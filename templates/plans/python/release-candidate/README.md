@@ -1,23 +1,43 @@
 # python/release-candidate
 
-**Production template. Production Plan.**
+Calculate candidate metadata, run Python quality and retain the project’s distribution bundle. Building uses the project’s version; metadata calculation does not stamp a new version into source.
 
-Quality-gated release candidate: compute explicit release metadata, run the strict quality pipeline, then build and verify Python distribution artifacts. No OCI image or registry mutation is implied by this plan.
+## Before you run
 
-## Contract
+The selected locked project/group must provide the commands used by the chosen Goons. The project supplies `release-metadata`; choose its channel and revision explicitly. The project supplies `package-artifacts`; retained bundle bytes require configured strict execution and content-store publication.
 
-- Canonical identity: `python/release-candidate`.
-- Effective execution/resource policy is machine-owned and rendered by Plan inspection; this README does not duplicate it.
-- Executable behavior is forbidden here; this file is an ordered Goon roster.
-- Inputs: `release_channel`, `revision`, `coverage_threshold`.
-- Ordered Goons: `python/release-metadata`, `python/quality`, `python/package-artifacts`.
+## Use this Plan
 
-## Safety boundary
+```sh
+oh-goon templates show python/release-candidate --kind plan
+oh-goon plan inputs templates/plans/python/release-candidate/plan.yml
+```
 
-The Plan contains no executable Steps. It only selects ordered Goons; execution/resource policy is resolved by the machine-owned Plan contract and admitted executor capacity, while implementation, requirements, secrets, network authority, and artifacts stay with the owning Goons.
+Copy with `oh-goon templates show python/release-candidate --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
 
-Machine-readable truth is [`plan.yml`](./plan.yml). The README explains intent and safety only; it is never runtime authority.
+## Configure a copy
 
-## Release identifier grammar
+The Plan routes `project` and `dependency_group` to metadata, quality and packaging because they are shared names. Their schemas and defaults stay in the Goons. Other unique public inputs are exposed automatically.
 
-`project.version` must be a canonical `MAJOR.MINOR.PATCH` numeric version with no leading-zero components. `revision` must be 7-40 lowercase hexadecimal characters. Alpha/beta identifiers are `<version>-alpha.<revision>` / `<version>-beta.<revision>`; production uses the project version unchanged. No case folding, punctuation cleanup, or ambient Git revision lookup occurs.
+Save these choices as `values.yml`. Omitted optional inputs keep their Goon defaults; native project configuration still owns test and lint policy.
+
+```yaml
+inputs:
+  release_channel: production
+  revision: abc1234
+  typechecker: ty
+```
+
+Validate and lock the same selection:
+
+```sh
+oh-goon plan validate plan.yml --inputs-file values.yml
+oh-goon lock plan.yml --inputs-file values.yml
+```
+
+Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.
+
+
+## Project release policy
+
+The project owns its release-metadata and packaging commands. Metadata outputs describe candidate values; this Plan does not change the committed project version. Adapt the project command when your release policy needs different behavior.

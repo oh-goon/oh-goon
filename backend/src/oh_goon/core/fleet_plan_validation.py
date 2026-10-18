@@ -237,7 +237,14 @@ def _validate_kubernetes_rollout_links(plan: Any) -> None:
 
 def _validate_plan_requirements(plan: Any) -> None:
     requirements = tuple(getattr(plan, "requirements", ()))
-    if requirements and plan.execution.purpose is not ExecutionPurpose.CICD:
+    if (
+        requirements
+        and plan.execution.purpose is not ExecutionPurpose.CICD
+        and (
+            plan.execution.purpose is not ExecutionPurpose.VERIFICATION
+            or any(item.kind != "uv_project" for item in requirements)
+        )
+    ):
         raise ValueError(
             "Fleet repository requirements are supported only for execution.purpose=cicd"
         )
@@ -258,7 +265,11 @@ def _validate_imports(plan: Any) -> None:
             raise ValueError(
                 "Imported Goons are supported outside CI/CD only for execution.purpose=verification"
             )
-        owners = sorted(item.name for item in imports if item.requirements)
+        owners = sorted(
+            item.name
+            for item in imports
+            if any(requirement.kind != "uv_project" for requirement in item.requirements)
+        )
         if owners:
             raise ValueError(
                 "Verification Goon imports cannot carry repository admission requirements; "

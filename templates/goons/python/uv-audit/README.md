@@ -1,12 +1,24 @@
 # python/uv-audit
 
-Audit the repository's locked Python resolution directly with `uv audit`.
+Audit the repository-root uv lock with native uv and record its vulnerability result.
 
-The command's stdout, stderr, exit status, and execution details already belong to the Run and Game Tape, so the Goon does not wrap uv in Python just to duplicate that evidence into JSON bookkeeping files.
+## Before you run
 
-**Network authority:** `host_unrestricted` is an intentional outbound exception:
-native `uv audit` may consult remote advisory data even with a frozen lock and
-Python downloads disabled. The advisory service/redirect endpoints are not a
-verified fixed hostname set, so a restrictive allowlist is not yet justified.
-Operators must explicitly accept the host-network exposure. See the
-[canonical template network authority](../../../../docs/development/TEMPLATE_NETWORK_AUTHORITY.md).
+The repository root contains the committed uv project and lock, and native uv supports its preview audit command. The scanner uses the explicitly declared online egress grant; configure any required native transport before running.
+
+## Configure and compose
+
+Inspect the current contract and copy the source when authoring your own capability:
+
+```sh
+oh-goon templates show python/uv-audit --kind goon
+oh-goon plan inputs templates/goons/python/uv-audit/goon.yml
+```
+
+Add `python/uv-audit` to a Plan’s ordered `goons:` list with a plain import to keep its defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed choices or dataflow; use `pass:` when shared names need explicit recipients. Refresh the lock with the same values before running.
+
+## Result and extension
+
+Native uv owns dependency and vulnerability interpretation. Its JSON stdout and exit status are Run evidence. This Goon does not create a separate audit report file or rewrite the lock.
+
+Append another Goon to the Plan to add a capability. To change this command sequence, create a project-owned Atomic Goon and import it with an explicit `from:` source. See [authoring and local imports](../../../README.md#append-your-own-capability).

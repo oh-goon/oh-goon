@@ -17,11 +17,7 @@ fabricate a Goon owner. A composite forwarding one input to more than one leaf
 can yield multiple owner paths; these are provenance, not alternate validation
 rules. An unresolved projected owner is an error, not a guessed path.
 
-Example: the shipped `python/quality` Plan exposes `coverage_threshold`, while
-`python/quality` forwards it to `python/test`. Its integer type, default `70`,
-minimum `70` and maximum `100` are owned by the `python/test` Goon, never by the
-Plan README. Inspect the live canonical contract instead of copying this example
-into an independent schema:
+The shipped `python/quality` Plan exposes project, dependency-group and checker choices. The project input has ultimate owners in Ruff, type checking and tests; the checker input belongs only to `python/typecheck`. Inspect the current contract rather than copying schemas into documentation:
 
 ```python
 from oh_goon.runtime.goon_templates import GoonTemplateStore
@@ -42,9 +38,11 @@ for item in inspected:
 - This is *contract inspection*, not the actual resolved input values, environment,
   Git facts, deferred Step outputs, or secret inspection. Do not display or infer
   runtime values from defaults alone.
-- A Plan's `inputs:` declaration projects a child contract; it never inherits,
-  overrides, or duplicates the owning Goon schema. Explicit `with:` forwarding
-  and Composite-local `pass:` are traced only through the same analyzed graph:
+- A Plan automatically exposes unambiguous, unbound direct public inputs. Optional
+  `inputs:` restricts that interface; it never duplicates the owning Goon schema.
+  Shared names with no explicit routing are omitted from caller inputs and retain
+  independent defaults. Supplying one is an ambiguity error. Explicit `with:` forwarding
+  and import-local `pass:` are traced only through the same analyzed graph:
   the latter compiles to identical `with:`-shaped `PlanInputBinding` edges.
   Mixed bindings preserve the same typed definitions and ultimate owner paths;
   inspecting a `pass:` binding does not trigger value resolution. Cycles, ambiguous projection,

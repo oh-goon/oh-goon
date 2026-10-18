@@ -201,6 +201,11 @@ def main(
     if standard_local and (fleet_provisioner is not None or not args.wait):
         parser.error("--standard-local requires --wait and cannot use deployment Fleet enrollment")
 
+    if args.command == "templates":
+        from oh_goon.cli_templates import run_template_command
+
+        return run_template_command(args)
+
     # Pure authoring commands share the original FleetPlanResolver and do not
     # need a database, journal, executor, or physical native admission.  Runtime
     # submission still passes through the one FleetPlanService owner below.

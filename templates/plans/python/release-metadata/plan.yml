@@ -1,6 +1,3 @@
 version: 1
-inputs:
-- release_channel
-- revision
 goons:
 - python/release-metadata

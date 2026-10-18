@@ -93,15 +93,16 @@ def test_escape_symlink_directory_and_file_rejected(tmp_path):
         read_caller_input_file(tmp_path, root=tmp_path)
 
 
-def test_disjoint_cli_and_file_preserve_scalar_types_and_duplicate_failure(tmp_path, monkeypatch):
+def test_cli_overrides_file_and_preserves_other_scalar_types(tmp_path, monkeypatch):
     p = _file(tmp_path)
     monkeypatch.chdir(tmp_path)
     assert plan_inputs(_args(p, "release=stable")) == {
         "release": "stable",
         "coverage_threshold": 85,
     }
-    with pytest.raises(FleetPlanInvalid, match="both --input and --inputs-file"):
-        plan_inputs(_args(p, "coverage_threshold=85"))
+    assert plan_inputs(_args(p, "coverage_threshold=90")) == {"coverage_threshold": "90"}
+    with pytest.raises(ValueError, match="unique"):
+        plan_inputs(_args(p, "coverage_threshold=90", "coverage_threshold=85"))
     assert plan_inputs(_args(None, "coverage_threshold=85")) == {"coverage_threshold": "85"}
 
 
@@ -387,19 +388,18 @@ def test_enrolled_manual_run_transports_exact_source_without_reselecting(
             require_cli_plan_preparation=lambda _: calls.append(("preflight",)), run=start
         )
     )
-    args = argparse.Namespace(
-        command="plan",
-        plan_command="run",
-        fleet_run_id="enrolled",
-        inputs_file=source,
-        plan=tmp_path / "plan.yml",
-        extensions=None,
-        repository_ids=["repo"],
-        all_repositories=False,
-        priority=None,
-        plan_inputs=[],
-        lock_file=None,
-        wait=False,
+    args = build_parser().parse_args(
+        [
+            "plan",
+            "run",
+            str(tmp_path / "plan.yml"),
+            "--fleet-run-id",
+            "enrolled",
+            "--inputs-file",
+            str(source),
+            "--repository-id",
+            "repo",
+        ]
     )
     assert run_plan_command(runtime, args) == 0
     assert [c[0] for c in calls] == ["preflight", "run"]

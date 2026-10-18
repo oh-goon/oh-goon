@@ -177,7 +177,14 @@ class SharedPlanService:
         # Validate once before persistence so malformed YAML never becomes selected state.
         # The committed bytes are already the exact content we just validated; do not
         # reload/reparse them after the atomic store write.
-        parse_plan_template(content, source=f"shared:{plan_key}/plan.yml", expected_name=plan_key)
+        compiled = parse_plan_template(
+            content, source=f"shared:{plan_key}/plan.yml", expected_name=plan_key
+        )
+        if any(getattr(step, "source_root", None) is not None for step in compiled.steps):
+            raise FleetPlanInvalid(
+                "Local Goon imports require a file-backed Plan and its catalog; "
+                "Shared Plan storage saves only plan.yml"
+            )
         return self._document(
             self._store.write(plan_key, content, expected_revision=expected_revision),
             validated=True,

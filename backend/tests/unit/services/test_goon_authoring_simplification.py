@@ -113,7 +113,7 @@ def test_composition_cycle_fails_before_execution(tmp_path: Path) -> None:
         FleetPlanResolver(goon_templates=GoonTemplateStore(store_root)).resolve(root)
 
 
-def test_composite_projected_input_requires_explicit_forwarding(tmp_path: Path) -> None:
+def test_composite_unique_projected_input_needs_no_forwarding_boilerplate(tmp_path: Path) -> None:
     store_root = tmp_path / "goons"
     _package(
         store_root,
@@ -138,8 +138,8 @@ goons:
 """,
     )
     root = _plan(tmp_path, "  - import: general/bundle\n")
-    with pytest.raises(FleetPlanInvalid, match="must be explicitly forwarded"):
-        FleetPlanResolver(goon_templates=GoonTemplateStore(store_root)).resolve(root)
+    plan = FleetPlanResolver(goon_templates=GoonTemplateStore(store_root)).resolve(root)
+    assert plan.steps[0].argv == ("echo", "child-default")
 
 
 def test_explicit_input_forwarding_crosses_goon_boundary(tmp_path: Path) -> None:

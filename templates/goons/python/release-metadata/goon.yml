@@ -1,7 +1,15 @@
 version: 1
-uv:
-  group: dev
 inputs:
+  project:
+    type: string
+    non_empty: true
+    default: .
+    description: Repository-relative directory containing pyproject.toml and uv.lock
+  dependency_group:
+    type: string
+    non_empty: true
+    default: dev
+    description: Locked uv dependency group containing the selected tools
   release_channel:
     type: choice
     choices:
@@ -9,11 +17,16 @@ inputs:
     - beta
     - production
     default: alpha
+    description: Release channel passed to the project metadata command
   revision:
     type: git_revision
+    description: Explicit Git revision used by the project metadata command
 outputs:
   project_version: ${{ steps.compute.outputs.PROJECT_VERSION }}
   release_version: ${{ steps.compute.outputs.RELEASE_VERSION }}
+uv:
+  project: ${{ inputs.project }}
+  group: ${{ inputs.dependency_group }}
 steps:
 - id: compute
   run: uv run release-metadata --channel ${{ inputs.release_channel }} --revision ${{ inputs.revision }} --output-dir .fleet/release

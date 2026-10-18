@@ -1,8 +1,3 @@
 version: 1
-inputs:
-- random_seed
-- test_size_percent
-- minimum_accuracy_percent
-- max_iterations
 goons:
 - ml/iris-train

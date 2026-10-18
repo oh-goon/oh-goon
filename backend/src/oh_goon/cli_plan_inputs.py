@@ -4,7 +4,6 @@ import argparse
 from pathlib import Path
 
 from oh_goon.cli_plan_input_files import read_caller_input_file
-from oh_goon.core.errors import FleetPlanInputRejected
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 
 
@@ -26,12 +25,5 @@ def plan_inputs(args: argparse.Namespace) -> dict[str, PlanInputValue]:
             # This belongs to exactly this invocation's Namespace. Repeated
             # diagnostic dispatches reuse the same frozen caller observation.
             args._caller_input_file_snapshot = snapshot
-        for name, value in snapshot.entries:
-            if name in values:
-                raise FleetPlanInputRejected(
-                    f"Fleet plan caller input {name!r} is supplied by both --input and --inputs-file; remove one",
-                    diagnostic_code="CONFLICTING_INPUT_SOURCES",
-                    input_names=(name,),
-                )
-            values[name] = value
+        values = {**snapshot.values(), **values}
     return values

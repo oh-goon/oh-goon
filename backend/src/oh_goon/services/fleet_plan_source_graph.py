@@ -11,7 +11,7 @@ from oh_goon.core.models.fleet_plan import (
     CompiledGoonImportStep,
     PreCommitPlanStep,
 )
-from oh_goon.core.path_authority import canonical_path, navigation_path
+from oh_goon.core.path_authority import ContainedPathSpace, canonical_path, navigation_path
 from oh_goon.core.product_identity import stable_id
 from oh_goon.integrations.fleet_plan_compilation import GoonTemplateProvider
 from oh_goon.integrations.fleet_plan_source_snapshot import (
@@ -27,6 +27,7 @@ class FleetPlanSourceNode:
     source_sha256: str | None = None
     package_kind: str | None = None
     package_name: str | None = None
+    local_source: str | None = None
     step_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
 
 
@@ -98,7 +99,7 @@ class FleetPlanSourceGraph:
                 if isinstance(step, AgentPlanStep):
                     found.append((node.path, step.step_id))
                 elif isinstance(step, CompiledGoonImportStep):
-                    walk(self.goon(node.path, step.goon))
+                    walk(self.goon(node.path, step))
 
         walk(self.root)
         return tuple(found)
@@ -109,11 +110,11 @@ class FleetPlanSourceGraph:
             raise FleetPlanInvalid(f"Resolved composition graph has no analyzed source {path}")
         return node
 
-    def goon(self, parent_path: Path, reference: str) -> FleetPlanSourceNode:
-        node = self._goon_edges.get((canonical_path(parent_path), reference))
+    def goon(self, parent_path: Path, step: CompiledGoonImportStep) -> FleetPlanSourceNode:
+        node = self._goon_edges.get((canonical_path(parent_path), step.step_id))
         if node is None:  # pragma: no cover - resolver asks only for analyzed edges
             raise FleetPlanInvalid(
-                f"Resolved composition graph has no analyzed Goon import {reference!r} from {parent_path}"
+                f"Resolved composition graph has no analyzed Goon occurrence {step.step_id!r} from {parent_path}"
             )
         return node
 
@@ -149,6 +150,7 @@ def analyze_fleet_plan_sources(
         source_stack=(root,),
         overrides=overrides,
         goon_templates=goon_templates,
+        authoring_root=containment_root,
         build=build,
     )
     return FleetPlanSourceGraph(
@@ -169,6 +171,7 @@ def _visit_source(
     source_stack: tuple[FleetPlanSourceNode, ...],
     overrides: Mapping[Path, CompiledExecutionTemplate],
     goon_templates: GoonTemplateProvider | None,
+    authoring_root: Path,
     build: _SourceGraphBuild,
 ) -> None:
     identity = canonical_path(node.path)
@@ -179,11 +182,13 @@ def _visit_source(
         _record_runtime_requirement(step, build)
         if not isinstance(step, CompiledGoonImportStep):
             continue
-        key = (identity, step.goon)
+        key = (identity, step.step_id)
         child = build.goon_edges.get(key)
         if child is None:
             child = _load_goon_child(
-                step.goon,
+                step,
+                parent_path=node.path,
+                authoring_root=authoring_root,
                 overrides=overrides,
                 provider=goon_templates,
                 build=build,
@@ -206,6 +211,7 @@ def _visit_source(
             source_stack=(*source_stack, child),
             overrides=overrides,
             goon_templates=goon_templates,
+            authoring_root=authoring_root,
             build=build,
         )
 
@@ -241,22 +247,50 @@ def _read_node(
 
 
 def _load_goon_child(
-    reference: str,
+    step: CompiledGoonImportStep,
     *,
+    parent_path: Path,
+    authoring_root: Path,
     overrides: Mapping[Path, CompiledExecutionTemplate],
     provider: GoonTemplateProvider | None,
     build: _SourceGraphBuild,
 ) -> FleetPlanSourceNode:
-    key = reference
-    cached = build.loaded.get(("goon", key))
+    key = step.goon
+    local_source = None
+    local_root = None
+    cache_key = ("goon", key)
+    if step.source_root is not None:
+        space = ContainedPathSpace.from_root(authoring_root)
+        root = space.resolve_from(
+            parent_path.parent,
+            step.source_root,
+            label="Local Goon catalog",
+            kind="directory",
+            require_exists=True,
+        )
+        selected = root / key / "goon.yml"
+        relative = space.relative(selected, label="Local Goon source")
+        local_source = f"local:{relative.as_posix()}"
+        cache_key = ("path", str(canonical_path(selected)))
+        local_root = root
+    cached = build.loaded.get(cache_key)
     if cached is not None:
         return cached
-    if provider is None:
+    if provider is None and local_root is None:
         raise FleetPlanInvalid(
             f"Plan or Composite Goon imports Goon {key!r}, but no Goon template store is configured"
         )
     try:
-        source = provider.source(key)
+        if local_root is not None:
+            from oh_goon.runtime.template_discovery import template_package
+
+            _, directory = template_package(local_root, key, source_name="goon.yml", kind="Goon")
+            source = read_fleet_plan_source(
+                directory / "goon.yml", kind="goon", expected_name=directory.name
+            )
+        else:
+            assert provider is not None
+            source = provider.source(key)
     except FleetPlanInvalid as exc:
         raise FleetPlanInvalid(f"Unknown Goon import {key!r}: {exc}") from exc
     compiled = overrides.get(canonical_path(source.path), source.compiled)
@@ -265,12 +299,13 @@ def _load_goon_child(
             f"Imported Goon {key!r} cannot declare execution policy; execution belongs to the root Plan or repository Goon"
         )
     node = FleetPlanSourceNode(
-        source.path,
-        compiled,
-        source.sha256 if compiled is source.compiled else None,
-        "goon",
-        key,
-        source.step_positions,
+        path=source.path,
+        compiled=compiled,
+        source_sha256=source.sha256 if compiled is source.compiled else None,
+        package_kind="goon",
+        package_name=key,
+        local_source=local_source,
+        step_positions=source.step_positions,
     )
-    build.loaded[("goon", key)] = node
+    build.loaded[cache_key] = node
     return node

@@ -1,19 +1,34 @@
 # python/secure
 
-**Production template. Production Plan.**
+Run Python quality, then the native dependency and repository vulnerability scanners. The scanner report retention requires the configured strict content store.
 
-Production Python quality and vulnerability validation using the standard quality capability plus the reusable combined CVE capability. Quality policy is explicit at the Plan boundary; security severity is intentionally not caller-lowerable.
+## Before you run
 
-## Contract
+The selected locked project/group must provide the commands used by the chosen Goons.
 
-- Canonical identity: `python/secure`.
-- Effective execution/resource policy is machine-owned and rendered by Plan inspection; this README does not duplicate it.
-- Executable behavior is forbidden here; this file is an ordered Goon roster.
-- Inputs: `coverage_threshold`.
-- Ordered Goons: `python/quality`, `security/cve-combined`.
+## Use this Plan
 
-## Safety boundary
+```sh
+oh-goon templates show python/secure --kind plan
+oh-goon plan inputs templates/plans/python/secure/plan.yml
+```
 
-The Plan contains no executable Steps. It only selects ordered Goons; execution/resource policy is resolved by the machine-owned Plan contract and admitted executor capacity, while implementation, requirements, secrets, network authority, and artifacts stay with the owning Goons.
+Copy with `oh-goon templates show python/secure --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
 
-Machine-readable truth is [`plan.yml`](./plan.yml). The README explains intent and safety only; it is never runtime authority.
+## Configure a copy
+
+Save these choices as `values.yml`. Omitted optional inputs keep their Goon defaults; native project configuration still owns test and lint policy.
+
+```yaml
+inputs:
+  typechecker: ty
+```
+
+Validate and lock the same selection:
+
+```sh
+oh-goon plan validate plan.yml --inputs-file values.yml
+oh-goon lock plan.yml --inputs-file values.yml
+```
+
+Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.

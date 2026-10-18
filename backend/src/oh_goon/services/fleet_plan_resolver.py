@@ -288,7 +288,6 @@ class FleetPlanResolver:
             materialize_projected_inputs(
                 source_graph,
                 source_graph.root.path,
-                plan_root=source_graph.root.path.name != "goon.yml",
             ).inputs,
             source_sha256,
         )
@@ -554,7 +553,6 @@ class FleetPlanResolver:
         compiled = materialize_projected_inputs(
             source_graph,
             source_graph.root.path,
-            plan_root=source_graph.root.path.name != "goon.yml",
         )
         values = bind_inputs(compiled, inputs, context=str(plan_path))
         return explain_agent_sources(
@@ -617,7 +615,6 @@ class FleetPlanResolver:
         compiled = materialize_projected_inputs(
             source_graph,
             source_graph.root.path,
-            plan_root=source_graph.root.path.name != "goon.yml",
         )
         values = bind_inputs(compiled, inputs, context=str(source_graph.root.path))
         return capture_agent_sources(
@@ -707,7 +704,6 @@ class FleetPlanResolver:
         compiled = materialize_projected_inputs(
             source_graph,
             source_graph.root.path,
-            plan_root=source_graph.root.path.name != "goon.yml",
         )
         source_sha256 = source_graph.root.source_sha256
         catalog = load_extension_catalog(extensions_path) if extensions_path is not None else None

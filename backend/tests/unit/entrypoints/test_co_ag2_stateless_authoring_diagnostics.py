@@ -42,7 +42,7 @@ def test_routes_preserves_original_value_redaction_and_input_origin(monkeypatch,
     _without_runtime(monkeypatch)
     source = _quality()
     file = tmp_path / "inputs.yml"
-    file.write_text("inputs:\n  coverage_threshold: 87\n", encoding="utf-8")
+    file.write_text("inputs:\n  typechecker: ty\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     assert (
         main(["plan", "explain", str(source), "--routes", "--json", "--inputs-file", "inputs.yml"])
@@ -51,8 +51,14 @@ def test_routes_preserves_original_value_redaction_and_input_origin(monkeypatch,
     routed = json.loads(capsys.readouterr().out)
     assert routed["schema"] == "oh-goon.plan-input-routing/v1"
     assert routed["status"] == "resolved_not_executed"
-    assert routed["inputs"][0]["origin"]["kind"] == "inputs_file"
-    assert routed["inputs"][0]["origin"]["path"] == "inputs.yml"
+    assert (
+        next(item for item in routed["inputs"] if item["name"] == "typechecker")["origin"]["kind"]
+        == "inputs_file"
+    )
+    assert (
+        next(item for item in routed["inputs"] if item["name"] == "typechecker")["origin"]["path"]
+        == "inputs.yml"
+    )
     assert all("value" not in item for item in routed["bindings"])
     assert not (tmp_path / "goon.lock").exists()
 

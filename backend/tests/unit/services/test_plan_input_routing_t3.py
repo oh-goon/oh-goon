@@ -25,15 +25,24 @@ def _source(key: str) -> Path:
 
 def test_python_quality_projected_route_and_exact_source_identity():
     path = _source("python/quality")
-    routed = _resolver().explain_routing(path, inputs={"coverage_threshold": 85})
+    routed = _resolver().explain_routing(path, inputs={"typechecker": "ty"})
     assert routed["schema"] == "oh-goon.plan-input-routing/v1"
     assert routed["status"] == "resolved_not_executed"
     assert routed["root_source_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
-    assert routed["inputs"][0]["owner_paths"] == [["python/quality", "python/test"]]
-    assert routed["inputs"][0]["origin"] == {"kind": "supplied"}
-    assert [(x["import_instance_id"], x["input"]) for x in routed["inputs"][0]["recipients"]] == [
-        ("python-quality", "coverage_threshold"),
-        ("python-quality.python-test", "coverage_threshold"),
+    assert next(item for item in routed["inputs"] if item["name"] == "typechecker")[
+        "owner_paths"
+    ] == [["python/quality", "python/typecheck"]]
+    assert next(item for item in routed["inputs"] if item["name"] == "typechecker")["origin"] == {
+        "kind": "supplied"
+    }
+    assert [
+        (x["import_instance_id"], x["input"])
+        for x in next(item for item in routed["inputs"] if item["name"] == "typechecker")[
+            "recipients"
+        ]
+    ] == [
+        ("python-quality", "typechecker"),
+        ("python-quality.python-typecheck", "typechecker"),
     ]
     assert all("value" not in binding for binding in routed["bindings"])
     assert "85" not in json.dumps(routed["inputs"] + routed["bindings"])
@@ -41,21 +50,23 @@ def test_python_quality_projected_route_and_exact_source_identity():
 
 def test_default_origin_and_no_resolved_values_serialized():
     routed = _resolver().explain_routing(_source("python/quality"))
-    assert routed["inputs"][0]["origin"] == {"kind": "default"}
+    assert next(item for item in routed["inputs"] if item["name"] == "typechecker")["origin"] == {
+        "kind": "default"
+    }
     assert "70" not in json.dumps(routed["inputs"] + routed["bindings"])
 
 
 def test_file_origin_only_for_selected_file_keys():
     routed = _resolver().explain_routing(
         _source("python/quality"),
-        inputs={"coverage_threshold": 85},
+        inputs={"typechecker": "ty"},
         caller_file=CallerFileRoutingOrigin(
             relative_path="values/stage.yml",
             sha256="a" * 64,
-            names=frozenset({"coverage_threshold"}),
+            names=frozenset({"typechecker"}),
         ),
     )
-    assert routed["inputs"][0]["origin"] == {
+    assert next(item for item in routed["inputs"] if item["name"] == "typechecker")["origin"] == {
         "kind": "inputs_file",
         "path": "values/stage.yml",
         "sha256": "a" * 64,
@@ -266,14 +277,14 @@ def test_routing_analyzes_once_and_resolves_once(monkeypatch):
 
 def test_routing_report_json_bytes_are_stable_for_same_source_cut():
     resolver = _resolver()
-    first = resolver.explain_routing(_source("python/quality"), inputs={"coverage_threshold": 85})
-    second = resolver.explain_routing(_source("python/quality"), inputs={"coverage_threshold": 85})
+    first = resolver.explain_routing(_source("python/quality"), inputs={"typechecker": "ty"})
+    second = resolver.explain_routing(_source("python/quality"), inputs={"typechecker": "ty"})
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
 
 
 def test_bad_typed_input_fails_before_routing_is_reported():
     with pytest.raises(FleetPlanInvalid):
-        _resolver().explain_routing(_source("python/quality"), inputs={"coverage_threshold": 101})
+        _resolver().explain_routing(_source("python/quality"), inputs={"typechecker": 101})
 
 
 def test_host_source_descriptor_omits_credential_values():

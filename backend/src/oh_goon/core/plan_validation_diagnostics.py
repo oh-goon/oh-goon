@@ -16,9 +16,8 @@ _NEXT_ACTIONS = {
     "MISSING_REQUIRED_INPUT": "Supply required inputs explicitly with --input or --inputs-file.",
     "INVALID_INPUT_VALUE": "Use plan inputs to inspect the owning Goon's type and constraints; correct the caller value.",
     "INVALID_INPUT_DEFAULT": "Correct the default in the owning Goon input definition.",
-    "CONFLICTING_INPUT_SOURCES": "Supply each input from exactly one of --input or --inputs-file.",
     "UNOWNED_PROJECTED_INPUT": "Expose the input through one selected Goon or author an explicit binding.",
-    "AMBIGUOUS_PROJECTED_INPUT": "Choose one Composite owner or bind the input explicitly; no implicit fan-out.",
+    "AMBIGUOUS_PROJECTED_INPUT": "Select recipient imports explicitly with pass: or with: for each shared input.",
 }
 
 

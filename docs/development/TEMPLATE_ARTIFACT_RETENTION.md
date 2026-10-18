@@ -4,7 +4,11 @@ This is the canonical authoring explanation for `steps[].artifacts[]` in shipped
 Goons. It documents the existing backend contract, not a new template-level
 storage manager or an alternate artifact schema. An Atomic Goon declares the
 repository-relative **file** produced by its command; the production executor
-owns collection, evidence and any content-store publication.
+owns collection, evidence and any content-store publication. In uv-managed Goons,
+authored output and artifact paths are relative to the command working directory,
+which defaults to the selected uv project. Compilation and input binding produce
+the existing concrete repository-relative paths before execution; the collector
+does not reinterpret the project selection.
 
 ## Choose the retention boundary
 
@@ -32,11 +36,11 @@ and references are repository-scoped: an SHA alone is not retrieval authority.
 
 ### Concrete shipped choices
 
-- [`python/test`](../../templates/goons/python/test/goon.yml): coverage and JUnit
-  reports provide test *evidence*; no durable bytes are requested.
-- [`python/ruff`](../../templates/goons/python/ruff/goon.yml) and
-  [`python/profile`](../../templates/goons/python/profile/goon.yml): lint
-  diagnostics and a profiling report are evidence.
+- [`python/test`](../../templates/goons/python/test/goon.yml): the JUnit report
+  provides test *evidence*; coverage policy and optional reports belong to native
+  project configuration. No durable bytes are requested.
+- [`python/profile`](../../templates/goons/python/profile/goon.yml): the profiling
+  report is evidence. Ruff uses native diagnostics without a duplicate report.
 - [`security/trivy-audit`](../../templates/goons/security/trivy-audit/goon.yml):
   the JSON scan report is deliberately content-store-retained for later reuse;
   this is not an automatic property of every audit report.

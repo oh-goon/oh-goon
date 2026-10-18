@@ -69,7 +69,9 @@ def _edit(items: list[object], action: Mapping[str, Any]) -> None:
             raise FleetPlanInvalid("UX-C import position is invalid")
         if type(item) not in (str, dict):
             raise FleetPlanInvalid("UX-C import must be a literal key or mapping")
-        if isinstance(item, dict) and (set(item) - {"import", "as", "with", "failure_impact"}):
+        if isinstance(item, dict) and (
+            set(item) - {"import", "as", "with", "pass", "failure_impact"}
+        ):
             raise FleetPlanInvalid("UX-C unknown import or executable field")
         if op == "add":
             items.insert(at, item)
@@ -192,9 +194,7 @@ def propose_plan(
     )
     old = [(s.step_id, s.goon) for s in source.compiled.steps]
     new = [(s.step_id, s.goon) for s in compiled.steps]
-    imports = sorted(
-        {(s.goon, graph.goon(source.path, s.goon).source_sha256) for s in compiled.steps}
-    )
+    imports = sorted({(s.goon, graph.goon(source.path, s).source_sha256) for s in compiled.steps})
     change_classes: list[str] = []
     if hashlib.sha256(plan_yaml.encode()).hexdigest() != source.sha256:
         change_classes.append("source_changed")

@@ -160,10 +160,16 @@ Each shipped package contains exactly YAML and README:
   legacy lookup, inheritance, overlay, patching, hidden deduplication, or reordering.
 - YAML owns machine facts; duplicate keys are invalid. README explains the
   package with heading `# category/name`. No sidecars or third classification level.
-- Inputs cross boundaries through explicit `with:` bindings or Composite Goon
-  `pass:` shorthand, which the compiler expands into those bindings. Requirements
+- Plans automatically expose unique unbound direct public inputs; optional `inputs:`
+  narrows that interface. Composite Goons explicitly declare public names. Inputs
+  cross boundaries through projection, `with:` or import-local `pass:`. The compiler expands
+  forwarding into those bindings; multiple recipients must be explicit. Requirements
   stay provenanced to their declaring Goon. Import-local `as:` names one occurrence
   without changing its package identity or lookup. Preserve ordered duplicate edges.
+- Project-owned Goons use an explicit import `from:` catalog directory confined to
+  the root authoring workspace. Omitted `from:` selects the shipped catalog;
+  local packages never shadow shipped imports. Shared Plan storage owns only its
+  Plan file and refuses external local imports. See `templates/README.md`.
 - Classification is backend-owned and category-derived: `python`, `security`,
   `oci`, and `kubernetes` are production; `advanced`, `general`, and `ml` are
   teaching; `oh-goon` is internal. Unknown categories fail. Production imports

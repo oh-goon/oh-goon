@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
@@ -155,7 +156,9 @@ class UvExecutionEnvironment(ImmutableModel):
     """
 
     project: str = Field(default=".", min_length=1, max_length=240)
-    group: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    group: str = Field(
+        pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|\$\{\{\s*inputs\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\})$"
+    )
 
     @field_validator("project")
     @classmethod
@@ -321,6 +324,13 @@ class CompiledGoonImportStep(ImmutableModel):
     """One compiled ordered Goon edge; never an authored Atomic-Goon Step."""
 
     kind: Literal["goon"] = "goon"
+    source_root: str | None = Field(default=None, min_length=1, max_length=240)
+
+    @field_validator("source_root")
+    @classmethod
+    def normalize_source_root(cls, value: str | None) -> str | None:
+        return PurePosixPath(value).as_posix() if value is not None else None
+
     step_id: str = Field(min_length=1, max_length=40)
     goon: str = Field(
         pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*$",
@@ -374,11 +384,13 @@ class CompiledExecutionTemplate(ImmutableModel):
     """
 
     version: Literal[1] = 1
+    authoring_kind: Literal["plan", "goon"] = "goon"
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
     execution: PlanExecutionPolicy | None = None
     inputs: tuple[PlanInputDefinition, ...] = Field(default_factory=tuple, max_length=32)
     projected_inputs: tuple[str, ...] = Field(default_factory=tuple, max_length=32)
+    ambiguous_inputs: tuple[str, ...] = ()
     env: tuple[PlanEnvDefinition, ...] = Field(default_factory=tuple, max_length=64)
     outputs: tuple[GoonOutputDefinition, ...] = Field(default_factory=tuple, max_length=32)
     inclusions: tuple[PlanStepInclusion, ...] = Field(default_factory=tuple, max_length=50)
@@ -417,6 +429,15 @@ class ResolvedCommandStep(CommandPlanStep):
     environment: tuple[ResolvedEnvironmentBinding, ...] = Field(
         default_factory=tuple, max_length=64
     )
+
+    @model_validator(mode="after")
+    def validate_uv_selection(self):
+        if self.uv is not None and (
+            "${{" in self.uv.project
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", self.uv.group) is None
+        ):
+            raise ValueError("Resolved uv project and dependency group must be concrete")
+        return self
 
 
 class ResolvedLocalSearchAgentStep(ResolvedCommandStep):

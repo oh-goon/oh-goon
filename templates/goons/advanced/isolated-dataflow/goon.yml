@@ -4,11 +4,13 @@ inputs:
     type: string
     non_empty: true
     default: dev
+    description: Explicit tag or project release label to inspect or prepare
   test_timeout_seconds:
     type: integer
     min: 1
     max: 3600
     default: 600
+    description: Timeout passed to the selected project test command
 env:
   RELEASE_TOKEN:
     from: host

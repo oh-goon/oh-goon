@@ -2,14 +2,14 @@
 
 Goons are Oh Goon capabilities. Each package is exactly `templates/goons/<category>/<name>/{goon.yml,README.md}`.
 
-An **Atomic Goon** declares `steps:`. A **Composite Goon** declares `goons:`. A Goon declares exactly one of those forms, never both. Composite imports use exact logical `category/name` identifiers and optional explicit `with:` input forwarding. Requirements remain owned by the Goon that declares them.
+An **Atomic Goon** declares `steps:`. A **Composite Goon** declares `goons:`. A Goon declares exactly one of those forms, never both. Composite imports use exact logical `category/name` identifiers and explicit `pass:`/`with:` forwarding where needed. Requirements remain owned by the Goon that declares them.
 
 There is no authored catalog, recursive lookup, alias, inheritance, merge, patch, or implicit input propagation.
 
 ## Resolved inputs
 
 An Atomic Goon owns its input schema; a Composite Goon forwards explicit bindings or
-projects compatible child contracts. See the
+projects a unique child contract. See the
 [template input resolution and transport guide](../../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md)
 for `from:` fallback, workspace/output edges, and the distinction between resolution,
 admission, and execution. No Step may reopen these external input sources at runtime.
@@ -43,3 +43,7 @@ The [self-hosting boundary guide](../../docs/development/TEMPLATE_SELF_HOSTING_B
 explains why two Goons may call the same `make` command with different workspace
 provenance, and why browser transport/engine/harness/runtime preflights remain
 distinct without inventing duplicate Make/npm prerequisite graphs.
+
+## Start and customize
+
+Use the [local Python journey](../README.md) to run, configure and extend an existing Plan. `oh-goon templates list --kind goon` lists the actual catalog. Atomic Goons own typed input descriptions; CLI overrides one selected values file. Local `from:` imports use the same package shape and compiler.

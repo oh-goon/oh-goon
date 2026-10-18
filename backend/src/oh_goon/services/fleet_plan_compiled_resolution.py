@@ -130,7 +130,7 @@ def resolve_goon_edge(
     tuple[ResolvedStepSource, ...],
     tuple,
 ]:
-    source = context.source_graph.goon(plan_path, step.goon)
+    source = context.source_graph.goon(plan_path, step)
     child_path = source.path
     child = materialize_projected_inputs(context.source_graph, child_path)
     if source.package_name != step.goon or source.source_sha256 is None:
@@ -268,7 +268,8 @@ def _resolved_step_source(
         return None
     return ResolvedStepSource(
         step_id=resolved_step_id,
-        source=_source_label(context, node.path, node.package_kind, node.package_name),
+        source=node.local_source
+        or _source_label(context, node.path, node.package_kind, node.package_name),
         line=position.line,
         column=position.column,
     )

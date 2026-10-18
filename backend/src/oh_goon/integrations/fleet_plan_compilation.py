@@ -269,6 +269,7 @@ def _compile_plan_payload(
             f"Invalid Plan {source}: Plans select and order Goons with a non-empty goons list"
         )
     normalized = dict(payload)
+    normalized["authoring_kind"] = "plan"
     normalized["name"] = expected_name or "plan"
     normalized["description"] = ""
     raw_inputs = normalized.get("inputs")
@@ -285,7 +286,10 @@ def _compile_plan_payload(
         normalized["projected_inputs"] = raw_inputs
         normalized.pop("inputs")
     normalized["steps"] = _compile_goon_imports(
-        normalized.pop("goons"), source=source, owner="Plan"
+        normalized.pop("goons"),
+        source=source,
+        owner="Plan",
+        projected_inputs=tuple(normalized.get("projected_inputs", ())),
     )
     normalized["requirements"] = []
     _normalize_template_fields(normalized)
@@ -333,19 +337,13 @@ def _compile_goon_imports(
     for index, item in enumerate(raw, start=1):
         if isinstance(item, str):
             raw_key = item
+            source_root = None
             bindings: Any = {}
             pass_names: tuple[str, ...] = ()
             failure_impact = "blocking"
             authored_alias: str | None = None
         elif isinstance(item, dict) and "import" in item:
-            if "pass" in item and owner != "Goon":
-                raise FleetPlanInvalid(
-                    f"Invalid {owner} {source}: Goon import {index} pass: belongs only on "
-                    "Composite Goon imports; use Plan inputs projection or with: instead"
-                )
-            allowed = {"import", "with", "failure_impact", "as"}
-            if owner == "Goon":
-                allowed.add("pass")
+            allowed = {"import", "with", "failure_impact", "as", "pass", "from"}
             unknown = sorted(set(item) - allowed)
             if unknown:
                 raise FleetPlanInvalid(
@@ -371,6 +369,19 @@ def _compile_goon_imports(
                     )
                 authored_aliases[authored_alias] = index
             raw_key = item.get("import")
+            source_root = item.get("from")
+            if "from" in item and (
+                not isinstance(source_root, str)
+                or not source_root.strip()
+                or len(source_root) > 240
+                or "${{" in source_root
+                or "\x00" in source_root
+                or "\\" in source_root
+                or PurePosixPath(source_root).is_absolute()
+            ):
+                raise FleetPlanInvalid(
+                    "Goon import from: must be a static relative catalog directory"
+                )
             bindings = item.get("with", {})
             failure_impact = item.get("failure_impact", "blocking")
             pass_names = ()
@@ -401,9 +412,9 @@ def _compile_goon_imports(
                 if name in seen:
                     raise FleetPlanInvalid(f"{label}: duplicate pass input {name!r}; remove one")
                 seen.add(name)
-                if name not in projected_inputs:
+                if name not in projected_inputs and (owner != "Plan" or projected_inputs):
                     raise FleetPlanInvalid(
-                        f"{label}: Composite inputs does not declare {name!r}; "
+                        f"{label}: inputs does not declare {name!r}; "
                         "expose it in inputs: or remove this pass"
                     )
                 if name in bindings:
@@ -441,6 +452,7 @@ def _compile_goon_imports(
                 "kind": "goon",
                 "step_id": compiled_id,
                 "goon": key,
+                "source_root": source_root,
                 "failure_impact": failure_impact,
                 "inputs": compiled_bindings,
             }
@@ -798,7 +810,11 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
     project = raw_uv.get("project", ".")
     if (
         not isinstance(group, str)
-        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", group) is None
+        or re.fullmatch(
+            r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|\$\{\{\s*inputs\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\})",
+            group,
+        )
+        is None
     ):
         raise FleetPlanInvalid("Goon uv.group has an invalid dependency-group name")
     if not isinstance(project, str) or not project.strip():
@@ -838,8 +854,7 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
             *argv[2:],
         ]
         step["uv"] = {"project": project, "group": group}
-    requirements = normalized.setdefault("requirements", [])
-    requirements.append({"kind": "uv_project", "project": project, "group": group})
+        step.setdefault("working_directory", project)
 
 
 def _normalize_step_mapping(value: Any) -> Any:

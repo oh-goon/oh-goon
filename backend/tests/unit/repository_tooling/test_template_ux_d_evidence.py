@@ -64,7 +64,7 @@ def test_real_golden_domain_drafts_are_unadmitted(key):
         [{"op": "add", "at": 0, "import": {"import": "python/ruff", "as": "python-quality"}}],
         [{"op": "add", "at": 0, "import": {"import": "python/ruff", "run": "sh -c evil"}}],
         [{"op": "add", "at": 0, "import": {"import": "python/ruff", "as": "bad*name"}}],
-        [{"op": "remove", "at": 0}],
+        [{"op": "remove", "at": 0}, {"op": "remove", "at": 0}],
     ],
 )
 def test_hostile_authoring_never_mutates_original_source(edits):
@@ -81,8 +81,8 @@ def test_hostile_authoring_never_mutates_original_source(edits):
         {"release_channel": "all"},
         {"release_channel": "${{ env.SECRET }}"},
         {"revision": ["not-a-scalar"]},
-        {"coverage_threshold": True},
-        {"coverage_threshold": 99999},
+        {"typechecker": True},
+        {"typechecker": 99999},
     ],
 )
 def test_hostile_values_fail_before_any_work(values):

@@ -48,13 +48,10 @@ def test_move_preserves_normal_compiler_and_references(origin):
     assert result.report["before"][0]["goon"] == "python/release-metadata"
 
 
-def test_remove_requires_updated_input_projection(origin):
-    with pytest.raises(FleetPlanInvalid):
-        draft(origin, edits=[{"op": "remove", "at": 0}])
-    result = draft(
-        origin, edits=[{"op": "remove", "at": 0}], projected_inputs=["coverage_threshold"]
-    )
+def test_remove_updates_automatic_input_projection(origin):
+    result = draft(origin, edits=[{"op": "remove", "at": 0}])
     assert [s.goon for s in parse_plan_template(result.plan_yaml).steps] == ["python/quality"]
+    assert result.report["missing_required_inputs"] == []
 
 
 def test_add_repeated_import_with_alias_and_remove(origin):
@@ -70,7 +67,7 @@ def test_values_are_canonical_and_validate_with_actual_caller_file_reader(origin
     selected = {
         "release_channel": "beta",
         "revision": "abcdef1234567890abcdef1234567890abcdef12",
-        "coverage_threshold": 85,
+        "typechecker": "ty",
     }
     result = draft(origin, values=selected)
     assert not result.report["missing_required_inputs"]
@@ -86,7 +83,7 @@ def test_values_are_canonical_and_validate_with_actual_caller_file_reader(origin
     "values",
     [
         {"mystery": 1},
-        {"coverage_threshold": True},
+        {"typechecker": True},
         {"release_channel": "not-an-option"},
         {"revision": "${{ env.SECRET }}"},
         {"revision": ["malformed"]},
@@ -149,13 +146,13 @@ def test_resolved_compilation_projects_exact_steps_without_effects(origin):
     draft_values = {
         "release_channel": "production",
         "revision": "abcdef1234567890abcdef1234567890abcdef12",
-        "coverage_threshold": 90,
+        "typechecker": "pyright",
     }
     result = draft(origin, edits=[{"op": "move", "from": 1, "to": 0}], values=draft_values)
     resolved = result.report["resolved_comparison"]
     assert resolved["status"] == "RESOLVED_NOT_EXECUTED"
     assert resolved["step_order_changed"]
-    assert resolved["step_count_before"] == resolved["step_count_after"] == 6
+    assert resolved["step_count_before"] == resolved["step_count_after"] == 5
     assert resolved["before"][0]["id"] == "python-release-metadata.compute"
     assert resolved["after"][0]["id"].startswith("python-quality")
     assert all("capabilities_sha256" in s for s in resolved["after"])
@@ -167,7 +164,7 @@ def test_values_from_removed_projection_are_rejected(origin):
         draft(
             origin,
             edits=[{"op": "remove", "at": 0}],
-            projected_inputs=["coverage_threshold"],
+            projected_inputs=["project", "dependency_group", "typechecker"],
             values={"revision": "abcdef1234567890abcdef1234567890abcdef12"},
         )
 

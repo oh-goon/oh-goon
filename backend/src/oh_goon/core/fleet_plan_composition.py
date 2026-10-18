@@ -27,6 +27,12 @@ from oh_goon.core.models.fleet_plan_step_contract import StepPlanCacheSource, St
 _INPUT_PATTERN = re.compile(r"\$\{\{\s*inputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}")
 
 
+def input_reference(value: object) -> str | None:
+    """Recognize one complete input reference using the renderer's grammar."""
+    match = _INPUT_PATTERN.fullmatch(value) if isinstance(value, str) else None
+    return match.group(1) if match is not None else None
+
+
 def bind_inputs(
     compiled: CompiledExecutionTemplate,
     supplied: dict[str, PlanInputValue],
@@ -34,6 +40,14 @@ def bind_inputs(
     context: str,
 ) -> dict[str, PlanInputValue]:
     definitions = {item.name: item for item in compiled.inputs}
+    ambiguous = sorted(set(supplied).intersection(compiled.ambiguous_inputs))
+    if ambiguous:
+        raise FleetPlanInputRejected(
+            f"Fleet plan {context} inputs are shared by several Goons: {', '.join(ambiguous)}; "
+            "route each input explicitly with pass: or with:",
+            diagnostic_code="AMBIGUOUS_PROJECTED_INPUT",
+            input_names=tuple(ambiguous),
+        )
     unknown = sorted(set(supplied) - set(definitions))
     if unknown:
         raise FleetPlanInputRejected(
@@ -177,9 +191,9 @@ def render_step(step: PlanStep, values: dict[str, PlanInputValue]) -> PlanStep:
 
 def _render_value(value, inputs: dict[str, PlanInputValue]):
     if isinstance(value, str):
-        direct = _INPUT_PATTERN.fullmatch(value)
+        direct = input_reference(value)
         if direct is not None:
-            name = direct.group(1)
+            name = direct
             if name not in inputs:
                 raise FleetPlanInvalid(f"Fleet plan references unresolved input {name!r}")
             return inputs[name]

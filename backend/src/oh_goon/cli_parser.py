@@ -139,6 +139,7 @@ def _add_direct_repository_commands(
     )
     lock.add_argument("plan", type=Path, help="Plan/Goon entrypoint to resolve")
     lock.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
+    lock.add_argument("--inputs-file", type=Path)
     lock.add_argument("--agent-repository-root", type=Path)
     lock.add_argument("--agent-skill-root", type=Path)
     lock.add_argument("--allow-agent-acceptance", action="append")

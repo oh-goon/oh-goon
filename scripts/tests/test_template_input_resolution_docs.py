@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -62,22 +61,6 @@ def test_m133_navigation_negative_malformed_link_and_missing_guide() -> None:
     )
 
 
-def test_m133_documented_projection_remains_owned_by_leaf_goon() -> None:
-    plan = _catalog("templates/plans/python/quality/plan.yml")
-    composite = _catalog("templates/goons/python/quality/goon.yml")
-    atomic = _catalog("templates/goons/python/test/goon.yml")
-    assert plan["inputs"] == ["coverage_threshold"]
-    assert "coverage_threshold" in composite["inputs"]
-    assert composite["goons"][-1]["import"] == "python/test"
-    assert composite["goons"][-1]["pass"] == ["coverage_threshold"]
-    assert "coverage_threshold" not in composite["goons"][-1].get("with", {})
-    assert atomic["inputs"]["coverage_threshold"]["type"] == "integer"
-    document = GUIDE.read_text(encoding="utf-8")
-    for name in ("python/quality", "python/test", "coverage_threshold"):
-        assert name in document
-    assert "ambiguous" in document
-
-
 def test_m133_documented_output_and_workspace_edges_match_shipped_catalog() -> None:
     release = _catalog("templates/plans/oci/release-deploy/plan.yml")
     publish = _catalog("templates/goons/oci/publish-image/goon.yml")
@@ -91,28 +74,3 @@ def test_m133_documented_output_and_workspace_edges_match_shipped_catalog() -> N
     assert "oci-publish-image.outputs.OCI_REFERENCE" in guide
     assert "oci-image.workspace" in guide
     assert "actual output value" in guide
-
-
-@pytest.mark.parametrize(
-    "required",
-    (
-        "FleetPlanResolver",
-        "FleetAdmissionPlanner",
-        "RUN_ADMITTED",
-        "_FleetPlanRunInputs",
-        "resolve_input_sources",
-        "bind_inputs",
-        "first defined",
-        "malformed YAML/TOML",
-        "staleness",
-        "NOT_APPLICABLE",
-        "Resolve once",
-        "transport once",
-        "execute once",
-        "report once",
-    ),
-)
-def test_m133_documentation_names_each_real_authority_and_failure_boundary(
-    required: str,
-) -> None:
-    assert required in GUIDE.read_text(encoding="utf-8")

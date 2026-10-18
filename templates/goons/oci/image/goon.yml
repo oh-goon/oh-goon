@@ -2,16 +2,22 @@ version: 1
 inputs:
   base_registry_hostname:
     type: hostname
+    description: Registry authorized for base-image pulls; independent of publication destination
   containerfile:
     type: repository_path
     default: Dockerfile
+    description: Containerfile path relative to the selected repository
   context:
     type: repository_path
     default: .
+    description: Repository-relative OCI build context
   platform:
     type: choice
-    choices: [linux/amd64, linux/arm64]
+    choices:
+    - linux/amd64
+    - linux/arm64
     default: linux/amd64
+    description: Target OCI image platform
 steps:
 - uses: oci_build
   id: build

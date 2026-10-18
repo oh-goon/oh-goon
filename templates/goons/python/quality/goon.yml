@@ -1,8 +1,9 @@
 version: 1
-inputs:
-- coverage_threshold
+inputs: [project, dependency_group, typechecker]
 goons:
-- python/ruff
-- python/typecheck
+- import: python/ruff
+  pass: [project, dependency_group]
+- import: python/typecheck
+  pass: [project, dependency_group]
 - import: python/test
-  pass: [coverage_threshold]
+  pass: [project, dependency_group]

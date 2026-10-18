@@ -23036,7 +23036,6 @@
               "MISSING_REQUIRED_INPUT",
               "INVALID_INPUT_VALUE",
               "INVALID_INPUT_DEFAULT",
-              "CONFLICTING_INPUT_SOURCES",
               "UNOWNED_PROJECTED_INPUT",
               "AMBIGUOUS_PROJECTED_INPUT",
               "PLAN_RESOLUTION_REJECTED"
@@ -28625,7 +28624,7 @@
         "description": "Backend-owned locked UV environment selected by a Goon.\n\nAuthoring selects the repository-relative uv project plus dependency group.\nLock enforcement, native materialization, cache lineage, and the concrete\n``uv run`` argv remain resolved execution concerns.",
         "properties": {
           "group": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|\\$\\{\\{\\s*inputs\\.[A-Za-z_][A-Za-z0-9_-]*\\s*\\}\\})$",
             "title": "Group",
             "type": "string"
           },

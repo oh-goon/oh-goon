@@ -65,7 +65,7 @@ goons:
 - python/test
 ```
 
-Composition preserves written order and duplicates. Inputs cross a Goon boundary only through an explicit `with:` binding. There is no implicit parent-input propagation.
+Composition preserves written order and duplicates. Inputs use unique named projection or explicit import-local `pass:`/`with:` bindings on both Plans and Composite Goons. There is no implicit parent-input propagation.
 
 ## Plan
 
@@ -78,17 +78,17 @@ goons:
 
 A Plan is an execution/admission boundary and capability roster, not a second implementation schema. It never owns executable Steps, requirements, environment, outputs, dependency lists or copied Goon input schemas.
 
-When a user may supply a Goon input, the Plan projects only its name:
+A plain Plan exposes unique unbound public inputs automatically. Use `with:` at the import to show a fixed override:
 
 ```yaml
 version: 1
-inputs:
-- coverage_threshold
 goons:
-- python/quality
+- import: python/quality
+  with:
+    typechecker: ty
 ```
 
-The selected Goon remains the sole owner of type, default and validation. Projection must have one unambiguous direct owner. `with:` remains the explicit mechanism for concrete binding or dataflow between selected Goons; it is not inheritance and does not create a second Plan schema.
+The selected Goon remains the sole owner of type, default and validation. The Plan repeats neither its inputs nor its internal forwarding. Fixed bindings are excluded from automatic caller inputs; shared names need explicit `pass:`/`with:` recipient routing before caller overrides. Optional Plan `inputs: [name, ...]` restricts its public interface. Composite Goons declare their public names and project a unique owner or bind compatible recipients explicitly.
 
 ## Explicit dataflow
 

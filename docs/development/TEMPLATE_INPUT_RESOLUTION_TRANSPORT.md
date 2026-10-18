@@ -10,8 +10,8 @@ canonical Fleet resolver/admission/executor. The catalog READMEs explain intent 
 | Boundary | One authority | What it decides / may carry | Must not do |
 | --- | --- | --- | --- |
 | Source selection | Repository `goon.yml` **or** selected Shared `plan.yml` | Exact mutually exclusive source and selected repository set | Merge sources or fall back to repository YAML in a Shared Run |
-| Composition | `FleetPlanResolver` plus canonical catalog/source graph | Ordered Plan → imported Goons → Steps; imported paths, projected inputs, explicit `with:` edges (or import-local `pass:` compiled to the same edges), step/output reference identity | Infer inputs, synthesize Plan Steps, search aliases, re-resolve inside Steps |
-| Caller values | CLI caller-input collector and the same canonical input binder | Explicit `--input` values and a captured `--inputs-file`, with disjoint input names | Overlay duplicates, retry an invalid value through another source, or let the file define input schemas |
+| Composition | `FleetPlanResolver` plus canonical catalog/source graph | Ordered Plan → imported Goons → Steps; imported paths, unique unbound Plan inputs, explicit `with:` edges (or import-local `pass:` compiled to the same edges), step/output reference identity | Broadcast shared names, invent schemas, synthesize Plan Steps, search aliases, re-resolve inside Steps |
+| Caller values | CLI caller-input collector and the same canonical input binder | Explicit `--input` values and a captured `--inputs-file`, with explicit CLI values winning over file values | Accept duplicate CLI/YAML names, retry an invalid final value through another source, or let the file define input schemas |
 | Input source | `fleet_plan_input_resolution.resolve_input_sources` | First **defined** `from:` source: `env`, repository-contained `yaml`/`toml`/one-line `text`, or native Git fact | Run shell/expressions, infer missing values, copy secrets into input sources |
 | Contract | `core.fleet_plan_composition.bind_inputs` and owning Goon input definition | Validate/coerce the selected value, apply child's declared default **only when no source was defined**, reject unknown/missing/invalid inputs | Let Plan/README repeat or relax child schemas |
 | Admission | `FleetAdmissionPlanner` and `RUN_ADMITTED` receipt | Prove source subject, resolved Plan and repository requirements before effects | Run a probe Step to discover predictable invalid input/requirements |
@@ -26,14 +26,20 @@ Do not claim that the compiler executes producers or eagerly resolves their outp
 
 ## Input ownership: three distinct cases
 
-**1. Projection is an interface, not inheritance.** The shipped
+**1. Projection exposes child-owned contracts.** The shipped
 [`python/quality` Plan](../../templates/plans/python/quality/plan.yml) exposes
-`inputs: [coverage_threshold]`. The owning
-[`python/test` Goon](../../templates/goons/python/test/goon.yml) defines the actual integer
-range/default; the intermediate
-[`python/quality` composite](../../templates/goons/python/quality/goon.yml) explicitly
-forwards it. Projection of a name across two directly selected Goons is ambiguous and
-must fail. Neither Plan nor README owns a copied validation rule.
+`project`, `dependency_group` and `typechecker`. Its
+[`Composite Goon](../../templates/goons/python/quality/goon.yml) explicitly selects
+recipients with `pass:`. The
+[`type-checking Goon](../../templates/goons/python/typecheck/goon.yml) owns the checker
+choices; Ruff, tests and type checking own compatible native environment contracts.
+The Plan needs only `goons: [python/quality]`; it does not repeat the Composite's
+public inputs or internal bindings. Unbound public names with one direct owner
+are automatically available to caller values. Fixed `with:` values are excluded.
+Shared names retain independent child defaults, and caller overrides are refused
+until `pass:`/`with:` explicitly selects recipients. Optional Plan `inputs:`
+restricts its public interface. Composite Goons always declare their interface;
+hidden child inputs do not become public. Neither Plan nor README copies a schema.
 
 **2. Explicit `with:` is a real edge.** The shipped
 [`oci/release-deploy` Plan](../../templates/plans/oci/release-deploy/plan.yml) passes
@@ -44,12 +50,12 @@ references are typed producer-to-consumer edges; they are not arbitrary interpol
 host paths or pre-existing environment values. Consumer capabilities remain responsible
 for validating the produced binding.
 
-On a **Composite Goon import only**, `pass: [namespace, deployment]` is an
+On a **Plan or Composite Goon import**, `pass: [namespace, deployment]` is an
 authoring shorthand for `with: {namespace: '${{ inputs.namespace }}',
 deployment: '${{ inputs.deployment }}'}` on that exact recipient. It is expanded
 by the existing YAML compiler into the same `PlanInputBinding` type before
 source-graph materialization. The shorthand has no value source of its own;
-it never introduces inheritance, environment reads, Plan-level forwarding,
+it never introduces inheritance, environment reads, implicit forwarding,
 runtime output resolution, or admission authority. `pass:` and `with:` may be
 combined for **different child targets** only; producer and workspace references
 remain in `with:`. A duplicate target or an implicit caller-level fan-out is an
@@ -135,7 +141,7 @@ executes a Step. The input schema remains owned by the original Goon.
 The Plan CLI accepts a caller-selected scalar mapping for diagnostic commands
 (`validate`, `prepare`, `preview`, `explain`, `check`, and `diff`) and for
 `run`, `schedule`, and `reschedule`. `--input name=value` and `--inputs-file`
-may be combined only for disjoint input names. Invalid explicit values fail at
+may be combined; the CLI value wins for overlapping names. Invalid explicit values fail at
 the original Goon binder; they do not fall back to `from:` or a default. For
 `diff`, the same mapping is supplied to both roots and each root's binder
 rejects any input it does not accept.
@@ -146,7 +152,7 @@ repository root:
 ```yaml
 # values/staging.yml
 inputs:
-  coverage_threshold: 85
+  typechecker: ty
 ```
 
 ```sh
@@ -165,8 +171,7 @@ defaults, and constraints. Inputs remain unsuitable for credentials.
 
 One read captures the parsed mapping and an immutable observation of its
 caller root, contained relative path, device/inode, and byte SHA-256. This is
-file provenance, not an imported-source-closure proof. `lock`, direct Goon
-and Shared Plan command families do not acquire this CLI option; `plan inputs`
+file provenance, not an imported-source-closure proof. `lock` uses the same collector. Direct Goon and Shared Plan command families do not acquire this CLI option; `plan inputs`
 inspects contracts and accepts no caller values.
 
 ### Manual Run freshness
@@ -223,3 +228,11 @@ actions; arbitrary exceptions become a generic refusal without raw source
 paths or values. This changes no input precedence, Run preparation, resolution
 snapshot, or admission authority. See
 [safe rejection diagnostics](TEMPLATE_INPUT_INSPECTION.md#safe-rejection-diagnostics).
+
+## Explicit local Goon sources
+
+An import may select `from: ./goons` beside its static `category/name` identity. The existing source graph resolves that exact package inside the root authoring workspace, keys edges by import occurrence and reads each unique source once. Omitted `from:` retains shipped catalog selection; there is no local shadowing or fallback. Source positions retain local paths, while locks continue covering resolved execution semantics. File-backed Plans and repository Goons support local catalogs; Shared Plan storage refuses them because it saves only the Plan file.
+
+## Native uv selection
+
+The Goon’s uv project/group may reference declared inputs. They are bound before requirements, native preparation or execution. Derived uv requirements remain with the declaring Atomic Goon and are supported for ordinary verification as environment requirements. CI/CD-only repository requirements remain CI/CD-only. The working directory defaults to the selected project; an explicit working directory is supported and the compiled uv project argument is relative to it. Authored uv output/artifact paths are relative to that command working directory, then become concrete repository-relative execution paths.

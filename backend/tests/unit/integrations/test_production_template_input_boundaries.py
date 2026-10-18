@@ -150,7 +150,7 @@ def _release_inputs() -> dict[str, object]:
     return {
         "release_channel": "production",
         "revision": "abc1234",
-        "coverage_threshold": 90,
+        "typechecker": "ty",
     }
 
 
@@ -172,9 +172,14 @@ def test_release_metadata_accepts_version_only_inputs() -> None:
     assert release.step_ids == ("python-release-metadata.compute",)
 
 
-def test_standalone_release_metadata_plan_has_two_public_inputs() -> None:
+def test_standalone_release_metadata_plan_exposes_release_and_environment_inputs() -> None:
     source = PLANS.source("python/release-metadata")
-    assert set(source.compiled.projected_inputs) == {"release_channel", "revision"}
+    assert {item.name for item in RESOLVER.input_definitions(source.path)} == {
+        "release_channel",
+        "revision",
+        "project",
+        "dependency_group",
+    }
     assert source.compiled.inputs == ()
     plan = RESOLVER.resolve(source.path, inputs={"release_channel": "beta", "revision": "abc1234"})
     assert [item.name for item in plan.imports] == ["python/release-metadata"]

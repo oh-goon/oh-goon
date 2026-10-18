@@ -1,6 +1,25 @@
 version: 1
+inputs:
+  project:
+    type: string
+    non_empty: true
+    default: .
+    description: Repository-relative directory containing pyproject.toml and uv.lock
+  dependency_group:
+    type: string
+    non_empty: true
+    default: dev
+    description: Locked uv dependency group containing the selected tools
+  typechecker:
+    type: choice
+    choices: [pyright, ty]
+    default: pyright
+    description: Type checker to run using its native project configuration
 uv:
-  group: dev
+  project: ${{ inputs.project }}
+  group: ${{ inputs.dependency_group }}
 steps:
-- run: uv run pyright --warnings
-- run: uv run ty check .
+- run: uv run pyright
+  include_when: {input: typechecker, equals: pyright}
+- run: uv run ty check
+  include_when: {input: typechecker, equals: ty}

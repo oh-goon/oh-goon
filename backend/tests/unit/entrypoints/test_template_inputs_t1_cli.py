@@ -33,23 +33,15 @@ def test_cli_inspection_prints_canonical_json_and_exact_root_digest(monkeypatch,
     source = _plan()
     assert main(["plan", "inputs", str(source), "--json"]) == 0
     parsed = json.loads(capsys.readouterr().out)
-    assert parsed == {
-        "schema": "oh-goon.plan-input-inspection/v1",
-        "root": source.as_posix(),
-        "root_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-        "status": "contract_inspected",
-        "inputs": [
-            {
-                "name": "coverage_threshold",
-                "type": "integer",
-                "required": False,
-                "default": 70,
-                "minimum": 70,
-                "maximum": 100,
-                "owner_paths": [["python/quality", "python/test"]],
-            }
-        ],
-    }
+    assert parsed["schema"] == "oh-goon.plan-input-inspection/v1"
+    assert parsed["root_source_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert parsed["status"] == "contract_inspected"
+    inputs = {item["name"]: item for item in parsed["inputs"]}
+    assert set(inputs) == {"project", "dependency_group", "typechecker"}
+    assert inputs["typechecker"]["choices"] == ["pyright", "ty"]
+    assert inputs["typechecker"]["owner_paths"] == [["python/quality", "python/typecheck"]]
+    assert len(inputs["project"]["owner_paths"]) == 3
+    assert inputs["project"]["description"]
 
 
 def test_inspection_human_and_json_are_repeatable_and_read_only(monkeypatch, capsys):
@@ -64,8 +56,9 @@ def test_inspection_human_and_json_are_repeatable_and_read_only(monkeypatch, cap
     )
     assert main(["plan", "inputs", str(source)]) == 0
     human = capsys.readouterr().out
-    assert "contract_inspected" in human
-    assert "not imported closure" in human
+    assert "Read-only input contracts" in human
+    assert "--input NAME=VALUE" in human
+    assert "CLI values override file values" in human
     assert "kubernetes/set-image" in human
     assert "kubernetes/rollout-verify" in human
     assert main(["plan", "inputs", str(source), "--json"]) == 0

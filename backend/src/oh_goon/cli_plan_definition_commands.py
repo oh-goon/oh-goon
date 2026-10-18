@@ -67,9 +67,8 @@ def _print_input_inspection(
     if args.as_json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0
-    print(f"Plan/Goon: {report['root']}")
-    print("Status: contract_inspected (read-only; not resolved, admitted or ready)")
-    print(f"Root source SHA-256: {root_digest} (root file only; not imported closure)")
+    print(f"Inputs for {report['root']}")
+    print("Read-only input contracts and defaults. No work started.")
     if not report["inputs"]:
         print("Inputs: none")
         return 0
@@ -96,6 +95,8 @@ def _print_input_inspection(
             print(f"    Owner: {' -> '.join(path)}")
         if not item["owner_paths"]:
             print("    Owner: directly authored root input")
+    print("Set --input NAME=VALUE or --inputs-file values.yml; CLI values override file values.")
+    print("Use --json for source provenance, or plan explain --routes for resolved recipients.")
     return 0
 
 
@@ -209,7 +210,8 @@ def _explain_with_owner(
                 origin = CallerFileRoutingOrigin(
                     relative_path=snapshot.relative_path,
                     sha256=snapshot.sha256,
-                    names=frozenset(name for name, _ in snapshot.entries),
+                    names=frozenset(name for name, _ in snapshot.entries)
+                    - frozenset(item.split("=", 1)[0] for item in args.plan_inputs or ()),
                 )
             routing = owner.explain_routing(
                 args.plan,

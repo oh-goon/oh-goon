@@ -7,11 +7,11 @@ It traverses import occurrences, not graph definitions (which may be shared).
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.fleet_plan_composition import input_reference
 from oh_goon.core.fleet_plan_output_refs import (
     goon_output_reference,
     goon_workspace_reference,
@@ -34,17 +34,14 @@ class CallerFileRoutingOrigin:
     names: frozenset[str]
 
 
-_PARENT_INPUT = re.compile(r"\$\{\{ inputs\.([A-Za-z_][A-Za-z0-9_-]{0,63}) \}\}\Z")
-
-
 def _binding_origin(value: object, sources: tuple[object, ...], prefix: str) -> dict[str, object]:
     """Only structural descriptors; never publish literals or resolved secret values."""
     if sources:
         return {"kind": "external_source", "source_kinds": [source.kind for source in sources]}
     if isinstance(value, str):
-        parent = _PARENT_INPUT.fullmatch(value)
-        if parent:
-            return {"kind": "parent_input", "parent_input": parent.group(1)}
+        parent = input_reference(value)
+        if parent is not None:
+            return {"kind": "parent_input", "parent_input": parent}
         workspace = goon_workspace_reference(value)
         if workspace:
             return {
@@ -85,7 +82,7 @@ def project_input_routing(
     active = {item.import_id: item for item in resolved.imports}
     resolved_steps = {step.step_id for step in resolved.steps}
     root = graph.root.path
-    root_compiled = materialize_projected_inputs(graph, root, plan_root=root.name != "goon.yml")
+    root_compiled = materialize_projected_inputs(graph, root)
     root_names = {item.name for item in root_compiled.inputs}
     root_origins = {
         item.name: item.origin
@@ -96,9 +93,7 @@ def project_input_routing(
     occurrences: list[dict[str, object]] = []
 
     def walk(path: Path, prefix: str, parent_id: str | None, lineage: dict[str, str]) -> None:
-        compiled = materialize_projected_inputs(
-            graph, path, plan_root=path == root and root.name != "goon.yml"
-        )
+        compiled = materialize_projected_inputs(graph, path)
         for step in compiled.steps:
             if not isinstance(step, CompiledGoonImportStep):
                 continue
@@ -108,13 +103,14 @@ def project_input_routing(
             actual = active[instance_id]
             if actual.name != step.goon or actual.parent_import_id != parent_id:
                 raise FleetPlanInvalid("Plan routing disagrees with resolved import identity")
-            child = graph.goon(path, step.goon)
+            child = graph.goon(path, step)
             occurrences.append(
                 {
                     "import_instance_id": instance_id,
                     "parent_import_instance_id": parent_id,
                     "goon": step.goon,
                     "source_sha256": actual.source_sha256,
+                    "source": child.local_source or f"goon:{step.goon}/goon.yml",
                 }
             )
             child_lineage: dict[str, str] = {}

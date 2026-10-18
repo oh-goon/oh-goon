@@ -79,15 +79,15 @@ def test_pass_with_collision_fails_even_if_values_equal() -> None:
 
 
 def test_pass_parent_must_declare_name() -> None:
-    with pytest.raises(FleetPlanInvalid, match=r"Composite inputs does not declare 'orphan'"):
+    with pytest.raises(FleetPlanInvalid, match=r"inputs does not declare 'orphan'"):
         parse_goon_template(_composite("  pass: [orphan]\n"))
 
 
-def test_pass_is_composite_only_and_not_plan_projection() -> None:
-    with pytest.raises(FleetPlanInvalid, match="Composite Goon imports"):
-        parse_plan_template(
-            "version: 1\ninputs: [x]\ngoons:\n- import: general/leaf\n  pass: [x]\n"
-        )
+def test_pass_belongs_on_plan_or_composite_imports() -> None:
+    compiled = parse_plan_template(
+        "version: 1\ninputs: [x]\ngoons:\n- import: general/leaf\n  pass: [x]\n"
+    )
+    assert compiled.steps[0].inputs[0].name == "x"
     with pytest.raises(FleetPlanInvalid, match="unsupported"):
         parse_goon_template("version: 1\npass: [x]\ngoons: [general/leaf]\n")
     with pytest.raises(FleetPlanInvalid):
@@ -238,8 +238,8 @@ def test_inspection_uses_exact_existing_owner_paths() -> None:
     results = FleetPlanResolver(goon_templates=GoonTemplateStore()).inspect_inputs(
         source.path, containment_root=store.root.parent.parent
     )
-    assert len(results) == 1
-    assert results[0].definition.name == "coverage_threshold"
+    assert len(results) == 3
+    assert results[0].definition.name == "project"
     assert any("python/test" in owner for path in results[0].owner_paths for owner in path)
 
 
@@ -302,8 +302,7 @@ goons:
     store = GoonTemplateStore(root)
     assert FleetPlanResolver(goon_templates=store).resolve(path).steps[0].argv == ("echo", "good")
     _package(root, "general/outer", outer.replace("  pass: [x]\n", ""))
-    with pytest.raises(FleetPlanInvalid, match="explicitly forwarded"):
-        FleetPlanResolver(goon_templates=store).resolve(path)
+    assert FleetPlanResolver(goon_templates=store).resolve(path).steps[0].argv == ("echo", "good")
 
 
 def test_renamed_input_uses_existing_with_and_pass_cannot_rename(tmp_path: Path) -> None:
@@ -316,7 +315,7 @@ goons:
 """
     resolved = _resolve(tmp_path, parent=parent, child=_leaf(child_input="child_name"))
     assert resolved.steps[0].argv == ("echo", "good")
-    with pytest.raises(FleetPlanInvalid, match="Composite inputs does not declare"):
+    with pytest.raises(FleetPlanInvalid, match="inputs does not declare"):
         _resolve(
             tmp_path,
             parent=parent.replace(

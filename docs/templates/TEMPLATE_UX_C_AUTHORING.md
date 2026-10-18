@@ -20,7 +20,7 @@ A request JSON for `python/standard` may look like:
   "values": {
     "release_channel":"production",
     "revision":"abcdef1234567890abcdef1234567890abcdef12",
-    "coverage_threshold":90
+    "typechecker":"ty"
   }
 }
 ```
@@ -42,9 +42,10 @@ configuration. Do not put credentials/secrets into caller values files.
 
 Operations address **zero-based occurrence positions**: `add` (`at`, `import`),
 `remove` (`at`), `move` (`from`, `to`), `replace` (`at`, `import`). A mapping import
-may contain `import`, `as`, `with`, or `failure_impact`; it cannot contain a Step,
+may contain `import`, `as`, `pass`, `with`, or `failure_impact`; it cannot contain a Step,
 command or a new interpreter. The compiler validates alias collisions and all
-producer/input references. For an input projection edit, explicitly pass
+producer/input references. Unique unbound public Plan inputs follow the edited
+imports automatically. To restrict the public input interface, explicitly pass
 `"projected_inputs":["..."]`: definitions, typing and defaults remain owned by
 Atomic Goons. Editing references does not reorder a Plan to rescue dependencies.
 

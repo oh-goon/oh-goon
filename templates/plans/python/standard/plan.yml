@@ -1,8 +1,10 @@
 version: 1
-inputs:
-- release_channel
-- revision
-- coverage_threshold
 goons:
-- python/release-metadata
-- python/quality
+- import: python/release-metadata
+  pass:
+  - project
+  - dependency_group
+- import: python/quality
+  pass:
+  - project
+  - dependency_group

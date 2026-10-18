@@ -1,19 +1,36 @@
 # kubernetes/set-image
 
-**Production template. Production Plan.**
-
 Standalone immutable Kubernetes Deployment image commit. The requested image must already be digest-qualified. This changes one Deployment pod-template image with optimistic JSON Patch tests and intentionally makes no rollout-readiness claim.
 
-## Contract
+## Use this Plan
 
-- Canonical identity: `kubernetes/set-image`.
-- Effective execution/resource policy is machine-owned and rendered by Plan inspection; this README does not duplicate it.
-- Executable behavior is forbidden here; this file is an ordered Goon roster.
-- Inputs: `kubernetes_api_hostname`, `namespace`, `deployment`, `container`, `image`.
-- Ordered Goons: `kubernetes/set-image`.
+```sh
+oh-goon templates show kubernetes/set-image --kind plan
+oh-goon plan inputs templates/plans/kubernetes/set-image/plan.yml
+```
 
-## Safety boundary
+Copy with `oh-goon templates show kubernetes/set-image --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
 
-The Plan contains no executable Steps. It only selects ordered Goons; execution/resource policy is resolved by the machine-owned Plan contract and admitted executor capacity, while implementation, requirements, secrets, network authority, and artifacts stay with the owning Goons.
+Select the exact API hostname, namespace, Deployment and container. Supply the declared token and CA certificate through host-backed environment authority. Image updates require a digest-qualified image; rollout verification consumes the exact expected generation and image. Inspect the Run for the actual mutation/verification result.
 
-Machine-readable truth is [`plan.yml`](./plan.yml). The README explains intent and safety only; it is never runtime authority.
+## Configure a copy
+
+Save the following illustrative values as `values.yml`. Replace example infrastructure addresses and targets with your own before submitting work. Credentials remain in the declared environment bindings.
+
+```yaml
+inputs:
+  kubernetes_api_hostname: kube.example.com
+  namespace: production
+  deployment: api
+  container: api
+  image: harbor.example.com/team/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+```
+
+Validate and lock the same selection:
+
+```sh
+oh-goon plan validate plan.yml --inputs-file values.yml
+oh-goon lock plan.yml --inputs-file values.yml
+```
+
+Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.

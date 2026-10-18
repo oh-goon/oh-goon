@@ -26,7 +26,7 @@ def add_plan_commands(
     )
     plan_inputs_inspect = plan_subparsers.add_parser(
         "inputs",
-        help="Inspect canonical Plan/Goon input contracts and owners without values or work",
+        help="Show available inputs, defaults and owning Goons without running work",
     )
     plan_inputs_inspect.add_argument("plan", type=Path)
     plan_inputs_inspect.add_argument("--json", action="store_true", dest="as_json")

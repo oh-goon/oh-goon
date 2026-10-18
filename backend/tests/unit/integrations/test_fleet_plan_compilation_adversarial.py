@@ -6,6 +6,7 @@ import pytest
 
 from oh_goon.core.errors import FleetExtensionInvalid, FleetPlanInvalid
 from oh_goon.integrations import fleet_plan_compilation as c
+from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 
 def test_yaml_parser_rejects_non_mapping_duplicates_nested_duplicates_and_bad_yaml() -> None:
@@ -191,44 +192,14 @@ def test_run_parser_rejects_shell_programs_punctuation_substitution_multiline_an
     assert c._parse_run_argv('echo "python -c"') == ["echo", "python -c"]
 
 
-def test_uv_authoring_injects_locked_group_and_rejects_ambiguous_environment() -> None:
-    normalized = {
-        "uv": {"group": "dev"},
-        "steps": [{"kind": "command", "argv": ["uv", "run", "ruff", "check", "."]}],
-        "requirements": [],
-    }
-    c._apply_uv_environment(normalized)
-    assert normalized["steps"][0]["argv"][:8] == [
-        "uv",
-        "run",
-        "--frozen",
-        "--no-default-groups",
-        "--project",
-        ".",
-        "--group",
-        "dev",
-    ]
-    assert normalized["requirements"][-1] == {"kind": "uv_project", "project": ".", "group": "dev"}
-    application_flags = {
-        "uv": {"group": "dev"},
-        "steps": [
-            {
-                "kind": "command",
-                "argv": [
-                    "uv",
-                    "run",
-                    "release-metadata",
-                    "--project",
-                    "demo",
-                    "--group",
-                    "app",
-                ],
-            }
-        ],
-        "requirements": [],
-    }
-    c._apply_uv_environment(application_flags)
-    assert application_flags["steps"][0]["argv"] == [
+def test_uv_authoring_injects_locked_group_and_rejects_ambiguous_environment(tmp_path) -> None:
+    path = tmp_path / "goon.yml"
+    path.write_text(
+        "version: 1\nuv: {group: dev}\nsteps:\n- run: uv run release-metadata --project demo --group app\n"
+    )
+    plan = FleetPlanResolver().resolve(path)
+    step = plan.steps[0]
+    assert step.argv == (
         "uv",
         "run",
         "--frozen",
@@ -242,30 +213,22 @@ def test_uv_authoring_injects_locked_group_and_rejects_ambiguous_environment() -
         "demo",
         "--group",
         "app",
-    ]
-    bads = [
-        {"uv": []},
-        {"uv": {"group": "bad space"}, "steps": [{}]},
-        {"uv": {"group": "dev"}, "steps": []},
-        {"uv": {"group": "dev"}, "steps": [{"kind": "git"}]},
-        {
-            "uv": {"group": "dev"},
-            "steps": [{"kind": "command", "cache": {}, "argv": ["uv", "run", "x"]}],
-        },
-        {"uv": {"group": "dev"}, "steps": [{"kind": "command", "argv": ["x"]}]},
-        {
-            "uv": {"group": "dev"},
-            "steps": [{"kind": "command", "argv": ["uv", "run", "--frozen", "x"]}],
-        },
-        {
-            "uv": {"group": "dev", "project": "../backend"},
-            "steps": [{"kind": "command", "argv": ["uv", "run", "x"]}],
-        },
-    ]
-    for bad in bads:
-        bad.setdefault("requirements", [])
+    )
+    assert plan.requirements[0].kind == "uv_project"
+    assert plan.requirements[0].group == "dev"
+    for body in (
+        "uv: []\nsteps: [{run: 'uv run pytest'}]",
+        "uv: {group: 'bad space'}\nsteps: [{run: 'uv run pytest'}]",
+        "uv: {group: dev}\nsteps: []",
+        "uv: {group: dev}\nsteps: [{uses: git, args: [status]}]",
+        "uv: {group: dev}\nsteps: [{run: 'uv run pytest', cache: {}}]",
+        "uv: {group: dev}\nsteps: [{run: pytest}]",
+        "uv: {group: dev}\nsteps: [{run: 'uv run --frozen pytest'}]",
+        "uv: {group: dev, project: ../backend}\nsteps: [{run: 'uv run pytest'}]",
+    ):
+        path.write_text("version: 1\n" + body + "\n")
         with pytest.raises(FleetPlanInvalid):
-            c._apply_uv_environment(bad)
+            FleetPlanResolver().resolve(path)
 
 
 def test_step_normalization_handles_ids_run_uses_outputs_workspace_and_git() -> None:

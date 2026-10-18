@@ -15,7 +15,10 @@ def _data() -> dict:
 def test_release_metadata_uses_project_command_not_embedded_program() -> None:
     data = _data()
     assert data.get("requirements") is None
-    assert data["uv"] == {"group": "dev"}
+    assert data["uv"] == {
+        "project": "${{ inputs.project }}",
+        "group": "${{ inputs.dependency_group }}",
+    }
     assert data["steps"] == [
         {
             "id": "compute",
@@ -30,12 +33,16 @@ def test_release_metadata_uses_project_command_not_embedded_program() -> None:
 
 def test_release_metadata_owns_only_its_input_contract_and_outputs() -> None:
     data = _data()
-    assert data["inputs"]["release_channel"] == {
+    assert {
+        key: value
+        for key, value in data["inputs"]["release_channel"].items()
+        if key != "description"
+    } == {
         "type": "choice",
         "choices": ["alpha", "beta", "production"],
         "default": "alpha",
     }
-    assert data["inputs"]["revision"] == {"type": "git_revision"}
+    assert data["inputs"]["revision"]["type"] == "git_revision"
     assert data["outputs"] == {
         "project_version": "${{ steps.compute.outputs.PROJECT_VERSION }}",
         "release_version": "${{ steps.compute.outputs.RELEASE_VERSION }}",

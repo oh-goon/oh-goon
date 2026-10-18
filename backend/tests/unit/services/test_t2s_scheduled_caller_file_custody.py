@@ -20,9 +20,9 @@ from oh_goon.services.schedule_admission import _admission_plan
 from tests.factories.schedules import schedule_create
 
 
-def _fresh(tmp_path: Path):
+def _fresh(tmp_path: Path, content="inputs:\n  coverage_threshold: 85\n"):
     source = tmp_path / "staging.yml"
-    source.write_text("inputs:\n  coverage_threshold: 85\n")
+    source.write_text(content)
     identity = read_caller_input_file(source, root=tmp_path).authority()
     return source, identity
 
@@ -147,11 +147,11 @@ def test_real_catalog_values_file_parameter_is_frozen_in_scheduled_execution(tmp
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
     from tests.factories.shipped_templates import GOON_TEMPLATES, PLAN_TEMPLATES
 
-    source, identity = _fresh(tmp_path)
+    source, identity = _fresh(tmp_path, "inputs:\n  typechecker: ty\n")
     template = PLAN_TEMPLATES.source("python/quality").path
     resolved = FleetPlanResolver(goon_templates=GOON_TEMPLATES).resolve(
         template,
-        inputs={"coverage_threshold": 85},
+        inputs={"typechecker": "ty"},
     )
     baseline = FleetPlanTarget(
         kind="fleet_plan",
@@ -169,22 +169,13 @@ def test_real_catalog_values_file_parameter_is_frozen_in_scheduled_execution(tmp
     scheduled = service._prepare_scheduled_target(
         template,
         extensions_path=None,
-        inputs={"coverage_threshold": 85},
+        inputs={"typechecker": "ty"},
         caller_input_file=identity,
     )
-    assert "--cov-fail-under=85" in next(
-        arg
-        for step in scheduled.plan.steps
-        for arg in step.argv
-        if arg.startswith("--cov-fail-under=")
-    )
-    source.write_text("inputs:\n  coverage_threshold: 90\n")
-    assert "--cov-fail-under=85" in next(
-        arg
-        for step in FleetPlanTarget.model_validate_json(scheduled.model_dump_json()).plan.steps
-        for arg in step.argv
-        if arg.startswith("--cov-fail-under=")
-    )
+    assert any(step.argv[-2:] == ("ty", "check") for step in scheduled.plan.steps)
+    source.write_text("inputs:\n  typechecker: pyright\n")
+    restored = FleetPlanTarget.model_validate_json(scheduled.model_dump_json())
+    assert any(step.argv[-2:] == ("ty", "check") for step in restored.plan.steps)
     require_target_caller_file_fresh(scheduled)
 
 

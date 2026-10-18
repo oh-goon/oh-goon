@@ -178,9 +178,9 @@ def test_ml_iris_training_uses_project_command_and_locked_group() -> None:
     assert len(goon["steps"]) == 1
     assert goon["steps"][0]["run"].startswith("uv run iris-train ")
     assert "python -c" not in source.content
-    assert [item.kind for item in source.compiled.requirements] == ["uv_project"]
 
     resolved = FleetPlanResolver(goon_templates=GOONS).resolve(plan_source.path)
+    assert [item.kind for item in resolved.imports[0].requirements] == ["uv_project"]
     assert [item.name for item in resolved.imports] == ["ml/iris-train"]
     assert [step.step_id for step in resolved.steps] == ["ml-iris-train.iris-train"]
     command = resolved.steps[0]
@@ -200,27 +200,21 @@ def test_ml_iris_training_uses_project_command_and_locked_group() -> None:
 def test_resolver_translates_resolved_plan_model_validation_to_domain_error(tmp_path: Path) -> None:
     from oh_goon.core.errors import FleetPlanInvalid
 
+    package = tmp_path / "goons/general/restricted"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# general/restricted\n")
+    (package / "goon.yml").write_text(
+        "version: 1\nrequirements:\n- kind: file_exists\n  path: marker\nsteps:\n- run: 'true'\n"
+    )
     plan_path = tmp_path / "plan.yml"
     plan_path.write_text(
-        """version: 1
-execution:
-  purpose: verification
-inputs:
-- release_channel
-- revision
-goons:
-- python/release-metadata
-""",
-        encoding="utf-8",
+        "version: 1\nexecution: {purpose: verification}\ngoons:\n- import: general/restricted\n  from: goons\n"
     )
-
     with pytest.raises(
         FleetPlanInvalid,
         match="Verification Goon imports cannot carry repository admission requirements",
     ):
-        FleetPlanResolver(goon_templates=GOONS).resolve(
-            plan_path, inputs={"release_channel": "beta", "revision": "abcdef1"}
-        )
+        FleetPlanResolver().resolve(plan_path)
 
 
 def test_simple_core_goons_keep_the_small_authoring_contract() -> None:
@@ -283,9 +277,11 @@ def test_shipped_template_identity_and_description_have_single_owners() -> None:
 
 def test_release_deploy_plan_projects_owned_contracts_instead_of_copying_schemas() -> None:
     payload = yaml.safe_load(PLANS.source("oci/release-deploy").content)
-    assert isinstance(payload["inputs"], list)
-    assert payload["inputs"] == [
-        "coverage_threshold",
+    assert "inputs" not in payload
+    resolver = FleetPlanResolver(goon_templates=GOONS)
+    assert {
+        item.name for item in resolver.input_definitions(PLANS.source("oci/release-deploy").path)
+    } == {
         "base_registry_hostname",
         "publish_registry_hostname",
         "publish_repository",
@@ -296,7 +292,10 @@ def test_release_deploy_plan_projects_owned_contracts_instead_of_copying_schemas
         "namespace",
         "deployment",
         "container",
-    ]
+        "project",
+        "dependency_group",
+        "typechecker",
+    }
     bindings = payload["goons"][-1]["with"]
     assert bindings == {"image": "${{ goons.oci-publish-image.outputs.OCI_REFERENCE }}"}
 

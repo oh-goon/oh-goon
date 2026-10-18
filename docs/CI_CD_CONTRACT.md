@@ -260,7 +260,12 @@ This avoids a second runtime state machine whose observations could disagree wit
 
 ## Plan/Goon composition rules
 
-Plans select and order Goons. Plans never contain executable Steps. Atomic Goons own Steps; Composite Goons own ordered `goons:` imports. A Goon declares one form, never both. Imports are exact `category/name` capability references and mean composition only—never merge, inheritance, patch, overlay, hidden deduplication, or reordering. Inputs cross a Goon boundary only through explicit `with:` bindings and requirements remain owned by the declaring Goon.
+Plans select and order Goons. Plans never contain executable Steps. Atomic Goons own Steps; Composite Goons own ordered `goons:` imports. A Goon declares one form, never both. Imports retain exact `category/name` identities and written order. Inputs use unique named projection or explicit import-local `pass:`/`with:` on Plans and Composite Goons; multiple recipients must be explicit. Project-local sources select a contained catalog with `from:` and never shadow the shipped catalog. Requirements remain owned by their declaring Goon. See the [developer journey](../templates/README.md).
+
+Ordinary verification Plans may carry derived native uv project/group environment
+requirements. Other repository admission requirements remain CI/CD-only. Local
+verification is explicitly selected and does not replace configured strict execution
+for workloads that require its capabilities.
 
 Reusable CI/CD behavior therefore belongs in Goons. Reusable capability bundles should normally be Composite Goons; Plans remain small intent rosters. GitLab migration writes an Atomic Goon via `goon import-gitlab`, never an executable Plan.
 

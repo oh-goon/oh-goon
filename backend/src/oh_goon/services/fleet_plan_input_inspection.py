@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.fleet_plan_composition import input_reference
 from oh_goon.core.models.fleet_plan import CompiledGoonImportStep
 from oh_goon.core.models.fleet_plan_composition import PlanInputDefinition
 from oh_goon.services.fleet_plan_input_resolution import materialize_projected_inputs
@@ -26,51 +27,32 @@ class InputInspection:
 def inspect_projected_inputs(graph: FleetPlanSourceGraph) -> tuple[InputInspection, ...]:
     """Inspect one analyzed source cut; never re-read or re-resolve a Goon."""
     root = graph.root
-    is_plan = root.path.name != "goon.yml"
-    compiled = materialize_projected_inputs(graph, root.path, plan_root=is_plan)
+    compiled = materialize_projected_inputs(graph, root.path)
     results = []
     for definition in compiled.inputs:
-        if definition.name not in root.compiled.projected_inputs:
+        if any(item.name == definition.name for item in root.compiled.inputs):
             results.append(InputInspection(definition, ()))
             continue
-        paths = _owners(graph, root.path, definition.name, plan_root=is_plan)
+        paths = _owners(graph, root.path, definition.name)
         if not paths:
             raise FleetPlanInvalid(f"Projected input {definition.name!r} has no ultimate owner")
         results.append(InputInspection(definition, tuple(paths)))
     return tuple(results)
 
 
-def _owners(
-    graph: FleetPlanSourceGraph, path: Path, name: str, *, plan_root: bool
-) -> list[tuple[str, ...]]:
+def _owners(graph: FleetPlanSourceGraph, path: Path, name: str) -> list[tuple[str, ...]]:
     node = graph.node(path)
-    if name not in node.compiled.projected_inputs:
-        return [()] if any(item.name == name for item in node.compiled.inputs) else []
+    if any(item.name == name for item in node.compiled.inputs):
+        return [()]
+    compiled = materialize_projected_inputs(graph, path)
     found: list[tuple[str, ...]] = []
-    expected_reference = f"${{{{ inputs.{name} }}}}"
-    for step in node.compiled.steps:
+    for step in compiled.steps:
         if not isinstance(step, CompiledGoonImportStep):
             continue
-        child_node = graph.goon(path, step.goon)
-        child = materialize_projected_inputs(graph, child_node.path)
-        if plan_root:
-            projected_child_name = name
-            if not any(item.name == name for item in child.inputs):
+        child_node = graph.goon(path, step)
+        for binding in step.inputs:
+            if input_reference(binding.value) != name or binding.sources:
                 continue
-            if any(binding.name == name for binding in step.inputs):
-                continue  # canonical materialization rejects this ambiguity
-        else:
-            forwarded = [
-                binding
-                for binding in step.inputs
-                if binding.value == expected_reference and not binding.sources
-            ]
-            if not forwarded:
-                continue
-            for binding in forwarded:
-                for suffix in _owners(graph, child_node.path, binding.name, plan_root=False):
-                    found.append((step.goon, *suffix))
-            continue
-        for suffix in _owners(graph, child_node.path, projected_child_name, plan_root=False):
-            found.append((step.goon, *suffix))
+            for suffix in _owners(graph, child_node.path, binding.name):
+                found.append((step.goon, *suffix))
     return found

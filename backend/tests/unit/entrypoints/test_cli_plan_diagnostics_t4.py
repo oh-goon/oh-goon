@@ -46,7 +46,7 @@ def _plan(name="python/quality") -> str:
 )
 def test_typed_violations_are_machine_safe_and_exit_2(command, tail, capsys):
     args = _args(
-        command, _plan(), *tail, "--diagnostics", "--json", "--input", "coverage_threshold=101"
+        command, _plan(), *tail, "--diagnostics", "--json", "--input", "typechecker=invalid"
     )
     assert run_plan_command(_runtime(), args) == 2
     raw = capsys.readouterr().out
@@ -56,7 +56,7 @@ def test_typed_violations_are_machine_safe_and_exit_2(command, tail, capsys):
         "status": "rejected",
         "stage": "input_contract",
         "code": "INVALID_INPUT_VALUE",
-        "inputs": ["coverage_threshold"],
+        "inputs": ["typechecker"],
         "safe_next_action": "Use plan inputs to inspect the owning Goon's type and constraints; correct the caller value.",
         "execution": "not_started_by_diagnostic",
     }
@@ -142,10 +142,8 @@ def test_bad_cli_input_never_echoes_secret_in_diagnostics(capsys):
     assert "SECRET_ONLY_NO_EQUALS" not in raw
 
 
-def test_conflicting_cli_file_source_has_typed_code_and_no_values(
-    tmp_path: Path, monkeypatch, capsys
-):
-    (tmp_path / "params.yml").write_text("inputs:\n  coverage_threshold: 90\n", encoding="utf-8")
+def test_cli_override_is_accepted_and_not_misattributed_to_file(tmp_path, monkeypatch, capsys):
+    (tmp_path / "params.yml").write_text("inputs:\n  typechecker: pyright\n")
     monkeypatch.chdir(tmp_path)
     assert (
         run_plan_command(
@@ -155,19 +153,18 @@ def test_conflicting_cli_file_source_has_typed_code_and_no_values(
                 _plan(),
                 "--routes",
                 "--json",
-                "--diagnostics",
                 "--input",
-                "coverage_threshold=80",
+                "typechecker=ty",
                 "--inputs-file",
                 "params.yml",
             ),
         )
-        == 2
+        == 0
     )
     doc = json.loads(capsys.readouterr().out)
-    assert doc["code"] == "CONFLICTING_INPUT_SOURCES"
-    assert doc["inputs"] == ["coverage_threshold"]
-    assert "80" not in json.dumps(doc) and "90" not in json.dumps(doc)
+    selected = next(item for item in doc["inputs"] if item["name"] == "typechecker")
+    assert selected["origin"] == {"kind": "supplied"}
+    assert all("value" not in item for item in doc["bindings"])
 
 
 def test_unsafe_input_name_and_exception_are_not_serialized():
@@ -197,7 +194,7 @@ def test_non_opted_in_failure_text_remains_legacy(capsys):
     assert (
         run_plan_command(
             _runtime(),
-            _args("explain", _plan(), "--routes", "--json", "--input", "coverage_threshold=101"),
+            _args("explain", _plan(), "--routes", "--json", "--input", "typechecker=invalid"),
         )
         == 2
     )
@@ -209,7 +206,7 @@ def test_human_opt_in_safe_codes_and_action(capsys):
     assert (
         run_plan_command(
             _runtime(),
-            _args("validate", _plan(), "--diagnostics", "--input", "coverage_threshold=101"),
+            _args("validate", _plan(), "--diagnostics", "--input", "typechecker=invalid"),
         )
         == 2
     )

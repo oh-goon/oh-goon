@@ -11,7 +11,7 @@ outputs:
   KUBERNETES_IMAGE: ${{ goons.kubernetes-set-image.outputs.KUBERNETES_IMAGE }}
 goons:
 - import: kubernetes/set-image
-  pass: [kubernetes_api_hostname, namespace, deployment, container, image]
+  pass: [kubernetes_api_hostname, namespace, deployment, container]
 - import: kubernetes/rollout-verify
   pass: [kubernetes_api_hostname, namespace, deployment, container]
   with:

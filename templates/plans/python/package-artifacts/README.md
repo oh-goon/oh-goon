@@ -1,19 +1,33 @@
 # python/package-artifacts
 
-**Production template. Production Plan.**
+Build through the project-owned packaging command and retain its distribution bundle for independent retrieval.
 
-Strict standalone Python package build. This builds wheel/sdist artifacts only; it is intentionally not an OCI/Docker image build and does not publish to a registry.
+## Before you run
 
-## Contract
+The selected locked project/group must provide the commands used by the chosen Goons. The project supplies `package-artifacts`; retained bundle bytes require configured strict execution and content-store publication.
 
-- Canonical identity: `python/package-artifacts`.
-- Effective execution/resource policy is machine-owned and rendered by Plan inspection; this README does not duplicate it.
-- Executable behavior is forbidden here; this file is an ordered Goon roster.
-- Inputs: none.
-- Ordered Goons: `python/package-artifacts`.
+## Use this Plan
 
-## Safety boundary
+```sh
+oh-goon templates show python/package-artifacts --kind plan
+oh-goon plan inputs templates/plans/python/package-artifacts/plan.yml
+```
 
-The Plan contains no executable Steps. It only selects ordered Goons; execution/resource policy is resolved by the machine-owned Plan contract and admitted executor capacity, while implementation, requirements, secrets, network authority, and artifacts stay with the owning Goons.
+Copy with `oh-goon templates show python/package-artifacts --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
 
-Machine-readable truth is [`plan.yml`](./plan.yml). The README explains intent and safety only; it is never runtime authority.
+## Configure a copy
+
+Save the selected project and locked tool group as `values.yml`:
+
+```yaml
+inputs:
+  project: .
+  dependency_group: dev
+```
+
+```sh
+oh-goon plan validate plan.yml --inputs-file values.yml
+oh-goon lock plan.yml --inputs-file values.yml
+```
+
+Use the same selection when submitting the Plan. The project command’s own configuration remains authoritative.

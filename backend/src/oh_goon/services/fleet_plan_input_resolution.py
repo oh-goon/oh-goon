@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid
+from oh_goon.core.fleet_plan_composition import input_reference
 from oh_goon.core.models.fleet_plan import CompiledExecutionTemplate, CompiledGoonImportStep
 from oh_goon.core.models.fleet_plan_composition import (
     EnvInputSource,
@@ -192,10 +193,14 @@ def materialize_projected_inputs(
     source_graph: FleetPlanSourceGraph,
     path: Path,
     *,
-    plan_root: bool = False,
     _cache: dict[Path, CompiledExecutionTemplate] | None = None,
 ) -> CompiledExecutionTemplate:
-    """Materialize explicit projected inputs without copying child schemas in YAML."""
+    """Derive public input contracts from their declaring Goons.
+
+    Plans expose unambiguous, unbound direct inputs automatically. Composite
+    Goons retain their explicitly declared interface. Explicit references select
+    recipients, including intentional fan-out; an unbound shared name never does.
+    """
 
     cache = {} if _cache is None else _cache
     canonical = navigation_path(path)
@@ -203,7 +208,8 @@ def materialize_projected_inputs(
     if cached is not None:
         return cached
     compiled = source_graph.node(canonical).compiled
-    if not compiled.projected_inputs:
+    automatic = compiled.authoring_kind == "plan" and not compiled.projected_inputs
+    if not compiled.projected_inputs and not automatic:
         cache[canonical] = compiled
         return compiled
     if compiled.inputs:
@@ -212,91 +218,99 @@ def materialize_projected_inputs(
         )
 
     steps = list(compiled.steps)
+    children = {}
+    names = dict.fromkeys(compiled.projected_inputs)
+    for index, step in enumerate(steps):
+        if not isinstance(step, CompiledGoonImportStep):
+            continue
+        child_node = source_graph.goon(canonical, step)
+        child = materialize_projected_inputs(source_graph, child_node.path, _cache=cache)
+        contracts = {item.name: item for item in child.inputs}
+        children[index] = contracts
+        if automatic:
+            bound = {binding.name for binding in step.inputs}
+            for binding in step.inputs:
+                reference = input_reference(binding.value)
+                if reference is not None and not binding.sources:
+                    names[reference] = None
+            for name in contracts:
+                if name not in bound:
+                    names[name] = None
     definitions: list[PlanInputDefinition] = []
-    for name in compiled.projected_inputs:
-        if plan_root:
-            matches: list[tuple[int, CompiledGoonImportStep, PlanInputDefinition]] = []
-            for index, step in enumerate(steps):
-                if not isinstance(step, CompiledGoonImportStep):
+    ambiguous: list[str] = []
+    for name in names:
+        expected_reference = f"${{{{ inputs.{name} }}}}"
+        recipients: list[tuple[str, PlanInputDefinition]] = []
+        candidates: list[tuple[int, CompiledGoonImportStep, PlanInputDefinition]] = []
+        for index, step in enumerate(steps):
+            if not isinstance(step, CompiledGoonImportStep):
+                continue
+            contracts = children[index]
+            for binding in step.inputs:
+                if binding.sources or input_reference(binding.value) != name:
                     continue
-                child_node = source_graph.goon(canonical, step.goon)
-                child = materialize_projected_inputs(source_graph, child_node.path, _cache=cache)
-                definition = next((item for item in child.inputs if item.name == name), None)
-                if definition is not None:
-                    matches.append((index, step, definition))
-            if not matches:
+                if binding.name not in contracts:
+                    raise FleetPlanInvalid(
+                        f"Projected input {name!r} binds unknown child input "
+                        f"{binding.name!r} on {step.step_id}"
+                    )
+                recipients.append((step.step_id, contracts[binding.name]))
+            if name in contracts and not any(binding.name == name for binding in step.inputs):
+                candidates.append((index, step, contracts[name]))
+        if not recipients:
+            if not candidates:
                 raise FleetPlanInputRejected(
-                    f"Plan projected input {name!r} is not owned by any directly selected Goon",
+                    f"Projected input {name!r} is not owned by any directly selected Goon; "
+                    "use with: to bind a renamed input",
                     diagnostic_code="UNOWNED_PROJECTED_INPUT",
                     input_names=(name,),
                 )
-            if len(matches) != 1:
-                owner_names = ", ".join(item[1].goon for item in matches)
+            if len(candidates) != 1:
+                if automatic:
+                    ambiguous.append(name)
+                    continue
                 raise FleetPlanInputRejected(
-                    f"Plan projected input {name!r} is ambiguous across direct Goons: "
-                    f"{owner_names}; "
-                    "bind it explicitly or expose it through one Composite Goon",
+                    f"Plan projected input {name!r} is ambiguous across direct Goons; "
+                    "select recipients explicitly with pass: or with:",
                     diagnostic_code="AMBIGUOUS_PROJECTED_INPUT",
                     input_names=(name,),
                 )
-            index, step, definition = matches[0]
-            if any(item.name == name for item in step.inputs):
-                raise FleetPlanInvalid(
-                    f"Plan projected input {name!r} is already explicitly bound on {step.goon}"
-                )
-            definitions.append(definition)
+            index, step, definition = candidates[0]
             steps[index] = step.model_copy(
                 update={
                     "inputs": (
                         *step.inputs,
-                        PlanInputBinding(name=name, value=f"${{{{ inputs.{name} }}}}"),
+                        PlanInputBinding(name=name, value=expected_reference),
                     )
                 }
             )
-            continue
-
-        bound_contracts: list[tuple[str, PlanInputDefinition]] = []
-        expected_reference = f"${{{{ inputs.{name} }}}}"
-        for step in steps:
-            if not isinstance(step, CompiledGoonImportStep):
-                continue
-            child_node = source_graph.goon(canonical, step.goon)
-            child = materialize_projected_inputs(source_graph, child_node.path, _cache=cache)
-            for binding in step.inputs:
-                if binding.sources or binding.value != expected_reference:
-                    continue
-                definition = next(
-                    (item for item in child.inputs if item.name == binding.name),
-                    None,
-                )
-                if definition is None:
-                    raise FleetPlanInvalid(
-                        f"Composite Goon projected input {name!r} binds unknown child input "
-                        f"{binding.name!r} on {step.goon}"
-                    )
-                bound_contracts.append((step.goon, definition))
-        if not bound_contracts:
-            raise FleetPlanInvalid(
-                f"Composite Goon projected input {name!r} must be explicitly forwarded with: "
-                f"${{{{ inputs.{name} }}}}"
-            )
-        first_owner, first = bound_contracts[0]
-        first_contract = first.model_dump(mode="python", exclude={"name"})
+            recipients.append((step.step_id, definition))
+        first_owner, first = recipients[0]
+        first_contract = first.model_dump(mode="python", exclude={"name", "description"})
         incompatible = [
             owner
-            for owner, definition in bound_contracts[1:]
-            if definition.model_dump(mode="python", exclude={"name"}) != first_contract
+            for owner, definition in recipients[1:]
+            if definition.model_dump(mode="python", exclude={"name", "description"})
+            != first_contract
         ]
         if incompatible:
-            owners = ", ".join([first_owner, *incompatible])
             raise FleetPlanInvalid(
-                f"Composite Goon projected input {name!r} has incompatible child contracts: "
-                f"{owners}"
+                f"Projected input {name!r} has incompatible child contracts: "
+                + ", ".join([first_owner, *incompatible])
             )
         definitions.append(first.model_copy(update={"name": name}))
 
+    if len(definitions) > 32:
+        raise FleetPlanInvalid(
+            "Plan exposes more than 32 inputs; select its public interface with inputs:"
+        )
     materialized = compiled.model_copy(
-        update={"inputs": tuple(definitions), "projected_inputs": (), "steps": tuple(steps)}
+        update={
+            "inputs": tuple(definitions),
+            "projected_inputs": (),
+            "ambiguous_inputs": tuple(ambiguous),
+            "steps": tuple(steps),
+        }
     )
     cache[canonical] = materialized
     return materialized

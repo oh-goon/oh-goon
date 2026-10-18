@@ -1,10 +1,3 @@
 version: 1
-inputs:
-- base_registry_hostname
-- publish_registry_hostname
-- publish_repository
-- containerfile
-- context
-- platform
 goons:
 - oci/publish-image

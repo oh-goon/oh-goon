@@ -1,8 +1,17 @@
 # kubernetes/set-image
 
-**Production template. Production Atomic Goon.**
-
 Commit one immutable OCI digest reference to exactly one container in one Kubernetes apps/v1 Deployment. Fleet talks directly to one declared API endpoint with attempt-private bearer-token/CA authority, applies a resourceVersion/current-image JSON Patch, and records only the committed spec transition. It does not read kubeconfig and does not wait for rollout.
+
+## Use this Goon
+
+```sh
+oh-goon templates show kubernetes/set-image --kind goon
+oh-goon plan inputs templates/goons/kubernetes/set-image/goon.yml
+```
+
+Use `goons: [kubernetes/set-image]` in a Plan to keep the Goon defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed values, renamed inputs or producer references; route shared names explicitly with `pass:`/`with:`. A Composite Goon declares which child inputs it exposes. The [authoring guide](../../../README.md) shows values files, explicit local sources and how to append Steps to your own Atomic Goon.
+
+Select the exact API hostname, namespace, Deployment and container. Supply the declared token and CA certificate through host-backed environment authority. Image updates require a digest-qualified image; rollout verification consumes the exact expected generation and image. Inspect the Run for the actual mutation/verification result.
 
 ## Contract
 

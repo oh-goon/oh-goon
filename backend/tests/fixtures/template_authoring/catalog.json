@@ -6,9 +6,9 @@
     "import_occurrences": 50,
     "lexical_from": 23,
     "lexical_goons": 28,
-    "lexical_inputs": 37,
+    "lexical_inputs": 27,
     "lexical_outputs": 10,
-    "lexical_pass": 5,
+    "lexical_pass": 10,
     "lexical_run": 36,
     "lexical_steps": 37,
     "lexical_uses": 6,
@@ -62,7 +62,7 @@
       "readme_path": "templates/goons/advanced/isolated-dataflow/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "28614dcfb5767afae64b1d47c37ab50376fa3ae0ee30e6ecf9a193eb997f3632",
+      "root_source_sha256": "4c14fe422a2e8a861f560a177ad828325f788df0592ee52c11ab1cd433600608",
       "source_path": "templates/goons/advanced/isolated-dataflow/goon.yml"
     },
     {
@@ -117,7 +117,7 @@
       "readme_path": "templates/goons/kubernetes/release/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "052eb3a94fcb4ea63a10f91604cb2a196c9741c554b519fcbb3c8f9508b0c404",
+      "root_source_sha256": "8f23f59231c707b700dcb7d395144f3899c71e4e1421645722195a23805f9e20",
       "source_path": "templates/goons/kubernetes/release/goon.yml"
     },
     {
@@ -154,7 +154,7 @@
       "readme_path": "templates/goons/kubernetes/rollout-verify/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "0335220d291f415ee9b7483eb4925acc484eff50d2c8cd7cbc78e50ec33f785b",
+      "root_source_sha256": "a45063505df734f9a8a00f5badc41d8d952aeaf6580982cab083b318fb0e3503",
       "source_path": "templates/goons/kubernetes/rollout-verify/goon.yml"
     },
     {
@@ -203,7 +203,7 @@
       "readme_path": "templates/goons/kubernetes/set-image/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "b741d2497cbf3b59e7eba4c76b2757707a244076775f204344c8d768150e7588",
+      "root_source_sha256": "62fbdcf0d15e92b0027fb50607f8fc2c1db3dd9e456207a2a34cadbe2f714e5a",
       "source_path": "templates/goons/kubernetes/set-image/goon.yml"
     },
     {
@@ -238,7 +238,7 @@
       "readme_path": "templates/goons/ml/iris-train/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "3f17cc9c0552b9155466626aa3b0432bb0b665acfe05406acda28fc38b24075d",
+      "root_source_sha256": "b4732040a1483be558893566aa6f3635dd0523c58a6cce4241a7ec58bf7ef3b9",
       "source_path": "templates/goons/ml/iris-train/goon.yml"
     },
     {
@@ -273,7 +273,7 @@
       "readme_path": "templates/goons/oci/image/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "75316a2e287b6c3fdc3dc7c6396fbb0d25d565a590c5751d78e441d74ee5e90e",
+      "root_source_sha256": "c9ca6c321cfed408c167b0d88cb59c948169d300f9ff7adc38df58dcaf05dd5e",
       "source_path": "templates/goons/oci/image/goon.yml"
     },
     {
@@ -316,7 +316,7 @@
       "readme_path": "templates/goons/oci/publish/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "fa0761b651088ee3741da2c1e7f755ca7277bf041ed3741e5ac3d78c5790c714",
+      "root_source_sha256": "7d2e894ceb9fc9b4a6ad1452d315e276d55aabbf2eabcaac5e391a8ec34cca7a",
       "source_path": "templates/goons/oci/publish/goon.yml"
     },
     {
@@ -325,7 +325,7 @@
         "goons": 1,
         "inputs": 1,
         "outputs": 1,
-        "pass": 2,
+        "pass": 0,
         "run": 0,
         "steps": 0,
         "uses": 0,
@@ -368,7 +368,7 @@
       "readme_path": "templates/goons/oci/publish-image/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "f8903e177b98f19711093a0ed6067607febd9532f50d5a9c5a7e744cb40334ce",
+      "root_source_sha256": "288c78158138b356f2a32d44ff73c08ee941fd4015e3a4b8de49f0f5cf5a6fe4",
       "source_path": "templates/goons/oci/publish-image/goon.yml"
     },
     {
@@ -412,7 +412,7 @@
       "readme_path": "templates/goons/oci/tag-assert/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "fb7289e25c2b8668c7905ff7d85f5868688b38b48bee11810d9b0e5652b09151",
+      "root_source_sha256": "061cdbe515e98f409c8bb50c1c629bd72036b9504fdd0f078e78f97087430921",
       "source_path": "templates/goons/oci/tag-assert/goon.yml"
     },
     {
@@ -504,7 +504,7 @@
       "readme_path": "templates/goons/oh-goon/backend-p1/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "c424c1be405465763868bf72c7e408136ca674c35037ea03a22b3414fccd925d",
+      "root_source_sha256": "fee2e769a964b0e3118b95d8159e7e371cae072da1cb7dd89fa9f736fd1bda2b",
       "source_path": "templates/goons/oh-goon/backend-p1/goon.yml"
     },
     {
@@ -536,7 +536,7 @@
       "readme_path": "templates/goons/oh-goon/backend-tests/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "7f62a6a680d737df0739cad098f226d63b3c9fa576a66236c7ad6d7de9607662",
+      "root_source_sha256": "e3efa11886564183aaace40ae4366e0c8c5ef73db0c3a43999db0ca0d0dc7647",
       "source_path": "templates/goons/oh-goon/backend-tests/goon.yml"
     },
     {
@@ -568,7 +568,7 @@
       "readme_path": "templates/goons/oh-goon/browser-engine-preflight/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "7c708ec96cbc751d74ec3350640ac2084d9452b06282ce710936f7126c361469",
+      "root_source_sha256": "951f9377ee36d54580d1450435699577635ddef0ae1d77a75baf99c86b5c94fb",
       "source_path": "templates/goons/oh-goon/browser-engine-preflight/goon.yml"
     },
     {
@@ -600,7 +600,7 @@
       "readme_path": "templates/goons/oh-goon/browser-harness-preflight/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "d625c4ccf33ad24f3aa9d5cfc0df52288ca364e8f23b6e5240bacae5c988cbc9",
+      "root_source_sha256": "a64fa859594c63c18e0e631a716b6f3f6d82046e2a91b0371d861b59a67bcb22",
       "source_path": "templates/goons/oh-goon/browser-harness-preflight/goon.yml"
     },
     {
@@ -632,7 +632,7 @@
       "readme_path": "templates/goons/oh-goon/browser-localhost-transport-preflight/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "e45b6e8e509bdefcd9d947c3550cca82d8c2c05262462e3e9305d32e232aac15",
+      "root_source_sha256": "9efe244b14228f4d5a4f4310c6bb5f83be1217ae6f161a3b4b8d4e931ab6af1c",
       "source_path": "templates/goons/oh-goon/browser-localhost-transport-preflight/goon.yml"
     },
     {
@@ -664,7 +664,7 @@
       "readme_path": "templates/goons/oh-goon/browser-required/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "9d0994fb173ef6de1559df926073f1d4424b5c2e8531516e2321d0cbbac5f769",
+      "root_source_sha256": "71d2cf51454d6d176ce7f7d7d7791898375e9bf33505d7d32909a1489eda9bb9",
       "source_path": "templates/goons/oh-goon/browser-required/goon.yml"
     },
     {
@@ -696,7 +696,7 @@
       "readme_path": "templates/goons/oh-goon/browser-runtime-preflight/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "e18ca227f26af640d62a593e6198ce35bd660d0664011782ae2058d8d673dcee",
+      "root_source_sha256": "9e3ba841b8b8ae0caaf6c9981bef2401fae197806d9c7b3cad95012710f10383",
       "source_path": "templates/goons/oh-goon/browser-runtime-preflight/goon.yml"
     },
     {
@@ -728,7 +728,7 @@
       "readme_path": "templates/goons/oh-goon/browser-targeted/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "143395cb51e95eb110fbd388eb078831b0e4224455d86ae2ef94fbe57d8018c1",
+      "root_source_sha256": "752be947a4300d6a961221669c109394ef1eda7d015a4cd19c4faef73b683e01",
       "source_path": "templates/goons/oh-goon/browser-targeted/goon.yml"
     },
     {
@@ -820,7 +820,7 @@
       "readme_path": "templates/goons/oh-goon/integration-contract/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "fea6dac03b318a16d81048474c70caa6872b2585a9e293c09e39f502a193d971",
+      "root_source_sha256": "4eed3b2c28d52863803990d6449471a68d37a96f0b42327fab40f86b35e497b1",
       "source_path": "templates/goons/oh-goon/integration-contract/goon.yml"
     },
     {
@@ -912,7 +912,7 @@
       "readme_path": "templates/goons/oh-goon/release-identity/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "1521129b091930649ec24460e918da324f642148c783a53f7cb3da21aa8e5610",
+      "root_source_sha256": "fad26af3001f918644307c347c58854a8446ddbf37a6c5549dbe5f1ea7b53939",
       "source_path": "templates/goons/oh-goon/release-identity/goon.yml"
     },
     {
@@ -944,7 +944,7 @@
       "readme_path": "templates/goons/oh-goon/release-locks/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "d650b84ada10406b392ceba65829e51456e453b70e47047149a4762f40df4210",
+      "root_source_sha256": "118b19e0beac447ad706cd5c5691905d28e9abf901f37cefd351a5eb50466d50",
       "source_path": "templates/goons/oh-goon/release-locks/goon.yml"
     },
     {
@@ -979,7 +979,7 @@
       "readme_path": "templates/goons/oh-goon/release-package-store/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "20c68a5f16126cf66c838e8a39e55324a35bc46445aabf6776af07343b90bc6a",
+      "root_source_sha256": "0913065f0294ccbbb1f3887583f91df36a0c542bb9a40dc438b2319f620ab0a4",
       "source_path": "templates/goons/oh-goon/release-package-store/goon.yml"
     },
     {
@@ -1106,7 +1106,7 @@
       "authored_lexical_counts": {
         "from": 0,
         "goons": 0,
-        "inputs": 0,
+        "inputs": 1,
         "outputs": 0,
         "pass": 0,
         "run": 1,
@@ -1115,7 +1115,10 @@
         "with": 0
       },
       "classification": "production",
-      "inputs_defined": [],
+      "inputs_defined": [
+        "project",
+        "dependency_group"
+      ],
       "inputs_projected": [],
       "key": "python/package-artifacts",
       "kind": "goon",
@@ -1129,14 +1132,14 @@
       "readme_path": "templates/goons/python/package-artifacts/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "2e4da0cecf31522f5d3975602106e566b2c1228fbae91f833fd1f1917a1a79be",
+      "root_source_sha256": "b1aca1281d05dfbd04aedb9302b40063e0019a6267984c55a16f4f4cea1b29c7",
       "source_path": "templates/goons/python/package-artifacts/goon.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 0,
-        "inputs": 0,
+        "inputs": 1,
         "outputs": 0,
         "pass": 0,
         "run": 1,
@@ -1145,7 +1148,10 @@
         "with": 0
       },
       "classification": "production",
-      "inputs_defined": [],
+      "inputs_defined": [
+        "project",
+        "dependency_group"
+      ],
       "inputs_projected": [],
       "key": "python/profile",
       "kind": "goon",
@@ -1159,7 +1165,7 @@
       "readme_path": "templates/goons/python/profile/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "f4bcc0fc46eb28892d23965d88115eeb39e94228c382b72d751a3aacc0416a08",
+      "root_source_sha256": "8db11b7138e71ef6c7d604586db1da4eb3a540baa3bac111e5cf4d1ff00faa50",
       "source_path": "templates/goons/python/profile/goon.yml"
     },
     {
@@ -1168,7 +1174,7 @@
         "goons": 1,
         "inputs": 1,
         "outputs": 0,
-        "pass": 1,
+        "pass": 3,
         "run": 0,
         "steps": 0,
         "uses": 0,
@@ -1177,7 +1183,9 @@
       "classification": "production",
       "inputs_defined": [],
       "inputs_projected": [
-        "coverage_threshold"
+        "project",
+        "dependency_group",
+        "typechecker"
       ],
       "key": "python/quality",
       "kind": "goon",
@@ -1202,7 +1210,7 @@
       "readme_path": "templates/goons/python/quality/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "34035ded673ee85c7f050133a8bb2c86d4a953f17425071ed21e364b7dce920a",
+      "root_source_sha256": "014e93047b371d9f77a26566634b3f27e174364b78a60393e79f9b7d1ddea35f",
       "source_path": "templates/goons/python/quality/goon.yml"
     },
     {
@@ -1219,6 +1227,8 @@
       },
       "classification": "production",
       "inputs_defined": [
+        "project",
+        "dependency_group",
         "release_channel",
         "revision"
       ],
@@ -1244,14 +1254,14 @@
       "readme_path": "templates/goons/python/release-metadata/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "9cd49f16acabb16c66d86d0f4e08ffe20a7ca64e0f9174051e5074c8dcb5a2bb",
+      "root_source_sha256": "3b2d50a99c88264f14e8aa0d690555280c2a34e95fe9c2955040cd3b49a0e0ed",
       "source_path": "templates/goons/python/release-metadata/goon.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 0,
-        "inputs": 0,
+        "inputs": 1,
         "outputs": 0,
         "pass": 0,
         "run": 2,
@@ -1260,7 +1270,10 @@
         "with": 0
       },
       "classification": "production",
-      "inputs_defined": [],
+      "inputs_defined": [
+        "project",
+        "dependency_group"
+      ],
       "inputs_projected": [],
       "key": "python/ruff",
       "kind": "goon",
@@ -1278,7 +1291,7 @@
       "readme_path": "templates/goons/python/ruff/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "1f67910994d2d9004b94e62d385a77ae9ea44bc050b6fc9269de0a24382b997b",
+      "root_source_sha256": "1fe7534c6cb3452250bb719aea55f19ee6a34708e11bbea7e6ee71c186173b76",
       "source_path": "templates/goons/python/ruff/goon.yml"
     },
     {
@@ -1295,7 +1308,8 @@
       },
       "classification": "production",
       "inputs_defined": [
-        "coverage_threshold"
+        "project",
+        "dependency_group"
       ],
       "inputs_projected": [],
       "key": "python/test",
@@ -1310,14 +1324,14 @@
       "readme_path": "templates/goons/python/test/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "b7bc38ebf4e11ea0b0227dedb3231d32cf9db4a49e9a6fe1e620884c6eaa6e3d",
+      "root_source_sha256": "59ea0838ae60003174dbb2419d1cdac0a238730bf2891f705d3a4bd51e7e09ca",
       "source_path": "templates/goons/python/test/goon.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 0,
-        "inputs": 0,
+        "inputs": 1,
         "outputs": 0,
         "pass": 0,
         "run": 2,
@@ -1326,7 +1340,11 @@
         "with": 0
       },
       "classification": "production",
-      "inputs_defined": [],
+      "inputs_defined": [
+        "project",
+        "dependency_group",
+        "typechecker"
+      ],
       "inputs_projected": [],
       "key": "python/typecheck",
       "kind": "goon",
@@ -1344,7 +1362,7 @@
       "readme_path": "templates/goons/python/typecheck/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "d7114ddafff391a8050c0284baf33857beda0585f2559fe77e14c16509f75dd2",
+      "root_source_sha256": "5980c8809a141431aa40de281f74ba969b9cdc8c1814d0f7fd889e0b552a8c88",
       "source_path": "templates/goons/python/typecheck/goon.yml"
     },
     {
@@ -1447,7 +1465,7 @@
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -1457,10 +1475,7 @@
       },
       "classification": "teaching-example",
       "inputs_defined": [],
-      "inputs_projected": [
-        "tag",
-        "test_timeout_seconds"
-      ],
+      "inputs_projected": [],
       "key": "advanced/isolated-dataflow",
       "kind": "plan",
       "ordered_steps": [
@@ -1474,14 +1489,14 @@
       "readme_path": "templates/plans/advanced/isolated-dataflow/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "9a031bbba2cbc2256785a28a759cd4ce930b82a246061809683990e103d89bbe",
+      "root_source_sha256": "a5382005037cbaeb2ed98bbaec9fdadc1543364e123605b3f9a3ee59348bef36",
       "source_path": "templates/plans/advanced/isolated-dataflow/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -1491,13 +1506,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "kubernetes_api_hostname",
-        "namespace",
-        "deployment",
-        "container",
-        "image"
-      ],
+      "inputs_projected": [],
       "key": "kubernetes/set-image",
       "kind": "plan",
       "ordered_steps": [
@@ -1511,14 +1520,14 @@
       "readme_path": "templates/plans/kubernetes/set-image/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "d218f63a51c50deadcd0ff7d8b29eefbe1acb4dea7d2d019737d99fa7ff19d2c",
+      "root_source_sha256": "a9afa3c2edb4118c3d9e012e821b6b790f2a9b67d0365a6c0333a23e8e7e38e9",
       "source_path": "templates/plans/kubernetes/set-image/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -1528,12 +1537,7 @@
       },
       "classification": "teaching-example",
       "inputs_defined": [],
-      "inputs_projected": [
-        "random_seed",
-        "test_size_percent",
-        "minimum_accuracy_percent",
-        "max_iterations"
-      ],
+      "inputs_projected": [],
       "key": "ml/iris-training",
       "kind": "plan",
       "ordered_steps": [
@@ -1547,14 +1551,14 @@
       "readme_path": "templates/plans/ml/iris-training/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "631d3a3bdf9c8476832c516fe0a8d2bda7d80fa34ffaeb48c89132eadb4884dc",
+      "root_source_sha256": "972a73aa162b7f3ab4daf9921dbf310dd4a4295be2221eb5a4bddd5849ef0692",
       "source_path": "templates/plans/ml/iris-training/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -1564,12 +1568,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "base_registry_hostname",
-        "containerfile",
-        "context",
-        "platform"
-      ],
+      "inputs_projected": [],
       "key": "oci/image",
       "kind": "plan",
       "ordered_steps": [
@@ -1583,14 +1582,14 @@
       "readme_path": "templates/plans/oci/image/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "c35805bd2ede78249028e7dd5f17395f3f71131ae663be8613257e8b6bc8dc33",
+      "root_source_sha256": "471cf57ec5db65dcd967332cb0cf8c67816574b118d5536a2c8163be1779578f",
       "source_path": "templates/plans/oci/image/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -1600,14 +1599,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "base_registry_hostname",
-        "publish_registry_hostname",
-        "publish_repository",
-        "containerfile",
-        "context",
-        "platform"
-      ],
+      "inputs_projected": [],
       "key": "oci/publish-image",
       "kind": "plan",
       "ordered_steps": [
@@ -1621,14 +1613,14 @@
       "readme_path": "templates/plans/oci/publish-image/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "04ce0743b8e73e532301cb2d4ae77b88e2fcc93cc8860f620deb795337e49031",
+      "root_source_sha256": "9bd0ec4c5332831e7600f67ae33b0e7aed5e99a8b6aa6c26131c0cc4802acff8",
       "source_path": "templates/plans/oci/publish-image/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -1638,15 +1630,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "base_registry_hostname",
-        "publish_registry_hostname",
-        "publish_repository",
-        "containerfile",
-        "context",
-        "platform",
-        "coverage_threshold"
-      ],
+      "inputs_projected": [],
       "key": "oci/release",
       "kind": "plan",
       "ordered_steps": [
@@ -1665,14 +1649,14 @@
       "readme_path": "templates/plans/oci/release/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "626a6672e8307521ff5f9de7234bd7d2cb0d786421584dd0707768ef949d7a29",
+      "root_source_sha256": "fe00617e015f6824aacab67f0358a034b27ab16deaae8568a1b424befea355cb",
       "source_path": "templates/plans/oci/release/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -1682,13 +1666,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "base_registry_hostname",
-        "containerfile",
-        "context",
-        "platform",
-        "coverage_threshold"
-      ],
+      "inputs_projected": [],
       "key": "oci/release-candidate",
       "kind": "plan",
       "ordered_steps": [
@@ -1707,14 +1685,14 @@
       "readme_path": "templates/plans/oci/release-candidate/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "a3f0f9248bfaa872e1b4e5fd7bae6ba05fcc7a48809618a27ca9519608da2803",
+      "root_source_sha256": "cf2be98d03d0f74c026d9032e59b7118d9d389e742023f01ef2a4d5c46e883aa",
       "source_path": "templates/plans/oci/release-candidate/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -1724,19 +1702,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "coverage_threshold",
-        "base_registry_hostname",
-        "publish_registry_hostname",
-        "publish_repository",
-        "containerfile",
-        "context",
-        "platform",
-        "kubernetes_api_hostname",
-        "namespace",
-        "deployment",
-        "container"
-      ],
+      "inputs_projected": [],
       "key": "oci/release-deploy",
       "kind": "plan",
       "ordered_steps": [
@@ -1760,14 +1726,14 @@
       "readme_path": "templates/plans/oci/release-deploy/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "29e05c3d5a1022fcdf2f0f58e146674d8ae84a456234d3d7f29f4a610fe0dc0b",
+      "root_source_sha256": "44af65bd051ea66455cd0998d18c0c5bdc5fdc842d02b3fa2f5fdb0fe59329d5",
       "source_path": "templates/plans/oci/release-deploy/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -1777,12 +1743,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "registry_hostname",
-        "repository",
-        "tag",
-        "expected_digest"
-      ],
+      "inputs_projected": [],
       "key": "oci/tag-gate",
       "kind": "plan",
       "ordered_steps": [
@@ -1796,7 +1757,7 @@
       "readme_path": "templates/plans/oci/tag-gate/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "57fd992071d9fd712cd42e786520a521210c8d608a3cf18e3696fa63851ef313",
+      "root_source_sha256": "ab3fed640bf4cf7dadb38ce6941da170b0d3adb1f71e545065c38a2a003c2034",
       "source_path": "templates/plans/oci/tag-gate/plan.yml"
     },
     {
@@ -2065,7 +2026,7 @@
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -2075,9 +2036,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "coverage_threshold"
-      ],
+      "inputs_projected": [],
       "key": "python/quality",
       "kind": "plan",
       "ordered_steps": [
@@ -2091,16 +2050,16 @@
       "readme_path": "templates/plans/python/quality/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "372a1a7bc31d1a8b7523ddf1d7ef7d5ad8335b922f812ae163bb2cd29028f7cd",
+      "root_source_sha256": "6305fff30488df59edfaaa6279281512f24a9a751caad082a204dee875f43093",
       "source_path": "templates/plans/python/quality/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
-        "pass": 0,
+        "pass": 3,
         "run": 0,
         "steps": 0,
         "uses": 0,
@@ -2108,11 +2067,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "release_channel",
-        "revision",
-        "coverage_threshold"
-      ],
+      "inputs_projected": [],
       "key": "python/release-candidate",
       "kind": "plan",
       "ordered_steps": [
@@ -2136,14 +2091,14 @@
       "readme_path": "templates/plans/python/release-candidate/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "eea745435eb6ae8be93a9b9e636cd895514fd8efaded60856d92f5525d696910",
+      "root_source_sha256": "95c13c76ca4c53a6642a59476bd6c36a4beeb4dbb7ef523760ba6d0e98c1f6bd",
       "source_path": "templates/plans/python/release-candidate/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -2153,10 +2108,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "release_channel",
-        "revision"
-      ],
+      "inputs_projected": [],
       "key": "python/release-metadata",
       "kind": "plan",
       "ordered_steps": [
@@ -2170,14 +2122,14 @@
       "readme_path": "templates/plans/python/release-metadata/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "7712fa41e6a42cf1cc978f628a398b6f910a9756b89fcc14c592699773832ebf",
+      "root_source_sha256": "483e20917870180277fcabe392e4f8f1689f1c784b5aaa2853996498a349527f",
       "source_path": "templates/plans/python/release-metadata/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
         "pass": 0,
         "run": 0,
@@ -2187,9 +2139,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "coverage_threshold"
-      ],
+      "inputs_projected": [],
       "key": "python/secure",
       "kind": "plan",
       "ordered_steps": [
@@ -2208,16 +2158,16 @@
       "readme_path": "templates/plans/python/secure/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "198fa445d8c71ca0e2496094097cd9cae0b792a53f0521d1f2a3ad310511e3e8",
+      "root_source_sha256": "f2a8caad597f55c983c01d4a9cdb619640f7fd9802b8c817b04a2080f83a3315",
       "source_path": "templates/plans/python/secure/plan.yml"
     },
     {
       "authored_lexical_counts": {
         "from": 0,
         "goons": 1,
-        "inputs": 1,
+        "inputs": 0,
         "outputs": 0,
-        "pass": 0,
+        "pass": 2,
         "run": 0,
         "steps": 0,
         "uses": 0,
@@ -2225,11 +2175,7 @@
       },
       "classification": "production",
       "inputs_defined": [],
-      "inputs_projected": [
-        "release_channel",
-        "revision",
-        "coverage_threshold"
-      ],
+      "inputs_projected": [],
       "key": "python/standard",
       "kind": "plan",
       "ordered_steps": [
@@ -2248,7 +2194,7 @@
       "readme_path": "templates/plans/python/standard/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "ce5049f0c2b860f231d93085b5558f73889d1c2870a2772960bf4bb4c90bd9a7",
+      "root_source_sha256": "a1e8e582f4556794d744a35737feae255867faf1c0dd0ae78f8d751e27bce849",
       "source_path": "templates/plans/python/standard/plan.yml"
     },
     {
@@ -2349,12 +2295,32 @@
     {
       "source": "templates/goons/advanced/isolated-dataflow/README.md",
       "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/advanced/isolated-dataflow/README.md",
+      "status": "OK",
       "target": "./goon.yml"
     },
     {
       "source": "templates/goons/kubernetes/release/README.md",
       "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/kubernetes/release/README.md",
+      "status": "OK",
       "target": "./goon.yml"
+    },
+    {
+      "source": "templates/goons/kubernetes/rollout-verify/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/kubernetes/set-image/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/goons/kubernetes/set-image/README.md",
@@ -2367,9 +2333,19 @@
       "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
     },
     {
+      "source": "templates/goons/ml/iris-train/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
       "source": "templates/goons/oci/image/README.md",
       "status": "OK",
       "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
+    },
+    {
+      "source": "templates/goons/oci/image/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/goons/oci/image/README.md",
@@ -2380,6 +2356,11 @@
       "source": "templates/goons/oci/publish-image/README.md",
       "status": "OK",
       "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
+    },
+    {
+      "source": "templates/goons/oci/publish-image/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/goons/oci/publish-image/README.md",
@@ -2392,9 +2373,39 @@
       "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
     },
     {
+      "source": "templates/goons/oci/publish/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oci/tag-assert/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
       "source": "templates/goons/oci/tag-assert/README.md",
       "status": "OK",
       "target": "./goon.yml"
+    },
+    {
+      "source": "templates/goons/oh-goon/architecture/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/backend-p0/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/backend-p1/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/backend-tests/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/goons/oh-goon/browser-engine-preflight/README.md",
@@ -2402,9 +2413,19 @@
       "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
     },
     {
+      "source": "templates/goons/oh-goon/browser-engine-preflight/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
       "source": "templates/goons/oh-goon/browser-harness-preflight/README.md",
       "status": "OK",
       "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/browser-harness-preflight/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/goons/oh-goon/browser-localhost-transport-preflight/README.md",
@@ -2412,9 +2433,39 @@
       "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
     },
     {
+      "source": "templates/goons/oh-goon/browser-localhost-transport-preflight/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/browser-required/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
       "source": "templates/goons/oh-goon/browser-runtime-preflight/README.md",
       "status": "OK",
       "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/browser-runtime-preflight/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/browser-targeted/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/frontend-functional/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/generated-contracts/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/goons/oh-goon/integration-contract/README.md",
@@ -2422,9 +2473,34 @@
       "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
     },
     {
+      "source": "templates/goons/oh-goon/integration-contract/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
       "source": "templates/goons/oh-goon/integration-tests/README.md",
       "status": "OK",
       "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/integration-tests/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/local-runtime/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/release-identity/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/release-locks/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/goons/oh-goon/release-package-store/README.md",
@@ -2432,34 +2508,119 @@
       "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
     },
     {
+      "source": "templates/goons/oh-goon/release-package-store/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
       "source": "templates/goons/oh-goon/repository-exam/README.md",
       "status": "OK",
       "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
     },
     {
+      "source": "templates/goons/oh-goon/repository-exam/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/template-startability/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/tooling-tests/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/goons/python/dependency-inventory/README.md",
+      "status": "OK",
+      "target": "../../../README.md#append-your-own-capability"
+    },
+    {
       "source": "templates/goons/python/package-artifacts/README.md",
       "status": "OK",
-      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+      "target": "../../../README.md#append-your-own-capability"
+    },
+    {
+      "source": "templates/goons/python/package-artifacts/README.md",
+      "status": "OK",
+      "target": "../../../README.md#change-values-without-editing-the-goon"
     },
     {
       "source": "templates/goons/python/profile/README.md",
       "status": "OK",
-      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+      "target": "../../../README.md#append-your-own-capability"
+    },
+    {
+      "source": "templates/goons/python/profile/README.md",
+      "status": "OK",
+      "target": "../../../README.md#change-values-without-editing-the-goon"
+    },
+    {
+      "source": "templates/goons/python/quality/README.md",
+      "status": "OK",
+      "target": "../../../README.md#append-your-own-capability"
+    },
+    {
+      "source": "templates/goons/python/quality/README.md",
+      "status": "OK",
+      "target": "../../../README.md#change-values-without-editing-the-goon"
+    },
+    {
+      "source": "templates/goons/python/quality/README.md",
+      "status": "OK",
+      "target": "../../../README.md#first-local-python-run"
+    },
+    {
+      "source": "templates/goons/python/release-metadata/README.md",
+      "status": "OK",
+      "target": "../../../README.md#append-your-own-capability"
+    },
+    {
+      "source": "templates/goons/python/release-metadata/README.md",
+      "status": "OK",
+      "target": "../../../README.md#change-values-without-editing-the-goon"
     },
     {
       "source": "templates/goons/python/ruff/README.md",
       "status": "OK",
-      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+      "target": "../../../README.md#append-your-own-capability"
+    },
+    {
+      "source": "templates/goons/python/ruff/README.md",
+      "status": "OK",
+      "target": "../../../README.md#change-values-without-editing-the-goon"
     },
     {
       "source": "templates/goons/python/test/README.md",
       "status": "OK",
-      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+      "target": "../../../README.md#append-your-own-capability"
+    },
+    {
+      "source": "templates/goons/python/test/README.md",
+      "status": "OK",
+      "target": "../../../README.md#change-values-without-editing-the-goon"
+    },
+    {
+      "source": "templates/goons/python/typecheck/README.md",
+      "status": "OK",
+      "target": "../../../README.md#append-your-own-capability"
+    },
+    {
+      "source": "templates/goons/python/typecheck/README.md",
+      "status": "OK",
+      "target": "../../../README.md#change-values-without-editing-the-goon"
     },
     {
       "source": "templates/goons/python/uv-audit/README.md",
       "status": "OK",
-      "target": "../../../../docs/development/TEMPLATE_NETWORK_AUTHORITY.md"
+      "target": "../../../README.md#append-your-own-capability"
+    },
+    {
+      "source": "templates/goons/security/cve-combined/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/goons/security/cve-combined/README.md",
@@ -2477,6 +2638,21 @@
       "target": "../../../../docs/development/TEMPLATE_NETWORK_AUTHORITY.md"
     },
     {
+      "source": "templates/goons/security/trivy-audit/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/advanced/isolated-dataflow/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/advanced/isolated-dataflow/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
       "source": "templates/plans/advanced/isolated-dataflow/README.md",
       "status": "OK",
       "target": "./plan.yml"
@@ -2484,7 +2660,27 @@
     {
       "source": "templates/plans/kubernetes/set-image/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/kubernetes/set-image/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/ml/iris-training/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/ml/iris-training/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/oci/image/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
     },
     {
       "source": "templates/plans/oci/image/README.md",
@@ -2494,7 +2690,12 @@
     {
       "source": "templates/plans/oci/image/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/oci/publish-image/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
     },
     {
       "source": "templates/plans/oci/publish-image/README.md",
@@ -2504,7 +2705,12 @@
     {
       "source": "templates/plans/oci/publish-image/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/oci/release-candidate/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
     },
     {
       "source": "templates/plans/oci/release-candidate/README.md",
@@ -2514,7 +2720,12 @@
     {
       "source": "templates/plans/oci/release-candidate/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/oci/release-deploy/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
     },
     {
       "source": "templates/plans/oci/release-deploy/README.md",
@@ -2524,7 +2735,12 @@
     {
       "source": "templates/plans/oci/release-deploy/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/oci/release/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
     },
     {
       "source": "templates/plans/oci/release/README.md",
@@ -2534,52 +2750,167 @@
     {
       "source": "templates/plans/oci/release/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../README.md"
     },
     {
       "source": "templates/plans/oci/tag-gate/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/oci/tag-gate/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/oh-goon/app-certification/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/oh-goon/app-certification/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/oh-goon/prepare-release/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/oh-goon/prepare-release/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/oh-goon/repository-understanding-certification/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/oh-goon/repository-understanding-certification/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/oh-goon/self-verification/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/oh-goon/self-verification/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/python/dependency-inventory/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/python/dependency-inventory/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/plans/python/package-artifacts/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/python/package-artifacts/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/python/profile/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/python/profile/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/plans/python/quality/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/python/quality/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/plans/python/release-candidate/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/python/release-candidate/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
+    },
+    {
+      "source": "templates/plans/python/release-metadata/README.md",
+      "status": "OK",
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/python/release-metadata/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/plans/python/secure/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/python/secure/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/plans/python/standard/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/python/standard/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/plans/python/uv-audit/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/python/uv-audit/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/plans/security/cve-combined/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/security/cve-combined/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     },
     {
       "source": "templates/plans/security/trivy-audit/README.md",
       "status": "OK",
-      "target": "./plan.yml"
+      "target": "../../../../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/plans/security/trivy-audit/README.md",
+      "status": "OK",
+      "target": "../../../README.md"
     }
   ],
   "schema": "oh-goon.template-ux-a-inventory/v1"

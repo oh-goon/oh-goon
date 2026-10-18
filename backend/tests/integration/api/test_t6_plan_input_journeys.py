@@ -143,7 +143,7 @@ def test_t6_full_correction_journey_with_real_shipped_plan_and_goons(journey, sp
 def test_t6_save_edit_requires_revision_and_invalidates_prior_inspection(journey):
     client, store, _, runs, _, _ = journey
     document = _create_from_shipped(client, "python/quality")
-    _assert_accepted(_inspect(client, document, {"coverage_threshold": "85"}), document)
+    _assert_accepted(_inspect(client, document, {"typechecker": "ty"}), document)
     changed = document["content"] + "\n# second team-owned revision\n"
     saved = client.put(
         f"{API}/shared-plans/{document['plan_key']}",
@@ -155,9 +155,9 @@ def test_t6_save_edit_requires_revision_and_invalidates_prior_inspection(journey
     assert saved.status_code == 200, saved.text
     current = saved.json()
     assert current["sha256"] != document["sha256"]
-    stale = _inspect(client, document, {"coverage_threshold": "85"})
+    stale = _inspect(client, document, {"typechecker": "ty"})
     assert stale.status_code == 409 and stale.json()["code"] == "FLEET_PLAN_SOURCE_STALE"
-    _assert_accepted(_inspect(client, current, {"coverage_threshold": "85"}), current)
+    _assert_accepted(_inspect(client, current, {"typechecker": "ty"}), current)
     old_write = client.put(
         f"{API}/shared-plans/{document['plan_key']}",
         json={
@@ -183,7 +183,7 @@ def test_t6_invalid_plan_edit_fails_before_commit(journey):
     )
     assert response.status_code in (400, 422), response.text
     assert store.path(document["plan_key"]).read_bytes() == before
-    _assert_accepted(_inspect(client, document, {"coverage_threshold": "85"}), document)
+    _assert_accepted(_inspect(client, document, {"typechecker": "ty"}), document)
     runs.assert_not_called()
     assert not list(store.root.rglob("goon.lock"))
 
@@ -191,10 +191,10 @@ def test_t6_invalid_plan_edit_fails_before_commit(journey):
 def test_t6_unknown_input_repair_does_not_leak_user_value(journey):
     client, _, _, runs, _, _ = journey
     document = _create_from_shipped(client, "python/quality")
-    response = _inspect(client, document, {"coverage_threshold": "85", "unknown": SECRET})
+    response = _inspect(client, document, {"typechecker": "ty", "unknown": SECRET})
     _assert_rejected(response, "UNKNOWN_INPUT", "unknown")
     assert SECRET not in json.dumps(response.json())
-    _assert_accepted(_inspect(client, document, {"coverage_threshold": "85"}), document)
+    _assert_accepted(_inspect(client, document, {"typechecker": "ty"}), document)
     runs.assert_not_called()
 
 
@@ -206,7 +206,7 @@ def test_t6_http_schema_error_redacts_secret(journey):
         json={
             "plan_key": document["plan_key"],
             "expected_revision": SECRET,
-            "inputs": {"coverage_threshold": [SECRET]},
+            "inputs": {"typechecker": [SECRET]},
         },
     )
     assert response.status_code == 422
@@ -220,7 +220,7 @@ def test_t6_same_source_input_pair_is_deterministic(journey):
     client, store, plans, runs, _, _ = journey
     doc = _create_from_shipped(client, "python/quality")
     original = store.path(doc["plan_key"]).read_bytes()
-    inputs = {"coverage_threshold": "88"}
+    inputs = {"typechecker": "88"}
     results = [_assert_accepted(_inspect(client, doc, inputs), doc) for _ in range(3)]
     assert results[0] == results[1] == results[2]
     assert plans.resolve_with_source.call_count == 3
@@ -231,7 +231,7 @@ def test_t6_same_source_input_pair_is_deterministic(journey):
 def test_t6_no_run_admission_or_lock_writes(journey):
     client, store, plans, runs, league, _ = journey
     doc = _create_from_shipped(client, "python/quality")
-    for inputs in ({"coverage_threshold": "85"}, {"coverage_threshold": "101"}, {"wrong": SECRET}):
+    for inputs in ({"typechecker": "ty"}, {"typechecker": "101"}, {"wrong": SECRET}):
         response = _inspect(client, doc, inputs)
         assert response.status_code == 200
         assert response.json()["execution"] == "not_started_by_inspection"

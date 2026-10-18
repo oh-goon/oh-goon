@@ -48,10 +48,7 @@ def test_every_shipped_plan_inspection_matches_canonical_materialization():
         assert len({item.definition.name for item in inspected}) == len(inspected), key
         for item in inspected:
             assert all(path and all(segment for segment in path) for path in item.owner_paths), key
-            if item.definition.name in source.compiled.projected_inputs:
-                assert item.owner_paths, key
-            else:
-                assert not item.owner_paths, key
+            assert item.owner_paths, key
 
 
 def test_inspection_is_repeatable_and_does_not_mutate_source_files():

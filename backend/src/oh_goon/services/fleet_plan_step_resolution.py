@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
+import posixpath
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from oh_goon.core.errors import FleetExtensionInvalid, FleetPlanInvalid
@@ -28,6 +29,7 @@ from oh_goon.core.models.fleet_plan_observation_steps import (
     DependencyInventoryPlanStep,
     ResolvedDependencyInventoryStep,
 )
+from oh_goon.core.path_authority import repository_relative_parts
 from oh_goon.engine.project import read_pyproject
 from oh_goon.services.fleet_plan_capability_compilation import compile_step_capabilities
 from oh_goon.services.fleet_plan_kubernetes_resolution import (
@@ -105,6 +107,25 @@ def resolve_plan_step(
         )
     capabilities = compile_step_capabilities(step, value_compiler)
     if isinstance(step, CommandPlanStep):
+        if step.uv is not None:
+            argv = list(step.argv)
+            index = argv.index("--project")
+            argv[index + 1] = posixpath.relpath(step.uv.project, step.working_directory)
+            publications = {}
+            for field in ("artifacts", "outputs"):
+                declarations = []
+                for declaration in getattr(step, field):
+                    path = getattr(declaration, "path", None)
+                    if path is not None:
+                        repository_relative_parts(path, label=f"uv {field} path")
+                        declaration = declaration.model_copy(
+                            update={
+                                "path": str(PurePosixPath(step.working_directory) / path),
+                            }
+                        )
+                    declarations.append(declaration)
+                publications[field] = tuple(declarations)
+            step = step.model_copy(update={"argv": tuple(argv), **publications})
         return ResolvedCommandStep(
             **step.model_dump(exclude={"step_id", "capabilities"}),
             step_id=step_id,
