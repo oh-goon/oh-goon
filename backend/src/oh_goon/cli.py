@@ -206,6 +206,11 @@ def main(
 
         return run_template_command(args)
 
+    if args.command == "agent" and args.agent_command == "providers":
+        from oh_goon.cli_agent_providers import run_provider_command
+
+        return run_provider_command(args)
+
     # Pure authoring commands share the original FleetPlanResolver and do not
     # need a database, journal, executor, or physical native admission.  Runtime
     # submission still passes through the one FleetPlanService owner below.

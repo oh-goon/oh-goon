@@ -1,5 +1,9 @@
 # Agent Skills
 
+For configurable Ollama, LiteLLM, OpenRouter, OpenAI and custom model endpoints, see
+[Agent providers](AGENT_PROVIDERS.md). That connection client is independent of
+the bounded local Agent Step execution contract described here.
+
 OH-Goon runs Agent Steps through the existing Plan → Goon → Step lifecycle.
 The Resolver captures the selected repository and Skill resources, Fleet owns
 admission and sequencing, the existing Step supervisor owns native processes,

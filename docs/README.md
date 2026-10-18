@@ -9,6 +9,7 @@ Start with the current operator and developer guides. The linked owners define b
 3. [Observability](OBSERVABILITY.md) and [Game Tape](development/GAME_TAPE.md) — inspect recorded Run outcomes, logs, and outputs.
 4. [Safety](SAFETY.md), [Policy](POLICY.md), and [Privacy](PRIVACY.md) — operator boundaries and local data handling.
 5. [Agent Skills](AGENT_SKILLS.md) — captured Skills, bounded local model work, failed-test feedback, and caller-authorized repair/retest loops.
+6. [Agent providers](AGENT_PROVIDERS.md) — configure local or remote model endpoints and make explicit text requests without installing provider servers.
 
 ## Developer guides
 

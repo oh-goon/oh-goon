@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     subparsers = parser.add_subparsers(dest="command")
 
-    _add_agent_apply_commands(subparsers)
+    _add_agent_commands(subparsers)
     _add_local_app_commands(subparsers)
     _add_local_state_commands(subparsers)
     _add_storage_commands(subparsers)
@@ -36,16 +36,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_agent_apply_commands(subparsers):
-    """One native effect consumer inside the existing oh-goon executable.
-
-    Authored Plan Steps still own the selection and effect authorization;
-    this CLI never starts an Agent run or treats model output as a grant.
-    """
+def _add_agent_commands(subparsers):
+    """Agent data operations and separately configured model connections."""
     agent = subparsers.add_parser(
-        "agent", help="Consume Agent data from an explicitly authorized Step"
+        "agent", help="Agent data operations and model provider connections"
     )
     commands = agent.add_subparsers(dest="agent_command", required=True)
+    from oh_goon.cli_agent_providers import add_provider_commands
+
+    add_provider_commands(commands)
     apply = commands.add_parser(
         "apply", help="Apply one frozen source-bound replacement to the selected workspace"
     )

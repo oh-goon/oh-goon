@@ -1,0 +1,51 @@
+version = 1
+default_model = "local"
+
+# These are connection descriptions. Validation never starts or probes a server.
+[providers.ollama]
+api = "ollama"
+base_url = "http://127.0.0.1:11434"
+
+[providers.litellm]
+api = "openai-chat-completions"
+base_url = "http://127.0.0.1:4000/v1"
+api_key_env = "LITELLM_API_KEY"
+
+[providers.openrouter]
+api = "openai-chat-completions"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+headers = { "X-Title" = "Oh-Goon" }
+
+[providers.openai]
+api = "openai-responses"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[providers.anthropic]
+api = "anthropic-messages"
+base_url = "https://api.anthropic.com/v1"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Profile names belong to Oh-Goon; model IDs belong to the selected provider.
+# Replace these placeholders with your installed/published model or proxy alias.
+[models.local]
+provider = "ollama"
+model = "YOUR_INSTALLED_MODEL"
+max_output_tokens = 1024
+
+[models.gateway]
+provider = "litellm"
+model = "YOUR_PROXY_MODEL_ALIAS"
+
+[models.router]
+provider = "openrouter"
+model = "PROVIDER/MODEL_ID"
+
+[models.openai]
+provider = "openai"
+model = "YOUR_OPENAI_MODEL_ID"
+
+[models.claude]
+provider = "anthropic"
+model = "YOUR_CLAUDE_MODEL_ID"
