@@ -1,0 +1,9 @@
+version: 1
+inputs:
+  source_workspace:
+    type: workspace_reference
+steps:
+- run: make verify-p1
+  workspace:
+    from: step
+    step: ${{ inputs.source_workspace }}

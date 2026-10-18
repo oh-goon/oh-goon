@@ -1,0 +1,7 @@
+:focus-visible{outline:2px solid var(--border-focus);outline-offset:2px;box-shadow:var(--shadow-focus);}button:focus:not(:focus-visible),input:focus:not(:focus-visible),select:focus:not(:focus-visible){outline:none;box-shadow:none;}@media (forced-colors:active){.status-badge,.button,.filter-chip{border:1px solid currentColor;}}.skip-link{position:fixed;z-index:1000;inset:var(--space-small) auto auto var(--space-small);transform:translateY(-160%);padding:var(--space-small) var(--space-medium);border-radius:var(--radius-small);background:var(--surface-elevated);color:var(--text-primary);}.skip-link:focus{transform:translateY(0);}
+
+/* Keyboard focus stays visible even where a component uses borderless controls. */
+:is(a,button,input,select,textarea,summary,[tabindex]):focus-visible{outline:2px solid var(--border-focus);outline-offset:2px;}
+.text-button:focus-visible,.filter-chip:focus-visible,.segmented-control__item:focus-visible{border-radius:var(--radius-small);box-shadow:var(--shadow-focus);}
+[aria-current="true"]:focus-within{outline:1px solid var(--border-focus);outline-offset:-1px;}
+@media(forced-colors:active){.notice,.empty-state,.table-shell{border:1px solid CanvasText}.notice::before{background:CanvasText}.button--danger{border-color:CanvasText}}

@@ -1,0 +1,6 @@
+version: 1
+steps:
+- run: uv --preview audit --frozen --no-python-downloads --output-format json
+  capabilities:
+    egress:
+      mode: host_unrestricted

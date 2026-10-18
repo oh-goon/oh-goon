@@ -1,0 +1,31 @@
+version: 1
+uv:
+  group: ml
+inputs:
+  random_seed:
+    type: integer
+    min: 0
+    max: 2147483647
+    default: 42
+  test_size_percent:
+    type: integer
+    min: 10
+    max: 40
+    default: 20
+  minimum_accuracy_percent:
+    type: integer
+    min: 80
+    max: 100
+    default: 90
+  max_iterations:
+    type: integer
+    min: 100
+    max: 2000
+    default: 300
+steps:
+- run: uv run iris-train --random-seed ${{ inputs.random_seed }} --test-size-percent ${{ inputs.test_size_percent }} --minimum-accuracy-percent ${{ inputs.minimum_accuracy_percent }} --max-iterations ${{ inputs.max_iterations }}
+  artifacts:
+  - path: ml-output/iris-training-metrics.json
+    retention: evidence
+  - path: ml-output/iris-model-parameters.json
+    retention: content_store

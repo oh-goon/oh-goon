@@ -1,0 +1,36 @@
+{
+  "schema": "oh-goon.hashmarks-joint-conformance-series.v1",
+  "series_id": "joint-210-canonical-hashmarks-v1",
+  "oh_goon_parent": {
+    "version": "1267.0.209",
+    "zip_sha256": "0e050e9b71e8c7eb9bea3fe289f9f2b8cb2fa07262c69de8187e79d53893dc26",
+    "source_identity": "sha256:80636e4b07b44fd593e92f8411abb8d40e046840838d2c2fdcccc66cb12788af"
+  },
+  "hashmarks": {
+    "version": "0.11.21",
+    "artifact_identity": "sha256:40e6c2af7913ddbd82ceecb70d5ee9d8f1b861d355b95fdda84c7f4b06751d21",
+    "producer_implementation_identity": "sha256:a5a94ed47b19541bfbd1f613a7cbaf455e943b22113b5d0ea6c8347619051ade"
+  },
+  "authority": {
+    "hashmarks": "repository-intelligence-and-verification-selection",
+    "oh_goon": "admission-execution-verification-certification",
+    "consumer_rule": "verify-producer-semantics-never-recreate-repair-or-reinterpret"
+  },
+  "experiments": {
+    "OG-XR-01": "covered",
+    "OG-XR-01B": "covered",
+    "OG-XR-02": "covered",
+    "OG-XR-02B": "covered",
+    "OG-XR-03": "covered",
+    "OG-XR-04": "covered-by-prior-phase",
+    "OG-XR-04B": "covered",
+    "OG-XR-05": "no-source-change-required",
+    "OG-XR-06": "covered-by-1267.0.209-cl01",
+    "OG-XR-07": "covered-by-1267.0.207-cache-boundary",
+    "OG-XR-08": "covered",
+    "OG-XR-09": "covered",
+    "OG-XR-10": "covered",
+    "OG-XR-11": "covered"
+  },
+  "rule": "Changing any frozen artifact, fixture, corpus, manifest, source or producer identity creates a new comparison series."
+}

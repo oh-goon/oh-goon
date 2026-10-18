@@ -1,0 +1,125 @@
+# Real lifecycle QA
+
+This guide and `REAL_LIFECYCLE_QA.yml` describe current coverage owners and
+reproduction commands. Listed test references are not recorded passes; report
+actual results against the exact source and environment that executed them.
+
+Oh-Goon treats real-lifecycle proof as the highest-value regression layer for critical behavior.
+Unit tests remain necessary, but they do not prove that independently correct owners compose correctly over time.
+
+A critical journey is therefore tested through the production-shaped chain that actually matters:
+
+```text
+public entrypoint
+  -> authority acquisition
+  -> work / mutation
+  -> durable publication
+  -> owner teardown
+  -> fresh owner reconstruction
+  -> normal observed readback
+```
+
+Failure-oriented journeys extend that chain with interruption, cancellation, stale identity, ambiguous commit,
+race-window, retry, or deliberate invariant mutation.
+
+The machine-readable inventory is `docs/development/REAL_LIFECYCLE_QA.yml`. Proofs may name an exact pytest node or a public Make command when the evidence requires a real process/runtime boundary. It records the lifecycle,
+entrypoint, durable observation, required proof modes, and the exact pytest nodes that protect it. The inventory
+is itself tested: a proof cannot silently point at a renamed/deleted test, and the historical bootstrap and SQLite
+lifetime regressions must retain mutation proof.
+
+## Golden source gate
+
+`make test-real-lifecycle` runs the compact high-risk suite. It intentionally selects lifecycle, boundary,
+adversarial, and mutation tests instead of optimizing for raw test count. It covers bootstrap convergence,
+terminal durable reload, failure-to-rerun, cancellation, repository-instance isolation, recovery reconciliation,
+executor settlement/readmission, shared-plan source authority, Repository Understanding candidate grading,
+Game Tape projection, SQLite preparation/execution lifetime, ambiguous/concurrent commit behavior, and the real `run_logged.sh` terminal/captured-output progress boundary.
+
+The normal backend/tooling certification suites still own their complete partitions; the golden gate is an
+investigation/release-confidence surface, not a second implementation or a replacement for those owners.
+
+
+## SQLite real-usage gate
+
+`make test-sqlite-real-usage` is the focused regression owner for SQLite behavior that only emerges when normal runtime phases compose. It uses a real SQLite state file through an active worker, foreground progress waiting, unrelated concurrent reads and immutable-input hashing, local terminal handoff, complete runtime teardown, fresh runtime reconstruction, and durable readback. A second scenario repeats runs across multiple runtime reconstructions and performs SQLite integrity/foreign-key checks throughout.
+
+The correctness assertions are intentionally product-shaped: terminal status, event identity, operation identity, restart readback, absence of ghost active work, and SQLite integrity. Connection counters remain mutation/diagnostic proof rather than independent authority: foreground progress must perform zero SQLite reconnects while the local worker is active, then exactly one fresh Journal reconstruction after supervisor liveness retires. This preserves the post-1267.0.280 single durable terminal-truth owner without reintroducing a supervisor completion mailbox.
+
+## Real-world full-stack gate
+
+`make test-real-world` is intentionally slower than the source golden pytest gate. It launches the actual `make dev` backend and Vite processes, drives local-access authentication through the browser-facing proxy, executes a real repository Goon, validates Game Tape and Shared Plan behavior, then starts a long-running real repository Step and waits until both its physical child PID and durable `STEP_STARTED` evidence exist. While that child is alive, a wrong Run cancellation must return `RUN_NOT_FOUND` without disturbing it and a competing repository admission must return `EXECUTION_BUSY` without stealing execution authority. The exact public cancellation then has to kill the owned child, forbid its completion marker, settle canonical `CANCELLED`, release the lease, and allow the previously blocked repository to execute successfully. A later physical Step is then active when the entire process group is SIGKILLed without EXIT cleanup; restart on the same isolated durable state must preserve the cancellation/success histories, fail-close the interrupted Run with no ghost active owner, execute again, and tear down deterministically.
+
+This gate exists because in-process dependency overrides cannot prove packaging, process ownership, launch-token, proxy, subprocess, restart, or durable-reconstruction behavior. The fast `make test` path remains independent; exact-artifact/native certification runs this gate before certification.
+
+When a validated strict executor inventory is available, `make test-real-world-parallel` strengthens the same journey across the real Shared Plan concurrency boundary. It authors one CICD Plan with `repositories.mode=parallel` and `max_parallel=2`, discovers two real repositories, then waits until two physical `release-metadata` children for the same Fleet Run are simultaneously visible. Cancellation is issued only through `/api/fleet/runs/{run_id}/cancel`; both child processes must disappear, the Run must settle `CANCELLED`, no active Fleet owner may remain, and a fresh two-target Shared Plan must subsequently complete successfully. The fixture uses the existing canonical `python/release-metadata` Goon and a zero-network in-tree PEP-517 repository backend; it does not add an acceptance-only Goon or bypass strict executor placement. This target deliberately fails fast when `OH_GOON_EXECUTORS_FILE` is absent rather than replacing strict CI/CD authority with a fake non-strict path. The same native target now also proves sibling failure isolation: both physical target children start, one repository-owned executable fails deliberately while its sibling remains in flight and must finish `SUCCESS`, Game Tape and successful-operation evidence must remain repository-attributed, no ghost Fleet owner may remain, the failing repository is repaired at its own source boundary, and a fresh strict parallel Shared Plan must succeed for both repositories. A later application restart must preserve both the failed and repaired histories. The strict native journey also closes the preview-to-command race explicitly: the saved Shared Plan SHA is sent as preview authority, the previewed Plan SHA/ID and every Team `repository_instance_id` are sent back at run admission, then one repository checkout is replaced at the same canonical path. The stale command must return `FLEET_PLAN_SOURCE_STALE` before any physical repository process or Fleet Run exists. Only a refreshed preview with the new repository-instance authority may execute.
+
+## Native exact-artifact gate
+
+Source-only QA must not pretend to prove host behavior it cannot actually execute. The stdlib-only implementation exposed as the named project command
+`oh-goon-native-real-lifecycle-artifact` accepts an exact retained source ZIP, extracts it to a new directory,
+and runs the public operator lifecycle:
+
+```text
+make init
+make local-state-prelaunch-check
+make goon-static-admission
+make test-real-lifecycle
+make test-real-world
+make certify
+```
+
+`--bootstrap-only` exists for focused bootstrap diagnosis, but the default remains the full certification path.
+This gate is intended for the supported dependency-complete native environment (including the required uv/npm,
+browser, and isolation supply). A source-only container that lacks those prerequisites must report this gate as
+unverified, never passed.
+
+### Deep dogfood boundary
+
+`oh-goon-native-real-lifecycle-artifact --deep-dogfood --expected-sha256 <ARCHIVE_SHA256> <source.zip>` extends the exact-artifact journey with
+clean-room self-hosting through the **installed public `oh-goon` CLI only**. After ordinary materialization and
+real-lifecycle gates, the extracted artifact runs `oh-goon self verify`, takes the one Fleet Run ID printed by that
+public command, reads the durable run back through `oh-goon dev explain-run <id>`, and finally runs
+`oh-goon self certify` against itself. The preceding real-world gate already proves the Repository -> Goon -> Step ->
+Game Tape -> production-browser journey, so deep mode composes that public product evidence with Fleet-on-itself and
+fresh public readback rather than adding a private Game Tape inspector.
+Before extraction, deep mode requires the exact retained `ARCHIVE_SHA256` receipt from package production and proves
+that the supplied ZIP bytes match it. A missing or mismatched receipt fails before artifact execution; an arbitrary
+ZIP cannot silently become the release dogfood subject merely because it is structurally valid.
+The dogfood helper must not import private Oh-Goon implementation modules, inject `PYTHONPATH`, bypass normal
+Plan/Fleet admission, or add a dogfood-only execution path.
+
+Two invariants govern every deeper dogfood campaign:
+
+> **Dogfood must cross a public boundary.** If a proof only works by importing private implementation code, it
+> is an implementation test rather than product dogfood.
+
+> **Dogfood may expose authority; dogfood must never become authority.** Dogfood results are diagnostic evidence.
+> They do not authorize admission, certification, release promotion, dependency resolution, or source mutation.
+
+Deep dogfood therefore stays opt-in and outside `make certify`. Product code must not branch on a dogfood flag,
+special-case a dogfood repository/name/version, or maintain a separate dogfood cache/state owner. A defect exposed
+by dogfood is repaired in the semantic owner with a focused regression; the campaign then replays the same public
+boundary from a fresh exact artifact. Long dogfood campaigns follow `DURABLE_CONTINUATION.md`: after every meaningful
+small closure, persist and independently read back the next generation before starting the next closure.
+
+## Test efficacy rule
+
+Executable mutation challenges here are reserved for selected high-risk
+regressions where test efficacy itself is release-relevant evidence. They are
+not a requirement for every ordinary test; see the local
+[test policy](TEST_QUALITY.md) and its canonical review Skills.
+
+For historical high-risk regressions, passing the regression test is not enough. A mutation proof deliberately
+restores the protected defect shape and must observe failure. This currently applies at minimum to:
+
+- clean-extraction `make init` independence from release staging (`generated/release/static` must remain unnecessary for Hatchling/native-uv editable materialization), and
+- strict Fleet preparation/execution callback lifetime (preparation-only SQLite observers must not escape into execution).
+
+The terminal presentation path follows the same rule: a pseudo-terminal proof exercises the real logging wrapper and requires a single in-place spinner, while a captured-output proof requires elapsed-time heartbeats to disappear and durable logs to remain free of transient progress.
+
+The long-term QA metric is lifecycle coverage, boundary coverage, failure-transition coverage, restart coverage,
+and mutation challenges detected. Raw pytest count is supporting evidence only.
+
+## Delegated configuration authority
+
+Real lifecycle QA applies the repository-wide invariant **Resolve once, transport once, execute once, report once**. A native acceptance override is resolved by one semantic owner before delegation, transported as immutable resolved authority through systemd/re-entry, consumed without re-reading the original environment, executed by one owner, and reported once by that execution owner. QA must reject silent fallback to defaults, duplicate execution/startup reporting, and delegated children that independently reconstruct caller configuration. Timeout evidence must distinguish a product failure from an observation bound: a still-running Run that has already reached `RUN_STARTED` but has not reached physical Step start is incomplete qualification evidence and must identify the next semantic preparation boundary rather than incorrectly blaming dispatch.

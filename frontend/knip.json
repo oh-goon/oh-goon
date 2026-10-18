@@ -1,0 +1,21 @@
+{
+  "entry": [
+    "src/**/*.test.{ts,tsx}",
+    "e2e/**/*.spec.ts",
+    "e2e/**/*.visual.ts",
+    "e2e/fixture-entry.tsx"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "tests/**/*.{ts,tsx}",
+    "*.ts",
+    "*.mjs",
+    "../generated/frontend/**/*.ts",
+    "e2e/**/*.{ts,tsx,mjs}"
+  ],
+  "ignore": [
+    "../generated/frontend/**"
+  ],
+  "ignoreDependencies": [],
+  "treatConfigHintsAsErrors": false
+}

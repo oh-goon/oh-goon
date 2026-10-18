@@ -1,0 +1,254 @@
+schema_version: 1
+source_version: 1267.0.1052
+section: cross-repository-security
+questions:
+- id: Q56
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: 'For a Shared Run, selected repositories'' root goon.yml files are omitted completely: they are not read, resolved, validated, merged, inherited, executed, or used as fallback. The selected Shared Plan plan.yml owns executable intent for that run.'
+    critical: true
+  - id: ownership_boundary
+    statement: Team-owned CI/CD and Shared-Plan CI/CD are separate source modes that converge only after resolution.
+    critical: true
+  - id: consequence
+    statement: Prevents accidental mixing of repository pipelines into a shared execution definition.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Reads or resolves selected repositories root goon.yml during Shared-Plan execution.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/LOCAL_FIRST.md:95-101
+  - backend/src/oh_goon/services/shared_plans.py:291-315
+- id: Q57
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: --all-repositories is an explicit operator decision for plan run. Empty/omitted repository scope must never be interpreted as all repositories; plan run retains explicit Shared Run target scope.
+    critical: true
+  - id: ownership_boundary
+    statement: Destructive/effectful target scope must be explicit.
+    critical: true
+  - id: consequence
+    statement: Prevents an empty selector from silently expanding blast radius.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Treats omitted/empty repository scope as all repositories instead of requiring explicit operator scope.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/CI_CD_CONTRACT.md:76-87
+  - backend/src/oh_goon/core/models/run_admission.py:54-71
+- id: Q58
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: No. team validate and enforcer run resolve the Team's current root goon.yml and call the same canonical read-only Fleet-plan preview/admission owner used before execution. They do not infer a project-type quality baseline.
+    critical: false
+  - id: ownership_boundary
+    statement: Repository requirements live in goon.yml and inspection reuses execution semantics.
+    critical: false
+  - id: consequence
+    statement: Prevents local inspection from becoming a parallel policy engine.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/development/LOCAL_TEAM_RUNS.md:22-30
+  - backend/src/oh_goon/cli_runtime_league.py:51-72
+  - backend/src/oh_goon/cli_enforcer.py:24-52
+  - backend/src/oh_goon/services/goon.py:26-51
+- id: Q59
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'No. League scanning is cheap structural discovery: it proves the exact root goon.yml is present/safe to read and fingerprints bytes. Semantic readiness is established only by explicit inspection or run admission, so scanning never executes or silently validates every pipeline.'
+    critical: false
+  - id: ownership_boundary
+    statement: Discovery and semantic admission are distinct owners/cost boundaries.
+    critical: false
+  - id: consequence
+    statement: Prevents fleet discovery from acquiring hidden execution/validation behavior.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/development/LOCAL_TEAM_RUNS.md:22-30
+  - backend/src/oh_goon/services/league.py:27-42
+  - backend/src/oh_goon/services/league.py:106-195
+- id: Q60
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: No. Physical retained objects may deduplicate by content hash, but a hash is provenance only. Consumption uses an opaque repository-owned ref and materialization must prove the destination belongs to the same repository owner; another repository's hash/ref never grants byte access.
+    critical: true
+  - id: ownership_boundary
+    statement: Physical content identity is not authorization; repository-owned reference/lease identity is.
+    critical: true
+  - id: consequence
+    statement: Prevents cross-repository content disclosure through deduplication identifiers.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Treats physical content hash equality by itself as authorization to consume a retained object across repository ownership boundaries.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - docs/development/DATAFLOW.md:14-16
+  - backend/src/oh_goon/integrations/fleet_content_store.py:236-280
+  - backend/src/oh_goon/integrations/fleet_content_store_lifecycle.py:245-261
+- id: Q193
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: 'For a Shared Run, selected repositories'' root goon.yml files are omitted completely: they are not read, resolved, validated, merged, inherited, executed, or used as fallback. The selected Shared Plan plan.yml owns executable intent for that run.'
+    critical: true
+  - id: ownership_boundary
+    statement: Team-owned CI/CD and Shared-Plan CI/CD are separate source modes that converge only after resolution.
+    critical: true
+  - id: consequence
+    statement: Prevents accidental mixing of repository pipelines into a shared execution definition.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reads or resolves selected repositories root goon.yml during Shared-Plan execution.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/LOCAL_FIRST.md:95-101
+  - backend/src/oh_goon/services/shared_plans.py:291-315
+- id: Q194
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: --all-repositories is an explicit operator decision for plan run. Empty/omitted repository scope must never be interpreted as all repositories; plan run retains explicit Shared Run target scope.
+    critical: true
+  - id: ownership_boundary
+    statement: Destructive/effectful target scope must be explicit.
+    critical: true
+  - id: consequence
+    statement: Prevents an empty selector from silently expanding blast radius.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Treats omitted/empty repository scope as all repositories instead of requiring explicit operator scope.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/CI_CD_CONTRACT.md:76-87
+  - backend/src/oh_goon/core/models/run_admission.py:54-71
+- id: Q195
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: No. team validate and enforcer run resolve the Team's current root goon.yml and call the same canonical read-only Fleet-plan preview/admission owner used before execution. They do not infer a project-type quality baseline.
+    critical: false
+  - id: ownership_boundary
+    statement: Repository requirements live in goon.yml and inspection reuses execution semantics.
+    critical: false
+  - id: consequence
+    statement: Prevents local inspection from becoming a parallel policy engine.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/development/LOCAL_TEAM_RUNS.md:22-30
+  - backend/src/oh_goon/cli_runtime_league.py:51-72
+  - backend/src/oh_goon/cli_enforcer.py:24-52
+  - backend/src/oh_goon/services/goon.py:26-51
+- id: Q196
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'No. League scanning is cheap structural discovery: it proves the exact root goon.yml is present/safe to read and fingerprints bytes. Semantic readiness is established only by explicit inspection or run admission, so scanning never executes or silently validates every pipeline.'
+    critical: false
+  - id: ownership_boundary
+    statement: Discovery and semantic admission are distinct owners/cost boundaries.
+    critical: false
+  - id: consequence
+    statement: Prevents fleet discovery from acquiring hidden execution/validation behavior.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/development/LOCAL_TEAM_RUNS.md:22-30
+  - backend/src/oh_goon/services/league.py:27-42
+  - backend/src/oh_goon/services/league.py:106-195
+- id: Q197
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: No. Physical retained objects may deduplicate by content hash, but a hash is provenance only. Consumption uses an opaque repository-owned ref and materialization must prove the destination belongs to the same repository owner; another repository's hash/ref never grants byte access.
+    critical: true
+  - id: ownership_boundary
+    statement: Physical content identity is not authorization; repository-owned reference/lease identity is.
+    critical: true
+  - id: consequence
+    statement: Prevents cross-repository content disclosure through deduplication identifiers.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Treats physical content hash equality by itself as authorization to consume a retained object across repository ownership boundaries.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - docs/development/DATAFLOW.md:14-16
+  - backend/src/oh_goon/integrations/fleet_content_store.py:236-280
+  - backend/src/oh_goon/integrations/fleet_content_store_lifecycle.py:245-261
+- id: Q204
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Hashmarks owns static cross-repository/project dependency and shared-input evidence; Oh-Goon owns admitted Fleet membership, Plan/Schedule coordination, CI scheduling, and process execution. Static topology is evidence, not a schedule.
+    critical: true
+  - id: ownership_boundary
+    statement: A dependency edge may inform admission/impact but cannot itself enqueue, place, or execute either repository.
+    critical: true
+  - id: consequence
+    statement: Prevents repository topology from becoming a hidden operational control plane.
+    critical: false
+  contradictions:
+  - id: boundary-01
+    statement: Treats a Hashmarks project dependency/shared-input edge as Fleet membership or scheduling authority.
+    severity: critical
+    misconception_id: dependency_direction_reversal
+  evidence_expectations:
+  - AGENTS.md:93-115
+  - docs/development/HASHMARKS_EXECUTION_LAYER.md:11-17
+
+
+- id: Q217
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Raw vocabulary occurrence is not equivalent to owning a Hashmarks repository-intelligence capability; the boundary guard reasons over capability-like definitions/module identifiers, imports, forbidden execution helpers, and explicit allowed consumer/integration roles.
+    critical: true
+  - id: ownership_boundary
+    statement: Oh-Goon documentation, tests, execution consumers, and boundary contracts may legitimately mention CodeMap or verification-selection terminology while still being forbidden from implementing repository-intelligence semantics outside the admitted adapter boundary.
+    critical: true
+  - id: consequence
+    statement: A token-only scanner would both flag legitimate references and miss semantically equivalent duplicate ownership that avoids the chosen words.
+    critical: false
+  contradictions:
+  - id: lexical-01
+    statement: Declares any CodeMap or verification-selection token outside integrations/hashmarks* to be a boundary leak without checking semantic ownership or allowed consumer roles.
+    severity: critical
+    misconception_id: observer_authority_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/architecture/hashmarks_harness_boundary_contract.py:34-55
+  - backend/src/oh_goon/repository_tooling/architecture/hashmarks_harness_boundary_contract.py:118-163
+  - AGENTS.md:183-190

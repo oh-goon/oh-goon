@@ -1,0 +1,10 @@
+version: 1
+execution:
+  purpose: verification
+goons:
+- oh-goon/backend-p0
+- oh-goon/tooling-tests
+- oh-goon/architecture
+- oh-goon/generated-contracts
+- oh-goon/integration-tests
+- oh-goon/repository-exam

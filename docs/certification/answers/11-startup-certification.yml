@@ -1,0 +1,2833 @@
+schema_version: 1
+source_version: 1267.0.1052
+section: startup-certification
+questions:
+- id: Q61
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q62
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q63
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q64
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: true
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: true
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - scripts/tests/test_app_certification_contract.py:53-86
+- id: Q65
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: backend/.venv and frontend/node_modules are generated developer materializations. They may exist locally, but canonical source
+      policy excludes generated/operational state before source identity and certification snapshotting. Certification therefore proves source
+      plus separately identified dependency supply, not the mutable contents of a developer environment.
+    critical: false
+  - id: ownership_boundary
+    statement: Source identity, developer materialization and certification dependency identity are separate authorities.
+    critical: false
+  - id: consequence
+    statement: Prevents stale/generated environment bytes and escaping virtualenv symlinks from becoming source evidence or changing certification
+      identity.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - README.md:75-79
+  - docs/development/APP_CERTIFICATION.md:28
+  - docs/development/APP_CERTIFICATION.md:1-35
+- id: Q66
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Managed-source admission proves Git-root topology and repository isolation before RUN_ADMITTED. The immutable execution snapshot
+      then revalidates only the resolved requirements against sanitized execution bytes. Because Git metadata is intentionally excluded from the
+      snapshot, execution must not re-run the live Git-root check or require .git to exist there.
+    critical: true
+  - id: ownership_boundary
+    statement: Git topology belongs to managed-source admission; sanitized execution-byte validation belongs to snapshot execution scope.
+    critical: true
+  - id: consequence
+    statement: Requiring both sanitized source and live Git metadata at the same stage creates an impossible certification contract.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Re-runs live Git-root topology validation against the sanitized execution snapshot or requires .git to survive source sanitization.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/services/fleet_admission.py:147-177
+  - backend/src/oh_goon/integrations/fleet_plan_admission.py:63-109
+  - docs/development/APP_CERTIFICATION.md:1-35
+- id: Q67
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Start with the retained make certify run log (make certify-log or the exact path printed by the command) and, when a Fleet Run
+      ID is available, use certification-explain for run evidence. Passive application diagnostics may explain degraded behavior, but Journal/Fleet
+      lifecycle and Game Tape/evidence remain execution truth; diagnostic sinks must never settle, retry, cancel, admit or infer Run state.
+    critical: false
+  - id: ownership_boundary
+    statement: Run/evidence owners explain execution; diagnostic sinks remain non-authoritative debugging evidence.
+    critical: false
+  - id: consequence
+    statement: Prevents debugging output from becoming a second lifecycle or certification-result authority.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/DIAGNOSTICS.md:1-33
+  - Makefile:486-488
+  - backend/src/oh_goon/core/ports/diagnostics.py:8-11
+  - backend/src/oh_goon/runtime/diagnostics.py:75-99
+- id: Q68
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'make diagnostic-diagnostic-system-check is a read-only environment/lock diagnostic and is not an extra startup prerequisite. make init is the materialization
+      path: it delegates directly to native uv/npm and then performs a tiny executable smoke. diagnostic-system-check must diagnose rather than becoming
+      another installer/materialization owner.'
+    critical: false
+  - id: ownership_boundary
+    statement: Diagnosis and developer dependency materialization are separate command owners.
+    critical: false
+  - id: consequence
+    statement: Keeps startup boring and prevents a diagnostic command from acquiring hidden mutation/install behavior.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - README.md:55-75
+  - Makefile:108-121
+  - Makefile:139-148
+- id: Q69
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Physical attempt creation owns the source-drift proof. It copies the frozen source into the disposable attempt workspace and compares
+      the copied snapshot identity with the identity bound during strict run preparation before any command executes. Read-only source observation
+      may inspect Git state for conditions/evidence, but must not perform a second full snapshot verification first; that would create a competing
+      mutation gate over the same source and can reject harmless filesystem churn before the authoritative copy proof runs.
+    critical: true
+  - id: ownership_boundary
+    statement: Attempt creation owns pre-execution source immutability proof; read-only observation owns no mutation decision.
+    critical: true
+  - id: consequence
+    statement: Keeps one mutation authority and prevents redundant pre-hashing from producing false execution-identity failures.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Makes read-only source observation a second execution source mutation gate or weakens the attempt copy-identity comparison.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/integrations/fleet_plan_run.py:195-224
+  - backend/tests/unit/integrations/test_fleet_plan_attempt_authority.py:205-250
+- id: Q70
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: 'A sanitized tree has one canonical execution-tree identity. After transient/generated paths are removed, source_snapshot_identity
+      and the generic execution snapshot identity must describe the same bytes with the same digest semantics. Live/external capture may use before/copy/after
+      stability proof, but once Fleet owns a frozen private snapshot, consumption is copy once, identify the exact destination once, and compare
+      that identity with the already-bound identity before execution. The same rule applies to content-addressed retained objects: lease, copy,
+      hash the materialized destination, and compare with the object SHA instead of repeatedly re-hashing the immutable source.'
+    critical: true
+  - id: ownership_boundary
+    statement: Live source capture owns stability proof; Fleet-owned frozen inputs own content-addressed destination equality, with one canonical
+      tree identity across both stages.
+    critical: true
+  - id: consequence
+    statement: Prevents false source-drift failures from competing identity algorithms and removes repeated full-tree scans from attempt and certification
+      startup without weakening the bytes that actually execute.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Gives sanitized source and execution copies different identity algorithms or requires Fleet-owned frozen inputs to be source-hashed
+      before and after every copy.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/integrations/source_snapshot.py:18-105
+  - backend/src/oh_goon/integrations/content_snapshot.py:116-178
+  - backend/src/oh_goon/integrations/fleet_plan_run.py:198-232
+  - backend/src/oh_goon/integrations/fleet_content_store.py:72-177
+- id: Q71
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Strict preparation may resolve and freeze the union of host tools and imported host-environment values once for reproducibility
+      and efficient evidence capture, but each physical Step attempt receives only the executable names derived from that Step plus its explicit
+      capabilities.tools child executables, and only the host-environment names imported by that Step. Another Step declaring sh, uv, npm, a registry
+      credential or any other value must never make that authority ambient to its siblings. Run-wide inventory is evidence/storage ownership,
+      not cross-Step execution permission.
+    critical: true
+  - id: ownership_boundary
+    statement: Run preparation owns union capture; the Step declaration owns the subset exposed to that Step attempt.
+    critical: true
+  - id: consequence
+    statement: Prevents ghost capability/credential ownership and Plan-order-dependent execution where one Step succeeds only because another
+      Step declared a tool or secret.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Treats the run-wide frozen tool/environment union as ambient execution authority for every Step.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/integrations/_fleet_plan_run_resources.py:130-165
+  - backend/src/oh_goon/integrations/fleet_plan_run.py:235-255
+  - backend/src/oh_goon/core/fleet_plan_tool_requirements.py:44-57
+  - backend/src/oh_goon/integrations/fleet_plan_environment.py:27-39
+- id: Q72
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Do not broaden PATH first. Strict Fleet exposes the Step's explicit authority-bearing executables plus, only for an explicitly
+      admitted shell, a fixed audited sandbox shell-support set whose exact membership is frozen and identity-bound. GNU Make may directly exec
+      a simple recipe command such as printf or test instead of invoking a shell, while compound recipe fragments use /bin/sh. Diagnosis must
+      therefore inspect the exact selected Make target and distinguish an authority-bearing child (whose derived need must fit the independent canonical permission ceiling), a shell
+      builtin, and an ordinary shell-support helper (which must be covered by the fixed runtime-support contract). A missing core helper such
+      as cat is therefore a support-contract regression, not a reason to hand-list it in every Goon. Adding /usr/bin/coreutils or an ambient baseline
+      PATH would bypass bounded executable authority and can hide real missing grants in later Steps.
+    critical: false
+  - id: ownership_boundary
+    statement: Missing-command diagnosis must preserve per-Step explicit authority and the fixed identity-bound shell-support contract; sandbox
+      PATH/runtime is not a generic repair owner.
+    critical: false
+  - id: consequence
+    statement: Prevents a misleading ENOENT symptom from turning into a broad ambient-tool escape that weakens strict execution and masks the
+      actual Goon/Make child-command contract.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Recommends adding a generic host PATH/coreutils baseline before proving whether Make directly executed an undeclared child or shell
+      builtin.
+    severity: normal
+    misconception_id: hidden_fallback_assumption
+  evidence_expectations:
+  - Makefile:253-266
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - backend/src/oh_goon/core/fleet_plan_tool_requirements.py:13-57
+  - docs/development/FROZEN_TOOL_AUTHORITY.md:1-15
+- id: Q73
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q74
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Source admission still rejects real escaping symlinks. But a sandboxed dependency-materialization Step may legitimately create
+      a generated virtualenv link naming immutable sandbox runtime authority such as /usr/bin/python3. Host-side output proof must not ignore
+      that edge, because publishing the raw link would make downstream execution depend on a previous sandbox namespace. Before any host-side
+      Git/evidence/publication, Fleet resolves the link in sandbox semantics, copies its target only from already-frozen declared runtime/tool
+      authority into the explicit generated runtime root, replaces the link with owned bytes, and then runs the unchanged full owned-tree proof.
+      Mutable attempt paths or undeclared sandbox authority are not materializable.
+    critical: true
+  - id: ownership_boundary
+    statement: Source isolation rejects undeclared escapes; strict output sealing owns conversion of explicit generated runtime links into self-contained
+      Fleet-owned bytes.
+    critical: true
+  - id: consequence
+    statement: Prevents both false rejection of sandbox-generated virtualenv links and the more dangerous shortcut of whitelisting live escaping
+      symlinks in published workspaces.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Ignores generated-runtime escaping symlinks, publishes them unchanged, or weakens real source/owned-tree symlink rejection.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/core/source_tree_policy.py:7-14
+  - backend/src/oh_goon/integrations/fleet_plan_run.py:70-83
+  - backend/src/oh_goon/integrations/fleet_plan_run.py:286-390
+  - backend/src/oh_goon/integrations/_fleet_plan_step_retry.py:129-143
+- id: Q75
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Every changed source checkpoint handed off for another certification run increments the canonical product patch version in VERSION
+      (for example 1267.0.0 -> 1267.0.1). The distributable source archive is named exactly oh-goon-<VERSION>.zip and package_slim gives it the
+      extraction root oh-goon-<VERSION>/. PENDING, BLOCKED, diagnostic phase names, timestamps and proof commentary do not belong in the ZIP filename;
+      they belong in CHECKPOINT_NOT_RELEASE.md, retained run evidence and the self-contained handoff. This keeps one short product identity usable
+      by humans while exact source/dependency/Plan hashes remain the machine identities.
+    critical: false
+  - id: ownership_boundary
+    statement: VERSION owns the checkpoint product version; the short archive name mirrors that owner only, while proof state is documentation/evidence
+      rather than filename state.
+    critical: false
+  - id: consequence
+    statement: Prevents multiple materially different patched ZIPs from all claiming 1267.0.0 and prevents operational filenames from becoming
+      a second mutable status database.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reuses the same product version for changed handoff bytes or encodes PENDING/BLOCKED/debug phase state into the canonical ZIP filename.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - VERSION:1
+  - docs/LOCAL_VERIFICATION.md:1-7
+  - backend/src/oh_goon/repository_tooling/release/package_slim.py:193-210
+- id: Q76
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q77
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q78
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: scripts/command_banner.sh is the one repository owner for setup/certification command-heading presentation. Make phases and Python
+      repository tooling such as the native-command evidence wrapper must route headings through that owner instead of embedding their own ANSI
+      sequences or plain headings. Color is emitted only when the destination stream itself is a TTY, NO_COLOR is not set to a non-empty value,
+      and TERM is not dumb. Normal phases are cyan, PASSED/READY headings green, and FAILED/BLOCKED red; non-TTY/log output stays plain text.
+    critical: false
+  - id: ownership_boundary
+    statement: The shared command-banner helper owns terminal presentation; command producers own only the label/detail semantics.
+    critical: false
+  - id: consequence
+    statement: Keeps interactive setup readable without leaking ANSI into logs or allowing each helper to invent a different color/TTY policy.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Hardcodes independent ANSI behavior in individual helpers, forces color into non-TTY logs, or ignores NO_COLOR.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - scripts/command_banner.sh:1-29
+  - Makefile:8-9
+  - Makefile:150-160
+  - backend/src/oh_goon/repository_tooling/native_command.py:1-149
+- id: Q79
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: true
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: true
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - scripts/tests/test_app_certification_contract.py:53-86
+- id: Q80
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Native tools own their native semantics. This rule is repository-wide, not package-manager-specific. uv/npm/Playwright, pytest/Ruff/mypy,
+      Docker/BuildKit, Kubernetes and its API/CLI clients, Git, operating-system process facilities, and future native tools remain semantic owners
+      of the operations they expose. Oh-Goon may order commands, transport already-resolved authority, provide isolated paths and bounded execution,
+      retain identity/evidence, or fail closed around an Oh-Goon trust boundary, but it must not parse, normalize, edit, emulate, second-guess,
+      or create a parallel state machine for an operation the native tool already owns. It must not respond to a blocked native semantic command
+      by invoking an altered fallback command, synthesizing extra semantic cache/state, narrowing or broadening scope, or creating a second proof
+      that claims the same native result; blocked required evidence remains INCOMPLETE. A helper is legitimate orchestration only when it enforces
+      an independently named Oh-Goon-owned boundary without becoming a second implementation of the child tool's semantics.
+    critical: true
+  - id: ownership_boundary
+    statement: Native tools own their operation semantics; Oh-Goon owns orchestration, isolation, authority transport, bounded execution, identity/evidence
+      binding, and result classification only.
+    critical: true
+  - id: consequence
+    statement: Prevents ghost owners that drift from package managers, container engines, cluster control planes, Git, process facilities, and
+      other native tools; avoids duplicate work, contradictory identities, and synthetic success proofs.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Reimplements any native-tool operation in Oh-Goon, treats a wrapper/mirror as co-authority with the native tool, or substitutes
+      custom resolution/cache/install/build/test/lint/type/merge/rollout/process semantics when the native operation exists.
+    severity: critical
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - AGENTS.md:34-45
+  - Makefile:1-340
+  - backend/src/oh_goon/repository_tooling/dependency_locks.py:1-100
+  - backend/src/oh_goon/repository_tooling/release/stamp_release_version.py:1-172
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_project_tooling_contract.py:28-228
+- id: Q81
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Repository Python is executed through uv. A one-off interpreter command, when genuinely necessary, is `uv run python ...`; repeated
+      repository logic must live under backend/src/oh_goon and have a named `[project.scripts]` entry in backend/pyproject.toml, then be invoked
+      as `uv run ... <entrypoint>`. Make, shell, Docker and frontend scripts must not launch ambient `python`/`python3`, inject PYTHONPATH to
+      create a parallel import surface, or run repeated `.py` source paths through `uv run --script`. Lock authoring/checking must use native
+      `uv lock` / `uv lock --check`, while repeated Oh-Goon repository logic uses the named project entrypoint.
+    critical: false
+  - id: ownership_boundary
+    statement: uv owns Python interpreter/project execution; backend/pyproject.toml owns executable repository Python entrypoints; source files
+      are implementation, not command surfaces.
+    critical: false
+  - id: consequence
+    statement: Eliminates ambient-interpreter drift, PYTHONPATH shadow ownership, source-path launchers, and repeated bootstrap code that bypasses
+      the project's real executable contract.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Uses host python/python3 for a repository command, uses PYTHONPATH or uv --script for repeated project tooling, or creates a Python
+      wrapper around a uv-native operation.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/pyproject.toml:33-72
+  - Makefile:1-340
+  - scripts/README.md:1-67
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_project_tooling_contract.py:28-228
+- id: Q82
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: npm owns frontend package/version/lock/materialization and repository frontend-script execution. Author frontend lock changes with
+      `npm install --package-lock-only`, validate/materialize with native npm commands such as `npm ci`, update package and lock versions with
+      `npm version`, and run repository frontend behavior through `npm run <script>` so package.json is the command owner. Make/Goons must not
+      manually edit package-lock.json, invoke repository-owned browser/frontend JS directly with `node`, use `npx` as a parallel Playwright command
+      surface when an npm script already exists, or reproduce npm's package/lock rules in Python.
+    critical: false
+  - id: ownership_boundary
+    statement: frontend/package.json and npm own frontend executable/package semantics; Make and Goons orchestrate npm scripts and declare only
+      the tool authority those scripts actually need.
+    critical: false
+  - id: consequence
+    statement: Keeps frontend execution and package-lock semantics in one native owner and prevents direct node/npx or Python lock manipulation
+      from becoming hidden second command surfaces.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Manually edits package-lock.json, uses direct Make/Goons node or npx for an npm-owned repository operation, or reimplements npm
+      lock/package semantics in Python.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - frontend/package.json:1-75
+  - Makefile:190-335
+  - templates/goons/oh-goon/browser-targeted/goon.yml:1-9
+  - backend/src/oh_goon/repository_tooling/dependency_locks.py:1-100
+  - backend/src/oh_goon/repository_tooling/release/stamp_release_version.py:1-172
+- id: Q83
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Content fingerprints are evidence only after the correct semantic owner has produced the content. For Python dependencies, native
+      uv owns committed `backend/uv.lock` semantics and its exact byte SHA is repository/package/certification dependency identity after public-source
+      privacy validation; APP certification reuses the native materialized environment and binds committed lock and produced artifact identities without creating a second dependency supply identity. npm continues to own `package-lock.json`
+      semantics. A fingerprint must never decide whether native package semantics are valid or cause a lock to be rewritten.
+    critical: false
+  - id: ownership_boundary
+    statement: Native tools own ecosystem semantics; Oh-Goon may bind immutable source, resolution and produced artifact bytes after validation,
+      but evidence fingerprints cannot become a second package-manager or private-registry authority.
+    critical: false
+  - id: consequence
+    statement: Preserves exact execution/provenance evidence while keeping local registry-bearing lock bytes separate from portable dependency
+      and certification identities.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Treats local `uv.lock` SHA as portable dependency identity, persists private registry-bearing lock bytes in public evidence, or
+      lets an Oh-Goon hash decide native dependency validity/resolution.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/dependency_locks.py:1-124
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - backend/src/oh_goon/engine/fleet_tools.py:70-125
+  - docs/goon-lock.md:8-14
+- id: Q84
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q85
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Native uv owns TLS/certificate behavior at canonical initialization. `make init` starts from the environment exported by the operator's
+      launching shell and preserves native settings such as `UV_SYSTEM_CERTS=true`, `SSL_CERT_FILE`, and `SSL_CERT_DIR` unchanged into the uv child.
+      Oh-Goon must not hardcode `UV_SYSTEM_CERTS`, translate it into a parallel TLS policy, clear native uv/network variables wholesale, or source
+      `~/.bashrc`. APP certification consumes the initialized repository and must not create a second acquisition boundary merely to re-check TLS.
+    critical: false
+  - id: ownership_boundary
+    statement: The launching shell owns which operator environment is exported; uv owns TLS semantics; Oh-Goon only preserves that environment
+      across its orchestration boundary and reports safe evidence.
+    critical: false
+  - id: consequence
+    statement: Prevents corporate/system certificate policy from disappearing during canonical initialization while avoiding a dangerous shell-startup-file
+      dependency, a second Oh-Goon TLS implementation, or a second certification acquisition path.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Sources `~/.bashrc` from Oh-Goon, clears operator `UV_SYSTEM_CERTS`, hardcodes a competing TLS mode, or claims an unexported shell
+      variable is inherited by external processes.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/native_command.py:1-149
+  - scripts/tests/test_native_command.py:1-176
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_project_dependency_contract.py:90-132
+  - scripts/tests/test_structural_authority_contract.py:324-340
+- id: Q86
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: uv owns Python index selection. An operator-required mirror or internal repository must be configured through native uv configuration
+      such as exported `UV_DEFAULT_INDEX`/`UV_INDEX`, an operator-selected `UV_CONFIG_FILE`, or user/system `uv.toml`; Oh-Goon must preserve those
+      inherited inputs and leave native config discovery enabled unless the operator explicitly disables it. Oh-Goon must not write an internal
+      index URL into repository `pyproject.toml`, invent a package-index abstraction, parse/copy uv configuration, or copy uv cache internals
+      as a substitute for uv. Certification may report only the presence of native index/config inputs without printing URLs or credentials, then
+      call the unchanged native uv operation.
+    critical: false
+  - id: ownership_boundary
+    statement: uv owns index/config/cache semantics; the operator owns host-specific registry policy; `make init` owns the one local materialization
+      boundary; APP certification consumes that initialized repository rather than becoming another registry/index authority.
+    critical: false
+  - id: consequence
+    statement: Prevents host-specific registry policy from leaking into source, avoids another ghost package manager/cache implementation, and
+      makes it obvious whether native uv received the operator's index configuration.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Hardcodes an internal index in Oh-Goon source, clears operator uv index/config environment, sources shell startup files, or implements
+      an Oh-Goon parser/copier for uv configuration or cache semantics.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/native_command.py:1-149
+  - Makefile:190-230
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_project_dependency_contract.py:90-132
+  - scripts/tests/test_native_command.py:1-176
+- id: Q87
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q88
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'uv `--locked`/`uv lock --check` asserts lock freshness while `--frozen` consumes an existing lock without reconciling it. Oh-Goon
+      commits `backend/uv.lock` as exact portable dependency identity: `make init` materializes with `uv sync --locked` so stale lock authority
+      is rejected, while repeated test/certification execution may use `--frozen --no-sync` only after that qualified environment exists. `make
+      backend-lock-check` requires native uv freshness plus public publication policy; only explicit dependency authoring through `make sync` may
+      update the lock. Release version stamping uses `uv version --frozen` and must leave `backend/uv.lock` byte-identical.'
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv owns resolution, lock format, and lock operations; the repository owns dependency intent in `backend/pyproject.toml`
+      and commits native `backend/uv.lock` bytes as the sole exact resolved authority. Make selects explicit consumer/authoring paths without
+      becoming a resolver.
+    critical: false
+  - id: consequence
+    statement: Prevents normal init/certification from becoming environment-dependent resolution authoring while preserving explicit native dependency
+      updates and byte-stable package/certification identity.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Treats `backend/uv.lock` as disposable/local-only, maintains a second normalized resolution authority, or lets normal init/test/certification
+      rewrite the committed lock.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - Makefile:1-180
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - scripts/tests/test_dependency_sync_contract.py:1-36
+- id: Q89
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Canonical `make init` is the single normal dependency/interpreter materialization boundary. APP certification consumes the already-initialized repository with verification purpose and must not create another environment, rerun uv/npm materialization, or reacquire already-present packages.
+    critical: true
+  - id: ownership_boundary
+    statement: Native uv/npm own resolution, installation, cache, retry, TLS and registry semantics at initialization. APP certification owns semantic verification of the initialized product; fresh-bootstrap/release reproducibility is a separate authority surface.
+    critical: true
+  - id: consequence
+    statement: After successful init, loss of registry/network access must not make APP certification redownload pytest or frontend packages, select another interpreter, or tell the operator to repeat init because an internal layer discarded established authority.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification dependency-materialization Goon, second environment, shadow supply/cache, or package reacquisition path after successful canonical initialization.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:5-37
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - scripts/tests/test_app_certification_contract.py:53-86
+
+- id: Q90
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Private/public package-index selection is operator-owned native uv configuration. Repository source, `backend/uv.lock`, releases,
+      patches, logs, handoffs, and certification identities must not persist an operator-private registry URL/hostname. Oh-Goon may report only
+      secret-safe presence of native index/config inputs and must not parse `uv.toml` or source shell startup files.
+    critical: true
+  - id: ownership_boundary
+    statement: Operator/native uv owns registry configuration; Oh-Goon owns only pass-through, sanitized evidence, and leak prevention.
+    critical: true
+  - id: consequence
+    statement: Allows one public repository to run against public PyPI or corporate mirrors without publishing infrastructure identity.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Persists or prints a private index URL/hostname, parses/copies operator uv config into repository state, or hardcodes a corporate
+      registry.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - scripts/tests/test_native_command.py:1-176
+  - scripts/tests/test_dependency_sync_contract.py:1-36
+- id: Q91
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: '`backend/uv.lock` is committed native uv resolution authority. `make init` consumes it, `make sync` may update it intentionally,
+      source/package/release identity includes it, and its exact SHA participates in qualification/certification evidence.'
+    critical: true
+  - id: ownership_boundary
+    statement: Native uv owns committed lock semantics; public repository dependency identity is `backend/pyproject.toml` plus exact `backend/uv.lock`
+      bytes.
+    critical: true
+  - id: consequence
+    statement: Prevents private registry artifact URLs from leaking through committed/source-packaged lock bytes while retaining native lock semantics
+      locally.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Commits/packages the Oh-Goon backend lock, treats its SHA as cross-host identity, or sanitizes/rewrites the native lock.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - .gitignore:1-13
+  - backend/src/oh_goon/core/source_tree_policy.py:1-128
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - scripts/tests/test_package_slim.py:115-165
+- id: Q92
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: '`backend/uv.lock` is the committed exact resolution authority emitted by native uv. `backend/pyproject.toml` remains dependency
+      intent. Oh-Goon hashes lock bytes directly, validates public-source privacy, and leaves graph/marker/version semantics to native uv rather
+      than normalizing them into a second format.'
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv owns the resolved graph and PEP 508 marker semantics; Oh-Goon owns only sanitized evidence, portable pin projection,
+      and comparison without becoming a second marker evaluator.
+    critical: false
+  - id: consequence
+    statement: Restores reviewable cross-environment reproducibility after the native local lock is removed from public source identity.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Persists private registry/host-absolute identity in committed `backend/uv.lock`, creates a second normalized dependency graph,
+      or uses active-environment package lists as resolution authority.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/uv.lock:1-1
+  - scripts/tests/test_dependency_resolution.py:1-35
+- id: Q93
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Fresh `make init` must consume committed `backend/uv.lock` exactly with frozen semantics and must not reconcile or rewrite it.
+      Offline cache state may satisfy materialization; operator-visible registry access is reserved for explicit acquisition. `make sync` is used
+      only when dependency intent is intentionally changed and the resulting native lock diff is reviewed.
+    critical: false
+  - id: ownership_boundary
+    statement: '`backend/pyproject.toml` owns intent; committed `backend/uv.lock` owns exact resolution; frozen consumers do not rewrite it; `make
+      sync` alone refreshes native lock authority intentionally.'
+    critical: false
+  - id: consequence
+    statement: Prevents stale/private operator-local lock bytes or historical evidence snapshots from overriding current dependency intent while
+      retaining strict retained-wheel and dependency-scope authority.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Generates a second dependency representation, rewrites committed `uv.lock` from init, bypasses retained-wheel identity, or lets
+      ordinary consumers author resolution history.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - scripts/tests/test_dependency_sync_contract.py:1-36
+- id: Q94
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Universal resolution evidence must preserve uv's Python/platform marker forks rather than only the active environment. Oh-Goon
+      bounds supported Python to 3.12-3.14 and records marker-bearing evidence such as Windows-only or Python-specific packages. Native uv supplies
+      those marker semantics. Single-version marker text is evidence, not a second repository resolver; marker-qualified forks become hard bootstrap
+      authority only when the same package has multiple resolved versions.
+    critical: false
+  - id: ownership_boundary
+    statement: uv owns universal resolution and PEP 508 markers; repository policy owns the supported environment boundary; Oh-Goon preserves
+      marker evidence and constrains only the minimum marker semantics required to reproduce multi-version forks.
+    critical: false
+  - id: consequence
+    statement: Prevents a Linux/Python-3.14 checkout from erasing branches required for other explicitly supported environments.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Builds the public baseline from `pip list`/active venv only, drops marker forks, or claims open-ended future Python support without
+      resolving/certifying it.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/pyproject.toml:1-95
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/uv.lock:1-1
+- id: Q95
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - scripts/tests/test_app_certification_contract.py:53-86
+- id: Q96
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q97
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: 'The public/private boundary must be machine-enforced across source composition: package-manager caches are transient; committed
+      backend lock rejects private URL/path infrastructure identity; package_slim includes the committed lock; secret-safe network diagnostics
+      never render inherited index values. A clean `make init` may create ignored local state but must not modify committed/packageable evidence.'
+    critical: true
+  - id: ownership_boundary
+    statement: Source-tree/package policy owns public composition; dependency normalizer owns sanitized evidence validation; operator secrets
+      remain outside those owners.
+    critical: true
+  - id: consequence
+    statement: Provides defense in depth against accidental leakage through ZIPs, patches, logs, generated evidence, or local bootstrap side effects.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Allows local lock/private registry identity into a source ZIP/patch/log, or makes init modify committed public dependency evidence
+      without explicit sync.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/core/source_tree_policy.py:1-128
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - scripts/tests/test_package_slim.py:115-165
+  - scripts/tests/test_native_command.py:1-176
+- id: Q98
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Committing a lock does not make proprietary dependency identities public-safe. Public `backend/uv.lock` may contain only dependency/source
+      identities explicitly classified as publishable; a private mirror of public packages is supported, while proprietary package identities
+      require a separate non-public policy rather than silent sanitization.
+    critical: false
+  - id: ownership_boundary
+    statement: Repository publication policy owns what dependency identity may become public; native package managers own resolution; URL sanitization
+      is not data classification.
+    critical: false
+  - id: consequence
+    statement: Prevents a public repository from disclosing confidential package names/version topology even after private infrastructure URLs
+      have been removed.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Claims URL removal alone makes arbitrary private dependencies safe to publish.
+    severity: normal
+    misconception_id: absence_as_positive_evidence
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/public_dependency_privacy.py:1-118
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+- id: Q99
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q100
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Public/private registry policy is ecosystem-wide. uv may use operator-local Python registry configuration; committed npm lock evidence
+      must not carry operator-private registry hosts, and Playwright acquisition remains native npm/Playwright-owned. A package-lock produced
+      against a private mirror must fail the public dependency privacy guard rather than be normalized or committed.
+    critical: false
+  - id: ownership_boundary
+    statement: npm/Playwright retain native package semantics; Oh-Goon owns only public-source admission/privacy checks and orchestration.
+    critical: false
+  - id: consequence
+    statement: Prevents the same registry-leak class fixed for uv from surviving in the frontend ecosystem.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows a committed npm lock to disclose an operator-private mirror or rewrites npm lock URLs to hide it.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/public_dependency_privacy.py:1-118
+  - backend/src/oh_goon/repository_tooling/dependency_locks.py:85-124
+  - scripts/tests/test_public_dependency_privacy.py:1-44
+- id: Q101
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Resolution schema 1 is registry-only, so certification materialization rejects PEP 610 `direct_url.json`; public package composition
+      scans dependency intent/locks for private infrastructure and never prints the sensitive hostname in failures. Local native diagnostics may
+      retain detail, but any packageable/persisted public evidence must pass the disclosure boundary.
+    critical: true
+  - id: ownership_boundary
+    statement: Native installers own local origin metadata and diagnostics; public source/evidence policy owns what may be persisted or published.
+    critical: true
+  - id: consequence
+    statement: Closes leakage through installed-origin metadata, source packaging, and failure evidence even when lock/resolution files themselves
+      are sanitized.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Publishes direct-origin/local-path metadata or renders private infrastructure values in public privacy-check failures.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/public_dependency_privacy.py:1-118
+  - backend/src/oh_goon/repository_tooling/release/package_slim.py:1-227
+  - backend/src/oh_goon/repository_tooling/public_dependency_privacy.py:1-130
+  - scripts/tests/test_public_dependency_privacy.py:1-44
+  - docs/development/APP_CERTIFICATION.md:1-35
+- id: Q102
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Native uv is the sole registry-version and PEP 508 marker authority. `make sync` resolves intent into committed `backend/uv.lock`;
+      `make init` consumes those exact lock bytes with frozen semantics. Oh-Goon does not reinterpret graph or marker semantics and separately
+      fails closed on retained-wheel artifact identity drift.
+    critical: false
+  - id: ownership_boundary
+    statement: Oh-Goon must never project exact registry pins from native evidence back into dependency intent and must not duplicate marker evaluation
+      or make formatting differences a second dependency-resolution policy.
+    critical: false
+  - id: consequence
+    statement: Prevents false fresh-checkout and qualification failures when compatible registry versions change while retaining strict declared
+      minimums, scope/direct membership, and retained-wheel identity.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Treats snapshot registry versions or marker strings as dependency intent, injects `==` pins during bootstrap, or ignores scope/direct-membership
+      or retained-wheel artifact drift.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - scripts/tests/test_dependency_resolution.py:1-35
+- id: Q103
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Startup diagnostics may report observed native-tool versions and the declarations that own their requirements, but Oh-Goon must
+      not parse or re-enforce those version semantics. Native uv owns `requires-python` and `[tool.uv].required-version`; native npm with `engine-strict=true`
+      owns `frontend/package.json` Node/npm engine compatibility during materialization.
+    critical: false
+  - id: ownership_boundary
+    statement: Oh-Goon owns only tool presence/reporting and invocation sequencing; the invoked native package managers own compatibility admission
+      and their exact error semantics.
+    critical: false
+  - id: consequence
+    statement: Prevents a second semver/PEP-440 implementation from drifting from uv/npm while still surfacing the owning requirement declarations
+      in diagnostics.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Parses uv/Node/npm requirements to make a competing compatibility decision, or converts an observed version into a synthetic native-tool
+      PASS/FAIL instead of letting the native materialization command decide.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/startup_environment.py:14-106
+  - backend/pyproject.toml:1-80
+  - frontend/.npmrc:1-3
+  - scripts/tests/test_startup_environment.py:1-180
+- id: Q104
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q105
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q106
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: '`frontend-install` delegates directly to native `npm ci --prefer-offline --ignore-scripts --no-audit --no-fund`. npm owns whether
+      its cache can accelerate that operation and owns the resulting `node_modules` graph. Oh-Goon keeps no local package-lock marker, graph cache,
+      or skip decision.'
+    critical: false
+  - id: ownership_boundary
+    statement: npm owns frontend dependency materialization, cache reuse, and graph semantics; Oh-Goon owns only when to invoke the native operation
+      and how to report its result.
+    critical: false
+  - id: consequence
+    statement: Avoids a second npm-like cache/validation layer and lets native npm make its own performance/reuse decisions.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Adds an Oh-Goon package-lock marker, graph cache, symlink publisher, or alternate rule that decides native npm installation can
+      be skipped.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - Makefile:205-230
+  - scripts/tests/test_make_progress_contract.py:45-57
+- id: Q107
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q108
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Absolute repository, certification-supply, run-state and transient temp paths are presentation details, not execution identity.
+      The native-command evidence wrapper and `scripts/run_logged.sh` may replace those known roots with stable labels such as `<repo>`, `<certification-supply>`,
+      `<state>` and `<tmp>` only in human-facing captured output. Exact native argv, cwd, environment, exit semantics and on-disk log locations
+      remain unchanged; explicit machine-oriented path/describe commands may still expose exact paths when deliberately requested.
+    critical: false
+  - id: ownership_boundary
+    statement: Repository UX owns safe display; uv/npm/Playwright, the shell and filesystem retain exact path semantics and diagnostic authority.
+    critical: false
+  - id: consequence
+    statement: Removes noisy/privacy-sensitive operator paths from normal setup/certification output without rewriting commands or hiding actionable
+      failure detail.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Rewrites native argv/cwd/env to sanitize display, drops native failure detail, or emits normal absolute operator roots after the
+      display owner is available.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - scripts/run_logged.sh:1-99
+  - backend/src/oh_goon/repository_tooling/native_command.py:1-149
+  - Makefile:210-320
+  - scripts/tests/test_run_logging.py:1-171
+- id: Q109
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: true
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: true
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - backend/tests/unit/integrations/test_fleet_content_store.py:140-188
+- id: Q110
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q111
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: The workflow process may run through a workspace `.venv/bin/python` that is a symlink to uv-managed base Python. Sibling CLI lookup
+      must use the invoked interpreter pathname without resolving that symlink, so `oh-goon` is selected from the same workspace `.venv/bin` as
+      `oh-goon-workflow`; resolving the interpreter would incorrectly search the base toolchain directory. Retained run-log presentation sanitizes
+      user-home/toolchain paths without changing execution.
+    critical: false
+  - id: ownership_boundary
+    statement: The materialized workspace owns sibling Oh-Goon entrypoints; uv owns the base interpreter target; display sanitization owns only
+      human-facing path labels.
+    critical: false
+  - id: consequence
+    statement: Prevents certification from escaping the derived workspace environment and failing with a nonexistent base-toolchain `bin/oh-goon`,
+      while keeping operator-specific home paths out of normal retained logs.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Resolves `.venv/bin/python` before locating sibling Oh-Goon entrypoints, searches the uv base interpreter directory for `oh-goon`,
+      or rewrites native execution paths merely to sanitize display.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/workflow.py:1-589
+  - scripts/tests/test_workflow_run.py:220-255
+  - scripts/run_logged.sh:1-99
+  - scripts/tests/test_run_logging.py:1-171
+- id: Q112
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q113
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: A completed content-store staging tree may intentionally have a read-only root mode such as 0555. On Linux, renaming a directory
+      between parents changes its `..` entry and requires owner-write permission on that moved directory root. Publication may therefore add only
+      owner-write to the unpublished staging root, perform the rename, restore the exact prepared root mode immediately, then durably sync the
+      published directory/parent. Child modes and bytes are never changed.
+    critical: false
+  - id: ownership_boundary
+    statement: Temporary publication permission belongs only to the private unpublished staging root; immutable child identity and the final prepared
+      root mode remain retained-content truth.
+    critical: false
+  - id: consequence
+    statement: Prevents non-root certification from failing at the final staging-to-object rename while keeping construction permission from becoming
+      durable object authority.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Makes the producer supply or retained children writable, permanently weakens the prepared root mode, or treats root publication
+      permission as content identity.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/integrations/exact_file_write.py:114-141
+  - backend/tests/unit/integrations/test_fleet_content_store.py:436-467
+- id: Q114
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Developer frontend materialization delegates directly to native npm even on slower mounted filesystems. npm owns cache behavior
+      and installation optimization; Oh-Goon must not create a second native-filesystem `node_modules` cache, runtime-key identity, symlink publication
+      protocol, or graph-validation layer to compensate for filesystem performance.
+    critical: false
+  - id: ownership_boundary
+    statement: npm lock/manifest and native npm own dependency truth, cache behavior, and materialization; Oh-Goon owns only orchestration and
+      evidence.
+    critical: false
+  - id: consequence
+    statement: Keeps the same authority model across Python and frontend dependencies and prevents a performance optimization from becoming a
+      shadow package-manager implementation.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Introduces an Oh-Goon-owned `node_modules` cache, cache-key compatibility algorithm, symlink publisher, or package graph reuse
+      decision parallel to npm.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - Makefile:180-245
+  - scripts/tests/test_native_command.py:130-160
+- id: Q115
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q116
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: '`make init` is the single idempotent developer materialization frontdoor for fresh and existing checkouts: native `uv sync --locked`
+      owns Python environment/project installation, native `npm ci` owns frontend materialization, and Oh-Goon performs only a tiny executable
+      smoke. Oh-Goon exposes no second developer setup or acquisition path.'
+    critical: false
+  - id: ownership_boundary
+    statement: Fresh-checkout and later reconciliation use the same native package-manager operations; only intentional `make sync` authors lock
+      history. Certification reuses the same native materialization authority and owns only Oh-Goon-specific execution/evidence boundaries.
+    critical: false
+  - id: consequence
+    statement: Avoids duplicate startup concepts and ensures there is one boring developer materialization path.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Gives a second developer setup path separate dependency/cache/install semantics, requires a separate acquisition phase before init,
+      or lets init author dependency intent.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - Makefile:113-170
+  - README.md:24-29
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+- id: Q117
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q118
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: '`make certify` runs an APP Plan with `execution.purpose: verification`, so its bootstrap must not discover, validate, materialize,
+      export, or require strict executor/cgroup authority that the Plan does not consume. `make strict-executor-setup` is reserved for explicit strict release/CI or strict-acceptance
+      paths that actually require delegated strict execution; it is never a recovery step for ordinary APP verification.'
+    critical: false
+  - id: ownership_boundary
+    statement: The workflow purpose decides whether strict executor authority is required. APP/self verification requests only durable control-state
+      authority. Release/CI explicitly requests strict executor authority; the certification front-door/runtime owners then own delegation and
+      executor validation, while `make strict-executor-setup` remains explicit operator-approved WSL/systemd host repair for that strict path only.
+    critical: false
+  - id: consequence
+    statement: Prevents cucumber architecture in which a verification-only APP run fails on unused systemd/cgroup/executor machinery before any
+      APP Goon can run, while preserving fail-closed strict isolation for release/CI workloads that actually consume it.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Makes normal `make certify` depend on `OH_GOON_EXECUTORS_FILE`, systemd/cgroup delegation, `make strict-executor-setup`, or any other
+      strict release/CI authority that the APP verification Plan does not consume.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - Makefile:480-500
+  - scripts/strict_executor_setup.sh:16-67
+  - backend/src/oh_goon/services/certification_frontdoor.py:27-175
+  - docs/development/APP_CERTIFICATION.md:1-35
+- id: Q119
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: true
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: true
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - scripts/tests/test_app_certification_contract.py:53-86
+- id: Q120
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: '`make certify` must remain visibly alive without turning presentation into execution truth. `scripts/run_logged.sh` preserves
+      one direct transient progress descriptor before ordinary stdout/stderr enter the unbuffered sanitize/tee pipeline. The Plan wait renders
+      time-only spinner refreshes in place only when that descriptor is an interactive terminal, while repository-controlled Goon/Step/activity
+      state-change labels remain newline milestones. Captured/non-interactive output suppresses spinner refreshes so elapsed-time pulses do not
+      become log noise; flushed stdout remains the portable milestone fallback when the descriptor is unavailable. Durable command/failure output
+      still flows through the redacted run log, while lifecycle truth still comes only from the Run projection and terminal wait. A non-success
+      terminal run must project the durable failed Step/command when available or explicitly declare repair evidence incomplete.'
+    critical: false
+  - id: ownership_boundary
+    statement: The run-log wrapper owns redaction/persistence and only transports a direct presentation descriptor; `cli_runtime_plans` owns bounded
+      transient rendering over existing Game Tape live observations; Game Tape owns process-local output observation; the Run projection owns
+      durable lifecycle truth. The progress descriptor is not a second log, event store, executor, or status authority and must never carry arbitrary
+      raw process output, credentials, or host paths.
+    critical: false
+  - id: consequence
+    statement: Keeps long certification visibly responsive even when the durable logging pipeline or caller UI batches normal output, while preserving
+      one execution owner, one durable Run truth, and one redacted persistent log.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Sends arbitrary raw Step output or credentials through the direct progress descriptor, creates a second durable log/status owner,
+      derives lifecycle from spinner/activity text, removes the redacted durable pipeline, or lets a buffered presentation layer make the certification
+      command silent for long periods.
+    severity: normal
+    misconception_id: observer_authority_confusion
+  evidence_expectations:
+  - scripts/run_logged.sh:1-108
+  - backend/src/oh_goon/cli_runtime_plans.py:220-390
+  - scripts/tests/test_run_logging.py:1-150
+  - backend/tests/unit/entrypoints/test_cli_plan_progress.py:1-150
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_project_supply_contract.py:79-108
+- id: Q121
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q122
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q123
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Developer frontend materialization always delegates to native `npm ci`; npm alone decides how its own cache accelerates installation
+      and owns the resulting graph. Oh-Goon must not add a `node_modules` cache key, marker, repository symlink, cache publication race protocol,
+      or native-graph validator in front of npm.
+    critical: false
+  - id: ownership_boundary
+    statement: '`package-lock.json` plus native npm remain dependency truth, cache owner, and graph authority. Oh-Goon owns only invocation sequencing
+      and evidence.'
+    critical: false
+  - id: consequence
+    statement: Prevents an optimization layer from duplicating npm semantics or turning cache presence into dependency authority.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Implements an Oh-Goon-owned `node_modules` reuse/cache/publication/validation protocol or lets any such state bypass native npm.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - Makefile:180-245
+  - scripts/tests/test_native_command.py:130-160
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_project_tooling_contract.py:229-285
+- id: Q124
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q125
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q126
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q127
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q128
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q129
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Strict Fleet runtime capture must treat the selected Python runtime as more than the interpreter executable plus copied stdlib
+      directories. Native stdlib extension modules are loaded later with `dlopen`; an extension such as `_ssl*.so` can depend on `libssl.so.3`
+      and `libcrypto.so.3` even when the Python executable itself does not link them. For every exact Python stdlib/platstdlib directory already
+      selected for the frozen runtime, Fleet therefore inspects the native `*.so` modules with the same trusted `ldd` runtime inspector used for
+      executables, preserves exact ABI/symlink aliases, and adds only those discovered shared-library bytes to the immutable runtime root. The
+      stdlib directory selection and interpreter identity remain unchanged, and Fleet must not solve the failure by mounting live `/lib` or `/usr/lib`,
+      widening `LD_LIBRARY_PATH`, installing OpenSSL into the workspace, or treating host libraries as ambient authority.
+    critical: false
+  - id: ownership_boundary
+    statement: Python/system-runtime discovery owns which interpreter and stdlib directories are admitted; Fleet runtime capture owns the exact
+      transitive native-library closure of every executable/native module that those frozen runtime bytes can load; the strict sandbox consumes
+      only that frozen closure. Workspace dependency materialization does not become a system-library installer.
+    critical: false
+  - id: consequence
+    statement: 'Prevents a correctly frozen Python interpreter and stdlib from failing only when a native extension is first imported, such as
+      `ImportError: libssl.so.3: cannot open shared object file`, while preserving exact runtime provenance and avoiding broad live host-library
+      authority.'
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Freezes only the interpreter executable dependencies, mounts broad live host library directories, repairs the failure with ambient
+      `LD_LIBRARY_PATH`, installs system libraries into the workspace, or skips exact alias/runtime identity preservation for extension-module
+      dependencies.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/integrations/_fleet_plan_runtime_root.py:58-124
+  - backend/src/oh_goon/integrations/_fleet_plan_runtime_root.py:300-334
+  - backend/tests/unit/integrations/test_fleet_plan_execution_snapshots.py:820-870
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_project_supply_contract.py:32-64
+- id: Q130
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Certification must not mutate the checkout merely to carry generated execution identity. Backend certification bootstrap owns an
+      isolated state root and a dedicated lock directory there. The workflow generates the exact `goon.lock` for the resolved APP/release Plan
+      into that state-owned path with `oh-goon lock --output`, then passes the same path explicitly to `oh-goon plan run --lock-file`. Fleet still
+      resolves the current source, loads the supplied lock, recomputes the expected execution fingerprint and fails closed on missing, malformed,
+      stale or tampered identity; the explicit path changes storage ownership, not locked-execution semantics. Normal interactive `oh-goon lock`
+      retains the source-adjacent default. A raw `[Errno 5] Input/output error` represents physical/storage failure and is therefore environment-classified
+      rather than being asserted to be an application/source defect.
+    critical: true
+  - id: ownership_boundary
+    statement: Human-authored Plan/Goon files remain source-owned; certification bootstrap owns ephemeral generated lock storage under isolated
+      certification state; FleetPlanService remains the sole resolver/verifier of locked execution identity regardless of lock location. The workflow
+      only transports the backend-provided lock root and must not invent a second lock format or bypass verification.
+    critical: true
+  - id: consequence
+    statement: Prevents APP bootstrap from performing durable generated-state writes on the operator checkout/DrvFS path before admission, while
+      preserving deterministic locked execution and producing an owner-specific storage diagnosis instead of mislabeling a physical I/O failure
+      as broken application source.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Writes certification goon.lock back beside the source Plan, treats an external lock as permission to run unlocked, accepts lock
+      bytes without recomputing the resolved execution fingerprint, creates a second lock authority/format, or classifies raw EIO as proof of
+      a source defect.
+    severity: critical
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/services/certification_bootstrap.py:1-301
+  - backend/src/oh_goon/workflow.py:1-589
+  - backend/src/oh_goon/services/fleet_plans.py:85-140
+  - backend/src/oh_goon/services/fleet_plans.py:320-380
+  - backend/tests/unit/services/test_execution_lock.py:220-310
+  - scripts/tests/test_workflow_run.py:150-220
+- id: Q131
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'First-checkout `make init` must not place a repository-owned filesystem/cache admission or bootstrap state machine in front of
+      native uv/npm. Make invokes the native materializers directly; uv/npm remain resolver/cache/lock/environment authorities and prove whether
+      their real operations can run by actually performing them. When a native operation fails, Oh-Goon preserves that cause and exit semantics
+      and must not retry it through a shadow loop, redirect native caches, repair permissions/mounts, substitute another installer/environment,
+      or treat classification as admission. `make init-doctor` is an explicit diagnostic-only create/write/fsync/delete probe whose PASS/FAIL
+      is never bootstrap evidence and is never invoked automatically by `make init`. Certification mutable state remains different: because a
+      long authoritative Oh-Goon run exists after installation, its existing backend bootstrap owner must prove the selected isolated state root
+      writable before Plan admission, and runtime EROFS/EIO/ENOSPC/EDQUOT or storage-shaped SQLite loss must remain one bounded environment failure
+      whose primary cause cannot be replaced by diagnostic/shutdown persistence failures.'
+    critical: false
+  - id: ownership_boundary
+    statement: Before Oh-Goon is installed, the stdlib repository bootstrap only delegates and observes; native uv/npm own their actual bootstrap
+      operations, while init-doctor owns optional diagnostics with zero admission/evidence/recovery authority. After Oh-Goon exists, certification
+      bootstrap owns certification-state placement and pre-admission writability, application/runtime storage handling owns mid-run classification/containment,
+      and scripts/run_logged.sh remains non-authoritative presentation/persistence. Host mount health remains environment authority throughout.
+    critical: false
+  - id: consequence
+    statement: Avoids duplicating uv's operational/storage model with a weaker preflight that can only prove create/write/fsync/delete, while
+      retaining a useful explicit diagnostic for host-path troubleshooting. The same boundary prevents a physical WSL/Linux storage transition
+      during an already-running certification from becoming a misleading source/Goon failure or traceback cascade.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Wires init-doctor or any storage probe into `make init`, treats a doctor PASS as permission to skip native uv, retries or reroutes
+      failed uv bootstrap through another cache/installer/environment, remounts or widens permissions to hide host failure, removes certification-state
+      admission after Oh-Goon exists, treats runtime SQLite/storage loss as a Goon/source failure, or lets diagnostic/log persistence alter command/run
+      semantics.
+    severity: normal
+    misconception_id: observer_authority_confusion
+  evidence_expectations:
+  - Makefile:1-145
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - scripts/init_doctor.sh:1-98
+  - scripts/tests/test_dependency_resolution.py:1-35
+  - scripts/tests/test_init_doctor.py:1-50
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_project_tooling_contract.py:28-228
+  - backend/src/oh_goon/runtime/storage_health.py:1-67
+  - backend/src/oh_goon/services/certification_bootstrap.py:1-301
+  - backend/src/oh_goon/cli.py:1-108
+  - backend/src/oh_goon/workflow.py:1-589
+  - scripts/run_logged.sh:1-99
+  - backend/tests/unit/runtime/test_storage_health.py:1-38
+  - backend/tests/unit/entrypoints/test_cli_storage_failure.py:1-64
+  - scripts/tests/test_run_logging.py:1-171
+- id: Q132
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: '`oh-goon self verify` is a thin selector for `templates/plans/oh-goon/self-verification/plan.yml`, and `oh-goon self certify`
+      selects the existing `templates/plans/oh-goon/app-certification/plan.yml`. Both use the ordinary Plan lock and Fleet execution path: resolve,
+      freeze/lock, RUN_ADMITTED, executor/cancellation ownership, durable Step evidence, and Game Tape. The self CLI must not own a private command
+      sequence, scheduler, retry loop, or per-unit executor.'
+    critical: false
+  - id: ownership_boundary
+    statement: Canonical Plans own required verification membership and ordering; Fleet owns admission/execution/evidence. Diagnostic sharding
+      may describe bounded test partitions, and artifact helpers may seal/package/verify already-proven source bytes, but neither may execute
+      source verification work. A public `--run-unit` path would bypass Plan admission and create competing execution authority, so it is forbidden.
+    critical: false
+  - id: consequence
+    statement: 'This prevents an agent or wrapper from silently changing verification membership, running a Step outside admitted tool/workspace/resource/cancellation
+      authority, manufacturing PASS evidence outside Game Tape, or evolving a second CI engine beside Oh-Goon. Packaging proof remains distinct:
+      it proves preservation of verified bytes, not source correctness.'
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Treats the self CLI or a repository planner as an execution engine, exposes a direct per-unit execution escape hatch, hard-codes
+      verification order outside the shipped Plan, or records source PASS without normal Fleet admission/evidence.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - templates/plans/oh-goon/self-verification/plan.yml:1-10
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - backend/src/oh_goon/cli_self.py:16-62
+  - backend/src/oh_goon/workflow.py:1-620
+  - backend/src/oh_goon/repository_tooling/self_certification_plan.py:75-178
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_authority_certification.py:7-86
+  - backend/tests/unit/entrypoints/test_cli_self_plan.py:1-73
+  - scripts/tests/test_workflow_run.py:1-280
+- id: Q133
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: 'Strict Step completion includes disposal of the Step''s attempt-private filesystem authority. A command return code of zero therefore
+      cannot produce a clean Step PASS when `FailedPlanStepTeardownEvidence` says the attempt root could not be inspected, removed or proved absent.
+      Game Tape must project that Step as failed, and certification handoff must use the durable teardown evidence to identify the exact Goon/Step,
+      `step_teardown` boundary and teardown reason instead of emitting `Failure evidence: INCOMPLETE` or pretending the successful command itself
+      failed. Because immutable/read-only dependency directories may legitimately exist inside the disposable attempt, Fleet may restore owner
+      read/write/execute permission only on directories beneath that Fleet-owned attempt root before deletion; it must never chmod repository
+      source, retained supply, caches or foreign paths. If owned cleanup still fails, certification remains non-successful.'
+    critical: true
+  - id: ownership_boundary
+    statement: Fleet Plan execution owns the disposable attempt tree and its teardown proof; native commands own their exit status; Game Tape/handoff
+      are read projections of durable execution/teardown evidence. Cleanup permission normalization is narrowly scoped to the already-owned private
+      attempt and is not host-storage repair, repository mutation, authority broadening or permission recovery for external state.
+    critical: true
+  - id: consequence
+    statement: 'Prevents a dependency-materialization command that completed successfully from ending certification with an unusable `ATTENTION_REQUIRED
+      / Failure evidence: INCOMPLETE` handoff merely because read-only materialized directories blocked naive deletion, while retaining the security
+      invariant that a genuinely unremoved private attempt cannot be certified clean.'
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Treats command exit 0 as Step PASS despite failed teardown, suppresses or ignores failed cleanup, reports a successful command
+      as the failing command, relies on transient logs instead of durable teardown evidence, chmods repository/retained/foreign paths, or turns
+      cleanup failure into automatic host-storage repair.
+    severity: critical
+    misconception_id: lifecycle_state_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/integrations/fleet_plan_run.py:260-501
+  - backend/src/oh_goon/integrations/_fleet_plan_step_sequence.py:100-165
+  - backend/src/oh_goon/core/models/fleet_plan_evidence.py:235-360
+  - backend/src/oh_goon/core/game_tape_lifecycle.py:40-81
+  - backend/src/oh_goon/core/game_tape_step_projection.py:1-180
+  - backend/src/oh_goon/cli_runtime_plans.py:350-465
+  - backend/tests/unit/integrations/test_fleet_plan_execution_snapshots.py:780-850
+  - backend/tests/unit/entrypoints/test_cli_plan_progress.py:130-253
+- id: Q134
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: The Phase-0 baseline had to describe the launch system that existed at that checkpoint rather than silently declaring the later
+      architecture complete. Contributor `make dev` delegates process orchestration to `scripts/dev.sh`, which creates the local-access capability,
+      launches uvicorn and npm/Vite children and owns shell-job teardown. Built `oh-goon start` separately owns its local-access capability, URL
+      and uvicorn launch in `cli_start.py`. The FastAPI lifespan/ApplicationRuntime owns application background lifecycle only; it is not the
+      OS process-tree owner. At that checkpoint this was an explicit duplicate local-launch ownership boundary plus readiness/launch-identity/generation
+      gaps identified for later convergence without reimplementing uvicorn, npm or Vite. The Phase-1 `LaunchManifest` is therefore a versioned
+      read model (`oh-goon.launch/v1`) whose requested intent is structurally separate from observations. An observed runtime fact carries who
+      asserted it, observation time, owner generation and where relevant service generation, so a configured port, stale PID or prior service
+      instance cannot become current runtime proof. The model contains no process-launch calls or raw local-access token field; secret/enforcement
+      authority remains outside the manifest.
+    critical: false
+  - id: ownership_boundary
+    statement: In the Phase-0 baseline, Make was a convenience/delegating caller and the contributor shell and built CLI paths were the separate
+      launch owners pending later proven convergence; uvicorn/Vite/npm retain native runtime mechanics; FastAPI/ApplicationRuntime owns application
+      lifecycle; local-access middleware owns enforcement. Launch Manifest owns only typed representation/serialization of resolved intent and
+      authoritative observations and cannot execute processes, grant authority, issue credentials or infer readiness from logs/configuration.
+    critical: false
+  - id: consequence
+    statement: Prevents Launch Manifest work from creating a third launcher or falsely treating configured endpoints, PIDs, tokens or presentation
+      text as canonical runtime truth. It also made the Phase-0 duplicate ownership debt explicit so later migration could remove it rather than
+      preserving two competing process owners behind a new status layer.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: For the Phase-0 baseline, claims a single canonical local launch owner already existed, makes the manifest an input/execution/process
+      owner, stores the raw access token, treats configured port/PID as observed readiness, or lets a stale service generation update current
+      launch truth.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  - id: fatal-02
+    statement: Treats requested/configured launch intent such as a desired endpoint, port, PID, or service target as proof of what actually started
+      or is currently ready.
+    severity: normal
+    misconception_id: desired_observed_conflation
+  evidence_expectations:
+  - docs/development/LAUNCH_OWNERSHIP.md:1-73
+  - backend/src/oh_goon/core/launch_manifest.py:1-235
+  - backend/tests/unit/core/test_launch_manifest.py:1-181
+  - docs/development/LAUNCH_OWNERSHIP.md:8-34
+  - backend/src/oh_goon/cli_start.py:1-46
+  - backend/src/oh_goon/api/app.py:1-105
+  - backend/src/oh_goon/repository_tooling/architecture/_launch_contract_foundation.py:12-73
+- id: Q135
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: The first runtime bridge must preserve the current native runtime owners while making their observable lifecycle facts structured.
+      Contributor `LocalLaunchSupervisor` is the process-orchestration owner. Each backend/frontend child is launched through the tiny `oh-goon-local-launch-exec`
+      bridge, which first writes generation-bound `service.spawned`, acknowledges that durable registration over a private inherited pipe, and
+      only then `exec`s uvicorn or npm in that same PID. The supervisor does not admit the child to liveness/readiness observation until that
+      acknowledgement arrives. This prevents immediate child exit or FastAPI lifespan startup from racing ahead of durable spawn evidence without
+      reimplementing the native runtime. The FastAPI lifespan may assert only backend `service.startup_complete`; it cannot infer bind/readiness.
+      Contributor readiness uses bounded positive HTTP observations of backend `/healthz` and the Vite endpoint; built `oh-goon start` keeps native
+      `uvicorn.run(...)` and uses a read-only `/healthz` observer. Only successful observations may publish bound/ready and `launch.ready`. Readiness
+      timeout and required child exit become structured failure events, while owner-issued stop/abort/fail events remain the only terminal authority.
+      A late observer cannot overwrite an already terminal launch.
+    critical: false
+  - id: ownership_boundary
+    statement: uvicorn owns server mechanics; npm/Vite own frontend execution/HMR; FastAPI/ApplicationRuntime owns application startup/background
+      lifecycle; LocalLaunchSupervisor owns contributor process orchestration while the built CLI owns only its in-process native server call.
+      LocalLaunchOwner/EventStore owns only generation-bound event publication and projection. The pre-exec bridge records the PID, acknowledges
+      durable spawn registration, and transfers that exact process to the native tool with `exec`; it cannot supervise/retry/repair that native
+      runtime. HTTP observers may establish positive readiness but cannot kill processes, infer terminal state from absence, parse logs, or store
+      the local-access credential.
+    critical: false
+  - id: consequence
+    statement: Prevents the Launch Manifest integration from creating a new process manager or promoting configured ports, child existence, arbitrary
+      logs or ASGI startup into false readiness. It also removes the concrete startup race between child creation and lifespan evidence and gives
+      coding agents a durable structured failure when readiness or a required service actually fails.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Records spawn after starting the native runtime, lets startup/config/PID imply READY, parses Vite/uvicorn logs for lifecycle truth,
+      allows a readiness observer to overwrite terminal state, stores the raw local-access token, or turns the bridge into a second server/HMR/process
+      manager.
+    severity: normal
+    misconception_id: lifecycle_state_confusion
+  evidence_expectations:
+  - docs/development/LAUNCH_OWNERSHIP.md:81-103
+  - backend/src/oh_goon/repository_tooling/local_launch_exec.py:1-34
+  - backend/src/oh_goon/repository_tooling/local_dev_launch.py:1-60
+  - backend/src/oh_goon/runtime/local_launch_context.py:1-74
+  - backend/src/oh_goon/runtime/local_launch_owner.py:1-276
+  - backend/src/oh_goon/api/app.py:40-58
+  - backend/src/oh_goon/cli_start.py:1-93
+  - backend/tests/unit/repository_tooling/test_local_dev_launch.py:1-41
+  - backend/tests/unit/api/test_launch_lifespan.py:1-55
+  - backend/src/oh_goon/repository_tooling/architecture/_launch_contract_foundation.py:1-73
+- id: Q136
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'Current-launch selection must be deterministic and identity-bound: canonicalize the exact current workspace, derive its collision-resistant
+      workspace identity, read exactly that workspace binding, then read exactly the bound launch ID and owner generation and revalidate the resolved
+      launch-intent identity against the launch record. Status must never scan launch files, pick the newest mtime, or use PID existence as current-owner
+      proof. A binding may be replaced only after the exact previously bound launch proves a terminal lifecycle through its durable event record.
+      If that record is missing, malformed, generation-mismatched, intent-mismatched, or still nonterminal, replacement is refused rather than
+      repaired or guessed. `oh-goon status --json` emits one versioned safe `oh-goon.launch-status/v1` document from a centralized whitelist and
+      must not serialize commands, credentials, raw event payloads, or the raw Launch Manifest. At the 1267.0.38 boundary, before process-birth
+      identity landed, a nonterminal launch preserved its last authoritative lifecycle while reporting `observation_freshness=stale` and `owner_proof=unavailable`;
+      absence or an unverified PID never becomes STOPPED or FAILED.'
+    critical: false
+  - id: ownership_boundary
+    statement: LocalLaunchBindingStore owns only the exact workspace-to-launch reference and conservative replacement rule; LocalLaunchEventStore
+      owns durable launch events; Launch Manifest projection owns lifecycle truth; SafeLaunchStatus owns credential-free presentation; CLI status
+      owns deterministic lookup and rendering. None of these layers may discover processes, select by recency, kill/attach/restart a process,
+      or infer terminal state from absence. At the 1267.0.38 boundary, process-birth identity and live-owner proof were intentionally deferred;
+      they subsequently landed and are tested by Q137.
+    critical: false
+  - id: consequence
+    statement: Prevents stale manifests, PID reuse, filesystem ordering, or a convenient recent-file scan from silently choosing a different launch
+      owner. It gives humans and coding agents one deterministic current-launch reference while preserving the stronger rule that unknown owner
+      liveness is uncertainty, not proof of failure or termination.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Scans or sorts launch records to select current state, replaces an unproven nonterminal binding, treats missing PID/process as
+      terminal proof, accepts a mismatched owner generation or intent identity, exposes raw commands/access credentials, or serializes the raw
+      Launch Manifest as the public status contract.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/runtime/local_launch_binding.py:1-221
+  - backend/src/oh_goon/core/launch_status.py:1-108
+  - backend/src/oh_goon/cli_status.py:1-45
+  - backend/src/oh_goon/runtime/local_launch_owner.py:44-90
+  - backend/tests/unit/runtime/test_local_launch_binding.py:1-144
+  - backend/tests/unit/core/test_launch_status.py:1-94
+  - backend/tests/unit/test_cli_status.py:1-81
+  - backend/src/oh_goon/repository_tooling/architecture/_launch_contract_status.py:9-23
+  - backend/src/oh_goon/repository_tooling/architecture/_launch_contract_control.py:37-73
+- id: Q137
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'A PID is only an address in the process table and may be reused, so a nonterminal local launch may claim live owner proof only
+      from an exact process-birth identity. On Linux Oh-Goon records the owner PID together with the kernel boot ID and `/proc/<pid>/stat` starttime
+      ticks; the latter two distinguish the same PID after reboot or reuse. Contributor mode must record the actual `scripts/dev.sh` shell as
+      launch owner before any service process is observed, while each pre-exec child bridge separately records its own birth identity before transferring
+      that unchanged process instance to uvicorn or npm with `exec`. Built local start records its current Python process as launch owner and
+      its backend process observation. Older `service.spawned` v1 evidence containing only a PID remains readable but cannot establish birth proof.
+      Status re-observes the recorded launch-owner birth identity: an exact match may produce `observation_freshness=current` and `owner_proof=available`;
+      missing procfs, disappeared process, permission failure, reboot, or birth mismatch must preserve the last authoritative lifecycle and report
+      `stale/unavailable`. None of those observations authorizes STOPPED/FAILED, binding replacement, attach, kill, retry or restart.'
+    critical: false
+  - id: ownership_boundary
+    statement: The launch owner remains the authority that declares lifecycle transitions. The process-birth observer is read-only and may only
+      compare Linux procfs identity facts. Launch Event/Manifest projection stores owner and service process observations separately. SafeLaunchStatus
+      owns the live comparison and public freshness/proof result. Native uvicorn/npm/Vite keep process/runtime mechanics. Process absence, signalability,
+      PID existence, or a service child staying alive cannot substitute for exact launch-owner birth identity.
+    critical: false
+  - id: consequence
+    statement: Prevents PID reuse, a surviving child, or a best-effort liveness check from falsely proving that the same owner still controls
+      a launch. It gives status a positive live-owner proof without weakening the separate rule that lifecycle becomes terminal only through authoritative
+      owner events, which was required before the attach/reuse admission later covered by Q138 could safely land.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Treats PID existence or `kill(pid, 0)` as process identity, uses a service child to prove the contributor shell owner, converts
+      missing/mismatched birth proof into STOPPED/FAILED, automatically replaces a nonterminal binding, or lets process observation gain kill/restart/attach
+      authority.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/core/process_birth.py:1-102
+  - backend/src/oh_goon/core/launch_events.py:1-240
+  - backend/src/oh_goon/core/launch_manifest.py:120-280
+  - backend/src/oh_goon/core/launch_projection.py:1-150
+  - backend/src/oh_goon/core/launch_status.py:1-124
+  - backend/src/oh_goon/runtime/local_launch_owner.py:1-155
+  - backend/src/oh_goon/repository_tooling/local_launch_exec.py:1-34
+  - backend/src/oh_goon/repository_tooling/local_dev_launch.py:1-55
+  - docs/development/LAUNCH_OWNERSHIP.md:113-139
+  - backend/tests/unit/core/test_process_birth.py:1-38
+  - backend/tests/unit/core/test_launch_status.py:1-146
+  - backend/src/oh_goon/repository_tooling/architecture/_launch_contract_control.py:53-73
+- id: Q138
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Repeated local startup must resolve one exact canonical workspace binding and its exact bound launch before doing execution work.
+      With no binding, or with an exact previously bound launch whose durable lifecycle is terminal, the request may proceed to normal new-owner
+      creation. A nonterminal launch may be reused only when the requested profile and resolved launch-intent identity exactly match the binding/manifest,
+      the workspace and owner generation still match, and the recorded launch-owner process birth identity is positively re-observed as the same
+      process instance. Missing or malformed bound evidence, a different intent, PID reuse, or unavailable/mismatched birth proof is a conflict;
+      it never authorizes a second owner or automatic replacement. Built `oh-goon start` and contributor `make dev` must perform this decision
+      before token/UI/League-folder work or native child spawn so a compatible rerun returns the existing launch quickly without starting another
+      uvicorn/npm/Vite tree.
+    critical: false
+  - id: ownership_boundary
+    statement: '`assess_local_launch_reuse` is read-only admission and owns only the three-way decision `start_new` / `reuse` / `conflict`. `LocalLaunchBindingStore`
+      remains the binding publication/replacement owner and still refuses nonterminal replacement. `SafeLaunchStatus` and the process-birth observer
+      provide positive live-owner proof without lifecycle mutation. `LocalLaunchOwner` remains the only launch-event writer used when a new owner
+      is actually created. `cli_start.py` and the contributor launch bridge consume the decision; native uvicorn/npm/Vite keep runtime mechanics.
+      The reuse assessor must never spawn, kill, stop, repair, rebind, or infer terminal lifecycle.'
+    critical: false
+  - id: consequence
+    statement: Prevents repeated developer commands from creating ghost owners or duplicate native runtimes while also preventing a stale PID,
+      mismatched launch intent, or unreadable owner from being treated as safe attachment evidence. Resolving ownership before unrelated startup
+      work also makes the common rerun path faster without weakening lifecycle authority.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reuses from PID presence, newest/most-recent launch selection, mismatched intent/profile, or unavailable birth proof; replaces
+      an unproven nonterminal binding; starts another native runtime on reuse; or gives the reuse assessor process, repair, lifecycle, or rebinding
+      authority.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/runtime/local_launch_reuse.py:1-131
+  - backend/src/oh_goon/runtime/local_launch_binding.py:70-145
+  - backend/src/oh_goon/cli_start.py:25-105
+  - backend/src/oh_goon/repository_tooling/local_dev_launch.py:1-60
+  - docs/development/LAUNCH_OWNERSHIP.md:144-164
+  - backend/tests/unit/runtime/test_local_launch_reuse.py:1-161
+  - backend/src/oh_goon/repository_tooling/architecture/_launch_contract_status.py:9-23
+- id: Q139
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: '`oh-goon open` must first resolve the exact canonical workspace binding, read exactly that bound launch, and revalidate workspace/owner-generation/resolved-intent
+      identity. It may navigate only when the recorded launch owner has positive process-birth proof, the launch lifecycle is READY or DEGRADED,
+      the profile''s explicit UI service has authoritative satisfied readiness, and that exact service generation has an observed loopback bound
+      endpoint. The browser host and port come only from the observed endpoint; configured endpoint intent may authorize local exposure but must
+      never supply or repair the runtime address. The local-access token is the exact capability published by the launch owner into a separate
+      owner-private launch/generation-bound store. `open` must never mint a replacement token for an already-running launch and must never persist
+      the token in Launch Manifest, status JSON, event records, or normal human output.'
+    critical: false
+  - id: ownership_boundary
+    statement: '`LaunchNavigationTarget` owns credential-free navigation projection from positively proven Launch Manifest facts. `LocalLaunchAccessStore`
+      owns only private exact-launch capability handoff and is not lifecycle, discovery, binding, or process authority. `LocalLaunchBindingStore`
+      remains exact current-launch selection authority; `SafeLaunchStatus` remains live-owner proof/presentation authority; `cli_open.py` composes
+      those read/projection owners and delegates the final credential-bearing URL to the system browser. The launch owners remain responsible
+      for publishing the same token actually supplied to their backend process. Native browser/runtime mechanics remain external; `open` cannot
+      start, stop, attach, repair, rebind, probe, or choose a launch by recency.'
+    critical: false
+  - id: consequence
+    statement: Prevents navigation from silently reverting desired state into observed truth, prevents a second CLI process from inventing a credential
+      that the running backend does not recognize, and keeps the secret outside the manifest/status surfaces while still making repeated local
+      development practical. Exact observed loopback binding plus positive owner proof also prevents stale or externally exposed endpoints from
+      being opened merely because configuration once requested a familiar port.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Uses configured host/port or newest-launch discovery as the browser target, opens an unready or owner-unproven launch, accepts
+      a non-loopback observed endpoint, creates a new token for an already-running launch, stores/exposes the raw token in Launch Manifest/status/events,
+      or gives navigation/access projection process/lifecycle/rebinding authority.
+    severity: normal
+    misconception_id: desired_observed_conflation
+  evidence_expectations:
+  - backend/src/oh_goon/core/launch_navigation.py:1-75
+  - backend/src/oh_goon/runtime/local_launch_access.py:1-80
+  - backend/src/oh_goon/cli_open.py:1-59
+  - backend/src/oh_goon/runtime/local_launch_binding.py:70-150
+  - backend/src/oh_goon/core/launch_status.py:1-124
+  - backend/src/oh_goon/cli_start.py:20-115
+  - backend/src/oh_goon/repository_tooling/local_access_token.py:1-24
+  - docs/development/LAUNCH_OWNERSHIP.md:166-196
+  - backend/tests/unit/core/test_launch_navigation.py:1-150
+  - backend/tests/unit/test_cli_open.py:1-70
+  - backend/tests/unit/runtime/test_local_launch_access.py:1-21
+  - backend/src/oh_goon/repository_tooling/architecture/_launch_contract_navigation.py:12-31
+- id: Q140
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: The strict backend test fixtures intentionally construct `StrictHostPathAuthority` with `ldd` as their runtime dependency inspector
+      and execute inner strict-plan fixtures that use the POSIX `true` command. `ldd` remains authority-bearing and is declared explicitly by
+      the APP `oh-goon/backend-p0` Goon together with its shell, while `true` belongs to Oh-Goon's fixed sandbox shell-support toolset. Fleet
+      resolves both explicit authority and shell support through admitted deployment path authority, snapshots exact bytes/runtime closure into
+      the immutable run toolchain/runtime root, and exposes only that bounded set through the private test toolchain rather than ambient `/usr/bin`
+      siblings. Changing shell-support membership changes execution-authority identity. The repair must not weaken the fixture, expose `/usr/bin`,
+      hard-code host paths, or make package/network/deployment tools implicit. Long certification progress remains presentation-only through the
+      Q120 direct progress transport; it cannot compensate for missing tool authority or become execution evidence.
+    critical: false
+  - id: ownership_boundary
+    statement: The backend-p0 Goon owns the release-critical authority-bearing Step capability intent for selected P0 tests; Fleet owns the fixed shell-support contract plus host-tool
+      resolution, identity capture, frozen toolchain publication, and runtime closure. The strict test fixture consumes only the admitted sandbox
+      PATH and fails when either explicit authority (such as `ldd`) or required fixed shell support is unavailable. The certification progress
+      renderer owns only bounded liveness presentation and has no tool-admission, repair, fixture, or lifecycle authority.
+    critical: false
+  - id: consequence
+    statement: "Keeps certification hermetic and reproducible: tests receive exactly the runtime inspector they declare instead of accidentally\
+      \ depending on ambient host PATH. It also prevents a tempting but unsafe repair\u2014loosening strict fixtures or exposing host directories\u2014\
+      while preserving visible progress as presentation rather than evidence."
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Removes or weakens the strict `ldd` fixture requirement; makes authority-bearing tools implicit; relies on ambient `/usr/bin` or
+      absolute host paths; treats shell support as unfrozen ambient PATH; omits tool identity/runtime closure; or treats progress output as proof
+      that a missing test capability is acceptable.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  - id: fatal-02
+    statement: Treats the strict backend test fixture or its required-tool list as runtime tool authority, so changing the test is considered
+      sufficient instead of changing the owning Goon declaration/Fleet authority.
+    severity: normal
+    misconception_id: test_as_runtime_authority
+  evidence_expectations:
+  - templates/goons/oh-goon/backend-p0/goon.yml:1-5
+  - templates/goons/oh-goon/backend-p0/README.md:1-9
+  - Makefile:234-250
+  - backend/tests/factories/path_authority.py:1-35
+  - backend/src/oh_goon/core/fleet_plan_tool_requirements.py:35-57
+  - backend/src/oh_goon/integrations/_fleet_plan_host_resources.py:105-160
+  - backend/src/oh_goon/integrations/_fleet_plan_sandbox_launch.py:20-85
+  - backend/tests/unit/runtime/test_plan_templates.py:150-220
+  - scripts/tests/test_app_certification_contract.py:1-138
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_authority_workflow.py:109-175
+- id: Q141
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: '`oh-goon logs` must resolve only the exact workspace binding and exact bound launch, revalidate binding/manifest identity, validate
+      the durable Launch Event stream, and emit a safe versioned projection containing only whitelisted structured activity such as observed bindings
+      and failure metadata. It must not capture or mirror native uvicorn/npm/Vite stdout as a second log authority. `oh-goon stop` must resolve
+      the same exact launch, require the recorded nonterminal launch owner to carry process-birth identity, re-observe the same PID + boot ID
+      + start ticks, acquire a Linux pidfd stable process handle, re-prove the birth identity after handle acquisition, and only then send SIGTERM
+      through the pidfd. PID absence/reuse or unavailable pidfd authority causes refusal. The stop CLI does not publish stopping/stopped/failed
+      lifecycle; the launch owner remains the only lifecycle writer.'
+    critical: false
+  - id: ownership_boundary
+    statement: LocalLaunchBindingStore owns exact current-launch selection; LocalLaunchEventStore owns durable structured events; `safe_launch_log`
+      owns credential/process-safe activity projection; `safe_launch_stop_target` owns read-only stop eligibility; pidfd signaling owns only delivery
+      of SIGTERM to the exact proven process instance. Native runtimes retain their stdout/process mechanics and the launch owner retains lifecycle
+      publication. `logs`/`stop` may not scan launches, infer current state from recency/PID existence, serialize raw manifest/event process payloads,
+      kill arbitrary PIDs, restart/repair a launch, or author lifecycle truth.
+    critical: false
+  - id: consequence
+    statement: Keeps the small local command surface useful without creating ghost process/log/lifecycle ownership. Birth proof plus pidfd closes
+      PID-reuse races, while safe structured logs preserve Launch Manifest's role as an observation projection rather than a duplicate native
+      logging subsystem.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Captures native process stdout into a new Launch log store, selects a launch by newest/mtime scan, treats PID presence as owner
+      identity, calls generic `os.kill(pid)`, signals after birth mismatch, or lets the stop CLI publish terminal lifecycle events.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/core/launch_activity.py:1-88
+  - backend/src/oh_goon/cli_logs.py:1-42
+  - backend/src/oh_goon/core/launch_control.py:1-81
+  - backend/src/oh_goon/cli_stop.py:1-39
+  - backend/tests/unit/core/test_launch_activity.py:1-94
+  - backend/tests/unit/core/test_launch_control.py:1-79
+- id: Q142
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q143
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+- id: Q144
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: "Strict Fleet admission must derive the tools required by the resolved Plan after projecting imported Goons for every selected\
+      \ repository, then prove the configured execution-environment path authority can supply the union before executor queueing, capacity reservation,\
+      \ final Fleet admission, or `RUN_ADMITTED`. An imported Goon that is not applicable to any selected repository contributes no tool requirement;\
+      \ if it is applicable to at least one selected repository, its tools are mandatory. Candidate placement must then independently prove isolation/backend\
+      \ availability and aggregate capacity before the final atomic admission cut. Native workload boundaries that are shared by several canonical\
+      \ Goons must own their tool requirement once at the workload itself\u2014for canonical Make workloads, an immediately adjacent machine-readable\
+      \ Make target annotation is that owner\u2014and the Goon requirements registry may reference that owner rather than copy the list. Static\
+      \ admission must reject a missing owner, owner/command drift, missing authority-bearing grants, shell helpers outside the fixed support\
+      \ contract, or excess explicit authority. The early tool-feasibility result is deliberately not persisted as execution evidence: strict\
+      \ preparation must resolve the same repository-applicable Plan again and revalidate/freeze actual host tools before any effect starts."
+    critical: true
+  - id: ownership_boundary
+    statement: The Make target owns what tools its native workload intrinsically needs; `integrations/workload_execution_requirements.py` parses
+      and identities that owner contract; `goon_static_admission.py` binds canonical Goon Steps to those owners and enforces declared least privilege.
+      Repository import applicability owns which imported Steps exist for one repository. `ExecutorPlacementAdmission` owns the pre-`RUN_ADMITTED`
+      feasibility cut and candidate backend/capacity selection, while deployment `StrictHostPathAuthority` owns which host tools can actually
+      be supplied. `FleetPlanRunExecutor.prepare_strict_run` remains the authoritative post-admission preparation boundary that rechecks and freezes
+      tool bytes, so cheap preflight cannot become stale execution truth.
+    critical: true
+  - id: consequence
+    statement: This converts a deterministic "the selected execution environment cannot run this workload" failure from a post-admission preparation
+      failure into a cheap pre-admission rejection, while preserving correctness for optional imports. Moving shared native workload requirements
+      to the actual workload owner also means one change invalidates every canonical consumer instead of letting two Goons silently disagree.
+      Revalidation during preparation preserves safety under host drift and keeps observed executable identity separate from cheap feasibility.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Admits a strict run before proving repository-applicable required tools exist; requires tools from imports that are not applicable
+      to any selected repository; lets duplicate canonical Goons maintain independent tool lists for the same owned Make workload; treats early
+      feasibility as durable execution evidence; or removes preparation-time revalidation/freezing of actual tool identity.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - Makefile:137-138
+  - Makefile:490-511
+  - backend/src/oh_goon/integrations/workload_execution_requirements.py:1-106
+  - backend/src/oh_goon/services/goon_static_admission.py:21-155
+  - backend/src/oh_goon/services/goon_static_admission.py:320-385
+  - backend/src/oh_goon/integrations/fleet_plan_import_applicability.py:1-86
+  - backend/src/oh_goon/integrations/_fleet_plan_host_resources.py:184-232
+  - backend/src/oh_goon/runtime/_executor_placement.py:59-116
+  - backend/src/oh_goon/runtime/_executor_placement.py:137-197
+  - backend/src/oh_goon/services/fleet_run_lifecycle.py:88-120
+  - backend/src/oh_goon/integrations/fleet_plan_run_execution.py:116-145
+  - backend/tests/unit/runtime/test_goon_static_admission.py:1-125
+  - backend/tests/unit/runtime/test_executor_pool.py:330-370
+  - backend/tests/unit/integrations/test_fleet_plan_cicd_isolation.py:133-220
+- id: Q145
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'Certification static admission must invoke the canonical Goon compiler authority in-process from the installed Oh-Goon package;
+      it must never infer a sibling `oh-goon-goon-compile` executable from `sys.executable`, because native uv may execute an environment console
+      script with a base interpreter whose physical `bin` directory is different. Strict Fleet admission must then reject deterministic repository-applicable
+      host-environment and credential defects, retained-cache reference owner/kind/presence defects, and executor inventory whose immutable backend/isolation/configured
+      CPU-memory-process capacity cannot satisfy one attempt before placement queueing or `RUN_ADMITTED`. Credential preflight validates presence/non-empty/format
+      without retaining secret bytes as evidence. Retained-input preflight validates reference ownership, declared kind, and object presence without
+      hashing potentially multi-gigabyte content. Static executor feasibility distinguishes impossible configured inventory from mutable capacity/operator/physical
+      availability that may legitimately wait. None of these cheap checks is execution truth: preparation must resolve applicability again, capture
+      and validate private host values, lease and verify immutable retained bytes, and revalidate/freeze the selected executor/tool authority
+      before effects. Unknown contributor Make targets should expose the canonical `make help` surface and fail non-zero rather than creating
+      typo aliases or a second command authority.'
+    critical: false
+  - id: ownership_boundary
+    statement: '`certification_frontdoor.py` owns the pre-mutation certification source gate and calls the product-safe `compile_canonical_goons`
+      authority directly; the repository-tooling console command is only an adapter over that same compiler. Repository applicability plus `_fleet_plan_host_resources.py`
+      own cheap host-import/credential feasibility while `capture_host_environment` remains the later private-value capture boundary. `FleetContentStore`
+      owns retained reference metadata and immutable object identity; lifecycle admission may ask it only for cheap owner/kind/presence proof,
+      while strict preparation retains lease/hash/materialization authority. `ExecutorPlacementAdmission` owns immutable configured executor feasibility
+      before queueing and keeps mutable backend/capacity/operator checks in placement. Production composition must inject the same content-store
+      authority into lifecycle and execution consumers. The Makefile owns contributor command discovery; `.DEFAULT` may display `make help` but
+      must still reject the unknown target.'
+    critical: false
+  - id: consequence
+    statement: This removes the exact certification crash where a valid `backend/.venv/bin/oh-goon-workflow` process looked for `oh-goon-goon-compile`
+      beside uv's base CPython instead of inside the project environment. It also moves deterministic secret/input/resource failures ahead of
+      queueing, source/runtime preparation, and expensive retained-content verification while preserving the authoritative owner checks required
+      under drift. The result is faster failure without converting speculative preflight into trusted execution evidence, and a mistyped Make
+      command becomes self-correcting UX instead of another supported alias.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Derives a certification helper executable from `sys.executable`; captures or persists secret credential values as cheap admission
+      evidence; hashes/materializes retained content merely to decide whether queueing is possible; allows a wrong-owner/wrong-kind/missing retained
+      reference or statically impossible executor inventory to enter placement; treats preflight as authoritative proof and removes preparation-time
+      revalidation; or makes unknown Make spellings aliases that duplicate canonical command ownership.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/services/certification_frontdoor.py:41-79
+  - backend/src/oh_goon/integrations/_fleet_plan_host_resources.py:71-135
+  - backend/src/oh_goon/integrations/fleet_content_store.py:265-325
+  - backend/src/oh_goon/services/fleet_run_lifecycle.py:85-139
+  - backend/src/oh_goon/services/fleet_run_lifecycle.py:174-203
+  - backend/src/oh_goon/runtime/_executor_placement.py:82-116
+  - backend/src/oh_goon/runtime/_executor_placement.py:223-261
+  - backend/src/oh_goon/_application_foundation.py:47-67
+  - backend/src/oh_goon/_application_foundation.py:203-217
+  - backend/src/oh_goon/_application_services.py:82-104
+  - Makefile:31-65
+  - scripts/tests/test_certification_frontdoor.py:1-120
+  - scripts/tests/test_app_certification_contract.py:1-138
+  - backend/tests/unit/runtime/test_executor_pool.py:1-430
+  - backend/tests/unit/integrations/test_fleet_content_store.py:1-180
+  - backend/tests/unit/integrations/test_fleet_plan_v26_oci_publish.py:1-220
+  - backend/tests/unit/integrations/test_fleet_plan_v28_kubernetes_set_image.py:1-230
+- id: Q146
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'First-checkout bootstrap must delegate native-tool compatibility to the tools that own it: native uv enforces backend/pyproject.toml
+      requires-python and [tool.uv].required-version, while native npm with frontend/.npmrc engine-strict=true enforces frontend/package.json
+      engines. Oh-Goon may report observed versions and owning declarations but must not parse or re-enforce their semantics; missing or incompatible
+      tools fail through the native materialization command before bootstrap can pass. APP certification must reuse the same native `make init` materialization owner as development and must not introduce a certification-only resolver, dependency cache, or offline replay authority. Long preparation before
+      a Step subprocess exists must publish bounded path-free transient activity through the existing progress/live-output owners, including native materialization and run-preparation activity; those hints are never durable Run truth and machine protocol records remain captured rather than
+      printed as activity. An admitted SQLite journal must use filesystem device/inode identity to prove that the configured path still names
+      the admitted file, while SQLite itself proves database readability and the expected user_version/schema through a real connection. A second
+      raw file reader must not guess SQLite validity from header bytes. One transient SQLite NOTADB/CORRUPT observation on an unchanged admitted
+      inode may trigger only a bounded observation-only re-proof: reconnect without create, re-prove the expected user_version and require SQLite
+      quick_check=ok before continuing. This is not execution retry and must never recreate/repair the database. Stable path replacement, same-inode
+      truncation/corruption, persistent format failure, and wrong schema must all still fail closed.'
+    critical: false
+  - id: ownership_boundary
+    statement: 'backend/pyproject.toml and frontend/package.json own native tool requirements; native uv/npm own compatibility admission, and
+      dependency_resolution_bootstrap.py does not duplicate version semantics. canonical `make init` is the single normal materialization boundary; verification Plans consume that initialized repository, while native uv/npm own dependency materialization and _fleet_plan_run_lineage.py only binds generic retained content when a Plan explicitly requests it. workflow.py captures backend machine protocol but forwards only explicit OH-GOON ACTIVITY
+      records through its transient progress descriptor; GameTapeLiveOutputStore and FleetRunExecution own bounded process-local post-admission
+      preparation activity before Step output. LocalDatabase owns runtime SQLite path identity: filesystem dev/inode proves path continuity and
+      SQLite PRAGMAs/database errors prove the admitted schema/format. LocalDatabase alone owns the bounded same-inode SQLite re-proof, uses non-creating
+      mode=rw for admitted reconnects, and requires quick_check after a transient format observation before continuing. None of these transient/readiness
+      observations may replace durable execution evidence or authoritative revalidation.'
+    critical: false
+  - id: consequence
+    statement: This prevents predictable first-checkout and certification failures from burning minutes before explaining a missing/incompatible
+      native tool or native dependency failure, while preserving committed-lock reproducibility. It also fixes the observed multi-minute apparent certification
+      freeze by exposing real preparation progress before the first Step emits stdout, without inventing a second event history. Finally, it removes
+      a fragile duplicate SQLite parser and avoids converting one transient SQLite format observation into false durable identity loss, while
+      retaining fail-closed detection for actual file replacement, truncation, persistent corruption, or schema drift. No certification Step or
+      external effect is replayed.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Parses or copies uv/Node/npm compatibility into another authoritative checker; converts observed versions into synthetic compatibility
+      admission decisions; treats native materialization progress or transient activity as durable execution evidence; buffers all preparation activity until completion; prints backend machine protocol as human progress; validates a live SQLite database by a second raw header reader instead
+      of SQLite; ignores dev/inode replacement; recreates/repairs the admitted database; retries certification execution/effects because SQLite
+      identity observation failed; accepts a transient format error without re-proving schema plus quick_check; or continues after persistent
+      SQLite format/schema identity is lost.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - backend/src/oh_goon/integrations/_fleet_plan_run_lineage.py:289-361
+  - backend/src/oh_goon/workflow.py:170-330
+  - backend/src/oh_goon/runtime/game_tape_live_output.py:20-125
+  - backend/src/oh_goon/services/fleet_run_execution.py:25-143
+  - backend/src/oh_goon/runtime/database.py:25-80
+  - backend/src/oh_goon/runtime/database.py:415-535
+  - scripts/tests/test_dependency_resolution.py:1-35
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - scripts/tests/test_workflow_run.py:235-290
+  - backend/tests/unit/runtime/test_database_path_ownership.py:1-122
+  - backend/tests/unit/entrypoints/test_cli_plan_progress.py:250-298
+- id: Q147
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: true
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: true
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - backend/tests/unit/runtime/test_storage_lifecycle.py:126-224
+- id: Q198
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
+      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    critical: false
+  - id: ownership_boundary
+    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
+      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    critical: false
+  - id: consequence
+    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
+      the lean semantic `make certify` path release-critical.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
+      path instead of delegating to native tools.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - backend/src/oh_goon/services/certification_frontdoor.py:1-120
+- id: Q199
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: "Strict Fleet admission must derive the tools required by the resolved Plan after projecting imported Goons for every selected\
+      \ repository, then prove the configured execution-environment path authority can supply the union before executor queueing, capacity reservation,\
+      \ final Fleet admission, or `RUN_ADMITTED`. An imported Goon that is not applicable to any selected repository contributes no tool requirement;\
+      \ if it is applicable to at least one selected repository, its tools are mandatory. Candidate placement must then independently prove isolation/backend\
+      \ availability and aggregate capacity before the final atomic admission cut. Native workload boundaries that are shared by several canonical\
+      \ Goons must own their tool requirement once at the workload itself\u2014for canonical Make workloads, an immediately adjacent machine-readable\
+      \ Make target annotation is that owner\u2014and the Goon requirements registry may reference that owner rather than copy the list. Static\
+      \ admission must reject a missing owner, owner/command drift, missing authority-bearing grants, shell helpers outside the fixed support\
+      \ contract, or excess explicit authority. The early tool-feasibility result is deliberately not persisted as execution evidence: strict\
+      \ preparation must resolve the same repository-applicable Plan again and revalidate/freeze actual host tools before any effect starts."
+    critical: true
+  - id: ownership_boundary
+    statement: The Make target owns what tools its native workload intrinsically needs; `integrations/workload_execution_requirements.py` parses
+      and identities that owner contract; `goon_static_admission.py` binds canonical Goon Steps to those owners and enforces declared least privilege.
+      Repository import applicability owns which imported Steps exist for one repository. `ExecutorPlacementAdmission` owns the pre-`RUN_ADMITTED`
+      feasibility cut and candidate backend/capacity selection, while deployment `StrictHostPathAuthority` owns which host tools can actually
+      be supplied. `FleetPlanRunExecutor.prepare_strict_run` remains the authoritative post-admission preparation boundary that rechecks and freezes
+      tool bytes, so cheap preflight cannot become stale execution truth.
+    critical: true
+  - id: consequence
+    statement: This converts a deterministic "the selected execution environment cannot run this workload" failure from a post-admission preparation
+      failure into a cheap pre-admission rejection, while preserving correctness for optional imports. Moving shared native workload requirements
+      to the actual workload owner also means one change invalidates every canonical consumer instead of letting two Goons silently disagree.
+      Revalidation during preparation preserves safety under host drift and keeps observed executable identity separate from cheap feasibility.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut,
+      and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Admits a strict run before proving repository-applicable required tools exist; requires tools from imports that are not applicable
+      to any selected repository; lets duplicate canonical Goons maintain independent tool lists for the same owned Make workload; treats early
+      feasibility as durable execution evidence; or removes preparation-time revalidation/freezing of actual tool identity.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - Makefile:137-138
+  - Makefile:490-511
+  - backend/src/oh_goon/integrations/workload_execution_requirements.py:1-106
+  - backend/src/oh_goon/services/goon_static_admission.py:21-155
+  - backend/src/oh_goon/services/goon_static_admission.py:320-385
+  - backend/src/oh_goon/integrations/fleet_plan_import_applicability.py:1-86
+  - backend/src/oh_goon/integrations/_fleet_plan_host_resources.py:184-232
+  - backend/src/oh_goon/runtime/_executor_placement.py:59-116
+  - backend/src/oh_goon/runtime/_executor_placement.py:137-197
+  - backend/src/oh_goon/services/fleet_run_lifecycle.py:88-120
+  - backend/src/oh_goon/integrations/fleet_plan_run_execution.py:116-145
+  - backend/tests/unit/runtime/test_goon_static_admission.py:1-125
+  - backend/tests/unit/runtime/test_executor_pool.py:330-370
+  - backend/tests/unit/integrations/test_fleet_plan_cicd_isolation.py:133-220
+- id: Q200
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'Certification static admission must invoke the canonical Goon compiler authority in-process from the installed Oh-Goon package;
+      it must never infer a sibling `oh-goon-goon-compile` executable from `sys.executable`, because native uv may execute an environment console
+      script with a base interpreter whose physical `bin` directory is different. Strict Fleet admission must then reject deterministic repository-applicable
+      host-environment and credential defects, retained-cache reference owner/kind/presence defects, and executor inventory whose immutable backend/isolation/configured
+      CPU-memory-process capacity cannot satisfy one attempt before placement queueing or `RUN_ADMITTED`. Credential preflight validates presence/non-empty/format
+      without retaining secret bytes as evidence. Retained-input preflight validates reference ownership, declared kind, and object presence without
+      hashing potentially multi-gigabyte content. Static executor feasibility distinguishes impossible configured inventory from mutable capacity/operator/physical
+      availability that may legitimately wait. None of these cheap checks is execution truth: preparation must resolve applicability again, capture
+      and validate private host values, lease and verify immutable retained bytes, and revalidate/freeze the selected executor/tool authority
+      before effects. Unknown contributor Make targets should expose the canonical `make help` surface and fail non-zero rather than creating
+      typo aliases or a second command authority.'
+    critical: false
+  - id: ownership_boundary
+    statement: '`certification_frontdoor.py` owns the pre-mutation certification source gate and calls the product-safe `compile_canonical_goons`
+      authority directly; the repository-tooling console command is only an adapter over that same compiler. Repository applicability plus `_fleet_plan_host_resources.py`
+      own cheap host-import/credential feasibility while `capture_host_environment` remains the later private-value capture boundary. `FleetContentStore`
+      owns retained reference metadata and immutable object identity; lifecycle admission may ask it only for cheap owner/kind/presence proof,
+      while strict preparation retains lease/hash/materialization authority. `ExecutorPlacementAdmission` owns immutable configured executor feasibility
+      before queueing and keeps mutable backend/capacity/operator checks in placement. Production composition must inject the same content-store
+      authority into lifecycle and execution consumers. The Makefile owns contributor command discovery; `.DEFAULT` may display `make help` but
+      must still reject the unknown target.'
+    critical: false
+  - id: consequence
+    statement: This removes the exact certification crash where a valid `backend/.venv/bin/oh-goon-workflow` process looked for `oh-goon-goon-compile`
+      beside uv's base CPython instead of inside the project environment. It also moves deterministic secret/input/resource failures ahead of
+      queueing, source/runtime preparation, and expensive retained-content verification while preserving the authoritative owner checks required
+      under drift. The result is faster failure without converting speculative preflight into trusted execution evidence, and a mistyped Make
+      command becomes self-correcting UX instead of another supported alias.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut,
+      and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Derives a certification helper executable from `sys.executable`; captures or persists secret credential values as cheap admission
+      evidence; hashes/materializes retained content merely to decide whether queueing is possible; allows a wrong-owner/wrong-kind/missing retained
+      reference or statically impossible executor inventory to enter placement; treats preflight as authoritative proof and removes preparation-time
+      revalidation; or makes unknown Make spellings aliases that duplicate canonical command ownership.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/services/certification_frontdoor.py:41-79
+  - backend/src/oh_goon/integrations/_fleet_plan_host_resources.py:71-135
+  - backend/src/oh_goon/integrations/fleet_content_store.py:265-325
+  - backend/src/oh_goon/services/fleet_run_lifecycle.py:85-139
+  - backend/src/oh_goon/services/fleet_run_lifecycle.py:174-203
+  - backend/src/oh_goon/runtime/_executor_placement.py:82-116
+  - backend/src/oh_goon/runtime/_executor_placement.py:223-261
+  - backend/src/oh_goon/_application_foundation.py:47-67
+  - backend/src/oh_goon/_application_foundation.py:203-217
+  - backend/src/oh_goon/_application_services.py:82-104
+  - Makefile:31-65
+  - scripts/tests/test_certification_frontdoor.py:1-120
+  - scripts/tests/test_app_certification_contract.py:1-138
+  - backend/tests/unit/runtime/test_executor_pool.py:1-430
+  - backend/tests/unit/integrations/test_fleet_content_store.py:1-180
+  - backend/tests/unit/integrations/test_fleet_plan_v26_oci_publish.py:1-220
+  - backend/tests/unit/integrations/test_fleet_plan_v28_kubernetes_set_image.py:1-230
+- id: Q201
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: 'First-checkout bootstrap must delegate native-tool compatibility to the tools that own it: native uv enforces backend/pyproject.toml
+      requires-python and [tool.uv].required-version, while native npm with frontend/.npmrc engine-strict=true enforces frontend/package.json
+      engines. Oh-Goon may report observed versions and owning declarations but must not parse or re-enforce their semantics; missing or incompatible
+      tools fail through the native materialization command before bootstrap can pass. APP certification must reuse the same native `make init` materialization owner as development and must not introduce a certification-only resolver, dependency cache, or offline replay authority. Long preparation before
+      a Step subprocess exists must publish bounded path-free transient activity through the existing progress/live-output owners, including native materialization and run-preparation activity; those hints are never durable Run truth and machine protocol records remain captured rather than
+      printed as activity. An admitted SQLite journal must use filesystem device/inode identity to prove that the configured path still names
+      the admitted file, while SQLite itself proves database readability and the expected user_version/schema through a real connection. A second
+      raw file reader must not guess SQLite validity from header bytes. One transient SQLite NOTADB/CORRUPT observation on an unchanged admitted
+      inode may trigger only a bounded observation-only re-proof: reconnect without create, re-prove the expected user_version and require SQLite
+      quick_check=ok before continuing. This is not execution retry and must never recreate/repair the database. Stable path replacement, same-inode
+      truncation/corruption, persistent format failure, and wrong schema must all still fail closed.'
+    critical: false
+  - id: ownership_boundary
+    statement: 'backend/pyproject.toml and frontend/package.json own native tool requirements; native uv/npm own compatibility admission, and
+      dependency_resolution_bootstrap.py does not duplicate version semantics. canonical `make init` is the single normal materialization boundary; verification Plans consume that initialized repository, while native uv/npm own dependency materialization and _fleet_plan_run_lineage.py only binds generic retained content when a Plan explicitly requests it. workflow.py captures backend machine protocol but forwards only explicit OH-GOON ACTIVITY
+      records through its transient progress descriptor; GameTapeLiveOutputStore and FleetRunExecution own bounded process-local post-admission
+      preparation activity before Step output. LocalDatabase owns runtime SQLite path identity: filesystem dev/inode proves path continuity and
+      SQLite PRAGMAs/database errors prove the admitted schema/format. LocalDatabase alone owns the bounded same-inode SQLite re-proof, uses non-creating
+      mode=rw for admitted reconnects, and requires quick_check after a transient format observation before continuing. None of these transient/readiness
+      observations may replace durable execution evidence or authoritative revalidation.'
+    critical: false
+  - id: consequence
+    statement: This prevents predictable first-checkout and certification failures from burning minutes before explaining a missing/incompatible
+      native tool or native dependency failure, while preserving committed-lock reproducibility. It also fixes the observed multi-minute apparent certification
+      freeze by exposing real preparation progress before the first Step emits stdout, without inventing a second event history. Finally, it removes
+      a fragile duplicate SQLite parser and avoids converting one transient SQLite format observation into false durable identity loss, while
+      retaining fail-closed detection for actual file replacement, truncation, persistent corruption, or schema drift. No certification Step or
+      external effect is replayed.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut,
+      and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Parses or copies uv/Node/npm compatibility into another authoritative checker; converts observed versions into synthetic compatibility
+      admission decisions; treats native materialization progress or transient activity as durable execution evidence; buffers all preparation activity until completion; prints backend machine protocol as human progress; validates a live SQLite database by a second raw header reader instead
+      of SQLite; ignores dev/inode replacement; recreates/repairs the admitted database; retries certification execution/effects because SQLite
+      identity observation failed; accepts a transient format error without re-proving schema plus quick_check; or continues after persistent
+      SQLite format/schema identity is lost.
+    severity: normal
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - backend/src/oh_goon/integrations/_fleet_plan_run_lineage.py:289-361
+  - backend/src/oh_goon/workflow.py:170-330
+  - backend/src/oh_goon/runtime/game_tape_live_output.py:20-125
+  - backend/src/oh_goon/services/fleet_run_execution.py:25-143
+  - backend/src/oh_goon/runtime/database.py:25-80
+  - backend/src/oh_goon/runtime/database.py:415-535
+  - scripts/tests/test_dependency_resolution.py:1-35
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - scripts/tests/test_workflow_run.py:235-290
+  - backend/tests/unit/runtime/test_database_path_ownership.py:1-122
+  - backend/tests/unit/entrypoints/test_cli_plan_progress.py:250-298
+- id: Q202
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: >
+      Storage lifecycle must distinguish durable Oh-Goon certification/control state from unclassified bytes that happen to sit below an Oh-Goon cache root and from native package-manager caches that Oh-Goon does not own.
+    critical: true
+  - id: ownership_boundary
+    statement: >
+      storage_lifecycle.py owns the current durable application/certification inventory. Oh-Goon has no dependency-cache lifecycle or historical-cache recognizer: bytes below an Oh-Goon cache root without a current inventory owner are unclassified, reporting-only, and receive no automatic cleanup authority. Native uv/npm/Playwright caches remain native-tool authority.
+    critical: true
+  - id: consequence
+    statement: >
+      Generic cleanup cannot delete durable control state, unclassified cache bytes, or native package-manager caches merely to make certification reproducible. Obsolete Oh-Goon cache commands and transitional cache readers do not exist.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: >
+      Treats uv/npm/Playwright caches as Oh-Goon-owned certification state, infers cleanup authority from an old cache pathname, makes cache presence part of readiness, or allows generic cache cleanup to remove durable certification/control state.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/runtime/storage_lifecycle.py:410-450
+  - backend/tests/unit/runtime/test_storage_lifecycle.py:95-155
+  - docs/DEVELOPMENT.md:120-143
+- id: Q220
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: >
+      generated/release/static is a release-artifact staging surface, not a source/bootstrap prerequisite. Ordinary make init, APP dependency materialization, source normalization, and source ZIP construction must neither require nor fabricate it. The release builder creates staging only after frontend bytes exist, and the Hatch build hook consumes those bytes only for a standard wheel.
+    critical: false
+  - id: ownership_boundary
+    statement: >
+      Release packaging is the single lifecycle owner for built UI bytes. Local release and isolated wheel-build contexts may materialize release staging inside their own release workspace, while bootstrap/source layers only transport source inputs or verify contracts and never compensate with empty directories, placeholder archive members, or editable-build exceptions.
+    critical: false
+  - id: consequence
+    statement: >
+      A clean extracted source can perform native editable materialization inside APP certification without depending on release staging, while standard wheel construction still fails closed when the release owner has not produced a real built UI.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: >
+      Makes make init, source cleanup, source ZIP construction, or editable Hatch materialization create an empty generated/release/static placeholder merely to satisfy release packaging.
+    severity: normal
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/RELEASE_REPRODUCIBILITY.md:1-17
+  - backend/hatch_build.py:1-40
+  - backend/src/oh_goon/repository_tooling/source_normalization.py:1-115
+  - backend/src/oh_goon/repository_tooling/release/package_slim.py:380-430
+  - scripts/release/build_release.sh:7-44
+  - scripts/tests/test_release_build_boundary.py:1-93

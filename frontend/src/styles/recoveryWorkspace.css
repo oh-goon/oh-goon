@@ -1,0 +1,20 @@
+.recovery-summary .summary-strip{margin-top:var(--space-large);}.recovery-list{display:grid;gap:var(--space-large);}.recovery-list .recipe-card{display:grid;gap:var(--space-medium);}.recovery-findings{display:grid;gap:var(--space-medium);padding:0;margin:0;list-style:none;}.recovery-findings li{display:grid;gap:var(--space-xsmall);padding:var(--space-medium);border:1px solid var(--border-subtle);border-radius:var(--radius-medium);background:var(--surface-subtle);}.detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--space-small);margin:var(--space-medium) 0 0;}.detail-grid>div{min-width:0;padding:var(--space-medium);border-radius:var(--radius-medium);background:var(--surface-subtle);}.detail-grid dt{color:var(--text-muted);font-size:.72rem;font-weight:700;}.detail-grid dd{margin:4px 0 0;overflow-wrap:anywhere;}
+
+/* UX continuation — Recovery: abnormal facts read as a queue, not a dashboard of cards. */
+.recovery-summary{display:grid;gap:16px;}
+.recovery-summary .summary-strip{margin-top:0;overflow:hidden;border:1px solid var(--border-subtle);border-radius:var(--radius-xlarge);background:var(--surface-panel);box-shadow:var(--shadow-low);}
+.recovery-list{gap:0;overflow:hidden;border:1px solid var(--border-subtle);border-radius:var(--radius-xlarge);background:var(--surface-panel);box-shadow:var(--shadow-low);}
+.recovery-list .recipe-card{gap:10px;padding:14px 16px;border:0;border-top:1px solid var(--border-subtle);border-radius:0;background:transparent;}
+.recovery-list .recipe-card:first-child{border-top:0;}
+.recovery-list .recipe-card:hover{background:var(--surface-subtle);}
+.recovery-list .recipe-card>p{margin:0;color:var(--text-secondary);font-size:.82rem;line-height:1.48;}
+.recovery-list .recipe-card>.action-row{justify-content:flex-end;}
+.detail-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;margin:2px 0 0;}
+.detail-grid>div{padding:8px 10px;border:1px solid var(--border-subtle);border-radius:var(--radius-small);background:var(--ice-subtle-background);}
+.recovery-findings{gap:0;overflow:hidden;border:1px solid var(--border-subtle);border-radius:var(--radius-xlarge);background:var(--surface-panel);box-shadow:var(--shadow-low);}
+.recovery-findings li{padding:11px 13px;border:0;border-top:1px solid var(--border-subtle);border-radius:0;background:transparent;}
+.recovery-findings li:first-child{border-top:0;}
+.recovery-findings li:hover{background:var(--surface-subtle);}
+.recovery-findings li>strong{font-family:var(--font-mono);font-size:.78rem;}
+.recovery-findings li>span{color:var(--text-secondary);line-height:1.45;}
+.recovery-findings li>small{color:var(--text-muted);}

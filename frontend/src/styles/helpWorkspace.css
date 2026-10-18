@@ -1,0 +1,19 @@
+.help-layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:28px;}.help-nav{position:sticky;top:calc(var(--layout-shell-height)+18px);display:grid;align-content:start;gap:4px;height:fit-content;}.help-nav button{border:0;border-radius:var(--radius-small);padding:8px 10px;text-align:left;color:var(--text-secondary);background:transparent;font-weight:700;}.help-nav button:hover{color:var(--action-primary);background:var(--action-primary-soft);}.help-content{display:grid;gap:18px;}.help-article{scroll-margin-top:calc(var(--layout-shell-height)+22px);padding:24px;border:1px solid var(--border-subtle);border-radius:var(--radius-large);background:var(--surface-panel);box-shadow:var(--shadow-low);}.help-article h2{margin-top:0;}.help-article p,.help-article li{color:var(--text-secondary);line-height:1.65;}.help-callout{display:grid;gap:5px;margin-top:14px;padding:14px 16px;border-radius:var(--radius-medium);color:var(--status-warning);background:var(--status-warning-surface);}
+
+/* UX continuation — Help: reading surface instead of a wall of standalone cards. */
+.page--help{--help-readable:780px;}
+.help-layout{grid-template-columns:210px minmax(0,1fr);gap:34px;align-items:start;}
+.help-nav{gap:2px;padding:8px;border:1px solid var(--border-subtle);border-radius:var(--radius-large);background:var(--ice-subtle-background);box-shadow:var(--shadow-low);}
+.help-nav::before{content:"";display:block;height:2px;margin:1px 7px 7px;border-radius:var(--radius-pill);background:var(--status-info);opacity:.72;}
+.help-nav button{min-height:38px;padding:8px 10px;border-radius:9px;font-size:.8rem;font-weight:720;}
+.help-nav button:hover,.help-nav button:focus-visible{color:var(--text-primary);background:var(--action-primary-soft);outline:none;}
+.help-content{display:block;max-width:var(--help-readable);overflow:hidden;border:1px solid var(--border-subtle);border-radius:var(--radius-xlarge);background:var(--surface-panel);box-shadow:var(--shadow-low);}
+.help-article{padding:28px 30px;border:0;border-top:1px solid var(--border-subtle);border-radius:0;background:transparent;box-shadow:none;}
+.help-article:first-child{border-top:0;}
+.help-article:target{background:var(--ice-subtle-background);}
+.help-article h2{margin:0 0 10px;font-size:1.2rem;letter-spacing:-.015em;}
+.help-article p,.help-article li{font-size:.9rem;line-height:1.7;}
+.help-article ol,.help-article ul{padding-left:1.25rem;}
+.help-callout{margin-top:16px;padding:14px 16px;border:1px solid var(--status-warning-border);border-radius:var(--radius-large);}
+@media(max-width:1040px){.help-layout{gap:16px}.help-nav{padding:6px;white-space:nowrap}.help-nav::before{display:none}.help-content{max-width:none;width:100%}}
+@media(max-width:680px){.help-article{padding:22px 18px}}

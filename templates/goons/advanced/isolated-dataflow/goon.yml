@@ -1,0 +1,25 @@
+version: 1
+inputs:
+  tag:
+    type: string
+    non_empty: true
+    default: dev
+  test_timeout_seconds:
+    type: integer
+    min: 1
+    max: 3600
+    default: 600
+env:
+  RELEASE_TOKEN:
+    from: host
+steps:
+- id: prepare
+  run: sh ./ci/prepare.sh --tag ${{ inputs.tag }}
+  outputs:
+    RELEASE_TAG: .fleet/release-tag.txt
+- run: uv run pytest --timeout ${{ inputs.test_timeout_seconds }}
+- run: uv build
+- run: sh ./ci/publish.sh ${{ steps.prepare.outputs.RELEASE_TAG }}-beta
+  imports:
+    env:
+    - RELEASE_TOKEN

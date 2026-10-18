@@ -1,0 +1,13 @@
+# B22 — B12E-C2 owner-bound read-only Linux observation (development only)
+
+**Canonical source of authority:** `FleetRunLifecycle.local_lace_recovery_owner` → `OriginalFleetLocalLaceRecoveryOwner`, its admitted executor generation, signer key, epoch/lease and original signed causal journal. B22 does **not** create a new signer, journal publisher, scheduler, cleanup owner or physical classifier.
+
+**One shared mechanism:** `integrations/linux_physical_observer.observe_kernel` (B21). The B13–B19 operator-scope diagnostic still uses the same reader but remains an unrelated **read-only diagnostic projection**, never invoked by Fleet.
+
+**New original-owner entrypoint:** `OriginalFleetLocalLaceRecoveryOwner.sample_recovery_physical_unqualified` validates the authenticated original admission, `RESOURCE_INTENT`, matching current cleanup-only claim, exact journal-recorded allocation and orphan inventory, configured executor generation and original issuer. The typed sampling scope must match signed Run/subject, cgroup path/device/inode, a PID + start time in the inventoried cgroup membership and the allocated network handles. The original lease and authority are checked in a Fleet session transaction before and after a **single** read-only kernel observation. Changed control/journal lineage, cancellation, lease, claim or subject aborts without a receipt. No caller JSON is parsed or used as Run admission.
+
+**Missing authority:** Mount target names are still supplied as bounded, read-only observation hints, *not signed Run-owned mount target facts*. An empty prior cgroup inventory has no birth-identified PID and is deliberately rejected by this first positive-identity sampling slice. Independent Linux observer custody and exact real cleanup-to-absence convergence are not proven. The returned immutable `OriginalRecoveryPhysicalSample` can **never** claim absence/quiescence/teardown or authorize effects, and is never appended to the causal journal.
+
+**X0 checks:** Exactly one original-owner call to the same shared `observe_kernel`, zero physical journal writes by the scope binder, no diagnostic CLI call/import from authority-bearing code. Regression coverage includes unknown signer, executor, subject, intent, inventory, live lease, cancellation and mid-observation takeovers, plus a dynamic architecture mutation injecting a duplicate reader.
+
+**Next:** B12E-C2 completion requires authenticating *every* physical resource target, signer/root provisioning, an independent native observer and producer integration through the original fact owner. C3–C6 require bounded physical convergence and journal/Enforcer proof. B22 is not Gate A/B, APP PASS or release.

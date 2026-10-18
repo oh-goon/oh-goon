@@ -1,0 +1,12 @@
+{
+  "frontend": {
+    "branches": 10.0,
+    "functions": 15.0,
+    "lines": 15.0,
+    "statements": 15.0
+  },
+  "python": {
+    "branches": 80.0,
+    "lines": 88.43
+  }
+}

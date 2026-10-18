@@ -1,0 +1,2586 @@
+{
+  "basis": "canonical shipped template stores / compile snapshots",
+  "limitation": "lexical occurrence counts are authoring measurements, not semantic parsing",
+  "metrics": {
+    "goon_packages": 41,
+    "import_occurrences": 50,
+    "lexical_from": 23,
+    "lexical_goons": 28,
+    "lexical_inputs": 37,
+    "lexical_outputs": 10,
+    "lexical_pass": 5,
+    "lexical_run": 36,
+    "lexical_steps": 37,
+    "lexical_uses": 6,
+    "lexical_with": 3,
+    "plan_packages": 24,
+    "public_output_expression_bytes": 735,
+    "public_output_mappings": 15,
+    "repeated_import_keys": 0,
+    "unresolved_readme_links": 0
+  },
+  "packages": [
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 1,
+        "pass": 0,
+        "run": 4,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "teaching-example",
+      "inputs_defined": [
+        "tag",
+        "test_timeout_seconds"
+      ],
+      "inputs_projected": [],
+      "key": "advanced/isolated-dataflow",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "prepare",
+          "kind": "command"
+        },
+        {
+          "id": "pytest",
+          "kind": "command"
+        },
+        {
+          "id": "uv",
+          "kind": "command"
+        },
+        {
+          "id": "sh",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/advanced/isolated-dataflow/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "28614dcfb5767afae64b1d47c37ab50376fa3ae0ee30e6ecf9a193eb997f3632",
+      "source_path": "templates/goons/advanced/isolated-dataflow/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 1,
+        "pass": 2,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 1
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "kubernetes_api_hostname",
+        "namespace",
+        "deployment",
+        "container",
+        "image"
+      ],
+      "key": "kubernetes/release",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "kubernetes-set-image",
+          "import": "kubernetes/set-image",
+          "kind": "goon"
+        },
+        {
+          "id": "kubernetes-rollout-verify",
+          "import": "kubernetes/rollout-verify",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "KUBERNETES_RESOURCE_VERSION",
+          "source": "${{ goons.kubernetes-set-image.outputs.KUBERNETES_RESOURCE_VERSION }}"
+        },
+        {
+          "name": "KUBERNETES_GENERATION",
+          "source": "${{ goons.kubernetes-set-image.outputs.KUBERNETES_GENERATION }}"
+        },
+        {
+          "name": "KUBERNETES_IMAGE",
+          "source": "${{ goons.kubernetes-set-image.outputs.KUBERNETES_IMAGE }}"
+        }
+      ],
+      "readme_path": "templates/goons/kubernetes/release/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "052eb3a94fcb4ea63a10f91604cb2a196c9741c554b519fcbb3c8f9508b0c404",
+      "source_path": "templates/goons/kubernetes/release/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 2,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 1,
+        "uses": 1,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [
+        "kubernetes_api_hostname",
+        "namespace",
+        "deployment",
+        "container",
+        "expected_generation",
+        "expected_image"
+      ],
+      "inputs_projected": [],
+      "key": "kubernetes/rollout-verify",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "verify",
+          "kind": "kubernetes_rollout_verify"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/kubernetes/rollout-verify/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "0335220d291f415ee9b7483eb4925acc484eff50d2c8cd7cbc78e50ec33f785b",
+      "source_path": "templates/goons/kubernetes/rollout-verify/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 2,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 1,
+        "pass": 0,
+        "run": 0,
+        "steps": 1,
+        "uses": 1,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [
+        "kubernetes_api_hostname",
+        "namespace",
+        "deployment",
+        "container",
+        "image"
+      ],
+      "inputs_projected": [],
+      "key": "kubernetes/set-image",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "commit",
+          "kind": "kubernetes_set_image"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "KUBERNETES_RESOURCE_VERSION",
+          "source": "${{ steps.commit.outputs.KUBERNETES_RESOURCE_VERSION }}"
+        },
+        {
+          "name": "KUBERNETES_GENERATION",
+          "source": "${{ steps.commit.outputs.KUBERNETES_GENERATION }}"
+        },
+        {
+          "name": "KUBERNETES_IMAGE",
+          "source": "${{ steps.commit.outputs.KUBERNETES_IMAGE }}"
+        }
+      ],
+      "readme_path": "templates/goons/kubernetes/set-image/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "b741d2497cbf3b59e7eba4c76b2757707a244076775f204344c8d768150e7588",
+      "source_path": "templates/goons/kubernetes/set-image/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "teaching-example",
+      "inputs_defined": [
+        "random_seed",
+        "test_size_percent",
+        "minimum_accuracy_percent",
+        "max_iterations"
+      ],
+      "inputs_projected": [],
+      "key": "ml/iris-train",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "iris-train",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/ml/iris-train/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "3f17cc9c0552b9155466626aa3b0432bb0b665acfe05406acda28fc38b24075d",
+      "source_path": "templates/goons/ml/iris-train/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 1,
+        "uses": 1,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [
+        "base_registry_hostname",
+        "containerfile",
+        "context",
+        "platform"
+      ],
+      "inputs_projected": [],
+      "key": "oci/image",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "build",
+          "kind": "oci_build"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oci/image/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "75316a2e287b6c3fdc3dc7c6396fbb0d25d565a590c5751d78e441d74ee5e90e",
+      "source_path": "templates/goons/oci/image/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 3,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 1,
+        "pass": 0,
+        "run": 0,
+        "steps": 1,
+        "uses": 1,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [
+        "source_workspace",
+        "publish_registry_hostname",
+        "publish_repository"
+      ],
+      "inputs_projected": [],
+      "key": "oci/publish",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "publish",
+          "kind": "oci_publish"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "OCI_DIGEST",
+          "source": "${{ steps.publish.outputs.OCI_DIGEST }}"
+        },
+        {
+          "name": "OCI_REFERENCE",
+          "source": "${{ steps.publish.outputs.OCI_REFERENCE }}"
+        }
+      ],
+      "readme_path": "templates/goons/oci/publish/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "fa0761b651088ee3741da2c1e7f755ca7277bf041ed3741e5ac3d78c5790c714",
+      "source_path": "templates/goons/oci/publish/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 1,
+        "pass": 2,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 1
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "base_registry_hostname",
+        "publish_registry_hostname",
+        "publish_repository",
+        "containerfile",
+        "context",
+        "platform"
+      ],
+      "key": "oci/publish-image",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "oci-image",
+          "import": "oci/image",
+          "kind": "goon"
+        },
+        {
+          "id": "oci-publish",
+          "import": "oci/publish",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "OCI_DIGEST",
+          "source": "${{ goons.oci-publish.outputs.OCI_DIGEST }}"
+        },
+        {
+          "name": "OCI_REFERENCE",
+          "source": "${{ goons.oci-publish.outputs.OCI_REFERENCE }}"
+        }
+      ],
+      "readme_path": "templates/goons/oci/publish-image/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "f8903e177b98f19711093a0ed6067607febd9532f50d5a9c5a7e744cb40334ce",
+      "source_path": "templates/goons/oci/publish-image/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 2,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 1,
+        "pass": 0,
+        "run": 0,
+        "steps": 1,
+        "uses": 1,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [
+        "registry_hostname",
+        "repository",
+        "tag",
+        "expected_digest"
+      ],
+      "inputs_projected": [],
+      "key": "oci/tag-assert",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "assert",
+          "kind": "oci_tag_assert"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "OCI_TAG_DIGEST",
+          "source": "${{ steps.assert.outputs.OCI_TAG_DIGEST }}"
+        },
+        {
+          "name": "OCI_TAG_RESOLVED_REFERENCE",
+          "source": "${{ steps.assert.outputs.OCI_TAG_RESOLVED_REFERENCE }}"
+        }
+      ],
+      "readme_path": "templates/goons/oci/tag-assert/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "fb7289e25c2b8668c7905ff7d85f5868688b38b48bee11810d9b0e5652b09151",
+      "source_path": "templates/goons/oci/tag-assert/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/architecture",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/architecture/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "038c93f451935f76c0176a5ec066164095a3f26f39643e5b825388c0885603f3",
+      "source_path": "templates/goons/oh-goon/architecture/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/backend-p0",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/backend-p0/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "09bc4069523a838d05ef17f1a404fe82b88f0246abc22e37944d9b2431ba66ae",
+      "source_path": "templates/goons/oh-goon/backend-p0/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/backend-p1",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/backend-p1/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "c424c1be405465763868bf72c7e408136ca674c35037ea03a22b3414fccd925d",
+      "source_path": "templates/goons/oh-goon/backend-p1/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/backend-tests",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/backend-tests/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "7f62a6a680d737df0739cad098f226d63b3c9fa576a66236c7ad6d7de9607662",
+      "source_path": "templates/goons/oh-goon/backend-tests/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/browser-engine-preflight",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/browser-engine-preflight/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "7c708ec96cbc751d74ec3350640ac2084d9452b06282ce710936f7126c361469",
+      "source_path": "templates/goons/oh-goon/browser-engine-preflight/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/browser-harness-preflight",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/browser-harness-preflight/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "d625c4ccf33ad24f3aa9d5cfc0df52288ca364e8f23b6e5240bacae5c988cbc9",
+      "source_path": "templates/goons/oh-goon/browser-harness-preflight/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/browser-localhost-transport-preflight",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/browser-localhost-transport-preflight/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "e45b6e8e509bdefcd9d947c3550cca82d8c2c05262462e3e9305d32e232aac15",
+      "source_path": "templates/goons/oh-goon/browser-localhost-transport-preflight/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/browser-required",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/browser-required/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "9d0994fb173ef6de1559df926073f1d4424b5c2e8531516e2321d0cbbac5f769",
+      "source_path": "templates/goons/oh-goon/browser-required/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/browser-runtime-preflight",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/browser-runtime-preflight/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "e18ca227f26af640d62a593e6198ce35bd660d0664011782ae2058d8d673dcee",
+      "source_path": "templates/goons/oh-goon/browser-runtime-preflight/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/browser-targeted",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/browser-targeted/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "143395cb51e95eb110fbd388eb078831b0e4224455d86ae2ef94fbe57d8018c1",
+      "source_path": "templates/goons/oh-goon/browser-targeted/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/frontend-functional",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/frontend-functional/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "5ade92aefa9babd93f46376ece07d0070b300fc4125406c70f6d9c1401cd9001",
+      "source_path": "templates/goons/oh-goon/frontend-functional/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/generated-contracts",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/generated-contracts/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "b17c36bbe8dcfcd245ea67e7bdfdddb3a88501881340b42066078103d482b5a1",
+      "source_path": "templates/goons/oh-goon/generated-contracts/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/integration-contract",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/integration-contract/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "fea6dac03b318a16d81048474c70caa6872b2585a9e293c09e39f502a193d971",
+      "source_path": "templates/goons/oh-goon/integration-contract/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/integration-tests",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/integration-tests/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "69545b72cf9c44db99bb57fee4fa4a3d8bca6c78fe16f91e848c501e9ed4c773",
+      "source_path": "templates/goons/oh-goon/integration-tests/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/local-runtime",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/local-runtime/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "95742c9f29985a20553b82ec30c568d0ae0a3fa2757f31b18b7d5ba262ed2f70",
+      "source_path": "templates/goons/oh-goon/local-runtime/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/release-identity",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "oh-goon-release-version",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/release-identity/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "1521129b091930649ec24460e918da324f642148c783a53f7cb3da21aa8e5610",
+      "source_path": "templates/goons/oh-goon/release-identity/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [
+        "source_workspace"
+      ],
+      "inputs_projected": [],
+      "key": "oh-goon/release-locks",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/release-locks/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "d650b84ada10406b392ceba65829e51456e453b70e47047149a4762f40df4210",
+      "source_path": "templates/goons/oh-goon/release-locks/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 1,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 2,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/release-package-store",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "package",
+          "kind": "command"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "archive_sha256",
+          "source": "${{ steps.package.outputs.ARCHIVE_SHA256 }}"
+        }
+      ],
+      "readme_path": "templates/goons/oh-goon/release-package-store/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "20c68a5f16126cf66c838e8a39e55324a35bc46445aabf6776af07343b90bc6a",
+      "source_path": "templates/goons/oh-goon/release-package-store/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/repository-exam",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "oh-goon-repository-understanding-exam",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/repository-exam/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "5c068c7c9bfa54f61cfcffb7fdab552a943f5051196105cb096ca3c5b7d3392b",
+      "source_path": "templates/goons/oh-goon/repository-exam/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/template-startability",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/template-startability/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "00a141b0e8698073642f17b86bd9f1c511c7febaf8af713a782e6ba6b1e38ed5",
+      "source_path": "templates/goons/oh-goon/template-startability/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/tooling-tests",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "make",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/oh-goon/tooling-tests/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "5e40113cfb2dbdfb8044daf0c5d68e90cb6e9610b5f3cf6e88911eb0bab65187",
+      "source_path": "templates/goons/oh-goon/tooling-tests/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 1,
+        "uses": 1,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "python/dependency-inventory",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "dependency-inventory",
+          "kind": "dependency_inventory"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/python/dependency-inventory/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "739de951447c98c0a720cc0e241ae969c25f819bc372fb33ebb44518ca12d26c",
+      "source_path": "templates/goons/python/dependency-inventory/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "python/package-artifacts",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "package-artifacts",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/python/package-artifacts/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "2e4da0cecf31522f5d3975602106e566b2c1228fbae91f833fd1f1917a1a79be",
+      "source_path": "templates/goons/python/package-artifacts/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "python/profile",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "pyinstrument",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/python/profile/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "f4bcc0fc46eb28892d23965d88115eeb39e94228c382b72d751a3aacc0416a08",
+      "source_path": "templates/goons/python/profile/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 1,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "coverage_threshold"
+      ],
+      "key": "python/quality",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "python-ruff",
+          "import": "python/ruff",
+          "kind": "goon"
+        },
+        {
+          "id": "python-typecheck",
+          "import": "python/typecheck",
+          "kind": "goon"
+        },
+        {
+          "id": "python-test",
+          "import": "python/test",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/python/quality/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "34035ded673ee85c7f050133a8bb2c86d4a953f17425071ed21e364b7dce920a",
+      "source_path": "templates/goons/python/quality/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 2,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [
+        "release_channel",
+        "revision"
+      ],
+      "inputs_projected": [],
+      "key": "python/release-metadata",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "compute",
+          "kind": "command"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "project_version",
+          "source": "${{ steps.compute.outputs.PROJECT_VERSION }}"
+        },
+        {
+          "name": "release_version",
+          "source": "${{ steps.compute.outputs.RELEASE_VERSION }}"
+        }
+      ],
+      "readme_path": "templates/goons/python/release-metadata/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "9cd49f16acabb16c66d86d0f4e08ffe20a7ca64e0f9174051e5074c8dcb5a2bb",
+      "source_path": "templates/goons/python/release-metadata/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 2,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "python/ruff",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "ruff",
+          "kind": "command"
+        },
+        {
+          "id": "ruff-2",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/python/ruff/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "1f67910994d2d9004b94e62d385a77ae9ea44bc050b6fc9269de0a24382b997b",
+      "source_path": "templates/goons/python/ruff/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [
+        "coverage_threshold"
+      ],
+      "inputs_projected": [],
+      "key": "python/test",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "pytest",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/python/test/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "b7bc38ebf4e11ea0b0227dedb3231d32cf9db4a49e9a6fe1e620884c6eaa6e3d",
+      "source_path": "templates/goons/python/test/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 2,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "python/typecheck",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "pyright",
+          "kind": "command"
+        },
+        {
+          "id": "ty",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/python/typecheck/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "d7114ddafff391a8050c0284baf33857beda0585f2559fe77e14c16509f75dd2",
+      "source_path": "templates/goons/python/typecheck/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "python/uv-audit",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "uv",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/python/uv-audit/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "354a3c5e3e159df0a37ddb7ac2d15b7b548b61668077ac4131cd463d8cd77322",
+      "source_path": "templates/goons/python/uv-audit/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "security/cve-combined",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "python-uv-audit",
+          "import": "python/uv-audit",
+          "kind": "goon"
+        },
+        {
+          "id": "security-trivy-audit",
+          "import": "security/trivy-audit",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/security/cve-combined/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "b13c8fdcab79ff9acae1bd1dd7e8c06281ab0f20ec1756af8649607a81bf3f8c",
+      "source_path": "templates/goons/security/cve-combined/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 0,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 1,
+        "steps": 1,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "security/trivy-audit",
+      "kind": "goon",
+      "ordered_steps": [
+        {
+          "id": "trivy",
+          "kind": "command"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/goons/security/trivy-audit/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "4d818576265f394ec787f428fd4abbceb2e361cc9557838496b26961f6d76dae",
+      "source_path": "templates/goons/security/trivy-audit/goon.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "teaching-example",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "tag",
+        "test_timeout_seconds"
+      ],
+      "key": "advanced/isolated-dataflow",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "advanced-isolated-dataflow",
+          "import": "advanced/isolated-dataflow",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/advanced/isolated-dataflow/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "9a031bbba2cbc2256785a28a759cd4ce930b82a246061809683990e103d89bbe",
+      "source_path": "templates/plans/advanced/isolated-dataflow/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "kubernetes_api_hostname",
+        "namespace",
+        "deployment",
+        "container",
+        "image"
+      ],
+      "key": "kubernetes/set-image",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "kubernetes-set-image",
+          "import": "kubernetes/set-image",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/kubernetes/set-image/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "d218f63a51c50deadcd0ff7d8b29eefbe1acb4dea7d2d019737d99fa7ff19d2c",
+      "source_path": "templates/plans/kubernetes/set-image/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "teaching-example",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "random_seed",
+        "test_size_percent",
+        "minimum_accuracy_percent",
+        "max_iterations"
+      ],
+      "key": "ml/iris-training",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "ml-iris-train",
+          "import": "ml/iris-train",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/ml/iris-training/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "631d3a3bdf9c8476832c516fe0a8d2bda7d80fa34ffaeb48c89132eadb4884dc",
+      "source_path": "templates/plans/ml/iris-training/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "base_registry_hostname",
+        "containerfile",
+        "context",
+        "platform"
+      ],
+      "key": "oci/image",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "oci-image",
+          "import": "oci/image",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/oci/image/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "c35805bd2ede78249028e7dd5f17395f3f71131ae663be8613257e8b6bc8dc33",
+      "source_path": "templates/plans/oci/image/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "base_registry_hostname",
+        "publish_registry_hostname",
+        "publish_repository",
+        "containerfile",
+        "context",
+        "platform"
+      ],
+      "key": "oci/publish-image",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "oci-publish-image",
+          "import": "oci/publish-image",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/oci/publish-image/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "04ce0743b8e73e532301cb2d4ae77b88e2fcc93cc8860f620deb795337e49031",
+      "source_path": "templates/plans/oci/publish-image/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "base_registry_hostname",
+        "publish_registry_hostname",
+        "publish_repository",
+        "containerfile",
+        "context",
+        "platform",
+        "coverage_threshold"
+      ],
+      "key": "oci/release",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-quality",
+          "import": "python/quality",
+          "kind": "goon"
+        },
+        {
+          "id": "oci-publish-image",
+          "import": "oci/publish-image",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/oci/release/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "626a6672e8307521ff5f9de7234bd7d2cb0d786421584dd0707768ef949d7a29",
+      "source_path": "templates/plans/oci/release/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "base_registry_hostname",
+        "containerfile",
+        "context",
+        "platform",
+        "coverage_threshold"
+      ],
+      "key": "oci/release-candidate",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-quality",
+          "import": "python/quality",
+          "kind": "goon"
+        },
+        {
+          "id": "oci-image",
+          "import": "oci/image",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/oci/release-candidate/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "a3f0f9248bfaa872e1b4e5fd7bae6ba05fcc7a48809618a27ca9519608da2803",
+      "source_path": "templates/plans/oci/release-candidate/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 1
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "coverage_threshold",
+        "base_registry_hostname",
+        "publish_registry_hostname",
+        "publish_repository",
+        "containerfile",
+        "context",
+        "platform",
+        "kubernetes_api_hostname",
+        "namespace",
+        "deployment",
+        "container"
+      ],
+      "key": "oci/release-deploy",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-quality",
+          "import": "python/quality",
+          "kind": "goon"
+        },
+        {
+          "id": "oci-publish-image",
+          "import": "oci/publish-image",
+          "kind": "goon"
+        },
+        {
+          "id": "kubernetes-release",
+          "import": "kubernetes/release",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/oci/release-deploy/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "29e05c3d5a1022fcdf2f0f58e146674d8ae84a456234d3d7f29f4a610fe0dc0b",
+      "source_path": "templates/plans/oci/release-deploy/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "registry_hostname",
+        "repository",
+        "tag",
+        "expected_digest"
+      ],
+      "key": "oci/tag-gate",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "oci-tag-assert",
+          "import": "oci/tag-assert",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/oci/tag-gate/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "57fd992071d9fd712cd42e786520a521210c8d608a3cf18e3696fa63851ef313",
+      "source_path": "templates/plans/oci/tag-gate/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/app-certification",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "oh-goon-backend-p0",
+          "import": "oh-goon/backend-p0",
+          "kind": "goon"
+        },
+        {
+          "id": "oh-goon-architecture",
+          "import": "oh-goon/architecture",
+          "kind": "goon"
+        },
+        {
+          "id": "oh-goon-template-startability",
+          "import": "oh-goon/template-startability",
+          "kind": "goon"
+        },
+        {
+          "id": "oh-goon-frontend-functional",
+          "import": "oh-goon/frontend-functional",
+          "kind": "goon"
+        },
+        {
+          "id": "oh-goon-local-runtime",
+          "import": "oh-goon/local-runtime",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/oh-goon/app-certification/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "f7944e440a578d59aeb72444f51a911d3afe4982f16af577d625020c1129423f",
+      "source_path": "templates/plans/oh-goon/app-certification/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/prepare-release",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "oh-goon-release-package-store",
+          "import": "oh-goon/release-package-store",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/oh-goon/prepare-release/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "d9cad1edd383a561d38a0c87ff69f510c84642d7943ab27ec77c5d1267d8d87c",
+      "source_path": "templates/plans/oh-goon/prepare-release/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/repository-understanding-certification",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "oh-goon-repository-exam",
+          "import": "oh-goon/repository-exam",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/oh-goon/repository-understanding-certification/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "c1940cc074281cf29b37bedab7c005b1a725e6688a10564a62254f4f5dabc179",
+      "source_path": "templates/plans/oh-goon/repository-understanding-certification/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "internal-self-hosting",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "oh-goon/self-verification",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "oh-goon-backend-p0",
+          "import": "oh-goon/backend-p0",
+          "kind": "goon"
+        },
+        {
+          "id": "oh-goon-tooling-tests",
+          "import": "oh-goon/tooling-tests",
+          "kind": "goon"
+        },
+        {
+          "id": "oh-goon-architecture",
+          "import": "oh-goon/architecture",
+          "kind": "goon"
+        },
+        {
+          "id": "oh-goon-generated-contracts",
+          "import": "oh-goon/generated-contracts",
+          "kind": "goon"
+        },
+        {
+          "id": "oh-goon-integration-tests",
+          "import": "oh-goon/integration-tests",
+          "kind": "goon"
+        },
+        {
+          "id": "oh-goon-repository-exam",
+          "import": "oh-goon/repository-exam",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/oh-goon/self-verification/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "dd81e88bf03bc7983ab6abe7662a845ed118cd33c762a0ee7e52f2382cfa074c",
+      "source_path": "templates/plans/oh-goon/self-verification/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "python/dependency-inventory",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-dependency-inventory",
+          "import": "python/dependency-inventory",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/python/dependency-inventory/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "081eb0bf9625cf45cd4aa52317fdc4ea922f86f2e9f5cfb659dff6b0fb68e11f",
+      "source_path": "templates/plans/python/dependency-inventory/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "python/package-artifacts",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-package-artifacts",
+          "import": "python/package-artifacts",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/python/package-artifacts/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "1d9009244a2ee2d8185570e2594f9e38a604d785909b081ba23498c0407f2c9f",
+      "source_path": "templates/plans/python/package-artifacts/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "python/profile",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-profile",
+          "import": "python/profile",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/python/profile/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "59f938727c1ad87f2674f633937d845f640da10d53c1762c5cae158e7024c54d",
+      "source_path": "templates/plans/python/profile/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "coverage_threshold"
+      ],
+      "key": "python/quality",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-quality",
+          "import": "python/quality",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/python/quality/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "372a1a7bc31d1a8b7523ddf1d7ef7d5ad8335b922f812ae163bb2cd29028f7cd",
+      "source_path": "templates/plans/python/quality/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "release_channel",
+        "revision",
+        "coverage_threshold"
+      ],
+      "key": "python/release-candidate",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-release-metadata",
+          "import": "python/release-metadata",
+          "kind": "goon"
+        },
+        {
+          "id": "python-quality",
+          "import": "python/quality",
+          "kind": "goon"
+        },
+        {
+          "id": "python-package-artifacts",
+          "import": "python/package-artifacts",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/python/release-candidate/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "eea745435eb6ae8be93a9b9e636cd895514fd8efaded60856d92f5525d696910",
+      "source_path": "templates/plans/python/release-candidate/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "release_channel",
+        "revision"
+      ],
+      "key": "python/release-metadata",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-release-metadata",
+          "import": "python/release-metadata",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/python/release-metadata/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "7712fa41e6a42cf1cc978f628a398b6f910a9756b89fcc14c592699773832ebf",
+      "source_path": "templates/plans/python/release-metadata/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "coverage_threshold"
+      ],
+      "key": "python/secure",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-quality",
+          "import": "python/quality",
+          "kind": "goon"
+        },
+        {
+          "id": "security-cve-combined",
+          "import": "security/cve-combined",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/python/secure/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "198fa445d8c71ca0e2496094097cd9cae0b792a53f0521d1f2a3ad310511e3e8",
+      "source_path": "templates/plans/python/secure/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 1,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [
+        "release_channel",
+        "revision",
+        "coverage_threshold"
+      ],
+      "key": "python/standard",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-release-metadata",
+          "import": "python/release-metadata",
+          "kind": "goon"
+        },
+        {
+          "id": "python-quality",
+          "import": "python/quality",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/python/standard/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "ce5049f0c2b860f231d93085b5558f73889d1c2870a2772960bf4bb4c90bd9a7",
+      "source_path": "templates/plans/python/standard/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "python/uv-audit",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "python-uv-audit",
+          "import": "python/uv-audit",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/python/uv-audit/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "2ec229d531f2f80d8015e345862b1e4e9e737f80df7c681f3c2441b9f51a313d",
+      "source_path": "templates/plans/python/uv-audit/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "security/cve-combined",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "security-cve-combined",
+          "import": "security/cve-combined",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/security/cve-combined/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "3da99846839d40ed78adb1403301adc1b3cadb3f36cc1357dbd22354fb759acb",
+      "source_path": "templates/plans/security/cve-combined/plan.yml"
+    },
+    {
+      "authored_lexical_counts": {
+        "from": 0,
+        "goons": 1,
+        "inputs": 0,
+        "outputs": 0,
+        "pass": 0,
+        "run": 0,
+        "steps": 0,
+        "uses": 0,
+        "with": 0
+      },
+      "classification": "production",
+      "inputs_defined": [],
+      "inputs_projected": [],
+      "key": "security/trivy-audit",
+      "kind": "plan",
+      "ordered_steps": [
+        {
+          "id": "security-trivy-audit",
+          "import": "security/trivy-audit",
+          "kind": "goon"
+        }
+      ],
+      "outputs": [],
+      "readme_path": "templates/plans/security/trivy-audit/README.md",
+      "readme_present": true,
+      "repeated_import_packages": [],
+      "root_source_sha256": "5163ff20694aab2eafeac17673685b5ee1c3c51e61e47c409dca20498cf5b154",
+      "source_path": "templates/plans/security/trivy-audit/plan.yml"
+    }
+  ],
+  "readme_links": [
+    {
+      "source": "templates/goons/advanced/isolated-dataflow/README.md",
+      "status": "OK",
+      "target": "./goon.yml"
+    },
+    {
+      "source": "templates/goons/kubernetes/release/README.md",
+      "status": "OK",
+      "target": "./goon.yml"
+    },
+    {
+      "source": "templates/goons/kubernetes/set-image/README.md",
+      "status": "OK",
+      "target": "./goon.yml"
+    },
+    {
+      "source": "templates/goons/ml/iris-train/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+    },
+    {
+      "source": "templates/goons/oci/image/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
+    },
+    {
+      "source": "templates/goons/oci/image/README.md",
+      "status": "OK",
+      "target": "./goon.yml"
+    },
+    {
+      "source": "templates/goons/oci/publish-image/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
+    },
+    {
+      "source": "templates/goons/oci/publish-image/README.md",
+      "status": "OK",
+      "target": "./goon.yml"
+    },
+    {
+      "source": "templates/goons/oci/publish/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
+    },
+    {
+      "source": "templates/goons/oci/tag-assert/README.md",
+      "status": "OK",
+      "target": "./goon.yml"
+    },
+    {
+      "source": "templates/goons/oh-goon/browser-engine-preflight/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/browser-harness-preflight/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/browser-localhost-transport-preflight/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/browser-runtime-preflight/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/integration-contract/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/integration-tests/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/release-package-store/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+    },
+    {
+      "source": "templates/goons/oh-goon/repository-exam/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+    },
+    {
+      "source": "templates/goons/python/package-artifacts/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+    },
+    {
+      "source": "templates/goons/python/profile/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+    },
+    {
+      "source": "templates/goons/python/ruff/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+    },
+    {
+      "source": "templates/goons/python/test/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+    },
+    {
+      "source": "templates/goons/python/uv-audit/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_NETWORK_AUTHORITY.md"
+    },
+    {
+      "source": "templates/goons/security/cve-combined/README.md",
+      "status": "OK",
+      "target": "./goon.yml"
+    },
+    {
+      "source": "templates/goons/security/trivy-audit/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+    },
+    {
+      "source": "templates/goons/security/trivy-audit/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_NETWORK_AUTHORITY.md"
+    },
+    {
+      "source": "templates/plans/advanced/isolated-dataflow/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/kubernetes/set-image/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/oci/image/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
+    },
+    {
+      "source": "templates/plans/oci/image/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/oci/publish-image/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
+    },
+    {
+      "source": "templates/plans/oci/publish-image/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/oci/release-candidate/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
+    },
+    {
+      "source": "templates/plans/oci/release-candidate/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/oci/release-deploy/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
+    },
+    {
+      "source": "templates/plans/oci/release-deploy/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/oci/release/README.md",
+      "status": "OK",
+      "target": "../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
+    },
+    {
+      "source": "templates/plans/oci/release/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/oci/tag-gate/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/python/package-artifacts/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/python/quality/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/python/release-candidate/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/python/secure/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/python/standard/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/python/uv-audit/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/security/cve-combined/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    },
+    {
+      "source": "templates/plans/security/trivy-audit/README.md",
+      "status": "OK",
+      "target": "./plan.yml"
+    }
+  ],
+  "schema": "oh-goon.template-ux-a-inventory/v1"
+}

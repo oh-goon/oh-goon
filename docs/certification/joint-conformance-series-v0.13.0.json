@@ -1,0 +1,27 @@
+{
+  "schema": "oh-goon.hashmarks-joint-conformance-series.v1",
+  "series_id": "joint-839-hashmarks-v0.13.0-v1",
+  "oh_goon_parent": {
+    "version": "1267.0.838",
+    "zip_sha256": "abe3f616ef7771f16dbd9fffa6c99aa85f1a519d38a68c05b810748999771afd",
+    "source_identity": "sha256:b37d44f14f5f18bebf666bf7d510d122bb7564ae8c5ccbccf60238fb986e2c38"
+  },
+  "hashmarks": {
+    "version": "0.13.0",
+    "canonical_source_archive_identity": "sha256:168bf08149ea3fd64d708c03d79317415f97a7abbb9558d6c4b33afed04418fb",
+    "artifact_identity": "sha256:7a72739cf628c955e0ad97c909ebcddf5d4ee6abeab5f7f2427be7adc0f38b18",
+    "producer_implementation_identity": "sha256:f9a337ae6f975427c202db86873cb0baa048de4ba2b134b0d6f9e1dc786288af"
+  },
+  "authority": {
+    "hashmarks": "repository-intelligence-and-verification-selection",
+    "oh_goon": "admission-execution-verification-certification",
+    "consumer_rule": "verify-producer-semantics-never-recreate-repair-or-reinterpret"
+  },
+  "qualification": {
+    "hashmarks_persistent_readback": "PASS",
+    "hashmarks_source_archive_sha256": "168bf08149ea3fd64d708c03d79317415f97a7abbb9558d6c4b33afed04418fb",
+    "oh_goon_parent": "exact 1267.0.838 DEVELOPMENT CANDIDATE",
+    "oh_goon_interoperability": "qualification-required-before-839-seal"
+  },
+  "rule": "Changing Hashmarks v0.13.0 source, retained wheel, producer implementation, or Oh-Goon parent creates a new comparison series."
+}

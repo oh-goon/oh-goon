@@ -1,0 +1,179 @@
+{
+  "gate_a": "BLOCKED",
+  "policy_sha256": "35c96af4b180d6616f23a59b24e980dcb72ae954fd3960185e6185d401c527f2",
+  "runtime_authority": false,
+  "schema": "oh-goon/trust-custody-evidence/v1",
+  "status": "PENDING_INDEPENDENT_REVIEW",
+  "subjects": {
+    "admission_issuer_evidence/backend_capability_manifest_identity": {
+      "disposition": "UNDECIDED",
+      "evidence_refs": [],
+      "observations": {
+        "compromise_boundary": "NOT_OBSERVED",
+        "domain_separation_insufficiency": "NOT_OBSERVED",
+        "independent_security_benefit": "NOT_OBSERVED",
+        "os_process_principal": "NOT_OBSERVED",
+        "private_key_custodian": "NOT_OBSERVED",
+        "provisioning": "NOT_OBSERVED",
+        "public_root_custodian": "NOT_OBSERVED",
+        "revocation": "NOT_OBSERVED",
+        "rotation": "NOT_OBSERVED",
+        "semantic_owner": "NOT_OBSERVED"
+      },
+      "review_state": "UNREVIEWED"
+    },
+    "admission_issuer_evidence/execution_environment_identity": {
+      "disposition": "UNDECIDED",
+      "evidence_refs": [],
+      "observations": {
+        "compromise_boundary": "NOT_OBSERVED",
+        "domain_separation_insufficiency": "NOT_OBSERVED",
+        "independent_security_benefit": "NOT_OBSERVED",
+        "os_process_principal": "NOT_OBSERVED",
+        "private_key_custodian": "NOT_OBSERVED",
+        "provisioning": "NOT_OBSERVED",
+        "public_root_custodian": "NOT_OBSERVED",
+        "revocation": "NOT_OBSERVED",
+        "rotation": "NOT_OBSERVED",
+        "semantic_owner": "NOT_OBSERVED"
+      },
+      "review_state": "UNREVIEWED"
+    },
+    "admission_issuer_evidence/lock_identity": {
+      "disposition": "UNDECIDED",
+      "evidence_refs": [],
+      "observations": {
+        "compromise_boundary": "NOT_OBSERVED",
+        "domain_separation_insufficiency": "NOT_OBSERVED",
+        "independent_security_benefit": "NOT_OBSERVED",
+        "os_process_principal": "NOT_OBSERVED",
+        "private_key_custodian": "NOT_OBSERVED",
+        "provisioning": "NOT_OBSERVED",
+        "public_root_custodian": "NOT_OBSERVED",
+        "revocation": "NOT_OBSERVED",
+        "rotation": "NOT_OBSERVED",
+        "semantic_owner": "NOT_OBSERVED"
+      },
+      "review_state": "UNREVIEWED"
+    },
+    "admission_issuer_evidence/native_tool_identity": {
+      "disposition": "UNDECIDED",
+      "evidence_refs": [],
+      "observations": {
+        "compromise_boundary": "NOT_OBSERVED",
+        "domain_separation_insufficiency": "NOT_OBSERVED",
+        "independent_security_benefit": "NOT_OBSERVED",
+        "os_process_principal": "NOT_OBSERVED",
+        "private_key_custodian": "NOT_OBSERVED",
+        "provisioning": "NOT_OBSERVED",
+        "public_root_custodian": "NOT_OBSERVED",
+        "revocation": "NOT_OBSERVED",
+        "rotation": "NOT_OBSERVED",
+        "semantic_owner": "NOT_OBSERVED"
+      },
+      "review_state": "UNREVIEWED"
+    },
+    "admission_issuer_evidence/repository_identity": {
+      "disposition": "UNDECIDED",
+      "evidence_refs": [],
+      "observations": {
+        "compromise_boundary": "NOT_OBSERVED",
+        "domain_separation_insufficiency": "NOT_OBSERVED",
+        "independent_security_benefit": "NOT_OBSERVED",
+        "os_process_principal": "NOT_OBSERVED",
+        "private_key_custodian": "NOT_OBSERVED",
+        "provisioning": "NOT_OBSERVED",
+        "public_root_custodian": "NOT_OBSERVED",
+        "revocation": "NOT_OBSERVED",
+        "rotation": "NOT_OBSERVED",
+        "semantic_owner": "NOT_OBSERVED"
+      },
+      "review_state": "UNREVIEWED"
+    },
+    "admission_issuer_evidence/source_identity": {
+      "disposition": "UNDECIDED",
+      "evidence_refs": [],
+      "observations": {
+        "compromise_boundary": "NOT_OBSERVED",
+        "domain_separation_insufficiency": "NOT_OBSERVED",
+        "independent_security_benefit": "NOT_OBSERVED",
+        "os_process_principal": "NOT_OBSERVED",
+        "private_key_custodian": "NOT_OBSERVED",
+        "provisioning": "NOT_OBSERVED",
+        "public_root_custodian": "NOT_OBSERVED",
+        "revocation": "NOT_OBSERVED",
+        "rotation": "NOT_OBSERVED",
+        "semantic_owner": "NOT_OBSERVED"
+      },
+      "review_state": "UNREVIEWED"
+    },
+    "control_plane_receipts": {
+      "disposition": "UNDECIDED",
+      "evidence_refs": [],
+      "observations": {
+        "compromise_boundary": "NOT_OBSERVED",
+        "domain_separation_insufficiency": "NOT_OBSERVED",
+        "independent_security_benefit": "NOT_OBSERVED",
+        "os_process_principal": "NOT_OBSERVED",
+        "private_key_custodian": "NOT_OBSERVED",
+        "provisioning": "NOT_OBSERVED",
+        "public_root_custodian": "NOT_OBSERVED",
+        "revocation": "NOT_OBSERVED",
+        "rotation": "NOT_OBSERVED",
+        "semantic_owner": "NOT_OBSERVED"
+      },
+      "review_state": "UNREVIEWED"
+    },
+    "future_role/independent_physical_observer": {
+      "disposition": "UNDECIDED",
+      "evidence_refs": [],
+      "observations": {
+        "compromise_boundary": "NOT_OBSERVED",
+        "domain_separation_insufficiency": "NOT_OBSERVED",
+        "independent_security_benefit": "NOT_OBSERVED",
+        "os_process_principal": "NOT_OBSERVED",
+        "private_key_custodian": "NOT_OBSERVED",
+        "provisioning": "NOT_OBSERVED",
+        "public_root_custodian": "NOT_OBSERVED",
+        "revocation": "NOT_OBSERVED",
+        "rotation": "NOT_OBSERVED",
+        "semantic_owner": "NOT_OBSERVED"
+      },
+      "review_state": "UNREVIEWED"
+    },
+    "future_role/provisioning_root": {
+      "disposition": "UNDECIDED",
+      "evidence_refs": [],
+      "observations": {
+        "compromise_boundary": "NOT_OBSERVED",
+        "domain_separation_insufficiency": "NOT_OBSERVED",
+        "independent_security_benefit": "NOT_OBSERVED",
+        "os_process_principal": "NOT_OBSERVED",
+        "private_key_custodian": "NOT_OBSERVED",
+        "provisioning": "NOT_OBSERVED",
+        "public_root_custodian": "NOT_OBSERVED",
+        "revocation": "NOT_OBSERVED",
+        "rotation": "NOT_OBSERVED",
+        "semantic_owner": "NOT_OBSERVED"
+      },
+      "review_state": "UNREVIEWED"
+    },
+    "signer_trust_epoch": {
+      "disposition": "UNDECIDED",
+      "evidence_refs": [],
+      "observations": {
+        "compromise_boundary": "NOT_OBSERVED",
+        "domain_separation_insufficiency": "NOT_OBSERVED",
+        "independent_security_benefit": "NOT_OBSERVED",
+        "os_process_principal": "NOT_OBSERVED",
+        "private_key_custodian": "NOT_OBSERVED",
+        "provisioning": "NOT_OBSERVED",
+        "public_root_custodian": "NOT_OBSERVED",
+        "revocation": "NOT_OBSERVED",
+        "rotation": "NOT_OBSERVED",
+        "semantic_owner": "NOT_OBSERVED"
+      },
+      "review_state": "UNREVIEWED"
+    }
+  }
+}

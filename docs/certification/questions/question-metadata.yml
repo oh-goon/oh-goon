@@ -1,0 +1,3085 @@
+schema_version: 2
+source_version: 1267.0.1052
+questions:
+- id: Q01
+  type: CHANGE_IMPACT
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: CHANGE_IMPACT
+- id: Q02
+  type: CHANGE_IMPACT
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: CHANGE_IMPACT
+- id: Q03
+  type: CHANGE_IMPACT
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: CHANGE_IMPACT
+- id: Q04
+  type: CHANGE_IMPACT
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: CHANGE_IMPACT
+- id: Q05
+  type: RELATIONSHIP
+  dimension: ownership
+  difficulty: L2
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: RELATIONSHIP
+- id: Q06
+  type: RELATIONSHIP
+  dimension: contracts
+  difficulty: L2
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: RELATIONSHIP
+- id: Q07
+  type: RELATIONSHIP
+  dimension: contracts
+  difficulty: L2
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: RELATIONSHIP
+- id: Q08
+  type: EXPLANATION
+  dimension: contracts
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: EXPLANATION
+- id: Q09
+  type: EXPLANATION
+  dimension: contracts
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: EXPLANATION
+- id: Q10
+  type: EXPLANATION
+  dimension: contracts
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: EXPLANATION
+- id: Q11
+  type: FACT
+  dimension: execution
+  difficulty: L1
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: FACT
+- id: Q12
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: COUNTERFACTUAL
+- id: Q13
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: COUNTERFACTUAL
+- id: Q14
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: COUNTERFACTUAL
+- id: Q15
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: COUNTERFACTUAL
+- id: Q16
+  type: EXPLANATION
+  dimension: testing
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: EXPLANATION
+- id: Q17
+  type: FACT
+  dimension: testing
+  difficulty: L1
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: FACT
+- id: Q18
+  type: FACT
+  dimension: testing
+  difficulty: L1
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: FACT
+- id: Q19
+  type: EXPLANATION
+  dimension: testing
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: EXPLANATION
+- id: Q20
+  type: EXPLANATION
+  dimension: testing
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: EXPLANATION
+- id: Q21
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q22
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q23
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q24
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q25
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q26
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q27
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q28
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q29
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q30
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q31
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q32
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q33
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q34
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q35
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: FALSE_PREMISE
+- id: Q36
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q37
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q38
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q39
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q40
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q41
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: COUNTERFACTUAL
+- id: Q42
+  type: EXPLANATION
+  dimension: ownership
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: EXPLANATION
+- id: Q43
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: COUNTERFACTUAL
+- id: Q44
+  type: EXPLANATION
+  dimension: ownership
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: EXPLANATION
+- id: Q45
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: COUNTERFACTUAL
+- id: Q46
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q47
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q48
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q49
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q50
+  type: EXPLANATION
+  dimension: lifecycle
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: EXPLANATION
+- id: Q51
+  type: EXPLANATION
+  dimension: structure
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EXPLANATION
+- id: Q52
+  type: EXPLANATION
+  dimension: structure
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EXPLANATION
+- id: Q53
+  type: EXPLANATION
+  dimension: structure
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EXPLANATION
+- id: Q54
+  type: EXPLANATION
+  dimension: structure
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EXPLANATION
+- id: Q55
+  type: EXPLANATION
+  dimension: structure
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EXPLANATION
+- id: Q56
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: COUNTERFACTUAL
+- id: Q57
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: COUNTERFACTUAL
+- id: Q58
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: COUNTERFACTUAL
+- id: Q59
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: COUNTERFACTUAL
+- id: Q60
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: COUNTERFACTUAL
+- id: Q61
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: SEQUENCE
+- id: Q62
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q63
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: SEQUENCE
+- id: Q64
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q65
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q66
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q67
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: DIAGNOSIS
+- id: Q68
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: DIAGNOSIS
+- id: Q69
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q70
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q71
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q72
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: DIAGNOSIS
+- id: Q73
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: FACT
+- id: Q74
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: EXPLANATION
+- id: Q75
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: SEQUENCE
+- id: Q76
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: RELATIONSHIP
+- id: Q77
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: EXPLANATION
+- id: Q78
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: FACT
+- id: Q79
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q80
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q81
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: RELATIONSHIP
+- id: Q82
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: EXPLANATION
+- id: Q83
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q84
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: FACT
+- id: Q85
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: EXPLANATION
+- id: Q86
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: EXPLANATION
+- id: Q87
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q88
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: FACT
+- id: Q89
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q90
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: BOUNDARY
+- id: Q91
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: EXPLANATION
+- id: Q92
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q93
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: SEQUENCE
+- id: Q94
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: EXPLANATION
+- id: Q95
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q96
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q97
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q98
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: EXPLANATION
+- id: Q99
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q100
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: RELATIONSHIP
+- id: Q101
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q102
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: EXPLANATION
+- id: Q103
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: FACT
+- id: Q104
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: DIAGNOSIS
+- id: Q105
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: EXPLANATION
+- id: Q106
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: SEQUENCE
+- id: Q107
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: EXPLANATION
+- id: Q108
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: RELATIONSHIP
+- id: Q109
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: EXPLANATION
+- id: Q110
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q111
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: EXPLANATION
+- id: Q112
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: EXPLANATION
+- id: Q113
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: EXPLANATION
+- id: Q114
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: EXPLANATION
+- id: Q115
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: SEQUENCE
+- id: Q116
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: SEQUENCE
+- id: Q117
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: SEQUENCE
+- id: Q118
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q119
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: SEQUENCE
+- id: Q120
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: DIAGNOSIS
+- id: Q121
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: EXPLANATION
+- id: Q122
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: SEQUENCE
+- id: Q123
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: EXPLANATION
+- id: Q124
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q125
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q126
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: EXPLANATION
+- id: Q127
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: DIAGNOSIS
+- id: Q128
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: RELATIONSHIP
+- id: Q129
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: EXPLANATION
+- id: Q130
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: EXPLANATION
+- id: Q131
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: SEQUENCE
+- id: Q132
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q133
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: SEQUENCE
+- id: Q134
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: CHANGE_IMPACT
+- id: Q135
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: RELATIONSHIP
+- id: Q136
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q137
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: EXPLANATION
+- id: Q138
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q139
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q140
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: DIAGNOSIS
+- id: Q141
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: BOUNDARY
+- id: Q142
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q143
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: DIAGNOSIS
+- id: Q144
+  type: EXPLANATION
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q145
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: RELATIONSHIP
+- id: Q146
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L3
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: DIAGNOSIS
+- id: Q147
+  type: CHANGE_IMPACT
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q148
+  type: FALSE_PREMISE
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q149
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q150
+  type: CHANGE_IMPACT
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: CHANGE_IMPACT
+- id: Q151
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: DIAGNOSIS
+- id: Q152
+  type: RELATIONSHIP
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: RELATIONSHIP
+- id: Q153
+  type: FALSE_PREMISE
+  dimension: contracts
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q154
+  type: COUNTERFACTUAL
+  dimension: contracts
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: BOUNDARY
+- id: Q155
+  type: CHANGE_IMPACT
+  dimension: contracts
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: CHANGE_IMPACT
+- id: Q156
+  type: COUNTERFACTUAL
+  dimension: contracts
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: DIAGNOSIS
+- id: Q157
+  type: RELATIONSHIP
+  dimension: contracts
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: RELATIONSHIP
+- id: Q158
+  type: FALSE_PREMISE
+  dimension: execution
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q159
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: BOUNDARY
+- id: Q160
+  type: CHANGE_IMPACT
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: CHANGE_IMPACT
+- id: Q161
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: DIAGNOSIS
+- id: Q162
+  type: RELATIONSHIP
+  dimension: execution
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: RELATIONSHIP
+- id: Q163
+  type: FALSE_PREMISE
+  dimension: testing
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q164
+  type: COUNTERFACTUAL
+  dimension: testing
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: BOUNDARY
+- id: Q165
+  type: CHANGE_IMPACT
+  dimension: testing
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: CHANGE_IMPACT
+- id: Q166
+  type: COUNTERFACTUAL
+  dimension: testing
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: DIAGNOSIS
+- id: Q167
+  type: RELATIONSHIP
+  dimension: testing
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: RELATIONSHIP
+- id: Q168
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q169
+  type: COUNTERFACTUAL
+  dimension: change_impact
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: BOUNDARY
+- id: Q170
+  type: CHANGE_IMPACT
+  dimension: change_impact
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: CHANGE_IMPACT
+- id: Q171
+  type: COUNTERFACTUAL
+  dimension: change_impact
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: DIAGNOSIS
+- id: Q172
+  type: RELATIONSHIP
+  dimension: change_impact
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: RELATIONSHIP
+- id: Q173
+  type: FALSE_PREMISE
+  dimension: lifecycle
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q174
+  type: COUNTERFACTUAL
+  dimension: lifecycle
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: BOUNDARY
+- id: Q175
+  type: CHANGE_IMPACT
+  dimension: lifecycle
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: CHANGE_IMPACT
+- id: Q176
+  type: COUNTERFACTUAL
+  dimension: lifecycle
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: DIAGNOSIS
+- id: Q177
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q178
+  type: FALSE_PREMISE
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q179
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: BOUNDARY
+- id: Q180
+  type: CHANGE_IMPACT
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: CHANGE_IMPACT
+- id: Q181
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: DIAGNOSIS
+- id: Q182
+  type: RELATIONSHIP
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: RELATIONSHIP
+- id: Q183
+  type: FALSE_PREMISE
+  dimension: lifecycle
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q184
+  type: COUNTERFACTUAL
+  dimension: lifecycle
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: BOUNDARY
+- id: Q185
+  type: CHANGE_IMPACT
+  dimension: lifecycle
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: CHANGE_IMPACT
+- id: Q186
+  type: COUNTERFACTUAL
+  dimension: lifecycle
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: DIAGNOSIS
+- id: Q187
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q188
+  type: FALSE_PREMISE
+  dimension: structure
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q189
+  type: COUNTERFACTUAL
+  dimension: structure
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: BOUNDARY
+- id: Q190
+  type: CHANGE_IMPACT
+  dimension: structure
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: CHANGE_IMPACT
+- id: Q191
+  type: COUNTERFACTUAL
+  dimension: structure
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: DIAGNOSIS
+- id: Q192
+  type: RELATIONSHIP
+  dimension: structure
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: RELATIONSHIP
+- id: Q193
+  type: FALSE_PREMISE
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q194
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: BOUNDARY
+- id: Q195
+  type: CHANGE_IMPACT
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: CHANGE_IMPACT
+- id: Q196
+  type: COUNTERFACTUAL
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: DIAGNOSIS
+- id: Q197
+  type: RELATIONSHIP
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: RELATIONSHIP
+- id: Q198
+  type: FALSE_PREMISE
+  dimension: execution
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q199
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q200
+  type: CHANGE_IMPACT
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: CHANGE_IMPACT
+- id: Q201
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: DIAGNOSIS
+- id: Q202
+  type: RELATIONSHIP
+  dimension: ownership
+  difficulty: L4
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: RELATIONSHIP
+- id: Q203
+  type: FALSE_PREMISE
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: BOUNDARY
+- id: Q204
+  type: RELATIONSHIP
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: change_impact
+  blueprint_form: RELATIONSHIP
+- id: Q205
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: BOUNDARY
+- id: Q206
+  type: RELATIONSHIP
+  dimension: lifecycle
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: lifecycle
+  blueprint_form: RELATIONSHIP
+- id: Q207
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: BOUNDARY
+- id: Q208
+  type: FALSE_PREMISE
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: EVIDENCE_SELECTION
+
+- id: Q209
+  type: FALSE_PREMISE
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: BOUNDARY
+- id: Q210
+  type: CHANGE_IMPACT
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: CHANGE_IMPACT
+- id: Q211
+  type: FALSE_PREMISE
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q212
+  type: COUNTERFACTUAL
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: execution
+  blueprint_form: BOUNDARY
+
+- id: Q213
+  type: FALSE_PREMISE
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: ownership
+  blueprint_form: BOUNDARY
+- id: Q214
+  type: FALSE_PREMISE
+  dimension: evidence_quality
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q215
+  type: FALSE_PREMISE
+  dimension: execution
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: contracts
+  blueprint_form: DIAGNOSIS
+- id: Q216
+  type: FALSE_PREMISE
+  dimension: change_impact
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: DIAGNOSIS
+- id: Q217
+  type: FALSE_PREMISE
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: security_isolation
+  blueprint_form: EVIDENCE_SELECTION
+- id: Q218
+  type: COUNTERFACTUAL
+  dimension: epistemic_accuracy
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: evidence_provenance
+  blueprint_form: DIAGNOSIS
+- id: Q219
+  type: CHANGE_IMPACT
+  dimension: testing
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: testing
+  blueprint_form: CHANGE_IMPACT
+- id: Q220
+  type: CHANGE_IMPACT
+  dimension: ownership
+  difficulty: L5
+  response_expectations:
+    require_evidence: true
+    allow_insufficient_evidence: true
+  evidence_scope:
+  - source
+  - tests
+  - contracts
+  - repository-documentation
+  blueprint_dimension: structure
+  blueprint_form: CHANGE_IMPACT

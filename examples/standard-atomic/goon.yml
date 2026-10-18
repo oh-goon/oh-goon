@@ -1,0 +1,6 @@
+version: 1
+execution:
+  purpose: maintenance
+steps:
+  - id: hello
+    run: sh scripts/hello.sh

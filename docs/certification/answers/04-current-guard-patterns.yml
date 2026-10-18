@@ -1,0 +1,227 @@
+schema_version: 1
+source_version: 1267.0.1052
+section: current-guard-patterns
+questions:
+- id: Q16
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: start and stop both hold _lifecycle_lock; stop holds it across setting the stop event, joining the captured thread, and clearing the same thread reference, so concurrent start cannot clear/publish a replacement before stop returns.
+    critical: false
+  - id: ownership_boundary
+    statement: Thread identity publication and join are one serialized lifecycle operation.
+    critical: false
+  - id: consequence
+    statement: This is the current closure of the historical thread-handle race; reporting the old race as present is wrong.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:30-60
+- id: Q17
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: backend/src/oh_goon/engine/command.py::_terminate_process_group sends SIGTERM, polls process-group existence with time.sleep(POLL_INTERVAL_SECONDS) until a monotonic grace deadline, then sends SIGKILL if still present.
+    critical: false
+  - id: ownership_boundary
+    statement: Termination is bounded and escalates explicitly.
+    critical: false
+  - id: consequence
+    statement: Agents should recognize real polling/timeout code rather than inventing async behavior.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/engine/command.py:180-209
+- id: Q18
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Kubernetes rollout verification loops in integrations/fleet_plan_kubernetes_rollout_execution.py, bounded by step.timeout_seconds/deadline, with request bounds and sleeper(min(policy.poll_interval_seconds, remaining)).
+    critical: false
+  - id: ownership_boundary
+    statement: Polling is dependency-injected and bounded by policy/time remaining.
+    critical: false
+  - id: consequence
+    statement: Tests can replace the sleeper/clock and reason about bounded rollout behavior deterministically.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/integrations/fleet_plan_kubernetes_rollout_execution.py:115-185
+- id: Q19
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Writes carry expected_revision through SharedPlanFileStore/LeagueLineupFileStore exact-file commits and Fleet Plan source commit; stale/removed revisions fail instead of overwriting newer bytes. SharedPlanService propagates expected_revision through read/save/preview boundaries.
+    critical: true
+  - id: ownership_boundary
+    statement: A safety/write proof is valid only for the exact revision observed.
+    critical: true
+  - id: consequence
+    statement: Prevents stale agent/UI writes from silently replacing concurrent durable state.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Allows a write/safety proof to commit without the exact observed revision or against a different revision.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/runtime/shared_plans.py:33-95
+  - backend/src/oh_goon/runtime/league_lineups.py:36-134
+  - backend/src/oh_goon/integrations/fleet_plan_source.py:35-89
+  - backend/src/oh_goon/services/shared_plans.py:166-214
+  - backend/AGENTS.md:73-75
+- id: Q20
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: ApiClientProvider captures supplied client/controllers as mount authority and throws if their identities change without remount; its transport is created once in useState. If both controllers are supplied they must share the same causality clock.
+    critical: false
+  - id: ownership_boundary
+    statement: Transport/read/write authority is mount-bound and causally singular.
+    critical: false
+  - id: consequence
+    statement: Prevents provider rerenders from silently replacing transport or splitting read/write causality.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - frontend/src/app/ApiClientProvider.tsx:33-50
+- id: Q163
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: start and stop both hold _lifecycle_lock; stop holds it across setting the stop event, joining the captured thread, and clearing the same thread reference, so concurrent start cannot clear/publish a replacement before stop returns.
+    critical: false
+  - id: ownership_boundary
+    statement: Thread identity publication and join are one serialized lifecycle operation.
+    critical: false
+  - id: consequence
+    statement: This is the current closure of the historical thread-handle race; reporting the old race as present is wrong.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:30-60
+- id: Q164
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: backend/src/oh_goon/engine/command.py::_terminate_process_group sends SIGTERM, polls process-group existence with time.sleep(POLL_INTERVAL_SECONDS) until a monotonic grace deadline, then sends SIGKILL if still present.
+    critical: false
+  - id: ownership_boundary
+    statement: Termination is bounded and escalates explicitly.
+    critical: false
+  - id: consequence
+    statement: Agents should recognize real polling/timeout code rather than inventing async behavior.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/engine/command.py:180-209
+- id: Q165
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Kubernetes rollout verification loops in integrations/fleet_plan_kubernetes_rollout_execution.py, bounded by step.timeout_seconds/deadline, with request bounds and sleeper(min(policy.poll_interval_seconds, remaining)).
+    critical: false
+  - id: ownership_boundary
+    statement: Polling is dependency-injected and bounded by policy/time remaining.
+    critical: false
+  - id: consequence
+    statement: Tests can replace the sleeper/clock and reason about bounded rollout behavior deterministically.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/integrations/fleet_plan_kubernetes_rollout_execution.py:115-185
+- id: Q166
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Writes carry expected_revision through SharedPlanFileStore/LeagueLineupFileStore exact-file commits and Fleet Plan source commit; stale/removed revisions fail instead of overwriting newer bytes. SharedPlanService propagates expected_revision through read/save/preview boundaries.
+    critical: true
+  - id: ownership_boundary
+    statement: A safety/write proof is valid only for the exact revision observed.
+    critical: true
+  - id: consequence
+    statement: Prevents stale agent/UI writes from silently replacing concurrent durable state.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows a write/safety proof to commit without the exact observed revision or against a different revision.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/runtime/shared_plans.py:33-95
+  - backend/src/oh_goon/runtime/league_lineups.py:36-134
+  - backend/src/oh_goon/integrations/fleet_plan_source.py:35-89
+  - backend/src/oh_goon/services/shared_plans.py:166-214
+  - backend/AGENTS.md:73-75
+- id: Q167
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: ApiClientProvider captures supplied client/controllers as mount authority and throws if their identities change without remount; its transport is created once in useState. If both controllers are supplied they must share the same causality clock.
+    critical: false
+  - id: ownership_boundary
+    statement: Transport/read/write authority is mount-bound and causally singular.
+    critical: false
+  - id: consequence
+    statement: Prevents provider rerenders from silently replacing transport or splitting read/write causality.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - frontend/src/app/ApiClientProvider.tsx:33-50
+
+- id: Q215
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: SystemInvariantAuditor.audit classifies one transactionally consistent durable runtime safety cut; the findings returned from one call are only the violations observed in that cut, not the universe of possible finding codes.
+    critical: true
+  - id: ownership_boundary
+    statement: recovery.py defines the typed InvariantFinding union and a generic code field, while concrete finding codes are emitted by invariant-auditor branches and must be established from source/test evidence rather than inferred from one runtime audit result.
+    critical: true
+  - id: consequence
+    statement: Confusing an observed runtime result with a static catalog can silently omit dormant invariant paths and produce a false completeness claim.
+    critical: false
+  contradictions:
+  - id: observation-01
+    statement: Claims that one SystemInvariantAuditor.audit invocation enumerates all possible invariant codes or that recovery.py itself is the complete concrete-code registry.
+    severity: critical
+    misconception_id: desired_observed_conflation
+  evidence_expectations:
+  - backend/src/oh_goon/services/invariant_auditor.py:44-105
+  - backend/src/oh_goon/core/models/recovery.py:31-75
+
+- id: Q219
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Oh-Goon already owns critical behavioral coverage through docs/development/REAL_LIFECYCLE_QA.yml, which defines lifecycle, boundary, adversarial, and mutation proof levels and requires production-shaped evidence rather than raw test counts.
+    critical: true
+  - id: ownership_boundary
+    statement: A genuinely missing failure mode should extend the existing lifecycle ledger and its executable contract/tests, not create an independent failure-mode matrix that can drift from the selected Make/test evidence.
+    critical: true
+  - id: consequence
+    statement: One executable coverage ledger keeps claimed lifecycle proof connected to real pytest nodes and prevents a second manual coverage authority from diverging.
+    critical: false
+  contradictions:
+  - id: duplicate-coverage-01
+    statement: Introduces a standalone manually maintained failure-mode matrix as the new primary behavioral-coverage authority without integrating the existing real-lifecycle ledger.
+    severity: critical
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - docs/development/REAL_LIFECYCLE_QA.yml:1-16
+  - scripts/tests/test_real_lifecycle_qa_contract.py:17-56

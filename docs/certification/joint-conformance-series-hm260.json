@@ -1,0 +1,30 @@
+{
+  "schema": "oh-goon.hashmarks-joint-conformance-series.v1",
+  "series_id": "joint-860-hashmarks-hm260-v1",
+  "oh_goon_parent": {
+    "version": "1267.0.859",
+    "zip_sha256": "d06aa15fe75cfc03b9b8c5a3f40e8df3a7a11536154045216b40ad0900bbcf09",
+    "source_identity": "sha256:782dc28b658fc72627ac2b39040a6559ae4a9d1c4340654ee2aca5d642b4dd41"
+  },
+  "hashmarks": {
+    "checkpoint": "HM260",
+    "version": "0.13.0",
+    "canonical_source_archive_identity": "sha256:fa6ca6b90d6b6fb3107f0596e3fae54b01277f080923455a9c24e47612d8bb70",
+    "artifact_identity": "sha256:c32cf232bfbb42eeffad7257eb215b0802bd0cbf8e35e8e4e8c2f0b4bc9eb5b3",
+    "producer_implementation_identity": "sha256:4cb5752192353474e19b7f6f30a81bd4da7a3d4e561eca781b01c84411cc3816"
+  },
+  "authority": {
+    "hashmarks": "repository-intelligence-and-verification-selection",
+    "oh_goon": "admission-execution-verification-certification",
+    "consumer_rule": "verify-producer-semantics-never-recreate-repair-or-reinterpret"
+  },
+  "qualification": {
+    "hashmarks_persistent_readback": "PASS",
+    "hashmarks_source_archive_sha256": "fa6ca6b90d6b6fb3107f0596e3fae54b01277f080923455a9c24e47612d8bb70",
+    "hashmarks_deterministic_rebuild": "PASS byte-identical",
+    "hashmarks_64_shards": "64/64 PASS",
+    "oh_goon_parent": "exact persisted 1267.0.859 DEVELOPMENT CANDIDATE",
+    "oh_goon_interoperability": "182/182 PASS against exact HM260"
+  },
+  "rule": "Changing HM260 source, retained wheel, producer implementation, or Oh-Goon parent creates a new comparison series."
+}

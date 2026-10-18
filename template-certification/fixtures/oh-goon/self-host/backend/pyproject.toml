@@ -1,0 +1,16 @@
+[project]
+name = "oh-goon-self-host-fixture"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+oh-goon-package-source = "oh_goon_self_host_fixture:main"
+oh-goon-repository-understanding-exam = "oh_goon_self_host_fixture:main"
+
+[dependency-groups]
+build = []
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"

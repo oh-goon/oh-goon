@@ -1,0 +1,8 @@
+version: 1
+inputs:
+- release_channel
+- revision
+- coverage_threshold
+goons:
+- python/release-metadata
+- python/quality

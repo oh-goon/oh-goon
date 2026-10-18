@@ -1,0 +1,89 @@
+{
+  "name": "oh-goon-frontend",
+  "private": true,
+  "version": "1267.0.1052",
+  "type": "module",
+  "engines": {
+    "node": ">=22.16.0",
+    "npm": ">=10.9.2"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint . --max-warnings=0 --concurrency=auto",
+    "lint:fix": "eslint . --fix --concurrency=auto",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify:functional": "npm run typecheck && npm run architecture && npm run i18n:check && npm run test && npm run build",
+    "check": "npm run typecheck && npm run lint && npm run architecture && npm run i18n:check && npm run quality:floor-guard && npm run test:coverage && npm run quality:check && npm run build",
+    "i18n:check": "npm run i18n:parity",
+    "architecture:dependencies": "depcruise --config .dependency-cruiser.cjs src",
+    "deadcode": "knip --include files,dependencies,unlisted,unresolved",
+    "architecture": "npm run architecture:dependencies && npm run deadcode",
+    "test:coverage": "vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text",
+    "i18n:parity": "node check-i18n-keys.mjs",
+    "quality:check": "uv run --frozen --project ../backend oh-goon-quality-ratchet check --area frontend",
+    "quality:raise": "uv run --frozen --project ../backend oh-goon-quality-ratchet raise --area frontend",
+    "quality:floor-guard": "uv run --frozen --project ../backend oh-goon-quality-ratchet guard",
+    "test:browser": "npm run browser:transport-preflight && npm run browser:test --",
+    "test:browser:chromium": "npm run browser:transport-preflight && npm run browser:test -- --project=chromium",
+    "test:browser:accessibility": "npm run browser:transport-preflight && npm run browser:test -- e2e/accessibility.spec.ts",
+    "test:browser:visibility": "npm run browser:transport-preflight && npm run browser:test -- e2e/content-visibility.spec.ts",
+    "test:visual": "npm run browser:transport-preflight && playwright test --config=playwright.visual.config.ts --project=chromium",
+    "test:visual:update": "npm run browser:transport-preflight && playwright test --config=playwright.visual.config.ts --project=chromium --update-snapshots",
+    "browser:install": "playwright install chromium firefox webkit",
+    "browser:system-deps": "playwright install-deps chromium firefox webkit",
+    "browser:preflight": "npm run browser:transport-preflight && node e2e/browser-preflight.mjs",
+    "browser:harness-preflight": "npm run browser:transport-preflight && playwright test --list",
+    "browser:runtime-preflight": "npm run browser:transport-preflight && node e2e/browser-runtime-preflight.mjs",
+    "browser:check": "npm run browser:transport-preflight && node e2e/browser-certification-runner.mjs --project=chromium",
+    "browser:release": "npm run browser:transport-preflight && playwright test --list && node e2e/browser-preflight.mjs && node e2e/browser-runtime-preflight.mjs && npm run browser:test -- && playwright test --config=playwright.visual.config.ts --project=chromium",
+    "browser:runtime": "npm run browser:preflight && playwright test --config=playwright.runtime.config.ts",
+    "browser:transport-preflight": "node e2e/browser-localhost-transport-preflight.mjs",
+    "browser:transport-test": "node --test e2e/browser-localhost-transport.test.mjs",
+    "browser:fixture-supervisor-test": "node --test e2e/browser-fixture-supervisor.test.mjs",
+    "playwright:test": "playwright test",
+    "browser:test": "node e2e/browser-certification-runner.mjs"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "i18next": "26.3.6",
+    "react-i18next": "17.0.11"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "26.2.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.4",
+    "eslint": "9.39.5",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.7.0",
+    "jsdom": "29.1.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vite": ">=8.1.5",
+    "vitest": "4.1.10",
+    "dependency-cruiser": "18.1.0",
+    "knip": "6.29.0",
+    "@vitest/coverage-v8": "4.1.10",
+    "@playwright/test": "1.62.1",
+    "@axe-core/playwright": "4.13.0"
+  },
+  "packageManager": "npm@10.9.2",
+  "overrides": {
+    "eslint-plugin-jsx-a11y": {
+      "eslint": "$eslint"
+    }
+  },
+  "ohGoonExecutionAuthority": {
+    "packageBinProviders": {
+      "playwright": "@playwright/test"
+    }
+  }
+}

@@ -1,0 +1,2 @@
+export const FIXTURE_NOW = "2026-08-21T16:00:00Z";
+export const FIXTURE_FINISHED = "2026-08-21T16:01:42Z";

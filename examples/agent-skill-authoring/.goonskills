@@ -1,0 +1,3 @@
+[skill "review"]
+path = skills/review
+source = local

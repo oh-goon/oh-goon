@@ -1,0 +1,12 @@
+export { DependencySearchPanel } from "@/features/dependencies/components/DependencySearchPanel";
+export { DependencyPackagePanel } from "@/features/dependencies/components/DependencyPackagePanel";
+export { RepositoryDependenciesPanel } from "@/features/dependencies/components/RepositoryDependenciesPanel";
+export { useDependencySearch } from "@/features/dependencies/hooks/useDependencySearch";
+export { useDependencyOverview } from "@/features/dependencies/hooks/useDependencyOverview";
+export { useDependencyFleetCoverage } from "@/features/dependencies/hooks/useDependencyFleetCoverage";
+export { useDependencyAdvisory } from "@/features/dependencies/hooks/useDependencyAdvisory";
+export { useDependencyRepositories } from "@/features/dependencies/hooks/useDependencyRepositories";
+export { useDependencyCoverageRepositories } from "@/features/dependencies/hooks/useDependencyCoverageRepositories";
+export { useRepositoryDependencies } from "@/features/dependencies/hooks/useRepositoryDependencies";
+export { useDependencyTargetSelection } from "@/features/dependencies/hooks/useDependencyTargetSelection";
+export type { DependencyCoverage, DependencyEvidence, DependencyRelationship } from "@/features/dependencies/model";

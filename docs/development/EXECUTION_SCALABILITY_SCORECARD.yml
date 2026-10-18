@@ -1,0 +1,99 @@
+schema: 1
+scope: execution-domain-only
+policy:
+  diagnostic_only: true
+  generic_metrics_store: forbidden
+  frontend_metric_authority: forbidden
+  hashmarks_agent_economics: forbidden
+  missing_data: unknown-not-zero
+metrics:
+  workflow_count:
+    unit: count
+    source: docs/development/MAKE_TARGET_SURFACE.yml
+    owner: canonical workflow surface
+    availability: direct
+    aggregation: current classified canonical workflow frontdoors
+  duplicate_execution_owner_violations:
+    unit: violations
+    source: backend/src/oh_goon/repository_tooling/architecture/execution_authority_entropy_contract.py
+    owner: execution authority entropy contract
+    availability: direct
+    aggregation: architecture run
+  architecture_hard_violations:
+    unit: violations
+    source: backend/src/oh_goon/repository_tooling/architecture/structural_authority_contract.py
+    owner: architecture checker
+    availability: direct
+    aggregation: architecture run
+  queue_admission_latency:
+    unit: seconds
+    source: canonical Fleet Run journal lifecycle timestamps
+    owner: Fleet Journal / FleetRunDetail
+    availability: derived
+    aggregation: distribution by run population
+  focused_validation_duration:
+    unit: seconds
+    source: bounded test-batch receipts and canonical validation command elapsed evidence
+    owner: repository tooling validation owners
+    availability: derived
+    aggregation: distribution by validation owner
+  certification_duration:
+    unit: seconds
+    source: self-certification Plan execution evidence
+    owner: FleetPlanService.run / self-certification Plan
+    availability: derived
+    aggregation: distribution by certification run
+  shard_duration_distribution:
+    unit: seconds
+    source: backend/src/oh_goon/repository_tooling/pytest_batch_receipts.py
+    owner: pytest batch runner receipts
+    availability: direct
+    aggregation: distribution by shard/batch
+  timeout_refinement_counts:
+    unit: count
+    source: bounded pytest batch receipts
+    owner: pytest batch runner receipts
+    availability: derived
+    aggregation: count by validation run
+  retry_resume_recovery_counts:
+    unit: count
+    source: canonical Run lifecycle plus self-certification resume evidence
+    owner: Fleet Journal and self-certification evidence owners
+    availability: derived
+    aggregation: count by operation class
+  process_tree_cleanup_failures:
+    unit: count
+    source: backend/src/oh_goon/engine/command.py
+    owner: command supervisor receipt
+    availability: derived
+    aggregation: count of non-successful cleanup outcomes
+  materialization_bytes_time:
+    unit: bytes_and_seconds
+    source: certification supply, workspace, retained-content and dependency materialization evidence
+    owner: existing materialization owners
+    availability: derived
+    aggregation: bytes and elapsed time by materialization class
+  cache_reuse_vs_invalidation:
+    unit: count
+    source: frontend dependency cache, certification supply and retained-content identity decisions
+    owner: existing cache/materialization owners
+    availability: derived
+    aggregation: reuse and invalidation counts by cache class
+  proof_evidence_reuse_rate:
+    unit: ratio
+    source: self-certification evidence state classification
+    owner: self-certification evidence owner
+    availability: derived
+    aggregation: proven reused units divided by reusable candidate units
+  generated_contract_drift_incidents:
+    unit: count
+    source: canonical check-generated result
+    owner: generated-contract checker
+    availability: derived
+    aggregation: failed drift checks by run population
+  artifact_replay_mismatch_incidents:
+    unit: count
+    source: backend/src/oh_goon/repository_tooling/release/exact_release_patch.py
+    owner: exact release patch/replay owner
+    availability: direct
+    aggregation: replay mismatches by packaging attempt

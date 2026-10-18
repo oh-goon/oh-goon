@@ -1,0 +1,35 @@
+{
+  "schema": "oh-goon.template-t6-journey-corpus/v1",
+  "intent": "Local production/teaching template input-correction journeys through actual HTTP and resolver, without execution",
+  "journeys": [
+    {
+      "id": "python-quality",
+      "template_key": "python/quality",
+      "valid_inputs": {"coverage_threshold": "85"},
+      "invalid_inputs": {"coverage_threshold": "101"},
+      "expected_rejection_code": "INVALID_INPUT_VALUE"
+    },
+    {
+      "id": "ml-iris-training",
+      "template_key": "ml/iris-training",
+      "valid_inputs": {"random_seed": "42", "test_size_percent": "20", "minimum_accuracy_percent": "90", "max_iterations": "300"},
+      "invalid_inputs": {"test_size_percent": "9"},
+      "expected_rejection_code": "INVALID_INPUT_VALUE"
+    },
+    {
+      "id": "kubernetes-rollout",
+      "template_key": "kubernetes/set-image",
+      "valid_inputs": {"kubernetes_api_hostname": "api.example.test", "namespace": "team-a", "deployment": "my-service", "container": "web", "image": "registry.example.test/my-service@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+      "invalid_inputs": {"namespace": "INVALID_NAMESPACE"},
+      "expected_rejection_code": "INVALID_INPUT_VALUE"
+    }
+  ],
+  "required_named_tests": [
+    "test_t6_save_edit_requires_revision_and_invalidates_prior_inspection",
+    "test_t6_invalid_plan_edit_fails_before_commit",
+    "test_t6_unknown_input_repair_does_not_leak_user_value",
+    "test_t6_http_schema_error_redacts_secret",
+    "test_t6_same_source_input_pair_is_deterministic",
+    "test_t6_no_run_admission_or_lock_writes"
+  ]
+}

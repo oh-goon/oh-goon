@@ -1,0 +1,88 @@
+{
+  "schema": 5,
+  "workload_tool_permissions": {
+    "make:architecture": [],
+    "make:template-startability-certification": [
+      "ldd",
+      "sh",
+      "true",
+      "uv"
+    ],
+    "make:verify-p0": [
+      "git",
+      "ldd",
+      "sh",
+      "uv"
+    ],
+    "make:verify-p1": [
+      "bash",
+      "git",
+      "sh"
+    ],
+    "make:test-python-complete": [
+      "git",
+      "ldd",
+      "node",
+      "npm",
+      "sh",
+      "true",
+      "uv"
+    ],
+    "make:browser-preflight": [
+      "node",
+      "npm",
+      "sh"
+    ],
+    "make:browser-harness-preflight": [
+      "node",
+      "npm",
+      "sh"
+    ],
+    "make:browser-localhost-transport-preflight": [
+      "node",
+      "npm",
+      "sh"
+    ],
+    "make:browser-required-certification": [
+      "node",
+      "npm",
+      "sh"
+    ],
+    "make:browser-runtime-preflight": [
+      "node",
+      "npm",
+      "sh"
+    ],
+    "make:browser-targeted-certification": [
+      "node",
+      "npm",
+      "sh"
+    ],
+    "make:frontend-functional-certification": [
+      "node",
+      "npm",
+      "sh"
+    ],
+    "make:check-generated": [],
+    "make:test-integration": [
+      "sh"
+    ],
+    "make:local-runtime-verification": [
+      "node",
+      "npm"
+    ],
+    "make:release-locks-check": [
+      "npm",
+      "sh",
+      "uv"
+    ],
+    "make:test-tooling-complete": [
+      "bash",
+      "dd",
+      "git",
+      "node",
+      "sh",
+      "uv"
+    ]
+  }
+}

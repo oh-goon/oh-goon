@@ -1,0 +1,8 @@
+version: 1
+inputs:
+- registry_hostname
+- repository
+- tag
+- expected_digest
+goons:
+- oci/tag-assert

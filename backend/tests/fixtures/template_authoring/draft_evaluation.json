@@ -1,0 +1,570 @@
+{
+  "app_pass": "BLOCKED",
+  "authority": "existing catalog stores, canonical compiler, UX-C draft service",
+  "catalog": {
+    "canonical_inventory_status": "PASS",
+    "goons": 41,
+    "plans": 24,
+    "readme_missing_or_bad_links": 0
+  },
+  "evaluation": {
+    "actual_run_workload": "NOT_RUN",
+    "agent_median_authoring_time": "NOT_MEASURED",
+    "browser_e2e": "NOT_RUN",
+    "compact_distribution": "NOT_PROVIDED",
+    "handoff_distribution": "PENDING_ARTIFACT_AUDIT",
+    "human_median_authoring_time": "NOT_MEASURED",
+    "median_edit_count_improvement": "NOT_MEASURED",
+    "method": "scripted deterministic no-op compilation and draft analysis",
+    "native_wsl": "NOT_RUN",
+    "output_shorthand_25_percent_target": "NOT_APPLICABLE_NO_GO",
+    "passing_plan_drafts": 24,
+    "reference_baseline_paired_trial": "NOT_RUN",
+    "usability_20_percent_target": "UNDETERMINED",
+    "wheel_distribution": "NOT_BUILT"
+  },
+  "execution_permission": "NONE",
+  "gate_a": "BLOCKED",
+  "gate_b": "BLOCKED",
+  "guide_links": [
+    {
+      "source": "docs/development/GOON_AUTHORING.md",
+      "status": "OK",
+      "target": "../templates/TEMPLATE_UX_D_EVALUATION.md"
+    },
+    {
+      "source": "docs/development/GOON_AUTHORING.md",
+      "status": "OK",
+      "target": "NATIVE_TOOL_AUTHORITY.md"
+    },
+    {
+      "source": "docs/development/GOON_AUTHORING.md",
+      "status": "OK",
+      "target": "TEMPLATE_ARTIFACT_RETENTION.md"
+    },
+    {
+      "source": "docs/development/GOON_AUTHORING.md",
+      "status": "OK",
+      "target": "TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md"
+    },
+    {
+      "source": "docs/development/GOON_AUTHORING.md",
+      "status": "OK",
+      "target": "TEMPLATE_NETWORK_AUTHORITY.md"
+    },
+    {
+      "source": "docs/development/GOON_AUTHORING.md",
+      "status": "OK",
+      "target": "TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_INSPECTION.md",
+      "status": "OK",
+      "target": "../DEVELOPMENT.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_INSPECTION.md",
+      "status": "OK",
+      "target": "../templates/TEMPLATE_UX_D_EVALUATION.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_INSPECTION.md",
+      "status": "OK",
+      "target": "FAIL_BEFORE_WORK.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_INSPECTION.md",
+      "status": "OK",
+      "target": "TEMPLATE_CATALOG_DETERMINISM.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_INSPECTION.md",
+      "status": "OK",
+      "target": "TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "../../templates/README.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "../../templates/goons/oci/publish-image/goon.yml"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "../../templates/goons/python/quality/goon.yml"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "../../templates/goons/python/test/goon.yml"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "../../templates/plans/oci/release-deploy/plan.yml"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "../../templates/plans/python/quality/plan.yml"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "../CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "../DEVELOPMENT.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "FAIL_BEFORE_WORK.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "GOON_AUTHORING.md#composite-inputs-expose-child-contracts"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "TEMPLATE_INPUT_INSPECTION.md"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "TEMPLATE_INPUT_INSPECTION.md#resolved-recipient-routing"
+    },
+    {
+      "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
+      "status": "OK",
+      "target": "TEMPLATE_INPUT_INSPECTION.md#safe-rejection-diagnostics"
+    },
+    {
+      "source": "docs/templates/TEMPLATE_UX_D_EVALUATION.md",
+      "status": "OK",
+      "target": "../../templates/README.md"
+    },
+    {
+      "source": "docs/templates/TEMPLATE_UX_D_EVALUATION.md",
+      "status": "OK",
+      "target": "../development/GOON_AUTHORING.md"
+    },
+    {
+      "source": "docs/templates/TEMPLATE_UX_D_EVALUATION.md",
+      "status": "OK",
+      "target": "../development/TEMPLATE_INPUT_INSPECTION.md#evaluation-and-proof-scope"
+    },
+    {
+      "source": "docs/templates/TEMPLATE_UX_D_EVALUATION.md",
+      "status": "OK",
+      "target": "../development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md"
+    },
+    {
+      "source": "docs/templates/TEMPLATE_UX_D_EVALUATION.md",
+      "status": "OK",
+      "target": "TEMPLATE_UX_C_AUTHORING.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/GOON_AUTHORING.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/GOON_AUTHORING.md#import-occurrences"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_ARTIFACT_RETENTION.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_CATALOG_DETERMINISM.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_INPUT_INSPECTION.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_INPUT_INSPECTION.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_INPUT_INSPECTION.md#evaluation-and-proof-scope"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_INPUT_INSPECTION.md#resolved-recipient-routing"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_INPUT_INSPECTION.md#safe-rejection-diagnostics"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md#caller-selected-input-files"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md#scheduled-values-and-provenance"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_NETWORK_AUTHORITY.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/templates/TEMPLATE_UX_D_EVALUATION.md"
+    }
+  ],
+  "missing_or_bad_guide_links": [],
+  "plan_drafts": [
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 84,
+      "key": "advanced/isolated-dataflow",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 84,
+      "source_sha256": "9a031bbba2cbc2256785a28a759cd4ce930b82a246061809683990e103d89bbe",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 120,
+      "key": "kubernetes/set-image",
+      "missing_required_names": [
+        "container",
+        "deployment",
+        "image",
+        "kubernetes_api_hostname",
+        "namespace"
+      ],
+      "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
+      "source_bytes": 120,
+      "source_sha256": "d218f63a51c50deadcd0ff7d8b29eefbe1acb4dea7d2d019737d99fa7ff19d2c",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 120,
+      "key": "ml/iris-training",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 120,
+      "source_sha256": "631d3a3bdf9c8476832c516fe0a8d2bda7d80fa34ffaeb48c89132eadb4884dc",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 100,
+      "key": "oci/image",
+      "missing_required_names": [
+        "base_registry_hostname"
+      ],
+      "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
+      "source_bytes": 100,
+      "source_sha256": "c35805bd2ede78249028e7dd5f17395f3f71131ae663be8613257e8b6bc8dc33",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 157,
+      "key": "oci/publish-image",
+      "missing_required_names": [
+        "base_registry_hostname",
+        "publish_registry_hostname",
+        "publish_repository"
+      ],
+      "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
+      "source_bytes": 157,
+      "source_sha256": "04ce0743b8e73e532301cb2d4ae77b88e2fcc93cc8860f620deb795337e49031",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 195,
+      "key": "oci/release",
+      "missing_required_names": [
+        "base_registry_hostname",
+        "publish_registry_hostname",
+        "publish_repository"
+      ],
+      "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
+      "source_bytes": 195,
+      "source_sha256": "626a6672e8307521ff5f9de7234bd7d2cb0d786421584dd0707768ef949d7a29",
+      "status": "PASS",
+      "step_occurrences": 2
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 138,
+      "key": "oci/release-candidate",
+      "missing_required_names": [
+        "base_registry_hostname"
+      ],
+      "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
+      "source_bytes": 138,
+      "source_sha256": "a3f0f9248bfaa872e1b4e5fd7bae6ba05fcc7a48809618a27ca9519608da2803",
+      "status": "PASS",
+      "step_occurrences": 2
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 359,
+      "key": "oci/release-deploy",
+      "missing_required_names": [
+        "base_registry_hostname",
+        "container",
+        "deployment",
+        "kubernetes_api_hostname",
+        "namespace",
+        "publish_registry_hostname",
+        "publish_repository"
+      ],
+      "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
+      "source_bytes": 359,
+      "source_sha256": "29e05c3d5a1022fcdf2f0f58e146674d8ae84a456234d3d7f29f4a610fe0dc0b",
+      "status": "PASS",
+      "step_occurrences": 3
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 100,
+      "key": "oci/tag-gate",
+      "missing_required_names": [
+        "expected_digest",
+        "registry_hostname",
+        "repository",
+        "tag"
+      ],
+      "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
+      "source_bytes": 100,
+      "source_sha256": "57fd992071d9fd712cd42e786520a521210c8d608a3cf18e3696fa63851ef313",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 183,
+      "key": "oh-goon/app-certification",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 183,
+      "source_sha256": "f7944e440a578d59aeb72444f51a911d3afe4982f16af577d625020c1129423f",
+      "status": "PASS",
+      "step_occurrences": 5
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 50,
+      "key": "oh-goon/prepare-release",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 50,
+      "source_sha256": "d9cad1edd383a561d38a0c87ff69f510c84642d7943ab27ec77c5d1267d8d87c",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 79,
+      "key": "oh-goon/repository-understanding-certification",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 79,
+      "source_sha256": "c1940cc074281cf29b37bedab7c005b1a725e6688a10564a62254f4f5dabc179",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 205,
+      "key": "oh-goon/self-verification",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 205,
+      "source_sha256": "dd81e88bf03bc7983ab6abe7662a845ed118cd33c762a0ee7e52f2382cfa074c",
+      "status": "PASS",
+      "step_occurrences": 6
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 115,
+      "key": "python/dependency-inventory",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 115,
+      "source_sha256": "081eb0bf9625cf45cd4aa52317fdc4ea922f86f2e9f5cfb659dff6b0fb68e11f",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 45,
+      "key": "python/package-artifacts",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 45,
+      "source_sha256": "1d9009244a2ee2d8185570e2594f9e38a604d785909b081ba23498c0407f2c9f",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 35,
+      "key": "python/profile",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 35,
+      "source_sha256": "59f938727c1ad87f2674f633937d845f640da10d53c1762c5cae158e7024c54d",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 64,
+      "key": "python/quality",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 64,
+      "source_sha256": "372a1a7bc31d1a8b7523ddf1d7ef7d5ad8335b922f812ae163bb2cd29028f7cd",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 146,
+      "key": "python/release-candidate",
+      "missing_required_names": [
+        "revision"
+      ],
+      "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
+      "source_bytes": 146,
+      "source_sha256": "eea745435eb6ae8be93a9b9e636cd895514fd8efaded60856d92f5525d696910",
+      "status": "PASS",
+      "step_occurrences": 3
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 81,
+      "key": "python/release-metadata",
+      "missing_required_names": [
+        "revision"
+      ],
+      "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
+      "source_bytes": 81,
+      "source_sha256": "7712fa41e6a42cf1cc978f628a398b6f910a9756b89fcc14c592699773832ebf",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 88,
+      "key": "python/secure",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 88,
+      "source_sha256": "198fa445d8c71ca0e2496094097cd9cae0b792a53f0521d1f2a3ad310511e3e8",
+      "status": "PASS",
+      "step_occurrences": 2
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 119,
+      "key": "python/standard",
+      "missing_required_names": [
+        "revision"
+      ],
+      "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
+      "source_bytes": 119,
+      "source_sha256": "ce5049f0c2b860f231d93085b5558f73889d1c2870a2772960bf4bb4c90bd9a7",
+      "status": "PASS",
+      "step_occurrences": 2
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 36,
+      "key": "python/uv-audit",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 36,
+      "source_sha256": "2ec229d531f2f80d8015e345862b1e4e9e737f80df7c681f3c2441b9f51a313d",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 42,
+      "key": "security/cve-combined",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 42,
+      "source_sha256": "3da99846839d40ed78adb1403301adc1b3cadb3f36cc1357dbd22354fb759acb",
+      "status": "PASS",
+      "step_occurrences": 1
+    },
+    {
+      "comparison_is_execution": false,
+      "draft_bytes": 41,
+      "key": "security/trivy-audit",
+      "missing_required_names": [],
+      "resolved_status": "RESOLVED_NOT_EXECUTED",
+      "source_bytes": 41,
+      "source_sha256": "5163ff20694aab2eafeac17673685b5ee1c3c51e61e47c409dca20498cf5b154",
+      "status": "PASS",
+      "step_occurrences": 1
+    }
+  ],
+  "release": "BLOCKED",
+  "save_permission": "NONE",
+  "schema": "oh-goon.template-ux-d-evidence/v1",
+  "status": "PASS",
+  "ux_d_final_exit_gate": "BLOCKED_PENDING_PAIRED_AND_NATIVE_EVIDENCE"
+}

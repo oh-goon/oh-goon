@@ -1,0 +1,6 @@
+version: 1
+uv:
+  group: dev
+steps:
+- run: uv run pyright --warnings
+- run: uv run ty check .

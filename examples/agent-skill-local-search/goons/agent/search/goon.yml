@@ -1,0 +1,8 @@
+inputs:
+  repo: {type: repository_reference}
+  skill: {type: skill_reference}
+  acceptance: {type: acceptance_profile}
+steps:
+  - uses: agent
+    harness: local-search
+    task: "search:needle"

@@ -1,0 +1,156 @@
+.venv/
+**/.venv/
+frontend/node_modules/
+.oh-goon-data/
+.hashmarks/
+/repositories/
+frontend/.oh-goon-playwright-browsers/
+frontend/.oh-goon-vite-cache/
+
+# Disposable local diagnostic coverage databases; never source identity.
+.coverage
+.coverage.*
+
+# Windows Mark-of-the-Web alternate-data-stream sidecars materialized by some copy paths.
+*:Zone.Identifier
+*:Zone.Identifier:$DATA
+*.patch
+*.patch.sha256
+
+# Native locks and generated API contracts are source: keep backend/uv.lock,
+# frontend/package-lock.json, fixture locks, generated/openapi and generated/frontend.
+
+# Disposable Python/compiler state.
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.tsbuildinfo
+/backend/build/
+/backend/dist/
+
+# Local frontend builds, coverage and browser reports.
+/frontend/dist/
+/frontend/coverage/
+/frontend/test-results/
+/frontend/playwright-report/
+/frontend/playwright-runtime-report/
+
+# Local run/qualification output and release staging, not source fixtures.
+/.qualification/
+/release-artifacts/
+/generated/release/
+/reports/
+/logs/
+/htmlcov/
+/coverage-python.json
+/coverage.xml
+/junit.xml
+
+# Local environment configuration; share only explicit templates.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# Checkpoint and handoff transport stays outside the published source tree.
+# Root anchoring protects runtime checkpoint code and executable templates/plans.
+/.checkpoint/
+/checkpoints/
+/handoffs/
+/recovery/
+/planning/
+/OH_GOON_*.zip
+/*_HANDOFF*.md
+/*_MEMBER_MANIFEST.sha256
+/*_SOURCE.sha256
+/*_SOURCE_AUDIT.json
+/*_PROOF.json
+/*_RECOVERY.json
+/*_FOCUSED.xml
+/*_ADJACENT.xml
+/*_FRESH.xml
+/*_ARCHITECTURE.xml
+/AGENT_*_README.md
+/CO_*_README.md
+/DB[0-9]*_README.md
+/EXEC_*_README.md
+/LACE_WF*_README.md
+/SKILL_*_README.md
+/*_NOT_RELEASE.md
+/LACE_WF02_REVIEW_DECISION.md
+/LACE_WF02_REVIEW_PROPOSAL.json
+/LACE_WF03A_APPROVAL_RECORD.md
+/OH_GOON_FORWARD_TODO*.md
+/CHANGELOG.md
+/HISTORY.md
+
+# Historical implementation plans and checkpoint reports. Keep current guides,
+# architectural contracts, executable examples and certification fixtures.
+/docs/OH_GOON_FORWARD_TODO*.md
+/docs/plans/
+/docs/checkpoints/
+/docs/reviews/
+/docs/development/PHASE_*.md
+/docs/development/M[0-9]*.md
+/docs/development/B[0-9]*.md
+/docs/development/A[0-9]*.md
+/docs/engineering/B[0-9]*.md
+/docs/oh-goon-master-execution-governance-plan-through-162-20260909.md
+/docs/development/MASTER_EXECUTION_GOVERNANCE_HASHMARKS_PLAN.md
+
+# Retired implementation campaigns and QA ledgers; current topic guides remain source.
+/docs/development/GROUP_A_*.md
+/docs/architecture/RUN_DATAFLOW_REDUCTION*.md
+/docs/architecture/CERTIFICATION_REALISM_481_510.md
+/docs/architecture/DB3_DB1B2_NATIVE_FAILURE_REVIEW.md
+/docs/architecture/EVIDENCE_DRIVEN_SIMPLIFICATION_691_720.md
+/docs/architecture/EXECUTION_AUTHORITY_CLOSURE_421_450.md
+/docs/architecture/EXECUTION_PROVENANCE_MODEL_AUDIT_792.md
+/docs/architecture/FAILURE_RECOVERY_RESUME_CLOSURE_541_570.md
+/docs/architecture/FULL_SYSTEM_QUALIFICATION_661_690.md
+/docs/architecture/GAME_TAPE_PRODUCT_CLOSURE_631_660.md
+/docs/architecture/HASHMARKS_HM160_AUDIT_HISTORY_BOUNDARY_781_810.md
+/docs/architecture/HASHMARKS_HM160_INTEROPERABILITY_751_780.md
+/docs/architecture/HASHMARKS_INTEROPERABILITY_571_600.md
+/docs/architecture/HASHMARKS_PROVENANCE_BINDING_813.md
+/docs/architecture/HASHMARKS_PYTEST_PROJECTION_RECOVERY_786_787.md
+/docs/architecture/HASHMARKS_TERMINAL_ACCOUNTING_OFFLINE_PROOF_788_789.md
+/docs/architecture/HASHMARKS_VALIDATION_OWNERSHIP_812.md
+/docs/architecture/LOCAL_EXECUTION_LIFECYCLE_CLOSURE_451_480.md
+/docs/architecture/PLAN_ONE_CANONICAL_DATABASE_OWNER.md
+/docs/architecture/PROMOTION_GATE_ECONOMICS_721_750.md
+/docs/architecture/REAL_REPOSITORY_SHARED_PLAN_WORKFLOWS_601_630.md
+/docs/development/CACHE_MATERIALIZATION_LIFECYCLE_PLAN.md
+/docs/development/EXECUTION_ENVIRONMENT_IMPLEMENTATION_CAMPAIGN.md
+/docs/development/PLAN_GOON_MIGRATION.md
+/docs/development/RISK_BACKLOG.md
+/docs/development/TEMPLATE_AUTHORING_UX_A.md
+/docs/development/TEMPLATE_AUTHORING_UX_B.md
+/docs/development/TEMPLATE_CALLER_VALUES_FILE_T2.md
+/docs/development/TEMPLATE_INPUT_DISCOVERY_T1.md
+/docs/development/TEMPLATE_RECIPIENT_PASS_V1_QA.md
+/docs/development/TEMPLATE_RECIPIENT_PASS_V1.md
+/docs/development/TEMPLATE_T2_REPORT_REPAIR_SOURCE_FENCE_QA.md
+/docs/development/TEMPLATE_T2G_FLEET_CALLER_SOURCE_ADMISSION.md
+/docs/development/TEMPLATE_T2S_SCHEDULED_CALLER_FILE_CUSTODY.md
+/docs/development/TEMPLATE_T3_EXACT_INPUT_ROUTING.md
+/docs/development/TEMPLATE_T4_SAFE_DIAGNOSTICS.md
+/docs/development/TEMPLATE_T5_SAFE_API_GUI.md
+/docs/development/TEMPLATE_T6_REAL_WORLD_EVALUATION.md
+/docs/development/UX_A_EVALUATION_BASELINE.md
+/docs/development/UX_A_CATALOG_BASELINE.json
+/docs/development/UX_D_EVALUATION_BASELINE.json
+/docs/development/*_1267_0_*.json
+/docs/development/TECHNICAL_DEBT_REVIEW.yml
+/docs/development/tests/test_qualification_closure_cadence_docs.py
+/docs/RESPONSIBILITY_COMPLEXITY_RC01.md
+/docs/RESPONSIBILITY_NAMING_REVIEW.md
+
+# Disposable external developer-only analysis checkouts; never product/release supply.
+.agents-cookbook/
+.agent-economics/

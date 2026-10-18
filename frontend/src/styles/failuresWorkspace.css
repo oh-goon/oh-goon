@@ -1,0 +1,30 @@
+.failures-page{--failure-workspace-accent:var(--status-danger);}
+.failure-overview{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.5fr);align-items:center;gap:var(--space-xlarge);padding:18px 20px;border-color:var(--status-danger-border);background:linear-gradient(120deg,var(--status-danger-surface),var(--ice-panel-background) 45%);box-shadow:var(--shadow-low);}
+.failure-overview>.section-heading{margin:0;}
+.failure-overview .summary-grid{grid-template-columns:repeat(2,minmax(120px,1fr));gap:8px;margin:0;}
+.failure-overview .summary-card{padding:13px 15px;border-color:var(--status-danger-border);background:rgba(7,16,21,.28);box-shadow:none;}
+.failure-overview .summary-card::before{display:none;}
+.failure-overview .summary-card strong{font-size:1.65rem;}
+.failure-workspace{padding:20px;}
+.failure-workspace>.section-heading{align-items:flex-end;}
+.failure-search{max-width:38rem;margin:10px 0 12px;}
+.failure-workspace .table-shell{margin-top:8px;}
+.failure-workspace table{font-size:.86rem;}
+.failure-workspace th{font-size:.67rem;}
+.failure-workspace td{line-height:1.45;}
+.failure-workspace--groups tbody td:first-child{min-width:220px;}
+.failure-workspace--groups tbody td:nth-child(2),.failure-workspace--groups tbody td:nth-child(3){max-width:280px;overflow-wrap:anywhere;}
+.failure-workspace--groups tbody td:nth-child(4),.failure-workspace--groups tbody td:nth-child(5){font-variant-numeric:tabular-nums;font-weight:760;}
+.failure-workspace--repositories{border-color:var(--status-danger-border);}
+.failure-workspace--repositories>.section-heading h2{color:var(--text-primary);}
+.failure-workspace--repositories tbody td:first-child{min-width:220px;}
+.failure-repository-row__message{min-width:280px;max-width:560px;color:var(--text-primary);overflow-wrap:anywhere;}
+.failure-repository-row__action{white-space:nowrap;}
+.failure-workspace>.button-row:last-child{justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px solid var(--border-subtle);}
+.failure-workspace .text-button:disabled{color:var(--text-muted);text-decoration:none;}
+@media(max-width:900px){.failure-overview{grid-template-columns:1fr}.failure-overview .summary-grid{max-width:420px}}
+@media(max-width:680px){.failure-overview{padding:16px}.failure-overview .summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));max-width:none}.failure-workspace{padding:16px}.failure-search{max-width:none}.failure-workspace>.section-heading{align-items:stretch}.failure-workspace>.button-row:last-child{align-items:stretch;flex-direction:column}.failure-workspace>.button-row:last-child .text-button{min-height:38px;text-align:left}.failure-repository-row__action .button{width:100%}}
+
+/* Failure text may be the longest value in the fleet; the investigation action must not be pushed away by it. */
+.failure-workspace td :is(strong,small,code),.failure-repository-row__message{overflow-wrap:anywhere;word-break:break-word;}
+.failure-repository-row__action{min-width:9rem;vertical-align:middle;}

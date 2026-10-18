@@ -1,0 +1,23 @@
+{
+  "schema": "oh-goon.runtime-authority-registry/v1",
+  "phase": "1267.0.956",
+  "principle": "Process lifecycle authority is shared only inside one semantic authority domain; qualification harnesses and native runtime delegates remain separate.",
+  "owners": {
+    "backend/src/oh_goon/runtime/process_group.py": "shared-posix-process-group-quiescence-proof",
+    "backend/src/oh_goon/runtime/local_launch_supervisor.py": "local-launch-process-lifecycle",
+    "backend/src/oh_goon/cli_start.py": "native-uvicorn-server-delegate",
+    "backend/src/oh_goon/workflow.py": "repository-workflow-frontdoor-lifecycle",
+    "backend/src/oh_goon/repository_tooling/opensandbox_attempt_runner.py": "opensandbox-isolation-lifecycle",
+    "backend/src/oh_goon/repository_tooling/scout_http_load_probe.py": "scout-qualification-harness",
+    "backend/src/oh_goon/repository_tooling/scout_reverse_proxy_certification.py": "scout-qualification-harness",
+    "backend/src/oh_goon/repository_tooling/release/accept_release.py": "release-qualification-harness",
+    "backend/src/oh_goon/repository_tooling/acceptance/product.py": "product-qualification-harness",
+    "backend/src/oh_goon/engine/command_process_tree.py": "admitted-step-command-process-tree-lifecycle",
+    "backend/src/oh_goon/engine/command.py": "admitted-step-command-launch-lifecycle",
+    "backend/src/oh_goon/repository_tooling/b11_ring_supervisor.py": "development-only-test-process-group-supervisor-no-runtime-lease-or-release-authority"
+  },
+  "non_owners": {
+    "subprocess.run": "bounded command invocation alone is not process-tree lifecycle ownership",
+    "urllib.request.urlopen": "an HTTP observation alone is not launch/readiness lifecycle ownership"
+  }
+}

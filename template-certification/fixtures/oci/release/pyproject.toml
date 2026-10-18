@@ -1,0 +1,18 @@
+[project]
+name = "template-oci-release-fixture"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+pyright = "template_oci_release_fixture:main"
+pytest = "template_oci_release_fixture:main"
+ruff = "template_oci_release_fixture:main"
+ty = "template_oci_release_fixture:main"
+
+[dependency-groups]
+dev = []
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"
