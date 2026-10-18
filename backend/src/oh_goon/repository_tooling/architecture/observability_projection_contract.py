@@ -69,7 +69,6 @@ def _observations_route_function(tree: ast.Module) -> ast.FunctionDef | ast.Asyn
     return None
 
 
-
 def _scout_duplicate_run_models() -> list[Path]:
     duplicates: list[Path] = []
     scout_root = BACKEND_PACKAGE_ROOT / "scout"
@@ -108,7 +107,9 @@ def _scout_evidence_uses_canonical_run_model(path: Path) -> bool:
         and isinstance(statement.target, ast.Name)
         and statement.target.id == "runs"
     ]
-    return len(runs_annotations) == 1 and "RepositoryRunObservation" in ast.unparse(runs_annotations[0])
+    return len(runs_annotations) == 1 and "RepositoryRunObservation" in ast.unparse(
+        runs_annotations[0]
+    )
 
 
 def check_observability_projection_contract() -> list[Violation]:

@@ -4,6 +4,7 @@ No identity monkeypatch, fake worker or subprocess interception is permitted her
 Ordinary test runs skip when native runtime is unavailable; the dedicated host
 qualification command refuses an unavailable or mismatched producer as failure.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -28,13 +29,19 @@ def _require_native_hashmarks() -> None:
         pytest.skip("Linux/WSL native process required")
     if importlib.util.find_spec("hashmarks") is None:
         if os.environ.get("OH_GOON_REQUIRE_NATIVE_HASHMARKS") == "1":
-            pytest.fail("Native qualification BLOCKED: install the pinned Hashmarks wheel using uv sync --locked before running this suite", pytrace=False)
+            pytest.fail(
+                "Native qualification BLOCKED: install the pinned Hashmarks wheel using uv sync --locked before running this suite",
+                pytrace=False,
+            )
         pytest.skip("Native Hashmarks not installed; not a host-qualification PASS")
     from hashmarks import __version__
+
     from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 
     assert __version__ == EXPECTED_HASHMARKS, "Installed Hashmarks differs from the project pin"
-    assert require_loaded_hashmarks_runtime(), "Installed Hashmarks producer has no authoritative identity"
+    assert require_loaded_hashmarks_runtime(), (
+        "Installed Hashmarks producer has no authoritative identity"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -95,8 +102,19 @@ def _reopened_tape(run_id: str):
 def test_native_cli_success_journal_and_game_tape_survive_restart(tmp_path, monkeypatch, capsys):
     repo = _repo(tmp_path, monkeypatch)
     _register(repo)
-    data = _cli(["plan", "run", str(repo / "goon.yml"), "--repository-id", repository_id(repo),
-                 "--standard-local", "--wait", "--json"], capsys)
+    data = _cli(
+        [
+            "plan",
+            "run",
+            str(repo / "goon.yml"),
+            "--repository-id",
+            repository_id(repo),
+            "--standard-local",
+            "--wait",
+            "--json",
+        ],
+        capsys,
+    )
     assert data["exit"] == 0
     assert data["status"] == "COMPLETED"
     assert data["outcome"] == "SUCCESS"
@@ -113,9 +131,13 @@ def test_native_real_nonzero_exit_durable_failure(tmp_path, monkeypatch):
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent)
-        target = runtime.plans.prepare_execution_target(repo / "goon.yml", lock_path=repo / "goon.lock")
+        target = runtime.plans.prepare_execution_target(
+            repo / "goon.yml", lock_path=repo / "goon.lock"
+        )
         admitted = runtime.runs.start_prepared_plan(
-            target, repository_ids={repository_id(repo)}, fleet_run_id="native-nonzero",
+            target,
+            repository_ids={repository_id(repo)},
+            fleet_run_id="native-nonzero",
         )
         terminal = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=30)
         assert terminal.outcome.value != "SUCCESS"
@@ -131,9 +153,13 @@ def test_native_owned_process_cancellation_durable(tmp_path, monkeypatch):
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent)
-        target = runtime.plans.prepare_execution_target(repo / "goon.yml", lock_path=repo / "goon.lock")
+        target = runtime.plans.prepare_execution_target(
+            repo / "goon.yml", lock_path=repo / "goon.lock"
+        )
         admitted = runtime.runs.start_prepared_plan(
-            target, repository_ids={repository_id(repo)}, fleet_run_id="native-cancel",
+            target,
+            repository_ids={repository_id(repo)},
+            fleet_run_id="native-cancel",
         )
         end = time.monotonic() + 15
         while time.monotonic() < end:

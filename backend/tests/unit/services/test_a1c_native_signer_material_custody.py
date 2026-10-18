@@ -3,6 +3,7 @@
 The prepared Fleet enrollment and file fixtures are test material, NOT real
 production signer custody or native host qualification.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,15 +32,26 @@ def _replace_identical(path: Path) -> None:
     os.replace(successor, path)
 
 
-@pytest.mark.parametrize("attack", [
-    "missing-seed", "invalid-seed", "wrong-seed", "weak-seed",
-    "symlink-seed", "policy-swap-after-read", "seed-swap-after-read",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "missing-seed",
+        "invalid-seed",
+        "wrong-seed",
+        "weak-seed",
+        "symlink-seed",
+        "policy-swap-after-read",
+        "seed-swap-after-read",
+    ],
+)
 def test_prework_rejects_bad_six_domain_native_signer_custody_before_work(
-    tmp_path, monkeypatch, attack,
+    tmp_path,
+    monkeypatch,
+    attack,
 ):
-    args, _params, conn, calls, _lifecycle, binding, owner, _inventory, _roots, _admit = provisioned(
-        tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, binding, owner, _inventory, _roots, _admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     policy_path, _policy, private = _policy_and_leaf(binding)
     try:
         if attack == "missing-seed":
@@ -64,9 +76,13 @@ def test_prework_rejects_bad_six_domain_native_signer_custody_before_work(
             def raced_read(root_fd, filename, *, limit):
                 nonlocal replaced
                 result = original_read(root_fd, filename, limit=limit)
-                if not replaced and filename == ("signers.json" if attack == "policy-swap-after-read" else private.name):
+                if not replaced and filename == (
+                    "signers.json" if attack == "policy-swap-after-read" else private.name
+                ):
                     replaced = True
-                    _replace_identical(policy_path if attack == "policy-swap-after-read" else private)
+                    _replace_identical(
+                        policy_path if attack == "policy-swap-after-read" else private
+                    )
                 return result
 
             monkeypatch.setattr(custody, "_read_leaf", raced_read)
@@ -80,8 +96,9 @@ def test_prework_rejects_bad_six_domain_native_signer_custody_before_work(
 
 
 def test_custody_probe_checks_all_six_seeds_without_signing_or_work(tmp_path, monkeypatch):
-    args, _params, conn, calls, _lifecycle, binding, owner, _inventory, _roots, _admit = provisioned(
-        tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, binding, owner, _inventory, _roots, _admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     try:
         result = owner.inspect_deployment_readiness("durable-run")
         assert result["status"] == "OBSERVED_NOT_ADMITTED"
@@ -95,8 +112,9 @@ def test_custody_probe_checks_all_six_seeds_without_signing_or_work(tmp_path, mo
 
 
 def test_native_leaf_name_swap_during_descriptor_read_fails_closed(tmp_path, monkeypatch):
-    args, _params, conn, calls, _lifecycle, binding, owner, _inventory, _roots, _admit = provisioned(
-        tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, binding, owner, _inventory, _roots, _admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     _policy_path, _policy, private = _policy_and_leaf(binding)
     real_read = os.read
     swapped = False
@@ -120,14 +138,21 @@ def test_native_leaf_name_swap_during_descriptor_read_fails_closed(tmp_path, mon
         conn.close()
 
 
-@pytest.mark.parametrize("field", [
-    "source_identity", "lock_identity", "native_tool_identity",
-    "backend_capability_manifest_identity", "execution_environment_identity",
-    "repository_identity",
-])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "source_identity",
+        "lock_identity",
+        "native_tool_identity",
+        "backend_capability_manifest_identity",
+        "execution_environment_identity",
+        "repository_identity",
+    ],
+)
 def test_each_native_signer_domain_must_match_independent_root(tmp_path, monkeypatch, field):
-    args, _params, conn, calls, _lifecycle, binding, owner, _inventory, _roots, _admit = provisioned(
-        tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, binding, owner, _inventory, _roots, _admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     try:
         policy = json.loads((binding.key_directory / "signers.json").read_bytes())
         key = binding.key_directory / policy["issuers"][field]["private_key_file"]

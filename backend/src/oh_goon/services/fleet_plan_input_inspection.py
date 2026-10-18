@@ -2,6 +2,7 @@
 
 This module does not resolve values, rewrite bindings, or own a second schema.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -59,7 +60,11 @@ def _owners(
             if any(binding.name == name for binding in step.inputs):
                 continue  # canonical materialization rejects this ambiguity
         else:
-            forwarded = [binding for binding in step.inputs if binding.value == expected_reference and not binding.sources]
+            forwarded = [
+                binding
+                for binding in step.inputs
+                if binding.value == expected_reference and not binding.sources
+            ]
             if not forwarded:
                 continue
             for binding in forwarded:

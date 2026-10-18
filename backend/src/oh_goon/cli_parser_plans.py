@@ -19,15 +19,25 @@ def add_plan_commands(
     plan_validate.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
     plan_validate.add_argument("--inputs-file", type=Path)
     plan_validate.add_argument("--json", action="store_true", dest="as_json")
-    plan_validate.add_argument("--diagnostics", action="store_true", help="Report safe structured validation failures (with --json)")
+    plan_validate.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Report safe structured validation failures (with --json)",
+    )
     plan_inputs_inspect = plan_subparsers.add_parser(
         "inputs",
         help="Inspect canonical Plan/Goon input contracts and owners without values or work",
     )
     plan_inputs_inspect.add_argument("plan", type=Path)
     plan_inputs_inspect.add_argument("--json", action="store_true", dest="as_json")
-    plan_inputs_inspect.add_argument("--source-closure", action="store_true", help="AG-01 read-only repository/skill closure evidence (no Run)")
-    plan_inputs_inspect.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
+    plan_inputs_inspect.add_argument(
+        "--source-closure",
+        action="store_true",
+        help="AG-01 read-only repository/skill closure evidence (no Run)",
+    )
+    plan_inputs_inspect.add_argument(
+        "--input", action="append", dest="plan_inputs", metavar="NAME=VALUE"
+    )
     plan_inputs_inspect.add_argument("--expect-sha256")
     plan_inputs_inspect.add_argument("--repository-root", type=Path)
     plan_inputs_inspect.add_argument("--skill-root", type=Path)
@@ -71,16 +81,28 @@ def add_plan_commands(
         type=Path,
         help="Explicit goon.lock path to verify; defaults to goon.lock beside the Plan",
     )
-    plan_run.add_argument("--json", action="store_true", dest="as_json", help="Emit one machine-readable Run result")
+    plan_run.add_argument(
+        "--json", action="store_true", dest="as_json", help="Emit one machine-readable Run result"
+    )
     plan_run.add_argument("--wait", action="store_true", help="Wait for terminal FleetRun state")
-    plan_run.add_argument("--standard-local", action="store_true",
-                          help="Explicitly run a non-CI/CD Plan on this host (not sandboxed); requires --wait")
-    plan_run.add_argument("--agent-repository-root", type=Path,
-                          help="Authorized local root for frozen Agent repository input")
-    plan_run.add_argument("--agent-skill-root", type=Path,
-                          help="Authorized local root for frozen Agent Skill input")
-    plan_run.add_argument("--allow-agent-acceptance", action="append",
-                          help="Explicit accepted Agent profile; standard-local only")
+    plan_run.add_argument(
+        "--standard-local",
+        action="store_true",
+        help="Explicitly run a non-CI/CD Plan on this host (not sandboxed); requires --wait",
+    )
+    plan_run.add_argument(
+        "--agent-repository-root",
+        type=Path,
+        help="Authorized local root for frozen Agent repository input",
+    )
+    plan_run.add_argument(
+        "--agent-skill-root", type=Path, help="Authorized local root for frozen Agent Skill input"
+    )
+    plan_run.add_argument(
+        "--allow-agent-acceptance",
+        action="append",
+        help="Explicit accepted Agent profile; standard-local only",
+    )
     plan_run.add_argument(
         "--repair-handoff",
         action="store_true",
@@ -101,8 +123,16 @@ def _add_plan_diagnostic_commands(
     plan_explain.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
     plan_explain.add_argument("--inputs-file", type=Path)
     plan_explain.add_argument("--json", action="store_true", dest="as_json")
-    plan_explain.add_argument("--diagnostics", action="store_true", help="Report safe structured validation failures (with --json)")
-    plan_explain.add_argument("--routes", action="store_true", help="Show exact resolved input recipient occurrence routes (v1)")
+    plan_explain.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Report safe structured validation failures (with --json)",
+    )
+    plan_explain.add_argument(
+        "--routes",
+        action="store_true",
+        help="Show exact resolved input recipient occurrence routes (v1)",
+    )
 
     plan_check = plan_subparsers.add_parser(
         "check", help="Statically check Plan/Goon contracts and fully resolve a single root Plan"
@@ -123,7 +153,8 @@ def _add_plan_diagnostic_commands(
     plan_diff.add_argument("--inputs-file", type=Path)
     plan_diff.add_argument("--json", action="store_true", dest="as_json")
     plan_diff.add_argument(
-        "--exit-code", action="store_true",
+        "--exit-code",
+        action="store_true",
         help="Exit 1 if canonical resolved execution meaning changed, 0 if unchanged, 2 if invalid",
     )
 
@@ -195,8 +226,12 @@ def _add_run_readback_commands(
     )
     events.add_argument("fleet_run_id")
     events.add_argument("--after", type=_nonnegative_cursor, default=0)
-    events.add_argument("--limit", type=_event_page_limit, default=100,
-                        help="Maximum durable events per page (1–100; default 100)")
+    events.add_argument(
+        "--limit",
+        type=_event_page_limit,
+        default=100,
+        help="Maximum durable events per page (1–100; default 100)",
+    )
     events.add_argument("--json", action="store_true", dest="as_json")
     logs = plan_subparsers.add_parser(
         "logs", help="Read retained transient Game Tape output (not durable Run truth)"

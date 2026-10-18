@@ -10,9 +10,7 @@ def require_successful_repository_execution(
     """Require exact repository-attributed successful work in Game Tape."""
 
     game_tape = detail.get("game_tape")
-    repository_facts = (
-        game_tape.get("repositories") if isinstance(game_tape, dict) else None
-    )
+    repository_facts = game_tape.get("repositories") if isinstance(game_tape, dict) else None
     if not isinstance(repository_facts, list):
         raise RuntimeError(f"{label} lost repository-attributed Game Tape evidence")
     observed = _repository_facts(repository_facts)
@@ -55,28 +53,20 @@ def _repository_facts(rows: list[object]) -> dict[str, dict[str, object]]:
     observed: dict[str, dict[str, object]] = {}
     for fact in rows:
         repository = fact.get("repository") if isinstance(fact, dict) else None
-        repository_id = (
-            repository.get("repository_id") if isinstance(repository, dict) else None
-        )
+        repository_id = repository.get("repository_id") if isinstance(repository, dict) else None
         if isinstance(repository_id, str) and isinstance(fact, dict):
             observed[repository_id] = fact
     return observed
 
 
-def _require_passed_steps(
-    fact: dict[str, object], repository_id: str, *, label: str
-) -> None:
+def _require_passed_steps(fact: dict[str, object], repository_id: str, *, label: str) -> None:
     steps = fact.get("steps")
     if fact.get("status") != "PASSED" or not isinstance(steps, list) or not steps:
         raise RuntimeError(
             f"{label} did not prove successful physical work for Team {repository_id}"
         )
-    if any(
-        not isinstance(step, dict) or step.get("status") != "PASSED" for step in steps
-    ):
-        raise RuntimeError(
-            f"{label} contains non-passed Step evidence for Team {repository_id}"
-        )
+    if any(not isinstance(step, dict) or step.get("status") != "PASSED" for step in steps):
+        raise RuntimeError(f"{label} contains non-passed Step evidence for Team {repository_id}")
 
 
 def require_preview_counts(
@@ -111,9 +101,10 @@ def require_preview_work(
     first_step = steps[0] if isinstance(steps, list) and steps else None
     if not isinstance(first_import, dict) or not isinstance(first_step, dict):
         raise RuntimeError(f"{label} lost projected import/Step evidence")
-    if first_import.get("applicability") != applicability or first_step.get("disposition") != disposition:
-        raise RuntimeError(
-            f"{label} expected {applicability}/{disposition} import/Step evidence"
-        )
+    if (
+        first_import.get("applicability") != applicability
+        or first_step.get("disposition") != disposition
+    ):
+        raise RuntimeError(f"{label} expected {applicability}/{disposition} import/Step evidence")
     if reason_contains is not None and reason_contains not in str(first_import.get("reason")):
         raise RuntimeError(f"{label} lost applicability reason: {reason_contains}")

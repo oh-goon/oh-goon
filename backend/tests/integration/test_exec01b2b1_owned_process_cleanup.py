@@ -3,6 +3,7 @@
 The existing command supervisor owns process groups; this is functional evidence,
 not a host isolation or high-security certification gate.
 """
+
 from __future__ import annotations
 
 import os
@@ -18,8 +19,9 @@ pytestmark = pytest.mark.skipif(os.name != "posix", reason="Linux/WSL process-gr
 def test_real_host_deadline_terminates_owned_shell_and_child():
     started = time.monotonic()
     with pytest.raises(CommandTimeoutExpired) as info:
-        run_command("sh", "-c", "sleep 30 & wait", timeout=0.25,
-                    require_process_group_quiescence=True)
+        run_command(
+            "sh", "-c", "sleep 30 & wait", timeout=0.25, require_process_group_quiescence=True
+        )
     receipt = info.value.supervisor
     assert receipt.process_group_cleanup_requested
     assert receipt.cleanup_reason == "timeout"
@@ -32,9 +34,14 @@ def test_real_host_deadline_terminates_owned_shell_and_child():
 def test_real_host_cancel_terminates_owned_shell_and_child():
     started = time.monotonic()
     with pytest.raises(CommandCancelledError) as info:
-        run_command("sh", "-c", "sleep 30 & wait", timeout=None,
-                    cancel_requested=lambda: time.monotonic() - started >= 0.25,
-                    require_process_group_quiescence=True)
+        run_command(
+            "sh",
+            "-c",
+            "sleep 30 & wait",
+            timeout=None,
+            cancel_requested=lambda: time.monotonic() - started >= 0.25,
+            require_process_group_quiescence=True,
+        )
     receipt = info.value.supervisor
     assert receipt.process_group_cleanup_requested
     assert receipt.cleanup_reason == "cancel"
@@ -46,8 +53,9 @@ def test_real_host_cancel_terminates_owned_shell_and_child():
 def test_real_host_completed_command_reaps_background_child():
     started = time.monotonic()
     # Leader exits with a helper still running: it must not extend command lifetime.
-    result = run_command("sh", "-c", "sleep 30 & echo done", timeout=4,
-                         require_process_group_quiescence=True)
+    result = run_command(
+        "sh", "-c", "sleep 30 & echo done", timeout=4, require_process_group_quiescence=True
+    )
     assert result.returncode == 0
     assert result.stdout == "done"
     assert result.supervisor is not None

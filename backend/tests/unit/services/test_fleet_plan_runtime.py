@@ -15,7 +15,11 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedFleetPlan,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
-from oh_goon.core.models.fleet_plan_values import HostEnvironmentPart, LiteralEnvironmentPart, ResolvedEnvironmentBinding
+from oh_goon.core.models.fleet_plan_values import (
+    HostEnvironmentPart,
+    LiteralEnvironmentPart,
+    ResolvedEnvironmentBinding,
+)
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
@@ -231,7 +235,6 @@ def test_plan_environment_is_explicitly_allowlisted(
     assert "FLEET_HIDDEN_TOKEN" not in env
 
 
-
 @pytest.mark.parametrize(
     "control_name",
     (
@@ -260,9 +263,7 @@ def test_plan_cannot_import_control_plane_authority(
                 environment=(
                     ResolvedEnvironmentBinding(
                         name="CONTROL_PLANE_TOKEN",
-                        parts=(
-                            HostEnvironmentPart(name=control_name),
-                        ),
+                        parts=(HostEnvironmentPart(name=control_name),),
                     ),
                 ),
             ),
@@ -378,6 +379,7 @@ def test_plan_cannot_publish_literal_value_under_control_plane_environment_name(
         PhysicalFleetPlanExecutorHarness(GitService()).prepare_direct_run(
             RepositoryIdentity(path=tmp_path), plan, cancel_requested=None
         )
+
 
 def test_plan_preflight_rejects_missing_declared_environment(tmp_path: Path) -> None:
     os.environ.pop("OH_GOON_TEST_MISSING_ENV", None)
@@ -500,7 +502,7 @@ def test_plan_reschedule_uses_schedule_generation_and_version_cas(tmp_path: Path
             f"""version: 1
 steps:
   - id: {step_id}
-    run: {argv.strip('[]').replace(',', '')}
+    run: {argv.strip("[]").replace(",", "")}
 """,
             encoding="utf-8",
         )

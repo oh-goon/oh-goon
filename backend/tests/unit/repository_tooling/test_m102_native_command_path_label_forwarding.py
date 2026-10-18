@@ -6,7 +6,6 @@ from oh_goon.repository_tooling.architecture._structural_project_supply_contract
     check_project_supply_contract,
 )
 
-
 NATIVE = "backend/src/oh_goon/repository_tooling/native_command.py"
 
 
@@ -152,7 +151,8 @@ def test_missing_public_path_label_protocol_fails_closed(tmp_path: Path) -> None
 def test_architecture_does_not_authorize_private_forwarding_spelling() -> None:
     root = Path(__file__).resolve().parents[4]
     source = (
-        root / "backend/src/oh_goon/repository_tooling/architecture/_structural_project_supply_contract.py"
+        root
+        / "backend/src/oh_goon/repository_tooling/architecture/_structural_project_supply_contract.py"
     ).read_text(encoding="utf-8")
 
     for private_spelling in ("path_labels=path_labels", "_path_labels(", "run_native_command"):

@@ -146,33 +146,95 @@ class CanonicalFleetJournalBuilder:
                 step_id=step_id,
                 step_order=step_order,
                 attempt_number=attempt_number,
-                step_attempt_id=fleet_step_attempt_id(
-                    operation_id, step_id, attempt_number
-                ),
+                step_attempt_id=fleet_step_attempt_id(operation_id, step_id, attempt_number),
                 generated_at=at,
             )
         )
         return self
 
-    def step_succeeded(self, repository_id: str, operation_id: str, step_id: str, step_order: int, returncode: int, at: datetime) -> CanonicalFleetJournalBuilder:
-        self._events.append(StepSucceededEvent(event_type=FleetRunEventType.STEP_SUCCEEDED, sequence=self._sequence(), fleet_run_id=self._fleet_run_id, repository_id=repository_id, operation_id=operation_id, step_id=step_id, step_order=step_order, returncode=returncode, generated_at=at))
-        return self
-
-    def step_failed(self, repository_id: str, operation_id: str, step_id: str, step_order: int, returncode: int, at: datetime) -> CanonicalFleetJournalBuilder:
-        self._events.append(StepFailedEvent(event_type=FleetRunEventType.STEP_FAILED, sequence=self._sequence(), fleet_run_id=self._fleet_run_id, repository_id=repository_id, operation_id=operation_id, step_id=step_id, step_order=step_order, returncode=returncode, generated_at=at))
-        return self
-
-    def step_skipped(self, repository_id: str, operation_id: str, step_id: str, step_order: int, at: datetime) -> CanonicalFleetJournalBuilder:
-        self._events.append(StepSkippedEvent(event_type=FleetRunEventType.STEP_SKIPPED, sequence=self._sequence(), fleet_run_id=self._fleet_run_id, repository_id=repository_id, operation_id=operation_id, step_id=step_id, step_order=step_order, generated_at=at))
-        return self
-
-    def step_cancelled(self, repository_id: str, operation_id: str, step_id: str, step_order: int, at: datetime) -> CanonicalFleetJournalBuilder:
-        self._events.append(StepCancelledEvent(event_type=FleetRunEventType.STEP_CANCELLED, sequence=self._sequence(), fleet_run_id=self._fleet_run_id, repository_id=repository_id, operation_id=operation_id, step_id=step_id, step_order=step_order, generated_at=at))
-        return self
-
-    def repository_completed(
-        self, operation_id: str, at: datetime
+    def step_succeeded(
+        self,
+        repository_id: str,
+        operation_id: str,
+        step_id: str,
+        step_order: int,
+        returncode: int,
+        at: datetime,
     ) -> CanonicalFleetJournalBuilder:
+        self._events.append(
+            StepSucceededEvent(
+                event_type=FleetRunEventType.STEP_SUCCEEDED,
+                sequence=self._sequence(),
+                fleet_run_id=self._fleet_run_id,
+                repository_id=repository_id,
+                operation_id=operation_id,
+                step_id=step_id,
+                step_order=step_order,
+                returncode=returncode,
+                generated_at=at,
+            )
+        )
+        return self
+
+    def step_failed(
+        self,
+        repository_id: str,
+        operation_id: str,
+        step_id: str,
+        step_order: int,
+        returncode: int,
+        at: datetime,
+    ) -> CanonicalFleetJournalBuilder:
+        self._events.append(
+            StepFailedEvent(
+                event_type=FleetRunEventType.STEP_FAILED,
+                sequence=self._sequence(),
+                fleet_run_id=self._fleet_run_id,
+                repository_id=repository_id,
+                operation_id=operation_id,
+                step_id=step_id,
+                step_order=step_order,
+                returncode=returncode,
+                generated_at=at,
+            )
+        )
+        return self
+
+    def step_skipped(
+        self, repository_id: str, operation_id: str, step_id: str, step_order: int, at: datetime
+    ) -> CanonicalFleetJournalBuilder:
+        self._events.append(
+            StepSkippedEvent(
+                event_type=FleetRunEventType.STEP_SKIPPED,
+                sequence=self._sequence(),
+                fleet_run_id=self._fleet_run_id,
+                repository_id=repository_id,
+                operation_id=operation_id,
+                step_id=step_id,
+                step_order=step_order,
+                generated_at=at,
+            )
+        )
+        return self
+
+    def step_cancelled(
+        self, repository_id: str, operation_id: str, step_id: str, step_order: int, at: datetime
+    ) -> CanonicalFleetJournalBuilder:
+        self._events.append(
+            StepCancelledEvent(
+                event_type=FleetRunEventType.STEP_CANCELLED,
+                sequence=self._sequence(),
+                fleet_run_id=self._fleet_run_id,
+                repository_id=repository_id,
+                operation_id=operation_id,
+                step_id=step_id,
+                step_order=step_order,
+                generated_at=at,
+            )
+        )
+        return self
+
+    def repository_completed(self, operation_id: str, at: datetime) -> CanonicalFleetJournalBuilder:
         self._events.append(
             RepositoryCompletedEvent(
                 event_type=FleetRunEventType.REPOSITORY_COMPLETED,
@@ -217,9 +279,7 @@ class CanonicalFleetJournalBuilder:
         )
         return self
 
-    def run_failed(
-        self, failure: FleetRunFailure, at: datetime
-    ) -> CanonicalFleetJournalBuilder:
+    def run_failed(self, failure: FleetRunFailure, at: datetime) -> CanonicalFleetJournalBuilder:
         self._events.append(
             RunFailedEvent(
                 event_type=FleetRunEventType.RUN_FAILED,

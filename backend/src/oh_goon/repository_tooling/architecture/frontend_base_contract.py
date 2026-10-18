@@ -4,7 +4,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture.common import Violation
-from oh_goon.repository_tooling.architecture.repository_layout import FRONTEND_ROOT, FRONTEND_SOURCE_ROOT
+from oh_goon.repository_tooling.architecture.repository_layout import (
+    FRONTEND_ROOT,
+    FRONTEND_SOURCE_ROOT,
+)
 from oh_goon.repository_tooling.architecture.typescript_semantics import project_typescript
 
 FORBIDDEN_BROWSER_APIS = (
@@ -32,18 +35,12 @@ def check_frontend_local_only() -> list[Violation]:
         for token in FORBIDDEN_BROWSER_APIS:
             if facts.uses(token):
                 violations.append(
-                    Violation(
-                        path, f"unsupported browser persistence/telemetry: {token}"
-                    )
+                    Violation(path, f"unsupported browser persistence/telemetry: {token}")
                 )
         if facts.uses("localStorage") and relative != "app/preferences.ts":
-            violations.append(
-                Violation(path, "localStorage is owned only by app/preferences.ts")
-            )
+            violations.append(Violation(path, "localStorage is owned only by app/preferences.ts"))
         if facts.external_urls:
-            violations.append(
-                Violation(path, "frontend source must not contain an external URL")
-            )
+            violations.append(Violation(path, "frontend source must not contain an external URL"))
         if relative != "app/api/httpTransport.ts" and facts.uses("fetch"):
             violations.append(
                 Violation(path, "raw fetch is owned only by app/api/httpTransport.ts")

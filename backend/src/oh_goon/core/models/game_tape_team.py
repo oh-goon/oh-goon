@@ -41,5 +41,6 @@ class GameTapeTeamComposition(ImmutableModel):
     @property
     def overlap_observed(self) -> bool:
         return bool(self.overlapping_repository_execution_ids)
+
     status_counts: tuple[GameTapeRepositoryStatusCount, ...] = Field(default_factory=tuple)
     first_failure: GameTapeTeamFailureFocus | None = None

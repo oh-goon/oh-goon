@@ -107,9 +107,7 @@ def _dimension_aggregation(
     scores["evidence_quality"] = evidence_quality
     included_count = len([item for item in state.question_results if item["included"]])
     penalty = (
-        0.25 * state.unsupported_count
-        + state.contradicted_count
-        + len(state.fabricated_evidence)
+        0.25 * state.unsupported_count + state.contradicted_count + len(state.fabricated_evidence)
     ) / max(1, included_count)
     scores["epistemic_accuracy"] = _percentage(100.0 * (1.0 - penalty))
     return scores, normalization

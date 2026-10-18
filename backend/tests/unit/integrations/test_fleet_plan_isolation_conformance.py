@@ -3,23 +3,21 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-
-import pytest
 import subprocess
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
+import pytest
+
+from oh_goon.core.fleet_plan_tool_requirements import shell_runtime_support_tool_names
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepCapabilities
-from oh_goon.core.fleet_plan_tool_requirements import shell_runtime_support_tool_names
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.integrations._fleet_plan_opensandbox_transport import _request_payload
 from oh_goon.integrations._fleet_plan_sandbox_launch import sandbox_process_launch
-from oh_goon.integrations.fleet_plan_atomic_runtime_authority import bind_atomic_runtime_authority
 from oh_goon.integrations.content_snapshot import SnapshotBinding, snapshot_identity
+from oh_goon.integrations.fleet_plan_atomic_runtime_authority import bind_atomic_runtime_authority
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
-from oh_goon.repository_tooling import opensandbox_attempt_runner as remote_runner
-from oh_goon.repository_tooling.opensandbox_attempt_runner import _prepare_root
 from oh_goon.integrations.fleet_plan_process_isolation import (
     IsolatedProcessRequest,
 )
@@ -27,6 +25,8 @@ from oh_goon.integrations.fleet_plan_runtime_authority import (
     observed_runtime_authority_payload,
     reconcile_runtime_authority,
 )
+from oh_goon.repository_tooling import opensandbox_attempt_runner as remote_runner
+from oh_goon.repository_tooling.opensandbox_attempt_runner import _prepare_root
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import (
     TEST_ISOLATION_BACKEND,
@@ -83,6 +83,7 @@ def test_backends_compile_the_same_fleet_attempt_semantics(tmp_path: Path) -> No
         assert bwrap_argv[index - 2] == f"{runtime_file.mode:o}"
         assert bwrap_argv[index + 1] == str(runtime_file.sandbox_path)
         assert index < separator
+
 
 def _assert_toolchain_payloads(
     shell_payload: dict[str, object], plain_payload: dict[str, object]
@@ -207,11 +208,9 @@ def test_read_only_cache_input_is_ro_bound_locally_and_readonly_remotely(tmp_pat
             bwrap_argv, _ = bubblewrap._command(
                 request, launch=launch, atomic_authority=atomic, network_prefix=()
             )
-        payload = _request_payload(
-            request, timeout=12.0, staging_root=tmp_path / "input-cache"
-        )
+        payload = _request_payload(request, timeout=12.0, staging_root=tmp_path / "input-cache")
 
-    pairs = list(zip(bwrap_argv, bwrap_argv[1:]))
+    pairs = list(zip(bwrap_argv, bwrap_argv[1:], strict=False))
     assert (str(attempt.paths.cache), "/cache") not in pairs
     assert (str(readonly_cache), "/cache") in pairs
     ro_index = bwrap_argv.index(str(readonly_cache)) - 1
@@ -382,11 +381,9 @@ def test_remote_runner_restores_bound_interpreter_after_path_mutation(
     assert result["returncode"] != 125, result
     assert result["runtime_authority"] == expected
     restored = (
-        tmp_path
-        / "remote-atomic-interpreter-fleet"
-        / "rootfs"
-        / "toolchain"
-        / "bin"
-        / "node"
+        tmp_path / "remote-atomic-interpreter-fleet" / "rootfs" / "toolchain" / "bin" / "node"
     )
-    assert "sha256:" + hashlib.sha256(restored.read_bytes()).hexdigest() == expected["interpreter_identity"]
+    assert (
+        "sha256:" + hashlib.sha256(restored.read_bytes()).hexdigest()
+        == expected["interpreter_identity"]
+    )

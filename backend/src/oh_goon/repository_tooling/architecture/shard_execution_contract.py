@@ -35,8 +35,7 @@ def _schema_assignments(path: Path) -> dict[str, list[object]]:
         targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
         value: object = (
             node.value.value
-            if isinstance(node.value, ast.Constant)
-            and isinstance(node.value.value, str)
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
             else object()
         )
         for target in targets:
@@ -128,7 +127,9 @@ def _require_class_fields(
     for name in required:
         if len(fields.get(name, [])) != 1:
             violations.append(
-                Violation(path, f"Shard contract {class_name}.{name} must have exactly one field owner")
+                Violation(
+                    path, f"Shard contract {class_name}.{name} must have exactly one field owner"
+                )
             )
 
 
@@ -253,12 +254,17 @@ def _require_field_type_reference(
     nodes = fields.get(field_name, [])
     if len(nodes) != 1:
         violations.append(
-            Violation(path, f"{class_name}.{field_name} must have exactly one structural field owner")
+            Violation(
+                path, f"{class_name}.{field_name} must have exactly one structural field owner"
+            )
         )
         return
     if target not in _annotation_references(path, nodes[0].annotation):
         violations.append(
-            Violation(path, f"{class_name}.{field_name} must structurally carry canonical shard execution evidence")
+            Violation(
+                path,
+                f"{class_name}.{field_name} must structurally carry canonical shard execution evidence",
+            )
         )
 
 

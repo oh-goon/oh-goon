@@ -10,7 +10,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_backend_runtime_has_one_http_client_owner_and_lean_default_dev_group() -> None:
-    payload = tomllib.loads((ROOT / "backend/pyproject.toml").read_text(encoding="utf-8"))
+    payload = tomllib.loads(
+        (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
+    )
     runtime = set(payload["project"]["dependencies"])
     groups = payload["dependency-groups"]
 
@@ -22,19 +24,21 @@ def test_backend_runtime_has_one_http_client_owner_and_lean_default_dev_group() 
         *groups["build"],
         *payload["build-system"]["requires"],
     ]
-    assert all("==" not in requirement and ",<" not in requirement for requirement in declared)
+    assert all(
+        "==" not in requirement and ",<" not in requirement for requirement in declared
+    )
 
 
 def test_oh_goon_http_calls_use_lazy_httpx2_leaf_transport() -> None:
-    product = (ROOT / "backend/src/oh_goon/integrations/gitlab_ci_component.py").read_text(
-        encoding="utf-8"
-    )
-    normal_test = (ROOT / "backend/tests/unit/entrypoints/test_gitlab_goon_import_cli_and_fetch.py").read_text(
-        encoding="utf-8"
-    )
-    late_test = (ROOT / "backend/tests/dependency_complete/test_gitlab_httpx2_transport.py").read_text(
-        encoding="utf-8"
-    )
+    product = (
+        ROOT / "backend/src/oh_goon/integrations/gitlab_ci_component.py"
+    ).read_text(encoding="utf-8")
+    normal_test = (
+        ROOT / "backend/tests/unit/entrypoints/test_gitlab_goon_import_cli_and_fetch.py"
+    ).read_text(encoding="utf-8")
+    late_test = (
+        ROOT / "backend/tests/dependency_complete/test_gitlab_httpx2_transport.py"
+    ).read_text(encoding="utf-8")
     assert "        import httpx2" in product
     assert "httpx2.get(" in product
     assert "httpx2.HTTPError" in product
@@ -44,11 +48,15 @@ def test_oh_goon_http_calls_use_lazy_httpx2_leaf_transport() -> None:
     assert "import httpx2" in late_test
 
 
-def test_normal_backend_install_delegates_one_materialization_operation_to_native_uv() -> None:
+def test_normal_backend_install_delegates_one_materialization_operation_to_native_uv() -> (
+    None
+):
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     backend_install = makefile.split("backend-install:", 1)[1].split("\n\n", 1)[0]
     init = makefile.split("\ninit:\n", 1)[1].split("\ninit-doctor:", 1)[0]
-    native_sync = "uv sync --project backend --locked --group dev --group quality --group build"
+    native_sync = (
+        "uv sync --project backend --locked --group dev --group quality --group build"
+    )
     assert native_sync in backend_install
     assert native_sync in init
     assert "--no-install-project" not in backend_install
@@ -65,7 +73,11 @@ def test_normal_backend_install_delegates_one_materialization_operation_to_nativ
                 continue
             assert command.startswith("ruff ")
             assert ".venv/bin/ruff" in line
-    coverage_targets = ("coverage-python", "test-sqlite-coverage", "test-journal-coverage")
+    coverage_targets = (
+        "coverage-python",
+        "test-sqlite-coverage",
+        "test-journal-coverage",
+    )
     coverage_blocks = {
         target: makefile.split(f"{target}:", 1)[1].split("\n\n", 1)[0]
         for target in coverage_targets
@@ -81,9 +93,13 @@ def test_normal_backend_install_delegates_one_materialization_operation_to_nativ
         assert ".venv/bin/python -m pytest" not in block
 
 
-def test_api_and_goon_imports_do_not_require_httpx2_transport_at_module_import(tmp_path: Path) -> None:
+def test_api_and_goon_imports_do_not_require_httpx2_transport_at_module_import(
+    tmp_path: Path,
+) -> None:
     blocker = tmp_path / "httpx2.py"
-    blocker.write_text('raise RuntimeError("httpx2 imported too early")\n', encoding="utf-8")
+    blocker.write_text(
+        'raise RuntimeError("httpx2 imported too early")\n', encoding="utf-8"
+    )
     env = os.environ.copy()
     pythonpath = [
         str(tmp_path),
@@ -110,7 +126,9 @@ def test_api_and_goon_imports_do_not_require_httpx2_transport_at_module_import(t
 
 
 def test_direct_runtime_reference_is_admitted_by_hatch_metadata() -> None:
-    payload = tomllib.loads((ROOT / "backend/pyproject.toml").read_text(encoding="utf-8"))
+    payload = tomllib.loads(
+        (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
+    )
     direct_runtime = [
         item for item in payload["project"]["dependencies"] if " @ " in item
     ]
@@ -121,7 +139,9 @@ def test_direct_runtime_reference_is_admitted_by_hatch_metadata() -> None:
     assert "sources" not in payload["tool"]["uv"]
 
 
-def test_hashmarks_upgrade_is_normal_uv_dependency_without_oh_goon_release_client() -> None:
+def test_hashmarks_upgrade_is_normal_uv_dependency_without_oh_goon_release_client() -> (
+    None
+):
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     project_path = ROOT / "backend/pyproject.toml"
     project = project_path.read_text(encoding="utf-8")
@@ -147,7 +167,9 @@ def test_hashmarks_upgrade_is_normal_uv_dependency_without_oh_goon_release_clien
     assert not tuple((ROOT / "vendor").glob("hashmarks-*.whl"))
 
 
-def test_ruff_repair_is_explicit_safe_mutation_and_qualification_stays_read_only() -> None:
+def test_ruff_repair_is_explicit_safe_mutation_and_qualification_stays_read_only() -> (
+    None
+):
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     repair = makefile.split("\nruff-repair:\n", 1)[1].split("\n\n", 1)[0]
     static = makefile.split("\npython-static-sanity:\n", 1)[1].split("\n\n", 1)[0]

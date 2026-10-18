@@ -9,17 +9,17 @@ from collections.abc import Callable
 from contextvars import ContextVar
 
 from oh_goon.application import ApplicationRuntime
-from oh_goon.cli_plan_inputs import plan_inputs
-from oh_goon.cli_plan_run_readback import run_plan_readback
 from oh_goon.cli_plan_definition_commands import (
     _check,
-    _inputs,
     _diff,
     _explain,
+    _inputs,
     _prepare,
     _preview,
     _validate,
 )
+from oh_goon.cli_plan_inputs import plan_inputs
+from oh_goon.cli_plan_run_readback import run_plan_readback
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
@@ -63,8 +63,9 @@ _RUN_RESULT_SCHEMA = "oh-goon.plan-run-result/v1"
 _RUN_JSON_PROGRESS: ContextVar[bool] = ContextVar("oh_goon_run_json_progress", default=False)
 
 
-def _run_result(*, fleet_run_id: str, plan_id: str | None, status: str,
-                outcome: str | None = None) -> dict[str, str | None]:
+def _run_result(
+    *, fleet_run_id: str, plan_id: str | None, status: str, outcome: str | None = None
+) -> dict[str, str | None]:
     """Presentation of original Fleet facts; never a second terminal classifier."""
     return {
         "schema": _RUN_RESULT_SCHEMA,
@@ -77,10 +78,17 @@ def _run_result(*, fleet_run_id: str, plan_id: str | None, status: str,
 
 def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     if getattr(args, "as_json", False) and args.repair_handoff:
-        print(json.dumps({"schema": _RUN_RESULT_SCHEMA, "status": "error",
-                          "fleet_run_id": None,
-                          "message": "--json and --repair-handoff cannot be combined"},
-                         sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    "schema": _RUN_RESULT_SCHEMA,
+                    "status": "error",
+                    "fleet_run_id": None,
+                    "message": "--json and --repair-handoff cannot be combined",
+                },
+                sort_keys=True,
+            )
+        )
         return 2
     admitted = None
     as_json = bool(getattr(args, "as_json", False))
@@ -102,7 +110,8 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             extensions_path=args.extensions,
             repository_ids=set(args.repository_ids) if args.repository_ids else None,
             all_repositories=args.all_repositories,
-            fleet_run_id=args.fleet_run_id, requested_priority=args.priority,
+            fleet_run_id=args.fleet_run_id,
+            requested_priority=args.priority,
             inputs=selected_inputs,
             **source_identity,
             lock_path=args.lock_file,
@@ -113,10 +122,16 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         plan_id = admitted.target.plan.plan_id if admitted.target is not None else None
         if not args.wait:
             if as_json:
-                print(json.dumps(_run_result(
-                    fleet_run_id=admitted.fleet_run_id, plan_id=plan_id,
-                    status=admitted.status.value,
-                ), sort_keys=True))
+                print(
+                    json.dumps(
+                        _run_result(
+                            fleet_run_id=admitted.fleet_run_id,
+                            plan_id=plan_id,
+                            status=admitted.status.value,
+                        ),
+                        sort_keys=True,
+                    )
+                )
             else:
                 print(f"Fleet Run ID: {admitted.fleet_run_id}")
                 print(f"Plan ID: {plan_id or 'unknown'}")
@@ -132,12 +147,14 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             token = _RUN_JSON_PROGRESS.set(True)
             try:
                 detail = _wait_for_terminal_with_progress(
-                    runtime, admitted.fleet_run_id, admitted_run=admitted)
+                    runtime, admitted.fleet_run_id, admitted_run=admitted
+                )
             finally:
                 _RUN_JSON_PROGRESS.reset(token)
         else:
             detail = _wait_for_terminal_with_progress(
-                runtime, admitted.fleet_run_id, admitted_run=admitted)
+                runtime, admitted.fleet_run_id, admitted_run=admitted
+            )
     except KeyboardInterrupt:
         if admitted is not None:
             try:
@@ -145,31 +162,48 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             except FleetDomainError:
                 pass
         if as_json:
-            print(json.dumps({
-                "schema": _RUN_RESULT_SCHEMA, "status": "interrupted",
-                "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
-            }, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "schema": _RUN_RESULT_SCHEMA,
+                        "status": "interrupted",
+                        "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
+                    },
+                    sort_keys=True,
+                )
+            )
         else:
             print("Plan run interrupted.")
         return 130
     except (FleetDomainError, ValueError) as exc:
         if as_json:
             # Do not assert no effects: a failure can occur after Run creation.
-            print(json.dumps({
-                "schema": _RUN_RESULT_SCHEMA, "status": "error",
-                "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
-                "message": str(exc),
-            }, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "schema": _RUN_RESULT_SCHEMA,
+                        "status": "error",
+                        "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
+                        "message": str(exc),
+                    },
+                    sort_keys=True,
+                )
+            )
         else:
             print(str(exc))
         return 2
     if as_json:
-        print(json.dumps(_run_result(
-            fleet_run_id=admitted.fleet_run_id,
-            plan_id=admitted.target.plan.plan_id if admitted.target is not None else None,
-            status=detail.run.status.value,
-            outcome=detail.outcome.value,
-        ), sort_keys=True))
+        print(
+            json.dumps(
+                _run_result(
+                    fleet_run_id=admitted.fleet_run_id,
+                    plan_id=admitted.target.plan.plan_id if admitted.target is not None else None,
+                    status=detail.run.status.value,
+                    outcome=detail.outcome.value,
+                ),
+                sort_keys=True,
+            )
+        )
     else:
         print(f"Execution status: {detail.run.status.value}")
         print(f"Outcome: {detail.outcome.value}")
@@ -271,9 +305,9 @@ def _plan_step_owner_labels(detail) -> dict[str, tuple[int, int, str]]:
 def _activity_markers(text: str) -> tuple[str, ...]:
     prefix = "OH-GOON ACTIVITY:"
     return tuple(
-        line[len(prefix):].strip()
+        line[len(prefix) :].strip()
         for line in text.splitlines()
-        if line.startswith(prefix) and line[len(prefix):].strip()
+        if line.startswith(prefix) and line[len(prefix) :].strip()
     )
 
 
@@ -326,8 +360,7 @@ def _emit_observed_step_activity(
             else:
                 index, total, goon_name = owner
                 _progress_print(
-                    f"Activity detail: Goon {index}/{total} — {goon_name} | "
-                    f"{marker}{attempt}"
+                    f"Activity detail: Goon {index}/{total} — {goon_name} | {marker}{attempt}"
                 )
             emitted = True
     return max(after, batch.next_sequence), emitted, current_activity
@@ -602,7 +635,9 @@ def _print_repair_workflow(
     print("1. Give this failure block to your coding agent.")
     print("2. Fix only the observed failure; do not weaken tests, locks, coverage, or timeouts.")
     if teardown_only:
-        print("3. Inspect the durable teardown reason above; do not treat the successful step command as the failing operation.")
+        print(
+            "3. Inspect the durable teardown reason above; do not treat the successful step command as the failing operation."
+        )
         print("4. Normal recovery and final proof: make certify")
         return
     print(f"3. Focused diagnostic command: {command}")
@@ -649,7 +684,9 @@ def _schedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     try:
         selected_inputs = plan_inputs(args)
         snapshot = getattr(args, "_caller_input_file_snapshot", None)
-        source_identity = ({"caller_input_file": snapshot.authority()} if snapshot is not None else {})
+        source_identity = (
+            {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
+        )
         definition = runtime.plans.schedule(
             args.plan,
             schedule_id=args.schedule_id,
@@ -674,7 +711,9 @@ def _reschedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     try:
         selected_inputs = plan_inputs(args)
         snapshot = getattr(args, "_caller_input_file_snapshot", None)
-        source_identity = ({"caller_input_file": snapshot.authority()} if snapshot is not None else {})
+        source_identity = (
+            {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
+        )
         definition = runtime.plans.reschedule(
             args.plan,
             schedule_id=args.schedule_id,

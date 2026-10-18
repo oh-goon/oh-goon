@@ -8,8 +8,7 @@ from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.league_folders import LeagueFolderStore
-from oh_goon.runtime.state import LocalState
-from oh_goon.runtime.state import locations_revision
+from oh_goon.runtime.state import LocalState, locations_revision
 from tests.factories.capabilities import admit_test_run
 from tests.factories.journal import commit_operation, start_run
 from tests.factories.local_state import local_state
@@ -24,7 +23,12 @@ def test_locations_round_trip_in_sqlite(tmp_path: Path) -> None:
 
     assert state.add_location(location) == [location.resolve()]
     assert list(state.read_view().locations) == [location.resolve()]
-    assert state.remove_location(location, expected_revision=locations_revision(state.read_view().locations)) == []
+    assert (
+        state.remove_location(
+            location, expected_revision=locations_revision(state.read_view().locations)
+        )
+        == []
+    )
 
 
 def test_concurrent_location_adds_preserve_both_serialized_updates(
@@ -458,7 +462,12 @@ def test_location_ambiguous_committed_remove_keeps_preference_and_projection(
 
     monkeypatch.setattr(database, "transaction", lose_first_write_response)
 
-    assert state.remove_location(location, expected_revision=locations_revision(state.read_view().locations)) == []
+    assert (
+        state.remove_location(
+            location, expected_revision=locations_revision(state.read_view().locations)
+        )
+        == []
+    )
     assert LeagueFolderStore(database.path.with_name("league.yml")).list() == ()
     assert state.read_view().locations == ()
 
@@ -546,7 +555,9 @@ def test_successful_location_write_reloads_to_same_preference_and_runtime_state(
     assert LeagueFolderStore(database_path.with_name("league.yml")).list() == (location.resolve(),)
     assert restarted.read_view().locations == (location.resolve(),)
 
-    restarted.remove_location(location, expected_revision=locations_revision(restarted.read_view().locations))
+    restarted.remove_location(
+        location, expected_revision=locations_revision(restarted.read_view().locations)
+    )
     assert LeagueFolderStore(database_path.with_name("league.yml")).list() == ()
     assert restarted.read_view().locations == ()
 

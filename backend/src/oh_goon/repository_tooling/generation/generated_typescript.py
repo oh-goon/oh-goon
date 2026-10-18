@@ -45,9 +45,5 @@ def assert_typescript_file_limit(outputs: Mapping[str, str]) -> None:
         and line_count(content) > MAX_TYPESCRIPT_LINES
     }
     if oversized:
-        details = ", ".join(
-            f"{path}={lines}" for path, lines in sorted(oversized.items())
-        )
-        raise ValueError(
-            f"Generated TypeScript exceeds {MAX_TYPESCRIPT_LINES} lines: {details}"
-        )
+        details = ", ".join(f"{path}={lines}" for path, lines in sorted(oversized.items()))
+        raise ValueError(f"Generated TypeScript exceeds {MAX_TYPESCRIPT_LINES} lines: {details}")

@@ -8,15 +8,19 @@ from dataclasses import replace
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from oh_goon.core.enforcer_lace_issuer_evidence import ISSUER_PROTOCOL, SIGNATURE_DOMAIN
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError, admission_receipt
-from oh_goon.core.enforcer_lace_issuer_evidence import SIGNATURE_DOMAIN, ISSUER_PROTOCOL
 from oh_goon.runtime.enforcer_lace_issuer_keyring import (
-    IssuerKeyReference, load_explicit_issuer_verifier,
+    IssuerKeyReference,
+    load_explicit_issuer_verifier,
 )
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
 from tests.unit.core.test_enforcer_lace_trust import authenticator
 from tests.unit.services.test_group_a_verified_ingress_authorities import (
-    FIELDS, proof, roots, setup,
+    FIELDS,
+    proof,
+    roots,
+    setup,
 )
 
 
@@ -43,14 +47,20 @@ def test_explicit_file_keys_validate_independent_existing_proofs(tmp_path):
     db.execute("INSERT INTO operational_lease VALUES ('run-one')")
     # This remains the non-live, opt-in tested boundary; key loading cannot issue proof.
     result = FleetAdmissionPlanner.publish_verified_ingress_admission(
-        journal=journal, contract=contract, receipt=admission_receipt(auth, contract),
-        authenticator=auth, configured=env, current=env, control_epoch=1,
-        lease_identity="lease-verified", issuer_verifier=verifier, issuer_evidence=witnesses,
-        lease_is_current=lambda run, epoch, lease: (
-            run, epoch, lease
-        ) == ("run-one", 1, "lease-verified"),
-        commit_lease_is_current=lambda conn, run, epoch, lease: conn.in_transaction and (
-            run, epoch, lease) == ("run-one", 1, "lease-verified"),
+        journal=journal,
+        contract=contract,
+        receipt=admission_receipt(auth, contract),
+        authenticator=auth,
+        configured=env,
+        current=env,
+        control_epoch=1,
+        lease_identity="lease-verified",
+        issuer_verifier=verifier,
+        issuer_evidence=witnesses,
+        lease_is_current=lambda run, epoch, lease: (run, epoch, lease)
+        == ("run-one", 1, "lease-verified"),
+        commit_lease_is_current=lambda conn, run, epoch, lease: conn.in_transaction
+        and (run, epoch, lease) == ("run-one", 1, "lease-verified"),
         operational_admission=lambda conn: conn.execute(
             "UPDATE operational_lease SET run_id=run_id WHERE run_id='run-one'"
         ),
@@ -60,13 +70,33 @@ def test_explicit_file_keys_validate_independent_existing_proofs(tmp_path):
     db.close()
 
 
-@pytest.mark.parametrize("attack", [
-    "no_root", "relative_root", "world_directory", "wrong_owner_directory",
-    "symlink_directory", "missing_file", "symlink_file", "world_file", "group_file",
-    "directory_instead_of_file", "short_key", "oversized_key", "duplicate_file",
-    "path_traversal", "absolute_leaf", "unknown_field", "missing_field",
-    "duplicated_key", "duplicated_issuer", "fifo", "hardlink", "read_race",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "no_root",
+        "relative_root",
+        "world_directory",
+        "wrong_owner_directory",
+        "symlink_directory",
+        "missing_file",
+        "symlink_file",
+        "world_file",
+        "group_file",
+        "directory_instead_of_file",
+        "short_key",
+        "oversized_key",
+        "duplicate_file",
+        "path_traversal",
+        "absolute_leaf",
+        "unknown_field",
+        "missing_field",
+        "duplicated_key",
+        "duplicated_issuer",
+        "fifo",
+        "hardlink",
+        "read_race",
+    ],
+)
 def test_unsafe_issuer_roots_reject_before_proofs_or_admission(tmp_path, monkeypatch, attack):
     directory, refs, keys = secure_roots(tmp_path)
     field = FIELDS[0]
@@ -80,6 +110,7 @@ def test_unsafe_issuer_roots_reject_before_proofs_or_admission(tmp_path, monkeyp
         directory.chmod(0o777)
     elif attack == "wrong_owner_directory":
         previous = os.fstat
+
         def fake_fstat(fd):
             info = previous(fd)
             if os.path.samefile(f"/proc/self/fd/{fd}", directory):
@@ -87,6 +118,7 @@ def test_unsafe_issuer_roots_reject_before_proofs_or_admission(tmp_path, monkeyp
                 values[4] = os.geteuid() + 1
                 return os.stat_result(values)
             return info
+
         monkeypatch.setattr(os, "fstat", fake_fstat)
     elif attack == "symlink_directory":
         alias = tmp_path / "keys-link"
@@ -126,10 +158,12 @@ def test_unsafe_issuer_roots_reject_before_proofs_or_admission(tmp_path, monkeyp
         (directory / "another-link").hardlink_to(path)
     elif attack == "read_race":
         original_read = os.read
+
         def racing_read(fd, n):
             result = original_read(fd, n)
             path.write_bytes(b"changed-within-native-read-time" * 2)
             return result
+
         monkeypatch.setattr(os, "read", racing_read)
     elif attack == "fifo":
         path.unlink()
@@ -143,19 +177,31 @@ def test_root_file_swap_does_not_fallback_to_old_key(tmp_path):
     old = load_explicit_issuer_verifier(directory, refs)
     _, _, _, contract, keys, _ = setup()
     evidence = tuple(proof(field, contract, keys) for field in FIELDS)
-    old.verify(contract, evidence=evidence, control_epoch=1, lease_identity="lease",
-               lease_is_current=lambda *_: True)
+    old.verify(
+        contract,
+        evidence=evidence,
+        control_epoch=1,
+        lease_identity="lease",
+        lease_is_current=lambda *_: True,
+    )
     swapped = directory / refs[FIELDS[0]].filename
     swapped.write_bytes(b"r" * 32)
     new = load_explicit_issuer_verifier(directory, refs)
     with pytest.raises(TrustProtocolError, match="authentication failed"):
-        new.verify(contract, evidence=evidence, control_epoch=1, lease_identity="lease",
-                   lease_is_current=lambda *_: True)
+        new.verify(
+            contract,
+            evidence=evidence,
+            control_epoch=1,
+            lease_identity="lease",
+            lease_is_current=lambda *_: True,
+        )
 
 
 @pytest.mark.parametrize("replacement", ["leaf-rename", "directory-rename"])
 def test_root_names_must_remain_bound_through_entire_verifier_load(
-    tmp_path, monkeypatch, replacement,
+    tmp_path,
+    monkeypatch,
+    replacement,
 ):
     directory, refs, keys = secure_roots(tmp_path)
     original_read = os.read
@@ -202,5 +248,10 @@ def test_public_verification_root_does_not_grant_signature_authority(tmp_path):
     forged = replace(evidence[0], signature_hex=fake.sign(message).hex())
     assert ISSUER_PROTOCOL.endswith("/v2")
     with pytest.raises(TrustProtocolError, match="authentication failed"):
-        verifier.verify(contract, evidence=(forged,) + evidence[1:], control_epoch=1,
-                        lease_identity="lease", lease_is_current=lambda *_: True)
+        verifier.verify(
+            contract,
+            evidence=(forged,) + evidence[1:],
+            control_epoch=1,
+            lease_identity="lease",
+            lease_is_current=lambda *_: True,
+        )

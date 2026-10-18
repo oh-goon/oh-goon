@@ -21,7 +21,9 @@ def _target_body(name: str) -> str:
     return "\n".join(body)
 
 
-def test_general_fleet_discovery_accepts_git_repo_without_root_pyproject(tmp_path: Path) -> None:
+def test_general_fleet_discovery_accepts_git_repo_without_root_pyproject(
+    tmp_path: Path,
+) -> None:
     repository = tmp_path / "repo"
     repository.mkdir()
     (repository / ".git").mkdir()
@@ -50,7 +52,7 @@ def test_app_test_runner_owns_bootstrap_not_goon_order() -> None:
     assert '"league", "add-folder"' in runner
     assert '["lock", plan, *input_args, "--output", str(lock_path)]' in runner
     assert '"--lock-file",' in runner
-    assert "\"plan\",\n            \"run\",\n            plan," in runner
+    assert '"plan",\n            "run",\n            plan,' in runner
     assert "repository_tooling.source_normalization" not in runner
     assert "OH_GOON_COPY_VENV" not in runner
     assert "import-certification-dependencies" not in runner
@@ -65,10 +67,15 @@ def test_junior_runbook_is_low_friction_development_start() -> None:
     assert "PASS" in APP_RUNBOOK and "FAIL" in APP_RUNBOOK
     assert "BLOCKED" in APP_RUNBOOK and "SKIPPED" in APP_RUNBOOK
 
+
 def test_junior_docs_have_no_explicit_self_repository_id_path() -> None:
-    docs = APP_RUNBOOK + (ROOT / "docs/development/APP_CERTIFICATION.md").read_text(encoding="utf-8")
+    docs = APP_RUNBOOK + (ROOT / "docs/development/APP_CERTIFICATION.md").read_text(
+        encoding="utf-8"
+    )
     assert "OH_GOON_SELF_REPOSITORY_ID=repo-" not in docs
-    assert "make certification-explain OH_GOON_RUN_ID=" in (ROOT / "backend/src/oh_goon/cli_runtime_plans.py").read_text(encoding="utf-8")
+    assert "make certification-explain OH_GOON_RUN_ID=" in (
+        ROOT / "backend/src/oh_goon/cli_runtime_plans.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_make_test_frontdoor_has_no_certification_repo_or_plan_semantics() -> None:

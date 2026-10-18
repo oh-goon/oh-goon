@@ -1,14 +1,15 @@
 """M171: retain deployment provenance and fail-before-planning boundaries."""
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-
-
 def test_one_original_lifecycle_and_deployment_owner():
     service = (ROOT / "backend/src/oh_goon/services/fleet_run_lifecycle.py").read_text()
-    plane = (ROOT / "backend/src/oh_goon/services/fleet_run_control_plane.py").read_text()
+    plane = (
+        ROOT / "backend/src/oh_goon/services/fleet_run_control_plane.py"
+    ).read_text()
     foundation = (ROOT / "backend/src/oh_goon/_application_foundation.py").read_text()
     wiring = (ROOT / "backend/src/oh_goon/_application_services.py").read_text()
     assert "self._lifecycle.require_fleet_prework_available(" in plane

@@ -8,7 +8,9 @@ from oh_goon.runtime.local_launch_owner import LocalLaunchOwner
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Record an owned child PID, then exec its native runtime")
+    parser = argparse.ArgumentParser(
+        description="Record an owned child PID, then exec its native runtime"
+    )
     parser.add_argument("--launch-id", required=True)
     parser.add_argument("--service", required=True)
     parser.add_argument("--generation", required=True, type=int)

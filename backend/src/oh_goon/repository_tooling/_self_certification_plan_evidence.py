@@ -1,55 +1,25 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import math
 import os
 import shutil
 import tempfile
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable
 
+from oh_goon.core.file_digest import sha256_file
+from oh_goon.repository_tooling import _self_certification_plan_units as plan_units
+from oh_goon.repository_tooling._self_certification_plan_units import (
+    _sha256_json,
+    _source_gate_dependencies,
+)
 from oh_goon.repository_tooling.release.package_slim import (
     archive_source_identity,
     canonical_source_files,
     canonical_source_identity,
     package_slim,
 )
-from oh_goon.repository_tooling.self_certification_artifacts import (
-    build_artifact_manifest,
-    build_artifact_sidecars,
-    build_cumulative_patch,
-    build_handoff,
-    cumulative_patch_path,
-    load_cumulative_patch_evidence,
-    load_fresh_zip_evidence,
-    load_handoff_evidence,
-    load_manifest_evidence,
-    load_parent_source_input,
-    load_patch_replay_evidence,
-    load_persist_evidence,
-    load_retained_readback_evidence,
-    load_sidecar_evidence,
-    manifest_path,
-    parent_checkpoint_spec,
-    parent_input_path,
-    persist_artifact_set,
-    retained_artifact_directory,
-    stage_parent_source_zip,
-    verify_cumulative_patch_replay,
-    verify_fresh_source_zip,
-    verify_retained_artifact_set,
-)
 
-from oh_goon.repository_tooling import _self_certification_plan_units as plan_units
-from oh_goon.repository_tooling._self_certification_plan_units import (
-    _sha256_json,
-    _source_gate_dependencies,
-)
-
-from oh_goon.core.file_digest import sha256_file
 
 def evidence_root(
     root: Path,
@@ -96,8 +66,10 @@ def load_unit_evidence(
     verification_config_identity: str,
     execution_unit_id: str,
 ) -> dict[str, object] | None:
-    path = evidence_root(root, source_identity, verification_config_identity) / "units" / (
-        execution_unit_id.removeprefix("sha256:") + ".json"
+    path = (
+        evidence_root(root, source_identity, verification_config_identity)
+        / "units"
+        / (execution_unit_id.removeprefix("sha256:") + ".json")
     )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -142,8 +114,10 @@ def record_unit_pass(
     }
     payload = dict(base)
     payload["evidence_identity"] = _sha256_json(base)
-    destination = evidence_root(root, source_identity, verification_config_identity) / "units" / (
-        str(unit["execution_unit_id"]).removeprefix("sha256:") + ".json"
+    destination = (
+        evidence_root(root, source_identity, verification_config_identity)
+        / "units"
+        / (str(unit["execution_unit_id"]).removeprefix("sha256:") + ".json")
     )
     return _atomic_json_write(destination, payload)
 
@@ -225,7 +199,9 @@ def record_source_seal(
             str(unit["execution_unit_id"]),
         )
         if evidence is None:
-            raise RuntimeError(f"cannot seal source; missing current PASS evidence for {unit['unit']}")
+            raise RuntimeError(
+                f"cannot seal source; missing current PASS evidence for {unit['unit']}"
+            )
         required[str(unit["unit"])] = str(evidence["evidence_identity"])
     base: dict[str, object] = {
         "schema": 1,
@@ -237,9 +213,10 @@ def record_source_seal(
     }
     payload = dict(base)
     payload["seal_identity"] = _sha256_json(base)
-    destination = evidence_root(root, source_identity, verification_config_identity) / "source-seal.json"
+    destination = (
+        evidence_root(root, source_identity, verification_config_identity) / "source-seal.json"
+    )
     return _atomic_json_write(destination, payload)
-
 
 
 def _package_config_identity() -> str:
@@ -254,13 +231,18 @@ def _package_config_identity() -> str:
     )
 
 
-def _artifact_directory(root: Path, source_identity: str, verification_config_identity: str) -> Path:
+def _artifact_directory(
+    root: Path, source_identity: str, verification_config_identity: str
+) -> Path:
     return evidence_root(root, source_identity, verification_config_identity) / "artifacts"
 
 
 def _source_zip_path(root: Path, source_identity: str, verification_config_identity: str) -> Path:
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
-    return _artifact_directory(root, source_identity, verification_config_identity) / f"oh-goon-{version}.zip"
+    return (
+        _artifact_directory(root, source_identity, verification_config_identity)
+        / f"oh-goon-{version}.zip"
+    )
 
 
 def _copy_canonical_source(root: Path, staging: Path) -> None:
@@ -277,7 +259,10 @@ def _load_package_build_evidence(
     verification_config_identity: str,
     seal_identity: str,
 ) -> dict[str, object] | None:
-    path = evidence_root(root, source_identity, verification_config_identity) / "package-source-zip.json"
+    path = (
+        evidence_root(root, source_identity, verification_config_identity)
+        / "package-source-zip.json"
+    )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
@@ -313,7 +298,9 @@ def build_sealed_source_zip(
     artifact_dir = _artifact_directory(root, source_identity, verification_config_identity)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     final_archive = _source_zip_path(root, source_identity, verification_config_identity)
-    with tempfile.TemporaryDirectory(prefix="oh-goon-sealed-source-", dir=artifact_dir) as directory:
+    with tempfile.TemporaryDirectory(
+        prefix="oh-goon-sealed-source-", dir=artifact_dir
+    ) as directory:
         temporary_root = Path(directory) / "source"
         temporary_root.mkdir()
         _copy_canonical_source(root, temporary_root)
@@ -341,7 +328,8 @@ def build_sealed_source_zip(
     payload = dict(base)
     payload["evidence_identity"] = _sha256_json(base)
     _atomic_json_write(
-        evidence_root(root, source_identity, verification_config_identity) / "package-source-zip.json",
+        evidence_root(root, source_identity, verification_config_identity)
+        / "package-source-zip.json",
         payload,
     )
     return final_archive
@@ -354,7 +342,10 @@ def _load_package_identity_evidence(
     seal_identity: str,
     build_evidence: dict[str, object],
 ) -> dict[str, object] | None:
-    path = evidence_root(root, source_identity, verification_config_identity) / "package-source-identity.json"
+    path = (
+        evidence_root(root, source_identity, verification_config_identity)
+        / "package-source-identity.json"
+    )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
@@ -406,8 +397,12 @@ def verify_sealed_source_zip_identity(
     }
     payload = dict(base)
     payload["evidence_identity"] = _sha256_json(base)
-    destination = evidence_root(root, source_identity, verification_config_identity) / "package-source-identity.json"
+    destination = (
+        evidence_root(root, source_identity, verification_config_identity)
+        / "package-source-identity.json"
+    )
     return _atomic_json_write(destination, payload)
+
 
 def _source_gate_payload(units: list[dict[str, object]]) -> list[dict[str, object]]:
     statuses = {str(unit["unit"]): str(unit["status"]) for unit in units}
@@ -416,9 +411,22 @@ def _source_gate_payload(units: list[dict[str, object]]) -> list[dict[str, objec
         gates.append(
             {
                 "gate": gate,
-                "status": "PASS" if all(statuses.get(name) == "PASS" for name in dependencies) else "PENDING",
+                "status": "PASS"
+                if all(statuses.get(name) == "PASS" for name in dependencies)
+                else "PENDING",
                 "evidence_units": list(dependencies),
-                "evidence_levels": sorted({str(next(unit.get("evidence_level", "L1_LOGIC") for unit in units if str(unit["unit"]) == name)) for name in dependencies}),
+                "evidence_levels": sorted(
+                    {
+                        str(
+                            next(
+                                unit.get("evidence_level", "L1_LOGIC")
+                                for unit in units
+                                if str(unit["unit"]) == name
+                            )
+                        )
+                        for name in dependencies
+                    }
+                ),
             }
         )
     return gates
@@ -450,8 +458,6 @@ def _transition_unit(
     return payload
 
 
-
-
 def _resume_evidence_inventory(
     root: Path,
     source_identity: str,
@@ -474,7 +480,9 @@ def _resume_evidence_inventory(
 
     sibling_payloads: dict[str, list[dict[str, object]]] = {}
     try:
-        siblings = [path for path in source_root.iterdir() if path.is_dir() and path != current_root]
+        siblings = [
+            path for path in source_root.iterdir() if path.is_dir() and path != current_root
+        ]
     except OSError:
         siblings = []
     for sibling in siblings:
@@ -497,7 +505,11 @@ def _resume_evidence_inventory(
     for unit in source_units:
         name = str(unit["unit"])
         status = str(unit.get("status", "PENDING"))
-        current_path = current_root / "units" / (str(unit["execution_unit_id"]).removeprefix("sha256:") + ".json")
+        current_path = (
+            current_root
+            / "units"
+            / (str(unit["execution_unit_id"]).removeprefix("sha256:") + ".json")
+        )
         if status == "PASS":
             unit["resume_state"] = "PROVEN"
             proven.append(name)

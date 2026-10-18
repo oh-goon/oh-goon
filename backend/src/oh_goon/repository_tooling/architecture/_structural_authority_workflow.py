@@ -275,7 +275,9 @@ def _check_make_frontdoors(root: Path, path: Path, facts: MakeSemanticFacts) -> 
         for name in test_chain
         if facts.variables.get(name) == "bash scripts/development_test.sh"
     ]
-    if runner_bindings and any(facts.variable_operators.get(name) != "=" for name in runner_bindings):
+    if runner_bindings and any(
+        facts.variable_operators.get(name) != "=" for name in runner_bindings
+    ):
         violations.append(
             Violation(
                 path,
@@ -298,9 +300,7 @@ def _check_make_frontdoors(root: Path, path: Path, facts: MakeSemanticFacts) -> 
     cert_frontdoors = [
         command
         for command in certify_commands
-        if _is_logged_frontdoor(
-            command, "certify", ("backend/.venv/bin/oh-goon-workflow",)
-        )
+        if _is_logged_frontdoor(command, "certify", ("backend/.venv/bin/oh-goon-workflow",))
     ]
     if len(cert_frontdoors) != 1:
         violations.append(
@@ -313,10 +313,11 @@ def _check_make_frontdoors(root: Path, path: Path, facts: MakeSemanticFacts) -> 
     executable_guards = [
         command
         for command in certify_commands
-        if _command_argv(command)[:3]
-        == ("test", "-x", "backend/.venv/bin/oh-goon-workflow")
+        if _command_argv(command)[:3] == ("test", "-x", "backend/.venv/bin/oh-goon-workflow")
     ]
-    hint_present = any("Run: make init" in token for command in certify_commands for token in command.argv)
+    hint_present = any(
+        "Run: make init" in token for command in certify_commands for token in command.argv
+    )
     if (
         not executable_guards
         or not hint_present
@@ -338,7 +339,11 @@ def _check_make_frontdoors(root: Path, path: Path, facts: MakeSemanticFacts) -> 
     }
     for command in certify_commands:
         argv = _command_argv(command)
-        if argv[:1] in {("make",), ("$(MAKE)",)} and len(argv) >= 2 and argv[1] in forbidden_targets:
+        if (
+            argv[:1] in {("make",), ("$(MAKE)",)}
+            and len(argv) >= 2
+            and argv[1] in forbidden_targets
+        ):
             violations.append(
                 Violation(
                     path,
@@ -363,7 +368,10 @@ def _check_make_orchestration_ownership(path: Path, facts: MakeSemanticFacts) ->
         ]
         if len(matches) != 1:
             violations.append(
-                Violation(path, f"{target} must delegate exactly once to the certification workflow entrypoint")
+                Violation(
+                    path,
+                    f"{target} must delegate exactly once to the certification workflow entrypoint",
+                )
             )
 
     if "release-stamp" in facts.targets:
@@ -406,16 +414,17 @@ def _check_make_orchestration_ownership(path: Path, facts: MakeSemanticFacts) ->
         for command in commands:
             argv = tuple(token.lower().replace("_", "-") for token in _command_argv(command))
             if (
-                len(argv) >= 3
-                and argv[0].endswith("oh-goon")
-                and argv[1:3] == ("plan", "run")
+                len(argv) >= 3 and argv[0].endswith("oh-goon") and argv[1:3] == ("plan", "run")
             ) or (
                 len(argv) >= 5
                 and Path(argv[0]).name in {"python", "python3"}
                 and argv[1:4] == ("-m", "oh-goon", "plan")
             ):
                 violations.append(
-                    Violation(path, f"line {command.line_number}: Make must not create a direct Plan execution path")
+                    Violation(
+                        path,
+                        f"line {command.line_number}: Make must not create a direct Plan execution path",
+                    )
                 )
     return violations
 
@@ -438,15 +447,19 @@ def _check_workflow_import_boundary(path: Path) -> list[Violation]:
             and not module.startswith("oh_goon.repository_tooling")
             and module not in _WORKFLOW_ALLOWED_PRODUCT_IMPORTS
         ):
-            violations.append(Violation(path, f"workflow runner must call backend capabilities instead of importing product domain module {module}"))
+            violations.append(
+                Violation(
+                    path,
+                    f"workflow runner must call backend capabilities instead of importing product domain module {module}",
+                )
+            )
 
     facts = python_semantic_facts(path)
     forbidden_modules = sorted(
         module
         for module in _WORKFLOW_FORBIDDEN_LOCAL_AUTHORITY_MODULES
         if any(
-            imported == module or imported.startswith(module + ".")
-            for imported in facts.imports
+            imported == module or imported.startswith(module + ".") for imported in facts.imports
         )
     )
     for module in forbidden_modules:
@@ -458,7 +471,9 @@ def _check_workflow_import_boundary(path: Path) -> list[Violation]:
         )
 
     for qualified, node in facts.calls:
-        if qualified in _WORKFLOW_FORBIDDEN_LOCAL_AUTHORITY_CALLS or qualified.startswith("psutil."):
+        if qualified in _WORKFLOW_FORBIDDEN_LOCAL_AUTHORITY_CALLS or qualified.startswith(
+            "psutil."
+        ):
             violations.append(
                 Violation(
                     path,
@@ -482,11 +497,7 @@ def _check_workflow_import_boundary(path: Path) -> list[Violation]:
             )
 
     for class_node in facts.classes:
-        bases = {
-            base.id
-            for base in class_node.bases
-            if isinstance(base, ast.Name)
-        }
+        bases = {base.id for base in class_node.bases if isinstance(base, ast.Name)}
         if bases & {"Exception", "RuntimeError"}:
             continue
         violations.append(
@@ -534,5 +545,10 @@ def check_no_persisted_success_mirror(root: Path) -> list[Violation]:
         text = path.read_text(encoding="utf-8")
         for token in _MIRROR_MARKER_TOKENS:
             if token in text:
-                violations.append(Violation(path, f"durable success must come from canonical Run evidence; mirror marker is forbidden: {token}"))
+                violations.append(
+                    Violation(
+                        path,
+                        f"durable success must come from canonical Run evidence; mirror marker is forbidden: {token}",
+                    )
+                )
     return violations

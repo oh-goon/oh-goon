@@ -8,10 +8,10 @@ from oh_goon.runtime.execution.shard_models import (
     ShardExecutionContext,
     ShardExecutionPlan,
     ShardResult,
+    ShardRetryPolicy,
     ShardWork,
     build_execution_report,
     execution_policy_identity,
-    ShardRetryPolicy,
 )
 
 
@@ -116,9 +116,7 @@ def test_offline_verifier_rejects_tampered_member_content_even_with_matching_ide
         report,
         actual_executed_members=tampered_members,
         actual_executed_membership_identity=(
-            membership_identity.executed_verification_membership_identity(
-                tampered_members
-            )
+            membership_identity.executed_verification_membership_identity(tampered_members)
         ),
     )
 

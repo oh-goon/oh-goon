@@ -12,9 +12,7 @@ Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 def backend_requirements(root: Path = ROOT) -> tuple[str, str]:
-    backend = tomllib.loads(
-        (root / "backend/pyproject.toml").read_text(encoding="utf-8")
-    )
+    backend = tomllib.loads((root / "backend/pyproject.toml").read_text(encoding="utf-8"))
     python_spec = backend["project"]["requires-python"]
     uv_spec = backend["tool"]["uv"]["required-version"]
     if not isinstance(python_spec, str) or not isinstance(uv_spec, str):
@@ -40,9 +38,7 @@ def requirements(root: Path = ROOT) -> tuple[str, str, str, str]:
 
 def _tool_version(name: str, runner: Runner) -> tuple[str | None, str | None]:
     try:
-        result = runner(
-            (name, "--version"), cwd=ROOT, check=True, capture_output=True, text=True
-        )
+        result = runner((name, "--version"), cwd=ROOT, check=True, capture_output=True, text=True)
     except (OSError, subprocess.SubprocessError) as exc:
         return None, str(exc)
     rendered = (result.stdout or result.stderr).strip()

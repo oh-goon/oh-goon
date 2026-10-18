@@ -48,7 +48,9 @@ class ConfiguredFleetExecutor:
         """Keep executor identity flat for callers while capacity remains its single owner."""
         return self.capacity.executor
 
-    def resolve_environment(self, path_authority: StrictHostPathAuthority) -> ResolvedExecutionEnvironment:
+    def resolve_environment(
+        self, path_authority: StrictHostPathAuthority
+    ) -> ResolvedExecutionEnvironment:
         """Project one backend's existing facts; do not reselect or assert admission."""
         capabilities = self.backend.capabilities
         return ResolvedExecutionEnvironment.from_authorities(
@@ -64,7 +66,9 @@ class ConfiguredFleetExecutor:
                 "cpu_millis": self.capacity.cpu_millis,
                 "memory_mib": self.capacity.memory_mib,
                 "max_processes": self.capacity.max_processes,
-                "cgroup_root": str(self.capacity.cgroup_root) if self.capacity.cgroup_root else None,
+                "cgroup_root": str(self.capacity.cgroup_root)
+                if self.capacity.cgroup_root
+                else None,
             },
         )
 
@@ -79,7 +83,9 @@ class ExecutorPoolConfiguration:
     executors: tuple[ConfiguredFleetExecutor, ...]
 
 
-def configured_executor_pool(*, control_state_root: Path | None = None) -> ExecutorPoolConfiguration | None:
+def configured_executor_pool(
+    *, control_state_root: Path | None = None
+) -> ExecutorPoolConfiguration | None:
     raw = os.environ.get(EXECUTORS_FILE_ENV)
     if not raw:
         return None
@@ -97,9 +103,7 @@ def load_executor_pool(
         payload = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise FleetPlanInvalid(f"Fleet executor inventory is not valid TOML: {path}") from exc
-    return _parse_executor_pool(
-        payload, source=path, control_state_root=control_state_root
-    )
+    return _parse_executor_pool(payload, source=path, control_state_root=control_state_root)
 
 
 def _parse_executor_pool(
@@ -290,7 +294,16 @@ def _parse_executor_backend(
         )
         return backend, True, cgroup_root
     if kind == "opensandbox":
-        allowed = common_fields | {"domain", "protocol", "image", "runtime", "api_key_env", "cli_executable", "runtime_attestation_file", "runtime_attestation_public_key_file"}
+        allowed = common_fields | {
+            "domain",
+            "protocol",
+            "image",
+            "runtime",
+            "api_key_env",
+            "cli_executable",
+            "runtime_attestation_file",
+            "runtime_attestation_public_key_file",
+        }
         _reject_unknown_fields(
             raw, allowed, source=source, context=f"OpenSandbox executor {executor_id!r}"
         )
@@ -342,7 +355,9 @@ def _opensandbox_settings(raw: dict[str, Any], *, source: Path) -> OpenSandboxSe
         image=_required_string(raw, "image", source),
         cli_executable=str(_required_path(raw, "cli_executable", source)),
         runtime_attestation_file=str(_required_path(raw, "runtime_attestation_file", source)),
-        runtime_attestation_public_key_file=str(_required_path(raw, "runtime_attestation_public_key_file", source)),
+        runtime_attestation_public_key_file=str(
+            _required_path(raw, "runtime_attestation_public_key_file", source)
+        ),
         runtime=_required_string(raw, "runtime", source),
         protocol=_required_string(raw, "protocol", source),
     )

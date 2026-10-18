@@ -23,7 +23,9 @@ def _settings() -> SimpleNamespace:
 
 
 class _Response:
-    def __init__(self, status_code: int = 200, payload: object = None, *, raise_error: bool = False):
+    def __init__(
+        self, status_code: int = 200, payload: object = None, *, raise_error: bool = False
+    ):
         self.status_code = status_code
         self._payload = payload
         self.raise_error = raise_error
@@ -37,7 +39,13 @@ class _Response:
 
 
 class _Http:
-    def __init__(self, *, get: _Response | None = None, post: _Response | None = None, delete: _Response | None = None):
+    def __init__(
+        self,
+        *,
+        get: _Response | None = None,
+        post: _Response | None = None,
+        delete: _Response | None = None,
+    ):
         self.get_response = get or _Response()
         self.post_response = post or _Response(202, {"id": "sandbox-1"})
         self.delete_response = delete or _Response(204)
@@ -61,7 +69,10 @@ def test_resource_api_and_environment_contracts(monkeypatch: pytest.MonkeyPatch)
         "cpu": "2",
         "memory": "64Mi",
     }
-    assert subject._opensandbox_resource(CicdResourcePolicy(cpu_millis=2500, memory_mib=64))["cpu"] == "2500m"
+    assert (
+        subject._opensandbox_resource(CicdResourcePolicy(cpu_millis=2500, memory_mib=64))["cpu"]
+        == "2500m"
+    )
     settings = _settings()
     assert subject._api_base(settings) == "https://sandbox.example/v1"
     assert subject._api_headers(settings)["OPEN-SANDBOX-API-KEY"] == "secret"
@@ -86,7 +97,9 @@ def test_probe_server_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> No
         subject._probe_server(settings)
 
 
-def test_create_sandbox_binds_deny_all_resources_timeout_and_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_sandbox_binds_deny_all_resources_timeout_and_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = _settings()
     http = _Http(post=_Response(202, {"id": "  sb-1  "}))
     monkeypatch.setattr(subject, "_httpx2", lambda: http)
@@ -154,7 +167,9 @@ def test_destroy_sandbox_swallows_api_and_cleanup_failure(monkeypatch: pytest.Mo
             raise OSError("offline")
 
     monkeypatch.setattr(subject, "_httpx2", lambda: Broken())
-    monkeypatch.setattr(subject, "_run_osb", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cli")))
+    monkeypatch.setattr(
+        subject, "_run_osb", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cli"))
+    )
     subject._destroy_sandbox(_settings(), "sandbox")
 
 
@@ -167,7 +182,9 @@ def test_cli_success_and_returned_output_contracts() -> None:
     events: list[tuple[str, str]] = []
     subject._observe_returned_output(None, "out", "err")
     subject._observe_returned_output(lambda stream, text: events.append((stream, text)), "", "")
-    subject._observe_returned_output(lambda stream, text: events.append((stream, text)), "out", "err")
+    subject._observe_returned_output(
+        lambda stream, text: events.append((stream, text)), "out", "err"
+    )
     assert events == [("stdout", "out"), ("stderr", "err")]
 
 

@@ -68,7 +68,9 @@ def test_reconciliation_uses_already_owned_current_lease(tmp_path: Path) -> None
     assert not workspace.exists()
 
 
-def test_reconciliation_does_not_interpret_noncurrent_schema_state(tmp_path: Path) -> None:
+def test_reconciliation_does_not_interpret_noncurrent_schema_state(
+    tmp_path: Path,
+) -> None:
     state_home = tmp_path / "state-home"
     source = tmp_path / "repo"
     source.mkdir()
@@ -94,7 +96,9 @@ def test_reconciliation_does_not_interpret_noncurrent_schema_state(tmp_path: Pat
     assert noncurrent.exists()
 
 
-def test_reconciliation_does_not_follow_symlinked_repository_namespace(tmp_path: Path) -> None:
+def test_reconciliation_does_not_follow_symlinked_repository_namespace(
+    tmp_path: Path,
+) -> None:
     state_home = tmp_path / "state-home"
     certification = state_home / "oh-goon" / "certification"
     certification.mkdir(parents=True)
@@ -112,7 +116,9 @@ def test_reconciliation_does_not_follow_symlinked_repository_namespace(tmp_path:
     assert workspace.exists()
 
 
-def test_reconciliation_does_not_follow_symlinked_schema_namespace(tmp_path: Path) -> None:
+def test_reconciliation_does_not_follow_symlinked_schema_namespace(
+    tmp_path: Path,
+) -> None:
     state_home = tmp_path / "state-home"
     repository = state_home / "oh-goon" / "certification" / ("repo-" + "b" * 20)
     repository.mkdir(parents=True)
@@ -130,7 +136,9 @@ def test_reconciliation_does_not_follow_symlinked_schema_namespace(tmp_path: Pat
     assert workspace.exists()
 
 
-def test_current_schema_without_database_is_retained_fail_closed(tmp_path: Path) -> None:
+def test_current_schema_without_database_is_retained_fail_closed(
+    tmp_path: Path,
+) -> None:
     state_home = tmp_path / "state-home"
     repository = "repo-" + "c" * 20
     state = (

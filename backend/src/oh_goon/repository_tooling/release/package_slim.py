@@ -1,24 +1,26 @@
 from __future__ import annotations
 
 import hashlib
-from functools import lru_cache
 import json
 import os
 import re
 import shutil
-from pathlib import Path
 import stat
 import tempfile
 import zipfile
+from functools import lru_cache
+from pathlib import Path
 
 from oh_goon.core.file_digest import sha256_file, update_digest_from_file
 from oh_goon.core.source_transport_metadata import is_disposable_source_transport_artifact_name
+from oh_goon.repository_tooling.public_dependency_privacy import assert_public_source_privacy
+from oh_goon.repository_tooling.release.source_version_coherence import (
+    require_source_version_coherence,
+)
 from oh_goon.repository_tooling.source_layout import (
     is_transient_source_path,
     source_transport_artifact_issues,
 )
-from oh_goon.repository_tooling.public_dependency_privacy import assert_public_source_privacy
-from oh_goon.repository_tooling.release.source_version_coherence import require_source_version_coherence
 
 ROOT = Path(__file__).resolve().parents[5]
 EXCLUDED_DIRS = {
@@ -88,12 +90,7 @@ def _include(path: Path, root: Path = ROOT) -> bool:
 
 
 def _validate_top_level_ownership(root: Path = ROOT) -> None:
-    allowed = (
-        OWNED_TOP_LEVEL
-        | EXCLUDED_DIRS
-        | EXCLUDED_FILES
-        | {".oh-goon-data", "repositories"}
-    )
+    allowed = OWNED_TOP_LEVEL | EXCLUDED_DIRS | EXCLUDED_FILES | {".oh-goon-data", "repositories"}
     unknown = sorted(
         path.name
         for path in root.iterdir()
@@ -160,9 +157,7 @@ def _collect_source_files(root: Path = ROOT) -> list[Path]:
         raise ValueError(f"slim source archive refuses symlinks: {rendered}")
     if special:
         rendered = ", ".join(path.relative_to(root).as_posix() for path in special[:5])
-        raise ValueError(
-            f"slim source archive refuses non-regular filesystem entries: {rendered}"
-        )
+        raise ValueError(f"slim source archive refuses non-regular filesystem entries: {rendered}")
     folded: dict[str, list[Path]] = {}
     for path in files:
         folded.setdefault(path.relative_to(root).as_posix().casefold(), []).append(path)
@@ -179,12 +174,13 @@ def _collect_source_files(root: Path = ROOT) -> list[Path]:
     return files
 
 
-
 def canonical_source_files(root: Path = ROOT) -> tuple[Path, ...]:
     """Return the exact packageable public-source file set in canonical order."""
 
     root = root.resolve()
-    return tuple(sorted(_collect_source_files(root), key=lambda path: path.relative_to(root).as_posix()))
+    return tuple(
+        sorted(_collect_source_files(root), key=lambda path: path.relative_to(root).as_posix())
+    )
 
 
 def _canonical_source_state(root: Path) -> tuple[tuple[str, int, int, int], ...]:
@@ -237,6 +233,7 @@ def canonical_source_identity(root: Path = ROOT) -> str:
     state = _canonical_source_state(root)
     return _canonical_source_identity_cached(str(root), state)
 
+
 def _archive_composition(output: Path) -> tuple[int, tuple[tuple[str, int], ...]]:
     by_owner: dict[str, int] = {}
     total = 0
@@ -283,14 +280,18 @@ def _write_checksum(output: Path, digest: str) -> Path:
     return checksum
 
 
-def _canonical_archive_rows(archive: zipfile.ZipFile) -> tuple[str, list[tuple[str, zipfile.ZipInfo]]]:
+def _canonical_archive_rows(
+    archive: zipfile.ZipFile,
+) -> tuple[str, list[tuple[str, zipfile.ZipInfo]]]:
     files = [info for info in archive.infolist() if not info.is_dir()]
     prefixes = {Path(info.filename).parts[0] for info in files if Path(info.filename).parts}
     if len(prefixes) != 1:
         raise ValueError("source archive must contain exactly one top-level directory")
     prefix = next(iter(prefixes))
     if re.fullmatch(r"oh-goon-\d+\.\d+\.\d+", prefix) is None:
-        raise ValueError("source archive top-level directory must carry canonical Oh-Goon version identity")
+        raise ValueError(
+            "source archive top-level directory must carry canonical Oh-Goon version identity"
+        )
     rows = [_canonical_archive_row(info, prefix) for info in files]
     rows.sort(key=lambda item: item[0])
     if len({relative.casefold() for relative, _info in rows}) != len(rows):
@@ -312,13 +313,19 @@ def _canonical_archive_row(info: zipfile.ZipInfo, prefix: str) -> tuple[str, zip
         raise ValueError(f"invalid source archive member: {info.filename}")
     relative = Path(*parts[1:]).as_posix()
     if is_disposable_source_transport_artifact_name(Path(relative).name):
-        raise ValueError("source archive contains forbidden source transport artifact; exact member paths are debug-only")
+        raise ValueError(
+            "source archive contains forbidden source transport artifact; exact member paths are debug-only"
+        )
     if is_transient_source_path(relative):
-        raise ValueError("source archive contains forbidden transient or local-only payload; exact member paths are debug-only")
+        raise ValueError(
+            "source archive contains forbidden transient or local-only payload; exact member paths are debug-only"
+        )
     return relative, info
 
 
-def _require_archive_version_identity(archive: zipfile.ZipFile, prefix: str, rows: list[tuple[str, zipfile.ZipInfo]]) -> None:
+def _require_archive_version_identity(
+    archive: zipfile.ZipFile, prefix: str, rows: list[tuple[str, zipfile.ZipInfo]]
+) -> None:
     version_rows = [info for relative, info in rows if relative == "VERSION"]
     if len(version_rows) != 1:
         raise ValueError("source archive must contain exactly one canonical VERSION member")
@@ -399,17 +406,12 @@ def _require_generated_contract_projection(root: Path) -> None:
     issues = _generated_contract_projection_issues(root)
     if issues:
         raise ValueError(
-            "slim source archive refuses stale generated contract projection: "
-            + "; ".join(issues)
+            "slim source archive refuses stale generated contract projection: " + "; ".join(issues)
         )
 
 
-def _write_slim_archive(
-    output: Path, *, root: Path, prefix: str, files: list[Path]
-) -> None:
-    with zipfile.ZipFile(
-        output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
-    ) as archive:
+def _write_slim_archive(output: Path, *, root: Path, prefix: str, files: list[Path]) -> None:
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for path in files:
             rel = path.relative_to(root).as_posix()
             info = zipfile.ZipInfo(prefix + rel)
@@ -437,9 +439,7 @@ def package_slim(output: Path, *, root: Path | None = None) -> str:
         raise ValueError("VERSION must be a regular non-symlink file")
     version = version_file.read_text(encoding="utf-8").strip()
     if re.fullmatch(r"\d+\.\d+\.\d+", version) is None:
-        raise ValueError(
-            f"VERSION must contain canonical x.y.z release identity, got {version!r}"
-        )
+        raise ValueError(f"VERSION must contain canonical x.y.z release identity, got {version!r}")
     assert_public_source_privacy(root)
     _require_generated_contract_projection(root)
     require_source_version_coherence(root, version)
@@ -462,4 +462,3 @@ def package_slim(output: Path, *, root: Path | None = None) -> str:
     digest = sha256_file(output)
     _write_checksum(output, digest)
     return digest
-

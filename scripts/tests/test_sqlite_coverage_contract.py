@@ -7,7 +7,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = (ROOT / "Makefile").read_text(encoding="utf-8")
 SURFACE = yaml.safe_load(
-    (ROOT / "docs" / "development" / "MAKE_TARGET_SURFACE.yml").read_text(encoding="utf-8")
+    (ROOT / "docs" / "development" / "MAKE_TARGET_SURFACE.yml").read_text(
+        encoding="utf-8"
+    )
 )
 
 
@@ -21,7 +23,9 @@ def _target_body(name: str) -> str:
 
 
 def test_sqlite_coverage_target_is_frozen_owner_local_validation() -> None:
-    owner_targets = SURFACE["noncanonical_make_target_classes"]["owner-local-validation"]
+    owner_targets = SURFACE["noncanonical_make_target_classes"][
+        "owner-local-validation"
+    ]
     assert "test-sqlite-coverage" in owner_targets
 
 
@@ -35,4 +39,4 @@ def test_sqlite_coverage_target_ratcheted_authority_and_resource_hygiene() -> No
     assert "--cov=oh_goon.runtime.execution.sqlite_lease" in body
     assert "--cov=oh_goon.runtime._sqlite_access_diagnostics" in body
     assert "--cov-branch --cov-fail-under=90" in body
-    assert '$(STATE_HOME)/oh-goon/coverage/sqlite-core.json' in body
+    assert "$(STATE_HOME)/oh-goon/coverage/sqlite-core.json" in body

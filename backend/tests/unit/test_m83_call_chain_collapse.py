@@ -42,18 +42,16 @@ goons:
         encoding="utf-8",
     )
 
-    report = FleetPlanResolver(
-        goon_templates=GoonTemplateStore(tmp_path / "goons")
-    ).explain(plan, environment={"RELEASE_TOKEN": "super-secret"})
+    report = FleetPlanResolver(goon_templates=GoonTemplateStore(tmp_path / "goons")).explain(
+        plan, environment={"RELEASE_TOKEN": "super-secret"}
+    )
 
     value = next(item for item in report.values if item.name == "token")
     assert value.origin == "env:RELEASE_TOKEN"
     assert value.resolved == "<env:RELEASE_TOKEN:redacted>"
     assert value.contains_host_value is True
     expanded = next(
-        item
-        for item in report.entries
-        if item.disposition is PlanResolutionDisposition.EXPANDED
+        item for item in report.entries if item.disposition is PlanResolutionDisposition.EXPANDED
     )
     assert expanded.step_id == "general-leaf"
     assert expanded.compiled_step_ids == ("general-leaf.echo",)
@@ -123,8 +121,8 @@ def test_local_executor_inventory_has_one_materialization_owner(
     text = inventory.read_text(encoding="utf-8")
     assert f"version = {certification_bootstrap.EXECUTOR_CONFIG_VERSION}" in text
     assert 'id = "certification-local"' in text
-    assert f"bwrap_executable = \"{bwrap}\"" in text
-    assert f"cgroup_root = \"{cgroup}\"" in text
+    assert f'bwrap_executable = "{bwrap}"' in text
+    assert f'cgroup_root = "{cgroup}"' in text
     assert stat.S_IMODE(inventory.stat().st_mode) == 0o600
     assert not hasattr(certification_bootstrap, "_materialize_local_executor_inventory")
 

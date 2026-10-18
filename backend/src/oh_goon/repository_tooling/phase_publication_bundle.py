@@ -1,4 +1,5 @@
 """Stage, verify, and commit immutable phase-publication evidence."""
+
 from __future__ import annotations
 
 import argparse
@@ -132,7 +133,6 @@ def verify_commit(directory: Path, commit: dict) -> list[str]:
     return issues
 
 
-
 def version_key(value: str) -> tuple[int, ...]:
     try:
         return tuple(int(part) for part in value.split("."))
@@ -167,14 +167,17 @@ def discover(archive: Path) -> dict:
             continue
         phase, record = candidate
         if phase in seen:
-            raise ValueError(f"ambiguous committed authority for phase {phase}: {seen[phase].name}, {directory.name}")
+            raise ValueError(
+                f"ambiguous committed authority for phase {phase}: {seen[phase].name}, {directory.name}"
+            )
         seen[phase] = directory
         valid.append((version_key(phase), directory, record))
     if not valid:
         raise ValueError("no valid committed development authority found")
     _, directory, record = max(valid, key=lambda item: item[0])
     return {
-        "phase": record["phase"], "parent": record["parent"],
+        "phase": record["phase"],
+        "parent": record["parent"],
         "directory": directory.name,
         "commit": next(directory.glob("OH-GOON-*-AUTHORITY-COMMIT.json")).name,
     }
@@ -196,7 +199,9 @@ def write_create_only(path: Path, data: dict) -> None:
 
 def _command_create(args: argparse.Namespace) -> int:
     try:
-        data = build(args.directory, args.phase, args.parent, {role: getattr(args, role) for role in ROLES})
+        data = build(
+            args.directory, args.phase, args.parent, {role: getattr(args, role) for role in ROLES}
+        )
     except ValueError as exc:
         print(f"PHASE PUBLICATION: FAIL\n- {exc}")
         return 1

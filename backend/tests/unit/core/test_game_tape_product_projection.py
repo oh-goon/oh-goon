@@ -63,7 +63,9 @@ def test_game_tape_owns_step_artifacts_and_published_outputs(tmp_path: Path) -> 
         repository_state_before="before",
         repository_state_after="after",
         artifacts=(
-            PresentPlanArtifact(status="PRESENT", path="dist/app.whl", sha256="2" * 64, byte_count=42),
+            PresentPlanArtifact(
+                status="PRESENT", path="dist/app.whl", sha256="2" * 64, byte_count=42
+            ),
             MissingPlanArtifact(status="MISSING", path="dist/sbom.json"),
         ),
         outputs=(PublishedPlanOutputEvidence(name="wheel", sha256="3" * 64, byte_count=42),),
@@ -93,7 +95,9 @@ def test_game_tape_owns_step_artifacts_and_published_outputs(tmp_path: Path) -> 
     )
     tape = FleetRunDetail(
         repository_admissions=repository_admissions_for(run.target, run.targets),
-        run=run, execution=DirectFleetExecutionAdmission(), operations=(report,)
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+        operations=(report,),
     ).game_tape
     step = tape.repositories[0].steps[0]
     assert step.artifacts == execution.artifacts
@@ -112,38 +116,64 @@ def test_run4_output_readback_uses_original_real_game_tape_evidence(tmp_path: Pa
 
     repository = RepositoryIdentity(path=tmp_path / "repo")
     plan = ResolvedFleetPlan.create(
-        name="run4-existing-output", description="", execution=MaintenanceExecutionPolicy(),
+        name="run4-existing-output",
+        description="",
+        execution=MaintenanceExecutionPolicy(),
         steps=(ResolvedCommandStep(step_id="publish", argv=("echo", "out"), timeout_seconds=30),),
     )
-    target = FleetPlanTarget(kind="fleet_plan", plan=plan,
-                             source=PlanFileSource(sha256="1" * 64),
-                             identity=structural_execution_identity(plan))
+    target = FleetPlanTarget(
+        kind="fleet_plan",
+        plan=plan,
+        source=PlanFileSource(sha256="1" * 64),
+        identity=structural_execution_identity(plan),
+    )
     now = utc_now()
     execution = CompletedPlanStepExecution(
-        step_id="publish", kind="command", started_at=now, finished_at=now,
-        argv=("echo", "out"), stdout_evidence=_output("secret raw bytes must not appear\n"),
-        stderr_evidence=_output(""), repository_state_before="before",
+        step_id="publish",
+        kind="command",
+        started_at=now,
+        finished_at=now,
+        argv=("echo", "out"),
+        stdout_evidence=_output("secret raw bytes must not appear\n"),
+        stderr_evidence=_output(""),
+        repository_state_before="before",
         repository_state_after="after",
-        artifacts=(PresentPlanArtifact(status="PRESENT", path="dist/output.whl",
-                                       sha256="2" * 64, byte_count=12),),
+        artifacts=(
+            PresentPlanArtifact(
+                status="PRESENT", path="dist/output.whl", sha256="2" * 64, byte_count=12
+            ),
+        ),
         outputs=(PublishedPlanOutputEvidence(name="wheel", sha256="3" * 64, byte_count=12),),
     )
     report = make_operation_report(
-        repository, OperationAction.EXECUTE_PLAN, Verdict.READY, ReasonCode.READY,
-        fleet_run_id="run4-real", target=target,
+        repository,
+        OperationAction.EXECUTE_PLAN,
+        Verdict.READY,
+        ReasonCode.READY,
+        fleet_run_id="run4-real",
+        target=target,
         evidence=FleetPlanOperationEvidence(
-            kind="FLEET_PLAN", plan=FleetPlanResult(plan_id=plan.plan_id, steps=(execution,))),
+            kind="FLEET_PLAN", plan=FleetPlanResult(plan_id=plan.plan_id, steps=(execution,))
+        ),
     )
     run = CompletedFleetRun(
-        status=FleetRunStatus.COMPLETED, fleet_run_id="run4-real", target=target,
+        status=FleetRunStatus.COMPLETED,
+        fleet_run_id="run4-real",
+        target=target,
         capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
-        repository_scope=fleet_repository_scope(None), targets=(repository,),
-        accepted_at=now, started_at=now, finished_at=now,
+        repository_scope=fleet_repository_scope(None),
+        targets=(repository,),
+        accepted_at=now,
+        started_at=now,
+        finished_at=now,
         progress=FleetRunProgress(total=1, succeeded=1, failed=0, needs_attention=0),
     )
     detail = FleetRunDetail(
         repository_admissions=repository_admissions_for(run.target, run.targets),
-        run=run, execution=DirectFleetExecutionAdmission(), operations=(report,))
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+        operations=(report,),
+    )
     calls = []
 
     def get(run_id):

@@ -4,8 +4,8 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.product_identity import stable_id
 
 ShardCanonicalStatus = Literal[
     "PASS",
@@ -35,9 +35,7 @@ class CanonicalShardAttemptEvidence(ImmutableModel):
     runtime_authority_receipt_identity: str | None = Field(
         default=None, pattern=r"^sha256:[0-9a-f]{64}$"
     )
-    supervisor_receipt_identity: str | None = Field(
-        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
-    )
+    supervisor_receipt_identity: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     process_group_quiescent: bool | None = None
     forced_termination: bool | None = None
 
@@ -78,22 +76,16 @@ class CanonicalShardExecutionEvidence(ImmutableModel):
     execution_policy_identity: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     producer_contract_schema: str = Field(min_length=1)
     producer_version: str = Field(min_length=1)
-    producer_artifact_identity: str | None = Field(
-        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
-    )
+    producer_artifact_identity: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     producer_implementation_identity: str | None = Field(
         default=None, pattern=r"^sha256:[0-9a-f]{64}$"
     )
-    producer_contract_identity: str | None = Field(
-        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
-    )
+    producer_contract_identity: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     repository_content_identity: str | None = None
     verification_selection_evidence_identity: str | None = Field(
         default=None, pattern=r"^sha256:[0-9a-f]{64}$"
     )
-    selected_membership_identity: str | None = Field(
-        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
-    )
+    selected_membership_identity: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     verification_revision_identity: str | None = Field(
         default=None, pattern=r"^sha256:[0-9a-f]{64}$"
     )

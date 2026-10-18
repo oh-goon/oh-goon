@@ -1,9 +1,8 @@
 """T3 command selection: versioned new presentation; legacy explain untouched."""
+
 from __future__ import annotations
 
 import json
-from argparse import Namespace
-from pathlib import Path
 from types import SimpleNamespace
 
 from oh_goon.cli_parser import build_parser
@@ -28,7 +27,12 @@ def test_routes_cli_json_uses_single_service_report_and_stays_redacted(capsys):
     plan = PlanTemplateStore().source("python/quality").path
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     runtime = SimpleNamespace(plans=SimpleNamespace(explain_routing=resolver.explain_routing))
-    assert run_plan_command(runtime, _args(str(plan), "--routes", "--json", "--input", "coverage_threshold=85")) == 0
+    assert (
+        run_plan_command(
+            runtime, _args(str(plan), "--routes", "--json", "--input", "coverage_threshold=85")
+        )
+        == 0
+    )
     output = capsys.readouterr().out
     parsed = json.loads(output)
     assert parsed["schema"] == "oh-goon.plan-input-routing/v1"
@@ -52,11 +56,18 @@ def test_routes_invalid_input_is_nonzero_and_cannot_report_readiness(capsys):
     plan = PlanTemplateStore().source("python/quality").path
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     runtime = SimpleNamespace(plans=SimpleNamespace(explain_routing=resolver.explain_routing))
-    assert run_plan_command(runtime, _args(str(plan), "--routes", "--json", "--input", "coverage_threshold=101")) == 2
+    assert (
+        run_plan_command(
+            runtime, _args(str(plan), "--routes", "--json", "--input", "coverage_threshold=101")
+        )
+        == 2
+    )
     assert "resolved_not_executed" not in capsys.readouterr().out
 
 
-def test_routes_cli_file_identity_is_from_collector_not_undocumented_read(tmp_path, monkeypatch, capsys):
+def test_routes_cli_file_identity_is_from_collector_not_undocumented_read(
+    tmp_path, monkeypatch, capsys
+):
     plan = PlanTemplateStore().source("python/quality").path
     (tmp_path / "values.yml").write_text("inputs:\n  coverage_threshold: 85\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)

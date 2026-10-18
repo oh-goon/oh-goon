@@ -10,9 +10,6 @@ from oh_goon.core.errors import (
     ExecutorCapacityBusy,
     FleetPlanInvalid,
 )
-from oh_goon.core.product_identity import stable_id
-from oh_goon.core.time import monotonic_now, wait_seconds
-from oh_goon.core.models.scheduling import SchedulingEnvelope, SchedulingPriority
 from oh_goon.core.models.fleet_executor import FleetExecutorPlacement
 from oh_goon.core.models.fleet_executor_operations import (
     ExecutorAdmissionMode,
@@ -21,16 +18,19 @@ from oh_goon.core.models.fleet_executor_operations import (
     PlacementQueueSnapshot,
 )
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
-from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_isolation import isolation_requirements
-from oh_goon.integrations.fleet_plan_process_isolation import isolation_backend_evidence
-from oh_goon.integrations.fleet_plan_repository_scope import admitted_active_plan
+from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
+from oh_goon.core.models.scheduling import SchedulingEnvelope, SchedulingPriority
+from oh_goon.core.product_identity import stable_id
+from oh_goon.core.time import monotonic_now, wait_seconds
 from oh_goon.integrations._fleet_plan_host_resources import (
     preflight_executor_tool_feasibility,
     preflight_host_environment_feasibility,
 )
+from oh_goon.integrations.fleet_plan_process_isolation import isolation_backend_evidence
+from oh_goon.integrations.fleet_plan_repository_scope import admitted_active_plan
 from oh_goon.runtime._executor_configuration import (
     ConfiguredFleetExecutor,
     ExecutorPoolConfiguration,
@@ -100,16 +100,16 @@ class ExecutorPlacementAdmission:
                 )
             active_plans = tuple(plan for _target in targets)
         else:
-            if {item.repository_id for item in repository_admissions} != {item.repository_id for item in targets}:
+            if {item.repository_id for item in repository_admissions} != {
+                item.repository_id for item in targets
+            }:
                 raise FleetPlanInvalid(
                     "Strict executor admission requires semantic evidence for every selected repository"
                 )
             active_plans = tuple(admitted_active_plan(plan, item) for item in repository_admissions)
         preflight_executor_tool_feasibility(active_plans, self._configuration.path_authority)
         preflight_host_environment_feasibility(active_plans)
-        _preflight_configured_executor_feasibility(
-            self._configuration.executors, execution
-        )
+        _preflight_configured_executor_feasibility(self._configuration.executors, execution)
         target_count = len(targets)
         ticket = self._queue.enter(
             fleet_run_id,
@@ -128,9 +128,7 @@ class ExecutorPlacementAdmission:
                 )
                 self._queue.set_eligibility(ticket, ready=ready)
                 if not ready or not self._queue.is_turn(ticket):
-                    _wait_for_placement_turn(
-                        deadline, monotonic=self._monotonic, wait=self._wait
-                    )
+                    _wait_for_placement_turn(deadline, monotonic=self._monotonic, wait=self._wait)
                     continue
                 result, failures, capacity_busy, operational_blocked = self._try_once(
                     ticket=ticket,
@@ -197,19 +195,19 @@ class ExecutorPlacementAdmission:
         execution: CicdExecutionPolicy,
         candidates: tuple[ConfiguredFleetExecutor, ...],
     ) -> None:
-        requirements = isolation_requirements(
-            execution.trust_repository_code, execution.resources
-        )
+        requirements = isolation_requirements(execution.trust_repository_code, execution.resources)
         compatible = [
-            candidate for candidate in candidates
+            candidate
+            for candidate in candidates
             if candidate.backend.capabilities.satisfies(requirements)
         ]
         if not compatible:
             return
         reasons = [
-            (candidate.identity.executor_id, _new_admission_block_reason(
-                self._controls.state(candidate.identity.executor_id)
-            ))
+            (
+                candidate.identity.executor_id,
+                _new_admission_block_reason(self._controls.state(candidate.identity.executor_id)),
+            )
             for candidate in compatible
         ]
         if any(reason is None for _, reason in reasons):
@@ -233,16 +231,15 @@ class ExecutorPlacementAdmission:
         result only controls queue competition; final admission re-proves the
         authoritative conditions before consuming the ticket.
         """
-        requirements = isolation_requirements(
-            execution.trust_repository_code, execution.resources
-        )
+        requirements = isolation_requirements(execution.trust_repository_code, execution.resources)
         for candidate in candidates:
             backend = candidate.backend
             if not backend.capabilities.satisfies(requirements):
                 continue
-            if _new_admission_block_reason(
-                self._controls.state(candidate.identity.executor_id)
-            ) is not None:
+            if (
+                _new_admission_block_reason(self._controls.state(candidate.identity.executor_id))
+                is not None
+            ):
                 continue
             backend_evidence = isolation_backend_evidence(backend)
             try:
@@ -301,9 +298,14 @@ class ExecutorPlacementAdmission:
                 continue
             try:
                 admitted = self._commit_candidate(
-                    ticket=ticket, fleet_run_id=fleet_run_id, candidate=candidate,
-                    backend_evidence=backend_evidence, execution=execution,
-                    target_count=target_count, rank=rank, commit=commit,
+                    ticket=ticket,
+                    fleet_run_id=fleet_run_id,
+                    candidate=candidate,
+                    backend_evidence=backend_evidence,
+                    execution=execution,
+                    target_count=target_count,
+                    rank=rank,
+                    commit=commit,
                 )
                 return admitted, failures, capacity_busy, operational_blocked
             except ExecutorCapacityBusy as exc:
@@ -316,10 +318,16 @@ class ExecutorPlacementAdmission:
                 failures.append(f"{candidate.identity.executor_id}: {rejected.reason}")
         return None, failures, capacity_busy, operational_blocked
 
-
     def _commit_candidate(
-        self, *, ticket, fleet_run_id: str, candidate: ConfiguredFleetExecutor,
-        backend_evidence, execution: CicdExecutionPolicy, target_count: int, rank: int,
+        self,
+        *,
+        ticket,
+        fleet_run_id: str,
+        candidate: ConfiguredFleetExecutor,
+        backend_evidence,
+        execution: CicdExecutionPolicy,
+        target_count: int,
+        rank: int,
         commit: Callable[[sqlite3.Connection, FleetExecutorPlacement], T],
     ) -> tuple[FleetExecutorPlacement, T]:
         """Own the final transactional re-proof and consumption of placement authority."""
@@ -334,10 +342,16 @@ class ExecutorPlacementAdmission:
                 raise _OperationalRejected(final_blocked)
             try:
                 evidence = self._reservations.reserve_in(
-                    connection, settings=candidate.capacity, fleet_run_id=fleet_run_id,
-                    backend=backend_evidence, execution=execution, target_count=target_count,
-                    pool_id=self._pool_id, placement_policy=_PLACEMENT_POLICY,
-                    placement_rank=rank, executor_priority=candidate.priority,
+                    connection,
+                    settings=candidate.capacity,
+                    fleet_run_id=fleet_run_id,
+                    backend=backend_evidence,
+                    execution=execution,
+                    target_count=target_count,
+                    pool_id=self._pool_id,
+                    placement_policy=_PLACEMENT_POLICY,
+                    placement_rank=rank,
+                    executor_priority=candidate.priority,
                 )
             except FleetPlanInvalid as exc:
                 raise _CandidateRejected(exc) from exc
@@ -350,15 +364,12 @@ class ExecutorPlacementAdmission:
             return placement, commit(connection, placement)
 
 
-
 def _preflight_configured_executor_feasibility(
     executors: tuple[ConfiguredFleetExecutor, ...], execution: CicdExecutionPolicy
 ) -> None:
     """Reject immutable executor-inventory impossibility before entering the queue."""
 
-    requirements = isolation_requirements(
-        execution.trust_repository_code, execution.resources
-    )
+    requirements = isolation_requirements(execution.trust_repository_code, execution.resources)
     failures: list[str] = []
     for candidate in executors:
         reasons: list[str] = []
@@ -394,8 +405,10 @@ def _preflight_configured_executor_feasibility(
         failures.append(f"{candidate.identity.executor_id}: " + "; ".join(reasons))
     detail = " | ".join(failures) if failures else "no configured executors"
     raise FleetPlanInvalid(
-        "No Fleet executor can satisfy the configured strict CI/CD requirements before queueing: " + detail
+        "No Fleet executor can satisfy the configured strict CI/CD requirements before queueing: "
+        + detail
     )
+
 
 def _new_admission_block_reason(operational) -> str | None:
     if operational.admission_mode is ExecutorAdmissionMode.DRAINING:

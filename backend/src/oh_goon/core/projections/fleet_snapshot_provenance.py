@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 """Fleet snapshot provenance derived from canonical projection source facts."""
 
-from oh_goon.core.product_identity import stable_id
+from __future__ import annotations
+
 from oh_goon.core.models.provenance import FleetSnapshotProvenance
+from oh_goon.core.product_identity import stable_id
 from oh_goon.core.projections.fleet_context import FleetProjectionContext
 from oh_goon.core.time import utc_now
 
@@ -22,7 +22,10 @@ def snapshot_payload(
     return {
         "durable_revision": durable_revision,
         "journal_revision": journal_revision,
-        "repositories": [repo.model_dump(mode="json", exclude_computed_fields=True) for repo in context.repositories],
+        "repositories": [
+            repo.model_dump(mode="json", exclude_computed_fields=True)
+            for repo in context.repositories
+        ],
         "active_fleet_run": (
             context.active_fleet_run.model_dump(mode="json", exclude_computed_fields=True)
             if context.active_fleet_run

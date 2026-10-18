@@ -12,11 +12,13 @@ from pathlib import Path
 from typing import Protocol
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.path_authority import ensure_private_directory
 from oh_goon.core.models.fleet_plan_step_contract import CidrAllowlistPlanEgress, PlanStepEgress
+from oh_goon.core.path_authority import ensure_private_directory
 from oh_goon.engine.command import run_command
+from oh_goon.integrations._fleet_plan_cgroup_resources import (
+    require_independent_native_parent_custody,
+)
 from oh_goon.integrations.exact_file_write import publish_text_file, remove_file_durably
-from oh_goon.integrations._fleet_plan_cgroup_resources import require_independent_native_parent_custody
 
 
 class RestrictedEgressHost(Protocol):
@@ -134,7 +136,9 @@ class RestrictedEgressLease:
             raise
 
     def _open_link(self, cancel_requested: Callable[[], bool] | None) -> None:
-        require_independent_native_parent_custody(operation="native restricted-egress link creation")
+        require_independent_native_parent_custody(
+            operation="native restricted-egress link creation"
+        )
         with _egress_allocation_lock(self.lock_path):
             _reconcile_stale_egress_leases(self)
             subnet = _select_free_link_subnet(
@@ -174,7 +178,9 @@ class RestrictedEgressLease:
         cancel_requested: Callable[[], bool] | None,
     ) -> None:
         # Callers bypassing open/_open_link cannot issue netns/nft mutations.
-        require_independent_native_parent_custody(operation="native restricted-egress setup command")
+        require_independent_native_parent_custody(
+            operation="native restricted-egress setup command"
+        )
         result = run_command(
             *command,
             timeout=10.0,
@@ -200,7 +206,9 @@ class RestrictedEgressLease:
     def command_prefix(self) -> tuple[str, ...]:
         # No direct netns command may be released from a hand-built lease
         # without independent original LACE namespace custody.
-        require_independent_native_parent_custody(operation="native restricted-egress process launch")
+        require_independent_native_parent_custody(
+            operation="native restricted-egress process launch"
+        )
         return (self.ip, "netns", "exec", self.namespace)
 
     def _nft_rules(self) -> str:
@@ -398,8 +406,11 @@ def _native_resource_absent(stdout: str, kind: str, name: str) -> bool:
                     return False
                 if "table" in item:
                     table = item["table"]
-                    if (type(table) is not dict or type(table.get("family")) is not str
-                            or type(table.get("name")) is not str):
+                    if (
+                        type(table) is not dict
+                        or type(table.get("family")) is not str
+                        or type(table.get("name")) is not str
+                    ):
                         return False
                     if table["family"] == "inet" and table["name"] == name:
                         return False

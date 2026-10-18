@@ -63,25 +63,20 @@ def render_generated_files(openapi: dict[str, Any]) -> dict[str, str]:
 
 def load_captured_openapi(path: Path = OPENAPI_PATH) -> dict[str, Any]:
     if not path.is_file():
-        raise SystemExit(
-            "generated/openapi/openapi.json is missing; run `make api-schema` first"
-        )
+        raise SystemExit("generated/openapi/openapi.json is missing; run `make api-schema` first")
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise SystemExit(
-            "generated/openapi/openapi.json must contain one OpenAPI object"
-        )
+        raise SystemExit("generated/openapi/openapi.json must contain one OpenAPI object")
     return payload
 
 
-def _remove_stale_generated_files(expected: set[str], *, generated_dir: Path = GENERATED_DIR) -> None:
+def _remove_stale_generated_files(
+    expected: set[str], *, generated_dir: Path = GENERATED_DIR
+) -> None:
     if not generated_dir.exists():
         return
     for path in sorted(generated_dir.rglob("*"), reverse=True):
-        if (
-            path.is_file()
-            and path.relative_to(generated_dir).as_posix() not in expected
-        ):
+        if path.is_file() and path.relative_to(generated_dir).as_posix() not in expected:
             path.unlink()
         elif path.is_dir() and not any(path.iterdir()):
             path.rmdir()

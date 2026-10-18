@@ -1,4 +1,5 @@
 """AGENT-01B2B: original standard Fleet admission and durable Agent Game Tape."""
+
 from __future__ import annotations
 
 import hashlib
@@ -12,15 +13,16 @@ import pytest
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.product_identity import repository_id
 from oh_goon.integrations.hashmarks import identity as external_identity
 from oh_goon.runtime import goon_templates
-from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
-from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.services.execution_lock_persistence import write_execution_lock
+from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
-pytestmark = pytest.mark.skipif(os.name != "posix" or shutil.which("rg") is None,
-                               reason="Linux/WSL ripgrep required")
+pytestmark = pytest.mark.skipif(
+    os.name != "posix" or shutil.which("rg") is None, reason="Linux/WSL ripgrep required"
+)
 
 
 def _case(tmp_path: Path, monkeypatch, *, task="search:needle", effects=""):
@@ -38,44 +40,60 @@ def _case(tmp_path: Path, monkeypatch, *, task="search:needle", effects=""):
     goon = tmp_path / "goons" / "agent" / "search"
     goon.mkdir(parents=True)
     (goon / "README.md").write_text("Offline search\n")
-    (goon / "goon.yml").write_text('''inputs:
+    (goon / "goon.yml").write_text(
+        '''inputs:
   repo: {type: repository_reference}
   skill: {type: skill_reference}
   acceptance: {type: acceptance_profile}
 steps:
   - uses: agent
     harness: local-search
-    task: "''' + task + '"\n' + effects)
+    task: "'''
+        + task
+        + '"\n'
+        + effects
+    )
     plan = tmp_path / "plan.yml"
-    plan.write_text('''inputs: [repo, skill, acceptance]
+    plan.write_text("""inputs: [repo, skill, acceptance]
 execution: {purpose: verification}
 goons: [agent/search]
-''')
+""")
     monkeypatch.setattr(goon_templates, "default_goon_templates_root", lambda: tmp_path / "goons")
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "database.sqlite"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+
     # External Hashmarks producer is not installed on this hosted test machine.
     # Replace only its leaf adapter; all Fleet admission, execution and Game Tape are real.
     def supply_hashmarks(path: Path, **_kwargs):
         files = sorted(p for p in path.rglob("*") if p.is_file() and ".git" not in p.parts)
         payload = b"".join(p.relative_to(path).as_posix().encode() + p.read_bytes() for p in files)
         return external_identity.HashmarksTreeIdentity(
-            sha256=hashlib.sha256(payload).hexdigest(), byte_count=len(payload), entry_count=len(files)
+            sha256=hashlib.sha256(payload).hexdigest(),
+            byte_count=len(payload),
+            entry_count=len(files),
         )
+
     monkeypatch.setattr(external_identity, "_identify_one", supply_hashmarks)
-    opts = dict(inputs={"repo": "local:team/app", "skill": "local:team/search", "acceptance": "review"},
-                agent_repository_root=tmp_path / "repositories", agent_skill_root=tmp_path / "skills",
-                allowed_agent_acceptance=("review",))
+    opts = dict(
+        inputs={"repo": "local:team/app", "skill": "local:team/search", "acceptance": "review"},
+        agent_repository_root=tmp_path / "repositories",
+        agent_skill_root=tmp_path / "skills",
+        allowed_agent_acceptance=("review",),
+    )
     return plan, repository, opts
 
 
 def _lock(plan: Path, opts):
     from oh_goon.runtime.goon_templates import GoonTemplateStore
+
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     frozen, handoff, _ = resolver.resolve_frozen_local_search_agent(
-        plan, inputs=opts["inputs"], repository_root=opts["agent_repository_root"],
-        skill_root=opts["agent_skill_root"], allowed_acceptance=opts["allowed_agent_acceptance"],
+        plan,
+        inputs=opts["inputs"],
+        repository_root=opts["agent_repository_root"],
+        skill_root=opts["agent_skill_root"],
+        allowed_acceptance=opts["allowed_agent_acceptance"],
     )
     write_execution_lock(plan.parent / "goon.lock", build_execution_lock(frozen))
     return frozen, handoff
@@ -89,7 +107,9 @@ def test_original_fleet_admits_real_read_only_agent_and_persists_tape(tmp_path, 
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent.parent)
-        started = runtime.plans.run(plan, repository_ids={repository_id(repo)}, fleet_run_id="agent01b2b-pass", **opts)
+        started = runtime.plans.run(
+            plan, repository_ids={repository_id(repo)}, fleet_run_id="agent01b2b-pass", **opts
+        )
         terminal = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
         persisted = runtime.runs.get(started.fleet_run_id)
         assert persisted.run == terminal.run
@@ -127,7 +147,9 @@ def test_agent_source_absent_lock_refuses_before_fleet(tmp_path, monkeypatch):
 
 
 def test_standard_local_agent_cannot_execute_unrequested_write(tmp_path, monkeypatch):
-    plan, repo, opts = _case(tmp_path, monkeypatch, effects='    requested_effects:\n      repository_access: write\n')
+    plan, repo, opts = _case(
+        tmp_path, monkeypatch, effects="    requested_effects:\n      repository_access: write\n"
+    )
     with pytest.raises(FleetPlanInvalid, match="read-only"):
         _lock(plan, opts)
 
@@ -138,8 +160,9 @@ def test_no_match_is_durable_success_through_original_fleet(tmp_path, monkeypatc
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent.parent)
-        started = runtime.plans.run(plan, repository_ids={repository_id(repo)},
-                                    fleet_run_id="agent01b2b-no-match", **opts)
+        started = runtime.plans.run(
+            plan, repository_ids={repository_id(repo)}, fleet_run_id="agent01b2b-no-match", **opts
+        )
         detail = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
         persisted = runtime.runs.get(started.fleet_run_id)
         assert detail.outcome.value == "SUCCESS"
@@ -185,6 +208,7 @@ def test_agent_ingress_fails_closed_before_work(tmp_path, monkeypatch, change):
         runtime.locations.add(repo.parent.parent)
         if change == "missing_standard_mode":
             from oh_goon.core.enforcer_lace_trust import TrustProtocolError
+
             expected = TrustProtocolError
         else:
             expected = FleetPlanInvalid
@@ -196,20 +220,32 @@ def test_agent_ingress_fails_closed_before_work(tmp_path, monkeypatch, change):
 
 def test_agent_delivery_reference_must_match_resolved_identity(tmp_path, monkeypatch):
     from pydantic import ValidationError
+
     from oh_goon.core.models.execution_identity import ExecutionIdentity
-    from oh_goon.core.models.target import FleetPlanTarget, AgentStepDeliveryReference
     from oh_goon.core.models.goon_plan_source import PlanFileSource
+    from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
+
     plan, _, opts = _case(tmp_path, monkeypatch)
     frozen, _ = _lock(plan, opts)
     step = frozen.steps[0]
     target = FleetPlanTarget(
-        kind="fleet_plan", plan=frozen, source=PlanFileSource(sha256="a" * 64),
+        kind="fleet_plan",
+        plan=frozen,
+        source=PlanFileSource(sha256="a" * 64),
         identity=ExecutionIdentity(digest=build_execution_lock(frozen).digest),
-        agent_deliveries=(AgentStepDeliveryReference(
-            step_id=step.step_id, handoff_identity=step.handoff_identity,
-            delivery_sha256=step.delivery_sha256, reference_id="file-opaque"),),
+        agent_deliveries=(
+            AgentStepDeliveryReference(
+                step_id=step.step_id,
+                handoff_identity=step.handoff_identity,
+                delivery_sha256=step.delivery_sha256,
+                reference_id="file-opaque",
+            ),
+        ),
     )
-    assert FleetPlanTarget.model_validate_json(target.model_dump_json()).agent_deliveries == target.agent_deliveries
+    assert (
+        FleetPlanTarget.model_validate_json(target.model_dump_json()).agent_deliveries
+        == target.agent_deliveries
+    )
     with pytest.raises(ValidationError):
         FleetPlanTarget.model_validate({**target.model_dump(), "agent_deliveries": []})
     bad = {**target.agent_deliveries[0].model_dump(), "delivery_sha256": "0" * 64}
@@ -219,7 +255,9 @@ def test_agent_delivery_reference_must_match_resolved_identity(tmp_path, monkeyp
 
 def test_original_agent_fleet_cancel_is_durably_recorded(tmp_path, monkeypatch):
     import threading
+
     import oh_goon.integrations.fleet_plan_step_execution as steps
+
     plan, repo, opts = _case(tmp_path, monkeypatch)
     _lock(plan, opts)
     entered, release = threading.Event(), threading.Event()
@@ -234,8 +272,9 @@ def test_original_agent_fleet_cancel_is_durably_recorded(tmp_path, monkeypatch):
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent.parent)
-        started = runtime.plans.run(plan, repository_ids={repository_id(repo)},
-                                    fleet_run_id="agent01b2b-cancel", **opts)
+        started = runtime.plans.run(
+            plan, repository_ids={repository_id(repo)}, fleet_run_id="agent01b2b-cancel", **opts
+        )
         assert entered.wait(timeout=15), "Agent attempt did not reach original Step supervisor"
         runtime.runs.cancel(started.fleet_run_id)
         release.set()
@@ -262,8 +301,9 @@ def test_original_agent_fleet_process_failure_is_durably_recorded(tmp_path, monk
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent.parent)
-        started = runtime.plans.run(plan, repository_ids={repository_id(repo)},
-                                    fleet_run_id="agent01b2b-failure", **opts)
+        started = runtime.plans.run(
+            plan, repository_ids={repository_id(repo)}, fleet_run_id="agent01b2b-failure", **opts
+        )
         terminal = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
         persisted = runtime.runs.get(started.fleet_run_id)
         assert terminal.outcome.value != "SUCCESS"

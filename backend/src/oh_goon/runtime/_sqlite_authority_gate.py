@@ -124,8 +124,7 @@ def _acquire_kernel_gate(descriptor: int, *, write: bool) -> None:
     while not _try_kernel_gate(descriptor, write=write):
         if time.monotonic() >= deadline:
             raise TimeoutError(
-                "SQLite authority gate remained busy for "
-                f"{_GATE_ACQUIRE_TIMEOUT_SECONDS:.0f}s"
+                f"SQLite authority gate remained busy for {_GATE_ACQUIRE_TIMEOUT_SECONDS:.0f}s"
             )
         time.sleep(_GATE_RETRY_SECONDS)
 

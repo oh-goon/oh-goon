@@ -3,6 +3,7 @@
 Unit fixtures simulate a foreign-owner DAC split; they do NOT attest the
 physical OS custody of a production signer or enable Agent effects.
 """
+
 from __future__ import annotations
 
 import os
@@ -20,7 +21,9 @@ from oh_goon.services.fleet_native_run_contract_compiler import (
 )
 from tests.unit.services.test_group_a_native_run_contract_compiler import setup_native
 from tests.unit.services.test_skill03c2b_native_agent_policy_issuer import (
-    agent_profile, compile_with, effects,
+    agent_profile,
+    compile_with,
+    effects,
 )
 
 
@@ -37,16 +40,24 @@ def _source(tmp_path: Path, monkeypatch, *, content: bytes):
 def _native_agent(tmp_path, monkeypatch):
     journal, intent, event, authority, profile, _ = setup_native(tmp_path, monkeypatch)
     step = agent_profile(profile)
-    ceiling = NativeAgentEffectCeilings.freeze({step: effects(write=True, tools=("git",), recipients=("model_a",))})
+    ceiling = NativeAgentEffectCeilings.freeze(
+        {step: effects(write=True, tools=("git",), recipients=("model_a",))}
+    )
     path, source = _source(tmp_path, monkeypatch, content=ceiling.encoded)
     policy = DeploymentRunContractPolicy.freeze(
-        profile, agent_effect_policy=ceiling, agent_policy_source=source,
+        profile,
+        agent_effect_policy=ceiling,
+        agent_policy_source=source,
     )
     return journal, intent, event, authority, profile, ceiling, path, source, policy
 
 
-def test_external_file_ceiling_reaches_original_contract_without_authority_grant(tmp_path, monkeypatch):
-    journal, intent, event, authority, _, ceiling, _, source, policy = _native_agent(tmp_path, monkeypatch)
+def test_external_file_ceiling_reaches_original_contract_without_authority_grant(
+    tmp_path, monkeypatch
+):
+    journal, intent, event, authority, _, ceiling, _, source, policy = _native_agent(
+        tmp_path, monkeypatch
+    )
     result = compile_with(journal, event, intent, authority, policy)
     envelope = result.fields["step_envelopes"][next(iter(ceiling.read()))]
     assert envelope["agent_effect_limits"] == next(iter(ceiling.read().values()))
@@ -56,21 +67,36 @@ def test_external_file_ceiling_reaches_original_contract_without_authority_grant
 
 
 def test_unbacked_typed_ceiling_cannot_enter_original_native_compiler(tmp_path, monkeypatch):
-    journal, intent, event, authority, profile, ceiling, _, _, _ = _native_agent(tmp_path, monkeypatch)
+    journal, intent, event, authority, profile, ceiling, _, _, _ = _native_agent(
+        tmp_path, monkeypatch
+    )
     unbacked = DeploymentRunContractPolicy.freeze(profile, agent_effect_policy=ceiling)
     with pytest.raises(TrustProtocolError, match="source custody"):
         compile_with(journal, event, intent, authority, unbacked)
     assert journal.read_view().run_detail(event.fleet_run_id) is None
 
 
-@pytest.mark.parametrize("tamper", [
-    "modified-bytes", "same-bytes-new-inode", "mode-writable", "hardlink",
-    "symlink", "deleted", "wrong-owner", "oversize",
-])
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "modified-bytes",
+        "same-bytes-new-inode",
+        "mode-writable",
+        "hardlink",
+        "symlink",
+        "deleted",
+        "wrong-owner",
+        "oversize",
+    ],
+)
 def test_original_enrollment_and_compilation_refuse_source_substitution(
-    tmp_path, monkeypatch, tamper,
+    tmp_path,
+    monkeypatch,
+    tamper,
 ):
-    journal, intent, event, authority, _, ceiling, path, _, policy = _native_agent(tmp_path, monkeypatch)
+    journal, intent, event, authority, _, ceiling, path, _, policy = _native_agent(
+        tmp_path, monkeypatch
+    )
     if tamper == "modified-bytes":
         path.write_bytes(ceiling.encoded.replace(b"git", b"curl"))
     elif tamper == "same-bytes-new-inode":
@@ -88,7 +114,10 @@ def test_original_enrollment_and_compilation_refuse_source_substitution(
     elif tamper == "deleted":
         path.unlink()
     elif tamper == "wrong-owner":
-        policy = replace(policy, agent_policy_source=replace(policy.agent_policy_source, owner_uid=os.geteuid() + 2))
+        policy = replace(
+            policy,
+            agent_policy_source=replace(policy.agent_policy_source, owner_uid=os.geteuid() + 2),
+        )
     elif tamper == "oversize":
         path.write_bytes(b" " * (native._AGENT_POLICY_MAX_BYTES + 1))
     with pytest.raises(TrustProtocolError):
@@ -106,12 +135,16 @@ def test_enrollment_requires_exact_canonical_admin_document(tmp_path, monkeypatc
 
 
 def test_external_document_is_not_a_self_asserted_author_grant(tmp_path, monkeypatch):
-    journal, intent, event, authority, profile, ceiling, _, source, _ = _native_agent(tmp_path, monkeypatch)
+    journal, intent, event, authority, profile, ceiling, _, source, _ = _native_agent(
+        tmp_path, monkeypatch
+    )
     step = next(iter(ceiling.read()))
     overbroad = NativeAgentEffectCeilings.freeze({step: effects()})
     with pytest.raises(TrustProtocolError, match="differs from enrolled ceiling"):
         DeploymentRunContractPolicy.freeze(
-            profile, agent_effect_policy=overbroad, agent_policy_source=source,
+            profile,
+            agent_effect_policy=overbroad,
+            agent_policy_source=source,
         )
     assert journal.read_view().run_detail(event.fleet_run_id) is None
 
@@ -123,12 +156,15 @@ def test_real_unsafe_ancestry_is_refused_even_with_valid_document(tmp_path):
     # to independent admin custody by choosing a different owner_uid field.
     with pytest.raises(TrustProtocolError, match="signer-mutable"):
         native._require_admin_policy_ancestry(
-            path, owner_uid=os.geteuid() + 1, signer_uid=os.geteuid(),
+            path,
+            owner_uid=os.geteuid() + 1,
+            signer_uid=os.geteuid(),
         )
 
 
 def test_root_signer_cannot_claim_independent_policy_custody(monkeypatch):
     from oh_goon.services import fleet_prework_provisioner as provisioner
+
     monkeypatch.setattr(provisioner, "_native_unprivileged_signer_identity", lambda: (1,))
     monkeypatch.setattr(native.os, "geteuid", lambda: 0)
     with pytest.raises(TrustProtocolError, match="privileged signer"):
@@ -136,7 +172,8 @@ def test_root_signer_cannot_claim_independent_policy_custody(monkeypatch):
 
 
 def test_deployment_document_drift_during_native_observation_aborts_without_admission(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     journal, intent, event, authority, _, _, path, _, policy = _native_agent(tmp_path, monkeypatch)
     original = native._owner_observation
@@ -167,5 +204,7 @@ def test_admin_policy_path_cannot_contain_parent_traversal(tmp_path):
     candidate = tmp_path / "child" / ".." / "agent.json"
     with pytest.raises(TrustProtocolError, match="absolute deployment"):
         native._require_admin_policy_ancestry(
-            candidate, owner_uid=os.geteuid() + 1, signer_uid=os.geteuid(),
+            candidate,
+            owner_uid=os.geteuid() + 1,
+            signer_uid=os.geteuid(),
         )

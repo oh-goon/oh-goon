@@ -36,7 +36,10 @@ def test_remove_disposable_tree_removes_read_only_tree_without_following_nested_
     external.mkdir()
     external_file = external / "keep"
     external_file.write_text("external", encoding="utf-8")
-    external_modes = (stat.S_IMODE(external.stat().st_mode), stat.S_IMODE(external_file.stat().st_mode))
+    external_modes = (
+        stat.S_IMODE(external.stat().st_mode),
+        stat.S_IMODE(external_file.stat().st_mode),
+    )
 
     target = tmp_path / "disposable"
     nested = target / "a/b"
@@ -51,10 +54,15 @@ def test_remove_disposable_tree_removes_read_only_tree_without_following_nested_
     assert result.returncode == 0, result.stdout + result.stderr
     assert not target.exists()
     assert external_file.read_text(encoding="utf-8") == "external"
-    assert (stat.S_IMODE(external.stat().st_mode), stat.S_IMODE(external_file.stat().st_mode)) == external_modes
+    assert (
+        stat.S_IMODE(external.stat().st_mode),
+        stat.S_IMODE(external_file.stat().st_mode),
+    ) == external_modes
 
 
-def test_remove_disposable_tree_unlinks_symlink_root_without_touching_target(tmp_path: Path) -> None:
+def test_remove_disposable_tree_unlinks_symlink_root_without_touching_target(
+    tmp_path: Path,
+) -> None:
     external = tmp_path / "external"
     external.mkdir()
     external_file = external / "keep"

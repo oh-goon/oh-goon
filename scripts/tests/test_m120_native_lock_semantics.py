@@ -35,12 +35,13 @@ def _release_prelude(extra: str) -> str:
         "FRONTEND_LOCK = Path('frontend') / 'package-lock.json'\n"
         "def native(version):\n"
         "    subprocess.run(('uv', 'version', '--frozen', version))\n"
-        "    subprocess.run(('npm', 'version', version))\n"
-        + extra
+        "    subprocess.run(('npm', 'version', version))\n" + extra
     )
 
 
-def test_browser_rejects_renamed_lock_bytes_parsed_by_json_alias(tmp_path: Path) -> None:
+def test_browser_rejects_renamed_lock_bytes_parsed_by_json_alias(
+    tmp_path: Path,
+) -> None:
     _write(
         tmp_path,
         "backend/src/oh_goon/repository_tooling/release/browser_acceptance_container.py",
@@ -84,7 +85,7 @@ def test_browser_old_marker_decoys_and_npm_json_output_are_not_authority(
         tmp_path,
         "backend/src/oh_goon/repository_tooling/release/browser_acceptance_container.py",
         "import json\n"
-        "# lock_path.read_text payload.get(\"packages\") packages.get(package)\n"
+        '# lock_path.read_text payload.get("packages") packages.get(package)\n'
         "def select(result):\n"
         "    payload = json.loads(result.stdout)\n"
         "    return payload.get('dependencies')\n",
@@ -113,7 +114,9 @@ def test_release_rejects_backend_lock_toml_alias_through_helper(tmp_path: Path) 
     )
 
 
-def test_release_rejects_frontend_lock_json_load_after_path_helper(tmp_path: Path) -> None:
+def test_release_rejects_frontend_lock_json_load_after_path_helper(
+    tmp_path: Path,
+) -> None:
     stamp = _write(
         tmp_path,
         "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py",
@@ -133,7 +136,9 @@ def test_release_rejects_frontend_lock_json_load_after_path_helper(tmp_path: Pat
     )
 
 
-def test_release_exact_lock_byte_receipts_and_decoy_markers_are_allowed(tmp_path: Path) -> None:
+def test_release_exact_lock_byte_receipts_and_decoy_markers_are_allowed(
+    tmp_path: Path,
+) -> None:
     stamp = _write(
         tmp_path,
         "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py",
@@ -156,7 +161,9 @@ def test_release_exact_lock_byte_receipts_and_decoy_markers_are_allowed(tmp_path
     )
 
 
-def test_release_unrelated_json_parsing_does_not_taint_lock_receipts(tmp_path: Path) -> None:
+def test_release_unrelated_json_parsing_does_not_taint_lock_receipts(
+    tmp_path: Path,
+) -> None:
     stamp = _write(
         tmp_path,
         "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py",

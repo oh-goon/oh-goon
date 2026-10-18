@@ -4,6 +4,7 @@ Read one raw JUnit document produced by the locked process test owner. Exact
 names, cardinality and outcomes are required: pytest exit 0 without executing
 all three real kernel cases (e.g. from skipped markers) is never a PASS.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -14,11 +15,13 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-EXPECTED = frozenset({
-    "test_real_linux_distinct_uid_no_new_privs_zero_caps_and_six_roots",
-    "test_real_linux_nonprivileged_caller_rejects_privileged_sibling_thread",
-    "test_real_linux_caller_drops_root_but_sibling_retains_root",
-})
+EXPECTED = frozenset(
+    {
+        "test_real_linux_distinct_uid_no_new_privs_zero_caps_and_six_roots",
+        "test_real_linux_nonprivileged_caller_rejects_privileged_sibling_thread",
+        "test_real_linux_caller_drops_root_but_sibling_retains_root",
+    }
+)
 SCHEMA = "oh-goon.a1-kernel-custody-diagnostic/v1"
 
 
@@ -54,8 +57,10 @@ def verify(junit: Path, log: Path, pytest_exit: int) -> dict[str, object]:
     names = [case.get("name") for case in cases]
     if len(cases) != len(EXPECTED) or set(names) != EXPECTED or len(set(names)) != len(names):
         raise CustodyReceiptError("missing, extra or duplicate real-kernel test identity")
-    if any((case.get("classname") or "") not in {"", "test_a1h_real_linux_process_custody"}
-           for case in cases):
+    if any(
+        (case.get("classname") or "") not in {"", "test_a1h_real_linux_process_custody"}
+        for case in cases
+    ):
         raise CustodyReceiptError("native kernel test cases came from unexpected module")
     if any(list(case) or case.get("status") in {"skipped", "failed"} for case in cases):
         raise CustodyReceiptError("native kernel test skipped, failed or emitted unknown result")
@@ -90,8 +95,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = verify(args.junit, args.log, args.pytest_exit)
     except (CustodyReceiptError, OSError, ValueError) as exc:
-        print(json.dumps({"schema": SCHEMA, "status": "REJECTED_INCOMPLETE_NATIVE_KERNEL_PROOF",
-                          "reason": str(exc), "app_pass": "NOT_ESTABLISHED"}, sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    "schema": SCHEMA,
+                    "status": "REJECTED_INCOMPLETE_NATIVE_KERNEL_PROOF",
+                    "reason": str(exc),
+                    "app_pass": "NOT_ESTABLISHED",
+                },
+                sort_keys=True,
+            )
+        )
         return 2
     print(json.dumps(result, sort_keys=True))
     return 0

@@ -14,7 +14,6 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedImport,
     ResolvedPreCommitStep,
 )
-from oh_goon.core.models.fleet_plan_evidence import RequirementsRepositoryAdmissionEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import (
     CicdExecutionPolicy,
     MaintenanceExecutionPolicy,
@@ -43,12 +42,11 @@ from oh_goon.core.models.repository import (
     RepositoryIdentity,
 )
 from oh_goon.core.vocabulary import FleetScope
+from oh_goon.integrations import fleet_plan_preview, fleet_plan_repository_scope
 from oh_goon.integrations.fleet_plan_admission import (
-    AcceptedCicdRepositoryAdmission,
     RejectedCicdRepositoryAdmission,
     inspect_cicd_repository,
 )
-from oh_goon.integrations import fleet_plan_preview, fleet_plan_repository_scope
 from oh_goon.integrations.fleet_plan_preview import (
     repository_plan_admission_evidence,
     require_repository_plan_admission_current,
@@ -58,8 +56,8 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import TEST_ISOLATION_BACKEND, prepare_physical_test_run
 from tests.factories.fleet_plan_targets import structural_fleet_plan_target
-from tests.factories.run_admission import repository_admission_for
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
+from tests.factories.run_admission import repository_admission_for
 
 
 def _plan(
@@ -304,9 +302,9 @@ def test_strict_source_only_step_rejects_canonical_sandbox_materialized_alias_be
         'command "$tool"',
         'env "$tool"',
         '"${TOOL}"',
-        '$(printf tool)',
+        "$(printf tool)",
         'eval "$tool"',
-        '`printf tool`',
+        "`printf tool`",
     ],
 )
 def test_strict_shell_rejects_unresolved_executable_authority_before_run_admitted(
@@ -566,9 +564,7 @@ def test_retained_cross_run_cache_is_strict_cicd_only() -> None:
         timeout_seconds=60,
         step_id="consume",
         argv=("true",),
-        cache=PlanStepCache(
-            source=RetainedPlanCacheSource(reference_id="ref-" + "a" * 32)
-        ),
+        cache=PlanStepCache(source=RetainedPlanCacheSource(reference_id="ref-" + "a" * 32)),
         capabilities=PlanStepCapabilities(),
     )
 
@@ -622,9 +618,7 @@ def test_repository_plan_admission_receipt_turns_later_invalidity_into_staleness
         require_repository_plan_admission_current(repository, plan, admitted)
 
 
-def test_verification_admission_binds_filtered_source_identity(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_verification_admission_binds_filtered_source_identity(tmp_path: Path, monkeypatch) -> None:
     repository_path = tmp_path / "repo"
     repository_path.mkdir()
     authored = repository_path / "owned.txt"
@@ -713,6 +707,7 @@ steps:
     )
     resolved = FleetPlanResolver().resolve(source)
     assert resolved.requirements == ()
+
 
 def test_cicd_root_goon_inherits_executor_capacity_by_default(tmp_path: Path) -> None:
     source = tmp_path / "goon.yml"
@@ -992,7 +987,10 @@ def test_uv_lock_structure_is_owned_by_native_uv_not_static_admission(
     (repository / "uv.lock").write_text(uv_lock, encoding="utf-8")
 
     pyproject = repository / "pyproject.toml"
-    pyproject.write_text(pyproject.read_text(encoding="utf-8") + "\n[dependency-groups]\ndev = []\n", encoding="utf-8")
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8") + "\n[dependency-groups]\ndev = []\n",
+        encoding="utf-8",
+    )
     inspection = inspect_cicd_repository(repository, (UvProjectRequirement(group="dev"),))
 
     assert not isinstance(inspection, RejectedCicdRepositoryAdmission)
@@ -1007,7 +1005,7 @@ def test_uv_project_requirement_transports_group_without_shadow_validation(tmp_p
         encoding="utf-8",
     )
     (repository / "uv.lock").write_text(
-        'version = 1\nrevision = 1\npackage = []\n', encoding="utf-8"
+        "version = 1\nrevision = 1\npackage = []\n", encoding="utf-8"
     )
 
     accepted = inspect_cicd_repository(repository, (UvProjectRequirement(group="dev"),))
@@ -1027,9 +1025,12 @@ def test_plan_repository_requirements_are_rechecked_on_frozen_snapshot(tmp_path:
         ),
         encoding="utf-8",
     )
-    pyproject.write_text(pyproject.read_text(encoding="utf-8") + "\n[dependency-groups]\ndev = []\n", encoding="utf-8")
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8") + "\n[dependency-groups]\ndev = []\n",
+        encoding="utf-8",
+    )
     (repository / "uv.lock").write_text(
-        'version = 1\nrevision = 1\npackage = []\n',
+        "version = 1\nrevision = 1\npackage = []\n",
         encoding="utf-8",
     )
     plan = _plan(
@@ -1086,14 +1087,11 @@ def test_uv_project_requirement_is_derived_and_valid_without_package_shadow_mode
 
     (tmp_path / ".git").mkdir()
     (tmp_path / "pyproject.toml").write_text("[dependency-groups]\ndev = []\n", encoding="utf-8")
-    (tmp_path / "uv.lock").write_text(
-        'version = 1\nrevision = 1\npackage = []\n', encoding="utf-8"
-    )
+    (tmp_path / "uv.lock").write_text("version = 1\nrevision = 1\npackage = []\n", encoding="utf-8")
     evidence = validate_cicd_repository(tmp_path, (UvProjectRequirement(group="dev"),))
 
     assert evidence.kind == "requirements"
     assert evidence.requirement_count == 1
-
 
 
 def test_sanitized_execution_snapshot_validates_requirements_without_git_metadata(
@@ -1196,7 +1194,6 @@ def test_strict_cicd_duplicate_entries_reach_selected_root_set_proof(
         )
 
     assert observed == [(repository, repository)]
-
 
 
 @pytest.mark.parametrize(
@@ -1333,9 +1330,7 @@ def test_repository_plan_admission_resolves_import_applicability_once(
         lambda _root: SimpleNamespace(sha256="d" * 64, byte_count=0, entry_count=0),
     )
 
-    admitted = repository_plan_admission_evidence(
-        RepositoryIdentity(path=repository_path), plan
-    )
+    admitted = repository_plan_admission_evidence(RepositoryIdentity(path=repository_path), plan)
 
     assert calls == [repository_path]
     assert admitted.import_applicability[0].status == "NOT_APPLICABLE"

@@ -4,6 +4,7 @@ The only doubles are downstream League/run/diagnostic services that must NOT be
 reached by inspection. The Plan store, actual shipped source/GOON tree, compiled
 input constraints and HTTP schemas are all first-party production owners.
 """
+
 from __future__ import annotations
 
 import json
@@ -34,7 +35,9 @@ SECRET = "T6_PRIVATE_TOKEN_SHOULD_NEVER_APPEAR"
 def journey(tmp_path):
     store = SharedPlanFileStore(tmp_path / "plans")
     runs, league, diagnostics = Mock(), Mock(), Mock()
-    plans = FleetPlanService(FleetPlanResolver(goon_templates=GOON_TEMPLATES), Mock(), Mock(), Mock(), Mock())
+    plans = FleetPlanService(
+        FleetPlanResolver(goon_templates=GOON_TEMPLATES), Mock(), Mock(), Mock(), Mock()
+    )
     resolve_real = plans.resolve_with_source
     plans.resolve_with_source = Mock(wraps=resolve_real)
     service = SharedPlanService(store, league, plans, runs, PLAN_TEMPLATES)
@@ -49,24 +52,36 @@ def journey(tmp_path):
 def _create_from_shipped(client, template_key):
     catalog = client.get(f"{API}/plan-templates")
     assert catalog.status_code == 200, catalog.text
-    template = next(item for item in catalog.json()["templates"] if item["template_key"] == template_key)
-    response = client.post(f"{API}/shared-plans/from-template", json={
-        "template_key": template_key, "expected_template_sha256": template["sha256"],
-    })
+    template = next(
+        item for item in catalog.json()["templates"] if item["template_key"] == template_key
+    )
+    response = client.post(
+        f"{API}/shared-plans/from-template",
+        json={
+            "template_key": template_key,
+            "expected_template_sha256": template["sha256"],
+        },
+    )
     assert response.status_code == 200, response.text
     document = response.json()
     assert document["sha256"] == template["sha256"]
     assert document["plan_key"] == template_key.replace("/", "-")
-    assert client.get(f"{API}/shared-plans/{document['plan_key']}").json()["sha256"] == document["sha256"]
+    assert (
+        client.get(f"{API}/shared-plans/{document['plan_key']}").json()["sha256"]
+        == document["sha256"]
+    )
     return document
 
 
 def _inspect(client, document, inputs, revision=None):
-    return client.post(f"{API}/shared-plan-input-inspections", json={
-        "plan_key": document["plan_key"],
-        "expected_revision": revision or document["sha256"],
-        "inputs": inputs,
-    })
+    return client.post(
+        f"{API}/shared-plan-input-inspections",
+        json={
+            "plan_key": document["plan_key"],
+            "expected_revision": revision or document["sha256"],
+            "inputs": inputs,
+        },
+    )
 
 
 def _assert_rejected(response, expected_code, expected_input=None):
@@ -99,7 +114,9 @@ def _assert_accepted(response, document):
     return body
 
 
-@pytest.mark.parametrize("spec", CORPUS["journeys"], ids=[item["id"] for item in CORPUS["journeys"]])
+@pytest.mark.parametrize(
+    "spec", CORPUS["journeys"], ids=[item["id"] for item in CORPUS["journeys"]]
+)
 def test_t6_full_correction_journey_with_real_shipped_plan_and_goons(journey, spec):
     client, store, plans, runs, league, _ = journey
     document = _create_from_shipped(client, spec["template_key"])
@@ -116,7 +133,9 @@ def test_t6_full_correction_journey_with_real_shipped_plan_and_goons(journey, sp
     assert plans.resolve_with_source.call_count == prior + 2
     assert _assert_accepted(_inspect(client, document, spec["valid_inputs"]), document) == accepted
     assert on_disk.read_bytes() == original_bytes, "Inspection mutated saved Plan bytes"
-    assert not list(store.root.rglob("goon.lock")), "Inspection unexpectedly authored execution lock"
+    assert not list(store.root.rglob("goon.lock")), (
+        "Inspection unexpectedly authored execution lock"
+    )
     runs.assert_not_called()
     league.assert_not_called()
 
@@ -126,18 +145,26 @@ def test_t6_save_edit_requires_revision_and_invalidates_prior_inspection(journey
     document = _create_from_shipped(client, "python/quality")
     _assert_accepted(_inspect(client, document, {"coverage_threshold": "85"}), document)
     changed = document["content"] + "\n# second team-owned revision\n"
-    saved = client.put(f"{API}/shared-plans/{document['plan_key']}", json={
-        "content": changed, "expected_revision": document["sha256"],
-    })
+    saved = client.put(
+        f"{API}/shared-plans/{document['plan_key']}",
+        json={
+            "content": changed,
+            "expected_revision": document["sha256"],
+        },
+    )
     assert saved.status_code == 200, saved.text
     current = saved.json()
     assert current["sha256"] != document["sha256"]
     stale = _inspect(client, document, {"coverage_threshold": "85"})
     assert stale.status_code == 409 and stale.json()["code"] == "FLEET_PLAN_SOURCE_STALE"
     _assert_accepted(_inspect(client, current, {"coverage_threshold": "85"}), current)
-    old_write = client.put(f"{API}/shared-plans/{document['plan_key']}", json={
-        "content": document["content"], "expected_revision": document["sha256"],
-    })
+    old_write = client.put(
+        f"{API}/shared-plans/{document['plan_key']}",
+        json={
+            "content": document["content"],
+            "expected_revision": document["sha256"],
+        },
+    )
     assert old_write.status_code == 409
     assert store.read(document["plan_key"]).sha256 == current["sha256"]
     runs.assert_not_called()
@@ -147,10 +174,13 @@ def test_t6_invalid_plan_edit_fails_before_commit(journey):
     client, store, plans, runs, _, _ = journey
     document = _create_from_shipped(client, "python/quality")
     before = store.path(document["plan_key"]).read_bytes()
-    response = client.put(f"{API}/shared-plans/{document['plan_key']}", json={
-        "content": "version: 1\nsteps:\n- run: dangerous-should-not-execute\n",
-        "expected_revision": document["sha256"],
-    })
+    response = client.put(
+        f"{API}/shared-plans/{document['plan_key']}",
+        json={
+            "content": "version: 1\nsteps:\n- run: dangerous-should-not-execute\n",
+            "expected_revision": document["sha256"],
+        },
+    )
     assert response.status_code in (400, 422), response.text
     assert store.path(document["plan_key"]).read_bytes() == before
     _assert_accepted(_inspect(client, document, {"coverage_threshold": "85"}), document)
@@ -171,10 +201,14 @@ def test_t6_unknown_input_repair_does_not_leak_user_value(journey):
 def test_t6_http_schema_error_redacts_secret(journey):
     client, _, plans, runs, _, _ = journey
     document = _create_from_shipped(client, "python/quality")
-    response = client.post(f"{API}/shared-plan-input-inspections", json={
-        "plan_key": document["plan_key"], "expected_revision": SECRET,
-        "inputs": {"coverage_threshold": [SECRET]},
-    })
+    response = client.post(
+        f"{API}/shared-plan-input-inspections",
+        json={
+            "plan_key": document["plan_key"],
+            "expected_revision": SECRET,
+            "inputs": {"coverage_threshold": [SECRET]},
+        },
+    )
     assert response.status_code == 422
     assert SECRET not in response.text
     assert response.json()["details"] == {}
@@ -202,6 +236,8 @@ def test_t6_no_run_admission_or_lock_writes(journey):
         assert response.status_code == 200
         assert response.json()["execution"] == "not_started_by_inspection"
     assert plans.resolve_with_source.call_count == 3
-    assert sorted(path.relative_to(store.root).as_posix() for path in store.root.rglob("*") if path.is_file()) == ["python-quality/plan.yml"]
+    assert sorted(
+        path.relative_to(store.root).as_posix() for path in store.root.rglob("*") if path.is_file()
+    ) == ["python-quality/plan.yml"]
     runs.assert_not_called()
     league.assert_not_called()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -34,7 +34,9 @@ def test_tooling_step_projects_exact_declared_children_into_strict_toolchain(
     toolchain.mkdir()
     for name in expected:
         executable = shutil.which(name)
-        assert executable is not None, f"strict tooling regression requires host fixture tool {name}"
+        assert executable is not None, (
+            f"strict tooling regression requires host fixture tool {name}"
+        )
         (toolchain / name).symlink_to(Path(executable).resolve())
 
     ambient = tmp_path / "ambient"
@@ -53,9 +55,7 @@ def test_tooling_step_projects_exact_declared_children_into_strict_toolchain(
     repository = tmp_path / "repository"
     repository.mkdir()
     (repository / "owned.txt").write_text("tooling-source\n", encoding="utf-8")
-    (repository / "Makefile").write_text(
-        "test-tooling-complete:\n\t@true\n", encoding="utf-8"
-    )
+    (repository / "Makefile").write_text("test-tooling-complete:\n\t@true\n", encoding="utf-8")
 
     with prepare_physical_test_run(
         RepositoryIdentity(path=repository),
@@ -92,9 +92,7 @@ def test_prepare_physical_test_run_does_not_recompute_explicit_test_authorities(
 
     repository = RepositoryIdentity(path=tmp_path / "repository")
     repository.path.mkdir()
-    plan = strict_test_plan(
-        ResolvedCommandStep(timeout_seconds=60, step_id="noop", argv=("true",))
-    )
+    plan = strict_test_plan(ResolvedCommandStep(timeout_seconds=60, step_id="noop", argv=("true",)))
     explicit_source = object()
     explicit_path = object()
     captured: dict[str, object] = {}

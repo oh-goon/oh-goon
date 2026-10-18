@@ -19,7 +19,6 @@ GOON = ROOT / "templates/goons/oh-goon/repository-exam/goon.yml"
 PLAN = ROOT / "templates/plans/oh-goon/repository-understanding-certification/plan.yml"
 
 
-
 def _question_ids() -> list[str]:
     found: list[str] = []
     for path in sorted(QUESTIONS.glob("*.md")):
@@ -30,30 +29,45 @@ def _question_ids() -> list[str]:
 def _secret_entries() -> list[dict[str, object]]:
     entries: list[dict[str, object]] = []
     for path in sorted(ANSWERS.glob("*.yml")):
-        if path.name in {"question-audit.yml", "question-lifecycle.yml", "benchmark-integrity.yml"}:
+        if path.name in {
+            "question-audit.yml",
+            "question-lifecycle.yml",
+            "benchmark-integrity.yml",
+        }:
             continue
         payload = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert payload["schema_version"] == 1
-        assert payload["source_version"] == (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        assert (
+            payload["source_version"]
+            == (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        )
         entries.extend(payload["questions"])
     return sorted(entries, key=lambda item: int(str(item["id"])[1:]))
 
 
-def test_frontend_native_tool_evidence_reference_includes_real_make_delegation() -> None:
+def test_frontend_native_tool_evidence_reference_includes_real_make_delegation() -> (
+    None
+):
     # A changed Goon source must not leave a stale or semantically empty certification range.
     question = next(item for item in _secret_entries() if item["id"] == "Q82")
     matching = [
         reference
         for reference in question["evidence_expectations"]
-        if str(reference).startswith("templates/goons/oh-goon/browser-targeted/goon.yml:")
+        if str(reference).startswith(
+            "templates/goons/oh-goon/browser-targeted/goon.yml:"
+        )
     ]
     assert len(matching) == 1
     start, end = map(int, str(matching[0]).rsplit(":", 1)[1].split("-"))
-    source = (ROOT / "templates/goons/oh-goon/browser-targeted/goon.yml").read_text(
-        encoding="utf-8"
-    ).splitlines()
+    source = (
+        (ROOT / "templates/goons/oh-goon/browser-targeted/goon.yml")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     assert 1 <= start <= end <= len(source)
-    assert "run: make browser-targeted-certification" in "\n".join(source[start - 1 : end])
+    assert "run: make browser-targeted-certification" in "\n".join(
+        source[start - 1 : end]
+    )
 
 
 def _module():
@@ -64,16 +78,16 @@ def _module():
     return repository_understanding_exam
 
 
-
 def _submission(tmp_path: Path, body: str = "Q01 answer\n") -> Path:
     path = tmp_path / "candidate.md"
     path.write_text(body, encoding="utf-8")
     return path
 
 
-
 def _filled_sheet(module, submission: Path) -> dict[str, object]:
-    sheet = module.grade_template(submission=submission, candidate="junior-a", mode="normal")
+    sheet = module.grade_template(
+        submission=submission, candidate="junior-a", mode="normal"
+    )
     sheet["grader"] = {
         "type": "llm",
         "identity": "grader-a",
@@ -124,26 +138,36 @@ def _first_critical_contradiction(sheet: dict[str, object]) -> dict[str, object]
     snapshot = {item["id"]: item for item in sheet["exam_snapshot"]["questions"]}
     for grade in sheet["grades"]:
         expected = snapshot[grade["id"]]["secret"]["contradictions"]
-        critical_ids = {item["id"] for item in expected if item["severity"] == "critical"}
+        critical_ids = {
+            item["id"] for item in expected if item["severity"] == "critical"
+        }
         for contradiction in grade["contradictions"]:
             if contradiction["contradiction_id"] in critical_ids:
                 return contradiction
     raise AssertionError("test fixture must contain a critical contradiction")
 
 
-def _write_sheet(tmp_path: Path, sheet: dict[str, object], name: str = "grades.json") -> Path:
+def _write_sheet(
+    tmp_path: Path, sheet: dict[str, object], name: str = "grades.json"
+) -> Path:
     path = tmp_path / name
     path.write_text(json.dumps(sheet), encoding="utf-8")
     return path
 
 
-
-def _score(module, tmp_path: Path, sheet: dict[str, object], submission: Path, name: str = "grades.json"):
+def _score(
+    module,
+    tmp_path: Path,
+    sheet: dict[str, object],
+    submission: Path,
+    name: str = "grades.json",
+):
     return module.score(_write_sheet(tmp_path, sheet, name), submission=submission)
 
 
-
-def test_certification_retains_220_authored_question_secret_pairs_with_157_score_bank() -> None:
+def test_certification_retains_220_authored_question_secret_pairs_with_157_score_bank() -> (
+    None
+):
     questions = _question_ids()
     secrets = [str(item["id"]) for item in _secret_entries()]
     expected = [f"Q{index:02d}" for index in range(1, 221)]
@@ -155,13 +179,17 @@ def test_certification_retains_220_authored_question_secret_pairs_with_157_score
     assert manifest["shadow_question_count"] == 63
 
 
-
-def test_public_question_metadata_exposes_no_secret_answer_paths_or_line_references() -> None:
+def test_public_question_metadata_exposes_no_secret_answer_paths_or_line_references() -> (
+    None
+):
     path = QUESTIONS / "question-metadata.yml"
     body = path.read_text(encoding="utf-8")
     payload = yaml.safe_load(body)
     assert payload["schema_version"] == 2
-    assert payload["source_version"] == (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    assert (
+        payload["source_version"]
+        == (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    )
     assert len(payload["questions"]) == 220
     assert "docs/certification/answers" not in body
     assert not re.search(r"[A-Za-z0-9_./-]+:\d+(?:-\d+)?", body)
@@ -173,8 +201,13 @@ def test_public_question_metadata_exposes_no_secret_answer_paths_or_line_referen
         "CHANGE_IMPACT",
         "FALSE_PREMISE",
     }
-    assert {item["difficulty"] for item in payload["questions"]} == {"L1", "L2", "L3", "L4", "L5"}
-
+    assert {item["difficulty"] for item in payload["questions"]} == {
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+    }
 
 
 def test_secret_uses_semantic_claims_contradictions_and_evidence_expectations() -> None:
@@ -200,22 +233,34 @@ def test_secret_uses_semantic_claims_contradictions_and_evidence_expectations() 
             assert item["contradictions"]
             assert any(bool(claim["critical"]) for claim in claims)
         critical_claims += sum(bool(claim["critical"]) for claim in claims)
-    qualification = {row["id"] for row in _module().question_lifecycle()["questions"] if row["qualification_bank_member"]}
-    qualification_entries = [item for item in _secret_entries() if item["id"] in qualification]
+    qualification = {
+        row["id"]
+        for row in _module().question_lifecycle()["questions"]
+        if row["qualification_bank_member"]
+    }
+    qualification_entries = [
+        item for item in _secret_entries() if item["id"] in qualification
+    ]
     assert sum(item["severity"] == "critical" for item in qualification_entries) == 45
-    qualification_critical_questions = sum(item["severity"] == "critical" for item in qualification_entries)
+    qualification_critical_questions = sum(
+        item["severity"] == "critical" for item in qualification_entries
+    )
     qualification_critical_claims = sum(
-        bool(claim["critical"]) for item in qualification_entries for claim in item["expected_claims"]
+        bool(claim["critical"])
+        for item in qualification_entries
+        for claim in item["expected_claims"]
     )
     assert qualification_critical_claims >= qualification_critical_questions
     assert critical_count >= 45
     assert critical_claims >= 148
 
 
-
 def test_exam_verify_reports_semantic_v7_profiles_and_information_model() -> None:
     manifest = _module().verify()
-    assert manifest["source_version"] == (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    assert (
+        manifest["source_version"]
+        == (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    )
     assert manifest["qa_schema_version"] == 28
     assert manifest["question_schema_version"] == 2
     assert manifest["grader_schema_version"] == 6
@@ -231,7 +276,9 @@ def test_exam_verify_reports_semantic_v7_profiles_and_information_model() -> Non
     assert manifest["blueprint_audit"]["status"] == "BALANCED"
     assert manifest["blueprint_audit"]["enforcement"] == "HARD_BANK_RELEASE_GATE"
     misconception_audit = manifest["misconception_coverage_audit"]
-    assert misconception_audit["policy_version"] == "repository-misconception-coverage.v7"
+    assert (
+        misconception_audit["policy_version"] == "repository-misconception-coverage.v7"
+    )
     assert misconception_audit["ownership_question_count"] == 24
     assert misconception_audit["ownership_with_contradiction_count"] == 24
     assert misconception_audit["ownership_gap_count"] == 0
@@ -239,7 +286,9 @@ def test_exam_verify_reports_semantic_v7_profiles_and_information_model() -> Non
     assert misconception_audit["critical_with_contradiction_count"] == 45
     assert misconception_audit["critical_contradiction_gap_count"] == 0
     assert misconception_audit["critical_contradiction_gaps"] == []
-    assert misconception_audit["critical_with_critical_severity_contradiction_count"] == 45
+    assert (
+        misconception_audit["critical_with_critical_severity_contradiction_count"] == 45
+    )
     assert misconception_audit["critical_severity_gap_count"] == 0
     assert misconception_audit["critical_severity_gaps"] == []
     assert misconception_audit["critical_with_critical_claim_count"] == 45
@@ -257,21 +306,41 @@ def test_exam_verify_reports_semantic_v7_profiles_and_information_model() -> Non
         for question in load_exam()
         if question.id in qualification
     )
-    assert misconception_audit["covered_misconception_count"] == misconception_audit["misconception_count"] == 11
+    assert (
+        misconception_audit["covered_misconception_count"]
+        == misconception_audit["misconception_count"]
+        == 11
+    )
     assert misconception_audit["taxonomy_gap_count"] == 0
     assert misconception_audit["taxonomy_gaps"] == []
     assert misconception_audit["severity_encoded_id_count"] == 0
     assert misconception_audit["severity_encoded_ids"] == []
-    assert misconception_audit["misconception_counts"]["semantic_invariant_violation"] >= 1
+    assert (
+        misconception_audit["misconception_counts"]["semantic_invariant_violation"] >= 1
+    )
     assert misconception_audit["misconception_counts"]["caller_owner_confusion"] >= 1
-    assert misconception_audit["misconception_counts"]["observer_authority_confusion"] >= 1
-    assert misconception_audit["misconception_counts"]["desired_observed_conflation"] >= 1
+    assert (
+        misconception_audit["misconception_counts"]["observer_authority_confusion"] >= 1
+    )
+    assert (
+        misconception_audit["misconception_counts"]["desired_observed_conflation"] >= 1
+    )
     assert misconception_audit["misconception_counts"]["test_as_runtime_authority"] >= 1
-    assert misconception_audit["misconception_counts"]["dependency_direction_reversal"] >= 1
+    assert (
+        misconception_audit["misconception_counts"]["dependency_direction_reversal"]
+        >= 1
+    )
     assert misconception_audit["misconception_counts"]["identity_scope_confusion"] >= 1
-    assert misconception_audit["misconception_counts"]["duplicate_owner_assumption"] >= 1
-    assert misconception_audit["misconception_counts"]["hidden_fallback_assumption"] >= 1
-    assert sum(misconception_audit["misconception_counts"].values()) == misconception_audit["contradiction_count"]
+    assert (
+        misconception_audit["misconception_counts"]["duplicate_owner_assumption"] >= 1
+    )
+    assert (
+        misconception_audit["misconception_counts"]["hidden_fallback_assumption"] >= 1
+    )
+    assert (
+        sum(misconception_audit["misconception_counts"].values())
+        == misconception_audit["contradiction_count"]
+    )
     assert misconception_audit["broad_misconception_counts"] == {
         name: misconception_audit["misconception_counts"][name]
         for name in misconception_audit["broad_misconception_counts"]
@@ -280,7 +349,8 @@ def test_exam_verify_reports_semantic_v7_profiles_and_information_model() -> Non
         misconception_audit["broad_misconception_counts"].values()
     )
     assert misconception_audit["specific_contradiction_count"] == (
-        misconception_audit["contradiction_count"] - misconception_audit["broad_contradiction_count"]
+        misconception_audit["contradiction_count"]
+        - misconception_audit["broad_contradiction_count"]
     )
     assert manifest["claim_states"] == [
         "SUPPORTED",
@@ -291,9 +361,21 @@ def test_exam_verify_reports_semantic_v7_profiles_and_information_model() -> Non
         "INSUFFICIENT_EVIDENCE",
     ]
     assert manifest["qualification"]["default_profile"] == "change-author.v1"
-    assert set(manifest["qualification"]["profiles"]) == {"read-only.v1", "change-author.v1", "release-author.v1"}
-    assert manifest["qualification"]["profiles"]["change-author.v1"]["overall_minimum"] == 85.0
-    assert manifest["qualification"]["profiles"]["release-author.v1"]["critical_dimension_minimums"]["ownership"] == 95.0
+    assert set(manifest["qualification"]["profiles"]) == {
+        "read-only.v1",
+        "change-author.v1",
+        "release-author.v1",
+    }
+    assert (
+        manifest["qualification"]["profiles"]["change-author.v1"]["overall_minimum"]
+        == 85.0
+    )
+    assert (
+        manifest["qualification"]["profiles"]["release-author.v1"][
+            "critical_dimension_minimums"
+        ]["ownership"]
+        == 95.0
+    )
     assert manifest["qualification"]["fabricated_evidence_allowed"] == 0
     authority_audit = manifest["evidence_authority_audit"]
     assert authority_audit["policy_version"] == "repository-evidence-roles.v2"
@@ -315,8 +397,9 @@ def test_exam_verify_reports_semantic_v7_profiles_and_information_model() -> Non
     assert re.fullmatch(r"[0-9a-f]{64}", manifest["manifest_sha256"])
 
 
-
-def test_high_risk_misconception_classes_are_bound_to_existing_question_semantics() -> None:
+def test_high_risk_misconception_classes_are_bound_to_existing_question_semantics() -> (
+    None
+):
     from oh_goon.repository_tooling.repository_understanding_material import load_exam
 
     questions = {question.id: question for question in load_exam()}
@@ -328,11 +411,14 @@ def test_high_risk_misconception_classes_are_bound_to_existing_question_semantic
     }
     for question_id, misconception_id in expected.items():
         assert misconception_id in {
-            contradiction.misconception_id for contradiction in questions[question_id].contradictions
+            contradiction.misconception_id
+            for contradiction in questions[question_id].contradictions
         }
 
 
-def test_broad_caller_owner_reclassifications_are_bound_to_narrower_existing_semantics() -> None:
+def test_broad_caller_owner_reclassifications_are_bound_to_narrower_existing_semantics() -> (
+    None
+):
     from oh_goon.repository_tooling.repository_understanding_material import load_exam
 
     questions = {question.id: question for question in load_exam()}
@@ -359,11 +445,14 @@ def test_broad_caller_owner_reclassifications_are_bound_to_narrower_existing_sem
     }
     for question_id, misconception_id in expected.items():
         assert misconception_id in {
-            contradiction.misconception_id for contradiction in questions[question_id].contradictions
+            contradiction.misconception_id
+            for contradiction in questions[question_id].contradictions
         }
 
 
-def test_broad_semantic_invariant_reclassifications_are_bound_to_specific_existing_semantics() -> None:
+def test_broad_semantic_invariant_reclassifications_are_bound_to_specific_existing_semantics() -> (
+    None
+):
     from oh_goon.repository_tooling.repository_understanding_material import load_exam
 
     questions = {question.id: question for question in load_exam()}
@@ -381,7 +470,8 @@ def test_broad_semantic_invariant_reclassifications_are_bound_to_specific_existi
     }
     for question_id, misconception_id in expected.items():
         assert misconception_id in {
-            contradiction.misconception_id for contradiction in questions[question_id].contradictions
+            contradiction.misconception_id
+            for contradiction in questions[question_id].contradictions
         }
 
 
@@ -395,7 +485,8 @@ def test_critical_question_contradiction_coverage_is_a_release_gate() -> None:
     target = next(
         question
         for question in questions
-        if question.severity == "critical" and question.blueprint_dimension != "ownership"
+        if question.severity == "critical"
+        and question.blueprint_dimension != "ownership"
     )
     without_contradiction = tuple(
         replace(question, contradictions=()) if question.id == target.id else question
@@ -406,7 +497,9 @@ def test_critical_question_contradiction_coverage_is_a_release_gate() -> None:
     except ValueError as exc:
         assert target.id in str(exc)
     else:
-        raise AssertionError("critical contradiction gap must make the bank non-release-ready")
+        raise AssertionError(
+            "critical contradiction gap must make the bank non-release-ready"
+        )
 
     normal_only = tuple(
         replace(
@@ -425,7 +518,9 @@ def test_critical_question_contradiction_coverage_is_a_release_gate() -> None:
     except ValueError as exc:
         assert target.id in str(exc)
     else:
-        raise AssertionError("critical-severity contradiction gap must make the bank non-release-ready")
+        raise AssertionError(
+            "critical-severity contradiction gap must make the bank non-release-ready"
+        )
 
 
 def test_critical_question_critical_claim_coverage_is_a_release_gate() -> None:
@@ -439,7 +534,9 @@ def test_critical_question_critical_claim_coverage_is_a_release_gate() -> None:
     without_critical_claim = tuple(
         replace(
             question,
-            expected_claims=tuple(replace(claim, critical=False) for claim in question.expected_claims),
+            expected_claims=tuple(
+                replace(claim, critical=False) for claim in question.expected_claims
+            ),
         )
         if question.id == target.id
         else question
@@ -475,14 +572,26 @@ def test_misconception_taxonomy_coverage_is_a_release_gate() -> None:
     except ValueError as exc:
         assert "observer_authority_confusion" in str(exc)
     else:
-        raise AssertionError("taxonomy gap must make the Repository Understanding bank non-release-ready")
+        raise AssertionError(
+            "taxonomy gap must make the Repository Understanding bank non-release-ready"
+        )
 
 
 def test_misconception_identity_does_not_encode_severity() -> None:
-    from oh_goon.repository_tooling.repository_understanding_material import _severity_encoded_misconception_ids
+    from oh_goon.repository_tooling.repository_understanding_material import (
+        _severity_encoded_misconception_ids,
+    )
 
-    assert _severity_encoded_misconception_ids(("semantic_invariant_violation", "caller_owner_confusion")) == []
-    assert _severity_encoded_misconception_ids(("critical_fake", "fake_normal")) == ["critical_fake", "fake_normal"]
+    assert (
+        _severity_encoded_misconception_ids(
+            ("semantic_invariant_violation", "caller_owner_confusion")
+        )
+        == []
+    )
+    assert _severity_encoded_misconception_ids(("critical_fake", "fake_normal")) == [
+        "critical_fake",
+        "fake_normal",
+    ]
 
 
 def test_exam_prepare_removes_secret_but_keeps_public_metadata(tmp_path: Path) -> None:
@@ -490,23 +599,32 @@ def test_exam_prepare_removes_secret_but_keeps_public_metadata(tmp_path: Path) -
     destination = tmp_path / "exam"
     module.prepare(destination)
     assert len(list((destination / "docs/certification/questions").glob("*.md"))) == 11
-    assert (destination / "docs/certification/questions/question-metadata.yml").is_file()
+    assert (
+        destination / "docs/certification/questions/question-metadata.yml"
+    ).is_file()
     assert not (destination / "docs/certification/answers").exists()
     marker = json.loads((destination / ".oh-goon-certification-exam.json").read_text())
     assert marker["candidate_mode"] == "read-only"
-    assert marker["information_classes"]["SECRET"].endswith("physically excluded from this checkout")
+    assert marker["information_classes"]["SECRET"].endswith(
+        "physically excluded from this checkout"
+    )
     assert marker["candidate_output"]["may_state_insufficient_evidence"] is True
 
 
-
-def test_grade_template_is_observation_only_and_preserves_offline_regrade_inputs(tmp_path: Path) -> None:
+def test_grade_template_is_observation_only_and_preserves_offline_regrade_inputs(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path, "same semantics, arbitrary wording\n")
-    sheet = module.grade_template(submission=submission, candidate="junior-a", mode="normal")
+    sheet = module.grade_template(
+        submission=submission, candidate="junior-a", mode="normal"
+    )
     assert sheet["artifact_type"] == "repository-understanding-grader-observations"
     assert sheet["rubric_version"] == "repository-understanding.v17"
     assert sheet["qualification_profile"] == "change-author.v1"
-    assert sheet["candidate_submission"]["files"][0]["text"].startswith("same semantics")
+    assert sheet["candidate_submission"]["files"][0]["text"].startswith(
+        "same semantics"
+    )
     assert sheet["exam_snapshot"]["questions"][0]["secret"]["expected_claims"]
     assert sheet["exam_snapshot"]["repository_evidence_index"]
     assert len(sheet["grades"]) == 157
@@ -518,8 +636,9 @@ def test_grade_template_is_observation_only_and_preserves_offline_regrade_inputs
         assert grade["reference_status"] is None
 
 
-
-def test_perfect_semantic_observations_produce_high_confidence_certificate(tmp_path: Path) -> None:
+def test_perfect_semantic_observations_produce_high_confidence_certificate(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     result = _score(module, tmp_path, _filled_sheet(module, submission), submission)
@@ -533,7 +652,9 @@ def test_perfect_semantic_observations_produce_high_confidence_certificate(tmp_p
     assert result["certificate_identity"].startswith("sha256:")
 
 
-def test_dimension_scores_use_equal_question_weight_not_expected_claim_count(tmp_path: Path) -> None:
+def test_dimension_scores_use_equal_question_weight_not_expected_claim_count(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
@@ -565,10 +686,14 @@ def test_dimension_scores_use_equal_question_weight_not_expected_claim_count(tmp
     assert result["dimension_scores"]["ownership"] == 95.0
 
 
-def test_dimension_normalization_bank_audit_exposes_composition_without_implicit_weight() -> None:
+def test_dimension_normalization_bank_audit_exposes_composition_without_implicit_weight() -> (
+    None
+):
     audit = _module().verify()["dimension_normalization"]
 
-    assert audit["policy_version"] == "repository-understanding-dimension-normalization.v1"
+    assert (
+        audit["policy_version"] == "repository-understanding-dimension-normalization.v1"
+    )
     assert audit["status"] == "NORMALIZED"
     assert audit["qualification_pool"]["question_count"] == 157
     assert audit["shadow_pool"]["question_count"] == 63
@@ -583,9 +708,13 @@ def test_dimension_normalization_bank_audit_exposes_composition_without_implicit
     assert "not implicit scoring weights" in audit["rule"]
 
 
-def test_semantically_equivalent_wording_is_not_part_of_deterministic_scoring(tmp_path: Path) -> None:
+def test_semantically_equivalent_wording_is_not_part_of_deterministic_scoring(
+    tmp_path: Path,
+) -> None:
     module = _module()
-    terse = _submission(tmp_path, "Lifecycle authority is singular; callers request cancellation.\n")
+    terse = _submission(
+        tmp_path, "Lifecycle authority is singular; callers request cancellation.\n"
+    )
     terse_sheet = _filled_sheet(module, terse)
     terse_result = _score(module, tmp_path, terse_sheet, terse, "terse-grades.json")
 
@@ -595,19 +724,34 @@ def test_semantically_equivalent_wording_is_not_part_of_deterministic_scoring(tm
         encoding="utf-8",
     )
     verbose_sheet = _filled_sheet(module, verbose)
-    verbose_result = _score(module, tmp_path, verbose_sheet, verbose, "verbose-grades.json")
+    verbose_result = _score(
+        module, tmp_path, verbose_sheet, verbose, "verbose-grades.json"
+    )
 
     assert terse_result["dimension_scores"] == verbose_result["dimension_scores"]
-    assert terse_result["composite_understanding"] == verbose_result["composite_understanding"]
+    assert (
+        terse_result["composite_understanding"]
+        == verbose_result["composite_understanding"]
+    )
     assert terse_result["qualification"] == verbose_result["qualification"]
-    assert terse_result["certificate_identity"] != verbose_result["certificate_identity"]
+    assert (
+        terse_result["certificate_identity"] != verbose_result["certificate_identity"]
+    )
 
 
-def test_claim_states_distinguish_partial_missing_uncertainty_unsupported_and_contradicted(tmp_path: Path) -> None:
+def test_claim_states_distinguish_partial_missing_uncertainty_unsupported_and_contradicted(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     scores: dict[str, float] = {}
-    for state in ["PARTIAL", "MISSING", "INSUFFICIENT_EVIDENCE", "UNSUPPORTED", "CONTRADICTED"]:
+    for state in [
+        "PARTIAL",
+        "MISSING",
+        "INSUFFICIENT_EVIDENCE",
+        "UNSUPPORTED",
+        "CONTRADICTED",
+    ]:
         sheet = _filled_sheet(module, submission)
         grade = next(item for item in sheet["grades"] if item["id"] == "Q01")
         claim = grade["claims"][0]
@@ -622,8 +766,9 @@ def test_claim_states_distinguish_partial_missing_uncertainty_unsupported_and_co
     assert scores["MISSING"] > scores["UNSUPPORTED"] > scores["CONTRADICTED"]
 
 
-
-def test_critical_claim_misunderstanding_vetoes_qualification_even_with_high_average(tmp_path: Path) -> None:
+def test_critical_claim_misunderstanding_vetoes_qualification_even_with_high_average(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
@@ -636,31 +781,50 @@ def test_critical_claim_misunderstanding_vetoes_qualification_even_with_high_ave
         and any(claim["critical"] for claim in question["secret"]["expected_claims"])
     )
     grade = next(item for item in sheet["grades"] if item["id"] == target["id"])
-    critical_claim_id = next(claim["id"] for claim in snapshot[target["id"]]["secret"]["expected_claims"] if claim["critical"])
-    claim = next(item for item in grade["claims"] if item["claim_id"] == critical_claim_id)
+    critical_claim_id = next(
+        claim["id"]
+        for claim in snapshot[target["id"]]["secret"]["expected_claims"]
+        if claim["critical"]
+    )
+    claim = next(
+        item for item in grade["claims"] if item["claim_id"] == critical_claim_id
+    )
     claim["result"] = "CONTRADICTED"
     claim["rationale"] = "Names the forbidden authority as owner."
     result = _score(module, tmp_path, sheet, submission)
     assert result["composite_understanding"] > 90
     assert result["qualified"] is False
-    assert any(item.get("kind") == "critical_claim" for item in result["critical_failures"])
-
+    assert any(
+        item.get("kind") == "critical_claim" for item in result["critical_failures"]
+    )
 
 
 @pytest.mark.parametrize("question_id", [f"Q{index}" for index in range(203, 213)])
-def test_hashmarks_boundary_critical_claims_are_non_compensatory(question_id: str, tmp_path: Path) -> None:
+def test_hashmarks_boundary_critical_claims_are_non_compensatory(
+    question_id: str, tmp_path: Path
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
     snapshot = {item["id"]: item for item in sheet["exam_snapshot"]["questions"]}
     target = snapshot[question_id]
     grade = next(item for item in sheet["grades"] if item["id"] == question_id)
-    critical_claim_id = next(claim["id"] for claim in target["secret"]["expected_claims"] if claim["critical"])
-    claim = next(item for item in grade["claims"] if item["claim_id"] == critical_claim_id)
+    critical_claim_id = next(
+        claim["id"]
+        for claim in target["secret"]["expected_claims"]
+        if claim["critical"]
+    )
+    claim = next(
+        item for item in grade["claims"] if item["claim_id"] == critical_claim_id
+    )
     claim["result"] = "CONTRADICTED"
-    claim["rationale"] = "fixture: candidate crosses the frozen Hashmarks/agent/Oh-Goon boundary"
+    claim["rationale"] = (
+        "fixture: candidate crosses the frozen Hashmarks/agent/Oh-Goon boundary"
+    )
 
-    result = _score(module, tmp_path, sheet, submission, f"{question_id}-boundary-veto.json")
+    result = _score(
+        module, tmp_path, sheet, submission, f"{question_id}-boundary-veto.json"
+    )
 
     assert result["composite_understanding"] > 90
     assert result["qualified"] is False
@@ -672,29 +836,45 @@ def test_hashmarks_boundary_critical_claims_are_non_compensatory(question_id: st
     )
 
 
-def test_evidence_quality_is_claim_specific_and_critical_claim_evidence_can_veto(tmp_path: Path) -> None:
+def test_evidence_quality_is_claim_specific_and_critical_claim_evidence_can_veto(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
-    snapshot = {question["id"]: question for question in sheet["exam_snapshot"]["questions"]}
+    snapshot = {
+        question["id"]: question for question in sheet["exam_snapshot"]["questions"]
+    }
     target = next(
         question
         for question in sheet["exam_snapshot"]["questions"]
         if question["severity"] == "critical"
         and question["public"]["dimension"] == "ownership"
-        and any(claim["id"] == "ownership_boundary" and claim["critical"] for claim in question["secret"]["expected_claims"])
+        and any(
+            claim["id"] == "ownership_boundary" and claim["critical"]
+            for claim in question["secret"]["expected_claims"]
+        )
     )
     grade = next(item for item in sheet["grades"] if item["id"] == target["id"])
-    ownership_claim = next(item for item in grade["claims"] if item["claim_id"] == "ownership_boundary")
+    ownership_claim = next(
+        item for item in grade["claims"] if item["claim_id"] == "ownership_boundary"
+    )
     ownership_claim["evidence"]["references"] = []
     result = _score(module, tmp_path, sheet, submission)
-    scored_question = next(item for item in result["questions"] if item["id"] == target["id"])
-    scored_claim = next(item for item in scored_question["claims"] if item["claim_id"] == "ownership_boundary")
+    scored_question = next(
+        item for item in result["questions"] if item["id"] == target["id"]
+    )
+    scored_claim = next(
+        item
+        for item in scored_question["claims"]
+        if item["claim_id"] == "ownership_boundary"
+    )
     assert scored_claim["result"] == "SUPPORTED"
     assert scored_claim["evidence_quality"] == 0.0
     assert result["qualified"] is False
     assert any(
-        item.get("kind") == "critical_evidence" and item.get("claim_id") == "ownership_boundary"
+        item.get("kind") == "critical_evidence"
+        and item.get("claim_id") == "ownership_boundary"
         for item in result["critical_failures"]
     )
     assert snapshot[target["id"]]["secret"]["evidence_expectations"]
@@ -710,14 +890,21 @@ def test_relevant_but_lower_authority_evidence_cannot_masquerade_as_governing_au
         question
         for question in sheet["exam_snapshot"]["questions"]
         if question["severity"] == "critical"
-        and question["secret"]["evidence_authority_roles"]["canonical_minimum_authority"] == "A1"
+        and question["secret"]["evidence_authority_roles"][
+            "canonical_minimum_authority"
+        ]
+        == "A1"
         and any(claim["critical"] for claim in question["secret"]["expected_claims"])
     )
     grade = next(item for item in sheet["grades"] if item["id"] == target["id"])
     critical_claim_id = next(
-        claim["id"] for claim in target["secret"]["expected_claims"] if claim["critical"]
+        claim["id"]
+        for claim in target["secret"]["expected_claims"]
+        if claim["critical"]
     )
-    claim = next(item for item in grade["claims"] if item["claim_id"] == critical_claim_id)
+    claim = next(
+        item for item in grade["claims"] if item["claim_id"] == critical_claim_id
+    )
     weak_reference = "scripts/tests/test_repository_understanding_certification.py:1-5"
     claim["evidence"] = {
         "references": [weak_reference],
@@ -727,13 +914,17 @@ def test_relevant_but_lower_authority_evidence_cannot_masquerade_as_governing_au
     }
 
     result = _score(module, tmp_path, sheet, submission)
-    scored_question = next(item for item in result["questions"] if item["id"] == target["id"])
-    scored_claim = next(
-        item for item in scored_question["claims"] if item["claim_id"] == critical_claim_id
+    scored_question = next(
+        item for item in result["questions"] if item["id"] == target["id"]
     )
-    validation = result["regrade_bundle"]["evidence_validation"][target["id"]]["claims"][
-        critical_claim_id
-    ]
+    scored_claim = next(
+        item
+        for item in scored_question["claims"]
+        if item["claim_id"] == critical_claim_id
+    )
+    validation = result["regrade_bundle"]["evidence_validation"][target["id"]][
+        "claims"
+    ][critical_claim_id]
 
     assert validation["existence"] == "VALID"
     assert validation["authority_assessment"]["minimum_authority"] == "A1"
@@ -751,21 +942,28 @@ def test_relevant_but_lower_authority_evidence_cannot_masquerade_as_governing_au
     )
 
 
-def test_fabricated_repository_evidence_is_mechanically_detected_and_blocks_junior_qualification(tmp_path: Path) -> None:
+def test_fabricated_repository_evidence_is_mechanically_detected_and_blocks_junior_qualification(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
-    sheet["grades"][0]["claims"][0]["evidence"]["references"] = ["does/not/exist.py:999"]
+    sheet["grades"][0]["claims"][0]["evidence"]["references"] = [
+        "does/not/exist.py:999"
+    ]
     result = _score(module, tmp_path, sheet, submission)
     assert result["fabricated_evidence"] == ["Q01/concept"]
     assert result["qualified"] is False
-    evidence = result["regrade_bundle"]["evidence_validation"]["Q01"]["claims"]["concept"]
+    evidence = result["regrade_bundle"]["evidence_validation"]["Q01"]["claims"][
+        "concept"
+    ]
     assert evidence["existence"] == "FABRICATED"
     assert evidence["invalid_references"] == ["does/not/exist.py:999"]
 
 
-
-def test_ambiguous_question_is_excluded_without_candidate_penalty(tmp_path: Path) -> None:
+def test_ambiguous_question_is_excluded_without_candidate_penalty(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
@@ -780,39 +978,56 @@ def test_ambiguous_question_is_excluded_without_candidate_penalty(tmp_path: Path
     assert result["qualified"] is True
 
 
-
-def test_reference_answer_can_be_challenged_without_marking_candidate_wrong(tmp_path: Path) -> None:
+def test_reference_answer_can_be_challenged_without_marking_candidate_wrong(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
     grade = sheet["grades"][0]
     grade["reference_status"] = "REFERENCE_SUSPECT"
-    grade["rationale"] = "Repository evidence conflicts with the SECRET expectation; author review required."
+    grade["rationale"] = (
+        "Repository evidence conflicts with the SECRET expectation; author review required."
+    )
     result = _score(module, tmp_path, sheet, submission)
     assert result["questions"][0]["included"] is False
     assert result["excluded_questions"][0]["reference_status"] == "REFERENCE_SUSPECT"
 
 
-
-def test_cross_answer_conflicting_owners_are_detected_as_critical_mental_model_failure(tmp_path: Path) -> None:
+def test_cross_answer_conflicting_owners_are_detected_as_critical_mental_model_failure(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
     sheet["grades"][0]["assertions"].append(
-        {"subject": "LifecycleController", "relation": "owns", "object": "TerminalState", "polarity": "AFFIRMED"}
+        {
+            "subject": "LifecycleController",
+            "relation": "owns",
+            "object": "TerminalState",
+            "polarity": "AFFIRMED",
+        }
     )
     sheet["grades"][1]["assertions"].append(
-        {"subject": "Frontend", "relation": "owns", "object": "TerminalState", "polarity": "AFFIRMED"}
+        {
+            "subject": "Frontend",
+            "relation": "owns",
+            "object": "TerminalState",
+            "polarity": "AFFIRMED",
+        }
     )
     result = _score(module, tmp_path, sheet, submission)
-    assert any(item["kind"] == "conflicting_owners" for item in result["cross_answer_findings"])
+    assert any(
+        item["kind"] == "conflicting_owners" for item in result["cross_answer_findings"]
+    )
     assert result["mental_model_consistency"] < 100.0
     assert result["qualified"] is False
     assert "critical_failure" in result["gate_failures"]
 
 
-
-def test_result_exposes_exam_coverage_misconceptions_and_human_report(tmp_path: Path) -> None:
+def test_result_exposes_exam_coverage_misconceptions_and_human_report(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
@@ -823,7 +1038,10 @@ def test_result_exposes_exam_coverage_misconceptions_and_human_report(tmp_path: 
     assert result["exam_coverage"]["method"] == "authored-question-blueprint.v1"
     assert result["exam_coverage"]["percent"] == 100.0
     assert result["exam_coverage"]["repository_model_relationship_coverage"] == 100.0
-    assert result["relationship_graph"]["policy_version"] == "repository-relationship-graph.v2"
+    assert (
+        result["relationship_graph"]["policy_version"]
+        == "repository-relationship-graph.v2"
+    )
     assert result["misconception_findings"][0]["misconception_id"]
     report = module.human_report(result)
     assert "OH-GOON REPOSITORY UNDERSTANDING" in report
@@ -833,7 +1051,9 @@ def test_result_exposes_exam_coverage_misconceptions_and_human_report(tmp_path: 
     assert result["qualification"] in report
 
 
-def test_offline_regrading_needs_no_candidate_rerun_and_preserves_certificate_identity(tmp_path: Path) -> None:
+def test_offline_regrading_needs_no_candidate_rerun_and_preserves_certificate_identity(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     first = _score(module, tmp_path, _filled_sheet(module, submission), submission)
@@ -846,8 +1066,9 @@ def test_offline_regrading_needs_no_candidate_rerun_and_preserves_certificate_id
     assert second["certificate_identity"] == first["certificate_identity"]
 
 
-
-def test_score_rejects_changed_submission_when_exact_bytes_are_supplied(tmp_path: Path) -> None:
+def test_score_rejects_changed_submission_when_exact_bytes_are_supplied(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path, "original\n")
     sheet = _filled_sheet(module, submission)
@@ -861,17 +1082,19 @@ def test_score_rejects_changed_submission_when_exact_bytes_are_supplied(tmp_path
         raise AssertionError("changed candidate submission must fail identity binding")
 
 
-
-def test_candidate_submission_cannot_reference_secret_answer_tree(tmp_path: Path) -> None:
+def test_candidate_submission_cannot_reference_secret_answer_tree(
+    tmp_path: Path,
+) -> None:
     module = _module()
-    submission = _submission(tmp_path, "I used docs/certification/answers/01-repository-ownership.yml\n")
+    submission = _submission(
+        tmp_path, "I used docs/certification/answers/01-repository-ownership.yml\n"
+    )
     try:
         module.grade_template(submission=submission)
     except ValueError as error:
         assert "grader-only answer material" in str(error)
     else:
         raise AssertionError("candidate SECRET-tree leakage must fail closed")
-
 
 
 def test_score_requires_grader_identity_and_confidence(tmp_path: Path) -> None:
@@ -896,9 +1119,10 @@ def test_score_requires_grader_identity_and_confidence(tmp_path: Path) -> None:
         raise AssertionError("invalid grader confidence must fail")
 
 
-
 def test_harmonic_understanding_aggregation_exposes_one_weak_dimension() -> None:
-    from oh_goon.repository_tooling.repository_understanding_policy import weighted_harmonic
+    from oh_goon.repository_tooling.repository_understanding_policy import (
+        weighted_harmonic,
+    )
 
     scores = {"structure": 98.0, "execution": 96.0, "testing": 95.0, "ownership": 42.0}
     harmonic = weighted_harmonic(scores)
@@ -907,9 +1131,10 @@ def test_harmonic_understanding_aggregation_exposes_one_weak_dimension() -> None
     assert harmonic < 75.0
 
 
-
 def test_source_policy_rejects_non_transient_symlink(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_material import _validate_source_symlinks
+    from oh_goon.repository_tooling.repository_understanding_material import (
+        _validate_source_symlinks,
+    )
 
     source = tmp_path / "source"
     source.mkdir()
@@ -924,8 +1149,9 @@ def test_source_policy_rejects_non_transient_symlink(tmp_path: Path) -> None:
         raise AssertionError("source symlink must fail closed")
 
 
-
-def test_shipped_repository_understanding_plan_still_uses_one_exam_material_goon() -> None:
+def test_shipped_repository_understanding_plan_still_uses_one_exam_material_goon() -> (
+    None
+):
     goon = yaml.safe_load(GOON.read_text(encoding="utf-8"))
     plan = yaml.safe_load(PLAN.read_text(encoding="utf-8"))
     step = goon["steps"][0]
@@ -936,48 +1162,78 @@ def test_shipped_repository_understanding_plan_still_uses_one_exam_material_goon
     assert step["id"] == "oh-goon-repository-understanding-exam"
     assert "capabilities" not in step
     assert step["artifacts"] == [
-        {"path": "repository-understanding-certification-manifest.json", "retention": "evidence"}
+        {
+            "path": "repository-understanding-certification-manifest.json",
+            "retention": "evidence",
+        }
     ]
     assert "inputs" not in plan
     assert plan["execution"] == {"purpose": "verification"}
     assert plan["goons"] == ["oh-goon/repository-exam"]
 
 
-def test_qualification_profiles_are_authority_based_and_candidate_labels_do_not_change_default(tmp_path: Path) -> None:
+def test_qualification_profiles_are_authority_based_and_candidate_labels_do_not_change_default(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
-    a = module.grade_template(submission=submission, candidate="model-a", mode="release")
-    b = module.grade_template(submission=submission, candidate="model-b", mode="observer")
+    a = module.grade_template(
+        submission=submission, candidate="model-a", mode="release"
+    )
+    b = module.grade_template(
+        submission=submission, candidate="model-b", mode="observer"
+    )
     assert a["qualification_profile"] == "change-author.v1"
     assert b["qualification_profile"] == "change-author.v1"
     assert a["qualification_profile"] == b["qualification_profile"]
 
 
-def test_release_author_profile_is_stricter_than_change_author_for_same_observations(tmp_path: Path) -> None:
+def test_release_author_profile_is_stricter_than_change_author_for_same_observations(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     change_sheet = _filled_sheet(module, submission)
     target = next(
-        grade for grade in change_sheet["grades"]
+        grade
+        for grade in change_sheet["grades"]
         if any(claim["claim_id"] == "concept" for claim in grade["claims"])
-        and next(q for q in change_sheet["exam_snapshot"]["questions"] if q["id"] == grade["id"])["severity"] != "critical"
+        and next(
+            q
+            for q in change_sheet["exam_snapshot"]["questions"]
+            if q["id"] == grade["id"]
+        )["severity"]
+        != "critical"
     )
     target["claims"][0]["result"] = "PARTIAL"
-    target["claims"][0]["rationale"] = "Only part of the expected concept is established."
-    change_result = _score(module, tmp_path, change_sheet, submission, "change-profile.json")
+    target["claims"][0]["rationale"] = (
+        "Only part of the expected concept is established."
+    )
+    change_result = _score(
+        module, tmp_path, change_sheet, submission, "change-profile.json"
+    )
 
     release_sheet = json.loads(json.dumps(change_sheet))
     release_sheet["qualification_profile"] = "release-author.v1"
-    release_result = _score(module, tmp_path, release_sheet, submission, "release-profile.json")
+    release_result = _score(
+        module, tmp_path, release_sheet, submission, "release-profile.json"
+    )
 
     assert change_result["qualification_profile"] == "change-author.v1"
     assert release_result["qualification_profile"] == "release-author.v1"
-    assert release_result["composite_understanding"] == change_result["composite_understanding"]
-    assert (release_result["qualified"] is False) or (change_result["qualified"] is True)
+    assert (
+        release_result["composite_understanding"]
+        == change_result["composite_understanding"]
+    )
+    assert (release_result["qualified"] is False) or (
+        change_result["qualified"] is True
+    )
     assert release_result["authority_class"] == "release-author"
 
 
-def test_low_confidence_fatal_judgment_requires_adjudication_instead_of_auto_failure(tmp_path: Path) -> None:
+def test_low_confidence_fatal_judgment_requires_adjudication_instead_of_auto_failure(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
@@ -989,11 +1245,18 @@ def test_low_confidence_fatal_judgment_requires_adjudication_instead_of_auto_fai
     assert result["qualified"] is False
     assert result["qualification"] == "NEEDS_ADJUDICATION"
     assert result["adjudication_required"]
-    assert not any(item.get("kind") == "critical_contradiction" for item in result["critical_failures"])
-    assert result["confidence_calibration"]["grader_judgment"]["adjudication_count"] >= 1
+    assert not any(
+        item.get("kind") == "critical_contradiction"
+        for item in result["critical_failures"]
+    )
+    assert (
+        result["confidence_calibration"]["grader_judgment"]["adjudication_count"] >= 1
+    )
 
 
-def test_high_confidence_fatal_judgment_still_vetoes_and_fabrication_is_never_adjudicated(tmp_path: Path) -> None:
+def test_high_confidence_fatal_judgment_still_vetoes_and_fabrication_is_never_adjudicated(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
@@ -1001,13 +1264,19 @@ def test_high_confidence_fatal_judgment_still_vetoes_and_fabrication_is_never_ad
     contradiction["observed"] = True
     contradiction["confidence"] = 1.0
     result = _score(module, tmp_path, sheet, submission, "fatal.json")
-    assert any(item.get("kind") == "critical_contradiction" for item in result["critical_failures"])
+    assert any(
+        item.get("kind") == "critical_contradiction"
+        for item in result["critical_failures"]
+    )
     assert result["qualification"] != "NEEDS_ADJUDICATION"
 
     sheet = _filled_sheet(module, submission)
     sheet["grades"][0]["claims"][0]["evidence"]["references"] = ["invented/path.py:999"]
     result = _score(module, tmp_path, sheet, submission, "fabricated-hard-fail.json")
-    assert any(item.get("kind") == "fabricated_evidence" for item in result["critical_failures"])
+    assert any(
+        item.get("kind") == "fabricated_evidence"
+        for item in result["critical_failures"]
+    )
     assert result["qualification"] != "NEEDS_ADJUDICATION"
 
 
@@ -1015,7 +1284,9 @@ def test_unknown_qualification_profile_fails_closed(tmp_path: Path) -> None:
     module = _module()
     submission = _submission(tmp_path)
     try:
-        module.grade_template(submission=submission, qualification_profile="model-brand-special.v1")
+        module.grade_template(
+            submission=submission, qualification_profile="model-brand-special.v1"
+        )
     except ValueError as error:
         assert "qualification profile must be one of" in str(error)
     else:
@@ -1027,15 +1298,24 @@ def test_forbidden_relationship_is_non_compensatory(tmp_path: Path) -> None:
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
     sheet["grades"][0]["assertions"].append(
-        {"subject": "Plan", "relation": "owns", "object": "Step execution", "polarity": "AFFIRMED"}
+        {
+            "subject": "Plan",
+            "relation": "owns",
+            "object": "Step execution",
+            "polarity": "AFFIRMED",
+        }
     )
     result = _score(module, tmp_path, sheet, submission, "forbidden-graph.json")
     assert "forbidden_relationship" in result["gate_failures"]
-    assert any(item["kind"] == "forbidden_relationship" for item in result["critical_failures"])
+    assert any(
+        item["kind"] == "forbidden_relationship" for item in result["critical_failures"]
+    )
     assert not result["qualified"]
 
 
-def test_question_health_audit_is_secret_and_current_bank_is_release_ready(tmp_path: Path) -> None:
+def test_question_health_audit_is_secret_and_current_bank_is_release_ready(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.repository_understanding_calibration import (
         QUESTION_AUDIT_POLICY_VERSION,
     )
@@ -1050,9 +1330,15 @@ def test_question_health_audit_is_secret_and_current_bank_is_release_ready(tmp_p
     manifest = _module().verify()
     assert manifest["question_audit"]["release_status"] == "READY"
     assert manifest["question_audit"]["release_status_scope"] == "QUESTION_HEALTH_ONLY"
-    assert manifest["question_audit"]["empirical_calibration_affects_release_status"] is False
+    assert (
+        manifest["question_audit"]["empirical_calibration_affects_release_status"]
+        is False
+    )
     assert manifest["question_audit"]["empirical_calibration_status"] == "UNCALIBRATED"
-    assert manifest["question_audit"]["critical_empirical_calibration_status"] == "UNCALIBRATED"
+    assert (
+        manifest["question_audit"]["critical_empirical_calibration_status"]
+        == "UNCALIBRATED"
+    )
     assert manifest["question_audit"]["uncalibrated_question_count"] == 220
     assert manifest["question_audit"]["calibrated_question_count"] == 0
     assert manifest["question_audit"]["critical_question_count"] == 45
@@ -1065,13 +1351,25 @@ def test_question_health_audit_is_secret_and_current_bank_is_release_ready(tmp_p
     assert not tuple(prepared.rglob("question-audit.yml"))
 
 
-def test_question_health_ready_is_explicitly_not_an_empirical_calibration_claim() -> None:
-    from oh_goon.repository_tooling.repository_understanding_calibration import audit_manifest
+def test_question_health_ready_is_explicitly_not_an_empirical_calibration_claim() -> (
+    None
+):
+    from oh_goon.repository_tooling.repository_understanding_calibration import (
+        audit_manifest,
+    )
 
     module = _module()
     exam = module.load_exam()
-    qualification_ids = {row["id"] for row in module.question_lifecycle()["questions"] if row["qualification_bank_member"]}
-    critical_ids = tuple(question.id for question in exam if question.id in qualification_ids and question.severity == "critical")
+    qualification_ids = {
+        row["id"]
+        for row in module.question_lifecycle()["questions"]
+        if row["qualification_bank_member"]
+    }
+    critical_ids = tuple(
+        question.id
+        for question in exam
+        if question.id in qualification_ids and question.severity == "critical"
+    )
     report = audit_manifest(module.question_audit(), critical_question_ids=critical_ids)
     assert report["release_status"] == "READY"
     assert report["release_status_scope"] == "QUESTION_HEALTH_ONLY"
@@ -1082,12 +1380,19 @@ def test_question_health_ready_is_explicitly_not_an_empirical_calibration_claim(
     assert report["critical_uncalibrated_question_count"] == 45
 
 
-def test_empirical_calibration_reports_difficulty_discrimination_without_policy_mutation(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_calibration import calibration_report
+def test_empirical_calibration_reports_difficulty_discrimination_without_policy_mutation(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_calibration import (
+        calibration_report,
+    )
 
     module = _module()
     snapshot = module.exam_snapshot()
-    authored = {question["id"]: question["public"]["difficulty"] for question in snapshot["questions"]}
+    authored = {
+        question["id"]: question["public"]["difficulty"]
+        for question in snapshot["questions"]
+    }
     observations = {
         "artifact_type": "repository-understanding-calibration-observations",
         "schema_version": 1,
@@ -1099,21 +1404,42 @@ def test_empirical_calibration_reports_difficulty_discrimination_without_policy_
                 "system_id": "system-strong",
                 "cohort": "STRONG",
                 "questions": [
-                    {"id": "Q01", "success": True, "tool_calls": 4, "time_to_evidence_seconds": 2.0, "context_tokens": 1000, "failure_mode": None}
+                    {
+                        "id": "Q01",
+                        "success": True,
+                        "tool_calls": 4,
+                        "time_to_evidence_seconds": 2.0,
+                        "context_tokens": 1000,
+                        "failure_mode": None,
+                    }
                 ],
             },
             {
                 "system_id": "system-mid",
                 "cohort": "MID",
                 "questions": [
-                    {"id": "Q01", "success": True, "tool_calls": 8, "time_to_evidence_seconds": 4.0, "context_tokens": 2000, "failure_mode": None}
+                    {
+                        "id": "Q01",
+                        "success": True,
+                        "tool_calls": 8,
+                        "time_to_evidence_seconds": 4.0,
+                        "context_tokens": 2000,
+                        "failure_mode": None,
+                    }
                 ],
             },
             {
                 "system_id": "system-weak",
                 "cohort": "WEAK",
                 "questions": [
-                    {"id": "Q01", "success": False, "tool_calls": 12, "time_to_evidence_seconds": 8.0, "context_tokens": 3000, "failure_mode": "WRONG_OWNER"}
+                    {
+                        "id": "Q01",
+                        "success": False,
+                        "tool_calls": 12,
+                        "time_to_evidence_seconds": 8.0,
+                        "context_tokens": 3000,
+                        "failure_mode": "WRONG_OWNER",
+                    }
                 ],
             },
         ],
@@ -1134,7 +1460,11 @@ def test_empirical_calibration_reports_difficulty_discrimination_without_policy_
     assert q1["median_tool_calls"] == 8.0
     assert q1["median_time_to_evidence_seconds"] == 4.0
     assert q1["median_context_tokens"] == 2000.0
-    assert q1["cohort_success_rate_percent"] == {"STRONG": 100.0, "MID": 100.0, "WEAK": 0.0}
+    assert q1["cohort_success_rate_percent"] == {
+        "STRONG": 100.0,
+        "MID": 100.0,
+        "WEAK": 0.0,
+    }
     assert q1["item_discrimination_strong_minus_weak"] == 100.0
     assert q1["failure_mode_distribution"] == {"WRONG_OWNER": 1}
     assert q1["calibration_maturity"] == "CALIBRATING"
@@ -1144,8 +1474,9 @@ def test_empirical_calibration_reports_difficulty_discrimination_without_policy_
     assert q1["review_eligibility"]["minimum_systems_per_cohort"] == 2
 
 
-def test_calibration_review_eligibility_and_audit_promotion_require_retained_sufficient_evidence(tmp_path: Path) -> None:
-    import copy
+def test_calibration_review_eligibility_and_audit_promotion_require_retained_sufficient_evidence(
+    tmp_path: Path,
+) -> None:
     import pytest
     from oh_goon.repository_tooling.repository_understanding_calibration import (
         calibration_promotion_review,
@@ -1155,10 +1486,15 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
 
     module = _module()
     snapshot = module.exam_snapshot()
-    authored = {question["id"]: question["public"]["difficulty"] for question in snapshot["questions"]}
+    authored = {
+        question["id"]: question["public"]["difficulty"]
+        for question in snapshot["questions"]
+    }
     from oh_goon.repository_tooling import repository_understanding_material as material
+
     question_bindings = {
-        question.id: material._calibration_question_binding(question) for question in material.load_exam()
+        question.id: material._calibration_question_binding(question)
+        for question in material.load_exam()
     }
 
     def report_for(per_cohort: int) -> dict:
@@ -1168,19 +1504,23 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
                 runs.append(
                     {
                         "system_id": f"{cohort.lower()}-{index}",
-                        "candidate_identity": "sha256:" + __import__("hashlib").sha256(
-                            f"candidate:{cohort}:{index}".encode("utf-8")
-                        ).hexdigest(),
-                        "grading_artifact_identity": "sha256:" + __import__("hashlib").sha256(
-                            f"grading:{cohort}:{index}".encode("utf-8")
-                        ).hexdigest(),
+                        "candidate_identity": "sha256:"
+                        + __import__("hashlib")
+                        .sha256(f"candidate:{cohort}:{index}".encode("utf-8"))
+                        .hexdigest(),
+                        "grading_artifact_identity": "sha256:"
+                        + __import__("hashlib")
+                        .sha256(f"grading:{cohort}:{index}".encode("utf-8"))
+                        .hexdigest(),
                         "qualification_profile": "calibration-test",
-                        "model_identity": "sha256:" + __import__("hashlib").sha256(
-                            f"model:{cohort}:{index}".encode("utf-8")
-                        ).hexdigest(),
-                        "configuration_identity": "sha256:" + __import__("hashlib").sha256(
-                            f"config:{cohort}:{index}".encode("utf-8")
-                        ).hexdigest(),
+                        "model_identity": "sha256:"
+                        + __import__("hashlib")
+                        .sha256(f"model:{cohort}:{index}".encode("utf-8"))
+                        .hexdigest(),
+                        "configuration_identity": "sha256:"
+                        + __import__("hashlib")
+                        .sha256(f"config:{cohort}:{index}".encode("utf-8"))
+                        .hexdigest(),
                         "system_family": f"family-{cohort.lower()}-{index}",
                         "provider": "test-provider",
                         "cohort": cohort,
@@ -1191,7 +1531,9 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
                                 "tool_calls": 5 + index,
                                 "time_to_evidence_seconds": 2.0 + index,
                                 "context_tokens": 1000 + index,
-                                "failure_mode": None if cohort != "WEAK" else "WRONG_OWNER",
+                                "failure_mode": None
+                                if cohort != "WEAK"
+                                else "WRONG_OWNER",
                             }
                         ],
                     }
@@ -1217,7 +1559,10 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
         )
 
     insufficient = report_for(1)
-    assert insufficient["questions"]["Q01"]["review_eligibility"]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert (
+        insufficient["questions"]["Q01"]["review_eligibility"]["status"]
+        == "INSUFFICIENT_EVIDENCE"
+    )
     sufficient = report_for(2)
     q1 = sufficient["questions"]["Q01"]
     assert q1["observation_count"] == 6
@@ -1272,7 +1617,9 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
 
     qrow["calibration_state"] = "CALIBRATED"
     qrow["calibrated_difficulty"] = authored["Q01"]
-    qrow["calibration_evidence"]["promotion_review_path"] = "calibration/q01-review.json"
+    qrow["calibration_evidence"]["promotion_review_path"] = (
+        "calibration/q01-review.json"
+    )
     qrow["calibration_evidence"]["promotion_review_identity"] = "sha256:" + "1" * 64
     audit_path.write_text(yaml.safe_dump(audit, sort_keys=False), encoding="utf-8")
     with pytest.raises(ValueError, match="insufficient empirical calibration evidence"):
@@ -1293,13 +1640,17 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
         calibration_report_identity=sufficient["report_identity"],
         calibrated_difficulty=authored["Q01"],
         reviewer_identity="sha256:" + "2" * 64,
-        evidence_assessment_identity=q1["promotion_evidence_assessment"]["assessment_identity"],
+        evidence_assessment_identity=q1["promotion_evidence_assessment"][
+            "assessment_identity"
+        ],
     )
     assert review["evidence_assessment_identity"] == assessment["assessment_identity"]
     assert review["decision_basis"] == "HUMAN_REVIEW_OF_EMPIRICAL_EVIDENCE"
     review_path = calibration_dir / "q01-review.json"
     review_path.write_text(json.dumps(review), encoding="utf-8")
-    qrow["calibration_evidence"]["promotion_review_identity"] = review["review_identity"]
+    qrow["calibration_evidence"]["promotion_review_identity"] = review[
+        "review_identity"
+    ]
     audit_path.write_text(yaml.safe_dump(audit, sort_keys=False), encoding="utf-8")
     calibrated = load_question_audit(
         audit_path,
@@ -1309,8 +1660,14 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
     normalized = calibrated["questions"][0]
     assert normalized["calibration_state"] == "CALIBRATED"
     assert normalized["calibrated_difficulty"] == authored["Q01"]
-    assert normalized["calibration_evidence"]["report_identity"] == sufficient["report_identity"]
-    assert normalized["calibration_evidence"]["promotion_review_identity"] == review["review_identity"]
+    assert (
+        normalized["calibration_evidence"]["report_identity"]
+        == sufficient["report_identity"]
+    )
+    assert (
+        normalized["calibration_evidence"]["promotion_review_identity"]
+        == review["review_identity"]
+    )
 
     current = load_question_audit(
         audit_path,
@@ -1331,17 +1688,30 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
 
     wrong_assessment = dict(review)
     wrong_assessment["evidence_assessment_identity"] = "sha256:" + "4" * 64
-    wrong_assessment["review_identity"] = "sha256:" + __import__("hashlib").sha256(
-        json.dumps(
-            {key: value for key, value in wrong_assessment.items() if key != "review_identity"},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    wrong_assessment["review_identity"] = (
+        "sha256:"
+        + __import__("hashlib")
+        .sha256(
+            json.dumps(
+                {
+                    key: value
+                    for key, value in wrong_assessment.items()
+                    if key != "review_identity"
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        .hexdigest()
+    )
     review_path.write_text(json.dumps(wrong_assessment), encoding="utf-8")
-    qrow["calibration_evidence"]["promotion_review_identity"] = wrong_assessment["review_identity"]
+    qrow["calibration_evidence"]["promotion_review_identity"] = wrong_assessment[
+        "review_identity"
+    ]
     audit_path.write_text(yaml.safe_dump(audit, sort_keys=False), encoding="utf-8")
-    with pytest.raises(ValueError, match="promotion review evidence_assessment_identity does not match"):
+    with pytest.raises(
+        ValueError, match="promotion review evidence_assessment_identity does not match"
+    ):
         load_question_audit(
             audit_path,
             source_version=snapshot["source_version"],
@@ -1350,15 +1720,26 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
 
     wrong_question = dict(review)
     wrong_question["question_id"] = "Q02"
-    wrong_question["review_identity"] = "sha256:" + __import__("hashlib").sha256(
-        json.dumps(
-            {key: value for key, value in wrong_question.items() if key != "review_identity"},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    wrong_question["review_identity"] = (
+        "sha256:"
+        + __import__("hashlib")
+        .sha256(
+            json.dumps(
+                {
+                    key: value
+                    for key, value in wrong_question.items()
+                    if key != "review_identity"
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        .hexdigest()
+    )
     review_path.write_text(json.dumps(wrong_question), encoding="utf-8")
-    qrow["calibration_evidence"]["promotion_review_identity"] = wrong_question["review_identity"]
+    qrow["calibration_evidence"]["promotion_review_identity"] = wrong_question[
+        "review_identity"
+    ]
     audit_path.write_text(yaml.safe_dump(audit, sort_keys=False), encoding="utf-8")
     with pytest.raises(ValueError, match="promotion review question_id does not match"):
         load_question_audit(
@@ -1369,17 +1750,30 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
 
     wrong_report = dict(review)
     wrong_report["calibration_report_identity"] = "sha256:" + "3" * 64
-    wrong_report["review_identity"] = "sha256:" + __import__("hashlib").sha256(
-        json.dumps(
-            {key: value for key, value in wrong_report.items() if key != "review_identity"},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    wrong_report["review_identity"] = (
+        "sha256:"
+        + __import__("hashlib")
+        .sha256(
+            json.dumps(
+                {
+                    key: value
+                    for key, value in wrong_report.items()
+                    if key != "review_identity"
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        .hexdigest()
+    )
     review_path.write_text(json.dumps(wrong_report), encoding="utf-8")
-    qrow["calibration_evidence"]["promotion_review_identity"] = wrong_report["review_identity"]
+    qrow["calibration_evidence"]["promotion_review_identity"] = wrong_report[
+        "review_identity"
+    ]
     audit_path.write_text(yaml.safe_dump(audit, sort_keys=False), encoding="utf-8")
-    with pytest.raises(ValueError, match="promotion review calibration_report_identity does not match"):
+    with pytest.raises(
+        ValueError, match="promotion review calibration_report_identity does not match"
+    ):
         load_question_audit(
             audit_path,
             source_version=snapshot["source_version"],
@@ -1388,17 +1782,30 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
 
     wrong_source = dict(review)
     wrong_source["source_version"] = "0.0.0"
-    wrong_source["review_identity"] = "sha256:" + __import__("hashlib").sha256(
-        json.dumps(
-            {key: value for key, value in wrong_source.items() if key != "review_identity"},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    wrong_source["review_identity"] = (
+        "sha256:"
+        + __import__("hashlib")
+        .sha256(
+            json.dumps(
+                {
+                    key: value
+                    for key, value in wrong_source.items()
+                    if key != "review_identity"
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        .hexdigest()
+    )
     review_path.write_text(json.dumps(wrong_source), encoding="utf-8")
-    qrow["calibration_evidence"]["promotion_review_identity"] = wrong_source["review_identity"]
+    qrow["calibration_evidence"]["promotion_review_identity"] = wrong_source[
+        "review_identity"
+    ]
     audit_path.write_text(yaml.safe_dump(audit, sort_keys=False), encoding="utf-8")
-    with pytest.raises(ValueError, match="promotion review source_version does not match"):
+    with pytest.raises(
+        ValueError, match="promotion review source_version does not match"
+    ):
         load_question_audit(
             audit_path,
             source_version=snapshot["source_version"],
@@ -1406,12 +1813,19 @@ def test_calibration_review_eligibility_and_audit_promotion_require_retained_suf
         )
 
 
-def test_calibration_system_identity_cannot_cross_cohort_boundaries(tmp_path: Path) -> None:
+def test_calibration_system_identity_cannot_cross_cohort_boundaries(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_calibration import calibration_report
+    from oh_goon.repository_tooling.repository_understanding_calibration import (
+        calibration_report,
+    )
 
     snapshot = _module().exam_snapshot()
-    authored = {question["id"]: question["public"]["difficulty"] for question in snapshot["questions"]}
+    authored = {
+        question["id"]: question["public"]["difficulty"]
+        for question in snapshot["questions"]
+    }
     observations = {
         "artifact_type": "repository-understanding-calibration-observations",
         "schema_version": 1,
@@ -1419,8 +1833,16 @@ def test_calibration_system_identity_cannot_cross_cohort_boundaries(tmp_path: Pa
         "repository_identity": snapshot["repository_identity"],
         "exam_snapshot_sha256": snapshot["snapshot_sha256"],
         "runs": [
-            {"system_id": "same-system", "cohort": "STRONG", "questions": [{"id": "Q01", "success": True}]},
-            {"system_id": "same-system", "cohort": "WEAK", "questions": [{"id": "Q01", "success": False}]},
+            {
+                "system_id": "same-system",
+                "cohort": "STRONG",
+                "questions": [{"id": "Q01", "success": True}],
+            },
+            {
+                "system_id": "same-system",
+                "cohort": "WEAK",
+                "questions": [{"id": "Q01", "success": False}],
+            },
         ],
     }
     path = tmp_path / "cross-cohort.json"
@@ -1436,38 +1858,65 @@ def test_calibration_system_identity_cannot_cross_cohort_boundaries(tmp_path: Pa
         )
 
 
-
-def test_calibration_alias_system_ids_do_not_fake_independent_subject_floor(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_calibration import calibration_report
+def test_calibration_alias_system_ids_do_not_fake_independent_subject_floor(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_calibration import (
+        calibration_report,
+    )
 
     snapshot = _module().exam_snapshot()
-    authored = {question["id"]: question["public"]["difficulty"] for question in snapshot["questions"]}
+    authored = {
+        question["id"]: question["public"]["difficulty"]
+        for question in snapshot["questions"]
+    }
     import hashlib
+
     runs = []
     for cohort in ("STRONG", "MID", "WEAK"):
         model = "sha256:" + hashlib.sha256(f"same-model-{cohort}".encode()).hexdigest()
-        config = "sha256:" + hashlib.sha256(f"same-config-{cohort}".encode()).hexdigest()
+        config = (
+            "sha256:" + hashlib.sha256(f"same-config-{cohort}".encode()).hexdigest()
+        )
         for index in range(2):
-            runs.append({
-                "system_id": f"alias-{cohort}-{index}",
-                "candidate_identity": "sha256:" + hashlib.sha256(f"candidate-{cohort}-{index}".encode()).hexdigest(),
-                "grading_artifact_identity": "sha256:" + hashlib.sha256(f"grading-{cohort}-{index}".encode()).hexdigest(),
-                "qualification_profile": "calibration-test",
-                "model_identity": model,
-                "configuration_identity": config,
-                "cohort": cohort,
-                "questions": [{"id": "Q01", "success": cohort != "WEAK"}],
-            })
+            runs.append(
+                {
+                    "system_id": f"alias-{cohort}-{index}",
+                    "candidate_identity": "sha256:"
+                    + hashlib.sha256(
+                        f"candidate-{cohort}-{index}".encode()
+                    ).hexdigest(),
+                    "grading_artifact_identity": "sha256:"
+                    + hashlib.sha256(f"grading-{cohort}-{index}".encode()).hexdigest(),
+                    "qualification_profile": "calibration-test",
+                    "model_identity": model,
+                    "configuration_identity": config,
+                    "cohort": cohort,
+                    "questions": [{"id": "Q01", "success": cohort != "WEAK"}],
+                }
+            )
     path = tmp_path / "aliases.json"
-    path.write_text(json.dumps({
-        "artifact_type": "repository-understanding-calibration-observations",
-        "schema_version": 1,
-        "source_version": snapshot["source_version"],
-        "repository_identity": snapshot["repository_identity"],
-        "exam_snapshot_sha256": snapshot["snapshot_sha256"],
-        "runs": runs,
-    }), encoding="utf-8")
-    report = calibration_report(path, question_ids=authored, authored_difficulty=authored, source_version=snapshot["source_version"], repository_identity=snapshot["repository_identity"], exam_snapshot_sha256=snapshot["snapshot_sha256"])
+    path.write_text(
+        json.dumps(
+            {
+                "artifact_type": "repository-understanding-calibration-observations",
+                "schema_version": 1,
+                "source_version": snapshot["source_version"],
+                "repository_identity": snapshot["repository_identity"],
+                "exam_snapshot_sha256": snapshot["snapshot_sha256"],
+                "runs": runs,
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = calibration_report(
+        path,
+        question_ids=authored,
+        authored_difficulty=authored,
+        source_version=snapshot["source_version"],
+        repository_identity=snapshot["repository_identity"],
+        exam_snapshot_sha256=snapshot["snapshot_sha256"],
+    )
     q1 = report["questions"]["Q01"]
     assert q1["system_count"] == 6
     assert q1["independent_subject_count"] == 3
@@ -1476,13 +1925,20 @@ def test_calibration_alias_system_ids_do_not_fake_independent_subject_floor(tmp_
     assert "independent_subject_count<6" in q1["review_eligibility"]["gaps"]
 
 
-def test_calibration_independent_subject_cannot_cross_cohort_aliases(tmp_path: Path) -> None:
+def test_calibration_independent_subject_cannot_cross_cohort_aliases(
+    tmp_path: Path,
+) -> None:
     import hashlib
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_calibration import calibration_report
+    from oh_goon.repository_tooling.repository_understanding_calibration import (
+        calibration_report,
+    )
 
     snapshot = _module().exam_snapshot()
-    authored = {question["id"]: question["public"]["difficulty"] for question in snapshot["questions"]}
+    authored = {
+        question["id"]: question["public"]["difficulty"]
+        for question in snapshot["questions"]
+    }
     model = "sha256:" + hashlib.sha256(b"same-model").hexdigest()
     config = "sha256:" + hashlib.sha256(b"same-config").hexdigest()
     payload = {
@@ -1492,22 +1948,50 @@ def test_calibration_independent_subject_cannot_cross_cohort_aliases(tmp_path: P
         "repository_identity": snapshot["repository_identity"],
         "exam_snapshot_sha256": snapshot["snapshot_sha256"],
         "runs": [
-            {"system_id": "alias-a", "model_identity": model, "configuration_identity": config, "cohort": "STRONG", "questions": [{"id": "Q01", "success": True}]},
-            {"system_id": "alias-b", "model_identity": model, "configuration_identity": config, "cohort": "WEAK", "questions": [{"id": "Q01", "success": False}]},
+            {
+                "system_id": "alias-a",
+                "model_identity": model,
+                "configuration_identity": config,
+                "cohort": "STRONG",
+                "questions": [{"id": "Q01", "success": True}],
+            },
+            {
+                "system_id": "alias-b",
+                "model_identity": model,
+                "configuration_identity": config,
+                "cohort": "WEAK",
+                "questions": [{"id": "Q01", "success": False}],
+            },
         ],
     }
     path = tmp_path / "cross-subject-cohort.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="independent subject cannot appear in multiple cohorts"):
-        calibration_report(path, question_ids=authored, authored_difficulty=authored, source_version=snapshot["source_version"], repository_identity=snapshot["repository_identity"], exam_snapshot_sha256=snapshot["snapshot_sha256"])
+    with pytest.raises(
+        ValueError, match="independent subject cannot appear in multiple cohorts"
+    ):
+        calibration_report(
+            path,
+            question_ids=authored,
+            authored_difficulty=authored,
+            source_version=snapshot["source_version"],
+            repository_identity=snapshot["repository_identity"],
+            exam_snapshot_sha256=snapshot["snapshot_sha256"],
+        )
 
 
-def test_calibration_telemetry_is_bound_to_exact_frozen_exam_identity(tmp_path: Path) -> None:
+def test_calibration_telemetry_is_bound_to_exact_frozen_exam_identity(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_calibration import calibration_report
+    from oh_goon.repository_tooling.repository_understanding_calibration import (
+        calibration_report,
+    )
 
     snapshot = _module().exam_snapshot()
-    authored = {question["id"]: question["public"]["difficulty"] for question in snapshot["questions"]}
+    authored = {
+        question["id"]: question["public"]["difficulty"]
+        for question in snapshot["questions"]
+    }
     observations = {
         "artifact_type": "repository-understanding-calibration-observations",
         "schema_version": 1,
@@ -1549,7 +2033,9 @@ def test_known_bad_active_question_blocks_bank_release() -> None:
         assert_question_audit_release_ready(bad)
 
 
-def test_candidate_confidence_and_abstention_are_explicit_grader_observations(tmp_path: Path) -> None:
+def test_candidate_confidence_and_abstention_are_explicit_grader_observations(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = module.grade_template(submission=submission)
@@ -1563,13 +2049,17 @@ def test_candidate_confidence_and_abstention_are_explicit_grader_observations(tm
     assert manifest["candidate_epistemic_states"] == ["ASSERTED", "ABSTAINED"]
 
 
-def test_correct_abstention_is_epistemically_visible_without_semantic_credit(tmp_path: Path) -> None:
+def test_correct_abstention_is_epistemically_visible_without_semantic_credit(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
     claim = sheet["grades"][0]["claims"][0]
     claim["result"] = "INSUFFICIENT_EVIDENCE"
-    claim["rationale"] = "Candidate explicitly states that the available evidence is insufficient."
+    claim["rationale"] = (
+        "Candidate explicitly states that the available evidence is insufficient."
+    )
     claim["candidate_epistemic_state"] = "ABSTAINED"
     claim["candidate_confidence"] = "LOW"
     result = _score(module, tmp_path, sheet, submission, "abstention.json")
@@ -1577,22 +2067,36 @@ def test_correct_abstention_is_epistemically_visible_without_semantic_credit(tmp
     assert "Q01/concept" in epistemic["accepted_abstentions"]
     assert epistemic["critical_overconfidence"] == []
     assert result["questions"][0]["claims"][0]["result"] == "INSUFFICIENT_EVIDENCE"
-    assert result["questions"][0]["claims"][0]["candidate_epistemic_state"] == "ABSTAINED"
+    assert (
+        result["questions"][0]["claims"][0]["candidate_epistemic_state"] == "ABSTAINED"
+    )
     assert result["questions"][0]["score"] < 100.0
 
 
-def test_write_authority_profile_records_critical_overconfidence_as_gate_failure(tmp_path: Path) -> None:
+def test_write_authority_profile_records_critical_overconfidence_as_gate_failure(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
     snapshot = {item["id"]: item for item in sheet["exam_snapshot"]["questions"]}
     target_grade = next(
-        grade for grade in sheet["grades"]
-        if any(claim["critical"] for claim in snapshot[grade["id"]]["secret"]["expected_claims"])
+        grade
+        for grade in sheet["grades"]
+        if any(
+            claim["critical"]
+            for claim in snapshot[grade["id"]]["secret"]["expected_claims"]
+        )
     )
     target_question = snapshot[target_grade["id"]]
-    critical_id = next(claim["id"] for claim in target_question["secret"]["expected_claims"] if claim["critical"])
-    claim = next(item for item in target_grade["claims"] if item["claim_id"] == critical_id)
+    critical_id = next(
+        claim["id"]
+        for claim in target_question["secret"]["expected_claims"]
+        if claim["critical"]
+    )
+    claim = next(
+        item for item in target_grade["claims"] if item["claim_id"] == critical_id
+    )
     claim["result"] = "UNSUPPORTED"
     claim["rationale"] = "Candidate asserts a wrong critical fact."
     claim["candidate_epistemic_state"] = "ASSERTED"
@@ -1604,7 +2108,9 @@ def test_write_authority_profile_records_critical_overconfidence_as_gate_failure
     assert not result["qualified"]
 
 
-def test_partial_critical_claim_with_high_candidate_confidence_is_overconfidence(tmp_path: Path) -> None:
+def test_partial_critical_claim_with_high_candidate_confidence_is_overconfidence(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = _filled_sheet(module, submission)
@@ -1612,22 +2118,35 @@ def test_partial_critical_claim_with_high_candidate_confidence_is_overconfidence
     target_grade = next(
         grade
         for grade in sheet["grades"]
-        if any(claim["critical"] for claim in snapshot[grade["id"]]["secret"]["expected_claims"])
+        if any(
+            claim["critical"]
+            for claim in snapshot[grade["id"]]["secret"]["expected_claims"]
+        )
     )
     target_question = snapshot[target_grade["id"]]
-    critical_id = next(claim["id"] for claim in target_question["secret"]["expected_claims"] if claim["critical"])
-    claim = next(item for item in target_grade["claims"] if item["claim_id"] == critical_id)
+    critical_id = next(
+        claim["id"]
+        for claim in target_question["secret"]["expected_claims"]
+        if claim["critical"]
+    )
+    claim = next(
+        item for item in target_grade["claims"] if item["claim_id"] == critical_id
+    )
     claim["result"] = "PARTIAL"
     claim["rationale"] = "Candidate established only part of the critical claim."
     claim["candidate_confidence"] = "HIGH"
-    result = _score(module, tmp_path, sheet, submission, "partial-critical-overconfidence.json")
+    result = _score(
+        module, tmp_path, sheet, submission, "partial-critical-overconfidence.json"
+    )
     epistemic = result["confidence_calibration"]["candidate_epistemic"]
     assert f"{target_grade['id']}/{critical_id}" in epistemic["critical_overconfidence"]
     assert "critical_overconfidence" in result["gate_failures"]
     assert not result["qualified"]
 
 
-def _candidate_configuration(tmp_path: Path, name: str = "candidate-config.json") -> Path:
+def _candidate_configuration(
+    tmp_path: Path, name: str = "candidate-config.json"
+) -> Path:
     path = tmp_path / name
     path.write_text(
         json.dumps(
@@ -1673,7 +2192,9 @@ def _stable_result(
     snapshot = {item["id"]: item for item in sheet["exam_snapshot"]["questions"]}
     for grade in sheet["grades"]:
         question = snapshot[grade["id"]]
-        canonical_evidence = question["secret"]["evidence_authority_roles"]["required_authority"]
+        canonical_evidence = question["secret"]["evidence_authority_roles"][
+            "required_authority"
+        ]
         assert canonical_evidence
         canonical_reference = canonical_evidence[0]["reference"]
         grade["question_status"] = "QUESTION_VALID"
@@ -1708,10 +2229,18 @@ def _stable_result(
     if partial_critical:
         for grade in sheet["grades"]:
             question = snapshot[grade["id"]]
-            critical = [claim for claim in question["secret"]["expected_claims"] if claim["critical"]]
+            critical = [
+                claim
+                for claim in question["secret"]["expected_claims"]
+                if claim["critical"]
+            ]
             if not critical:
                 continue
-            target = next(item for item in grade["claims"] if item["claim_id"] == critical[0]["id"])
+            target = next(
+                item
+                for item in grade["claims"]
+                if item["claim_id"] == critical[0]["id"]
+            )
             target["result"] = "PARTIAL"
             target["rationale"] = "Run recovered only part of this critical concept."
             target["candidate_confidence"] = "MEDIUM"
@@ -1724,8 +2253,12 @@ def _stable_result(
     return output
 
 
-def test_repeated_run_stability_requires_three_distinct_identity_bound_passes(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_stability import stability_report
+def test_repeated_run_stability_requires_three_distinct_identity_bound_passes(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_stability import (
+        stability_report,
+    )
 
     module = _module()
     config = _candidate_configuration(tmp_path)
@@ -1743,8 +2276,12 @@ def test_repeated_run_stability_requires_three_distinct_identity_bound_passes(tm
     assert report["stability_certificate_identity"].startswith("sha256:")
 
 
-def test_repeated_run_stability_rejects_lucky_global_pass_with_critical_concept_oscillation(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_stability import stability_report
+def test_repeated_run_stability_rejects_lucky_global_pass_with_critical_concept_oscillation(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_stability import (
+        stability_report,
+    )
 
     module = _module()
     config = _candidate_configuration(tmp_path)
@@ -1762,14 +2299,20 @@ def test_repeated_run_stability_rejects_lucky_global_pass_with_critical_concept_
     assert report["qualified"] is False
 
 
-def test_repeated_run_stability_rejects_mixed_candidate_configuration_identity(tmp_path: Path) -> None:
+def test_repeated_run_stability_rejects_mixed_candidate_configuration_identity(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_stability import stability_report
+    from oh_goon.repository_tooling.repository_understanding_stability import (
+        stability_report,
+    )
 
     module = _module()
     config_a = _candidate_configuration(tmp_path, "config-a.json")
     config_b = tmp_path / "config-b.json"
-    config_b.write_text(json.dumps({"model": "candidate-b", "harness": "other"}), encoding="utf-8")
+    config_b.write_text(
+        json.dumps({"model": "candidate-b", "harness": "other"}), encoding="utf-8"
+    )
     results = [
         _stable_result(module, tmp_path, 1, config_a),
         _stable_result(module, tmp_path, 2, config_a),
@@ -1779,9 +2322,13 @@ def test_repeated_run_stability_rejects_mixed_candidate_configuration_identity(t
         stability_report(results)
 
 
-def test_repeated_run_stability_rejects_duplicate_candidate_run_identity(tmp_path: Path) -> None:
+def test_repeated_run_stability_rejects_duplicate_candidate_run_identity(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_stability import stability_report
+    from oh_goon.repository_tooling.repository_understanding_stability import (
+        stability_report,
+    )
 
     module = _module()
     config = _candidate_configuration(tmp_path)
@@ -1801,9 +2348,13 @@ def test_repeated_run_stability_rejects_duplicate_candidate_run_identity(tmp_pat
         stability_report(results)
 
 
-def test_repeated_run_stability_rejects_tampered_result_certificate_identity(tmp_path: Path) -> None:
+def test_repeated_run_stability_rejects_tampered_result_certificate_identity(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_stability import stability_report
+    from oh_goon.repository_tooling.repository_understanding_stability import (
+        stability_report,
+    )
 
     module = _module()
     config = _candidate_configuration(tmp_path)
@@ -1811,12 +2362,18 @@ def test_repeated_run_stability_rejects_tampered_result_certificate_identity(tmp
     tampered = json.loads(results[1].read_text(encoding="utf-8"))
     tampered["composite_understanding"] = 99.9
     results[1].write_text(json.dumps(tampered), encoding="utf-8")
-    with pytest.raises(ValueError, match="certificate identity does not match result bytes"):
+    with pytest.raises(
+        ValueError, match="certificate identity does not match result bytes"
+    ):
         stability_report(results)
 
 
-def _challenge_instance(module, tmp_path: Path, seed: str = "seed-a") -> tuple[dict[str, object], Path]:
-    from oh_goon.repository_tooling.repository_understanding_integrity import challenge_set
+def _challenge_instance(
+    module, tmp_path: Path, seed: str = "seed-a"
+) -> tuple[dict[str, object], Path]:
+    from oh_goon.repository_tooling.repository_understanding_integrity import (
+        challenge_set,
+    )
 
     snapshot = module.exam_snapshot()
     payload = challenge_set(
@@ -1831,7 +2388,9 @@ def _challenge_instance(module, tmp_path: Path, seed: str = "seed-a") -> tuple[d
     return payload, path
 
 
-def _adversarial_observations(module, challenge: dict[str, object]) -> dict[str, object]:
+def _adversarial_observations(
+    module, challenge: dict[str, object]
+) -> dict[str, object]:
     registry = module.benchmark_registry()
     challenges = []
     for binding in challenge["secret_bindings"]:
@@ -1863,7 +2422,9 @@ def _adversarial_observations(module, challenge: dict[str, object]) -> dict[str,
     }
 
 
-def test_benchmark_integrity_registry_is_secret_prompt_free_in_public_manifest() -> None:
+def test_benchmark_integrity_registry_is_secret_prompt_free_in_public_manifest() -> (
+    None
+):
     module = _module()
     manifest = module.manifest()
     integrity = manifest["benchmark_integrity"]
@@ -1885,12 +2446,16 @@ def test_benchmark_integrity_registry_is_secret_prompt_free_in_public_manifest()
     assert "The UI already has the run identity" not in rendered
 
 
-def test_prepared_candidate_workspace_excludes_hidden_benchmark_registry_and_git_history(tmp_path: Path) -> None:
+def test_prepared_candidate_workspace_excludes_hidden_benchmark_registry_and_git_history(
+    tmp_path: Path,
+) -> None:
     module = _module()
     prepared = module.prepare(tmp_path / "candidate")
     assert not (prepared / "docs/certification/answers").exists()
     assert not (prepared / ".git").exists()
-    marker = json.loads((prepared / ".oh-goon-certification-exam.json").read_text(encoding="utf-8"))
+    marker = json.loads(
+        (prepared / ".oh-goon-certification-exam.json").read_text(encoding="utf-8")
+    )
     controls = marker["benchmark_integrity_contract"]
     assert controls["network_access"] == "DENIED"
     assert controls["prior_conversation_history"] == "DENIED"
@@ -1913,7 +2478,9 @@ def test_exam_snapshot_freezes_exact_secret_evidence_range_bytes() -> None:
     assert all(item["end_line"] >= item["start_line"] >= 1 for item in frozen)
 
 
-def test_challenge_set_selects_one_hidden_paraphrase_per_family_and_hides_secret_roles(tmp_path: Path) -> None:
+def test_challenge_set_selects_one_hidden_paraphrase_per_family_and_hides_secret_roles(
+    tmp_path: Path,
+) -> None:
     module = _module()
     first, _ = _challenge_instance(module, tmp_path, "same-seed")
     second, _ = _challenge_instance(module, tmp_path, "same-seed")
@@ -1935,15 +2502,21 @@ def test_challenge_set_selects_one_hidden_paraphrase_per_family_and_hides_secret
     assert "secret_bindings" not in public_rendered
 
 
-def test_adversarial_report_keeps_rates_diagnostic_but_vetoes_failed_critical_challenge(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_integrity import adversarial_report
+def test_adversarial_report_keeps_rates_diagnostic_but_vetoes_failed_critical_challenge(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_integrity import (
+        adversarial_report,
+    )
 
     module = _module()
     challenge, challenge_path = _challenge_instance(module, tmp_path)
     observations = _adversarial_observations(module, challenge)
     path = tmp_path / "adversarial.json"
     path.write_text(json.dumps(observations), encoding="utf-8")
-    clean = adversarial_report(challenge_path, path, registry=module.benchmark_registry())
+    clean = adversarial_report(
+        challenge_path, path, registry=module.benchmark_registry()
+    )
     assert clean["qualified"] is True
     assert clean["paraphrase_consistency_percent"] == 100.0
     assert clean["pressure_resistance_percent"] == 100.0
@@ -1956,20 +2529,27 @@ def test_adversarial_report_keeps_rates_diagnostic_but_vetoes_failed_critical_ch
         if binding["critical"] and binding["role"] == "CONTRADICTION_PRESSURE"
     )
     target = next(
-        row for row in observations["challenges"]
+        row
+        for row in observations["challenges"]
         if row["delivery_id"] == critical_pressure["delivery_id"]
     )
     target["outcome"] = "UNSUPPORTED_YIELD"
     path.write_text(json.dumps(observations), encoding="utf-8")
-    failed = adversarial_report(challenge_path, path, registry=module.benchmark_registry())
+    failed = adversarial_report(
+        challenge_path, path, registry=module.benchmark_registry()
+    )
     assert failed["qualified"] is False
     assert failed["critical_adversarial_failures"]
     assert failed["adversarial_gate_failures"] == ["critical_adversarial_failure"]
 
 
-def test_adversarial_report_rejects_incomplete_false_premise_coverage(tmp_path: Path) -> None:
+def test_adversarial_report_rejects_incomplete_false_premise_coverage(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_integrity import adversarial_report
+    from oh_goon.repository_tooling.repository_understanding_integrity import (
+        adversarial_report,
+    )
 
     module = _module()
     challenge, challenge_path = _challenge_instance(module, tmp_path)
@@ -1981,8 +2561,12 @@ def test_adversarial_report_rejects_incomplete_false_premise_coverage(tmp_path: 
         adversarial_report(challenge_path, path, registry=module.benchmark_registry())
 
 
-def _benchmark_execution_evidence(module, challenge: dict[str, object]) -> dict[str, object]:
-    from oh_goon.repository_tooling.repository_understanding_integrity import BENCHMARK_CONTROL_REQUIREMENTS
+def _benchmark_execution_evidence(
+    module, challenge: dict[str, object]
+) -> dict[str, object]:
+    from oh_goon.repository_tooling.repository_understanding_integrity import (
+        BENCHMARK_CONTROL_REQUIREMENTS,
+    )
 
     return {
         "artifact_type": "repository-understanding-benchmark-execution-evidence",
@@ -1998,8 +2582,12 @@ def _benchmark_execution_evidence(module, challenge: dict[str, object]) -> dict[
     }
 
 
-def test_benchmark_integrity_requires_no_network_history_answers_or_secret_access(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_integrity import benchmark_integrity_report
+def test_benchmark_integrity_requires_no_network_history_answers_or_secret_access(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_integrity import (
+        benchmark_integrity_report,
+    )
 
     module = _module()
     challenge, challenge_path = _challenge_instance(module, tmp_path)
@@ -2029,12 +2617,19 @@ def test_benchmark_integrity_requires_no_network_history_answers_or_secret_acces
         challenge_instance_path=challenge_path,
     )
     assert report["comparison_status"] == "NOT_COMPARABLE"
-    assert report["control_failures"] == ["network_access", "prior_conversation_history"]
+    assert report["control_failures"] == [
+        "network_access",
+        "prior_conversation_history",
+    ]
 
 
-def test_benchmark_integrity_rejects_tampered_challenge_identity(tmp_path: Path) -> None:
+def test_benchmark_integrity_rejects_tampered_challenge_identity(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_integrity import benchmark_integrity_report
+    from oh_goon.repository_tooling.repository_understanding_integrity import (
+        benchmark_integrity_report,
+    )
 
     module = _module()
     challenge, challenge_path = _challenge_instance(module, tmp_path)
@@ -2055,12 +2650,18 @@ def test_benchmark_integrity_rejects_tampered_challenge_identity(tmp_path: Path)
         )
 
 
-def test_canary_registry_rejects_score_bearing_or_calibrated_canary(tmp_path: Path) -> None:
+def test_canary_registry_rejects_score_bearing_or_calibrated_canary(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_integrity import load_benchmark_registry
+    from oh_goon.repository_tooling.repository_understanding_integrity import (
+        load_benchmark_registry,
+    )
 
     module = _module()
-    source = yaml.safe_load((ANSWERS / "benchmark-integrity.yml").read_text(encoding="utf-8"))
+    source = yaml.safe_load(
+        (ANSWERS / "benchmark-integrity.yml").read_text(encoding="utf-8")
+    )
     source["canaries"][0]["score_bearing"] = True
     bad = tmp_path / "bad-integrity.yml"
     bad.write_text(yaml.safe_dump(source, sort_keys=False), encoding="utf-8")
@@ -2072,11 +2673,17 @@ def test_canary_registry_rejects_score_bearing_or_calibrated_canary(tmp_path: Pa
         )
 
 
-def test_canary_introduction_version_is_historical_and_not_rewritten(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_integrity import load_benchmark_registry
+def test_canary_introduction_version_is_historical_and_not_rewritten(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_integrity import (
+        load_benchmark_registry,
+    )
 
     module = _module()
-    source = yaml.safe_load((ANSWERS / "benchmark-integrity.yml").read_text(encoding="utf-8"))
+    source = yaml.safe_load(
+        (ANSWERS / "benchmark-integrity.yml").read_text(encoding="utf-8")
+    )
     source["canaries"][0]["introduced_source_version"] = "1267.0.71"
     source["fresh_challenges"][0]["introduced_source_version"] = "1267.0.71"
     historical = tmp_path / "historical-integrity.yml"
@@ -2092,10 +2699,14 @@ def test_canary_introduction_version_is_historical_and_not_rewritten(tmp_path: P
 
 def test_canary_introduction_version_rejects_future_identity(tmp_path: Path) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_integrity import load_benchmark_registry
+    from oh_goon.repository_tooling.repository_understanding_integrity import (
+        load_benchmark_registry,
+    )
 
     module = _module()
-    source = yaml.safe_load((ANSWERS / "benchmark-integrity.yml").read_text(encoding="utf-8"))
+    source = yaml.safe_load(
+        (ANSWERS / "benchmark-integrity.yml").read_text(encoding="utf-8")
+    )
     current = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     major, minor, patch = (int(part) for part in current.split("."))
     source["canaries"][0]["introduced_source_version"] = f"{major}.{minor}.{patch + 1}"
@@ -2109,19 +2720,33 @@ def test_canary_introduction_version_rejects_future_identity(tmp_path: Path) -> 
         )
 
 
-def test_challenge_registry_binding_rejects_tamper_even_after_self_hash_recomputed(tmp_path: Path) -> None:
+def test_challenge_registry_binding_rejects_tamper_even_after_self_hash_recomputed(
+    tmp_path: Path,
+) -> None:
     import hashlib
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_integrity import benchmark_integrity_report
+    from oh_goon.repository_tooling.repository_understanding_integrity import (
+        benchmark_integrity_report,
+    )
 
     module = _module()
     challenge, challenge_path = _challenge_instance(module, tmp_path)
     evidence = _benchmark_execution_evidence(module, challenge)
     tampered = json.loads(challenge_path.read_text(encoding="utf-8"))
-    tampered["secret_bindings"][0]["critical"] = not tampered["secret_bindings"][0]["critical"]
-    body = {key: value for key, value in tampered.items() if key != "challenge_instance_identity"}
-    encoded = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    tampered["challenge_instance_identity"] = "sha256:" + hashlib.sha256(encoded).hexdigest()
+    tampered["secret_bindings"][0]["critical"] = not tampered["secret_bindings"][0][
+        "critical"
+    ]
+    body = {
+        key: value
+        for key, value in tampered.items()
+        if key != "challenge_instance_identity"
+    }
+    encoded = json.dumps(
+        body, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    tampered["challenge_instance_identity"] = (
+        "sha256:" + hashlib.sha256(encoded).hexdigest()
+    )
     challenge_path.write_text(json.dumps(tampered), encoding="utf-8")
     evidence["challenge_instance_identity"] = tampered["challenge_instance_identity"]
     evidence_path = tmp_path / "execution-evidence-rehashed-tamper.json"
@@ -2137,19 +2762,31 @@ def test_challenge_registry_binding_rejects_tamper_even_after_self_hash_recomput
         )
 
 
-def test_question_lifecycle_is_secret_explicit_and_current_bank_is_active(tmp_path: Path) -> None:
+def test_question_lifecycle_is_secret_explicit_and_current_bank_is_active(
+    tmp_path: Path,
+) -> None:
     module = _module()
     lifecycle = module.question_lifecycle()
     assert lifecycle["policy_version"] == "repository-question-lifecycle.v3"
     assert len(lifecycle["questions"]) == 220
     active = [row for row in lifecycle["questions"] if row["qualification_bank_member"]]
-    shadow = [row for row in lifecycle["questions"] if not row["qualification_bank_member"]]
+    shadow = [
+        row for row in lifecycle["questions"] if not row["qualification_bank_member"]
+    ]
     assert len(active) == 157 and all(row["state"] == "ACTIVE" for row in active)
     assert len(shadow) == 63 and all(row["state"] == "SHADOW" for row in shadow)
     assert all(row["score_bearing"] is True for row in active)
     assert all(row["score_bearing"] is False for row in shadow)
-    assert all(row["activation_basis"] == "LEGACY_ACTIVE" for row in active if int(row["id"][1:]) <= 147)
-    assert all(row["activation_basis"] == "PROMOTION_REVIEW" for row in active if int(row["id"][1:]) >= 203)
+    assert all(
+        row["activation_basis"] == "LEGACY_ACTIVE"
+        for row in active
+        if int(row["id"][1:]) <= 147
+    )
+    assert all(
+        row["activation_basis"] == "PROMOTION_REVIEW"
+        for row in active
+        if int(row["id"][1:]) >= 203
+    )
     manifest = module.verify()
     assert manifest["question_lifecycle"]["states"]["ACTIVE"] == 157
     assert manifest["question_lifecycle"]["states"]["SHADOW"] == 63
@@ -2162,8 +2799,9 @@ def test_question_lifecycle_is_secret_explicit_and_current_bank_is_active(tmp_pa
     assert not tuple(prepared.rglob("question-lifecycle.yml"))
 
 
-
-def test_question_lifecycle_review_required_blocks_critical_qualification_without_threshold_rescale(tmp_path: Path) -> None:
+def test_question_lifecycle_review_required_blocks_critical_qualification_without_threshold_rescale(
+    tmp_path: Path,
+) -> None:
     import copy
     import pytest
     from oh_goon.repository_tooling.repository_understanding_lifecycle import (
@@ -2174,8 +2812,14 @@ def test_question_lifecycle_review_required_blocks_critical_qualification_withou
 
     module = _module()
     snapshot = module.exam_snapshot()
-    critical_id = next(question["id"] for question in snapshot["questions"] if question["severity"] == "critical")
-    payload = yaml.safe_load((ANSWERS / "question-lifecycle.yml").read_text(encoding="utf-8"))
+    critical_id = next(
+        question["id"]
+        for question in snapshot["questions"]
+        if question["severity"] == "critical"
+    )
+    payload = yaml.safe_load(
+        (ANSWERS / "question-lifecycle.yml").read_text(encoding="utf-8")
+    )
     row = next(item for item in payload["questions"] if item["id"] == critical_id)
     row.update(
         {
@@ -2208,10 +2852,20 @@ def test_question_lifecycle_review_required_blocks_critical_qualification_withou
     loaded = load_question_lifecycle(
         path, source_version=snapshot["source_version"], question_ids=_question_ids()
     )
-    assert question_lifecycle_manifest(loaded, critical_question_ids=[critical_id])["qualification_status"] == "BLOCKED"
+    assert (
+        question_lifecycle_manifest(loaded, critical_question_ids=[critical_id])[
+            "qualification_status"
+        ]
+        == "BLOCKED"
+    )
 
-def test_human_baseline_reports_timing_and_disagreement_without_mutating_policy(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_lifecycle import human_baseline_report
+
+def test_human_baseline_reports_timing_and_disagreement_without_mutating_policy(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_lifecycle import (
+        human_baseline_report,
+    )
 
     module = _module()
     snapshot = module.exam_snapshot()
@@ -2267,10 +2921,14 @@ def test_human_baseline_reports_timing_and_disagreement_without_mutating_policy(
     assert "cannot automatically change" in report["authority_note"]
 
 
-def test_active_promotion_requires_empirical_human_and_adjudication_evidence(tmp_path: Path) -> None:
+def test_active_promotion_requires_empirical_human_and_adjudication_evidence(
+    tmp_path: Path,
+) -> None:
     import copy
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_lifecycle import authorize_question_transition
+    from oh_goon.repository_tooling.repository_understanding_lifecycle import (
+        authorize_question_transition,
+    )
 
     module = _module()
     lifecycle = copy.deepcopy(module.question_lifecycle())
@@ -2285,24 +2943,45 @@ def test_active_promotion_requires_empirical_human_and_adjudication_evidence(tmp
         }
     )
     import hashlib
-    lifecycle_body = {key: value for key, value in lifecycle.items() if key != "lifecycle_identity"}
-    lifecycle["lifecycle_identity"] = "sha256:" + hashlib.sha256(
-        json.dumps(lifecycle_body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
+
+    lifecycle_body = {
+        key: value for key, value in lifecycle.items() if key != "lifecycle_identity"
+    }
+    lifecycle["lifecycle_identity"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                lifecycle_body,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+    )
     calibration = {
         "source_version": lifecycle["source_version"],
         "questions": {"Q01": {"observation_count": 4}},
     }
-    calibration["report_identity"] = "sha256:" + hashlib.sha256(
-        json.dumps(calibration, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
+    calibration["report_identity"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                calibration, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
+    )
     human = {
         "source_version": lifecycle["source_version"],
         "questions": {"Q01": {"reviewer_count": 2, "reference_disagreement": True}},
     }
-    human["human_baseline_identity"] = "sha256:" + hashlib.sha256(
-        json.dumps(human, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
+    human["human_baseline_identity"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                human, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
+    )
     request = {
         "artifact_type": "repository-question-lifecycle-transition-request",
         "schema_version": 1,
@@ -2337,12 +3016,16 @@ def test_active_promotion_requires_empirical_human_and_adjudication_evidence(tmp
     )
     assert result["authorized"] is True
     assert result["next_state_projection"]["score_bearing"] is True
-    assert result["evidence"]["adjudication_identity"] == request["adjudication_identity"]
+    assert (
+        result["evidence"]["adjudication_identity"] == request["adjudication_identity"]
+    )
 
 
 def test_lifecycle_telemetry_never_auto_promotes_question(tmp_path: Path) -> None:
     import copy
-    from oh_goon.repository_tooling.repository_understanding_lifecycle import authorize_question_transition
+    from oh_goon.repository_tooling.repository_understanding_lifecycle import (
+        authorize_question_transition,
+    )
 
     module = _module()
     lifecycle = copy.deepcopy(module.question_lifecycle())
@@ -2357,18 +3040,45 @@ def test_lifecycle_telemetry_never_auto_promotes_question(tmp_path: Path) -> Non
         }
     )
     import hashlib
-    lifecycle_body = {key: value for key, value in lifecycle.items() if key != "lifecycle_identity"}
-    lifecycle["lifecycle_identity"] = "sha256:" + hashlib.sha256(
-        json.dumps(lifecycle_body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
-    calibration = {"source_version": lifecycle["source_version"], "questions": {"Q01": {"observation_count": 999}}}
-    calibration["report_identity"] = "sha256:" + hashlib.sha256(
-        json.dumps(calibration, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
-    human = {"source_version": lifecycle["source_version"], "questions": {"Q01": {"reviewer_count": 99, "reference_disagreement": False}}}
-    human["human_baseline_identity"] = "sha256:" + hashlib.sha256(
-        json.dumps(human, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
+
+    lifecycle_body = {
+        key: value for key, value in lifecycle.items() if key != "lifecycle_identity"
+    }
+    lifecycle["lifecycle_identity"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                lifecycle_body,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+    calibration = {
+        "source_version": lifecycle["source_version"],
+        "questions": {"Q01": {"observation_count": 999}},
+    }
+    calibration["report_identity"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                calibration, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+    human = {
+        "source_version": lifecycle["source_version"],
+        "questions": {"Q01": {"reviewer_count": 99, "reference_disagreement": False}},
+    }
+    human["human_baseline_identity"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                human, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
+    )
     request = {
         "artifact_type": "repository-question-lifecycle-transition-request",
         "schema_version": 1,
@@ -2385,6 +3095,7 @@ def test_lifecycle_telemetry_never_auto_promotes_question(tmp_path: Path) -> Non
     path = tmp_path / "transition-no-review.json"
     path.write_text(json.dumps(request), encoding="utf-8")
     import pytest
+
     with pytest.raises(ValueError, match="promotion_review_identity"):
         authorize_question_transition(
             path,
@@ -2395,17 +3106,23 @@ def test_lifecycle_telemetry_never_auto_promotes_question(tmp_path: Path) -> Non
         )
 
 
-def test_canary_and_fresh_shadow_pools_rotate_without_exposing_roles(tmp_path: Path) -> None:
+def test_canary_and_fresh_shadow_pools_rotate_without_exposing_roles(
+    tmp_path: Path,
+) -> None:
     module = _module()
     canaries: set[str] = set()
     fresh: set[str] = set()
     for index in range(80):
         challenge, _ = _challenge_instance(module, tmp_path, f"rotation-{index}")
         canaries.update(
-            row["challenge_id"] for row in challenge["secret_bindings"] if row["role"] == "CANARY"
+            row["challenge_id"]
+            for row in challenge["secret_bindings"]
+            if row["role"] == "CANARY"
         )
         fresh.update(
-            row["challenge_id"] for row in challenge["secret_bindings"] if row["role"] == "FRESH_SHADOW"
+            row["challenge_id"]
+            for row in challenge["secret_bindings"]
+            if row["role"] == "FRESH_SHADOW"
         )
         rendered = json.dumps(challenge["public_delivery"])
         assert "CANARY" not in rendered
@@ -2414,7 +3131,9 @@ def test_canary_and_fresh_shadow_pools_rotate_without_exposing_roles(tmp_path: P
     assert fresh == {"FRESH-001", "FRESH-002"}
 
 
-def test_rotating_hidden_selection_rejects_seed_swap_after_self_hash_recomputed(tmp_path: Path) -> None:
+def test_rotating_hidden_selection_rejects_seed_swap_after_self_hash_recomputed(
+    tmp_path: Path,
+) -> None:
     import hashlib
     import pytest
     from oh_goon.repository_tooling.repository_understanding_integrity import (
@@ -2423,7 +3142,9 @@ def test_rotating_hidden_selection_rejects_seed_swap_after_self_hash_recomputed(
     )
 
     module = _module()
-    original, challenge_path = _challenge_instance(module, tmp_path, "rotation-original")
+    original, challenge_path = _challenge_instance(
+        module, tmp_path, "rotation-original"
+    )
     original_hidden = {
         row["challenge_id"]
         for row in original["secret_bindings"]
@@ -2452,11 +3173,22 @@ def test_rotating_hidden_selection_rejects_seed_swap_after_self_hash_recomputed(
 
     tampered = json.loads(challenge_path.read_text(encoding="utf-8"))
     tampered["secret_rotation_seed"] = replacement_seed
-    tampered["seed_identity"] = "sha256:" + hashlib.sha256(replacement_seed.encode("utf-8")).hexdigest()
-    body = {key: value for key, value in tampered.items() if key != "challenge_instance_identity"}
-    tampered["challenge_instance_identity"] = "sha256:" + hashlib.sha256(
-        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
+    tampered["seed_identity"] = (
+        "sha256:" + hashlib.sha256(replacement_seed.encode("utf-8")).hexdigest()
+    )
+    body = {
+        key: value
+        for key, value in tampered.items()
+        if key != "challenge_instance_identity"
+    }
+    tampered["challenge_instance_identity"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                body, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
+    )
     challenge_path.write_text(json.dumps(tampered), encoding="utf-8")
 
     evidence = _benchmark_execution_evidence(module, original)
@@ -2472,7 +3204,6 @@ def test_rotating_hidden_selection_rejects_seed_swap_after_self_hash_recomputed(
             exam_snapshot_sha256=original["exam_snapshot_sha256"],
             challenge_instance_path=challenge_path,
         )
-
 
 
 def _capability_run_evidence(
@@ -2573,8 +3304,12 @@ def _capability_fixture(module, tmp_path: Path, *, profile: str = "change-author
     return config, results, integrity, adversarial
 
 
-def test_capability_certificate_derives_standard_scope_from_change_author_profile(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_capability import capability_certificate
+def test_capability_certificate_derives_standard_scope_from_change_author_profile(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_capability import (
+        capability_certificate,
+    )
 
     module = _module()
     _config, results, integrity, adversarial = _capability_fixture(module, tmp_path)
@@ -2605,11 +3340,18 @@ def test_capability_certificate_derives_standard_scope_from_change_author_profil
     assert certificate["capability_certificate_identity"].startswith("sha256:")
 
 
-def test_capability_tier_is_derived_from_profile_not_candidate_request(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_capability import capability_certificate
+def test_capability_tier_is_derived_from_profile_not_candidate_request(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_capability import (
+        capability_certificate,
+    )
 
     module = _module()
-    for profile, expected in (("read-only.v1", "PLAN"), ("release-author.v1", "CRITICAL")):
+    for profile, expected in (
+        ("read-only.v1", "PLAN"),
+        ("release-author.v1", "CRITICAL"),
+    ):
         sub = tmp_path / expected.lower()
         sub.mkdir()
         _config, results, integrity, adversarial = _capability_fixture(
@@ -2627,8 +3369,12 @@ def test_capability_tier_is_derived_from_profile_not_candidate_request(tmp_path:
     assert certificate["authorization"]["release_promotion"] is True
 
 
-def test_capability_certificate_denies_noncomparable_run_without_weakening_stability(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_capability import capability_certificate
+def test_capability_certificate_denies_noncomparable_run_without_weakening_stability(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_capability import (
+        capability_certificate,
+    )
 
     module = _module()
     config = _candidate_configuration(tmp_path)
@@ -2657,8 +3403,12 @@ def test_capability_certificate_denies_noncomparable_run_without_weakening_stabi
     assert not any(certificate["authorization"].values())
 
 
-def test_capability_certificate_denies_critical_adversarial_failure(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_capability import capability_certificate
+def test_capability_certificate_denies_critical_adversarial_failure(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_capability import (
+        capability_certificate,
+    )
 
     module = _module()
     config = _candidate_configuration(tmp_path)
@@ -2682,23 +3432,35 @@ def test_capability_certificate_denies_critical_adversarial_failure(tmp_path: Pa
         issued_at_utc="2026-09-05T12:00:00Z",
     )
     assert certificate["certificate_status"] == "DENIED"
-    assert "critical_adversarial_failure:candidate-run-3" in certificate["gate_failures"]
+    assert (
+        "critical_adversarial_failure:candidate-run-3" in certificate["gate_failures"]
+    )
     assert certificate["adversarial_qualified_runs"] == 2
 
 
-def test_capability_certificate_rejects_integrity_run_identity_substitution(tmp_path: Path) -> None:
+def test_capability_certificate_rejects_integrity_run_identity_substitution(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_capability import capability_certificate
+    from oh_goon.repository_tooling.repository_understanding_capability import (
+        capability_certificate,
+    )
 
     module = _module()
     _config, results, integrity, adversarial = _capability_fixture(module, tmp_path)
     payload = json.loads(integrity[2].read_text(encoding="utf-8"))
     payload["candidate_run_identity"] = "candidate-run-2"
     payload["integrity_result_identity"] = "sha256:" + module._canonical_json_sha256(
-        {key: value for key, value in payload.items() if key != "integrity_result_identity"}
+        {
+            key: value
+            for key, value in payload.items()
+            if key != "integrity_result_identity"
+        }
     )
     integrity[2].write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="one unique integrity result per candidate run"):
+    with pytest.raises(
+        ValueError, match="one unique integrity result per candidate run"
+    ):
         capability_certificate(
             results,
             integrity_paths=integrity,
@@ -2707,9 +3469,13 @@ def test_capability_certificate_rejects_integrity_run_identity_substitution(tmp_
         )
 
 
-def test_capability_certificate_rejects_reused_hidden_challenge_instance(tmp_path: Path) -> None:
+def test_capability_certificate_rejects_reused_hidden_challenge_instance(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_capability import capability_certificate
+    from oh_goon.repository_tooling.repository_understanding_capability import (
+        capability_certificate,
+    )
 
     module = _module()
     _config, results, integrity, adversarial = _capability_fixture(module, tmp_path)
@@ -2717,7 +3483,11 @@ def test_capability_certificate_rejects_reused_hidden_challenge_instance(tmp_pat
     first = json.loads(integrity[0].read_text(encoding="utf-8"))
     second["challenge_instance_identity"] = first["challenge_instance_identity"]
     second["integrity_result_identity"] = "sha256:" + module._canonical_json_sha256(
-        {key: value for key, value in second.items() if key != "integrity_result_identity"}
+        {
+            key: value
+            for key, value in second.items()
+            if key != "integrity_result_identity"
+        }
     )
     integrity[1].write_text(json.dumps(second), encoding="utf-8")
     with pytest.raises(ValueError, match="distinct hidden challenge instances"):
@@ -2729,7 +3499,9 @@ def test_capability_certificate_rejects_reused_hidden_challenge_instance(tmp_pat
         )
 
 
-def test_capability_check_binds_exact_repository_candidate_and_requested_action(tmp_path: Path) -> None:
+def test_capability_check_binds_exact_repository_candidate_and_requested_action(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.repository_understanding_capability import (
         capability_certificate,
         capability_check,
@@ -2748,14 +3520,18 @@ def test_capability_check_binds_exact_repository_candidate_and_requested_action(
     allowed = capability_check(
         path,
         repository_identity=certificate["repository_identity"],
-        candidate_configuration_identity=certificate["candidate_configuration_identity"],
+        candidate_configuration_identity=certificate[
+            "candidate_configuration_identity"
+        ],
         requested_capability="standard_editing",
     )
     assert allowed["authorized"] is True
     denied = capability_check(
         path,
         repository_identity=certificate["repository_identity"],
-        candidate_configuration_identity=certificate["candidate_configuration_identity"],
+        candidate_configuration_identity=certificate[
+            "candidate_configuration_identity"
+        ],
         requested_capability="critical_execution",
     )
     assert denied["authorized"] is False
@@ -2763,7 +3539,9 @@ def test_capability_check_binds_exact_repository_candidate_and_requested_action(
     wrong_repo = capability_check(
         path,
         repository_identity="sha256:" + "9" * 64,
-        candidate_configuration_identity=certificate["candidate_configuration_identity"],
+        candidate_configuration_identity=certificate[
+            "candidate_configuration_identity"
+        ],
         requested_capability="planning",
     )
     assert wrong_repo["failures"] == ["repository_identity_mismatch"]
@@ -2776,7 +3554,9 @@ def test_capability_check_binds_exact_repository_candidate_and_requested_action(
     assert wrong_candidate["failures"] == ["candidate_configuration_identity_mismatch"]
 
 
-def test_capability_check_rejects_tampered_certificate_even_if_grant_looks_stronger(tmp_path: Path) -> None:
+def test_capability_check_rejects_tampered_certificate_even_if_grant_looks_stronger(
+    tmp_path: Path,
+) -> None:
     import pytest
     from oh_goon.repository_tooling.repository_understanding_capability import (
         capability_certificate,
@@ -2798,14 +3578,19 @@ def test_capability_check_rejects_tampered_certificate_even_if_grant_looks_stron
         capability_check(
             path,
             repository_identity=certificate["repository_identity"],
-            candidate_configuration_identity=certificate["candidate_configuration_identity"],
+            candidate_configuration_identity=certificate[
+                "candidate_configuration_identity"
+            ],
             requested_capability="critical_execution",
         )
 
 
-
-def test_capability_certificate_denies_critical_concept_instability_even_when_three_runs_qualify(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_capability import capability_certificate
+def test_capability_certificate_denies_critical_concept_instability_even_when_three_runs_qualify(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_capability import (
+        capability_certificate,
+    )
 
     module = _module()
     config = _candidate_configuration(tmp_path)
@@ -2814,7 +3599,9 @@ def test_capability_certificate_denies_critical_concept_instability_even_when_th
         _stable_result(module, tmp_path, 2, config, partial_critical=True),
         _stable_result(module, tmp_path, 3, config),
     ]
-    assert all(json.loads(path.read_text(encoding="utf-8"))["qualified"] for path in results)
+    assert all(
+        json.loads(path.read_text(encoding="utf-8"))["qualified"] for path in results
+    )
     integrity = []
     adversarial = []
     for index, result in enumerate(results, start=1):
@@ -2836,7 +3623,9 @@ def test_capability_certificate_denies_critical_concept_instability_even_when_th
 
 
 def _recertification_fixture(module, tmp_path: Path):
-    from oh_goon.repository_tooling.repository_understanding_capability import capability_certificate
+    from oh_goon.repository_tooling.repository_understanding_capability import (
+        capability_certificate,
+    )
 
     _config, results, integrity, adversarial = _capability_fixture(module, tmp_path)
     certificate = capability_certificate(
@@ -2856,7 +3645,9 @@ def _resign_snapshot(module, snapshot: dict[str, object]) -> dict[str, object]:
     return snapshot
 
 
-def test_differential_recertification_same_source_requires_nothing(tmp_path: Path) -> None:
+def test_differential_recertification_same_source_requires_nothing(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.repository_understanding_recertification import (
         differential_recertification_plan,
         validate_recertification_plan,
@@ -2878,9 +3669,13 @@ def test_differential_recertification_same_source_requires_nothing(tmp_path: Pat
     assert plan["enforcement_status"] == "EVIDENCE_ONLY"
 
 
-def test_differential_recertification_source_change_suspends_certificate_even_when_declared_bindings_match(tmp_path: Path) -> None:
+def test_differential_recertification_source_change_suspends_certificate_even_when_declared_bindings_match(
+    tmp_path: Path,
+) -> None:
     from copy import deepcopy
-    from oh_goon.repository_tooling.repository_understanding_recertification import differential_recertification_plan
+    from oh_goon.repository_tooling.repository_understanding_recertification import (
+        differential_recertification_plan,
+    )
 
     module = _module()
     _certificate, certificate_path, results = _recertification_fixture(module, tmp_path)
@@ -2888,7 +3683,9 @@ def test_differential_recertification_source_change_suspends_certificate_even_wh
     current["source_version"] = "1267.0.999"
     current["repository_identity"] = "sha256:" + "7" * 64
     _resign_snapshot(module, current)
-    plan = differential_recertification_plan(certificate_path, results[0], current_snapshot=current)
+    plan = differential_recertification_plan(
+        certificate_path, results[0], current_snapshot=current
+    )
     assert plan["status"] == "SOURCE_CHANGED_DECLARED_CONCEPT_BINDINGS_UNCHANGED"
     assert plan["capability_state"] == "SUSPENDED_SOURCE_CHANGED"
     assert plan["reissue_required"] is True
@@ -2896,20 +3693,28 @@ def test_differential_recertification_source_change_suspends_certificate_even_wh
     assert len(plan["preserved_concepts"]) == 11
 
 
-def test_differential_recertification_invalidates_only_concept_whose_declared_evidence_range_changed(tmp_path: Path) -> None:
+def test_differential_recertification_invalidates_only_concept_whose_declared_evidence_range_changed(
+    tmp_path: Path,
+) -> None:
     from copy import deepcopy
-    from oh_goon.repository_tooling.repository_understanding_recertification import differential_recertification_plan
+    from oh_goon.repository_tooling.repository_understanding_recertification import (
+        differential_recertification_plan,
+    )
 
     module = _module()
     _certificate, certificate_path, results = _recertification_fixture(module, tmp_path)
     current = deepcopy(module.exam_snapshot())
     target = current["questions"][0]
     concept = target["public"]["blueprint"]["concept_family"]
-    target["secret"]["evidence_reference_identities"][0]["range_sha256"] = "sha256:" + "a" * 64
+    target["secret"]["evidence_reference_identities"][0]["range_sha256"] = (
+        "sha256:" + "a" * 64
+    )
     current["source_version"] = "1267.0.999"
     current["repository_identity"] = "sha256:" + "6" * 64
     _resign_snapshot(module, current)
-    plan = differential_recertification_plan(certificate_path, results[0], current_snapshot=current)
+    plan = differential_recertification_plan(
+        certificate_path, results[0], current_snapshot=current
+    )
     expected_questions = [
         row["id"]
         for row in current["questions"]
@@ -2924,9 +3729,13 @@ def test_differential_recertification_invalidates_only_concept_whose_declared_ev
     assert len(plan["preserved_concepts"]) == 10
 
 
-def test_differential_recertification_semantic_claim_change_invalidates_owning_concept(tmp_path: Path) -> None:
+def test_differential_recertification_semantic_claim_change_invalidates_owning_concept(
+    tmp_path: Path,
+) -> None:
     from copy import deepcopy
-    from oh_goon.repository_tooling.repository_understanding_recertification import differential_recertification_plan
+    from oh_goon.repository_tooling.repository_understanding_recertification import (
+        differential_recertification_plan,
+    )
 
     module = _module()
     _certificate, certificate_path, results = _recertification_fixture(module, tmp_path)
@@ -2936,14 +3745,20 @@ def test_differential_recertification_semantic_claim_change_invalidates_owning_c
     target["secret"]["expected_claims"][0]["statement"] += " changed"
     current["repository_identity"] = "sha256:" + "5" * 64
     _resign_snapshot(module, current)
-    plan = differential_recertification_plan(certificate_path, results[0], current_snapshot=current)
+    plan = differential_recertification_plan(
+        certificate_path, results[0], current_snapshot=current
+    )
     assert plan["affected_concepts"] == [concept]
     assert target["id"] in plan["recertification_question_ids"]
 
 
-def test_differential_recertification_unmapped_source_change_is_diagnostic_not_silent_authority(tmp_path: Path) -> None:
+def test_differential_recertification_unmapped_source_change_is_diagnostic_not_silent_authority(
+    tmp_path: Path,
+) -> None:
     from copy import deepcopy
-    from oh_goon.repository_tooling.repository_understanding_recertification import differential_recertification_plan
+    from oh_goon.repository_tooling.repository_understanding_recertification import (
+        differential_recertification_plan,
+    )
 
     module = _module()
     _certificate, certificate_path, results = _recertification_fixture(module, tmp_path)
@@ -2952,16 +3767,22 @@ def test_differential_recertification_unmapped_source_change_is_diagnostic_not_s
     current["repository_evidence_index"]["LICENSE"]["sha256"] = "1" * 64
     current["repository_identity"] = "sha256:" + "4" * 64
     _resign_snapshot(module, current)
-    plan = differential_recertification_plan(certificate_path, results[0], current_snapshot=current)
+    plan = differential_recertification_plan(
+        certificate_path, results[0], current_snapshot=current
+    )
     assert plan["status"] == "SOURCE_CHANGED_DECLARED_CONCEPT_BINDINGS_UNCHANGED"
     assert "LICENSE" in plan["unmapped_changed_paths"]
     assert plan["capability_state"] == "SUSPENDED_SOURCE_CHANGED"
     assert plan["enforcement_status"] == "EVIDENCE_ONLY"
 
 
-def test_differential_recertification_rejects_prior_result_not_bound_to_certificate(tmp_path: Path) -> None:
+def test_differential_recertification_rejects_prior_result_not_bound_to_certificate(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_recertification import differential_recertification_plan
+    from oh_goon.repository_tooling.repository_understanding_recertification import (
+        differential_recertification_plan,
+    )
 
     module = _module()
     _certificate, certificate_path, results = _recertification_fixture(module, tmp_path)
@@ -2969,11 +3790,17 @@ def test_differential_recertification_rejects_prior_result_not_bound_to_certific
     payload["candidate_run_identity"] = "substituted-run"
     payload["regrade_bundle"]["candidate_run_identity"] = "substituted-run"
     payload["certificate_identity"] = "sha256:" + module._canonical_json_sha256(
-        {key: value for key, value in payload.items() if key not in {"certificate_identity", "regrade_bundle", "regraded"}}
+        {
+            key: value
+            for key, value in payload.items()
+            if key not in {"certificate_identity", "regrade_bundle", "regraded"}
+        }
     )
     substituted = tmp_path / "substituted-result.json"
     substituted.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="not one of the capability certificate qualifying runs"):
+    with pytest.raises(
+        ValueError, match="not one of the capability certificate qualifying runs"
+    ):
         differential_recertification_plan(
             certificate_path,
             substituted,
@@ -2981,9 +3808,13 @@ def test_differential_recertification_rejects_prior_result_not_bound_to_certific
         )
 
 
-def test_differential_recertification_rejects_tampered_certificate(tmp_path: Path) -> None:
+def test_differential_recertification_rejects_tampered_certificate(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_recertification import differential_recertification_plan
+    from oh_goon.repository_tooling.repository_understanding_recertification import (
+        differential_recertification_plan,
+    )
 
     module = _module()
     certificate, certificate_path, results = _recertification_fixture(module, tmp_path)
@@ -2998,7 +3829,9 @@ def test_differential_recertification_rejects_tampered_certificate(tmp_path: Pat
 
 
 def _game_tape_fixture(module, tmp_path: Path):
-    from oh_goon.repository_tooling.repository_understanding_capability import capability_certificate
+    from oh_goon.repository_tooling.repository_understanding_capability import (
+        capability_certificate,
+    )
 
     _config, results, integrity, adversarial = _capability_fixture(module, tmp_path)
     certificate = capability_certificate(
@@ -3012,7 +3845,9 @@ def _game_tape_fixture(module, tmp_path: Path):
     return results, integrity, adversarial, certificate, certificate_path
 
 
-def test_game_tape_projects_complete_certificate_explainability_without_new_authority(tmp_path: Path) -> None:
+def test_game_tape_projects_complete_certificate_explainability_without_new_authority(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.repository_understanding_game_tape import (
         GAME_TAPE_TABS,
         game_tape,
@@ -3020,7 +3855,9 @@ def test_game_tape_projects_complete_certificate_explainability_without_new_auth
     )
 
     module = _module()
-    results, integrity, adversarial, certificate, certificate_path = _game_tape_fixture(module, tmp_path)
+    results, integrity, adversarial, certificate, certificate_path = _game_tape_fixture(
+        module, tmp_path
+    )
     tape = game_tape(
         results,
         integrity_paths=integrity,
@@ -3041,8 +3878,13 @@ def test_game_tape_projects_complete_certificate_explainability_without_new_auth
     assert len(tape["tabs"]["questions"]) == 157
     assert len(tape["tabs"]["benchmark_integrity"]) == 3
     assert all(row["comparable"] for row in tape["tabs"]["benchmark_integrity"])
-    assert all(row["adversarial_qualified"] for row in tape["tabs"]["benchmark_integrity"])
-    assert tape["tabs"]["qualification_capability"]["authorization"] == certificate["authorization"]
+    assert all(
+        row["adversarial_qualified"] for row in tape["tabs"]["benchmark_integrity"]
+    )
+    assert (
+        tape["tabs"]["qualification_capability"]["authorization"]
+        == certificate["authorization"]
+    )
     assert tape["tabs"]["recertification"] is None
     assert tape["game_tape_identity"].startswith("sha256:")
     rendered = json.dumps(tape)
@@ -3051,18 +3893,33 @@ def test_game_tape_projects_complete_certificate_explainability_without_new_auth
     assert "why_it_matters" not in rendered
 
 
-def test_game_tape_rejects_validly_rehashed_but_unreproducible_capability_projection(tmp_path: Path) -> None:
+def test_game_tape_rejects_validly_rehashed_but_unreproducible_capability_projection(
+    tmp_path: Path,
+) -> None:
     import hashlib
     import pytest
     from oh_goon.repository_tooling.repository_understanding_game_tape import game_tape
 
     module = _module()
-    results, integrity, adversarial, certificate, certificate_path = _game_tape_fixture(module, tmp_path)
-    certificate["median_composite_understanding"] = float(certificate["median_composite_understanding"]) - 0.1
-    body = {key: value for key, value in certificate.items() if key != "capability_certificate_identity"}
-    certificate["capability_certificate_identity"] = "sha256:" + hashlib.sha256(
-        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
+    results, integrity, adversarial, certificate, certificate_path = _game_tape_fixture(
+        module, tmp_path
+    )
+    certificate["median_composite_understanding"] = (
+        float(certificate["median_composite_understanding"]) - 0.1
+    )
+    body = {
+        key: value
+        for key, value in certificate.items()
+        if key != "capability_certificate_identity"
+    }
+    certificate["capability_certificate_identity"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                body, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
+    )
     certificate_path.write_text(json.dumps(certificate), encoding="utf-8")
     with pytest.raises(ValueError, match="cannot be reproduced"):
         game_tape(
@@ -3073,12 +3930,18 @@ def test_game_tape_rejects_validly_rehashed_but_unreproducible_capability_projec
         )
 
 
-def test_game_tape_binds_differential_recertification_and_surfaces_what_remains(tmp_path: Path) -> None:
+def test_game_tape_binds_differential_recertification_and_surfaces_what_remains(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.repository_understanding_game_tape import game_tape
-    from oh_goon.repository_tooling.repository_understanding_recertification import differential_recertification_plan
+    from oh_goon.repository_tooling.repository_understanding_recertification import (
+        differential_recertification_plan,
+    )
 
     module = _module()
-    results, integrity, adversarial, certificate, certificate_path = _game_tape_fixture(module, tmp_path)
+    results, integrity, adversarial, certificate, certificate_path = _game_tape_fixture(
+        module, tmp_path
+    )
     plan = differential_recertification_plan(
         certificate_path,
         results[0],
@@ -3095,18 +3958,27 @@ def test_game_tape_binds_differential_recertification_and_surfaces_what_remains(
     )
     assert tape["tabs"]["recertification"]["status"] == "NO_RECERTIFICATION_REQUIRED"
     assert tape["tabs"]["overview"]["what_remains"]["recertification_concepts"] == []
-    assert tape["tabs"]["overview"]["what_remains"]["recertification_question_ids"] == []
-    assert tape["input_identities"]["recertification_plan_identity"] == plan["recertification_plan_identity"]
+    assert (
+        tape["tabs"]["overview"]["what_remains"]["recertification_question_ids"] == []
+    )
+    assert (
+        tape["input_identities"]["recertification_plan_identity"]
+        == plan["recertification_plan_identity"]
+    )
 
 
-def test_game_tape_human_report_leads_with_authority_and_what_remains(tmp_path: Path) -> None:
+def test_game_tape_human_report_leads_with_authority_and_what_remains(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.repository_understanding_game_tape import (
         game_tape,
         human_game_tape_report,
     )
 
     module = _module()
-    results, integrity, adversarial, _certificate, certificate_path = _game_tape_fixture(module, tmp_path)
+    results, integrity, adversarial, _certificate, certificate_path = (
+        _game_tape_fixture(module, tmp_path)
+    )
     tape = game_tape(
         results,
         integrity_paths=integrity,
@@ -3121,13 +3993,20 @@ def test_game_tape_human_report_leads_with_authority_and_what_remains(tmp_path: 
     assert "Game Tape identity" in report
 
 
-def test_calibration_observation_provenance_identity_and_duplicate_run_rejection(tmp_path: Path) -> None:
+def test_calibration_observation_provenance_identity_and_duplicate_run_rejection(
+    tmp_path: Path,
+) -> None:
     import copy
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_calibration import calibration_report
+    from oh_goon.repository_tooling.repository_understanding_calibration import (
+        calibration_report,
+    )
 
     snapshot = _module().exam_snapshot()
-    authored = {question["id"]: question["public"]["difficulty"] for question in snapshot["questions"]}
+    authored = {
+        question["id"]: question["public"]["difficulty"]
+        for question in snapshot["questions"]
+    }
     run = {
         "system_id": "system-a",
         "candidate_identity": "sha256:" + "1" * 64,
@@ -3176,11 +4055,18 @@ def test_calibration_observation_provenance_identity_and_duplicate_run_rejection
         )
 
 
-def test_calibration_review_requires_complete_observation_provenance(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling.repository_understanding_calibration import calibration_report
+def test_calibration_review_requires_complete_observation_provenance(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.repository_understanding_calibration import (
+        calibration_report,
+    )
 
     snapshot = _module().exam_snapshot()
-    authored = {question["id"]: question["public"]["difficulty"] for question in snapshot["questions"]}
+    authored = {
+        question["id"]: question["public"]["difficulty"]
+        for question in snapshot["questions"]
+    }
     runs = []
     for cohort in ("STRONG", "MID", "WEAK"):
         for index in range(2):
@@ -3217,12 +4103,19 @@ def test_calibration_review_requires_complete_observation_provenance(tmp_path: P
     assert "observation_provenance_incomplete" in q1["review_eligibility"]["gaps"]
 
 
-def test_same_grading_artifact_cannot_count_twice_for_one_question(tmp_path: Path) -> None:
+def test_same_grading_artifact_cannot_count_twice_for_one_question(
+    tmp_path: Path,
+) -> None:
     import pytest
-    from oh_goon.repository_tooling.repository_understanding_calibration import calibration_report
+    from oh_goon.repository_tooling.repository_understanding_calibration import (
+        calibration_report,
+    )
 
     snapshot = _module().exam_snapshot()
-    authored = {question["id"]: question["public"]["difficulty"] for question in snapshot["questions"]}
+    authored = {
+        question["id"]: question["public"]["difficulty"]
+        for question in snapshot["questions"]
+    }
     common_grade = "sha256:" + "4" * 64
     runs = []
     for index in range(2):
@@ -3246,7 +4139,9 @@ def test_same_grading_artifact_cannot_count_twice_for_one_question(tmp_path: Pat
     }
     path = tmp_path / "duplicate-grade.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="grading artifact is represented by more than one"):
+    with pytest.raises(
+        ValueError, match="grading artifact is represented by more than one"
+    ):
         calibration_report(
             path,
             question_ids=authored,
@@ -3257,7 +4152,9 @@ def test_same_grading_artifact_cannot_count_twice_for_one_question(tmp_path: Pat
         )
 
 
-def test_shadow_external_answerability_fails_closed_on_secret_evidence_reference() -> None:
+def test_shadow_external_answerability_fails_closed_on_secret_evidence_reference() -> (
+    None
+):
     from dataclasses import replace
     import pytest
     from oh_goon.repository_tooling.repository_understanding_material import (
@@ -3267,11 +4164,17 @@ def test_shadow_external_answerability_fails_closed_on_secret_evidence_reference
     module = _module()
     questions = list(module.load_exam())
     lifecycle = module.question_lifecycle()
-    shadow_id = next(row["id"] for row in lifecycle["questions"] if not row["qualification_bank_member"])
+    shadow_id = next(
+        row["id"]
+        for row in lifecycle["questions"]
+        if not row["qualification_bank_member"]
+    )
     index = next(i for i, question in enumerate(questions) if question.id == shadow_id)
     questions[index] = replace(
         questions[index],
-        evidence_expectations=("docs/certification/answers/01-repository-ownership.yml:1-2",),
+        evidence_expectations=(
+            "docs/certification/answers/01-repository-ownership.yml:1-2",
+        ),
     )
     with pytest.raises(ValueError, match="shadow answerability is not release-ready"):
         _assert_external_answerability_ready(tuple(questions), lifecycle)
@@ -3281,7 +4184,10 @@ def test_shadow_question_health_maintenance_is_structural_and_non_mutating() -> 
     module = _module()
     manifest = module.verify()
     report = manifest["question_health_maintenance"]
-    assert report["policy_version"] == "repository-understanding-question-health-maintenance.v1"
+    assert (
+        report["policy_version"]
+        == "repository-understanding-question-health-maintenance.v1"
+    )
     assert report["scope"] == "PRE_PROMOTION_SHADOW_POOL"
     assert report["question_count"] == 63
     assert report["structurally_ready_count"] == 63
@@ -3290,12 +4196,21 @@ def test_shadow_question_health_maintenance_is_structural_and_non_mutating() -> 
     assert report["health_state_authority"] == "SECRET_QUESTION_AUDIT"
     assert report["automatic_health_mutation"] is False
     assert report["automatic_lifecycle_transition"] is False
-    assert set(report["empirical_states_requiring_observations"]) == {"NON_DISCRIMINATING"}
-    assert all(row["semantic_health_review"] == "REQUIRED" for row in report["questions"])
-    assert all(row["empirical_discrimination_review"] == "REQUIRED" for row in report["questions"])
+    assert set(report["empirical_states_requiring_observations"]) == {
+        "NON_DISCRIMINATING"
+    }
+    assert all(
+        row["semantic_health_review"] == "REQUIRED" for row in report["questions"]
+    )
+    assert all(
+        row["empirical_discrimination_review"] == "REQUIRED"
+        for row in report["questions"]
+    )
 
 
-def test_shadow_health_maintenance_blocks_duplicate_like_prompt_without_mutating_health() -> None:
+def test_shadow_health_maintenance_blocks_duplicate_like_prompt_without_mutating_health() -> (
+    None
+):
     from dataclasses import replace
     from oh_goon.repository_tooling.repository_understanding_material import (
         _assert_external_answerability_ready,
@@ -3307,29 +4222,44 @@ def test_shadow_health_maintenance_blocks_duplicate_like_prompt_without_mutating
     questions = list(module.load_exam())
     lifecycle = module.question_lifecycle()
     audit = module.question_audit()
-    shadow_ids = [row["id"] for row in lifecycle["questions"] if not row["qualification_bank_member"]]
+    shadow_ids = [
+        row["id"]
+        for row in lifecycle["questions"]
+        if not row["qualification_bank_member"]
+    ]
     first_id, second_id = shadow_ids[:2]
     first = next(question for question in questions if question.id == first_id)
-    second_index = next(index for index, question in enumerate(questions) if question.id == second_id)
+    second_index = next(
+        index for index, question in enumerate(questions) if question.id == second_id
+    )
     questions[second_index] = replace(questions[second_index], prompt=first.prompt)
     answerability = _assert_external_answerability_ready(tuple(questions), lifecycle)
-    report = _question_health_maintenance_audit(tuple(questions), lifecycle, audit, answerability)
+    report = _question_health_maintenance_audit(
+        tuple(questions), lifecycle, audit, answerability
+    )
     assert report["status"] == "BLOCKED"
     assert report["structural_blocker_count"] >= 2
     by_id = {row["id"]: row for row in report["questions"]}
     assert "POTENTIAL_DUPLICATE" in by_id[first_id]["structural_signals"]
     assert second_id in by_id[first_id]["duplicate_candidate_ids"]
     assert {row["health_status"] for row in audit["questions"]} == {"VALID"}
-    with pytest.raises(ValueError, match="shadow question health is not promotion-ready"):
-        _assert_question_health_maintenance_ready(tuple(questions), lifecycle, audit, answerability)
+    with pytest.raises(
+        ValueError, match="shadow question health is not promotion-ready"
+    ):
+        _assert_question_health_maintenance_ready(
+            tuple(questions), lifecycle, audit, answerability
+        )
 
 
-
-def test_shadow_questions_never_enter_score_grader_template_before_promotion(tmp_path: Path) -> None:
+def test_shadow_questions_never_enter_score_grader_template_before_promotion(
+    tmp_path: Path,
+) -> None:
     module = _module()
     submission = _submission(tmp_path)
     sheet = module.grade_template(submission=submission)
     graded_ids = [row["id"] for row in sheet["grades"]]
-    assert graded_ids == [f"Q{index:02d}" for index in range(1, 148)] + [f"Q{index}" for index in range(203, 213)]
+    assert graded_ids == [f"Q{index:02d}" for index in range(1, 148)] + [
+        f"Q{index}" for index in range(203, 213)
+    ]
     assert len(sheet["exam_snapshot"]["questions"]) == 157
     assert sheet["exam_snapshot"]["external_answerability"]["question_count"] == 63

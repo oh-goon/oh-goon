@@ -1,44 +1,54 @@
 from __future__ import annotations
+
 import json
 import os
-import signal
 import socket
 import tempfile
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
 from oh_goon.api.local_access import new_local_access_token
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.integrations._fleet_plan_cgroup_resources import NESTED_CGROUP_DELEGATED_ENV
 from oh_goon.core.process_birth import observe_process_liveness
-from oh_goon.repository_tooling.acceptance.product import exercise_location_lifecycle
-from oh_goon.repository_tooling.acceptance.dev_runtime_repositories import prepare_runtime_acceptance_repositories
-from oh_goon.repository_tooling.acceptance.local_delegation import needs_systemd_delegation, run_under_systemd_delegation
-from oh_goon.repository_tooling.acceptance.timing import RuntimeAcceptanceTiming
-from oh_goon.repository_tooling.acceptance.shared_plan import exercise_shared_plan
+from oh_goon.integrations._fleet_plan_cgroup_resources import NESTED_CGROUP_DELEGATED_ENV
+from oh_goon.repository_tooling.acceptance.dev_runtime_repositories import (
+    prepare_runtime_acceptance_repositories,
+)
+from oh_goon.repository_tooling.acceptance.local_delegation import (
+    needs_systemd_delegation,
+    run_under_systemd_delegation,
+)
 from oh_goon.repository_tooling.acceptance.local_runtime import (
     exercise_operator_parallel_acceptance,
     prepare_local_runtime_environment,
     prepare_verification_local_runtime_environment,
 )
+from oh_goon.repository_tooling.acceptance.product import exercise_location_lifecycle
+from oh_goon.repository_tooling.acceptance.shared_plan import exercise_shared_plan
+from oh_goon.repository_tooling.acceptance.timing import RuntimeAcceptanceTiming
 from oh_goon.repository_tooling.local_access_http import authorized_request
-from oh_goon.runtime.local_launch_plan import contributor_dev_plan
-from oh_goon.runtime.local_launch_supervisor import LocalLaunchStartupError, RunningLocalLaunch, start_contributor_launch
 from oh_goon.repository_tooling.release.runtime_journey import (
     cancel_acceptance_goon,
-    prepare_acceptance_repository,
-    prepare_interruptible_acceptance_repository,
     run_acceptance_goon,
     start_acceptance_goon,
     team_run_request_payload,
     wait_for_acceptance_run_status,
     wait_for_interruptible_step,
 )
+from oh_goon.runtime.local_launch_plan import contributor_dev_plan
+from oh_goon.runtime.local_launch_supervisor import (
+    LocalLaunchStartupError,
+    RunningLocalLaunch,
+    start_contributor_launch,
+)
+
 ROOT = Path(__file__).resolve().parents[4]
 HOST = "127.0.0.1"
 BACKEND_PORT = 8787
 FRONTEND_PORT = 5173
+
 
 def _port_is_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -48,6 +58,8 @@ def _port_is_free(port: int) -> bool:
         except OSError:
             return False
     return True
+
+
 def _wait_ports_free(*, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -55,6 +67,8 @@ def _wait_ports_free(*, timeout: float = 10.0) -> bool:
             return True
         time.sleep(0.1)
     return False
+
+
 def _http_status(
     url: str,
     *,
@@ -74,10 +88,14 @@ def _http_status(
             return response.status
     except urllib.error.HTTPError as exc:
         return exc.code
+
+
 def _request_json(url: str, *, token: str) -> object:
     request = authorized_request(url, access_token=token)
     with urllib.request.urlopen(request, timeout=5.0) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
 def _post_json_expect_error(
     url: str,
     *,
@@ -88,9 +106,7 @@ def _post_json_expect_error(
 ) -> dict[str, object]:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"} if data is not None else None
-    request = authorized_request(
-        url, access_token=token, data=data, method="POST", headers=headers
-    )
+    request = authorized_request(url, access_token=token, data=data, method="POST", headers=headers)
     try:
         urllib.request.urlopen(request, timeout=5.0)
     except urllib.error.HTTPError as exc:
@@ -105,6 +121,7 @@ def _post_json_expect_error(
         f"expected HTTP {expected_status}/{expected_code} from {url}, request unexpectedly succeeded"
     )
 
+
 def _exchange_cookie(base_url: str, token: str) -> str:
     request = urllib.request.Request(
         f"{base_url}/api/local-session",
@@ -113,16 +130,23 @@ def _exchange_cookie(base_url: str, token: str) -> str:
     )
     with urllib.request.urlopen(request, timeout=2.0) as response:
         if response.status != 204:
-            raise RuntimeError(f"local-session exchange returned HTTP {response.status}, expected 204")
+            raise RuntimeError(
+                f"local-session exchange returned HTTP {response.status}, expected 204"
+            )
         raw_cookie = response.headers.get("Set-Cookie", "")
     if "HttpOnly" not in raw_cookie or "SameSite=strict" not in raw_cookie:
-        raise RuntimeError("local-session exchange did not return the expected HttpOnly SameSite=strict cookie")
+        raise RuntimeError(
+            "local-session exchange did not return the expected HttpOnly SameSite=strict cookie"
+        )
     pair = raw_cookie.split(";", 1)[0].strip()
     if "=" not in pair:
         raise RuntimeError("local-session exchange did not return a usable session cookie")
     return pair
 
-def _wait_status(url: str, expected: int, *, token: str | None = None, timeout: float = 30.0) -> None:
+
+def _wait_status(
+    url: str, expected: int, *, token: str | None = None, timeout: float = 30.0
+) -> None:
     deadline = time.monotonic() + timeout
     last: int | str = "not attempted"
     while time.monotonic() < deadline:
@@ -134,6 +158,7 @@ def _wait_status(url: str, expected: int, *, token: str | None = None, timeout: 
             last = str(exc)
         time.sleep(0.2)
     raise RuntimeError(f"{url} did not reach HTTP {expected}; last result: {last}")
+
 
 def _pid_is_alive(pid: int) -> bool:
     observed = observe_process_liveness(pid)
@@ -158,7 +183,9 @@ def _wait_pid_dead(pid: int, *, timeout: float = 5.0) -> bool:
 
 
 def _launch_dev(root: Path, env: dict[str, str]) -> RunningLocalLaunch:
-    return start_contributor_launch(root=root, env=env, plan=contributor_dev_plan(root), token=new_local_access_token())
+    return start_contributor_launch(
+        root=root, env=env, plan=contributor_dev_plan(root), token=new_local_access_token()
+    )
 
 
 def _exercise_access_boundaries(*, frontend_base: str, token: str, issues: list[str]) -> None:
@@ -175,6 +202,7 @@ def _exercise_access_boundaries(*, frontend_base: str, token: str, issues: list[
     if cookie_status != 200:
         issues.append(f"browser-session cookie returned HTTP {cookie_status}, expected 200")
 
+
 def _verify_restart_persistence(
     *,
     frontend_base: str,
@@ -186,9 +214,7 @@ def _verify_restart_persistence(
     configured = str(repositories.resolve())
     if not isinstance(locations, dict) or configured not in locations.get("locations", []):
         raise RuntimeError("real-world dev restart did not preserve configured repository location")
-    historical = _request_json(
-        f"{frontend_base}/api/fleet/runs/{historical_run_id}", token=token
-    )
+    historical = _request_json(f"{frontend_base}/api/fleet/runs/{historical_run_id}", token=token)
     if "acceptance-step" not in json.dumps(historical):
         raise RuntimeError("real-world dev restart did not preserve historical Game Tape")
     shared = _request_json(
@@ -197,7 +223,10 @@ def _verify_restart_persistence(
     if not isinstance(shared, dict) or shared.get("name") != "acceptance-shared":
         raise RuntimeError("real-world dev restart did not preserve Shared Plan state")
 
-def _verify_parallel_cancel_restart(frontend_base: str, token: str, cancelled_id: str, success_id: str) -> None:
+
+def _verify_parallel_cancel_restart(
+    frontend_base: str, token: str, cancelled_id: str, success_id: str
+) -> None:
     cancelled = _request_json(f"{frontend_base}/api/fleet/runs/{cancelled_id}", token=token)
     cancelled_run = cancelled.get("run") if isinstance(cancelled, dict) else None
     if (
@@ -213,16 +242,25 @@ def _verify_parallel_cancel_restart(frontend_base: str, token: str, cancelled_id
         or success_run.get("status") != "COMPLETED"
         or success.get("outcome") != "SUCCESS"
     ):
-        raise RuntimeError("restart did not preserve the successful post-cancel parallel Shared Plan")
+        raise RuntimeError(
+            "restart did not preserve the successful post-cancel parallel Shared Plan"
+        )
 
-def _verify_parallel_repair_restart(frontend_base: str, token: str, failed_id: str, repaired_id: str) -> None:
+
+def _verify_parallel_repair_restart(
+    frontend_base: str, token: str, failed_id: str, repaired_id: str
+) -> None:
     failed = _request_json(f"{frontend_base}/api/fleet/runs/{failed_id}", token=token)
     failed_run = failed.get("run") if isinstance(failed, dict) else None
     if not isinstance(failed_run, dict) or failed_run.get("status") != "FAILED":
-        raise RuntimeError("restart did not preserve the repository-attributed failed parallel Shared Plan")
+        raise RuntimeError(
+            "restart did not preserve the repository-attributed failed parallel Shared Plan"
+        )
     rendered = json.dumps(failed)
     if "parallel-failure-left" not in rendered or "parallel-failure-right" not in rendered:
-        raise RuntimeError("restart lost per-repository attribution for failed parallel Shared Plan")
+        raise RuntimeError(
+            "restart lost per-repository attribution for failed parallel Shared Plan"
+        )
     repaired = _request_json(f"{frontend_base}/api/fleet/runs/{repaired_id}", token=token)
     repaired_run = repaired.get("run") if isinstance(repaired, dict) else None
     if (
@@ -231,6 +269,7 @@ def _verify_parallel_repair_restart(frontend_base: str, token: str, failed_id: s
         or repaired.get("outcome") != "SUCCESS"
     ):
         raise RuntimeError("restart did not preserve the repaired successful parallel Shared Plan")
+
 
 def _verify_parallel_stale_restart(frontend_base: str, token: str, recovered_id: str) -> None:
     recovered = _request_json(f"{frontend_base}/api/fleet/runs/{recovered_id}", token=token)
@@ -241,6 +280,7 @@ def _verify_parallel_stale_restart(frontend_base: str, token: str, recovered_id:
         or recovered.get("outcome") != "SUCCESS"
     ):
         raise RuntimeError("restart did not preserve the refreshed post-stale parallel Shared Plan")
+
 
 def _verify_restart_history(
     rendered_history: str,
@@ -257,6 +297,7 @@ def _verify_restart_history(
             "real-world dev restart history did not retain success/cancelled/competing/interrupted/parallel-failed/parallel-repaired/stale-recovered-without-stale-admission/post-restart runs"
         )
 
+
 def _verify_primary_restart_state(
     frontend_base: str, token: str, cancelled_run_id: str, interrupted_run_id: str
 ) -> None:
@@ -267,18 +308,25 @@ def _verify_primary_restart_state(
         or cancelled_run.get("status") != "CANCELLED"
         or cancelled.get("outcome") != "CANCELLED"
     ):
-        raise RuntimeError(f"restart did not preserve the physically cancelled real Run: {cancelled!r}")
+        raise RuntimeError(
+            f"restart did not preserve the physically cancelled real Run: {cancelled!r}"
+        )
     interrupted = _request_json(f"{frontend_base}/api/fleet/runs/{interrupted_run_id}", token=token)
     run = interrupted.get("run") if isinstance(interrupted, dict) else None
     if not isinstance(run, dict) or run.get("status") != "FAILED":
-        raise RuntimeError(f"crash-interrupted real Run was not terminalized FAILED: {interrupted!r}")
+        raise RuntimeError(
+            f"crash-interrupted real Run was not terminalized FAILED: {interrupted!r}"
+        )
     failure = run.get("failure")
     failure_code = failure.get("code") if isinstance(failure, dict) else None
     if failure_code not in {"REPOSITORY_EFFECT_OUTCOME_UNKNOWN", "RUN_INTERRUPTED_BY_RESTART"}:
-        raise RuntimeError(f"crash-interrupted real Run lost canonical restart failure evidence: {interrupted!r}")
+        raise RuntimeError(
+            f"crash-interrupted real Run lost canonical restart failure evidence: {interrupted!r}"
+        )
     fleet = _request_json(f"{frontend_base}/api/fleet", token=token)
     if not isinstance(fleet, dict) or fleet.get("active_fleet_run") is not None:
         raise RuntimeError("crash/restart left a ghost active Fleet Run")
+
 
 def _verify_crash_restart_journey(
     *,
@@ -321,9 +369,7 @@ def _verify_crash_restart_journey(
         if parallel_stale_recovered_run_id is not None:
             _verify_parallel_stale_restart(frontend_base, token2, parallel_stale_recovered_run_id)
 
-        _verify_primary_restart_state(
-            frontend_base, token2, cancelled_run_id, interrupted_run_id
-        )
+        _verify_primary_restart_state(frontend_base, token2, cancelled_run_id, interrupted_run_id)
         second_run_id = run_acceptance_goon(
             base_url=frontend_base,
             server_repository_path=str(repository.resolve()),
@@ -363,6 +409,7 @@ def _post_crash_cleanup_issues(interrupted_pid: int | None) -> tuple[str, ...]:
         issues.append("crashed make dev left 127.0.0.1:5173 or :8787 occupied")
     return tuple(issues)
 
+
 def _missing_runtime_identity(*values: object | None) -> bool:
     return any(value is None for value in values)
 
@@ -389,7 +436,9 @@ def accept_local_runtime_verification(root: Path = ROOT) -> tuple[str, ...]:
         running: RunningLocalLaunch | None = None
         try:
             running = _launch_dev(root, env)
-            _exercise_access_boundaries(frontend_base=frontend_base, token=running.token, issues=issues)
+            _exercise_access_boundaries(
+                frontend_base=frontend_base, token=running.token, issues=issues
+            )
         except (LocalLaunchStartupError, OSError, RuntimeError, urllib.error.URLError) as exc:
             issues.append(str(exc))
             if running is not None:
@@ -401,7 +450,9 @@ def accept_local_runtime_verification(root: Path = ROOT) -> tuple[str, ...]:
             if running is not None:
                 running.stop()
         if not _wait_ports_free():
-            issues.append("local-runtime verification teardown left 127.0.0.1:5173 or :8787 occupied")
+            issues.append(
+                "local-runtime verification teardown left 127.0.0.1:5173 or :8787 occupied"
+            )
         return tuple(issues)
 
 
@@ -413,16 +464,22 @@ def accept_dev_runtime(
     interruptible_step_seconds = timing.interruptible_step_seconds
     occupied = [str(port) for port in (FRONTEND_PORT, BACKEND_PORT) if not _port_is_free(port)]
     if occupied:
-        return (f"local-access runtime acceptance requires free loopback ports before startup: {', '.join(occupied)}",)
+        return (
+            f"local-access runtime acceptance requires free loopback ports before startup: {', '.join(occupied)}",
+        )
 
     with tempfile.TemporaryDirectory(prefix="oh-goon-dev-runtime-") as temporary:
         temp = Path(temporary)
         state = temp / "state"
         config = temp / "config"
-        repositories, repository, cancelled_repository, competing_repository, interrupted_repository = (
-            prepare_runtime_acceptance_repositories(
-                temp, interruptible_step_seconds=interruptible_step_seconds
-            )
+        (
+            repositories,
+            repository,
+            cancelled_repository,
+            competing_repository,
+            interrupted_repository,
+        ) = prepare_runtime_acceptance_repositories(
+            temp, interruptible_step_seconds=interruptible_step_seconds
         )
         env, operator_executor_configured, executor_issue = prepare_local_runtime_environment(
             temp=temp, state=state, config=config
@@ -511,9 +568,13 @@ def accept_dev_runtime(
                 expected_code="EXECUTION_BUSY",
             )
             if not _pid_is_alive(cancelled_pid):
-                raise RuntimeError("competing repository admission disturbed the active physical Step")
+                raise RuntimeError(
+                    "competing repository admission disturbed the active physical Step"
+                )
             if (cancelled_repository / "acceptance-step.finished").exists():
-                raise RuntimeError("active Step completed while testing conflicting admission isolation")
+                raise RuntimeError(
+                    "active Step completed while testing conflicting admission isolation"
+                )
             cancel_result = cancel_acceptance_goon(
                 base_url=frontend_base, run_id=cancelled_run_id, access_token=token
             )
@@ -534,14 +595,21 @@ def accept_dev_runtime(
             if not _wait_pid_dead(cancelled_pid):
                 raise RuntimeError("real-world cancellation left the physical Step child alive")
             if (cancelled_repository / "acceptance-step.finished").exists():
-                raise RuntimeError("real-world cancelled Step reached its forbidden completion marker")
+                raise RuntimeError(
+                    "real-world cancelled Step reached its forbidden completion marker"
+                )
             repeated_cancel = cancel_acceptance_goon(
                 base_url=frontend_base, run_id=cancelled_run_id, access_token=token
             )
             if repeated_cancel.get("status") != "CANCELLED":
-                raise RuntimeError("real-world repeated cancellation was not idempotently CANCELLED")
+                raise RuntimeError(
+                    "real-world repeated cancellation was not idempotently CANCELLED"
+                )
             after_cancel = _request_json(f"{frontend_base}/api/fleet", token=token)
-            if not isinstance(after_cancel, dict) or after_cancel.get("active_fleet_run") is not None:
+            if (
+                not isinstance(after_cancel, dict)
+                or after_cancel.get("active_fleet_run") is not None
+            ):
                 raise RuntimeError("real-world cancellation left a ghost active Fleet Run")
             competing_run_id = run_acceptance_goon(
                 base_url=frontend_base,
@@ -569,7 +637,12 @@ def accept_dev_runtime(
             )
         finally:
             if issues or _missing_runtime_identity(
-                first_run_id, cancelled_run_id, cancelled_pid, competing_run_id, interrupted_run_id, interrupted_pid
+                first_run_id,
+                cancelled_run_id,
+                cancelled_pid,
+                competing_run_id,
+                interrupted_run_id,
+                interrupted_pid,
             ):
                 running.stop()
             else:
@@ -606,6 +679,7 @@ def accept_dev_runtime(
         if not _wait_ports_free():
             issues.append("restarted make dev teardown left 127.0.0.1:5173 or :8787 occupied")
         return tuple(issues)
+
 
 def main(argv: tuple[str, ...] | None = None) -> int:
     if argv is None:
@@ -657,7 +731,11 @@ def main(argv: tuple[str, ...] | None = None) -> int:
         for issue in issues:
             print(f"  - {issue}")
         return 1
-    print("Local-access dev runtime acceptance passed: auth + Vite proxy -> real Repo/Goon/Game Tape -> Shared Plan -> optional strict parallel Shared Plan physical fan-out/cancel/failure-isolation/repair-rerun/stale-preview-fencing when an executor is configured -> wrong-run cancellation isolation + competing repository busy rejection -> physical live-Step cancellation + child termination -> lease release + competing repository execution -> active-Step hard crash/restart -> durable cancellation/crash recovery -> post-restart execution -> deterministic teardown verified.")
+    print(
+        "Local-access dev runtime acceptance passed: auth + Vite proxy -> real Repo/Goon/Game Tape -> Shared Plan -> optional strict parallel Shared Plan physical fan-out/cancel/failure-isolation/repair-rerun/stale-preview-fencing when an executor is configured -> wrong-run cancellation isolation + competing repository busy rejection -> physical live-Step cancellation + child termination -> lease release + competing repository execution -> active-Step hard crash/restart -> durable cancellation/crash recovery -> post-restart execution -> deterministic teardown verified."
+    )
     return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

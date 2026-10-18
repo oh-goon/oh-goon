@@ -22,17 +22,48 @@ UNPROVISIONED_FLEET_PLAN_INGRESS = (
     "production Plan ingress Fleet Enforcer authority not provisioned"
 )
 UNPROVISIONED_FLEET_ADMISSION = "production Fleet Enforcer authority not provisioned"
-CONTRACT_KEYS = frozenset({
-    "run_id", "resolved_plan_identity", "repository_identity", "source_identity",
-    "lock_identity", "native_tool_identity", "execution_environment_identity",
-    "backend_capability_manifest_identity", "executor_generation", "run_authority",
-    "step_envelopes", "step_teardown_envelopes", "run_teardown_envelope",
-    "lineage_policy", "artifact_type_policy", "evidence_policy", "redaction_policy",
-    "retention_policy", "observation_schema_version", "evaluator_version",
-    "rollup_version", "journal_schema_version", "journal_identity_version",
-    "receipt_canonicalization_version", "receipt_authentication_scheme_version",
-})
-RECEIPT_DOMAINS = frozenset({"admission", "step-output", "terminal", "unresolved", "recovery-transfer", "admission-signer-epoch", "agent-source-prework", "agent-source-prework-stage", "agent-tool-launch-grant"})
+CONTRACT_KEYS = frozenset(
+    {
+        "run_id",
+        "resolved_plan_identity",
+        "repository_identity",
+        "source_identity",
+        "lock_identity",
+        "native_tool_identity",
+        "execution_environment_identity",
+        "backend_capability_manifest_identity",
+        "executor_generation",
+        "run_authority",
+        "step_envelopes",
+        "step_teardown_envelopes",
+        "run_teardown_envelope",
+        "lineage_policy",
+        "artifact_type_policy",
+        "evidence_policy",
+        "redaction_policy",
+        "retention_policy",
+        "observation_schema_version",
+        "evaluator_version",
+        "rollup_version",
+        "journal_schema_version",
+        "journal_identity_version",
+        "receipt_canonicalization_version",
+        "receipt_authentication_scheme_version",
+    }
+)
+RECEIPT_DOMAINS = frozenset(
+    {
+        "admission",
+        "step-output",
+        "terminal",
+        "unresolved",
+        "recovery-transfer",
+        "admission-signer-epoch",
+        "agent-source-prework",
+        "agent-source-prework-stage",
+        "agent-tool-launch-grant",
+    }
+)
 
 
 class TrustProtocolError(ValueError):
@@ -60,7 +91,9 @@ def canonical_bytes(payload: Mapping[str, Any]) -> bytes:
     if not isinstance(payload, dict):
         raise TrustProtocolError("authority must be a plain mapping")
     _check_tree(payload)
-    return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return json.dumps(
+        payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
 
 
 def digest(domain: str, payload: bytes) -> str:
@@ -82,16 +115,27 @@ class AdmittedRunContract:
             raise TrustProtocolError("incomplete or unknown AdmittedRunContract authority")
         if not isinstance(authority["run_id"], str) or not authority["run_id"]:
             raise TrustProtocolError("run identity required")
-        if type(authority["executor_generation"]) is not int or authority["executor_generation"] < 1:
+        if (
+            type(authority["executor_generation"]) is not int
+            or authority["executor_generation"] < 1
+        ):
             raise TrustProtocolError("positive executor generation required")
         for field in ("execution_environment_identity", "backend_capability_manifest_identity"):
             value = authority[field]
-            if not isinstance(value, str) or not value.startswith(DIGEST_PREFIX) or len(value) != 71:
+            if (
+                not isinstance(value, str)
+                or not value.startswith(DIGEST_PREFIX)
+                or len(value) != 71
+            ):
                 raise TrustProtocolError(f"exact {field} digest required")
             if any(c not in "0123456789abcdef" for c in value[7:]):
                 raise TrustProtocolError(f"noncanonical {field} digest")
-        for field in ("run_authority", "step_envelopes", "step_teardown_envelopes",
-                      "run_teardown_envelope"):
+        for field in (
+            "run_authority",
+            "step_envelopes",
+            "step_teardown_envelopes",
+            "run_teardown_envelope",
+        ):
             if not isinstance(authority[field], dict) or not authority[field]:
                 raise TrustProtocolError(f"structured {field} authority required")
         for field in CONTRACT_KEYS - {"executor_generation"}:
@@ -142,7 +186,11 @@ class ReceiptAuthenticator:
         return AuthenticatedReceipt(domain, self.key_id, data, self._mac(domain, data))
 
     def verify(self, receipt: AuthenticatedReceipt, *, domain: str) -> dict[str, Any]:
-        if domain not in RECEIPT_DOMAINS or receipt.domain != domain or receipt.key_id != self.key_id:
+        if (
+            domain not in RECEIPT_DOMAINS
+            or receipt.domain != domain
+            or receipt.key_id != self.key_id
+        ):
             raise TrustProtocolError("wrong receipt domain or trusted key identity")
         try:
             decoded = json.loads(receipt.payload)
@@ -155,24 +203,54 @@ class ReceiptAuthenticator:
         return decoded
 
 
-def admission_receipt(auth: ReceiptAuthenticator, contract: AdmittedRunContract) -> AuthenticatedReceipt:
-    return auth.issue("admission", {"decision": "ADMITTED", "run_id": contract.fields["run_id"],
-                                   "contract_identity": contract.identity, "protocol": PROTOCOL_VERSION})
+def admission_receipt(
+    auth: ReceiptAuthenticator, contract: AdmittedRunContract
+) -> AuthenticatedReceipt:
+    return auth.issue(
+        "admission",
+        {
+            "decision": "ADMITTED",
+            "run_id": contract.fields["run_id"],
+            "contract_identity": contract.identity,
+            "protocol": PROTOCOL_VERSION,
+        },
+    )
 
 
-def rejected_receipt(auth: ReceiptAuthenticator, *, run_id: str, reason: str) -> AuthenticatedReceipt:
+def rejected_receipt(
+    auth: ReceiptAuthenticator, *, run_id: str, reason: str
+) -> AuthenticatedReceipt:
     if not run_id or not reason:
         raise TrustProtocolError("rejection requires run and reason")
-    return auth.issue("admission", {"decision": "REJECTED", "run_id": run_id,
-                                   "reason": reason, "protocol": PROTOCOL_VERSION})
+    return auth.issue(
+        "admission",
+        {"decision": "REJECTED", "run_id": run_id, "reason": reason, "protocol": PROTOCOL_VERSION},
+    )
 
 
-def step_output_receipt(auth: ReceiptAuthenticator, *, run_id: str, step_id: str,
-                        contract_identity: str, output_identity: str, semantic_type: str,
-                        lineage_identity: str) -> AuthenticatedReceipt:
-    if not all((run_id, step_id, contract_identity, output_identity, semantic_type, lineage_identity)):
+def step_output_receipt(
+    auth: ReceiptAuthenticator,
+    *,
+    run_id: str,
+    step_id: str,
+    contract_identity: str,
+    output_identity: str,
+    semantic_type: str,
+    lineage_identity: str,
+) -> AuthenticatedReceipt:
+    if not all(
+        (run_id, step_id, contract_identity, output_identity, semantic_type, lineage_identity)
+    ):
         raise TrustProtocolError("complete Step output lineage required")
-    return auth.issue("step-output", {"protocol": PROTOCOL_VERSION, "run_id": run_id,
-        "step_id": step_id, "contract_identity": contract_identity,
-        "output_identity": output_identity, "semantic_type": semantic_type,
-        "lineage_identity": lineage_identity})
+    return auth.issue(
+        "step-output",
+        {
+            "protocol": PROTOCOL_VERSION,
+            "run_id": run_id,
+            "step_id": step_id,
+            "contract_identity": contract_identity,
+            "output_identity": output_identity,
+            "semantic_type": semantic_type,
+            "lineage_identity": lineage_identity,
+        },
+    )

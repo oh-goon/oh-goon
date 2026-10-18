@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from oh_goon.api.dependencies import executor_pool
-from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.fleet_executor_operations import (
     FleetExecutorPoolSnapshot,
     FleetExecutorStatus,
     PlacementQueueEntry,
     PlacementQueueSnapshot,
 )
+from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 
 router = APIRouter(prefix="/fleet/executors", tags=["fleet"])

@@ -3,13 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.fleet_plan_output_refs import goon_workspace_reference
 from oh_goon.core.fleet_plan_composition import (
     bind_inputs,
     qualify_step_dependencies,
     render_step,
     resolve_output_references,
 )
+from oh_goon.core.fleet_plan_output_refs import goon_workspace_reference
 from oh_goon.core.models.fleet_plan import (
     CompiledExecutionTemplate,
     CompiledGoonImportStep,
@@ -27,11 +27,11 @@ from oh_goon.services.fleet_plan_composition_scope import (
     referenced_step_ids,
     render_pipeline_step,
 )
-from oh_goon.services.fleet_plan_resolution_context import FleetPlanResolutionContext
 from oh_goon.services.fleet_plan_input_resolution import (
     materialize_projected_inputs,
     resolve_input_sources,
 )
+from oh_goon.services.fleet_plan_resolution_context import FleetPlanResolutionContext
 from oh_goon.services.fleet_plan_step_resolution import resolve_plan_step
 
 
@@ -228,9 +228,7 @@ def child_goon_bindings(
                 )
             producer = goon_workspaces.get(workspace_goon)
             if producer is None:
-                raise FleetPlanInvalid(
-                    f"Goon import {workspace_goon} does not publish a workspace"
-                )
+                raise FleetPlanInvalid(f"Goon import {workspace_goon} does not publish a workspace")
             explicit[item.name] = producer
             origins[item.name] = f"workspace:{workspace_goon}"
             referenced_workspaces.add(producer)
@@ -238,9 +236,7 @@ def child_goon_bindings(
         if workspace_goon is not None:
             producer = goon_workspaces.get(workspace_goon)
             if producer is None:
-                raise FleetPlanInvalid(
-                    f"Goon import {workspace_goon} does not publish a workspace"
-                )
+                raise FleetPlanInvalid(f"Goon import {workspace_goon} does not publish a workspace")
             explicit[item.name] = producer
             origins[item.name] = f"workspace:{workspace_goon}"
             referenced_workspaces.add(producer)
@@ -258,6 +254,7 @@ def child_goon_bindings(
     external.update(referenced_step_ids(explicit))
     external.update(referenced_workspaces)
     return inputs, origins, frozenset(external)
+
 
 def _resolved_step_source(
     context: FleetPlanResolutionContext,

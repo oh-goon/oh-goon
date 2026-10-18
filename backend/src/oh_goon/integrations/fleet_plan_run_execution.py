@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,13 +18,14 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanStepExecution,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
+from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunDetail
-from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
-from oh_goon.integrations.fleet_plan_process_isolation import TrustedLocalRunScope
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
+from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.path_authority import StrictHostPathAuthority, canonical_path
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
+from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
@@ -43,17 +43,17 @@ from oh_goon.integrations._fleet_plan_step_local_execution import (
 from oh_goon.integrations._fleet_plan_step_sequence import FleetPlanStepSequence
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.integrations.fleet_plan_environment import require_environment
-from oh_goon.integrations.fleet_plan_managed_runtime import prepare_managed_runtimes
 from oh_goon.integrations.fleet_plan_import_applicability import applicable_plan_for_repository
+from oh_goon.integrations.fleet_plan_managed_runtime import prepare_managed_runtimes
 from oh_goon.integrations.fleet_plan_process_isolation import (
     ProcessIsolationBackend,
+    TrustedLocalRunScope,
     admitted_tl1_run_context,
     isolation_backend_evidence,
     select_bound_process_isolation_backend,
 )
 from oh_goon.integrations.fleet_plan_run import PreparedPlanRun
 from oh_goon.integrations.fleet_plan_step_execution import StepLifecycleObserver, StepRuntime
-from oh_goon.core.models.termination import TerminationSignal
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,16 +133,19 @@ class FleetPlanRunExecutor:
                 "Strict Fleet CI/CD requires configured deployment path authority"
             )
         process_isolation = select_bound_process_isolation_backend(
-            plan, admitted_isolation_backend, self._process_isolation_backends,
+            plan,
+            admitted_isolation_backend,
+            self._process_isolation_backends,
             admitted_run=admitted_run,
         )
         # The original journal owns these facts. Selection already validated
         # the same Run; no consent is minted or inferred from Plan inputs.
-        consent, scope = (admitted_tl1_run_context(plan, admitted_isolation_backend, admitted_run)
-                          if admitted_run is not None else (None, None))
-        active_plan, source_applicability = applicable_plan_for_repository(
-            repository.path, plan
+        consent, scope = (
+            admitted_tl1_run_context(plan, admitted_isolation_backend, admitted_run)
+            if admitted_run is not None
+            else (None, None)
         )
+        active_plan, source_applicability = applicable_plan_for_repository(repository.path, plan)
         preflight_run_capabilities(active_plan, self._path_authority)
         self._preflight_strict_steps(
             repository.path, active_plan, cancel_requested=cancel_requested
@@ -193,8 +196,13 @@ class FleetPlanRunExecutor:
 
         if plan.execution.purpose is ExecutionPurpose.CICD:
             raise FleetPlanInvalid("Strict CI/CD plans require execute_strict_run")
-        runtime = self._step_runtime(cancel_requested, fleet_run_id, repository_id, lifecycle_observer,
-                                     agent_delivery_for=agent_delivery_for)
+        runtime = self._step_runtime(
+            cancel_requested,
+            fleet_run_id,
+            repository_id,
+            lifecycle_observer,
+            agent_delivery_for=agent_delivery_for,
+        )
         sequence = FleetPlanStepSequence(repository, runtime, output_observer)
         for step in plan.steps:
             sequence.run_direct(step)
@@ -226,8 +234,10 @@ class FleetPlanRunExecutor:
             )
         # Check exact Run identity before binding callbacks or materializing
         # any disposable Step attempts. No consent may transfer to another Run.
-        if (prepared_run.trusted_local_scope is not None
-                and prepared_run.trusted_local_scope.fleet_run_id != fleet_run_id):
+        if (
+            prepared_run.trusted_local_scope is not None
+            and prepared_run.trusted_local_scope.fleet_run_id != fleet_run_id
+        ):
             raise FleetPlanInvalid("TL-1 prepared Run identity differs from worker Run")
         # The callback used while freezing immutable inputs can be backed by a
         # preparation-scoped SQLite observer and is invalid after prepare_strict_run

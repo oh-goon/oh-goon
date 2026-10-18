@@ -1,4 +1,5 @@
 """A1: original certification state selection must fail before state/effects."""
+
 from __future__ import annotations
 
 import json
@@ -24,17 +25,33 @@ def _env(tmp_path, monkeypatch):
     return state
 
 
-@pytest.mark.parametrize("attack", [
-    "missing-db", "different-db", "relative-db", "missing-league",
-    "different-league", "new-state-home", "revoked-signer",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "missing-db",
+        "different-db",
+        "relative-db",
+        "missing-league",
+        "different-league",
+        "new-state-home",
+        "revoked-signer",
+    ],
+)
 def test_wrong_certification_selection_rejected_before_state_lease(
-    tmp_path, monkeypatch, attack,
+    tmp_path,
+    monkeypatch,
+    attack,
 ):
-    args, _params, conn, calls, _lifecycle, binding, owner, _inventory, _roots, _ = provisioned(tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, binding, owner, _inventory, _roots, _ = provisioned(
+        tmp_path, monkeypatch
+    )
     state = _env(tmp_path, monkeypatch)
     monkeypatch.setattr(frontdoor, "_static_source_admission", lambda: True)
-    monkeypatch.setattr(frontdoor, "_workflow_main_with_state_lease", lambda *_a, **_kw: pytest.fail("mutable state lease"))
+    monkeypatch.setattr(
+        frontdoor,
+        "_workflow_main_with_state_lease",
+        lambda *_a, **_kw: pytest.fail("mutable state lease"),
+    )
     observed = []
     observer = type(owner).inspect_deployment_readiness
 
@@ -64,7 +81,8 @@ def test_wrong_certification_selection_rejected_before_state_lease(
     try:
         with pytest.raises(TrustProtocolError):
             frontdoor.certify_deployment_run(
-                fleet_provisioner=owner, fleet_run_id="durable-run",
+                fleet_provisioner=owner,
+                fleet_run_id="durable-run",
             )
         assert observed == (["durable-run"] if attack == "revoked-signer" else [])
         assert not state.exists(), "selection alone must not create certification state"
@@ -76,10 +94,16 @@ def test_wrong_certification_selection_rejected_before_state_lease(
 
 
 def test_native_observation_cannot_change_control_path_before_lease(tmp_path, monkeypatch):
-    args, _params, conn, calls, _lifecycle, _binding, owner, _inventory, _roots, _ = provisioned(tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, _binding, owner, _inventory, _roots, _ = provisioned(
+        tmp_path, monkeypatch
+    )
     state = _env(tmp_path, monkeypatch)
     monkeypatch.setattr(frontdoor, "_static_source_admission", lambda: True)
-    monkeypatch.setattr(frontdoor, "_workflow_main_with_state_lease", lambda *_a, **_kw: pytest.fail("mutable state lease"))
+    monkeypatch.setattr(
+        frontdoor,
+        "_workflow_main_with_state_lease",
+        lambda *_a, **_kw: pytest.fail("mutable state lease"),
+    )
     original = type(owner).inspect_deployment_readiness
 
     def racing_observer(self, run_id):
@@ -98,19 +122,33 @@ def test_native_observation_cannot_change_control_path_before_lease(tmp_path, mo
         conn.close()
 
 
-def test_original_in_process_app_transport_keeps_one_owner_and_canonical_identity(tmp_path, monkeypatch):
-    args, _params, conn, calls, _lifecycle, _binding, owner, _inventory, _roots, _ = provisioned(tmp_path, monkeypatch)
+def test_original_in_process_app_transport_keeps_one_owner_and_canonical_identity(
+    tmp_path, monkeypatch
+):
+    args, _params, conn, calls, _lifecycle, _binding, owner, _inventory, _roots, _ = provisioned(
+        tmp_path, monkeypatch
+    )
     state = _env(tmp_path, monkeypatch)
     events = []
-    monkeypatch.setattr(frontdoor, "_static_source_admission", lambda: events.append("source") or True)
+    monkeypatch.setattr(
+        frontdoor, "_static_source_admission", lambda: events.append("source") or True
+    )
     from oh_goon import cli
 
     def delegated_plan(argv, *, fleet_provisioner):
         assert fleet_provisioner is owner
         assert argv == [
-            "plan", "run", workflow.APP_PLAN, "--repository-id", "repo-example",
-            "--lock-file", str(state / "locks" / "app-certification.goon.lock"),
-            "--wait", "--repair-handoff", "--fleet-run-id", "durable-run",
+            "plan",
+            "run",
+            workflow.APP_PLAN,
+            "--repository-id",
+            "repo-example",
+            "--lock-file",
+            str(state / "locks" / "app-certification.goon.lock"),
+            "--wait",
+            "--repair-handoff",
+            "--fleet-run-id",
+            "durable-run",
         ]
         events.append("original-cli")
         return 2  # No forged APP success.
@@ -121,9 +159,18 @@ def test_original_in_process_app_transport_keeps_one_owner_and_canonical_identit
         assert deployment_context_guard(env) is None
         events.append("original-workflow")
         status, message = deployment_plan_run(
-            ["plan", "run", workflow.APP_PLAN, "--repository-id", "repo-example",
-             "--lock-file", str(state / "locks" / "app-certification.goon.lock"),
-             "--wait", "--repair-handoff"], env,
+            [
+                "plan",
+                "run",
+                workflow.APP_PLAN,
+                "--repository-id",
+                "repo-example",
+                "--lock-file",
+                str(state / "locks" / "app-certification.goon.lock"),
+                "--wait",
+                "--repair-handoff",
+            ],
+            env,
         )
         assert message == ""
         return status
@@ -131,13 +178,18 @@ def test_original_in_process_app_transport_keeps_one_owner_and_canonical_identit
     monkeypatch.setattr(cli, "main", delegated_plan)
     monkeypatch.setattr(workflow, "run_app_for_deployment", original_workflow)
     monkeypatch.setattr(
-        frontdoor, "_workflow_main_with_state_lease",
+        frontdoor,
+        "_workflow_main_with_state_lease",
         lambda _a, *, workflow_runner: events.append("lease-cut") or workflow_runner(["app"]),
     )
     try:
-        assert frontdoor.certify_deployment_run(
-            fleet_provisioner=owner, fleet_run_id="durable-run",
-        ) == 2
+        assert (
+            frontdoor.certify_deployment_run(
+                fleet_provisioner=owner,
+                fleet_run_id="durable-run",
+            )
+            == 2
+        )
         assert events == ["source", "lease-cut", "original-workflow", "original-cli"]
         assert not state.exists()
         assert facts(args, conn) == (None, 0, 0)

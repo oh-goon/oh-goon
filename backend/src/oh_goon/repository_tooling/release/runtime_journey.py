@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import time
 import urllib.error
 import urllib.request
-
-from oh_goon.repository_tooling.local_access_http import authorized_request
 import uuid
+from pathlib import Path
 from typing import Any
 
 from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.repository_tooling.local_access_http import authorized_request
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
@@ -42,9 +41,7 @@ def _prepare_repository(path: Path, *, script: str) -> None:
         "[project]\nname = 'oh-goon-acceptance'\nversion = '0.0.0'\n",
         encoding="utf-8",
     )
-    (path / "README.md").write_text(
-        "# Oh Goon runtime acceptance repository\n", encoding="utf-8"
-    )
+    (path / "README.md").write_text("# Oh Goon runtime acceptance repository\n", encoding="utf-8")
     # Acceptance repositories must cross the same locked execution boundary as real
     # users. Generate from the canonical resolver instead of teaching certification
     # helpers an unlocked shortcut.
@@ -62,9 +59,7 @@ def prepare_acceptance_repository(path: Path) -> None:
 def prepare_interruptible_acceptance_repository(
     path: Path, *, duration_seconds: float = 300.0
 ) -> None:
-    _prepare_repository(
-        path, script=INTERRUPTIBLE_STEP.format(duration_seconds=duration_seconds)
-    )
+    _prepare_repository(path, script=INTERRUPTIBLE_STEP.format(duration_seconds=duration_seconds))
 
 
 def _request_json(
@@ -108,9 +103,7 @@ def team_run_authority(
             continue
         pipeline = team.get("pipeline")
         if not isinstance(pipeline, dict) or pipeline.get("state") != "CONFIGURED":
-            raise RuntimeError(
-                f"acceptance Team is not CONFIGURED in League projection: {team!r}"
-            )
+            raise RuntimeError(f"acceptance Team is not CONFIGURED in League projection: {team!r}")
         pipeline_sha256 = pipeline.get("sha256")
         repository_instance_id = team.get("repository_instance_id")
         if (
@@ -146,14 +139,14 @@ def team_run_request_payload(
     }
 
 
-def start_acceptance_goon(
-    *, base_url: str, server_repository_path: str, access_token: str
-) -> str:
+def start_acceptance_goon(*, base_url: str, server_repository_path: str, access_token: str) -> str:
     parent = str(Path(server_repository_path).parent)
     locations = _request_json("GET", f"{base_url}/api/locations", access_token=access_token)
     existing = locations.get("locations", [])
     if parent not in existing:
-        _request_json("POST", f"{base_url}/api/locations", access_token=access_token, payload={"path": parent})
+        _request_json(
+            "POST", f"{base_url}/api/locations", access_token=access_token, payload={"path": parent}
+        )
     run_id = f"acceptance-{uuid.uuid4().hex[:16]}"
     _request_json(
         "POST",
@@ -164,9 +157,7 @@ def start_acceptance_goon(
     return run_id
 
 
-def cancel_acceptance_goon(
-    *, base_url: str, run_id: str, access_token: str
-) -> dict[str, Any]:
+def cancel_acceptance_goon(*, base_url: str, run_id: str, access_token: str) -> dict[str, Any]:
     return _request_json(
         "POST",
         f"{base_url}/api/fleet/runs/{run_id}/cancel",
@@ -194,7 +185,11 @@ def _run_progress_summary(detail: dict[str, Any] | None) -> dict[str, object]:
 
 
 def _first_repository_progress(repositories: object) -> tuple[object, object, object]:
-    if not isinstance(repositories, list) or not repositories or not isinstance(repositories[0], dict):
+    if (
+        not isinstance(repositories, list)
+        or not repositories
+        or not isinstance(repositories[0], dict)
+    ):
         return None, None, None
     repository = repositories[0]
     steps = repository.get("steps")
@@ -266,12 +261,16 @@ def wait_for_interruptible_step(
     access_token: str,
     timeout_seconds: float = 180.0,
 ) -> int:
-    del repository  # Acceptance start authority is the canonical lifecycle journal, not a PID marker.
+    del (
+        repository
+    )  # Acceptance start authority is the canonical lifecycle journal, not a PID marker.
     deadline = time.monotonic() + timeout_seconds
     last: dict[str, Any] | None = None
     recent_events: list[str] = []
     while time.monotonic() < deadline:
-        last = _request_json("GET", f"{base_url}/api/fleet/runs/{run_id}", access_token=access_token)
+        last = _request_json(
+            "GET", f"{base_url}/api/fleet/runs/{run_id}", access_token=access_token
+        )
         run = last.get("run")
         status = run.get("status") if isinstance(run, dict) else None
         if status in TERMINAL:
@@ -315,7 +314,9 @@ def run_acceptance_goon(
     last: dict[str, object] | None = None
     while time.monotonic() < deadline:
         try:
-            last = _request_json("GET", f"{base_url}/api/fleet/runs/{run_id}", access_token=access_token)
+            last = _request_json(
+                "GET", f"{base_url}/api/fleet/runs/{run_id}", access_token=access_token
+            )
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 time.sleep(0.2)
@@ -329,11 +330,7 @@ def run_acceptance_goon(
                     f"acceptance Goon did not pass: status={status!r} outcome={last.get('outcome')!r}"
                 )
             if "acceptance-step" not in json.dumps(last.get("game_tape")):
-                raise RuntimeError(
-                    "acceptance Game Tape does not contain the executed Step"
-                )
+                raise RuntimeError("acceptance Game Tape does not contain the executed Step")
             return run_id
         time.sleep(0.2)
-    raise RuntimeError(
-        f"acceptance Goon did not finish within {timeout_seconds}s; last={last!r}"
-    )
+    raise RuntimeError(f"acceptance Goon did not finish within {timeout_seconds}s; last={last!r}")

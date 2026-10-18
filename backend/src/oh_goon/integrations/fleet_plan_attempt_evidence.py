@@ -5,16 +5,16 @@ from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_tool_requirements import step_execution_tool
-from oh_goon.core.models.fleet_plan import (
-    ResolvedCommandStep,
-    ResolvedPlanStep,
-    ResolvedPreCommitStep,
-)
 from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityAtomicHandoffEvidence,
     PlanExecutionAuthorityDiagnosticEvidence,
     PlanExecutionAuthorityMaterializationEvidence,
     PlanExecutionAuthorityRuntimeEvidence,
+)
+from oh_goon.core.models.fleet_plan import (
+    ResolvedCommandStep,
+    ResolvedPlanStep,
+    ResolvedPreCommitStep,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanResourceEvidence,
@@ -136,9 +136,7 @@ def _direct_tool_evidence(
     return PlanToolEvidence(
         name=Path(executable).name or executable,
         origin=(
-            "managed"
-            if isinstance(step, ResolvedPreCommitStep)
-            else _tool_origin(path, repository)
+            "managed" if isinstance(step, ResolvedPreCommitStep) else _tool_origin(path, repository)
         ),
         sha256=runtime.executable_identity.removeprefix("sha256:"),
         byte_count=runtime.executable_byte_count,

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from oh_goon.core.errors import FleetDomainError, RunNotFound, ScheduleExecutionStale
-from oh_goon.core.product_identity import schedule_repository_fleet_run_id
-from oh_goon.core.run_identity import require_fleet_run_binding
 from oh_goon.core.models.run_admission import ExplicitRepositoryScope
 from oh_goon.core.models.schedule import ScheduleFailure
 from oh_goon.core.models.schedule_execution import RunningScheduleRun, ScheduleRunRecord
+from oh_goon.core.product_identity import schedule_repository_fleet_run_id
+from oh_goon.core.run_identity import require_fleet_run_binding
 from oh_goon.core.schedule_transitions import (
     begin_schedule_run,
     fail_schedule_run,
@@ -152,7 +152,9 @@ class ScheduleExecutionEngine:
             and item.fleet_run_id == fleet_run_id
             for item in bound.repository_runs
         ):
-            raise ScheduleExecutionStale("Scheduled Fleet admission returned without durable child binding")
+            raise ScheduleExecutionStale(
+                "Scheduled Fleet admission returned without durable child binding"
+            )
         return bound
 
     def _fail_latest(self, schedule_run_id: str, failure: ScheduleFailure) -> ScheduleRunRecord:

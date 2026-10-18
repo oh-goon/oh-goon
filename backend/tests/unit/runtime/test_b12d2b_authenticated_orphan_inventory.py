@@ -1,4 +1,5 @@
 """B12D2B negative proof: native inventory is never cleanup permission."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -6,39 +7,56 @@ from dataclasses import replace
 
 import pytest
 
-from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
-from tests.fixtures.db1b2_legacy_sqlite import CausalRunJournal
-from oh_goon.runtime.enforcer_lace_orphan_subject import subject_in, inventory_in
 from oh_goon.core.ports.local_lace_orphan_inventory import LocalLaceOrphanInventory
 from oh_goon.runtime.enforcer_lace_fleet_resource_owner import OriginalFleetLocalLaceRecoveryOwner
+from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
+from oh_goon.runtime.enforcer_lace_orphan_subject import inventory_in, subject_in
+from tests.fixtures.db1b2_legacy_sqlite import CausalRunJournal
 from tests.unit.core.test_enforcer_lace_trust import authenticator
-from tests.unit.runtime.test_b12_local_resource_intent import _store, _reserve
-from tests.unit.runtime.test_b12d1_native_allocation_journal import publish, observation
-from tests.unit.runtime.test_b12d2_recovery_claims import _claim
+from tests.unit.runtime.test_b12_local_resource_intent import _reserve, _store
 from tests.unit.runtime.test_b12c2_original_fleet_local_lace import _OriginalSession
+from tests.unit.runtime.test_b12d1_native_allocation_journal import observation, publish
+from tests.unit.runtime.test_b12d2_recovery_claims import _claim
 
 
 def subject(journal, *, epoch=1, lease="lease-one"):
-    return journal._transaction(lambda: subject_in(
-        journal, "run-one", epoch=epoch, lease_identity=lease,
-        auth=authenticator(), intent_run_seq=2))
+    return journal._transaction(
+        lambda: subject_in(
+            journal,
+            "run-one",
+            epoch=epoch,
+            lease_identity=lease,
+            auth=authenticator(),
+            intent_run_seq=2,
+        )
+    )
 
 
 def record(journal, item, inventory, *, epoch=1, lease="lease-one"):
-    return journal._transaction(lambda: inventory_in(
-        journal, item, inventory, epoch=epoch, lease_identity=lease,
-        auth=authenticator()))
+    return journal._transaction(
+        lambda: inventory_in(
+            journal, item, inventory, epoch=epoch, lease_identity=lease, auth=authenticator()
+        )
+    )
 
 
 def unknown(item):
-    return LocalLaceOrphanInventory(item.subject_identity, "INTENT_ONLY_UNKNOWN",
-                                    None, None, None, (), None, None)
+    return LocalLaceOrphanInventory(
+        item.subject_identity, "INTENT_ONLY_UNKNOWN", None, None, None, (), None, None
+    )
 
 
 def observed(item):
-    return LocalLaceOrphanInventory(item.subject_identity, "OBSERVED_PRESENT",
-                                    observation().cgroup_identity, 123, 456, (),
-                                    observation().network_identity, "sha256:" + "c" * 64)
+    return LocalLaceOrphanInventory(
+        item.subject_identity,
+        "OBSERVED_PRESENT",
+        observation().cgroup_identity,
+        123,
+        456,
+        (),
+        observation().network_identity,
+        "sha256:" + "c" * 64,
+    )
 
 
 @pytest.mark.parametrize("has_observation", [False, True])
@@ -76,8 +94,13 @@ def test_claim_required_and_takeover_invalidates_earlier_inventory(tmp_path):
         subject(journal)
     _claim(journal)
     original = subject(journal)
-    journal.transfer_control("run-one", epoch=1, lease_identity="lease-one",
-                             next_epoch=2, next_lease_identity="new-owner")
+    journal.transfer_control(
+        "run-one",
+        epoch=1,
+        lease_identity="lease-one",
+        next_epoch=2,
+        next_lease_identity="new-owner",
+    )
     with pytest.raises(CausalJournalError, match="stale"):
         record(journal, original, unknown(original))
     _claim(journal, epoch=2, lease="new-owner")
@@ -89,8 +112,17 @@ def test_claim_required_and_takeover_invalidates_earlier_inventory(tmp_path):
     conn.close()
 
 
-@pytest.mark.parametrize("attack", ["foreign-subject", "forged-absence", "forged-present",
-                                     "invented-resource", "bad-mount-claim", "uncommitted"])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "foreign-subject",
+        "forged-absence",
+        "forged-present",
+        "invented-resource",
+        "bad-mount-claim",
+        "uncommitted",
+    ],
+)
 def test_inventory_attacks_fail_without_new_journal_effects(tmp_path, attack):
     conn, journal = _store(tmp_path / "journal.db")
     _reserve(journal)
@@ -110,7 +142,9 @@ def test_inventory_attacks_fail_without_new_journal_effects(tmp_path, attack):
     before = len(journal.verify("run-one", auth=authenticator()))
     if attack == "uncommitted":
         with pytest.raises(CausalJournalError, match="transaction"):
-            inventory_in(journal, item, native, epoch=1, lease_identity="lease-one", auth=authenticator())
+            inventory_in(
+                journal, item, native, epoch=1, lease_identity="lease-one", auth=authenticator()
+            )
     else:
         with pytest.raises(CausalJournalError):
             record(journal, item, native)
@@ -124,8 +158,11 @@ def test_original_session_checks_authority_before_and_after_native_receipt(tmp_p
     _claim(journal)
     session = _OriginalSession(conn)
     original = OriginalFleetLocalLaceRecoveryOwner(
-        session=session, validate_authority_in=lambda _: None,
-        authenticator=authenticator(), run_id="run-one")
+        session=session,
+        validate_authority_in=lambda _: None,
+        authenticator=authenticator(),
+        run_id="run-one",
+    )
     item = original.rediscovery_subject(intent_run_seq=2)
     assert item == subject(journal)
     session.token = "wrong-owner"

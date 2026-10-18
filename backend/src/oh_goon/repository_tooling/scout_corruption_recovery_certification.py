@@ -5,8 +5,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from oh_goon.runtime.database import LocalDatabase
-from oh_goon.scout.database import scout_analytical_database_path
 from oh_goon.repository_tooling.network_certification import blocked_network_attempts
 from oh_goon.repository_tooling.release.runtime_journey import (
     prepare_acceptance_repository,
@@ -22,6 +20,8 @@ from oh_goon.repository_tooling.scout_http_load_probe import (
     _stop_server,
     _wait_json,
 )
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.scout.database import scout_analytical_database_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,9 +40,7 @@ class ScoutCorruptionRecoveryResult:
     blocked_outbound_attempts: int
 
 
-def _run_real_goon(
-    root: Path, state: Path, league: Path, repo: Path, guard_log: Path
-) -> str:
+def _run_real_goon(root: Path, state: Path, league: Path, repo: Path, guard_log: Path) -> str:
     port = _port()
     base = f"http://127.0.0.1:{port}"
     server = _start_server(
@@ -59,9 +57,7 @@ def _run_real_goon(
         _stop_server(server)
 
 
-def run_corruption_recovery_certification(
-    *, root: Path = ROOT
-) -> ScoutCorruptionRecoveryResult:
+def run_corruption_recovery_certification(*, root: Path = ROOT) -> ScoutCorruptionRecoveryResult:
     with TemporaryDirectory(prefix="oh-goon-scout-corruption-recovery-") as directory:
         temp = Path(directory)
         state = temp / "state" / "oh-goon.db"
@@ -73,9 +69,7 @@ def run_corruption_recovery_certification(
         database = LocalDatabase(state)
         revision_before = _journal_revision(database)
         if revision_before < 1:
-            raise RuntimeError(
-                "corruption recovery requires real canonical Journal truth"
-            )
+            raise RuntimeError("corruption recovery requires real canonical Journal truth")
 
         sidecar = scout_analytical_database_path(state)
         sidecar.parent.mkdir(parents=True, exist_ok=True)
@@ -98,13 +92,9 @@ def run_corruption_recovery_certification(
                     "Scout corruption recovery changed canonical durable Journal revision"
                 )
             if recovered.get("processed_journal_revision") != revision_before:
-                raise RuntimeError(
-                    "Scout did not rebuild to the canonical Journal revision"
-                )
+                raise RuntimeError("Scout did not rebuild to the canonical Journal revision")
             if recovered.get("lag_revisions") != 0:
-                raise RuntimeError(
-                    "Scout remained behind Journal after corruption recovery"
-                )
+                raise RuntimeError("Scout remained behind Journal after corruption recovery")
             second_run = run_acceptance_goon(
                 base_url=base,
                 server_repository_path=str(repo.resolve()),
@@ -124,9 +114,7 @@ def run_corruption_recovery_certification(
     outcome = fleet.get("outcome") if isinstance(fleet, dict) else None
     game_tape_ok = "acceptance-step" in json.dumps(fleet.get("game_tape"))
     if status != "COMPLETED" or outcome != "SUCCESS" or not game_tape_ok:
-        raise RuntimeError(
-            "real execution/Game Tape failed after Scout corruption recovery"
-        )
+        raise RuntimeError("real execution/Game Tape failed after Scout corruption recovery")
     return ScoutCorruptionRecoveryResult(
         canonical_revision_before_corruption=revision_before,
         canonical_revision_after_recovery=revision_after,
@@ -136,23 +124,15 @@ def run_corruption_recovery_certification(
         second_execution_status=str(status),
         second_execution_outcome=str(outcome),
         second_game_tape_contains_acceptance_step=game_tape_ok,
-        retained_runs_after_second_execution=int(
-            final_health["retained_run_observations"]
-        ),
-        retained_steps_after_second_execution=int(
-            final_health["retained_step_observations"]
-        ),
+        retained_runs_after_second_execution=int(final_health["retained_run_observations"]),
+        retained_steps_after_second_execution=int(final_health["retained_step_observations"]),
         final_lag_revisions=int(final_health["lag_revisions"]),
         blocked_outbound_attempts=0,
     )
 
 
 def main() -> int:
-    print(
-        json.dumps(
-            asdict(run_corruption_recovery_certification()), indent=2, sort_keys=True
-        )
-    )
+    print(json.dumps(asdict(run_corruption_recovery_certification()), indent=2, sort_keys=True))
     return 0
 
 

@@ -1,7 +1,7 @@
 """B10: easy development witness must not confer certification authority."""
+
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -21,7 +21,10 @@ def _mini_source(tmp_path: Path) -> Path:
 def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(root / "scripts/qualify_b10_development_wsl.sh"), *args],
-        cwd=root, capture_output=True, text=True, timeout=15,
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
 
 
@@ -64,6 +67,7 @@ def test_non_wsl_does_not_create_evidence_or_execute_project(tmp_path):
     kernel = Path("/proc/sys/kernel/osrelease").read_text().lower()
     if "microsoft" in kernel or "wsl" in kernel:
         import pytest
+
         pytest.skip("native WSL available: non-WSL denial not applicable")
     root = _mini_source(tmp_path)
     expected = tmp_path / "new-evidence"

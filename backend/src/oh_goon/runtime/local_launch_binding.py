@@ -20,6 +20,7 @@ from oh_goon.runtime.local_launch_state import LocalLaunchEventStore
 
 LOCAL_LAUNCH_BINDING_SCHEMA = "oh-goon.local-launch-binding/v1"
 
+
 @dataclass(frozen=True, slots=True)
 class LocalLaunchBinding:
     """Exact canonical workspace -> current launch owner binding."""
@@ -67,7 +68,9 @@ class LocalLaunchBindingStore:
 
     @classmethod
     def from_database(cls, database_path: Path) -> LocalLaunchBindingStore:
-        return cls(root=ApplicationStatePathLayout.from_database(database_path).local_launch_bindings)
+        return cls(
+            root=ApplicationStatePathLayout.from_database(database_path).local_launch_bindings
+        )
 
     @classmethod
     def from_event_store(cls, event_store: LocalLaunchEventStore) -> LocalLaunchBindingStore:

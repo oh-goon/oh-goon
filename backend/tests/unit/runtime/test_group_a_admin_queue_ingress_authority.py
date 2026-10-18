@@ -1,4 +1,5 @@
 """M184: queue-admin ingress must not initialize or publish strict-placement authority."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -82,8 +83,10 @@ def test_rejected_reprioritization_does_not_publish_generation(tmp_path: Path) -
     before = pool.placement_queue()
     with pytest.raises(StateConflict, match="scheduling revision changed"):
         pool.reprioritize_queued_admission(
-            "queued", admitted_priority=SchedulingPriority.HIGH,
-            expected_revision=37, reason="stale admin caller",
+            "queued",
+            admitted_priority=SchedulingPriority.HIGH,
+            expected_revision=37,
+            reason="stale admin caller",
         )
     assert pool.placement_queue() == before
     assert _generation(database) == 1
@@ -105,8 +108,10 @@ def test_accepted_queue_admin_cas_uses_shared_queue_without_publishing_generatio
     database, pool, queue = _pool(tmp_path)
     ticket = queue.enter("queued", max_entries=64)
     updated = pool.reprioritize_queued_admission(
-        "queued", admitted_priority=SchedulingPriority.HIGH,
-        expected_revision=0, reason="operator adjustment",
+        "queued",
+        admitted_priority=SchedulingPriority.HIGH,
+        expected_revision=0,
+        reason="operator adjustment",
     )
     assert updated.sequence == ticket.sequence
     assert updated.scheduling_revision == 1

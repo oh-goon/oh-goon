@@ -64,6 +64,7 @@ def test_health_contains_required_tools() -> None:
 def test_missing_required_tool_requires_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     def missing(*_args):
         raise OSError(2, "missing")
+
     monkeypatch.setattr("oh_goon.services.system_health.run_command", missing)
     health = SystemHealthService(_safety(), lambda: []).inspect()  # type: ignore[arg-type]
     assert health.status is SystemHealthStatus.SETUP_REQUIRED
@@ -98,6 +99,7 @@ def test_health_observes_uv_version_without_redeciding_project_compatibility(
     assert uv.version == "uv 0.1.0"
     assert health.status is SystemHealthStatus.READY
 
+
 def test_background_failure_degrades_health_without_blocking_runtime_proof(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -119,5 +121,3 @@ def test_background_failure_degrades_health_without_blocking_runtime_proof(
     assert health.status is SystemHealthStatus.DEGRADED
     assert health.runtime_safety.effects_allowed
     assert health.background_failures == (failure,)
-
-

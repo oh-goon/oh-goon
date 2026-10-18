@@ -21,7 +21,11 @@ def test_shard_execution_contract_rejects_loss_of_exact_context_field(
     )
     monkeypatch.setattr(contract, "RUNTIME_MODEL", runtime_model)
     violations = contract.check_shard_execution_contract()
-    assert any("Shard execution context" in item.message and "dependency_identity" in item.message for item in violations)
+    assert any(
+        "Shard execution context" in item.message
+        and "dependency_identity" in item.message
+        for item in violations
+    )
 
 
 def test_standalone_shard_cli_rejects_parallel_runtime_or_service_ownership(
@@ -45,7 +49,11 @@ def test_private_runtime_local_rename_does_not_change_architecture(
 
     runtime = tmp_path / "shards.py"
     runtime.write_text(
-        re.sub(r"\bremaining\b", "available_window", contract.RUNTIME.read_text(encoding="utf-8")),
+        re.sub(
+            r"\bremaining\b",
+            "available_window",
+            contract.RUNTIME.read_text(encoding="utf-8"),
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(contract, "RUNTIME", runtime)
@@ -71,8 +79,15 @@ def test_runtime_shard_schema_owner_value_change_needs_no_architecture_literal_e
 
 
 def _canonical_schema_value() -> str:
-    fields = contract._class_fields(contract.CANONICAL_MODEL, "CanonicalShardExecutionEvidence")
-    return contract._literal_schema_value(contract.CANONICAL_MODEL, fields["contract_schema"][0]) or ""
+    fields = contract._class_fields(
+        contract.CANONICAL_MODEL, "CanonicalShardExecutionEvidence"
+    )
+    return (
+        contract._literal_schema_value(
+            contract.CANONICAL_MODEL, fields["contract_schema"][0]
+        )
+        or ""
+    )
 
 
 def test_canonical_shard_schema_owner_value_change_needs_no_architecture_literal_edit(
@@ -99,14 +114,17 @@ def test_canonical_shard_schema_owner_requires_fixed_matching_literal(
     owner.write_text(
         contract.CANONICAL_MODEL.read_text(encoding="utf-8").replace(
             f'contract_schema: Literal["{current}"]',
-            'contract_schema: str',
+            "contract_schema: str",
         ),
         encoding="utf-8",
     )
     monkeypatch.setattr(contract, "CANONICAL_MODEL", owner)
 
     violations = contract.check_shard_execution_contract()
-    assert any("contract_schema must be one fixed model-owned string literal" in item.message for item in violations)
+    assert any(
+        "contract_schema must be one fixed model-owned string literal" in item.message
+        for item in violations
+    )
 
 
 def test_runtime_schema_owner_representation_is_refactor_tolerant(
@@ -145,7 +163,10 @@ def test_runtime_schema_owner_rejects_wrong_assignment_even_with_comment_decoy(
     monkeypatch.setattr(contract, "RUNTIME_MODEL", inspected)
 
     violations = contract.check_shard_execution_contract()
-    assert any("consume the runtime shard-model owner values" in item.message for item in violations)
+    assert any(
+        "consume the runtime shard-model owner values" in item.message
+        for item in violations
+    )
 
 
 def test_runtime_schema_constants_reject_second_assignment_owner(
@@ -194,7 +215,10 @@ def test_fleet_shard_evidence_relationship_cannot_be_removed(
     monkeypatch.setattr(contract, "FLEET_EVIDENCE", evidence)
 
     violations = contract.check_shard_execution_contract()
-    assert any("must structurally carry canonical shard execution evidence" in item.message for item in violations)
+    assert any(
+        "must structurally carry canonical shard execution evidence" in item.message
+        for item in violations
+    )
 
 
 def test_projection_expression_refactor_does_not_change_architecture(
@@ -202,20 +226,24 @@ def test_projection_expression_refactor_does_not_change_architecture(
 ) -> None:
     projection = tmp_path / "game_tape_projection.py"
     text = contract.GAME_TAPE_PROJECTION.read_text(encoding="utf-8")
-    text = text.replace(
-        "    return GameTapeVerificationExecutionBoundary(\n",
-        "    plan_identity = evidence.plan_identity\n"
-        "    policy_identity = evidence.execution_policy_identity\n"
-        "    return GameTapeVerificationExecutionBoundary(\n",
-        1,
-    ).replace(
-        "execution_plan_identity=evidence.plan_identity",
-        "execution_plan_identity=plan_identity",
-        1,
-    ).replace(
-        "execution_policy_identity=evidence.execution_policy_identity",
-        "execution_policy_identity=policy_identity",
-        1,
+    text = (
+        text.replace(
+            "    return GameTapeVerificationExecutionBoundary(\n",
+            "    plan_identity = evidence.plan_identity\n"
+            "    policy_identity = evidence.execution_policy_identity\n"
+            "    return GameTapeVerificationExecutionBoundary(\n",
+            1,
+        )
+        .replace(
+            "execution_plan_identity=evidence.plan_identity",
+            "execution_plan_identity=plan_identity",
+            1,
+        )
+        .replace(
+            "execution_policy_identity=evidence.execution_policy_identity",
+            "execution_policy_identity=policy_identity",
+            1,
+        )
     )
     projection.write_text(text, encoding="utf-8")
     monkeypatch.setattr(contract, "GAME_TAPE_PROJECTION", projection)

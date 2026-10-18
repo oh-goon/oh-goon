@@ -307,7 +307,9 @@ def test_strict_repository_rejects_same_filesystem_nested_mount_topology(
         RepositoryPathSpace.from_root(repository).require_isolated_source()
 
 
-def test_strict_repository_ignores_escaping_symlink_inside_transient_backend_venv(tmp_path: Path) -> None:
+def test_strict_repository_ignores_escaping_symlink_inside_transient_backend_venv(
+    tmp_path: Path,
+) -> None:
     repository = tmp_path / "repo"
     venv_bin = repository / "backend" / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
@@ -321,7 +323,9 @@ def test_strict_repository_ignores_escaping_symlink_inside_transient_backend_ven
     RepositoryPathSpace.from_root(repository).require_isolated_source()
 
 
-def test_strict_repository_still_rejects_escaping_symlink_outside_transient_source(tmp_path: Path) -> None:
+def test_strict_repository_still_rejects_escaping_symlink_outside_transient_source(
+    tmp_path: Path,
+) -> None:
     repository = tmp_path / "repo"
     repository.mkdir()
     outside = tmp_path / "secret"
@@ -436,9 +440,7 @@ def test_selected_repository_root_index_preserves_nested_loop_first_conflict_ord
     # A streaming-by-right-index implementation would encounter (1, 2) first.
     # Historical deterministic pair order is (0, 3), which must remain authoritative.
     with pytest.raises(FleetPlanInvalid) as exc:
-        RepositoryPathSpace.require_disjoint_sources(
-            (first, second, second_nested, first_nested)
-        )
+        RepositoryPathSpace.require_disjoint_sources((first, second, second_nested, first_nested))
 
     message = str(exc.value)
     assert str(first.resolve()) in message
@@ -472,9 +474,7 @@ def test_selected_repository_root_index_preserves_first_pair_across_alias_and_ov
     # (1, 2) overlaps and is discovered earlier by right index, but historical
     # nested-loop authority reaches the alias pair (0, 3) first.
     with pytest.raises(FleetPlanInvalid, match="alias the same filesystem directory") as exc:
-        RepositoryPathSpace.require_disjoint_sources(
-            (first, second, second_nested, alias)
-        )
+        RepositoryPathSpace.require_disjoint_sources((first, second, second_nested, alias))
 
     message = str(exc.value)
     assert str(first_resolved) in message

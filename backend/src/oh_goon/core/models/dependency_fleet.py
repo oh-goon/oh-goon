@@ -180,7 +180,9 @@ class DependencyTargetMaterialization(ImmutableModel):
         if self.repo_ids != tuple(sorted(set(self.repo_ids))):
             raise ValueError("Materialized dependency repository IDs must be unique and sorted")
         if set(self.repository_instance_ids) != set(self.repo_ids):
-            raise ValueError("Materialized dependency target instances must exactly match repository IDs")
+            raise ValueError(
+                "Materialized dependency target instances must exactly match repository IDs"
+            )
         if any(not value for value in self.repository_instance_ids.values()):
             raise ValueError("Materialized dependency repository instance IDs must not be empty")
         return self

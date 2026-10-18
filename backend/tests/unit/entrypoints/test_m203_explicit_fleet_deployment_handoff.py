@@ -1,7 +1,6 @@
 """M203: deployment transports one original provisioner, never CLI data or ambient state."""
-from __future__ import annotations
 
-from types import SimpleNamespace
+from __future__ import annotations
 
 import pytest
 
@@ -9,14 +8,25 @@ from oh_goon import cli
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from tests.unit.services.test_group_a_fleet_provisioning_authority import provisioned
 
-
-PLAN_ARGS = ["plan", "run", "nonexistent-plan.yml", "--repository-id", "repo-1", "--fleet-run-id", "durable-run"]
+PLAN_ARGS = [
+    "plan",
+    "run",
+    "nonexistent-plan.yml",
+    "--repository-id",
+    "repo-1",
+    "--fleet-run-id",
+    "durable-run",
+]
 
 
 def _guard_before_work(monkeypatch):
     """Make any pre-command work or DB/runtime construction visibly forbidden."""
-    monkeypatch.setattr(cli, "_run_pre_runtime_command", lambda _args: pytest.fail("pre-runtime work began"))
-    monkeypatch.setattr(cli, "_build_application_runtime", lambda **_kw: pytest.fail("runtime work began"))
+    monkeypatch.setattr(
+        cli, "_run_pre_runtime_command", lambda _args: pytest.fail("pre-runtime work began")
+    )
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **_kw: pytest.fail("runtime work began")
+    )
 
 
 def test_original_deployment_object_transported_once_to_public_composition(tmp_path, monkeypatch):
@@ -30,9 +40,11 @@ def test_original_deployment_object_transported_once_to_public_composition(tmp_p
 
     monkeypatch.setattr(cli.ApplicationRuntime, "build", classmethod(builder))
     monkeypatch.setattr(cli, "_run_pre_runtime_command", lambda _args: None)
-    monkeypatch.setattr(cli, "_execute_stateful_command", lambda built, args: (
-        events.append(("command", built, args.fleet_run_id)) or 0
-    ))
+    monkeypatch.setattr(
+        cli,
+        "_execute_stateful_command",
+        lambda built, args: (events.append(("command", built, args.fleet_run_id)) or 0),
+    )
     assert cli.main(PLAN_ARGS, fleet_provisioner=provisioner) == 0
     assert events == [("build", provisioner), ("command", runtime, "durable-run")]
 
@@ -48,13 +60,20 @@ def test_wrong_run_enrollment_blocks_before_any_runtime_or_plan_read(tmp_path, m
         cli.main(args, fleet_provisioner=provisioner)
 
 
-@pytest.mark.parametrize("args", [
-    ["serve"], ["start"], ["self", "certify", "--plan"],
-    ["plan", "validate", "missing.yml"],
-    ["plan", "prepare", "missing.yml"],
-    ["plan", "preview", "missing.yml", "repo-1"],
-])
-def test_deployment_handoff_cannot_be_ignored_or_leak_to_other_commands(tmp_path, monkeypatch, args):
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["serve"],
+        ["start"],
+        ["self", "certify", "--plan"],
+        ["plan", "validate", "missing.yml"],
+        ["plan", "prepare", "missing.yml"],
+        ["plan", "preview", "missing.yml", "repo-1"],
+    ],
+)
+def test_deployment_handoff_cannot_be_ignored_or_leak_to_other_commands(
+    tmp_path, monkeypatch, args
+):
     *_, provisioner, _inventory, _trusted, _admit = provisioned(tmp_path, monkeypatch)
     _guard_before_work(monkeypatch)
     with pytest.raises(TrustProtocolError, match="only valid for plan run"):
@@ -73,9 +92,11 @@ def test_ordinary_shell_cli_cannot_read_environment_as_provisioner(monkeypatch):
     monkeypatch.setenv("OH_GOON_FLEET_ISSUER_KEYS", "/tmp/pretend")
     observed = []
     monkeypatch.setattr(cli, "_run_pre_runtime_command", lambda _args: None)
-    monkeypatch.setattr(cli.ApplicationRuntime, "build", classmethod(
-        lambda cls: observed.append("no-provisioner") or object()
-    ))
+    monkeypatch.setattr(
+        cli.ApplicationRuntime,
+        "build",
+        classmethod(lambda cls: observed.append("no-provisioner") or object()),
+    )
     monkeypatch.setattr(cli, "_execute_stateful_command", lambda _runtime, _args: 2)
     assert cli.main(PLAN_ARGS) == 2
     assert observed == ["no-provisioner"]

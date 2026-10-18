@@ -7,13 +7,13 @@ from types import MappingProxyType
 
 from oh_goon.core.errors import InvalidRunTransition
 from oh_goon.core.fleet_plan_projection import fleet_plan_logical_slot
-from oh_goon.core.product_identity import operation_intent_key, repository_id
 from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import fleet_readmission_parent
 from oh_goon.core.models.run_events import FleetRunEvent
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
+from oh_goon.core.product_identity import operation_intent_key, repository_id
 from oh_goon.core.result_lifecycle import result_freshness
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.vocabulary import FleetRunEventType, OperationAction, ResultFreshness
@@ -99,13 +99,12 @@ def _build_readmission_index(
     return MappingProxyType(child_by_parent)
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class CurrentFleetPlanOperation:
     revision: int
     fleet_run_id: str
     report: OperationReport
+
 
 @dataclass(frozen=True, slots=True)
 class JournalIndex:

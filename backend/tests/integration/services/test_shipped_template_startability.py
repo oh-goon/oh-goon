@@ -143,9 +143,7 @@ class _StartabilityBackend:
         raise AssertionError("template startability must stop before Step work")
 
 
-def _admission_stack(
-    tmp_path: Path, repository: Path, *, path_authority=TEST_PATH_AUTHORITY
-):
+def _admission_stack(tmp_path: Path, repository: Path, *, path_authority=TEST_PATH_AUTHORITY):
     database = LocalDatabase(tmp_path / "runtime.db")
     state = local_state(database)
     state.add_location(repository.parent)
@@ -232,9 +230,7 @@ def test_representative_shipped_plan_reaches_run_admitted_without_step_work(
     repository = tmp_path / "repositories" / "fixture"
     seed_cicd_repository(repository)
     target = _reviewed_shipped_target("python/dependency-inventory")
-    database, state, attempts, planner, lifecycle, backend = _admission_stack(
-        tmp_path, repository
-    )
+    database, state, attempts, planner, lifecycle, backend = _admission_stack(tmp_path, repository)
     repository_identity = RepositoryIdentity(path=repository)
     repository_scope = fleet_repository_scope({repository_identity.repository_id})
     intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)
@@ -290,7 +286,6 @@ def test_invalid_shipped_template_inputs_fail_before_state_or_work_mutation(
     assert _repository_bytes(repository) == source_before
 
 
-
 def _copy_iris_certification_fixture(repository: Path) -> None:
     shutil.copytree(IRIS_CERTIFICATION_FIXTURE, repository)
     (repository / ".git").mkdir()
@@ -298,9 +293,7 @@ def _copy_iris_certification_fixture(repository: Path) -> None:
 
 def _iris_uv_requirement(plan: ResolvedFleetPlan) -> tuple[ResolvedCommandStep, str]:
     uv_steps = tuple(
-        step
-        for step in plan.steps
-        if isinstance(step, ResolvedCommandStep) and step.uv is not None
+        step for step in plan.steps if isinstance(step, ResolvedCommandStep) and step.uv is not None
     )
     assert len(uv_steps) == 1
     step = uv_steps[0]
@@ -408,9 +401,7 @@ def test_iris_certification_fixture_resolves_entrypoint_and_reaches_admission_wi
     repository = tmp_path / "repositories" / "iris"
     _copy_iris_certification_fixture(repository)
     target = _reviewed_shipped_target("ml/iris-training")
-    database, state, attempts, planner, lifecycle, backend = _admission_stack(
-        tmp_path, repository
-    )
+    database, state, attempts, planner, lifecycle, backend = _admission_stack(tmp_path, repository)
     repository_identity = RepositoryIdentity(path=repository)
     repository_scope = fleet_repository_scope({repository_identity.repository_id})
     intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)

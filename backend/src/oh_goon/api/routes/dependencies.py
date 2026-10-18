@@ -11,9 +11,8 @@ from oh_goon.core.models.dependency_fleet import (
     DependencyRelationshipFilter,
     DependencyRepositoryPage,
     DependencySearchResult,
-    DependencyTargetFilter,
-    DependencyTargetMaterializeRequest,
     DependencyTargetMaterialization,
+    DependencyTargetMaterializeRequest,
     RepositoryDependencyPage,
 )
 from oh_goon.services.dependencies import DependencyFleetService

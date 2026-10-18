@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pydantic import AwareDatetime, computed_field, model_validator
 
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary import PolicySource, WorkspaceMode, WorkspaceScope
 
 

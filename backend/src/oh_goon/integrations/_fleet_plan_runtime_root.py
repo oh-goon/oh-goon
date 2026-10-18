@@ -64,9 +64,7 @@ def capture_runtime_root(
         executable_sources.add(source)
         if getattr(binding, "runtime_support", None) is None:
             files.update(
-                _dynamic_dependencies(
-                    source, runtime_inspector, runtime_aliases=runtime_aliases
-                )
+                _dynamic_dependencies(source, runtime_inspector, runtime_aliases=runtime_aliases)
             )
         name = str(binding.name)
         if _PYTHON_NAME.match(name):
@@ -111,9 +109,7 @@ def capture_runtime_root(
         for python in _managed_python_interpreters(spec):
             executable_sources.add(python)
             files.update(
-                _dynamic_dependencies(
-                    python, runtime_inspector, runtime_aliases=runtime_aliases
-                )
+                _dynamic_dependencies(python, runtime_inspector, runtime_aliases=runtime_aliases)
             )
             python_directories = _python_runtime_directories(python)
             directories.update(python_directories)
@@ -206,12 +202,15 @@ def _dynamic_dependencies(
         alias = PurePosixPath(interpreter)
         if str(interpreter_source) != interpreter:
             aliases[alias] = interpreter_source
-        return {interpreter_source, *_dynamic_dependencies(
+        return {
             interpreter_source,
-            runtime_inspector,
-            runtime_aliases=aliases,
-            _seen=seen,
-        )}
+            *_dynamic_dependencies(
+                interpreter_source,
+                runtime_inspector,
+                runtime_aliases=aliases,
+                _seen=seen,
+            ),
+        }
     if not runtime_inspector.is_file():
         raise FleetPlanInvalid(
             "Strict Fleet runtime dependency inspector disappeared after deployment validation: "
@@ -248,7 +247,8 @@ def _dynamic_dependencies(
             aliases[PurePosixPath(str(runtime_path))] = resolved
     if missing:
         raise FleetPlanInvalid(
-            "Fleet runtime dependency discovery returned missing files: " + ", ".join(sorted(missing))
+            "Fleet runtime dependency discovery returned missing files: "
+            + ", ".join(sorted(missing))
         )
     return result
 
@@ -300,7 +300,6 @@ def _python_runtime_directories(executable: Path) -> set[Path]:
     }
 
 
-
 def _python_runtime_native_dependencies(
     runtime_directories: Iterable[Path],
     runtime_inspector: Path,
@@ -337,6 +336,7 @@ def _python_runtime_native_dependencies(
             )
     return result
 
+
 def _git_runtime_directories(executable: Path) -> set[Path]:
     completed = subprocess.run(
         (str(executable), "--exec-path"),
@@ -353,7 +353,6 @@ def _git_runtime_directories(executable: Path) -> set[Path]:
         )
     path = Path(completed.stdout.strip()).resolve()
     return {path} if path.is_dir() else set()
-
 
 
 def _managed_python_interpreters(spec: ManagedRuntimeSpec) -> set[Path]:
@@ -395,7 +394,6 @@ def _nss_runtime_files(dynamic_files: Iterable[Path]) -> set[Path]:
     return result
 
 
-
 def _include_runtime_file_preserving_exact_path(
     path: Path,
     *,
@@ -410,6 +408,7 @@ def _include_runtime_file_preserving_exact_path(
     files.add(resolved)
     if resolved != path:
         runtime_aliases[PurePosixPath(str(path))] = resolved
+
 
 def _materialize_sparse_root(
     files: set[Path],
@@ -451,9 +450,7 @@ def _materialize_sparse_root(
         )
     for sandbox_path, source in file_aliases:
         if not sandbox_path.is_absolute():
-            raise FleetPlanInvalid(
-                f"Fleet runtime file alias must be absolute: {sandbox_path}"
-            )
+            raise FleetPlanInvalid(f"Fleet runtime file alias must be absolute: {sandbox_path}")
         target = destination / Path(*sandbox_path.parts[1:])
         snapshot_host_path(
             source,
@@ -510,13 +507,10 @@ def _materialize_host_tool_runtime_support(
 
 def _runtime_file_mount_targets(host_tools: Iterable[object]) -> tuple[PurePosixPath, ...]:
     fixed = tuple(
-        SANDBOX_PATHS.etc / name
-        for name in ("passwd", "group", "nsswitch.conf", "hosts")
+        SANDBOX_PATHS.etc / name for name in ("passwd", "group", "nsswitch.conf", "hosts")
     )
     host_tools = tuple(host_tools)
-    toolchain = tuple(
-        SANDBOX_PATHS.toolchain / str(binding.name) for binding in host_tools
-    )
+    toolchain = tuple(SANDBOX_PATHS.toolchain / str(binding.name) for binding in host_tools)
     shell = (
         (PurePosixPath("/bin/sh"),)
         if any(str(binding.name) == "sh" for binding in host_tools)

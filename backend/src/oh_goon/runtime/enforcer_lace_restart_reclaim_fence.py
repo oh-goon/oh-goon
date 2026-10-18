@@ -5,6 +5,7 @@ Their SQLite BEGIN IMMEDIATE cuts must refuse to delete an orphaned execution
 lease or terminalize its Run while a local resource intent is durably present.
 This is a *negative* guard, not a cleanup grant or a new authority channel.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -13,7 +14,8 @@ from oh_goon.core.errors import StateConflict
 
 
 def require_no_original_lace_intent_before_reclamation_in(
-    connection: sqlite3.Connection, run_id: str,
+    connection: sqlite3.Connection,
+    run_id: str,
 ) -> None:
     """Fail before generic dead-lease reclamation, in its original write cut.
 
@@ -23,15 +25,23 @@ def require_no_original_lace_intent_before_reclamation_in(
     the generic owner cannot authenticate absence from the signed journal.
     The caller must roll back on any denial.
     """
-    if (not isinstance(connection, sqlite3.Connection)
-            or not connection.in_transaction
-            or type(run_id) is not str or not run_id):
-        raise StateConflict("original SQLite writer and Fleet Run required for LACE reclamation fence")
+    if (
+        not isinstance(connection, sqlite3.Connection)
+        or not connection.in_transaction
+        or type(run_id) is not str
+        or not run_id
+    ):
+        raise StateConflict(
+            "original SQLite writer and Fleet Run required for LACE reclamation fence"
+        )
     try:
-        tables = {row[0] for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name IN ('lace_run_authority','lace_run_events')"
-        )}
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('lace_run_authority','lace_run_events')"
+            )
+        }
         if not tables:
             return  # pre-LACE database; no hidden bootstrap of a second authority
         if tables != {"lace_run_authority", "lace_run_events"}:
@@ -51,9 +61,12 @@ def require_no_original_lace_intent_before_reclamation_in(
             raise StateConflict(
                 "original LACE admission requires authenticated recovery before lease reclamation"
             )
-        if connection.execute(
-            "SELECT 1 FROM lace_run_events WHERE run_id=? LIMIT 1", (run_id,)
-        ).fetchone() is not None:
+        if (
+            connection.execute(
+                "SELECT 1 FROM lace_run_events WHERE run_id=? LIMIT 1", (run_id,)
+            ).fetchone()
+            is not None
+        ):
             raise StateConflict("orphan original LACE events block legacy lease reclamation")
     except sqlite3.Error as exc:
         raise StateConflict("original LACE authority unreadable; lease reclamation denied") from exc

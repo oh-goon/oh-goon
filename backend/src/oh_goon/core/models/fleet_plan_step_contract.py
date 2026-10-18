@@ -53,7 +53,6 @@ class StepPlanCacheSource(ImmutableModel):
     step_id: str = Field(min_length=1, max_length=80)
 
 
-
 class RetainedPlanCacheSource(ImmutableModel):
     """Start strict CI/CD from one repository-owned immutable cache reference.
 
@@ -75,7 +74,9 @@ class RetainedPlanCacheSource(ImmutableModel):
             return value
         if re.fullmatch(r"\$\{\{ inputs\.[A-Za-z_][A-Za-z0-9_-]{0,63} \}\}", value):
             return value
-        raise ValueError("retained cache reference must be a ref-* identity or one direct input projection")
+        raise ValueError(
+            "retained cache reference must be a ref-* identity or one direct input projection"
+        )
 
 
 PlanCacheSource = Annotated[

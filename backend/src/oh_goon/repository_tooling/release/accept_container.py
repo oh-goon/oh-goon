@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
@@ -11,12 +10,16 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
 from typing import Any
 
 from oh_goon.core import local_access_protocol
-from oh_goon.repository_tooling.local_access_http import authorized_request, new_certification_access_token
-from oh_goon.repository_tooling.public_dependency_privacy import public_source_privacy_issues
 from oh_goon.repository_tooling.acceptance.product import exercise_product_runtime
+from oh_goon.repository_tooling.local_access_http import (
+    authorized_request,
+    new_certification_access_token,
+)
+from oh_goon.repository_tooling.public_dependency_privacy import public_source_privacy_issues
 
 ROOT = Path(__file__).resolve().parents[5]
 HOST = "127.0.0.1"
@@ -47,9 +50,7 @@ def _wait_http(url: str, timeout_seconds: float = 60.0) -> object:
     raise RuntimeError(f"timed out waiting for {url}")
 
 
-def _cleanup_compose(
-    compose: tuple[str, ...], *, root: Path, env: dict[str, str]
-) -> None:
+def _cleanup_compose(compose: tuple[str, ...], *, root: Path, env: dict[str, str]) -> None:
     subprocess.run(
         (*compose, "down", "--remove-orphans", "--rmi", "local"),
         cwd=root,
@@ -82,9 +83,7 @@ def _verify_container_package_origin(
         return ("container did not import Oh Goon from the installed wheel",)
     expected = (root / "VERSION").read_text(encoding="utf-8").strip()
     if lines[1].strip() != expected:
-        return (
-            f"container imported version {lines[1].strip()!r}, expected {expected!r}",
-        )
+        return (f"container imported version {lines[1].strip()!r}, expected {expected!r}",)
     return ()
 
 
@@ -135,9 +134,7 @@ def _acceptance_environment(
 def _validated_compose_file(root: Path) -> Path:
     path = root / "docker-compose.yml"
     if path.is_symlink() or not path.is_file():
-        raise ValueError(
-            "container acceptance compose file must be a regular non-symlink file"
-        )
+        raise ValueError("container acceptance compose file must be a regular non-symlink file")
     return path
 
 
@@ -150,9 +147,7 @@ def _validated_dockerfile(root: Path, value: str) -> str:
     try:
         relative = path.resolve().relative_to((root / "docker").resolve())
     except ValueError as exc:
-        raise ValueError(
-            "container acceptance Dockerfile must remain under docker/"
-        ) from exc
+        raise ValueError("container acceptance Dockerfile must remain under docker/") from exc
     return f"docker/{relative.as_posix()}"
 
 
@@ -169,9 +164,7 @@ def _container_source_policy_issues(root: Path) -> tuple[str, ...]:
             issues.append(f"{relative.as_posix()} must remain inside the checkout")
             continue
         if path.is_symlink() or not path.is_file():
-            issues.append(
-                f"{relative.as_posix()} must be a contained regular non-symlink file"
-            )
+            issues.append(f"{relative.as_posix()} must be a contained regular non-symlink file")
     issues.extend(public_source_privacy_issues(root))
     return tuple(dict.fromkeys(issues))
 
@@ -214,26 +207,23 @@ def accept_container(
             str(compose_file),
         )
         try:
-            subprocess.run(
-                (*compose, "build", "oh-goon"), cwd=root, env=env, check=True
-            )
-            subprocess.run(
-                (*compose, "up", "-d", "oh-goon"), cwd=root, env=env, check=True
-            )
+            subprocess.run((*compose, "build", "oh-goon"), cwd=root, env=env, check=True)
+            subprocess.run((*compose, "up", "-d", "oh-goon"), cwd=root, env=env, check=True)
             _wait_http(f"{base}/healthz")
-            if provenance_issues := _verify_container_package_origin(
-                compose, root=root, env=env
-            ):
+            if provenance_issues := _verify_container_package_origin(compose, root=root, env=env):
                 return provenance_issues
             subprocess.run(
                 ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
                 cwd=root / "frontend",
                 check=True,
             )
-            subprocess.run(
-                ("npm", "run", "browser:install"), cwd=root / "frontend", check=True
+            subprocess.run(("npm", "run", "browser:install"), cwd=root / "frontend", check=True)
+            _request_json(
+                "POST",
+                f"{base}/api/locations",
+                access_token=access_token,
+                payload={"path": "/repositories"},
             )
-            _request_json("POST", f"{base}/api/locations", access_token=access_token, payload={"path": "/repositories"})
             run_id = exercise_product_runtime(
                 root=root,
                 base_url=base,
@@ -245,20 +235,16 @@ def accept_container(
             subprocess.run((*compose, "down"), cwd=root, env=env, check=True)
             if not (data / "oh-goon.db").is_file():
                 return ("container did not persist SQLite database on the host",)
-            subprocess.run(
-                (*compose, "up", "-d", "oh-goon"), cwd=root, env=env, check=True
-            )
+            subprocess.run((*compose, "up", "-d", "oh-goon"), cwd=root, env=env, check=True)
             _wait_http(f"{base}/healthz")
             locations = _request_json("GET", f"{base}/api/locations", access_token=access_token)
             if "/repositories" not in locations.get("locations", []):  # type: ignore[union-attr]
-                return (
-                    "replacement container did not restore persisted League configuration",
-                )
-            persisted_run = _request_json("GET", f"{base}/api/fleet/runs/{run_id}", access_token=access_token)
+                return ("replacement container did not restore persisted League configuration",)
+            persisted_run = _request_json(
+                "GET", f"{base}/api/fleet/runs/{run_id}", access_token=access_token
+            )
             if persisted_run.get("fleet_run_id") != run_id:  # type: ignore[union-attr]
-                return (
-                    "replacement container did not restore persisted SQLite Game Tape state",
-                )
+                return ("replacement container did not restore persisted SQLite Game Tape state",)
         finally:
             _cleanup_compose(compose, root=root, env=env)
     return ()

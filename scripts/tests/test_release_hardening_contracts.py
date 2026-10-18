@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.repository_tooling.release import accept_container as accept_container_module
+from oh_goon.repository_tooling.release import (
+    accept_container as accept_container_module,
+)
 from oh_goon.repository_tooling.release import accept_release as accept_release_module
 from oh_goon.repository_tooling.release.accept_container import _validated_dockerfile
 from oh_goon.repository_tooling.dependency_locks import dependency_lock_issues
 from oh_goon.repository_tooling import startup_environment
-
-
 
 
 def test_release_build_runs_repository_check_before_wheel_build() -> None:
@@ -53,40 +53,53 @@ def test_source_sync_uses_declared_build_requirements_and_release_stays_locked()
     )
     release = (root / "scripts/release/build_release.sh").read_text(encoding="utf-8")
     init = "init:" + makefile.split("\ninit:", 1)[1].split("\n\n", 1)[0]
-    assert set(payload["build-system"]["requires"]) == {"editables>=0.5", "hatchling>=1.32.0"}
+    assert set(payload["build-system"]["requires"]) == {
+        "editables>=0.5",
+        "hatchling>=1.32.0",
+    }
     assert "\nsetup:" not in makefile
     assert "\ndeveloper-dependencies-acquire:" not in makefile
     assert "certification-setup:" not in makefile
     assert "certification-dependencies-prepare:" not in makefile
-    assert "uv sync --project backend --locked --group dev --group quality --group build" in init
+    assert (
+        "uv sync --project backend --locked --group dev --group quality --group build"
+        in init
+    )
     assert "npm ci --prefer-offline --ignore-scripts --no-audit --no-fund" in init
     assert "certification-dependencies-" not in init
     assert "make release-locks-check" in release
     assert "uv lock --project backend --check" not in release
     assert "npm ci --package-lock-only" not in release
-    assert "uv sync --locked --no-dev --group dev --group quality --group build --no-python-downloads" in release
+    assert (
+        "uv sync --locked --no-dev --group dev --group quality --group build --no-python-downloads"
+        in release
+    )
     assert "uv build --wheel --no-build-isolation --no-sources" in release
     assert "oh-goon-python-install" not in release
     assert "uv sync --group dev" not in release
     assert "--no-install-project" not in release
 
 
-def test_release_acceptance_has_one_lock_admissibility_owner_before_materialization() -> None:
+def test_release_acceptance_has_one_lock_admissibility_owner_before_materialization() -> (
+    None
+):
     root = Path(__file__).resolve().parents[2]
     accept_release = (
         root / "backend/src/oh_goon/repository_tooling/release/accept_release.py"
     ).read_text(encoding="utf-8")
     release = (root / "scripts/release/build_release.sh").read_text(encoding="utf-8")
     makefile = (root / "Makefile").read_text(encoding="utf-8")
-    lock_target = "release-locks-check:" + makefile.split(
-        "release-locks-check:", 1
-    )[1].split("\n\n", 1)[0]
+    lock_target = (
+        "release-locks-check:"
+        + makefile.split("release-locks-check:", 1)[1].split("\n\n", 1)[0]
+    )
 
     assert "dependency_lock_issues" not in accept_release
     assert release.count("make release-locks-check") == 1
     assert "uv lock --project backend --check" not in release
     assert "npm ci --package-lock-only" not in release
     assert "backend-lock-check frontend-lock-check" in lock_target
+
 
 def test_container_acceptance_dockerfile_must_stay_under_repository_docker_tree(
     tmp_path: Path,
@@ -110,7 +123,9 @@ def test_container_acceptance_dockerfile_must_stay_under_repository_docker_tree(
 
 def test_lock_authoring_has_no_python_transaction_wrapper() -> None:
     root = Path(__file__).resolve().parents[2]
-    assert not (root / "backend/src/oh_goon/repository_tooling/dependency_lock_authoring.py").exists()
+    assert not (
+        root / "backend/src/oh_goon/repository_tooling/dependency_lock_authoring.py"
+    ).exists()
     makefile = (root / "Makefile").read_text(encoding="utf-8")
     assert "backend-lock:" not in makefile
 
@@ -185,7 +200,9 @@ def test_vendor_wheel_builder_copies_release_identity_for_verification() -> None
         )
 
 
-def test_native_lock_validation_rejects_parent_symlink_escape_before_package_manager_call(tmp_path: Path) -> None:
+def test_native_lock_validation_rejects_parent_symlink_escape_before_package_manager_call(
+    tmp_path: Path,
+) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "uv.lock").write_text("version = 1\n", encoding="utf-8")
@@ -194,10 +211,12 @@ def test_native_lock_validation_rejects_parent_symlink_escape_before_package_man
     (root / "backend").symlink_to(outside, target_is_directory=True)
     frontend = root / "frontend"
     frontend.mkdir()
-    (frontend / "package-lock.json").write_text('{}\n', encoding="utf-8")
+    (frontend / "package-lock.json").write_text("{}\n", encoding="utf-8")
 
     issues = dependency_lock_issues(root)
-    assert any("contained regular non-symlink file" in reason for _path, reason in issues)
+    assert any(
+        "contained regular non-symlink file" in reason for _path, reason in issues
+    )
 
 
 def test_dependency_lock_checker_rejects_parent_symlink_escape(tmp_path: Path) -> None:
@@ -310,7 +329,9 @@ def test_release_acceptance_reverifies_wheel_after_browser_matrix(
     def forbidden_startup_diagnostic(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("release acceptance must not gate on startup diagnostics")
 
-    monkeypatch.setattr(startup_environment, "startup_report", forbidden_startup_diagnostic)
+    monkeypatch.setattr(
+        startup_environment, "startup_report", forbidden_startup_diagnostic
+    )
     monkeypatch.setattr(accept_release_module, "release_artifact_issues", verify)
     monkeypatch.setattr(accept_release_module, "_install_locked_runtime", install)
     monkeypatch.setattr(
@@ -332,8 +353,12 @@ def test_container_acceptance_reaches_native_docker_without_startup_preflight(
     (tmp_path / "frontend").mkdir()
     (tmp_path / "docker/ubuntu").mkdir(parents=True)
     (tmp_path / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
-    (tmp_path / "docker/ubuntu/Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
-    (tmp_path / "backend/pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+    (tmp_path / "docker/ubuntu/Dockerfile").write_text(
+        "FROM scratch\n", encoding="utf-8"
+    )
+    (tmp_path / "backend/pyproject.toml").write_text(
+        "[project]\nname='x'\n", encoding="utf-8"
+    )
     (tmp_path / "backend/uv.lock").write_text("version = 1\n", encoding="utf-8")
     (tmp_path / "frontend/package.json").write_text('{"name":"x"}\n', encoding="utf-8")
     (tmp_path / "frontend/package-lock.json").write_text(
@@ -356,25 +381,43 @@ def test_container_acceptance_reaches_native_docker_without_startup_preflight(
 
 def test_source_product_acceptance_isolates_ambient_runtime_environment() -> None:
     root = Path(__file__).resolve().parents[2]
-    text = (root / "backend/src/oh_goon/repository_tooling/acceptance/product.py").read_text(encoding="utf-8")
+    text = (
+        root / "backend/src/oh_goon/repository_tooling/acceptance/product.py"
+    ).read_text(encoding="utf-8")
     assert "_source_runtime_environment" in text
     assert 'name.startswith("OH_GOON_")' in text
     assert '"HOME": str(state / "home")' in text
     assert '"XDG_CONFIG_HOME": str(state / "config")' in text
     assert '"PYTHONPATH": source' not in text
-    for name in ("PYTHONPATH", "VIRTUAL_ENV", "UV_RESOLUTION", "UV_PRERELEASE", "UV_EXCLUDE_NEWER"):
+    for name in (
+        "PYTHONPATH",
+        "VIRTUAL_ENV",
+        "UV_RESOLUTION",
+        "UV_PRERELEASE",
+        "UV_EXCLUDE_NEWER",
+    ):
         assert f'"{name}"' in text
     assert '"--no-dev"' in text
 
 
-def test_container_runtime_consumes_current_public_lock_then_installs_hash_pinned_runtime() -> None:
+def test_container_runtime_consumes_current_public_lock_then_installs_hash_pinned_runtime() -> (
+    None
+):
     root = Path(__file__).resolve().parents[2]
     for vendor in ("ubuntu", "opensuse"):
         text = (root / "docker" / vendor / "Dockerfile").read_text(encoding="utf-8")
         assert "ghcr.io/astral-sh/uv:0.12.5" in text
-        assert "uv sync --locked --project backend --group dev --group quality --group build --no-install-project --no-python-downloads" in text
-        assert "uv export --project backend --frozen --no-dev --no-emit-project --format requirements.txt" in text
-        assert "uv pip install --python backend/.venv/bin/python --require-hashes" in text
+        assert (
+            "uv sync --locked --project backend --group dev --group quality --group build --no-install-project --no-python-downloads"
+            in text
+        )
+        assert (
+            "uv export --project backend --frozen --no-dev --no-emit-project --format requirements.txt"
+            in text
+        )
+        assert (
+            "uv pip install --python backend/.venv/bin/python --require-hashes" in text
+        )
         assert "COPY backend/pyproject.toml backend/uv.lock backend/" in text
         assert "COPY vendor vendor" not in text
         assert "uv build --wheel --no-build-isolation --no-sources" in text

@@ -5,6 +5,7 @@ registry access, caching, and environment materialization. This module does not
 invoke or emulate uv. It checks only repository-specific publication properties
 that uv does not own.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,10 +51,7 @@ def command_public_lock_check() -> None:
             f"{rendered}\n"
             "Recovery: author backend/uv.lock with native `uv lock --project backend` using public dependency source identity."
         )
-    print(
-        "DEPENDENCY LOCK PUBLICATION POLICY PASSED\n"
-        f"uv.lock sha256: {_sha256(LOCK)}"
-    )
+    print(f"DEPENDENCY LOCK PUBLICATION POLICY PASSED\nuv.lock sha256: {_sha256(LOCK)}")
 
 
 def command_status() -> None:

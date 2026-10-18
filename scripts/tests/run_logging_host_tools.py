@@ -6,7 +6,7 @@ from pathlib import Path
 
 _HOST_TOOL_NAMES = ("ln", "mkdir", "mv", "rm")
 
-_SHIM = r'''#!__PYTHON__
+_SHIM = r"""#!__PYTHON__
 from __future__ import annotations
 
 import os
@@ -64,7 +64,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-'''.replace("__PYTHON__", sys.executable)
+""".replace("__PYTHON__", sys.executable)
 
 
 def logging_host_env(tmp_path: Path) -> dict[str, str]:

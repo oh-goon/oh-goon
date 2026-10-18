@@ -16,15 +16,18 @@ from oh_goon.core.errors import RunNotFound
 from oh_goon.core.models.run_events import RunAdmittedEvent
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import FleetRunEventType, FleetRunStatus
+from oh_goon.native_issuer.enforcer_lace_prework_capture import PreworkRunCapture
 from oh_goon.native_issuer.enforcer_lace_run_source_issuer import (
     issue_observed_run_repository_source_identity,
 )
 from oh_goon.runtime.journal import Journal
-from oh_goon.native_issuer.enforcer_lace_prework_capture import PreworkRunCapture
 
 
 def _read_original_admission(
-    journal: Journal, run_id: str, *, prework: PreworkRunCapture | None = None,
+    journal: Journal,
+    run_id: str,
+    *,
+    prework: PreworkRunCapture | None = None,
 ) -> tuple[RunAdmittedEvent, int]:
     """Require a sole queued Run admission, never a stale/history replay."""
     if prework is not None:
@@ -37,20 +40,28 @@ def _read_original_admission(
         batch = journal.read_view().run_events(run_id)
     except (ValueError, OSError, KeyError, RunNotFound) as exc:
         raise TrustProtocolError("durable Run admission is unavailable") from exc
-    if (len(batch.events) != 1 or batch.next_sequence != 1
-            or batch.run.status is not FleetRunStatus.QUEUED
-            or batch.run.fleet_run_id != run_id):
+    if (
+        len(batch.events) != 1
+        or batch.next_sequence != 1
+        or batch.run.status is not FleetRunStatus.QUEUED
+        or batch.run.fleet_run_id != run_id
+    ):
         raise TrustProtocolError("Run is not at its sole committed admission cut")
     event = batch.events[0]
-    if (not isinstance(event, RunAdmittedEvent)
-            or event.event_type is not FleetRunEventType.RUN_ADMITTED
-            or event.sequence != 1 or event.fleet_run_id != run_id
-            or not isinstance(event.target, FleetPlanTarget)
-            or len(event.repository_admissions) < 2):
+    if (
+        not isinstance(event, RunAdmittedEvent)
+        or event.event_type is not FleetRunEventType.RUN_ADMITTED
+        or event.sequence != 1
+        or event.fleet_run_id != run_id
+        or not isinstance(event.target, FleetPlanTarget)
+        or len(event.repository_admissions) < 2
+    ):
         raise TrustProtocolError("Run admission lacks multi-repository Fleet Plan authority")
     # Revalidate the entire persisted immutable model; never trust partial objects.
     try:
-        validated = RunAdmittedEvent.model_validate(event.model_dump(mode="python", exclude_computed_fields=True))
+        validated = RunAdmittedEvent.model_validate(
+            event.model_dump(mode="python", exclude_computed_fields=True)
+        )
     except (ValueError, TypeError) as exc:
         raise TrustProtocolError("invalid stored RUN_ADMITTED authority") from exc
     if validated != event:
@@ -59,8 +70,11 @@ def _read_original_admission(
 
 
 def issue_observed_captured_run_source(
-    *, journal: Journal, contract: AdmittedRunContract,
-    issuer_id: str, signing_key: Ed25519PrivateKey,
+    *,
+    journal: Journal,
+    contract: AdmittedRunContract,
+    issuer_id: str,
+    signing_key: Ed25519PrivateKey,
     prework: PreworkRunCapture | None = None,
 ) -> IssuerEvidence:
     """Issue only for exact repositories *read from* the one operational Journal.
@@ -74,18 +88,25 @@ def issue_observed_captured_run_source(
     admitted, revision = _read_original_admission(journal, run_id, prework=prework)
     selected = tuple(item.repository_id for item in admitted.repository_admissions)
     captured = {target.repository_id: target.path for target in admitted.targets}
-    if (set(captured) != set(selected) or len(captured) != len(admitted.targets)
-            or admitted.target.plan.plan_id != admitted.repository_admissions[0].plan_id):
+    if (
+        set(captured) != set(selected)
+        or len(captured) != len(admitted.targets)
+        or admitted.target.plan.plan_id != admitted.repository_admissions[0].plan_id
+    ):
         raise TrustProtocolError("durable Run repository scope differs from admitted Plan")
     evidence = issue_observed_run_repository_source_identity(
-        repositories=captured, admissions=admitted.repository_admissions,
-        selected_repository_ids=selected, contract=contract,
-        issuer_id=issuer_id, signing_key=signing_key,
+        repositories=captured,
+        admissions=admitted.repository_admissions,
+        selected_repository_ids=selected,
+        contract=contract,
+        issuer_id=issuer_id,
+        signing_key=signing_key,
     )
     after, later_revision = _read_original_admission(journal, run_id, prework=prework)
     if later_revision != revision or after != admitted:
         raise TrustProtocolError("durable admission changed while issuing Run evidence")
     return evidence
+
 
 REPOSITORY_CAPTURE_DOMAIN = "oh-goon/fleet-run-captured-repository-identity/v1"
 REPOSITORY_FIELD = "repository_identity"
@@ -95,10 +116,14 @@ def admitted_run_repository_capture_identity(admitted: RunAdmittedEvent) -> str:
     """Canonical projection of original Run target roots and admitted subjects."""
     from oh_goon.core.enforcer_lace_trust import canonical_bytes, digest
 
-    if not isinstance(admitted, RunAdmittedEvent) or not isinstance(admitted.target, FleetPlanTarget):
+    if not isinstance(admitted, RunAdmittedEvent) or not isinstance(
+        admitted.target, FleetPlanTarget
+    ):
         raise TrustProtocolError("durable Fleet Plan RUN_ADMITTED required")
     try:
-        verified = RunAdmittedEvent.model_validate(admitted.model_dump(mode="python", exclude_computed_fields=True))
+        verified = RunAdmittedEvent.model_validate(
+            admitted.model_dump(mode="python", exclude_computed_fields=True)
+        )
     except (ValueError, TypeError) as exc:
         raise TrustProtocolError("invalid captured repository authority") from exc
     if verified != admitted or len(admitted.repository_admissions) < 2:
@@ -107,22 +132,33 @@ def admitted_run_repository_capture_identity(admitted: RunAdmittedEvent) -> str:
     selected = tuple(item.repository_id for item in admitted.repository_admissions)
     if len(by_id) != len(admitted.targets) or set(by_id) != set(selected):
         raise TrustProtocolError("captured repository subjects differ from durable admissions")
-    return digest(REPOSITORY_CAPTURE_DOMAIN, canonical_bytes({
-        "run_id": admitted.fleet_run_id,
-        "plan_id": admitted.target.plan.plan_id,
-        "repositories": [{
-            "repository_id": item.repository_id,
-            "canonical_root": str(by_id[item.repository_id].path),
-            "subject_instance_id": item.source_authority.subject_instance_id,
-            "source_authority_id": item.source_authority.authority_id,
-            "repository_admission_id": item.admission_id,
-        } for item in admitted.repository_admissions],
-    }))
+    return digest(
+        REPOSITORY_CAPTURE_DOMAIN,
+        canonical_bytes(
+            {
+                "run_id": admitted.fleet_run_id,
+                "plan_id": admitted.target.plan.plan_id,
+                "repositories": [
+                    {
+                        "repository_id": item.repository_id,
+                        "canonical_root": str(by_id[item.repository_id].path),
+                        "subject_instance_id": item.source_authority.subject_instance_id,
+                        "source_authority_id": item.source_authority.authority_id,
+                        "repository_admission_id": item.admission_id,
+                    }
+                    for item in admitted.repository_admissions
+                ],
+            }
+        ),
+    )
 
 
 def issue_observed_captured_run_repository_identity(
-    *, journal: Journal, contract: AdmittedRunContract,
-    issuer_id: str, signing_key: Ed25519PrivateKey,
+    *,
+    journal: Journal,
+    contract: AdmittedRunContract,
+    issuer_id: str,
+    signing_key: Ed25519PrivateKey,
     prework: PreworkRunCapture | None = None,
 ) -> IssuerEvidence:
     """Sign Run repository capture with its *separate* repository issuer key.
@@ -135,9 +171,13 @@ def issue_observed_captured_run_repository_identity(
     from oh_goon.native_issuer import enforcer_lace_repository_snapshot_issuer as native
 
     contract.verify()
-    if (not isinstance(signing_key, Ed25519PrivateKey)
-            or not isinstance(issuer_id, str) or not issuer_id or not issuer_id.isascii()
-            or any(c in issuer_id for c in "\x00\n/")):
+    if (
+        not isinstance(signing_key, Ed25519PrivateKey)
+        or not isinstance(issuer_id, str)
+        or not issuer_id
+        or not issuer_id.isascii()
+        or any(c in issuer_id for c in "\x00\n/")
+    ):
         raise TrustProtocolError("independent repository signing authority required")
     values = contract.fields
     admitted, revision = _read_original_admission(journal, values["run_id"], prework=prework)
@@ -150,26 +190,39 @@ def issue_observed_captured_run_repository_identity(
         for target in admitted.targets:
             item = selected[target.repository_id]
             root = target.path
-            if (not root.is_absolute() or root.is_symlink() or not root.is_dir()
-                    or root.resolve() != root):
+            if (
+                not root.is_absolute()
+                or root.is_symlink()
+                or not root.is_dir()
+                or root.resolve() != root
+            ):
                 raise TrustProtocolError("unsafe captured native repository root")
             try:
                 subject = native.repository_subject_instance_id(root)
                 snapshot = native.source_snapshot_identity(root)
             except (OSError, ValueError, ImportError) as exc:
-                raise TrustProtocolError("captured repository owner observation unavailable") from exc
+                raise TrustProtocolError(
+                    "captured repository owner observation unavailable"
+                ) from exc
             expected = item.source_authority.source_snapshot
-            if (subject != item.source_authority.subject_instance_id
-                    or (snapshot.sha256, snapshot.byte_count, snapshot.entry_count)
-                    != (expected.sha256, expected.byte_count, expected.entry_count)):
+            if subject != item.source_authority.subject_instance_id or (
+                snapshot.sha256,
+                snapshot.byte_count,
+                snapshot.entry_count,
+            ) != (expected.sha256, expected.byte_count, expected.entry_count):
                 raise TrustProtocolError("captured repository no longer matches native owner")
 
     observe()
-    payload = canonical_bytes({
-        "protocol": ISSUER_PROTOCOL, "field": REPOSITORY_FIELD,
-        "run_id": values["run_id"], "contract_identity": contract.identity,
-        "identity": identity, "executor_generation": values["executor_generation"],
-    })
+    payload = canonical_bytes(
+        {
+            "protocol": ISSUER_PROTOCOL,
+            "field": REPOSITORY_FIELD,
+            "run_id": values["run_id"],
+            "contract_identity": contract.identity,
+            "identity": identity,
+            "executor_generation": values["executor_generation"],
+        }
+    )
     observe()
     after, later_revision = _read_original_admission(journal, values["run_id"], prework=prework)
     if later_revision != revision or after != admitted:

@@ -378,9 +378,7 @@ _AGENT_ACCEPTANCE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 _AGENT_SKILL_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}(?:/[a-z][a-z0-9-]{0,63})*$")
 
 
-def validate_domain_input_value(
-    definition: PlanInputDefinition, value: str, *, label: str
-) -> None:
+def validate_domain_input_value(definition: PlanInputDefinition, value: str, *, label: str) -> None:
     kind = definition.input_type
     match kind:
         case PlanInputType.HOSTNAME:
@@ -391,8 +389,7 @@ def validate_domain_input_value(
             else:
                 parts = value.split("/")
                 valid = bool(parts) and all(
-                    part not in {"", ".", ".."}
-                    and _REPOSITORY_PATH_SEGMENT.fullmatch(part)
+                    part not in {"", ".", ".."} and _REPOSITORY_PATH_SEGMENT.fullmatch(part)
                     for part in parts
                 )
         case PlanInputType.GIT_REVISION:

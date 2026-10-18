@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.repository_tooling import repository_understanding_material as material
+from oh_goon.repository_tooling import _repository_understanding_exam_validation as validation
 from oh_goon.repository_tooling import repository_understanding_calibration as calibration
 from oh_goon.repository_tooling import repository_understanding_lifecycle as lifecycle
-from oh_goon.repository_tooling import _repository_understanding_exam_validation as validation
+from oh_goon.repository_tooling import repository_understanding_material as material
 
 SHA_A = "sha256:" + "a" * 64
 SHA_B = "sha256:" + "b" * 64
@@ -174,7 +174,6 @@ def test_calibration_report_rejects_malformed_run_and_question_rows(tmp_path: Pa
             _report(tmp_path, payload)
 
 
-
 def test_calibration_report_rejects_duplicate_run_identity(tmp_path: Path) -> None:
     payload = _observation_payload()
     payload["runs"].append(copy.deepcopy(payload["runs"][0]))
@@ -214,7 +213,9 @@ def test_calibration_report_rejects_duplicate_question_and_grading_binding(tmp_p
     second["model_identity"] = SHA_B
     second["configuration_identity"] = SHA_A
     payload["runs"].append(second)
-    with pytest.raises(ValueError, match="grading artifact is represented by more than one calibration observation"):
+    with pytest.raises(
+        ValueError, match="grading artifact is represented by more than one calibration observation"
+    ):
         _report(tmp_path, payload)
 
 
@@ -234,6 +235,7 @@ def test_calibration_report_rejects_malformed_optional_provenance(tmp_path: Path
         with pytest.raises(ValueError):
             _report(tmp_path, payload)
 
+
 def test_lifecycle_identity_version_and_state_projections_fail_closed() -> None:
     with pytest.raises(ValueError, match="sha256 identity"):
         lifecycle._identity("bad", label="x")
@@ -246,7 +248,12 @@ def test_lifecycle_identity_version_and_state_projections_fail_closed() -> None:
         lifecycle._version_not_future("9999.0.0", label="v", source_version="1.2.3")
     with pytest.raises(ValueError):
         lifecycle._version_not_future(None, label="v", source_version="1.2.3")
-    assert lifecycle._version_not_future("PRE_LIFECYCLE", label="v", source_version="1.2.3", allow_legacy=True) == "PRE_LIFECYCLE"
+    assert (
+        lifecycle._version_not_future(
+            "PRE_LIFECYCLE", label="v", source_version="1.2.3", allow_legacy=True
+        )
+        == "PRE_LIFECYCLE"
+    )
     assert lifecycle._state_projection("ACTIVE")["score_bearing"] is True
     assert lifecycle._state_projection("QUARANTINED")["candidate_delivery"] is False
     assert lifecycle._state_projection("RETIRED")["delivery_mode"] == "WITHHELD"
@@ -261,7 +268,14 @@ def test_material_reference_validation_rejects_absolute_escape_and_missing(tmp_p
     material._validate_evidence("ok.txt:1-2", root=root)
     identity = material._evidence_reference_identity("ok.txt:1-2", root=root)
     assert identity["reference"] == "ok.txt:1-2"
-    for reference in ("/etc/passwd:1", "../escape.txt:1", "missing.txt:1", "ok.txt:0", "ok.txt:1-99", "bad-format"):
+    for reference in (
+        "/etc/passwd:1",
+        "../escape.txt:1",
+        "missing.txt:1",
+        "ok.txt:0",
+        "ok.txt:1-99",
+        "bad-format",
+    ):
         with pytest.raises(ValueError):
             material._validate_evidence(reference, root=root)
 

@@ -9,7 +9,9 @@ from oh_goon.core.models.game_tape_live_output import (
 )
 
 
-def _chunk(sequence: int, *, step: str, attempt: int, stream: str, text: str) -> GameTapeLiveOutputChunk:
+def _chunk(
+    sequence: int, *, step: str, attempt: int, stream: str, text: str
+) -> GameTapeLiveOutputChunk:
     return GameTapeLiveOutputChunk(
         sequence=sequence,
         repository_id="repo-test",

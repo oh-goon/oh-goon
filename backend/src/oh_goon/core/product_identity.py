@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Oh-Goon product identity primitives for repository, execution, schedule, and stable IDs."""
+
+from __future__ import annotations
 
 import hashlib
 import json
@@ -24,8 +24,6 @@ def repository_id(path: Path | str) -> str:
     canonical = str(canonical_repository_path(path))
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:20]
     return f"repo-{digest}"
-
-
 
 
 def repository_instance_id(path: Path | str) -> str:
@@ -101,6 +99,7 @@ def repository_subject_instance_id(path: Path | str) -> str:
             "git": marker_payload,
         },
     )
+
 
 def new_operation_id() -> str:
     return f"op-{uuid.uuid4().hex}"

@@ -1,4 +1,5 @@
 """P1P2B2B1: reject WSL EROFS fixture root shortcut before real FD mount."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,24 +13,27 @@ from tests.native.test_p1b27b2b3b2b3a_effectful_mount import (
 
 
 def test_native_runtime_scaffold_precreates_read_only_bind_targets(tmp_path: Path):
-    binding, tools = _prepared_effectful_runtime_root(tmp_path / 'runtime')
+    binding, tools = _prepared_effectful_runtime_root(tmp_path / "runtime")
     runtime = binding.root
     assert {tool.name for tool in tools} == {"sh", "cat", "stat", "awk", "sleep"}
-    for name in ('workspace', 'home/fleet', 'tmp', 'etc', 'proc', 'dev'):
+    for name in ("workspace", "home/fleet", "tmp", "etc", "proc", "dev"):
         assert (runtime / name).is_dir(), name
-    for name in ('etc/passwd', 'toolchain/bin/stat', 'bin/sh'):
+    for name in ("etc/passwd", "toolchain/bin/stat", "bin/sh"):
         assert (runtime / name).is_file(), name
-    assert runtime != Path('/')
+    assert runtime != Path("/")
 
 
-@pytest.mark.parametrize('old,new', (
-    ('capture_runtime_root(', 'capture_not_canonical_root('),
-    ('verify_runtime_root(runtime)', 'pass # identity verification removed'),
-    ('request.attempt.runtime_root = runtime', "request.attempt.runtime_root.root = Path('/')"),
-))
+@pytest.mark.parametrize(
+    "old,new",
+    (
+        ("capture_runtime_root(", "capture_not_canonical_root("),
+        ("verify_runtime_root(runtime)", "pass # identity verification removed"),
+        ("request.attempt.runtime_root = runtime", "request.attempt.runtime_root.root = Path('/')"),
+    ),
+)
 def test_x0_rejects_canonical_root_bypass(tmp_path: Path, old: str, new: str):
-    src = ROOT / 'backend/tests/native/test_p1b27b2b3b2b3a_effectful_mount.py'
-    out = tmp_path / 'backend/tests/native/test_p1b27b2b3b2b3a_effectful_mount.py'
+    src = ROOT / "backend/tests/native/test_p1b27b2b3b2b3a_effectful_mount.py"
+    out = tmp_path / "backend/tests/native/test_p1b27b2b3b2b3a_effectful_mount.py"
     out.parent.mkdir(parents=True)
     content = src.read_text()
     assert old in content
@@ -37,4 +41,5 @@ def test_x0_rejects_canonical_root_bypass(tmp_path: Path, old: str, new: str):
     from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
         _check_p1p2b2b2_canonical_runtime_root,
     )
+
     assert _check_p1p2b2b2_canonical_runtime_root(tmp_path)

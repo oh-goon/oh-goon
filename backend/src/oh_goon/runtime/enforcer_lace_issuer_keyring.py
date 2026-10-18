@@ -24,8 +24,14 @@ _PUBLIC_KEY_BYTES = 32
 def _file_identity(info: os.stat_result) -> tuple[int, ...]:
     """Identity of an opened root or a name, including in-place mutation."""
     return (
-        info.st_dev, info.st_ino, info.st_uid, info.st_mode, info.st_nlink,
-        info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+        info.st_dev,
+        info.st_ino,
+        info.st_uid,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
     )
 
 
@@ -40,7 +46,8 @@ class IssuerKeyReference:
 def load_explicit_issuer_verifier(
     key_directory: Path,
     references: Mapping[str, IssuerKeyReference],
-    *, public_root_owner_uid: int | None = None,
+    *,
+    public_root_owner_uid: int | None = None,
 ) -> TrustedIssuerVerifier:
     """Load pinned public roots using dirfd-relative, name-stable opens.
 
@@ -57,10 +64,14 @@ def load_explicit_issuer_verifier(
     if not isinstance(key_directory, Path) or not key_directory.is_absolute():
         raise TrustProtocolError("explicit absolute issuer key directory required")
     observer_uid = os.geteuid()
-    if (public_root_owner_uid is not None and
-            (type(public_root_owner_uid) is not int or public_root_owner_uid < 0
-             or public_root_owner_uid == observer_uid)):
-        raise TrustProtocolError("independent public root owner must be an explicitly different OS principal")
+    if public_root_owner_uid is not None and (
+        type(public_root_owner_uid) is not int
+        or public_root_owner_uid < 0
+        or public_root_owner_uid == observer_uid
+    ):
+        raise TrustProtocolError(
+            "independent public root owner must be an explicitly different OS principal"
+        )
     if not isinstance(references, Mapping) or set(references) != AUTHORITY_FIELDS:
         raise TrustProtocolError("all six explicit issuer key references required")
     values = tuple(references.values())
@@ -113,13 +124,17 @@ def load_explicit_issuer_verifier(
         # Verify both the original directory descriptor and its *current path*
         # after the full six-root cut. Reject symlink/path replacement and leaf
         # rename, even when the old opened inode remained valid while reading.
-        if (_file_identity(os.fstat(directory_fd)) != _file_identity(original_directory)
-                or _file_identity(os.stat(key_directory, follow_symlinks=False))
-                != _file_identity(original_directory)):
+        if _file_identity(os.fstat(directory_fd)) != _file_identity(
+            original_directory
+        ) or _file_identity(os.stat(key_directory, follow_symlinks=False)) != _file_identity(
+            original_directory
+        ):
             raise TrustProtocolError("issuer root directory changed during observation")
         for filename, identity in leaf_identities.items():
-            if (_file_identity(os.stat(filename, dir_fd=directory_fd,
-                                       follow_symlinks=False)) != identity):
+            if (
+                _file_identity(os.stat(filename, dir_fd=directory_fd, follow_symlinks=False))
+                != identity
+            ):
                 raise TrustProtocolError("issuer root name changed during observation")
         if os.geteuid() != observer_uid:
             raise TrustProtocolError("issuer root observer principal changed during observation")
@@ -132,12 +147,15 @@ def load_explicit_issuer_verifier(
 
 
 def _require_secure_file(
-    info: os.stat_result, *, directory: bool, owner_uid: int | None = None,
+    info: os.stat_result,
+    *,
+    directory: bool,
+    owner_uid: int | None = None,
 ) -> None:
     # The owner may make the public root readable by the verifier's UID, but
     # never writable by it through group/other. Signer keys stay owner-only.
     expected_uid = os.geteuid() if owner_uid is None else owner_uid
-    unsafe_permissions = (0o077 if owner_uid is None else 0o022)
+    unsafe_permissions = 0o077 if owner_uid is None else 0o022
     if (
         info.st_uid != expected_uid
         or info.st_mode & unsafe_permissions

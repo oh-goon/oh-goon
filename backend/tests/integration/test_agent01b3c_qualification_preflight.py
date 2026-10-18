@@ -1,4 +1,5 @@
 """Native qualification must never return a false PASS for missing dependencies."""
+
 from __future__ import annotations
 
 import os
@@ -14,7 +15,9 @@ from tests.integration import test_agent01b3c_native_model_review as native
 def test_native_model_absence_is_not_a_qualification_pass(monkeypatch, selected):
     # The injected PATH contains no `ollama`, regardless of hosted tools.
     original_which = native.shutil.which
-    monkeypatch.setattr(native.shutil, "which", lambda exe: None if exe == "ollama" else original_which(exe))
+    monkeypatch.setattr(
+        native.shutil, "which", lambda exe: None if exe == "ollama" else original_which(exe)
+    )
     monkeypatch.setenv("OH_GOON_AGENT_MODEL", "qwen3:0.6b")
     if selected:
         monkeypatch.setenv(native.REQUIRED_ENV, "1")
@@ -33,7 +36,10 @@ def test_native_script_missing_ollama_fails_before_dependency_materialization(tm
     if os.name != "posix" or native.shutil.which("ollama") is not None:
         pytest.skip("requires Linux host without Ollama; no simulated binary")
     completed = subprocess.run(
-        ["bash", str(script), "qwen3:0.6b"], capture_output=True, text=True, timeout=15,
+        ["bash", str(script), "qwen3:0.6b"],
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
     assert completed.returncode == 2
     assert "UNQUALIFIED: required native executable missing: ollama" in completed.stderr

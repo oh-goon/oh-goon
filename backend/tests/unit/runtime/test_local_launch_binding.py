@@ -16,7 +16,9 @@ T0 = datetime(2026, 9, 4, 4, 0, tzinfo=UTC)
 
 def _stores(tmp_path: Path) -> tuple[LocalLaunchEventStore, LocalLaunchBindingStore]:
     database = tmp_path / "state" / "oh-goon.db"
-    return LocalLaunchEventStore.from_database(database), LocalLaunchBindingStore.from_database(database)
+    return LocalLaunchEventStore.from_database(database), LocalLaunchBindingStore.from_database(
+        database
+    )
 
 
 def _intent(profile: str = "dev") -> LaunchIntent:
@@ -85,7 +87,9 @@ def test_nonterminal_binding_blocks_replacement(tmp_path: Path) -> None:
     workspace = tmp_path / "repo"
     first_identity, first_intent = _create_record(events, workspace=workspace, launch_id="launch-a")
     bindings.bind(identity=first_identity, intent=first_intent, event_store=events, timestamp=T0)
-    second_identity, second_intent = _create_record(events, workspace=workspace, launch_id="launch-b")
+    second_identity, second_intent = _create_record(
+        events, workspace=workspace, launch_id="launch-b"
+    )
     with pytest.raises(ValueError, match="nonterminal"):
         bindings.bind(
             identity=second_identity,
@@ -107,7 +111,9 @@ def test_terminal_binding_can_be_replaced(tmp_path: Path) -> None:
         asserted_by="owner",
         timestamp=T0 + timedelta(seconds=1),
     )
-    second_identity, second_intent = _create_record(events, workspace=workspace, launch_id="launch-b")
+    second_identity, second_intent = _create_record(
+        events, workspace=workspace, launch_id="launch-b"
+    )
     replacement = bindings.bind(
         identity=second_identity,
         intent=second_intent,
@@ -123,7 +129,9 @@ def test_missing_bound_launch_never_authorizes_automatic_replacement(tmp_path: P
     first_identity, first_intent = _create_record(events, workspace=workspace, launch_id="launch-a")
     bindings.bind(identity=first_identity, intent=first_intent, event_store=events, timestamp=T0)
     events.path("launch-a").unlink()
-    second_identity, second_intent = _create_record(events, workspace=workspace, launch_id="launch-b")
+    second_identity, second_intent = _create_record(
+        events, workspace=workspace, launch_id="launch-b"
+    )
     with pytest.raises(ValueError, match="cannot be proven terminal"):
         bindings.bind(
             identity=second_identity,

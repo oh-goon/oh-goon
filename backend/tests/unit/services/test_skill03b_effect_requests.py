@@ -1,4 +1,5 @@
 """SKILL-3B original Agent Step intent is source-bound, never executable authority."""
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,8 @@ def _make_step(tmp_path: Path, *, effect_block: str = "") -> FrozenAgentStepHand
     goon = tmp_path / "goons" / "agent" / "review"
     goon.mkdir(parents=True)
     (goon / "README.md").write_text("# Agent review\n")
-    (goon / "goon.yml").write_text("""inputs:
+    (goon / "goon.yml").write_text(
+        """inputs:
   repo: {type: repository_reference}
   skill: {type: skill_reference}
   acceptance: {type: acceptance_profile}
@@ -28,7 +30,9 @@ steps:
 - uses: agent
   harness: opencode
   task: Review these changes
-""" + effect_block)
+"""
+        + effect_block
+    )
     (tmp_path / "plan.yml").write_text("inputs: [repo, skill, acceptance]\ngoons: [agent/review]\n")
     repo = tmp_path / "repos" / "team" / "project"
     repo.mkdir(parents=True)
@@ -39,10 +43,12 @@ steps:
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(tmp_path / "goons"))
     _, source_sha = resolver.input_definitions_with_source(tmp_path / "plan.yml")
     return resolver.prepare_agent_step_handoff(
-        tmp_path / "plan.yml", inputs={"repo": "local:team/project",
-                                            "skill": "local:team/review", "acceptance": "review"},
-        repository_root=tmp_path / "repos", skill_root=tmp_path / "skills",
-        allowed_acceptance=("review",), expected_source_sha256=source_sha,
+        tmp_path / "plan.yml",
+        inputs={"repo": "local:team/project", "skill": "local:team/review", "acceptance": "review"},
+        repository_root=tmp_path / "repos",
+        skill_root=tmp_path / "skills",
+        allowed_acceptance=("review",),
+        expected_source_sha256=source_sha,
     )
 
 
@@ -87,54 +93,89 @@ def test_effect_requests_change_handoff_identity_not_source_capture_identity(tmp
 def test_unconfigured_existing_agent_packet_stays_original_byte_schema(tmp_path):
     handoff = _make_step(tmp_path)
     obj = json.loads(handoff.encode_prework_delivery())
-    assert set(obj["step"]) == {"owner_source_sha256", "step_id", "harness", "task", "timeout_seconds"}
+    assert set(obj["step"]) == {
+        "owner_source_sha256",
+        "step_id",
+        "harness",
+        "task",
+        "timeout_seconds",
+    }
     assert handoff.requested_effects == AgentStepRequestedEffects()
-    assert FrozenAgentStepHandoff.decode_prework_delivery(
-        handoff.encode_prework_delivery(), expected_handoff_identity=handoff.handoff_identity,
-    ).requested_effects == AgentStepRequestedEffects()
+    assert (
+        FrozenAgentStepHandoff.decode_prework_delivery(
+            handoff.encode_prework_delivery(),
+            expected_handoff_identity=handoff.handoff_identity,
+        ).requested_effects
+        == AgentStepRequestedEffects()
+    )
 
 
-@pytest.mark.parametrize("invalid", [
-    {"repository_access": "admin"},
-    {"recipients": ["external", "external"]},
-    {"recipients": ["z", "a"]},
-    {"recipients": ["https://example.com"]},
-    {"capabilities": {"tools": ["shell;rm"]}},
-    {"capabilities": {"tools": ["ruff", "pytest"]}},
-    {"capabilities": {"egress": {"mode": "host_unrestricted"}}},
-    {"capabilities": {"nested_strict_execution": True}},
-    {"is_admitted": True},
-])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"repository_access": "admin"},
+        {"recipients": ["external", "external"]},
+        {"recipients": ["z", "a"]},
+        {"recipients": ["https://example.com"]},
+        {"capabilities": {"tools": ["shell;rm"]}},
+        {"capabilities": {"tools": ["ruff", "pytest"]}},
+        {"capabilities": {"egress": {"mode": "host_unrestricted"}}},
+        {"capabilities": {"nested_strict_execution": True}},
+        {"is_admitted": True},
+    ],
+)
 def test_authored_effects_reject_ambient_or_noncanonical_requests(invalid):
     with pytest.raises(ValidationError):
-        AgentPlanStep.model_validate({"kind": "agent", "step_id": "review",
-                                      "harness": "opencode", "task": "review", "requested_effects": invalid})
+        AgentPlanStep.model_validate(
+            {
+                "kind": "agent",
+                "step_id": "review",
+                "harness": "opencode",
+                "task": "review",
+                "requested_effects": invalid,
+            }
+        )
 
 
-@pytest.mark.parametrize("mutator", [
-    lambda step: step["requested_effects"].update({"repository_access": "read_only"}),
-    lambda step: step["requested_effects"].update({"effect_permission": "EXECUTE"}),
-    lambda step: step["requested_effects"]["capabilities"].update({"nested_strict_execution": True}),
-    lambda step: step["requested_effects"].update({"recipients": ["other_model"]}),
-    lambda step: step.pop("requested_effects"),
-])
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda step: step["requested_effects"].update({"repository_access": "read_only"}),
+        lambda step: step["requested_effects"].update({"effect_permission": "EXECUTE"}),
+        lambda step: step["requested_effects"]["capabilities"].update(
+            {"nested_strict_execution": True}
+        ),
+        lambda step: step["requested_effects"].update({"recipients": ["other_model"]}),
+        lambda step: step.pop("requested_effects"),
+    ],
+)
 def test_transport_tampering_cannot_expand_or_remove_requested_effects(tmp_path, mutator):
     handoff = _make_step(tmp_path, effect_block=EFFECTS)
     obj = json.loads(handoff.encode_prework_delivery())
     mutator(obj["step"])
     with pytest.raises(FleetPlanInvalid):
         FrozenAgentStepHandoff.decode_prework_delivery(
-            canonical_bytes(obj), expected_handoff_identity=handoff.handoff_identity,
+            canonical_bytes(obj),
+            expected_handoff_identity=handoff.handoff_identity,
         )
 
 
 def test_clean_result_is_still_only_untrusted_claim_with_write_request(tmp_path):
     from oh_goon.services.agent_harness_contract import decode_agent_harness_submission
+
     handoff = _make_step(tmp_path, effect_block=EFFECTS)
-    payload = canonical_bytes({"schema": "oh-goon.agent-harness-submission/v1",
-                               "handoff_identity": handoff.handoff_identity,
-                               "verdict": "CLEAN", "findings": [], "summary": "looks good"})
-    result = decode_agent_harness_submission(payload, expected_handoff_identity=handoff.handoff_identity)
+    payload = canonical_bytes(
+        {
+            "schema": "oh-goon.agent-harness-submission/v1",
+            "handoff_identity": handoff.handoff_identity,
+            "verdict": "CLEAN",
+            "findings": [],
+            "summary": "looks good",
+        }
+    )
+    result = decode_agent_harness_submission(
+        payload, expected_handoff_identity=handoff.handoff_identity
+    )
     assert result.authority == "UNTRUSTED_HARNESS_CLAIM"
     assert not hasattr(result, "effect_permission")
 

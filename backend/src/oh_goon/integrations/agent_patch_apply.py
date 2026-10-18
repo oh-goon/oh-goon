@@ -4,6 +4,7 @@ This owner interprets untrusted proposal data only. A later explicitly admitted
 command Step decides whether to launch the native apply CLI; this module does
 not turn an Agent's output into write authority.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -14,8 +15,10 @@ from pathlib import Path
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.path_authority import RepositoryPathSpace, repository_relative_parts
 from oh_goon.integrations.exact_file_write import (
-    exact_file_write_lock, exact_file_revision,
-    prepared_text_file, replace_prepared_file,
+    exact_file_revision,
+    exact_file_write_lock,
+    prepared_text_file,
+    replace_prepared_file,
 )
 
 _MAX_PROPOSAL_BYTES = 4096
@@ -43,18 +46,33 @@ def parse_proposal_receipt(text: str, *, handoff_identity: str | None = None) ->
     if data["schema"] != "agent-patch-proposal-v1":
         raise FleetPlanInvalid("unsupported proposal schema")
     path, digest, identity = data["path"], data["source_sha256"], data["handoff_identity"]
-    if (type(identity) is not str or not identity or len(identity) > 200
-            or (handoff_identity is not None and identity != handoff_identity)):
+    if (
+        type(identity) is not str
+        or not identity
+        or len(identity) > 200
+        or (handoff_identity is not None and identity != handoff_identity)
+    ):
         raise FleetPlanInvalid("proposal is not bound to selected source handoff")
-    if (type(path) is not str or not path.startswith("repo/") or len(path) > 200
-            or type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+    if (
+        type(path) is not str
+        or not path.startswith("repo/")
+        or len(path) > 200
+        or type(digest) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+    ):
         raise FleetPlanInvalid("proposal has invalid source path or revision")
     repository_relative_parts(path[5:], label="agent patch target")
     replacement, summary = data["replacement"], data["summary"]
-    if (type(replacement) is not str or not replacement
-            or len(replacement.encode("utf-8")) > 2048 or "\x00" in replacement
-            or type(summary) is not str or not summary.strip() or len(summary) > 500
-            or any(ord(c) < 32 or ord(c) == 127 for c in summary)):
+    if (
+        type(replacement) is not str
+        or not replacement
+        or len(replacement.encode("utf-8")) > 2048
+        or "\x00" in replacement
+        or type(summary) is not str
+        or not summary.strip()
+        or len(summary) > 500
+        or any(ord(c) < 32 or ord(c) == 127 for c in summary)
+    ):
         raise FleetPlanInvalid("proposal content or summary is invalid")
     return data
 
@@ -73,7 +91,10 @@ def proposal_from_step_stdout(stdout: str, *, handoff_identity: str) -> str:
 
 
 def apply_selected_proposal(
-    proposal_text: str, *, workspace: Path, expected_path: str,
+    proposal_text: str,
+    *,
+    workspace: Path,
+    expected_path: str,
     expected_handoff_identity: str | None = None,
 ) -> tuple[str, str]:
     """Exact, cooperating locked CAS on an explicitly selected workspace file.
@@ -85,7 +106,9 @@ def apply_selected_proposal(
     if type(expected_path) is not str or expected_path != proposal["path"][5:]:
         raise FleetPlanInvalid("apply Step did not select the proposed exact path")
     root = RepositoryPathSpace.from_root(workspace)
-    target = root.resolve(expected_path, label="Agent apply target", kind="file", require_exists=True)
+    target = root.resolve(
+        expected_path, label="Agent apply target", kind="file", require_exists=True
+    )
     # Containment is not enough: do not silently follow any repository-local
     # symlink or alias when a proposal is for one original exact member.
     current = root.root

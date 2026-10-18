@@ -23,9 +23,10 @@ def test_run_command_captures_actual_executable_and_path_authority(tmp_path: Pat
     receipt = result.runtime_authority
     assert receipt is not None
     assert Path(receipt.executable_path) == executable.resolve()
-    assert receipt.executable_identity == "sha256:" + hashlib.sha256(
-        executable.read_bytes()
-    ).hexdigest()
+    assert (
+        receipt.executable_identity
+        == "sha256:" + hashlib.sha256(executable.read_bytes()).hexdigest()
+    )
     assert receipt.executable_byte_count == len(executable.read_bytes())
     assert receipt.path_authority_identity.startswith("sha256:")
     assert receipt.execution_materialization_identity is not None
@@ -52,7 +53,9 @@ def test_run_command_runtime_authority_binding_is_execution_owner_input(tmp_path
     executable = tmp_path / "bound-tool"
     executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     executable.chmod(0o755)
-    identity = lambda char: "sha256:" + char * 64
+
+    def identity(char):
+        return "sha256:" + char * 64
 
     result = run_command(
         "bound-tool",
@@ -94,7 +97,10 @@ def test_runtime_authority_binds_exact_exported_environment() -> None:
     assert first.runtime_authority is not None
     assert second.runtime_authority is not None
     assert first.runtime_authority.environment_identity.startswith("sha256:")
-    assert first.runtime_authority.environment_identity != second.runtime_authority.environment_identity
+    assert (
+        first.runtime_authority.environment_identity
+        != second.runtime_authority.environment_identity
+    )
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux sealed execution authority")
@@ -144,9 +150,7 @@ def test_runtime_authority_executes_admitted_shebang_interpreter_after_replaceme
 ) -> None:
     interpreter = tmp_path / "admitted-sh"
     shutil.copy2("/bin/sh", interpreter)
-    admitted_interpreter_identity = "sha256:" + hashlib.sha256(
-        interpreter.read_bytes()
-    ).hexdigest()
+    admitted_interpreter_identity = "sha256:" + hashlib.sha256(interpreter.read_bytes()).hexdigest()
     executable = tmp_path / "admitted-script"
     executable.write_text(
         f"#!{interpreter}\nprintf 'admitted-script\\n'\n",

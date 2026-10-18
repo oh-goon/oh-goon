@@ -11,7 +11,6 @@ from oh_goon.core.errors import FleetPlanInvalid, LeagueLineupStale
 from oh_goon.core.models.shared_plan import LeagueLineupDocument
 from oh_goon.runtime.exact_file_store import ExactFileStore
 from oh_goon.runtime.league_folders import (
-    default_league_preferences_path,
     league_preferences_path_for_environment,
 )
 
@@ -138,9 +137,7 @@ class LeagueLineupFileStore(ExactFileStore):
 
     @staticmethod
     def _removed_stale(_key: str) -> Exception:
-        return LeagueLineupStale(
-            "League Lineup was removed before save; reload the Lineup catalog"
-        )
+        return LeagueLineupStale("League Lineup was removed before save; reload the Lineup catalog")
 
 
 def _key(value: str) -> str:

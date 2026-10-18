@@ -6,7 +6,6 @@ from oh_goon.repository_tooling.architecture._structural_project_dependency_cont
     _check_lock_authority,
 )
 
-
 LOCK_CHECK = "backend/src/oh_goon/repository_tooling/dependency_locks.py"
 
 

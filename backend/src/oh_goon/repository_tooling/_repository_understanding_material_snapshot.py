@@ -3,12 +3,14 @@
 Loaded lazily by repository_understanding_material; it does not own exam material,
 question lifecycle, or certification authority.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 from typing import Any
 
+from oh_goon.repository_tooling.release.package_slim import canonical_source_files
 from oh_goon.repository_tooling.repository_understanding_blueprint import question_blueprint
 from oh_goon.repository_tooling.repository_understanding_graph import evidence_expectation_roles
 from oh_goon.repository_tooling.repository_understanding_material import (
@@ -20,7 +22,7 @@ from oh_goon.repository_tooling.repository_understanding_material import (
     _contained,
     _evidence_reference_identity,
 )
-from oh_goon.repository_tooling.release.package_slim import canonical_source_files
+
 
 def _question_snapshot(
     question: ExamQuestion,
@@ -62,12 +64,11 @@ def _question_snapshot(
                 for reference in question.evidence_expectations
             ],
             "evidence_authority_roles": evidence_expectation_roles(
-                question.evidence_expectations, question_blueprint(question)["minimum_evidence_authority"]
+                question.evidence_expectations,
+                question_blueprint(question)["minimum_evidence_authority"],
             ),
         },
     }
-
-
 
 
 def _calibration_question_binding(question: ExamQuestion) -> str:
@@ -99,8 +100,11 @@ def _calibration_question_binding(question: ExamQuestion) -> str:
             _evidence_reference_identity(reference) for reference in question.evidence_expectations
         ],
     }
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
     return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
 
 def _repository_evidence_index() -> dict[str, dict[str, Any]]:
     index: dict[str, dict[str, Any]] = {}
@@ -118,8 +122,6 @@ def _repository_evidence_index() -> dict[str, dict[str, Any]]:
             "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         }
     return index
-
-
 
 
 def _qualification_bank_questions(
@@ -160,4 +162,3 @@ def _dimension_normalization_bank_audit(
             "each included question contributes equally inside its semantic dimension and only explicit dimension weights control cross-dimension influence"
         ),
     }
-

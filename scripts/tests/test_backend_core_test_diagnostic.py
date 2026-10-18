@@ -16,7 +16,9 @@ SCRIPT = ROOT / "scripts/backend_core_test_diagnostic.sh"
 HOST_PYTHON_SELECTOR = ROOT / "scripts/host_python.sh"
 
 
-def test_hosted_diagnostic_selector_delegates_required_capabilities_to_semantic_owner() -> None:
+def test_hosted_diagnostic_selector_delegates_required_capabilities_to_semantic_owner() -> (
+    None
+):
     text = SCRIPT.read_text(encoding="utf-8")
     selector = HOST_PYTHON_SELECTOR.read_text(encoding="utf-8")
     assert 'source "$ROOT/scripts/host_python.sh"' in text
@@ -45,7 +47,9 @@ def test_explicit_host_python_override_remains_authoritative(tmp_path: Path) -> 
     assert result.stdout.strip() == str(explicit)
 
 
-def test_host_python_selector_prefers_capable_python_over_incapable_python3(tmp_path: Path) -> None:
+def test_host_python_selector_prefers_capable_python_over_incapable_python3(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("host interpreter selector is POSIX shell tooling")
     bin_dir = tmp_path / "bin"
@@ -85,7 +89,7 @@ def test_host_python_selector_accepts_candidate_only_through_semantic_capability
     fallback = bin_dir / "python3"
     candidate.write_text(
         "#!/usr/bin/env bash\n"
-        "case \"$*\" in\n"
+        'case "$*" in\n'
         "  *hosted_dependency_capability.py*--probe-required-host-capabilities*) exit 0 ;;\n"
         "  *) exit 41 ;;\n"
         "esac\n",
@@ -114,9 +118,11 @@ def test_predependency_diagnostic_does_not_privately_materialize_hashmarks() -> 
     assert "HASHMARKS_SITE" not in text
     assert "zipfile -e" not in text
     assert "--exclude-dependency" not in text
-    assert 'native-only-dependencies = ["hashmarks"]' in (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
+    assert 'native-only-dependencies = ["hashmarks"]' in (
+        ROOT / "backend/pyproject.toml"
+    ).read_text(encoding="utf-8")
     assert 'export PYTHONPATH="$ROOT/backend/src"' in text
-    assert '${PYTHONPATH:+' not in text
+    assert "${PYTHONPATH:+" not in text
     assert "trap cleanup_diagnostic_and_report_status EXIT" in text
     assert 'rm -rf -- "$DIAGNOSTIC_TEMP"' in text
     assert "local status=$?" in text
@@ -156,16 +162,23 @@ def test_hosted_diagnostic_validates_host_dependencies_before_running_batches() 
     assert '"$PYTHON_BIN" -I ' in text
 
 
-def test_hosted_diagnostic_cannot_certify_one_crypto_then_import_an_ambient_pythonpath_copy() -> None:
+def test_hosted_diagnostic_cannot_certify_one_crypto_then_import_an_ambient_pythonpath_copy() -> (
+    None
+):
     text = SCRIPT.read_text(encoding="utf-8")
     assert 'export PYTHONPATH="$ROOT/backend/src"' in text
-    assert '${PYTHONPATH:+' not in text
+    assert "${PYTHONPATH:+" not in text
     assert '"$PYTHON_BIN" -P -m oh_goon.repository_tooling.test_batches' in text
-    assert '"$PYTHON_BIN" -P -m oh_goon.repository_tooling.hosted_diagnostic_receipt' in text
+    assert (
+        '"$PYTHON_BIN" -P -m oh_goon.repository_tooling.hosted_diagnostic_receipt'
+        in text
+    )
     assert "-c 'import pytest'" not in text
 
 
-def test_architecture_guard_rejects_ambient_pythonpath_without_freezing_crypto_implementation(tmp_path: Path) -> None:
+def test_architecture_guard_rejects_ambient_pythonpath_without_freezing_crypto_implementation(
+    tmp_path: Path,
+) -> None:
     script = tmp_path / "scripts/backend_core_test_diagnostic.sh"
     capability = (
         tmp_path
@@ -176,7 +189,10 @@ def test_architecture_guard_rejects_ambient_pythonpath_without_freezing_crypto_i
     script.write_bytes(SCRIPT.read_bytes())
     (script.parent / "host_python.sh").write_bytes(HOST_PYTHON_SELECTOR.read_bytes())
     capability.write_bytes(
-        (ROOT / "backend/src/oh_goon/repository_tooling/hosted_dependency_capability.py").read_bytes()
+        (
+            ROOT
+            / "backend/src/oh_goon/repository_tooling/hosted_dependency_capability.py"
+        ).read_bytes()
     )
     assert not _check_hosted_diagnostic_contract(script)
 
@@ -211,7 +227,9 @@ def test_architecture_guard_rejects_ambient_pythonpath_without_freezing_crypto_i
     assert not _check_hosted_diagnostic_contract(script)
 
 
-def test_hosted_diagnostic_keeps_native_uv_authority_separate_from_host_capability() -> None:
+def test_hosted_diagnostic_keeps_native_uv_authority_separate_from_host_capability() -> (
+    None
+):
     text = SCRIPT.read_text(encoding="utf-8")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     qualification = (
@@ -219,7 +237,10 @@ def test_hosted_diagnostic_keeps_native_uv_authority_separate_from_host_capabili
     ).read_text(encoding="utf-8")
     assert "native uv/.venv remains authoritative" in text
     init = makefile.split("\ninit:\n", 1)[1].split("\ninit-doctor:", 1)[0]
-    assert "uv sync --project backend --locked --group dev --group quality --group build" in init
+    assert (
+        "uv sync --project backend --locked --group dev --group quality --group build"
+        in init
+    )
     assert "--no-install-project" not in init
     assert "uv pip install" not in init
     assert "qualification execution refuses interpreter rediscovery" in qualification
@@ -244,7 +265,7 @@ def test_hosted_diagnostic_allows_only_narrowing_extra_marker_subset() -> None:
     assert 'MARKER="$BASE_MARKER"' in text
     assert 'MARKER="$BASE_MARKER and ($EXTRA_MARKER)"' in text
     assert "must be MARKER or 'not MARKER'" in text
-    assert 'Marker policy: $MARKER' in text
+    assert "Marker policy: $MARKER" in text
 
 
 @pytest.mark.parametrize(
@@ -288,17 +309,21 @@ def test_hosted_diagnostic_help_documents_narrowing_only_marker_contract() -> No
 
 def test_hosted_diagnostic_does_not_offer_a_full_marker_override() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
-    assert 'DIAGNOSTIC_MARKER' not in text
+    assert "DIAGNOSTIC_MARKER" not in text
 
 
-def test_hosted_diagnostic_uses_native_batch_reports_for_machine_readable_evidence() -> None:
+def test_hosted_diagnostic_uses_native_batch_reports_for_machine_readable_evidence() -> (
+    None
+):
     text = SCRIPT.read_text(encoding="utf-8")
     assert '--report-path "$report_path"' in text
-    assert 'REPORT_MANIFEST=' in text
-    assert '-m oh_goon.repository_tooling.hosted_diagnostic_receipt' in text
+    assert "REPORT_MANIFEST=" in text
+    assert "-m oh_goon.repository_tooling.hosted_diagnostic_receipt" in text
 
 
 def test_hosted_diagnostic_invalidates_stale_receipt_before_capability_probes() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     assert 'rm -f -- "$RECEIPT_PATH"' in text
-    assert text.index('rm -f -- "$RECEIPT_PATH"') < text.index('command -v "$PYTHON_BIN"')
+    assert text.index('rm -f -- "$RECEIPT_PATH"') < text.index(
+        'command -v "$PYTHON_BIN"'
+    )

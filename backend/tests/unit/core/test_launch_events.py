@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from oh_goon.core.process_birth import ProcessBirthIdentity
 from oh_goon.core.launch_events import (
     LAUNCH_EVENT_SCHEMA,
     LaunchEvent,
@@ -14,6 +13,7 @@ from oh_goon.core.launch_events import (
     validate_launch_event_stream,
 )
 from oh_goon.core.launch_manifest import LaunchLifecycleState
+from oh_goon.core.process_birth import ProcessBirthIdentity
 
 T0 = datetime(2026, 9, 3, 20, 0, tzinfo=UTC)
 
@@ -21,9 +21,18 @@ T0 = datetime(2026, 9, 3, 20, 0, tzinfo=UTC)
 def _event(sequence: int, kind: LaunchEventKind, **kwargs) -> LaunchEvent:
     if kind is LaunchEventKind.SERVICE_SPAWNED:
         payload = kwargs.get("payload")
-        if isinstance(payload, dict) and isinstance(payload.get("pid"), int) and "birth_identity" not in payload:
+        if (
+            isinstance(payload, dict)
+            and isinstance(payload.get("pid"), int)
+            and "birth_identity" not in payload
+        ):
             pid = payload["pid"]
-            kwargs["payload"] = {**payload, "birth_identity": ProcessBirthIdentity(pid=pid, boot_id="test-boot", start_ticks=sequence).to_payload()}
+            kwargs["payload"] = {
+                **payload,
+                "birth_identity": ProcessBirthIdentity(
+                    pid=pid, boot_id="test-boot", start_ticks=sequence
+                ).to_payload(),
+            }
     return LaunchEvent(
         launch_id="launch-a",
         sequence=sequence,
@@ -150,10 +159,24 @@ def test_event_payload_is_immutable_after_construction() -> None:
 def test_service_generation_rejects_late_events_from_replaced_process() -> None:
     events = (
         _event(1, LaunchEventKind.LAUNCH_RESOLVED),
-        _event(2, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=1, payload={"pid": 10}),
-        _event(3, LaunchEventKind.SERVICE_STARTUP_COMPLETE, service="backend", service_generation=1),
+        _event(
+            2,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=1,
+            payload={"pid": 10},
+        ),
+        _event(
+            3, LaunchEventKind.SERVICE_STARTUP_COMPLETE, service="backend", service_generation=1
+        ),
         _event(4, LaunchEventKind.SERVICE_READY, service="backend", service_generation=1),
-        _event(5, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=2, payload={"pid": 20}),
+        _event(
+            5,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=2,
+            payload={"pid": 20},
+        ),
         _event(6, LaunchEventKind.SERVICE_READY, service="backend", service_generation=1),
     )
     with pytest.raises(ValueError, match="stale service generation"):
@@ -164,7 +187,13 @@ def test_spawn_and_bound_payloads_are_structured_facts() -> None:
     with pytest.raises(ValueError, match="payload pid"):
         _event(2, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=1)
     with pytest.raises(ValueError, match="payload port"):
-        _event(2, LaunchEventKind.SERVICE_BOUND, service="backend", service_generation=1, payload={"host": "127.0.0.1", "port": 0})
+        _event(
+            2,
+            LaunchEventKind.SERVICE_BOUND,
+            service="backend",
+            service_generation=1,
+            payload={"host": "127.0.0.1", "port": 0},
+        )
 
 
 def test_owner_observation_requires_birth_identity_and_pid_match() -> None:
@@ -193,11 +222,16 @@ def test_service_spawn_requires_birth_identity() -> None:
             payload={"pid": 42},
         )
 
+
 def test_owner_observation_is_single_and_must_precede_service_processes() -> None:
     birth = ProcessBirthIdentity(pid=30, boot_id="boot", start_ticks=1).to_payload()
     resolved = _event(1, LaunchEventKind.LAUNCH_RESOLVED)
-    owner = _event(2, LaunchEventKind.LAUNCH_OWNER_OBSERVED, payload={"pid": 30, "birth_identity": birth})
-    duplicate = _event(3, LaunchEventKind.LAUNCH_OWNER_OBSERVED, payload={"pid": 30, "birth_identity": birth})
+    owner = _event(
+        2, LaunchEventKind.LAUNCH_OWNER_OBSERVED, payload={"pid": 30, "birth_identity": birth}
+    )
+    duplicate = _event(
+        3, LaunchEventKind.LAUNCH_OWNER_OBSERVED, payload={"pid": 30, "birth_identity": birth}
+    )
     with pytest.raises(ValueError, match="only be observed once"):
         validate_launch_event_stream((resolved, owner, duplicate))
 
@@ -208,20 +242,51 @@ def test_owner_observation_is_single_and_must_precede_service_processes() -> Non
         service_generation=1,
         payload={"pid": 41},
     )
-    late_owner = _event(3, LaunchEventKind.LAUNCH_OWNER_OBSERVED, payload={"pid": 30, "birth_identity": birth})
+    late_owner = _event(
+        3, LaunchEventKind.LAUNCH_OWNER_OBSERVED, payload={"pid": 30, "birth_identity": birth}
+    )
     with pytest.raises(ValueError, match="before service processes"):
         validate_launch_event_stream((resolved, spawned, late_owner))
 
 
 def test_service_generation_state_machine_rejects_duplicate_and_post_failure_events() -> None:
     resolved = _event(1, LaunchEventKind.LAUNCH_RESOLVED)
-    spawned = _event(2, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=1, payload={"pid": 10})
-    bound = _event(3, LaunchEventKind.SERVICE_BOUND, service="backend", service_generation=1, payload={"host": "127.0.0.1", "port": 8787})
-    duplicate_bound = _event(4, LaunchEventKind.SERVICE_BOUND, service="backend", service_generation=1, payload={"host": "127.0.0.1", "port": 8787})
+    spawned = _event(
+        2,
+        LaunchEventKind.SERVICE_SPAWNED,
+        service="backend",
+        service_generation=1,
+        payload={"pid": 10},
+    )
+    bound = _event(
+        3,
+        LaunchEventKind.SERVICE_BOUND,
+        service="backend",
+        service_generation=1,
+        payload={"host": "127.0.0.1", "port": 8787},
+    )
+    duplicate_bound = _event(
+        4,
+        LaunchEventKind.SERVICE_BOUND,
+        service="backend",
+        service_generation=1,
+        payload={"host": "127.0.0.1", "port": 8787},
+    )
     with pytest.raises(ValueError, match="only be asserted once"):
         validate_launch_event_stream((resolved, spawned, bound, duplicate_bound))
 
-    failed = _event(3, LaunchEventKind.SERVICE_FAILED, service="backend", service_generation=1, payload={"failure_kind": "process", "failure_code": "exit", "reason": "gone", "retryable": True})
+    failed = _event(
+        3,
+        LaunchEventKind.SERVICE_FAILED,
+        service="backend",
+        service_generation=1,
+        payload={
+            "failure_kind": "process",
+            "failure_code": "exit",
+            "reason": "gone",
+            "retryable": True,
+        },
+    )
     late_ready = _event(4, LaunchEventKind.SERVICE_READY, service="backend", service_generation=1)
     with pytest.raises(ValueError, match="after service.failed"):
         validate_launch_event_stream((resolved, spawned, failed, late_ready))
@@ -229,14 +294,28 @@ def test_service_generation_state_machine_rejects_duplicate_and_post_failure_eve
 
 def test_service_ready_requires_startup_complete_and_freezes_runtime_facts() -> None:
     resolved = _event(1, LaunchEventKind.LAUNCH_RESOLVED)
-    spawned = _event(2, LaunchEventKind.SERVICE_SPAWNED, service="frontend", service_generation=1, payload={"pid": 20})
+    spawned = _event(
+        2,
+        LaunchEventKind.SERVICE_SPAWNED,
+        service="frontend",
+        service_generation=1,
+        payload={"pid": 20},
+    )
     ready = _event(3, LaunchEventKind.SERVICE_READY, service="frontend", service_generation=1)
     with pytest.raises(ValueError, match="startup_complete"):
         validate_launch_event_stream((resolved, spawned, ready))
 
-    startup = _event(3, LaunchEventKind.SERVICE_STARTUP_COMPLETE, service="frontend", service_generation=1)
+    startup = _event(
+        3, LaunchEventKind.SERVICE_STARTUP_COMPLETE, service="frontend", service_generation=1
+    )
     ready = _event(4, LaunchEventKind.SERVICE_READY, service="frontend", service_generation=1)
-    late_bound = _event(5, LaunchEventKind.SERVICE_BOUND, service="frontend", service_generation=1, payload={"host": "127.0.0.1", "port": 5173})
+    late_bound = _event(
+        5,
+        LaunchEventKind.SERVICE_BOUND,
+        service="frontend",
+        service_generation=1,
+        payload={"host": "127.0.0.1", "port": 5173},
+    )
     with pytest.raises(ValueError, match="after service.ready"):
         validate_launch_event_stream((resolved, spawned, startup, ready, late_bound))
 
@@ -244,15 +323,50 @@ def test_service_ready_requires_startup_complete_and_freezes_runtime_facts() -> 
 def test_failed_generation_may_restart_only_at_next_exact_generation() -> None:
     events = (
         _event(1, LaunchEventKind.LAUNCH_RESOLVED),
-        _event(2, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=1, payload={"pid": 10}),
-        _event(3, LaunchEventKind.SERVICE_FAILED, service="backend", service_generation=1, payload={"failure_kind": "process", "failure_code": "exit", "reason": "gone", "retryable": True}),
-        _event(4, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=2, payload={"pid": 11}),
+        _event(
+            2,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=1,
+            payload={"pid": 10},
+        ),
+        _event(
+            3,
+            LaunchEventKind.SERVICE_FAILED,
+            service="backend",
+            service_generation=1,
+            payload={
+                "failure_kind": "process",
+                "failure_code": "exit",
+                "reason": "gone",
+                "retryable": True,
+            },
+        ),
+        _event(
+            4,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=2,
+            payload={"pid": 11},
+        ),
     )
     assert validate_launch_event_stream(events) == events
     live_replace = (
         _event(1, LaunchEventKind.LAUNCH_RESOLVED),
-        _event(2, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=1, payload={"pid": 10}),
-        _event(3, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=2, payload={"pid": 11}),
+        _event(
+            2,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=1,
+            payload={"pid": 10},
+        ),
+        _event(
+            3,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=2,
+            payload={"pid": 11},
+        ),
     )
     with pytest.raises(ValueError, match="still starting"):
         validate_launch_event_stream(live_replace)
@@ -271,19 +385,60 @@ def test_launch_terminal_state_machine_distinguishes_stop_abort_and_failure() ->
 
     stopping = _event(3, LaunchEventKind.LAUNCH_STOPPING)
     with pytest.raises(ValueError, match="only transition to launch.stopped"):
-        validate_launch_event_stream((resolved, ready, stopping, _event(4, LaunchEventKind.LAUNCH_FAILED, payload={"failure_kind": "process", "failure_code": "x", "reason": "x", "retryable": False})))
+        validate_launch_event_stream(
+            (
+                resolved,
+                ready,
+                stopping,
+                _event(
+                    4,
+                    LaunchEventKind.LAUNCH_FAILED,
+                    payload={
+                        "failure_kind": "process",
+                        "failure_code": "x",
+                        "reason": "x",
+                        "retryable": False,
+                    },
+                ),
+            )
+        )
     stopped = _event(4, LaunchEventKind.LAUNCH_STOPPED)
     assert validate_launch_event_stream((resolved, ready, stopping, stopped))
 
 
 def test_launch_ready_rejects_failed_current_generation_and_new_spawn_after_ready() -> None:
     resolved = _event(1, LaunchEventKind.LAUNCH_RESOLVED)
-    spawned = _event(2, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=1, payload={"pid": 10})
-    failed = _event(3, LaunchEventKind.SERVICE_FAILED, service="backend", service_generation=1, payload={"failure_kind": "process", "failure_code": "exit", "reason": "gone", "retryable": True})
+    spawned = _event(
+        2,
+        LaunchEventKind.SERVICE_SPAWNED,
+        service="backend",
+        service_generation=1,
+        payload={"pid": 10},
+    )
+    failed = _event(
+        3,
+        LaunchEventKind.SERVICE_FAILED,
+        service="backend",
+        service_generation=1,
+        payload={
+            "failure_kind": "process",
+            "failure_code": "exit",
+            "reason": "gone",
+            "retryable": True,
+        },
+    )
     with pytest.raises(ValueError, match="failed current"):
-        validate_launch_event_stream((resolved, spawned, failed, _event(4, LaunchEventKind.LAUNCH_READY)))
+        validate_launch_event_stream(
+            (resolved, spawned, failed, _event(4, LaunchEventKind.LAUNCH_READY))
+        )
 
     launch_ready = _event(2, LaunchEventKind.LAUNCH_READY)
-    new_spawn = _event(3, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=1, payload={"pid": 10})
+    new_spawn = _event(
+        3,
+        LaunchEventKind.SERVICE_SPAWNED,
+        service="backend",
+        service_generation=1,
+        payload={"pid": 10},
+    )
     with pytest.raises(ValueError, match="after launch.ready"):
         validate_launch_event_stream((resolved, launch_ready, new_spawn))

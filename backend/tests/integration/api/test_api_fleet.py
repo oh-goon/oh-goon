@@ -1,8 +1,7 @@
 from pathlib import Path
 
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api.app import app as api_app
+from tests.integration.api.client import authenticated_api_client
 
 
 def test_fleet_snapshot_does_not_infer_readiness_during_discovery(tmp_path: Path) -> None:

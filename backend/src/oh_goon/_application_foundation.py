@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from oh_goon.core.capability_model import CapabilityRunnerKind
-from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.capability_registry import capability_definitions
+from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
@@ -20,13 +20,13 @@ from oh_goon.runtime._executor_configuration import (
     configured_executor_pool,
 )
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.diagnostics import DiagnosticRouter, JsonlDiagnosticSink, StderrDiagnosticSink
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator, RunExecutionSupervisor
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.league_folders import LeagueFolderStore
-from oh_goon.runtime.diagnostics import DiagnosticRouter, JsonlDiagnosticSink, StderrDiagnosticSink
 from oh_goon.runtime.lifecycle import RuntimeLifecycle
 from oh_goon.runtime.safety import RuntimeSafetyGate
 from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
@@ -36,14 +36,14 @@ from oh_goon.runtime.state import LocalState
 from oh_goon.services.capability_executor import CapabilityExecutor
 from oh_goon.services.direct_effect_admission import DirectEffectAdmission
 from oh_goon.services.effect_recovery import RepositoryEffectRecovery
+from oh_goon.services.fleet_prework_composition import FleetPreworkComposition
+from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 from oh_goon.services.invariant_auditor import SystemInvariantAuditor
 from oh_goon.services.reconciliation import RepositoryReconciler
 from oh_goon.services.repository_effect_execution import RepositoryEffectExecution
 from oh_goon.services.repository_effect_fence import RepositoryEffectFence
 from oh_goon.services.repository_effect_settlement import RepositoryEffectSettlement
 from oh_goon.services.runtime_safety import RuntimeSafetyService
-from oh_goon.services.fleet_prework_composition import FleetPreworkComposition
-from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +115,8 @@ def _build_capability_runtime(
             path_authority=path_authority,
             content_store=content_store,
             run_parent=run_parent,
-            output_observer_factory=live_output.observer, lifecycle_observer_factory=Journal(database).execution_lifecycle_observer,
+            output_observer_factory=live_output.observer,
+            lifecycle_observer_factory=Journal(database).execution_lifecycle_observer,
             diagnostics=diagnostics,
         ),
     }
@@ -181,7 +182,8 @@ def _prove_startup_safety(
 
 
 def build_runtime_foundation(
-    *, fleet_provisioner: FleetPreworkProvisioner | None = None,
+    *,
+    fleet_provisioner: FleetPreworkProvisioner | None = None,
     standard_local: bool = False,
 ) -> RuntimeFoundation:
     """Compose production services with mandatory native Fleet Enforcer admission.
@@ -190,8 +192,11 @@ def build_runtime_foundation(
     verified provisioner. Absence means reject Fleet Plan work, not legacy mode.
     """
     from oh_goon.core.enforcer_lace_trust import TrustProtocolError
+
     if fleet_provisioner is not None and type(fleet_provisioner) is not FleetPreworkProvisioner:
-        raise TrustProtocolError("production Fleet provisioner must be an explicit native authority")
+        raise TrustProtocolError(
+            "production Fleet provisioner must be an explicit native authority"
+        )
     if standard_local and fleet_provisioner is not None:
         raise TrustProtocolError("standard host execution cannot use deployment Fleet enrollment")
     local = _build_local_state_foundation()
@@ -226,8 +231,7 @@ def build_runtime_foundation(
                 owner="LocalDatabase",
                 operation=event.action,
                 message=(
-                    f"recovery kind={event.kind} reason={event.reason_code} "
-                    f"outcome={event.outcome}"
+                    f"recovery kind={event.kind} reason={event.reason_code} outcome={event.outcome}"
                 ),
                 execution_affected=event.outcome == "failed",
                 failure_class="execution_recovery",
@@ -235,9 +239,7 @@ def build_runtime_foundation(
         )
     )
     supervisor = RunExecutionSupervisor(diagnostics=diagnostics)
-    configuration = configured_executor_pool(
-        control_state_root=state_paths.executor_control
-    )
+    configuration = configured_executor_pool(control_state_root=state_paths.executor_control)
     path_authority = configuration.path_authority if configuration is not None else None
     extension_store = FleetExtensionStore(state_paths.extensions, path_authority=path_authority)
     tool_store = FleetToolStore(state_paths.plan_tools, path_authority=path_authority)

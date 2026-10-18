@@ -19,7 +19,11 @@ def prepare_runtime_acceptance_repositories(
     interrupted = repositories / "interrupted-repo"
     repositories.mkdir()
     prepare_acceptance_repository(repository)
-    prepare_interruptible_acceptance_repository(cancelled, duration_seconds=interruptible_step_seconds)
+    prepare_interruptible_acceptance_repository(
+        cancelled, duration_seconds=interruptible_step_seconds
+    )
     prepare_acceptance_repository(competing)
-    prepare_interruptible_acceptance_repository(interrupted, duration_seconds=interruptible_step_seconds)
+    prepare_interruptible_acceptance_repository(
+        interrupted, duration_seconds=interruptible_step_seconds
+    )
     return repositories, repository, cancelled, competing, interrupted

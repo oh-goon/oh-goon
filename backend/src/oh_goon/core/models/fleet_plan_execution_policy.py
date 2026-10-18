@@ -134,10 +134,15 @@ def compile_lace_required_guarantees(policy: PlanExecutionPolicy) -> LaceRequire
             isolation=isolation_requirements(threat, policy.resources),
             profile_status="defined",
         )
-    if isinstance(policy, (
-        MaintenanceExecutionPolicy, MigrationExecutionPolicy,
-        VerificationExecutionPolicy, InspectionExecutionPolicy,
-    )):
+    if isinstance(
+        policy,
+        (
+            MaintenanceExecutionPolicy,
+            MigrationExecutionPolicy,
+            VerificationExecutionPolicy,
+            InspectionExecutionPolicy,
+        ),
+    ):
         return LaceRequiredGuarantees(
             purpose=policy.purpose,
             threat_model=None,

@@ -145,7 +145,8 @@ def _statement_end(tokens: tuple[_Token, ...], start: int) -> int:
         value = tokens[index].value
         if value in {"(", "[", "{"}:
             depth += 1
-        elif value in {")",
+        elif value in {
+            ")",
             "]",
             "}",
         }:
@@ -193,9 +194,7 @@ def _string_expr(
     return "".join(pieces)
 
 
-def _matching(
-    tokens: tuple[_Token, ...], start: int, opener: str, closer: str
-) -> int | None:
+def _matching(tokens: tuple[_Token, ...], start: int, opener: str, closer: str) -> int | None:
     depth = 0
     for index in range(start, len(tokens)):
         value = tokens[index].value
@@ -312,9 +311,7 @@ def project_typescript(text: str) -> TypeScriptFacts:
     imports = _module_imports(tokens)
     declared = _declared_names(tokens)
     constants: dict[str, str] = {}
-    objects: dict[str, str] = {
-        name: name for name in _BROWSER_ROOTS | {"document", "navigator"}
-    }
+    objects: dict[str, str] = {name: name for name in _BROWSER_ROOTS | {"document", "navigator"}}
     aliases: dict[str, set[str]] = {}
     authorities: set[str] = set()
     external_urls: set[str] = set()
@@ -322,9 +319,7 @@ def project_typescript(text: str) -> TypeScriptFacts:
     # String literals that are actual URL values are semantic data; prose/code examples
     # containing a URL are not treated as network authority.
     for token in tokens:
-        if token.kind == "string" and token.value.lower().startswith(
-            ("http://", "https://")
-        ):
+        if token.kind == "string" and token.value.lower().startswith(("http://", "https://")):
             external_urls.add(token.value)
 
     index = 0

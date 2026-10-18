@@ -250,9 +250,7 @@ def _copy_filtered_view_entry(
             identity_root=identity_root,
         )
         return
-    raise FleetPlanInvalid(
-        f"Snapshot contains unsupported filesystem entry: {relative.as_posix()}"
-    )
+    raise FleetPlanInvalid(f"Snapshot contains unsupported filesystem entry: {relative.as_posix()}")
 
 
 def _inventory(
@@ -275,9 +273,7 @@ def _inventory(
         current_path = Path(current)
         relative_current = current_path.relative_to(root)
         directories[:] = [
-            name
-            for name in sorted(directories)
-            if not _excluded(relative_current / name, excluded)
+            name for name in sorted(directories) if not _excluded(relative_current / name, excluded)
         ]
         for name in (*directories, *sorted(files)):
             relative = relative_current / name
@@ -296,6 +292,7 @@ def _inventory(
             if progress is not None:
                 progress(entry_count, byte_count)
     return byte_count, entry_count
+
 
 def _normalize_exclusion(root: Path, item: str | Path) -> str:
     candidate = Path(item)

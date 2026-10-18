@@ -1,4 +1,5 @@
 """M189: strict placement-loss readmission must consult original replay gate first."""
+
 from __future__ import annotations
 
 from unittest.mock import Mock
@@ -25,7 +26,9 @@ def _manager(*, authenticated: bool, child: object | None = None):
     manager._lifecycle._require_authenticated_fleet = authenticated  # type: ignore[attr-defined]
     manager._lifecycle.require_fleet_prework_available = (  # type: ignore[attr-defined]
         lambda *args, **kwargs: FleetRunLifecycle.require_fleet_prework_available(
-            manager._lifecycle, *args, **kwargs,
+            manager._lifecycle,
+            *args,
+            **kwargs,
         )
     )
     manager._start_intent = Mock(side_effect=AssertionError("no fresh admission"))  # type: ignore[method-assign]
@@ -37,7 +40,8 @@ def test_authenticated_strict_readmission_denied_before_capability_resolution(
 ) -> None:
     manager, _parent, reads = _manager(authenticated=True)
     monkeypatch.setattr(
-        control_plane_module, "resolve_bound_capability_intent",
+        control_plane_module,
+        "resolve_bound_capability_intent",
         lambda *args: pytest.fail("capability work preceded the original replay gate"),
     )
     with pytest.raises(TrustProtocolError, match="replay Fleet ingress requires"):
@@ -72,7 +76,8 @@ def test_original_prework_owner_receives_exact_captured_lineage_before_resolutio
 
     manager._lifecycle.require_fleet_prework_available = reject
     monkeypatch.setattr(
-        control_plane_module, "resolve_bound_capability_intent",
+        control_plane_module,
+        "resolve_bound_capability_intent",
         lambda *args: pytest.fail("capability work preceded lifecycle authorization"),
     )
     with pytest.raises(TrustProtocolError, match="original lifecycle"):
@@ -97,7 +102,9 @@ def test_legacy_readmission_preserves_original_capability_and_start_path(
 ) -> None:
     manager, parent, reads = _manager(authenticated=False)
     resolved = object()
-    monkeypatch.setattr(control_plane_module, "resolve_bound_capability_intent", lambda *args: resolved)
+    monkeypatch.setattr(
+        control_plane_module, "resolve_bound_capability_intent", lambda *args: resolved
+    )
     manager._start_intent = Mock(return_value="legacy-child")  # type: ignore[method-assign]
     assert manager.readmit("old-run", new_fleet_run_id="child") == "legacy-child"
     manager._start_intent.assert_called_once_with(

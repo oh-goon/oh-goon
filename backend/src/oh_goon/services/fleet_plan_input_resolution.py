@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from oh_goon.core.errors import FleetPlanInvalid, FleetPlanInputRejected
+from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import CompiledExecutionTemplate, CompiledGoonImportStep
 from oh_goon.core.models.fleet_plan_composition import (
     EnvInputSource,
@@ -220,16 +220,15 @@ def materialize_projected_inputs(
                 if not isinstance(step, CompiledGoonImportStep):
                     continue
                 child_node = source_graph.goon(canonical, step.goon)
-                child = materialize_projected_inputs(
-                    source_graph, child_node.path, _cache=cache
-                )
+                child = materialize_projected_inputs(source_graph, child_node.path, _cache=cache)
                 definition = next((item for item in child.inputs if item.name == name), None)
                 if definition is not None:
                     matches.append((index, step, definition))
             if not matches:
                 raise FleetPlanInputRejected(
                     f"Plan projected input {name!r} is not owned by any directly selected Goon",
-                    diagnostic_code="UNOWNED_PROJECTED_INPUT", input_names=(name,),
+                    diagnostic_code="UNOWNED_PROJECTED_INPUT",
+                    input_names=(name,),
                 )
             if len(matches) != 1:
                 owner_names = ", ".join(item[1].goon for item in matches)
@@ -237,7 +236,8 @@ def materialize_projected_inputs(
                     f"Plan projected input {name!r} is ambiguous across direct Goons: "
                     f"{owner_names}; "
                     "bind it explicitly or expose it through one Composite Goon",
-                    diagnostic_code="AMBIGUOUS_PROJECTED_INPUT", input_names=(name,),
+                    diagnostic_code="AMBIGUOUS_PROJECTED_INPUT",
+                    input_names=(name,),
                 )
             index, step, definition = matches[0]
             if any(item.name == name for item in step.inputs):
@@ -261,9 +261,7 @@ def materialize_projected_inputs(
             if not isinstance(step, CompiledGoonImportStep):
                 continue
             child_node = source_graph.goon(canonical, step.goon)
-            child = materialize_projected_inputs(
-                source_graph, child_node.path, _cache=cache
-            )
+            child = materialize_projected_inputs(source_graph, child_node.path, _cache=cache)
             for binding in step.inputs:
                 if binding.sources or binding.value != expected_reference:
                     continue

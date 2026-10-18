@@ -32,7 +32,10 @@ def test_native_command_runs_exactly_once_for_transient_looking_failures(
         return subprocess.CompletedProcess(args, returncode, stdout="", stderr=stderr)
 
     monkeypatch.setattr(native_command.subprocess, "run", fake_run)
-    assert native_command.run_native_command(command, show_command_banner=False) == returncode
+    assert (
+        native_command.run_native_command(command, show_command_banner=False)
+        == returncode
+    )
     assert seen == [command]
 
 
@@ -70,11 +73,14 @@ def test_native_command_display_sanitization_never_changes_native_command(
         )
 
     monkeypatch.setattr(native_command.subprocess, "run", fake_run)
-    assert native_command.run_native_command(
-        command,
-        show_command_banner=False,
-        path_labels=((private_root, "<repo>"),),
-    ) == 0
+    assert (
+        native_command.run_native_command(
+            command,
+            show_command_banner=False,
+            path_labels=((private_root, "<repo>"),),
+        )
+        == 0
+    )
     captured = capsys.readouterr()
     assert private_root not in captured.out
     assert private_root not in captured.err
@@ -120,7 +126,12 @@ def test_native_command_cli_applies_environment_only_to_child(
         return subprocess.CompletedProcess(("uv", "sync"), 0, stdout="", stderr="")
 
     monkeypatch.setattr(native_command.subprocess, "run", fake_run)
-    assert native_command.main(["--env", "UV_PROJECT_ENVIRONMENT=/tmp/venv", "--", "uv", "sync"]) == 0
+    assert (
+        native_command.main(
+            ["--env", "UV_PROJECT_ENVIRONMENT=/tmp/venv", "--", "uv", "sync"]
+        )
+        == 0
+    )
     assert seen and seen[0] is not None
     assert seen[0]["UV_PROJECT_ENVIRONMENT"] == "/tmp/venv"
 
@@ -148,7 +159,9 @@ def test_native_command_preserves_operator_uv_configuration_without_printing_sec
     assert "secret" not in output
 
 
-def test_native_command_strips_ambient_virtual_env_from_child(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_native_command_strips_ambient_virtual_env_from_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     seen: list[dict[str, str] | None] = []
 
     def fake_run(_args, **kwargs):
@@ -169,7 +182,10 @@ def _target(makefile: str, name: str) -> str:
 def test_make_init_delegates_directly_to_native_uv_and_npm() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     init = _target(makefile, "init")
-    assert "uv sync --project backend --locked --group dev --group quality --group build" in init
+    assert (
+        "uv sync --project backend --locked --group dev --group quality --group build"
+        in init
+    )
     assert "npm ci --prefer-offline --ignore-scripts --no-audit --no-fund" in init
     assert "release-static-dir" not in init
     assert "transport-clean" not in init
@@ -188,7 +204,9 @@ def test_frontend_install_is_native_npm_only() -> None:
 
 def test_lean_certification_consumes_native_init_without_reacquisition() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    plan = (ROOT / "templates/plans/oh-goon/app-certification/plan.yml").read_text(encoding="utf-8")
+    plan = (ROOT / "templates/plans/oh-goon/app-certification/plan.yml").read_text(
+        encoding="utf-8"
+    )
     assert "purpose: verification" in plan
     assert "dependency-materialize" not in plan
     assert "make init" not in plan
@@ -197,8 +215,11 @@ def test_lean_certification_consumes_native_init_without_reacquisition() -> None
     assert "certification-dependencies-replay:" not in makefile
     assert "oh-goon-network-retry" not in _target(makefile, "init")
 
+
 def test_native_command_banner_uses_repository_command_banner_owner() -> None:
-    source = (ROOT / "backend/src/oh_goon/repository_tooling/native_command.py").read_text(encoding="utf-8")
+    source = (
+        ROOT / "backend/src/oh_goon/repository_tooling/native_command.py"
+    ).read_text(encoding="utf-8")
     assert '_COMMAND_BANNER = _ROOT / "scripts" / "command_banner.sh"' in source
     assert 'command = ("sh", str(_COMMAND_BANNER), label, detail)' in source
     assert 'command = ("bash", str(_COMMAND_BANNER)' not in source
@@ -206,7 +227,9 @@ def test_native_command_banner_uses_repository_command_banner_owner() -> None:
 
 
 def test_command_banner_interpreter_has_one_repository_authority() -> None:
-    native = (ROOT / "backend/src/oh_goon/repository_tooling/native_command.py").read_text(encoding="utf-8")
+    native = (
+        ROOT / "backend/src/oh_goon/repository_tooling/native_command.py"
+    ).read_text(encoding="utf-8")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     run_step = (ROOT / "scripts/run_step.sh").read_text(encoding="utf-8")
     run_logged = (ROOT / "scripts/run_logged.sh").read_text(encoding="utf-8")

@@ -172,7 +172,6 @@ def test_ownership_transitions_advance_durable_revision_without_heartbeat_state(
     assert "heartbeat_at" not in columns
 
 
-
 def test_reused_live_pid_with_different_birth_identity_reclaims_stale_lease(
     tmp_path: Path,
 ) -> None:
@@ -219,6 +218,7 @@ def test_execution_lease_schema_records_process_birth_identity(tmp_path: Path) -
     assert row["lease_token"] == lease.token
 
     leases.finish_as_owner(lease, lambda _connection: None)
+
 
 def test_owner_critical_mutation_rejects_stale_token_before_write(tmp_path: Path) -> None:
     database = LocalDatabase(tmp_path / "state.db")

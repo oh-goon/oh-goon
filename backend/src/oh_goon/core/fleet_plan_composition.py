@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import re
 
-from oh_goon.core.errors import FleetPlanInvalid, FleetPlanInputRejected
+from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid
+from oh_goon.core.fleet_plan_output_refs import (
+    goon_output_reference,
+    replace_step_output_references,
+    step_output_reference,
+)
 from oh_goon.core.models.fleet_plan import (
     CommandPlanStep,
     CompiledExecutionTemplate,
     PlanStep,
     ResolvedPlanStep,
     StepStatusCondition,
-)
-from oh_goon.core.fleet_plan_output_refs import (
-    goon_output_reference,
-    replace_step_output_references,
-    step_output_reference,
 )
 from oh_goon.core.models.fleet_plan_composition import (
     PlanInputDefinition,
@@ -38,7 +38,8 @@ def bind_inputs(
     if unknown:
         raise FleetPlanInputRejected(
             f"Fleet plan {context} received unknown inputs: {', '.join(unknown)}",
-            diagnostic_code="UNKNOWN_INPUT", input_names=tuple(unknown),
+            diagnostic_code="UNKNOWN_INPUT",
+            input_names=tuple(unknown),
         )
     values: dict[str, PlanInputValue] = {}
     missing: list[str] = []
@@ -64,7 +65,8 @@ def bind_inputs(
     if missing:
         raise FleetPlanInputRejected(
             f"Fleet plan {context} requires inputs: {', '.join(sorted(missing))}",
-            diagnostic_code="MISSING_REQUIRED_INPUT", input_names=tuple(sorted(missing)),
+            diagnostic_code="MISSING_REQUIRED_INPUT",
+            input_names=tuple(sorted(missing)),
         )
     return values
 
@@ -110,7 +112,9 @@ def coerce_input(
         try:
             validate_domain_input_value(definition, value, label="value")
         except ValueError as exc:
-            raise FleetPlanInvalid(f"{prefix} has invalid {definition.input_type.value} syntax") from exc
+            raise FleetPlanInvalid(
+                f"{prefix} has invalid {definition.input_type.value} syntax"
+            ) from exc
         return value
     if definition.input_type is PlanInputType.BOOLEAN:
         if type(value) is bool:
@@ -337,9 +341,7 @@ def _resolve_output_reference(
         if step_id in goon_aliases:
             concrete = goon_aliases[step_id].get(output)
             if concrete is None:
-                raise FleetPlanInvalid(
-                    f"Goon import {step_id} does not publish output {output!r}"
-                )
+                raise FleetPlanInvalid(f"Goon import {step_id} does not publish output {output!r}")
             return concrete
         qualified = _qualified_step_id(prefix, step_id)
         return f"${{{{ steps.{qualified}.outputs.{output} }}}}"

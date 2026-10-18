@@ -151,9 +151,7 @@ def kubernetes_environment(environment: Mapping[str, str]) -> dict[str, str]:
         )
     }
     return {
-        name: value
-        for name, value in environment.items()
-        if name.casefold() not in transport_owned
+        name: value for name, value in environment.items() if name.casefold() not in transport_owned
     }
 
 

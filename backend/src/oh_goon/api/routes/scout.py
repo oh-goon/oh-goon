@@ -40,7 +40,6 @@ def scout_findings(
     return service.findings(hours=hours, category=category, offset=offset, limit=limit)
 
 
-
 @router.get(
     "/goon-leaders",
     response_model=ScoutGoonLeadersPage,

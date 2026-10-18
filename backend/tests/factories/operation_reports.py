@@ -6,7 +6,6 @@ from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.migration import MigrationResult
 from oh_goon.core.models.operation import (
     AvailableToolVersion,
-    ReadyUvTool,
     DependencyPlanCompleted,
     FailedOperationOutcome,
     MigrationOperationEvidence,
@@ -19,6 +18,7 @@ from oh_goon.core.models.operation import (
     PythonRuntimeResult,
     ReadinessChecks,
     ReadinessOperationEvidence,
+    ReadyUvTool,
     RecipeOperationEvidence,
     RepositoryValidationCompleted,
     ReviewOperationEvidence,

@@ -1,25 +1,25 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import (
-    ExecutorTrustRevoked,
     ExecutorPlacementLost,
+    ExecutorTrustRevoked,
     FleetExtensionInvalid,
     InvalidRunTransition,
     OperationNotFound,
     RepositoryStateChanged,
     StateConflict,
 )
-from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import (
     EffectAttemptStatus,
     EffectBoundaryKind,
@@ -28,9 +28,9 @@ from oh_goon.core.vocabulary import (
     OperationAction,
 )
 from oh_goon.core.vocabulary.fleet import FleetScope
-from oh_goon.engine.git import GitService
 from oh_goon.engine.command import CommandAuthorityTerminatedError, run_command
-from oh_goon.runtime.database import DatabasePathIdentityLost, LocalDatabase
+from oh_goon.engine.git import GitService
+from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.fault_injection import FaultPoint, RaisingFaultInjector
@@ -587,9 +587,7 @@ def test_fleet_effect_start_and_repository_lifecycle_commit_atomically(
 
     operation_id = repository_attempt_operation_id(run_id, identity.repository_id)
     assert attempts.get(operation_id).status is EffectAttemptStatus.OUTCOME_UNKNOWN
-    assert [
-        event.event_type for event in journal.run_events(run_id).events
-    ] == [
+    assert [event.event_type for event in journal.run_events(run_id).events] == [
         FleetRunEventType.RUN_ADMITTED,
         FleetRunEventType.RUN_STARTED,
         FleetRunEventType.REPOSITORY_STARTED,
@@ -682,7 +680,9 @@ def test_canonical_commit_and_attempt_retirement_roll_back_together(tmp_path: Pa
         operation_id=operation_id,
     )
 
-    with pytest.raises(InvalidRunTransition, match="requires matching canonical REPOSITORY_STARTED"):
+    with pytest.raises(
+        InvalidRunTransition, match="requires matching canonical REPOSITORY_STARTED"
+    ):
         with database.transaction(write=True) as connection:
             journal.commit_operation_in(connection, report)
             attempts.retire_committed_in(connection, operation_id)
@@ -873,5 +873,3 @@ def test_interruption_replay_rejects_superseding_attempt_after_lost_response(
         )
 
     assert attempts.get(operation_id).status is EffectAttemptStatus.CLAIMED
-
-

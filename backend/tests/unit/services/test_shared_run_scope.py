@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import cast
 
-from oh_goon.core.vocabulary import OperationAction
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plans import FleetPlanService
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane

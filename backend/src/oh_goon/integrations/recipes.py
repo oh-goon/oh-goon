@@ -5,9 +5,7 @@ from typing import cast
 from oh_goon.core.errors import CapabilityUnavailable
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.target import OperationTarget, UvRecipeTarget
-from oh_goon.core.ports.capability_runner import (
-    CapabilityExecutionRequest
-)
+from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import EffectBoundaryKind
 from oh_goon.engine.command import CommandCancelledError, run_command

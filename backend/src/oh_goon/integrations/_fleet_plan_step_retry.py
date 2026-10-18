@@ -248,9 +248,12 @@ def _successful_direct_publication(
         # a bounded diagnostic file to subsequent authored Steps.  Its nonzero
         # physical result remains FAILED in Game Tape.  Agent proposals, strict
         # workspaces, and retryable attempts never use this diagnostic path.
-        if not (type(step) is ResolvedCommandStep
-                and step.on_failure is StepFailurePolicy.CONTINUE
-                and step.retry.max_attempts == 1 and step.outputs):
+        if not (
+            type(step) is ResolvedCommandStep
+            and step.on_failure is StepFailurePolicy.CONTINUE
+            and step.retry.max_attempts == 1
+            and step.outputs
+        ):
             return AttemptPublication({}, (), outcome, None, None)
     return publish_direct_attempt_outputs(step, outcome, repository)
 

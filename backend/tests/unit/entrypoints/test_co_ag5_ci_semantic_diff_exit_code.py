@@ -1,4 +1,5 @@
 """CO-AG5: agent/CI change detection uses the original resolved-meaning owner."""
+
 from __future__ import annotations
 
 import json
@@ -103,14 +104,24 @@ def test_invalid_plan_remains_exit_two_and_does_not_write(monkeypatch, capsys, t
 def test_existing_stateful_dispatch_adapter_matches_same_exit_contract(monkeypatch, capsys):
     """Service dispatch is compatibility-only; never start a second diff implementation."""
     from argparse import Namespace
+
     from oh_goon.cli_plan_definition_commands import _diff
     from oh_goon.services.fleet_plans import FleetPlanService
 
     before, after = _plans()
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     service = FleetPlanService(resolver, None, None, None, None)
-    args = Namespace(before=before, after=after, extensions=None,
-                     plan_inputs=None, inputs_file=None, as_json=True, exit_code=True)
+    args = Namespace(
+        before=before,
+        after=after,
+        extensions=None,
+        plan_inputs=None,
+        inputs_file=None,
+        as_json=True,
+        exit_code=True,
+    )
     runtime = type("Runtime", (), {"plans": service})()
     assert _diff(runtime, args) == 1
-    assert json.loads(capsys.readouterr().out) == json.loads(resolver.diff(before, after).model_dump_json())
+    assert json.loads(capsys.readouterr().out) == json.loads(
+        resolver.diff(before, after).model_dump_json()
+    )

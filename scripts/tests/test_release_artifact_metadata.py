@@ -4,7 +4,10 @@ import io
 import zipfile
 from pathlib import Path
 
-from oh_goon.repository_tooling.release.check_release_artifact import _entry_point_issues, _project_scripts
+from oh_goon.repository_tooling.release.check_release_artifact import (
+    _entry_point_issues,
+    _project_scripts,
+)
 
 
 def test_project_scripts_reads_console_entry_points(tmp_path: Path) -> None:

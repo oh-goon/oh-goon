@@ -64,9 +64,12 @@ def _checkpoint(tmp_path: Path, monkeypatch, identity: str = "sha256:" + "a" * 6
 def test_external_recovery_path_accepts_transport_outside_source(tmp_path: Path) -> None:
     root = _source(tmp_path)
     external = tmp_path / "durable" / "continuation-input.json"
-    assert subject._require_external_recovery_path(
-        source_root=root, candidate=external, label="recovery continuation input"
-    ) == external.resolve()
+    assert (
+        subject._require_external_recovery_path(
+            source_root=root, candidate=external, label="recovery continuation input"
+        )
+        == external.resolve()
+    )
 
 
 def test_checkpoint_cli_rejects_store_inside_source_before_creating_it(tmp_path: Path) -> None:
@@ -76,11 +79,21 @@ def test_checkpoint_cli_rejects_store_inside_source_before_creating_it(tmp_path:
     store = root / "recovery-store"
 
     with pytest.raises(RuntimeError, match="recovery store must be outside canonical source root"):
-        subject.main([
-            "checkpoint", "--root", str(root), "--store", str(store),
-            "--campaign-id", "campaign", "--expected-generation", "0",
-            "--continuation-input", str(continuation),
-        ])
+        subject.main(
+            [
+                "checkpoint",
+                "--root",
+                str(root),
+                "--store",
+                str(store),
+                "--campaign-id",
+                "campaign",
+                "--expected-generation",
+                "0",
+                "--continuation-input",
+                str(continuation),
+            ]
+        )
 
     assert not store.exists()
 
@@ -96,11 +109,21 @@ def test_checkpoint_cli_rejects_continuation_input_inside_source_before_store_cr
     with pytest.raises(
         RuntimeError, match="recovery continuation input must be outside canonical source root"
     ):
-        subject.main([
-            "checkpoint", "--root", str(root), "--store", str(store),
-            "--campaign-id", "campaign", "--expected-generation", "0",
-            "--continuation-input", str(continuation),
-        ])
+        subject.main(
+            [
+                "checkpoint",
+                "--root",
+                str(root),
+                "--store",
+                str(store),
+                "--campaign-id",
+                "campaign",
+                "--expected-generation",
+                "0",
+                "--continuation-input",
+                str(continuation),
+            ]
+        )
 
     assert not store.exists()
 
@@ -110,9 +133,15 @@ def test_verify_cli_rejects_store_inside_subject_before_creating_it(tmp_path: Pa
     store = root / "recovery-store"
 
     with pytest.raises(RuntimeError, match="recovery store must be outside canonical source root"):
-        subject.main([
-            "verify", "--store", str(store), "--subject-root", str(root),
-        ])
+        subject.main(
+            [
+                "verify",
+                "--store",
+                str(store),
+                "--subject-root",
+                str(root),
+            ]
+        )
 
     assert not store.exists()
 
@@ -125,10 +154,17 @@ def test_resume_cli_rejects_destination_inside_subject_before_store_access(tmp_p
     with pytest.raises(
         RuntimeError, match="recovery destination must be outside canonical source root"
     ):
-        subject.main([
-            "resume", "--store", str(store), "--destination", str(destination),
-            "--subject-root", str(root),
-        ])
+        subject.main(
+            [
+                "resume",
+                "--store",
+                str(store),
+                "--destination",
+                str(destination),
+                "--subject-root",
+                str(root),
+            ]
+        )
 
     assert not store.exists()
     assert not destination.exists()
@@ -150,15 +186,25 @@ def test_stale_writer_requires_generation_and_exact_head_identity(
     root, publisher, head = _checkpoint(tmp_path, monkeypatch)
     with pytest.raises(RuntimeError, match="generation changed"):
         subject.checkpoint(
-            root=root, publisher=publisher, campaign_id="campaign", expected_generation=0,
+            root=root,
+            publisher=publisher,
+            campaign_id="campaign",
+            expected_generation=0,
             continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-            expected_head_sha256=None, proof_level="NONE", qualification_state="INCOMPLETE",
+            expected_head_sha256=None,
+            proof_level="NONE",
+            qualification_state="INCOMPLETE",
         )
     with pytest.raises(RuntimeError, match="identity changed"):
         subject.checkpoint(
-            root=root, publisher=publisher, campaign_id="campaign", expected_generation=1,
+            root=root,
+            publisher=publisher,
+            campaign_id="campaign",
+            expected_generation=1,
             continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-            expected_head_sha256="bad", proof_level="NONE", qualification_state="INCOMPLETE",
+            expected_head_sha256="bad",
+            proof_level="NONE",
+            qualification_state="INCOMPLETE",
         )
     current = publisher.read("RECOVERY_HEAD.json")
     assert hashlib.sha256(current).hexdigest() != "bad"
@@ -181,9 +227,13 @@ def test_publisher_without_conditional_head_is_rejected(tmp_path: Path, monkeypa
 
     with pytest.raises(RuntimeError, match="lacks safe conditional"):
         subject.checkpoint(
-            root=root, publisher=Unsafe(tmp_path / "durable"), campaign_id="campaign",
+            root=root,
+            publisher=Unsafe(tmp_path / "durable"),
+            campaign_id="campaign",
             continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-            expected_generation=0, proof_level="NONE", qualification_state="INCOMPLETE",
+            expected_generation=0,
+            proof_level="NONE",
+            qualification_state="INCOMPLETE",
         )
 
 
@@ -193,15 +243,24 @@ def test_structured_proof_must_bind_exact_result_source(tmp_path: Path, monkeypa
     _fake_packager(monkeypatch, identity)
     publisher = subject.FilesystemRecoveryPublisher(tmp_path / "durable")
     wrong = subject.create_proof_receipt(
-        source_identity="sha256:" + "d" * 64, test_command_identity="cmd", test_selection="focused",
-        environment_identity="env", evidence_identity="evidence", timestamp="2026-09-25T00:00:00Z",
+        source_identity="sha256:" + "d" * 64,
+        test_command_identity="cmd",
+        test_selection="focused",
+        environment_identity="env",
+        evidence_identity="evidence",
+        timestamp="2026-09-25T00:00:00Z",
         proof_level="FOCUSED_PROVEN",
     )
     with pytest.raises(RuntimeError, match="does not bind"):
         subject.checkpoint(
-            root=root, publisher=publisher, campaign_id="campaign", expected_generation=0,
+            root=root,
+            publisher=publisher,
+            campaign_id="campaign",
+            expected_generation=0,
             continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-            proof_level="FOCUSED_PROVEN", qualification_state="INCOMPLETE", proof_receipt=wrong,
+            proof_level="FOCUSED_PROVEN",
+            qualification_state="INCOMPLETE",
+            proof_receipt=wrong,
         )
     assert not (tmp_path / "durable" / "RECOVERY_HEAD.json").exists()
 
@@ -212,23 +271,31 @@ def test_structured_proof_survives_durable_readback(tmp_path: Path, monkeypatch)
     _fake_packager(monkeypatch, identity)
     publisher = subject.FilesystemRecoveryPublisher(tmp_path / "durable")
     proof = subject.create_proof_receipt(
-        source_identity=identity, test_command_identity="cmd", test_selection="focused",
-        environment_identity="env", evidence_identity="evidence", timestamp="2026-09-25T00:00:00Z",
+        source_identity=identity,
+        test_command_identity="cmd",
+        test_selection="focused",
+        environment_identity="env",
+        evidence_identity="evidence",
+        timestamp="2026-09-25T00:00:00Z",
         proof_level="FOCUSED_PROVEN",
     )
     head = subject.checkpoint(
-        root=root, publisher=publisher, campaign_id="campaign", expected_generation=0,
+        root=root,
+        publisher=publisher,
+        campaign_id="campaign",
+        expected_generation=0,
         continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-        proof_level="FOCUSED_PROVEN", qualification_state="INCOMPLETE", proof_receipt=proof,
+        proof_level="FOCUSED_PROVEN",
+        qualification_state="INCOMPLETE",
+        proof_receipt=proof,
     )
     assert head.proof_level == "FOCUSED_PROVEN"
     assert subject.verify(publisher=publisher) == head
 
 
 @pytest.mark.parametrize(
-    "boundary", [
-        "archive_publish", "archive_verify", "continuation_publish", "receipt_publish", "before_cas"
-    ]
+    "boundary",
+    ["archive_publish", "archive_verify", "continuation_publish", "receipt_publish", "before_cas"],
 )
 def test_crash_before_cas_never_creates_intermediate_authority(
     tmp_path: Path, monkeypatch, boundary: str
@@ -264,9 +331,13 @@ def test_crash_before_cas_never_creates_intermediate_authority(
     publisher = Crashing(tmp_path / "durable")
     with pytest.raises(RuntimeError, match="injected crash"):
         subject.checkpoint(
-            root=root, publisher=publisher, campaign_id="campaign", expected_generation=0,
+            root=root,
+            publisher=publisher,
+            campaign_id="campaign",
+            expected_generation=0,
             continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-            proof_level="NONE", qualification_state="INCOMPLETE",
+            proof_level="NONE",
+            qualification_state="INCOMPLETE",
         )
     assert not (tmp_path / "durable" / "RECOVERY_HEAD.json").exists()
 
@@ -287,9 +358,13 @@ def test_crash_after_successful_cas_leaves_new_head_fully_recoverable(
     publisher = CrashAfterCas(store)
     with pytest.raises(RuntimeError, match="after cas"):
         subject.checkpoint(
-            root=root, publisher=publisher, campaign_id="campaign", expected_generation=0,
+            root=root,
+            publisher=publisher,
+            campaign_id="campaign",
+            expected_generation=0,
             continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-            proof_level="NONE", qualification_state="INCOMPLETE",
+            proof_level="NONE",
+            qualification_state="INCOMPLETE",
         )
     stable = subject.FilesystemRecoveryPublisher(store)
     head = subject.verify(publisher=stable)
@@ -306,6 +381,7 @@ def test_resume_reconstructs_committed_source_into_empty_destination(
 
     def package(output: Path, *, root: Path) -> str:
         import zipfile
+
         with zipfile.ZipFile(output, "w") as archive:
             archive.writestr("source/VERSION", (root / "VERSION").read_bytes())
         return hashlib.sha256(output.read_bytes()).hexdigest()
@@ -313,9 +389,13 @@ def test_resume_reconstructs_committed_source_into_empty_destination(
     monkeypatch.setattr(subject, "package_slim", package)
     monkeypatch.setattr(subject, "archive_source_identity", lambda _archive: identity)
     head = subject.checkpoint(
-        root=root, publisher=publisher, campaign_id="campaign", expected_generation=0,
+        root=root,
+        publisher=publisher,
+        campaign_id="campaign",
+        expected_generation=0,
         continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-        proof_level="NONE", qualification_state="INCOMPLETE",
+        proof_level="NONE",
+        qualification_state="INCOMPLETE",
     )
     destination = tmp_path / "restored"
     assert subject.resume(publisher=publisher, destination=destination) == head
@@ -346,15 +426,23 @@ def test_retry_after_receipt_publish_resumes_at_cas_without_rebuild(
     store = tmp_path / "durable"
     with pytest.raises(RuntimeError, match="before cas"):
         subject.checkpoint(
-            root=root, publisher=CrashBeforeCas(store), campaign_id="campaign",
+            root=root,
+            publisher=CrashBeforeCas(store),
+            campaign_id="campaign",
             continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-            expected_generation=0, proof_level="NONE", qualification_state="INCOMPLETE",
+            expected_generation=0,
+            proof_level="NONE",
+            qualification_state="INCOMPLETE",
         )
     assert calls["package"] == 1
     head = subject.checkpoint(
-        root=root, publisher=subject.FilesystemRecoveryPublisher(store), campaign_id="campaign",
+        root=root,
+        publisher=subject.FilesystemRecoveryPublisher(store),
+        campaign_id="campaign",
         continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-        expected_generation=0, proof_level="NONE", qualification_state="INCOMPLETE",
+        expected_generation=0,
+        proof_level="NONE",
+        qualification_state="INCOMPLETE",
     )
     assert calls["package"] == 1
     assert head.generation == 1
@@ -384,9 +472,14 @@ def test_state_boundary_crashes_before_commit_leave_old_head_authoritative(
 
     with pytest.raises(RuntimeError, match="crash at"):
         subject.checkpoint(
-            root=root, publisher=publisher, campaign_id="campaign", expected_generation=0,
+            root=root,
+            publisher=publisher,
+            campaign_id="campaign",
+            expected_generation=0,
             continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-            proof_level="NONE", qualification_state="INCOMPLETE", state_hook=crash,
+            proof_level="NONE",
+            qualification_state="INCOMPLETE",
+            state_hook=crash,
         )
     assert not (tmp_path / "durable" / "RECOVERY_HEAD.json").exists()
 
@@ -399,10 +492,14 @@ def test_publication_states_reach_committed_only_after_head_cas(
     _fake_packager(monkeypatch, identity)
     states: list[subject.PublicationState] = []
     subject.checkpoint(
-        root=root, publisher=subject.FilesystemRecoveryPublisher(tmp_path / "durable"),
+        root=root,
+        publisher=subject.FilesystemRecoveryPublisher(tmp_path / "durable"),
         continuation_input=_continuation_input(qualification_state="INCOMPLETE"),
-        campaign_id="campaign", expected_generation=0, proof_level="NONE",
-        qualification_state="INCOMPLETE", state_hook=states.append,
+        campaign_id="campaign",
+        expected_generation=0,
+        proof_level="NONE",
+        qualification_state="INCOMPLETE",
+        state_hook=states.append,
     )
     assert states == list(subject.PublicationState)
 
@@ -423,9 +520,7 @@ def test_checkpoint_binds_continuation_state_to_receipt_and_head(
     assert continuation["next_executable_phase"] == "phase-2"
 
 
-def test_tampered_continuation_state_fails_verification(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_tampered_continuation_state_fails_verification(tmp_path: Path, monkeypatch) -> None:
     _root, publisher, head = _checkpoint(tmp_path, monkeypatch)
     receipt = subject._verify_receipt(publisher, head.checkpoint_receipt_sha256)
     path = publisher._path(receipt.continuation_object_key)
@@ -458,16 +553,28 @@ def test_retry_with_changed_continuation_ledger_does_not_resume_stale_receipt(
     store = tmp_path / "durable"
     with pytest.raises(RuntimeError, match="before cas"):
         subject.checkpoint(
-            root=root, publisher=CrashBeforeCas(store), campaign_id="campaign",
-            expected_generation=0, continuation_input=_continuation_input(qualification_state="INCOMPLETE", next_phase="phase-2"),
-            proof_level="NONE", qualification_state="INCOMPLETE",
+            root=root,
+            publisher=CrashBeforeCas(store),
+            campaign_id="campaign",
+            expected_generation=0,
+            continuation_input=_continuation_input(
+                qualification_state="INCOMPLETE", next_phase="phase-2"
+            ),
+            proof_level="NONE",
+            qualification_state="INCOMPLETE",
         )
     assert calls["package"] == 1
     with pytest.raises(RuntimeError, match="before cas"):
         subject.checkpoint(
-            root=root, publisher=CrashBeforeCas(store), campaign_id="campaign",
-            expected_generation=0, continuation_input=_continuation_input(qualification_state="INCOMPLETE", next_phase="phase-3"),
-            proof_level="NONE", qualification_state="INCOMPLETE",
+            root=root,
+            publisher=CrashBeforeCas(store),
+            campaign_id="campaign",
+            expected_generation=0,
+            continuation_input=_continuation_input(
+                qualification_state="INCOMPLETE", next_phase="phase-3"
+            ),
+            proof_level="NONE",
+            qualification_state="INCOMPLETE",
         )
     assert calls["package"] == 2
 

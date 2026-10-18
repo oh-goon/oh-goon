@@ -1,4 +1,5 @@
 """M198: installed-wheel issuer attestation is fail-closed and alias preserving."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -56,10 +57,13 @@ def test_exact_ten_installed_owners_and_aliases_pass(monkeypatch, tmp_path):
     assert report["fleet_enforcer_provisioning"] == "NOT_ESTABLISHED"
 
 
-@pytest.mark.parametrize("missing", [
-    "oh_goon/native_issuer/__init__.py",
-    "oh_goon/native_issuer/enforcer_lace_signer_custody.py",
-])
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "oh_goon/native_issuer/__init__.py",
+        "oh_goon/native_issuer/enforcer_lace_signer_custody.py",
+    ],
+)
 def test_missing_installed_owner_is_not_accepted(monkeypatch, tmp_path, missing):
     dist = FakeDistribution(tmp_path, missing=missing)
     monkeypatch.setattr(probe, "import_module", _imports(tmp_path))
@@ -78,10 +82,15 @@ def test_wrong_installed_version_fails_before_import(monkeypatch, tmp_path):
 def test_competing_alias_or_source_overlay_rejected(monkeypatch, tmp_path, attack):
     dist = FakeDistribution(tmp_path)
     name = "enforcer_lace_native_issuer_suite"
-    monkeypatch.setattr(probe, "import_module", _imports(
-        tmp_path, different_alias=name if attack == "alias" else "",
-        forged_origin=name if attack == "source" else "",
-    ))
+    monkeypatch.setattr(
+        probe,
+        "import_module",
+        _imports(
+            tmp_path,
+            different_alias=name if attack == "alias" else "",
+            forged_origin=name if attack == "source" else "",
+        ),
+    )
     with pytest.raises(probe.WheelAuthorityFailure, match="origin"):
         probe.prove_wheel_owner(distribution=dist, expected_version="1267.0.1052")
 
@@ -90,17 +99,23 @@ def test_missing_wheel_metadata_cannot_count_as_positive(tmp_path):
     class FakeNoRecord:
         version = "1267.0.1052"
         files = None
+
     with pytest.raises(probe.WheelAuthorityFailure, match="RECORD"):
         probe.prove_wheel_owner(distribution=FakeNoRecord(), expected_version="1267.0.1052")
 
 
 def test_explicit_fleet_provisioner_cannot_be_inferred_from_wheel():
-    from dataclasses import fields, MISSING
+    from dataclasses import MISSING, fields
 
     from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
     required = {part.name for part in fields(FleetPreworkProvisioner) if part.default is MISSING}
-    assert required == {"enrolled", "executor_inventory_file", "trusted_key_directory", "issuer_references"}
+    assert required == {
+        "enrolled",
+        "executor_inventory_file",
+        "trusted_key_directory",
+        "issuer_references",
+    }
 
 
 def test_native_wheel_qualification_script_never_reuses_checkout_imports():

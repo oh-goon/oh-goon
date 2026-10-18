@@ -14,7 +14,9 @@ def _rule(css: str, selector: str) -> str:
 
 def test_wide_table_scroll_owners_bound_their_inline_size_generically() -> None:
     layout = (ROOT / "frontend/src/styles/pageLayout.css").read_text(encoding="utf-8")
-    responsive = (ROOT / "frontend/src/styles/responsive.css").read_text(encoding="utf-8")
+    responsive = (ROOT / "frontend/src/styles/responsive.css").read_text(
+        encoding="utf-8"
+    )
 
     for selector in (".table-shell", ".execution-timeline__scroll"):
         body = _rule(layout, selector)
@@ -32,7 +34,9 @@ def test_wide_table_scroll_owners_bound_their_inline_size_generically() -> None:
 
 
 def test_mobile_fixed_navigation_uses_insets_instead_of_base_full_width() -> None:
-    responsive = (ROOT / "frontend/src/styles/responsive.css").read_text(encoding="utf-8")
+    responsive = (ROOT / "frontend/src/styles/responsive.css").read_text(
+        encoding="utf-8"
+    )
     match = re.search(r"\.app-nav\{position:fixed;([^}]*)\}", responsive)
     assert match is not None, "missing fixed mobile navigation rule"
     body = match.group(1)

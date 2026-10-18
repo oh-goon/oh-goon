@@ -6,13 +6,7 @@ from statistics import median
 from typing import Literal
 
 from oh_goon.core.execution_observability import RepositoryRunObservation
-from oh_goon.scout.models import (
-    ScoutFinding,
-    ScoutFindingCategory,
-    ScoutFindingCount,
-    ScoutRankingRow,
-    ScoutWindow,
-)
+from oh_goon.core.vocabulary import GameTapeStatus
 from oh_goon.scout.aggregation import (
     coverage,
     cpu_rank_key,
@@ -28,6 +22,13 @@ from oh_goon.scout.evidence import (
     ScoutStepObservation,
     comparison_environment,
 )
+from oh_goon.scout.models import (
+    ScoutFinding,
+    ScoutFindingCategory,
+    ScoutFindingCount,
+    ScoutRankingRow,
+    ScoutWindow,
+)
 from oh_goon.scout.policy import (
     SCOUT_GOON_REGRESSION_RATIO,
     SCOUT_MEMORY_COMPARISON_MIN_COVERAGE_PERCENT,
@@ -38,7 +39,6 @@ from oh_goon.scout.policy import (
     SCOUT_RUN_SPIKE_HISTORY_PERIODS,
     SCOUT_RUN_SPIKE_RATIO,
 )
-from oh_goon.core.vocabulary import GameTapeStatus
 
 _UNSUCCESSFUL_STATUSES = frozenset(
     {

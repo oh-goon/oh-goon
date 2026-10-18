@@ -50,7 +50,16 @@ def test_phase25_scorecard_covers_only_required_execution_metrics() -> None:
         assert metric["aggregation"]
 
 
-def test_scorecard_does_not_create_agent_economics_or_generic_metric_ownership() -> None:
+def test_scorecard_does_not_create_agent_economics_or_generic_metric_ownership() -> (
+    None
+):
     text = SCORECARD.read_text(encoding="utf-8").lower()
-    for forbidden in ("token_count", "model_cost", "prompt_tokens", "completion_tokens", "genericmetric", "genericobservation"):
+    for forbidden in (
+        "token_count",
+        "model_cost",
+        "prompt_tokens",
+        "completion_tokens",
+        "genericmetric",
+        "genericobservation",
+    ):
         assert forbidden not in text

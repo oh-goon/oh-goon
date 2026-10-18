@@ -7,7 +7,6 @@ from oh_goon.core.models.operator_diagnostic import OperatorWhyNotDiagnostic
 from oh_goon.core.models.shared_plan import ReadySharedPlanRepositoryPreview
 
 
-
 def blocked_preview_diagnostic(exc: Exception) -> OperatorWhyNotDiagnostic:
     if isinstance(exc, FleetDomainError):
         reason_code = exc.code
@@ -45,7 +44,6 @@ def preview_readiness(
         _host_storage_fact(),
         _cache_reuse_fact(cache_sources),
     )
-
 
 
 def _host_storage_fact() -> OperatorWhyNotDiagnostic:

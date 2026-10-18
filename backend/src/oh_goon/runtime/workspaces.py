@@ -5,8 +5,8 @@ import json
 import os
 import shutil
 import sqlite3
-import tempfile
 import stat
+import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -18,23 +18,22 @@ from oh_goon.core.errors import (
     WorkspaceStateStale,
     WorkspaceTransitionInvalid,
 )
-from oh_goon.core.product_identity import new_checkpoint_id, new_workspace_id
 from oh_goon.core.models.workspace import CandidateCheckpoint, WorkspaceRef, WorkspaceState
 from oh_goon.core.path_authority import canonical_path, ensure_private_directory, storage_component
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.product_identity import new_checkpoint_id, new_workspace_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
-from oh_goon.runtime.database import LocalDatabase
+from oh_goon.engine.git import GitService
 from oh_goon.integrations._copy_transport import copy_regular_file
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
-from oh_goon.engine.git import GitService
 from oh_goon.integrations.source_snapshot import (
     SourceSnapshotBinding,
     snapshot_source_directory,
     source_snapshot_identity,
     verify_clean_source_snapshot,
 )
-
+from oh_goon.runtime.database import LocalDatabase
 
 
 def _worktree_git_environment() -> dict[str, str]:
@@ -266,9 +265,13 @@ class RepositoryWorkspaceAuthority:
     def _prepare_allocation_marker(self, marker: Path, current: WorkspaceState) -> None:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         payload = json.dumps(
-            {"owner": "RepositoryWorkspaceAuthority", "workspace_id": current.workspace_id,
-             "expected_state_version": current.state_version},
-            sort_keys=True, separators=(",", ":"),
+            {
+                "owner": "RepositoryWorkspaceAuthority",
+                "workspace_id": current.workspace_id,
+                "expected_state_version": current.state_version,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode("utf-8")
         descriptor = os.open(marker, flags, 0o600)
         try:
@@ -283,8 +286,11 @@ class RepositoryWorkspaceAuthority:
         info = marker.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise WorkspaceStateStale("Allocation receipt was replaced")
-        expected = {"owner": "RepositoryWorkspaceAuthority", "workspace_id": current.workspace_id,
-                    "expected_state_version": 0}
+        expected = {
+            "owner": "RepositoryWorkspaceAuthority",
+            "workspace_id": current.workspace_id,
+            "expected_state_version": 0,
+        }
         # REQUESTED has version 0; ALLOCATED is the only valid committed successor.
         if current.lifecycle_state is WorkspaceLifecycleState.ALLOCATED:
             expected["expected_state_version"] = current.state_version - 1
@@ -292,8 +298,9 @@ class RepositoryWorkspaceAuthority:
             raise WorkspaceStateStale("Allocation receipt identity or generation changed")
 
     def _fsync_managed_root(self) -> None:
-        descriptor = os.open(self._root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-                             | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(
+            self._root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        )
         try:
             os.fsync(descriptor)
         finally:
@@ -354,7 +361,11 @@ class RepositoryWorkspaceAuthority:
                     raise WorkspaceTransitionInvalid(
                         "READ_SNAPSHOT materialization requires ALLOCATED workspace state"
                     )
-                if not destination.is_dir() or destination.is_symlink() or any(destination.iterdir()):
+                if (
+                    not destination.is_dir()
+                    or destination.is_symlink()
+                    or any(destination.iterdir())
+                ):
                     raise WorkspaceStateStale(
                         f"READ_SNAPSHOT workspace container changed before publication: {workspace.workspace_id}"
                     )
@@ -416,16 +427,21 @@ class RepositoryWorkspaceAuthority:
     ) -> None:
         marker = self._read_publication_marker_for_id(workspace.workspace_id)
         payload = {
-            "owner": "RepositoryWorkspaceAuthority", "kind": "READ_SNAPSHOT",
-            "workspace_id": workspace.workspace_id, "state_version": state.state_version,
-            "sha256": identity.sha256, "byte_count": identity.byte_count,
+            "owner": "RepositoryWorkspaceAuthority",
+            "kind": "READ_SNAPSHOT",
+            "workspace_id": workspace.workspace_id,
+            "state_version": state.state_version,
+            "sha256": identity.sha256,
+            "byte_count": identity.byte_count,
             "entry_count": identity.entry_count,
         }
         descriptor = os.open(
             marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
         )
         try:
-            os.write(descriptor, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+            os.write(
+                descriptor, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            )
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
@@ -440,9 +456,13 @@ class RepositoryWorkspaceAuthority:
         """
 
         if workspace.kind is not WorkspaceKind.READ_SNAPSHOT:
-            raise WorkspaceTransitionInvalid("Read publication reconciliation requires READ_SNAPSHOT")
+            raise WorkspaceTransitionInvalid(
+                "Read publication reconciliation requires READ_SNAPSHOT"
+            )
         if self.reference(workspace.workspace_id) != workspace:
-            raise WorkspaceStateStale("Publication workspace reference does not match durable identity")
+            raise WorkspaceStateStale(
+                "Publication workspace reference does not match durable identity"
+            )
         marker = self._read_publication_marker_for_id(workspace.workspace_id)
         with self._database.transaction(write=True) as connection:
             state = self._state_for_update(connection, workspace.workspace_id)
@@ -452,19 +472,27 @@ class RepositoryWorkspaceAuthority:
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 2048:
                 raise WorkspaceStateStale("Read publication receipt is invalid or replaced")
             payload = json.loads(marker.read_text(encoding="utf-8"))
-            if (payload.get("owner") != "RepositoryWorkspaceAuthority"
-                    or payload.get("kind") != "READ_SNAPSHOT"
-                    or payload.get("workspace_id") != workspace.workspace_id
-                    or payload.get("state_version") not in {state.state_version, state.state_version - 1}):
-                raise WorkspaceStateStale("Read publication receipt generation or identity mismatch")
+            if (
+                payload.get("owner") != "RepositoryWorkspaceAuthority"
+                or payload.get("kind") != "READ_SNAPSHOT"
+                or payload.get("workspace_id") != workspace.workspace_id
+                or payload.get("state_version")
+                not in {state.state_version, state.state_version - 1}
+            ):
+                raise WorkspaceStateStale(
+                    "Read publication receipt generation or identity mismatch"
+                )
             identity = SnapshotIdentity(
-                sha256=payload["sha256"], byte_count=payload["byte_count"],
+                sha256=payload["sha256"],
+                byte_count=payload["byte_count"],
                 entry_count=payload["entry_count"],
             )
             path = self._physical_path_for_id(workspace.workspace_id)
             if not path.is_dir() or path.is_symlink():
                 raise WorkspaceStateStale("Read publication destination missing or replaced")
-            if state.lifecycle_state is WorkspaceLifecycleState.ALLOCATED and not any(path.iterdir()):
+            if state.lifecycle_state is WorkspaceLifecycleState.ALLOCATED and not any(
+                path.iterdir()
+            ):
                 # Crash after intent, before atomic rename. Remain ALLOCATED.
                 marker.unlink()
                 self._fsync_managed_root()
@@ -473,28 +501,41 @@ class RepositoryWorkspaceAuthority:
             try:
                 verify_clean_source_snapshot(binding, label="recovered READ_SNAPSHOT")
             except Exception as exc:
-                raise WorkspaceStateStale("Read publication bytes cannot be independently proven") from exc
+                raise WorkspaceStateStale(
+                    "Read publication bytes cannot be independently proven"
+                ) from exc
             if state.lifecycle_state is WorkspaceLifecycleState.ALLOCATED:
                 if state.state_version != payload["state_version"]:
                     raise WorkspaceStateStale("Read publication generation was superseded")
                 connection.execute(
                     "INSERT INTO workspace_read_snapshots(workspace_id, sha256, byte_count, "
                     "entry_count, materialized_at) VALUES (?, ?, ?, ?, ?)",
-                    (workspace.workspace_id, identity.sha256, identity.byte_count,
-                     identity.entry_count, utc_now().isoformat()),
+                    (
+                        workspace.workspace_id,
+                        identity.sha256,
+                        identity.byte_count,
+                        identity.entry_count,
+                        utc_now().isoformat(),
+                    ),
                 )
                 state = self._write_state(
-                    connection, current=state, next_state=WorkspaceLifecycleState.READY,
+                    connection,
+                    current=state,
+                    next_state=WorkspaceLifecycleState.READY,
                 )
             elif state.lifecycle_state is WorkspaceLifecycleState.READY:
                 row = connection.execute(
                     "SELECT sha256, byte_count, entry_count FROM workspace_read_snapshots WHERE workspace_id=?",
                     (workspace.workspace_id,),
                 ).fetchone()
-                if row is None or (str(row["sha256"]), int(row["byte_count"]), int(row["entry_count"])) != (
-                    identity.sha256, identity.byte_count, identity.entry_count
-                ):
-                    raise WorkspaceStateStale("Committed snapshot receipt differs from physical source")
+                if row is None or (
+                    str(row["sha256"]),
+                    int(row["byte_count"]),
+                    int(row["entry_count"]),
+                ) != (identity.sha256, identity.byte_count, identity.entry_count):
+                    raise WorkspaceStateStale(
+                        "Committed snapshot receipt differs from physical source"
+                    )
             else:
                 raise WorkspaceStateStale("Publication receipt conflicts with workspace lifecycle")
         # Sidecar is removed only after the final SQLite commit returned.
@@ -525,11 +566,15 @@ class RepositoryWorkspaceAuthority:
                 f"Workspace reference does not match durable identity: {workspace.workspace_id}"
             )
         if workspace.kind is not WorkspaceKind.WORKTREE:
-            raise WorkspaceTransitionInvalid("WORKTREE materialization requires a WORKTREE workspace")
+            raise WorkspaceTransitionInvalid(
+                "WORKTREE materialization requires a WORKTREE workspace"
+            )
         current = self.state(workspace.workspace_id)
         self._require_version(current, expected_state_version)
         if current.lifecycle_state is not WorkspaceLifecycleState.ALLOCATED:
-            raise WorkspaceTransitionInvalid("WORKTREE materialization requires ALLOCATED workspace state")
+            raise WorkspaceTransitionInvalid(
+                "WORKTREE materialization requires ALLOCATED workspace state"
+            )
 
         verify_clean_source_snapshot(source_snapshot, label="candidate source snapshot")
         source_repository = canonical_path(source_repository)
@@ -544,9 +589,13 @@ class RepositoryWorkspaceAuthority:
                 f"expected {workspace.base_revision}, observed {source_observation.head_sha}"
             )
         if source_observation.changed_files:
-            raise WorkspaceStateStale("Candidate source repository must be clean before materialization")
+            raise WorkspaceStateStale(
+                "Candidate source repository must be clean before materialization"
+            )
         if source_snapshot_identity(source_repository) != source_snapshot.identity:
-            raise WorkspaceStateStale("Candidate source snapshot does not match clean repository source")
+            raise WorkspaceStateStale(
+                "Candidate source snapshot does not match clean repository source"
+            )
 
         destination = self.physical_path(workspace)
         if not destination.is_dir() or destination.is_symlink() or any(destination.iterdir()):
@@ -574,10 +623,14 @@ class RepositoryWorkspaceAuthority:
                 env=_worktree_git_environment(),
             )
             if result.returncode != 0:
-                raise WorkspaceStateStale(f"Cannot register candidate Git worktree: {result.stderr}")
+                raise WorkspaceStateStale(
+                    f"Cannot register candidate Git worktree: {result.stderr}"
+                )
             git_marker = destination / ".git"
             if not git_marker.is_file() or git_marker.is_symlink():
-                raise WorkspaceStateStale("Candidate Git worktree did not create canonical .git metadata")
+                raise WorkspaceStateStale(
+                    "Candidate Git worktree did not create canonical .git metadata"
+                )
             index_result = service.run(
                 "-c",
                 "core.hooksPath=/dev/null",
@@ -602,7 +655,9 @@ class RepositoryWorkspaceAuthority:
                 raise WorkspaceStateStale("Candidate bytes differ from admitted source snapshot")
             observation = service.observe(destination)
             if observation.head_sha != workspace.base_revision or observation.changed_files:
-                raise WorkspaceStateStale("Candidate worktree is not clean at its declared base revision")
+                raise WorkspaceStateStale(
+                    "Candidate worktree is not clean at its declared base revision"
+                )
 
             with self._database.transaction(write=True) as connection:
                 fresh = self._state_for_update(connection, workspace.workspace_id)
@@ -715,14 +770,18 @@ class RepositoryWorkspaceAuthority:
             raise WorkspaceStateStale("Missing original worktree receipt for recovery") from exc
         try:
             import fcntl
+
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
                 raise WorkspaceStateStale("Native Git effect is still in flight") from exc
             opened = os.fstat(descriptor)
             current = marker.lstat()
-            if (not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
-                    or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)):
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)
+            ):
                 raise WorkspaceStateStale("Worktree receipt replaced during recovery")
             yield
         finally:
@@ -752,7 +811,8 @@ class RepositoryWorkspaceAuthority:
             raise WorkspaceStateStale("Worktree source repository is missing or replaced")
         source_info = source.lstat()
         if (source_info.st_dev, source_info.st_ino) != (
-            payload.get("source_device"), payload.get("source_inode")
+            payload.get("source_device"),
+            payload.get("source_inode"),
         ):
             raise WorkspaceStateStale("Worktree source repository identity changed")
         if not isinstance(payload.get("sha256"), str) or len(payload["sha256"]) != 64:
@@ -764,8 +824,12 @@ class RepositoryWorkspaceAuthority:
         service: GitService, source_repository: Path, destination: Path
     ) -> bool:
         result = service.run(
-            "worktree", "list", "--porcelain", "-z",
-            cwd=source_repository, env=_worktree_git_environment(),
+            "worktree",
+            "list",
+            "--porcelain",
+            "-z",
+            cwd=source_repository,
+            env=_worktree_git_environment(),
         )
         if result.returncode != 0:
             raise WorkspaceStateStale("Cannot prove native Git worktree registration")
@@ -795,9 +859,9 @@ class RepositoryWorkspaceAuthority:
             return False
         if self._registered_git_worktree(service, source, destination):
             return False
-        if destination.is_symlink() or (destination.exists() and (
-            not destination.is_dir() or any(destination.iterdir())
-        )):
+        if destination.is_symlink() or (
+            destination.exists() and (not destination.is_dir() or any(destination.iterdir()))
+        ):
             raise WorkspaceStateStale("Unregistered Git effect has unknown filesystem bytes")
         destination.mkdir(mode=0o700, exist_ok=True)
         self._fsync_managed_root()
@@ -818,7 +882,10 @@ class RepositoryWorkspaceAuthority:
     def _reconcile_worktree_locked(
         self, workspace: WorkspaceRef, *, git: GitService | None = None
     ) -> WorkspaceState:
-        if workspace.kind is not WorkspaceKind.WORKTREE or self.reference(workspace.workspace_id) != workspace:
+        if (
+            workspace.kind is not WorkspaceKind.WORKTREE
+            or self.reference(workspace.workspace_id) != workspace
+        ):
             raise WorkspaceStateStale("Worktree reconciliation requires exact durable identity")
         service = git or GitService()
         with self._database.transaction(write=True) as connection:
@@ -829,50 +896,87 @@ class RepositoryWorkspaceAuthority:
             if not self._registered_git_worktree(service, source, destination):
                 # An absent registration is not proof of an absent filesystem
                 # effect. In particular, do not replace a foreign path.
-                if destination.is_symlink() or (destination.exists() and (
-                    not destination.is_dir() or any(destination.iterdir())
-                )):
+                if destination.is_symlink() or (
+                    destination.exists()
+                    and (not destination.is_dir() or any(destination.iterdir()))
+                ):
                     raise WorkspaceStateStale("Unregistered worktree has unproven bytes")
                 if state.lifecycle_state is not WorkspaceLifecycleState.ALLOCATED:
                     raise WorkspaceStateStale("Committed worktree lost native Git registration")
                 destination.mkdir(mode=0o700, exist_ok=True)
             else:
                 marker = destination / ".git"
-                if not destination.is_dir() or destination.is_symlink() or not marker.is_file() or marker.is_symlink():
-                    raise WorkspaceStateStale("Registered Git worktree metadata is missing or replaced")
+                if (
+                    not destination.is_dir()
+                    or destination.is_symlink()
+                    or not marker.is_file()
+                    or marker.is_symlink()
+                ):
+                    raise WorkspaceStateStale(
+                        "Registered Git worktree metadata is missing or replaced"
+                    )
                 common = service.run(
-                    "rev-parse", "--path-format=absolute", "--git-common-dir",
-                    cwd=destination, env=_worktree_git_environment(),
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-common-dir",
+                    cwd=destination,
+                    env=_worktree_git_environment(),
                 )
                 expected_common = service.run(
-                    "rev-parse", "--path-format=absolute", "--git-common-dir",
-                    cwd=source, env=_worktree_git_environment(),
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-common-dir",
+                    cwd=source,
+                    env=_worktree_git_environment(),
                 )
-                if (common.returncode != 0 or expected_common.returncode != 0
-                        or common.stdout.strip() != expected_common.stdout.strip()):
-                    raise WorkspaceStateStale("Registered Git worktree belongs to another repository")
+                if (
+                    common.returncode != 0
+                    or expected_common.returncode != 0
+                    or common.stdout.strip() != expected_common.stdout.strip()
+                ):
+                    raise WorkspaceStateStale(
+                        "Registered Git worktree belongs to another repository"
+                    )
                 observation = service.observe(destination, env=_worktree_git_environment())
                 if observation.head_sha != workspace.base_revision or observation.changed_files:
-                    raise WorkspaceStateStale("Registered Git worktree content is incomplete or dirty")
+                    raise WorkspaceStateStale(
+                        "Registered Git worktree content is incomplete or dirty"
+                    )
                 actual = source_snapshot_identity(destination)
                 if (actual.sha256, actual.byte_count, actual.entry_count) != (
-                    payload["sha256"], payload["byte_count"], payload["entry_count"]
+                    payload["sha256"],
+                    payload["byte_count"],
+                    payload["entry_count"],
                 ):
-                    raise WorkspaceStateStale("Registered Git worktree content differs from exact source")
+                    raise WorkspaceStateStale(
+                        "Registered Git worktree content differs from exact source"
+                    )
                 if state.lifecycle_state is WorkspaceLifecycleState.ALLOCATED:
                     now = utc_now()
                     connection.execute(
                         "INSERT INTO workspace_worktrees(workspace_id, base_revision, git_marker_sha256, "
                         "materialized_at) VALUES (?, ?, ?, ?)",
-                        (workspace.workspace_id, workspace.base_revision, _sha256_file(marker), now.isoformat()),
+                        (
+                            workspace.workspace_id,
+                            workspace.base_revision,
+                            _sha256_file(marker),
+                            now.isoformat(),
+                        ),
                     )
                     checkpoint = self._insert_checkpoint(
-                        connection, workspace_id=workspace.workspace_id,
-                        parent_checkpoint_id=None, identity=actual, changed_paths=(),
-                        attempt_id=None, assignment_id=None, created_at=now,
+                        connection,
+                        workspace_id=workspace.workspace_id,
+                        parent_checkpoint_id=None,
+                        identity=actual,
+                        changed_paths=(),
+                        attempt_id=None,
+                        assignment_id=None,
+                        created_at=now,
                     )
                     state = self._write_state_with_checkpoint(
-                        connection, current=state, next_state=WorkspaceLifecycleState.READY,
+                        connection,
+                        current=state,
+                        next_state=WorkspaceLifecycleState.READY,
                         checkpoint_id=checkpoint.checkpoint_id,
                     )
                 elif state.lifecycle_state is WorkspaceLifecycleState.READY:
@@ -880,10 +984,18 @@ class RepositoryWorkspaceAuthority:
                         "SELECT base_revision, git_marker_sha256 FROM workspace_worktrees WHERE workspace_id=?",
                         (workspace.workspace_id,),
                     ).fetchone()
-                    if row is None or row["base_revision"] != workspace.base_revision or row["git_marker_sha256"] != _sha256_file(marker):
-                        raise WorkspaceStateStale("Committed Git worktree metadata mismatches native Git")
+                    if (
+                        row is None
+                        or row["base_revision"] != workspace.base_revision
+                        or row["git_marker_sha256"] != _sha256_file(marker)
+                    ):
+                        raise WorkspaceStateStale(
+                            "Committed Git worktree metadata mismatches native Git"
+                        )
                 else:
-                    raise WorkspaceStateStale("Worktree publication receipt conflicts with durable state")
+                    raise WorkspaceStateStale(
+                        "Worktree publication receipt conflicts with durable state"
+                    )
         self._clear_worktree_marker(workspace.workspace_id)
         return state
 
@@ -902,7 +1014,8 @@ class RepositoryWorkspaceAuthority:
         """
         row = connection.execute(
             "SELECT 1 FROM workspace_leases WHERE workspace_id=? "
-            "AND writer_authority_kind IS NOT NULL LIMIT 1", (workspace_id,),
+            "AND writer_authority_kind IS NOT NULL LIMIT 1",
+            (workspace_id,),
         ).fetchone()
         if row is not None:
             raise WorkspaceStateStale("Native Git retirement requires independent writer absence")
@@ -910,18 +1023,27 @@ class RepositoryWorkspaceAuthority:
     def _worktree_retirement_preflight(
         self, workspace: WorkspaceRef, *, expected_state_version: int, git: GitService
     ) -> dict:
-        if workspace.kind is not WorkspaceKind.WORKTREE or self.reference(workspace.workspace_id) != workspace:
+        if (
+            workspace.kind is not WorkspaceKind.WORKTREE
+            or self.reference(workspace.workspace_id) != workspace
+        ):
             raise WorkspaceStateStale("Worktree retirement requires exact durable identity")
-        if (self._worktree_marker_for_id(workspace.workspace_id).exists()
-                or self._worktree_marker_for_id(workspace.workspace_id).is_symlink()
-                or self._worktree_retirement_marker_for_id(workspace.workspace_id).exists()
-                or self._worktree_retirement_marker_for_id(workspace.workspace_id).is_symlink()):
-            raise WorkspaceStateStale("Worktree has unresolved Git retirement or publication effect")
+        if (
+            self._worktree_marker_for_id(workspace.workspace_id).exists()
+            or self._worktree_marker_for_id(workspace.workspace_id).is_symlink()
+            or self._worktree_retirement_marker_for_id(workspace.workspace_id).exists()
+            or self._worktree_retirement_marker_for_id(workspace.workspace_id).is_symlink()
+        ):
+            raise WorkspaceStateStale(
+                "Worktree has unresolved Git retirement or publication effect"
+            )
         with self._database.transaction(write=True) as connection:
             state = self._state_for_update(connection, workspace.workspace_id)
             self._require_version(state, expected_state_version)
             if state.lifecycle_state is not WorkspaceLifecycleState.FINALIZED:
-                raise WorkspaceTransitionInvalid("Native Git retirement requires FINALIZED workspace")
+                raise WorkspaceTransitionInvalid(
+                    "Native Git retirement requires FINALIZED workspace"
+                )
             self._require_no_unsettled_writer(connection, state)
             self._require_no_ever_started_writer(connection, workspace.workspace_id)
             row = connection.execute(
@@ -935,42 +1057,75 @@ class RepositoryWorkspaceAuthority:
             if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
                 raise WorkspaceStateStale("Native Git retirement destination replaced")
             marker = path / ".git"
-            if marker.is_symlink() or not marker.is_file() or _sha256_file(marker) != row["git_marker_sha256"]:
-                raise WorkspaceStateStale("Native Git marker differs from durable original registration")
-            common = git.run("rev-parse", "--path-format=absolute", "--git-common-dir",
-                             cwd=path, env=_worktree_git_environment())
+            if (
+                marker.is_symlink()
+                or not marker.is_file()
+                or _sha256_file(marker) != row["git_marker_sha256"]
+            ):
+                raise WorkspaceStateStale(
+                    "Native Git marker differs from durable original registration"
+                )
+            common = git.run(
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+                cwd=path,
+                env=_worktree_git_environment(),
+            )
             if common.returncode != 0:
                 raise WorkspaceStateStale("Cannot prove original Git common directory")
             common_path = Path(common.stdout.strip())
-            if (not common_path.is_absolute() or common_path.is_symlink()
-                    or not common_path.is_dir() or common_path.name != ".git"):
+            if (
+                not common_path.is_absolute()
+                or common_path.is_symlink()
+                or not common_path.is_dir()
+                or common_path.name != ".git"
+            ):
                 raise WorkspaceStateStale("Original Git common directory is unavailable")
             source = common_path.parent
-            if (source.is_symlink() or not source.is_dir()
-                    or not self._registered_git_worktree(git, source, path)):
-                raise WorkspaceStateStale("Native Git registration cannot be proved before retirement")
+            if (
+                source.is_symlink()
+                or not source.is_dir()
+                or not self._registered_git_worktree(git, source, path)
+            ):
+                raise WorkspaceStateStale(
+                    "Native Git registration cannot be proved before retirement"
+                )
             observation = git.observe(path, env=_worktree_git_environment())
             if observation.head_sha != workspace.base_revision or observation.changed_files:
-                raise WorkspaceStateStale("Native Git retirement refuses dirty or changed candidate")
+                raise WorkspaceStateStale(
+                    "Native Git retirement refuses dirty or changed candidate"
+                )
             checkpoint = connection.execute(
                 "SELECT sha256, byte_count, entry_count FROM candidate_checkpoints WHERE checkpoint_id=? "
-                "AND workspace_id=?", (state.current_checkpoint_id, workspace.workspace_id),
+                "AND workspace_id=?",
+                (state.current_checkpoint_id, workspace.workspace_id),
             ).fetchone()
             if checkpoint is None:
-                raise WorkspaceStateStale("Native Git retirement requires current durable checkpoint")
+                raise WorkspaceStateStale(
+                    "Native Git retirement requires current durable checkpoint"
+                )
             identity = source_snapshot_identity(path)
             if (identity.sha256, identity.byte_count, identity.entry_count) != (
-                checkpoint["sha256"], checkpoint["byte_count"], checkpoint["entry_count"]
+                checkpoint["sha256"],
+                checkpoint["byte_count"],
+                checkpoint["entry_count"],
             ):
-                raise WorkspaceStateStale("Native Git retirement candidate differs from durable checkpoint")
+                raise WorkspaceStateStale(
+                    "Native Git retirement candidate differs from durable checkpoint"
+                )
             common_info = common_path.lstat()
             return {
-                "owner": "RepositoryWorkspaceAuthority", "kind": "WORKTREE_RETIRE",
-                "workspace_id": workspace.workspace_id, "state_version": state.state_version,
+                "owner": "RepositoryWorkspaceAuthority",
+                "kind": "WORKTREE_RETIRE",
+                "workspace_id": workspace.workspace_id,
+                "state_version": state.state_version,
                 "base_revision": workspace.base_revision,
-                "common_path": str(common_path), "common_device": common_info.st_dev,
+                "common_path": str(common_path),
+                "common_device": common_info.st_dev,
                 "common_inode": common_info.st_ino,
-                "destination_device": info.st_dev, "destination_inode": info.st_ino,
+                "destination_device": info.st_dev,
+                "destination_inode": info.st_ino,
                 "git_marker_sha256": str(row["git_marker_sha256"]),
                 "checkpoint_sha256": identity.sha256,
                 "checkpoint_byte_count": identity.byte_count,
@@ -979,9 +1134,12 @@ class RepositoryWorkspaceAuthority:
 
     def _prepare_retirement_marker(self, workspace_id: str, payload: dict) -> int:
         marker = self._worktree_retirement_marker_for_id(workspace_id)
-        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        descriptor = os.open(
+            marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+        )
         try:
             import fcntl
+
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             serialized = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
             if os.write(descriptor, serialized) != len(serialized):
@@ -996,25 +1154,40 @@ class RepositoryWorkspaceAuthority:
     def _read_retirement_marker(self, workspace: WorkspaceRef, state: WorkspaceState) -> dict:
         marker = self._worktree_retirement_marker_for_id(workspace.workspace_id)
         info = marker.lstat()
-        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                or info.st_size > 4096 or marker.is_symlink()):
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_size > 4096
+            or marker.is_symlink()
+        ):
             raise WorkspaceStateStale("Native Git retirement receipt replaced")
         try:
             payload = json.loads(marker.read_text(encoding="utf-8"))
         except (ValueError, UnicodeError) as exc:
             raise WorkspaceStateStale("Malformed native Git retirement receipt") from exc
-        if (payload.get("owner") != "RepositoryWorkspaceAuthority"
-                or payload.get("kind") != "WORKTREE_RETIRE"
-                or payload.get("workspace_id") != workspace.workspace_id
-                or payload.get("base_revision") != workspace.base_revision
-                or payload.get("state_version") not in (state.state_version, state.state_version - 1)):
-            raise WorkspaceStateStale("Native Git retirement receipt identity or generation changed")
+        if (
+            payload.get("owner") != "RepositoryWorkspaceAuthority"
+            or payload.get("kind") != "WORKTREE_RETIRE"
+            or payload.get("workspace_id") != workspace.workspace_id
+            or payload.get("base_revision") != workspace.base_revision
+            or payload.get("state_version") not in (state.state_version, state.state_version - 1)
+        ):
+            raise WorkspaceStateStale(
+                "Native Git retirement receipt identity or generation changed"
+            )
         common = Path(payload.get("common_path", ""))
-        if (not common.is_absolute() or common.is_symlink() or not common.is_dir()
-                or common.name != ".git"):
+        if (
+            not common.is_absolute()
+            or common.is_symlink()
+            or not common.is_dir()
+            or common.name != ".git"
+        ):
             raise WorkspaceStateStale("Native Git retirement common directory replaced")
         observed = common.lstat()
-        if (observed.st_dev, observed.st_ino) != (payload.get("common_device"), payload.get("common_inode")):
+        if (observed.st_dev, observed.st_ino) != (
+            payload.get("common_device"),
+            payload.get("common_inode"),
+        ):
             raise WorkspaceStateStale("Native Git retirement common directory identity changed")
         return payload
 
@@ -1027,7 +1200,10 @@ class RepositoryWorkspaceAuthority:
         self._fsync_managed_root()
 
     def retire_worktree(
-        self, workspace: WorkspaceRef, *, expected_state_version: int,
+        self,
+        workspace: WorkspaceRef,
+        *,
+        expected_state_version: int,
         git: GitService | None = None,
     ) -> WorkspaceState:
         """One original-owner native Git removal followed by SQLite RELEASED cut.
@@ -1038,7 +1214,9 @@ class RepositoryWorkspaceAuthority:
         """
         service = git or GitService()
         payload = self._worktree_retirement_preflight(
-            workspace, expected_state_version=expected_state_version, git=service,
+            workspace,
+            expected_state_version=expected_state_version,
+            git=service,
         )
         descriptor = self._prepare_retirement_marker(workspace.workspace_id, payload)
         try:
@@ -1053,30 +1231,43 @@ class RepositoryWorkspaceAuthority:
             path = self._physical_path_for_id(workspace.workspace_id)
             info = path.lstat()
             if (info.st_dev, info.st_ino) != (
-                payload["destination_device"], payload["destination_inode"]
+                payload["destination_device"],
+                payload["destination_inode"],
             ):
                 raise WorkspaceStateStale("Native Git retirement destination identity raced")
             source = Path(payload["common_path"]).parent
             if not self._registered_git_worktree(service, source, path):
                 raise WorkspaceStateStale("Native Git worktree disappeared before retirement")
             native_marker = path / ".git"
-            if (native_marker.is_symlink() or not native_marker.is_file()
-                    or _sha256_file(native_marker) != payload["git_marker_sha256"]):
+            if (
+                native_marker.is_symlink()
+                or not native_marker.is_file()
+                or _sha256_file(native_marker) != payload["git_marker_sha256"]
+            ):
                 raise WorkspaceStateStale("Native Git metadata changed during retirement prework")
             observed = service.observe(path, env=_worktree_git_environment())
             if observed.head_sha != workspace.base_revision or observed.changed_files:
                 raise WorkspaceStateStale("Native Git candidate changed during retirement prework")
             identity = source_snapshot_identity(path)
             if (identity.sha256, identity.byte_count, identity.entry_count) != (
-                payload["checkpoint_sha256"], payload["checkpoint_byte_count"],
+                payload["checkpoint_sha256"],
+                payload["checkpoint_byte_count"],
                 payload["checkpoint_entry_count"],
             ):
-                raise WorkspaceStateStale("Native Git candidate content changed during retirement prework")
+                raise WorkspaceStateStale(
+                    "Native Git candidate content changed during retirement prework"
+                )
             result = service.run(
-                "worktree", "remove", str(path), cwd=source, env=_worktree_git_environment(),
+                "worktree",
+                "remove",
+                str(path),
+                cwd=source,
+                env=_worktree_git_environment(),
             )
             if result.returncode != 0:
-                raise WorkspaceStateStale(f"Native Git worktree removal unresolved: {result.stderr}")
+                raise WorkspaceStateStale(
+                    f"Native Git worktree removal unresolved: {result.stderr}"
+                )
             return self._reconcile_retirement_locked(workspace, git=service)
         finally:
             os.close(descriptor)
@@ -1092,20 +1283,29 @@ class RepositoryWorkspaceAuthority:
             raise WorkspaceStateStale("Missing native Git retirement receipt") from exc
         try:
             import fcntl
+
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
                 raise WorkspaceStateStale("Native Git retirement still in flight") from exc
             opened, observed = os.fstat(descriptor), marker.lstat()
-            if (not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
-                    or (opened.st_dev, opened.st_ino) != (observed.st_dev, observed.st_ino)):
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or (opened.st_dev, opened.st_ino) != (observed.st_dev, observed.st_ino)
+            ):
                 raise WorkspaceStateStale("Native Git retirement receipt replaced during replay")
             return self._reconcile_retirement_locked(workspace, git=git or GitService())
         finally:
             os.close(descriptor)
 
-    def _reconcile_retirement_locked(self, workspace: WorkspaceRef, *, git: GitService) -> WorkspaceState:
-        if workspace.kind is not WorkspaceKind.WORKTREE or self.reference(workspace.workspace_id) != workspace:
+    def _reconcile_retirement_locked(
+        self, workspace: WorkspaceRef, *, git: GitService
+    ) -> WorkspaceState:
+        if (
+            workspace.kind is not WorkspaceKind.WORKTREE
+            or self.reference(workspace.workspace_id) != workspace
+        ):
             raise WorkspaceStateStale("Native Git retirement requires exact durable owner identity")
         with self._database.transaction(write=True) as connection:
             state = self._state_for_update(connection, workspace.workspace_id)
@@ -1114,7 +1314,9 @@ class RepositoryWorkspaceAuthority:
             path = self._physical_path_for_id(workspace.workspace_id)
             registered = self._registered_git_worktree(git, source, path)
             if registered or path.exists() or path.is_symlink():
-                raise WorkspaceStateStale("Native Git retirement unresolved: registration or bytes remain")
+                raise WorkspaceStateStale(
+                    "Native Git retirement unresolved: registration or bytes remain"
+                )
             if state.lifecycle_state is WorkspaceLifecycleState.FINALIZED:
                 self._require_no_unsettled_writer(connection, state)
                 self._require_no_ever_started_writer(connection, workspace.workspace_id)
@@ -1122,19 +1324,28 @@ class RepositoryWorkspaceAuthority:
                     "SELECT base_revision, git_marker_sha256 FROM workspace_worktrees WHERE workspace_id=?",
                     (workspace.workspace_id,),
                 ).fetchone()
-                if (row is None or row["base_revision"] != workspace.base_revision
-                        or row["git_marker_sha256"] != payload["git_marker_sha256"]
-                        or state.state_version != payload["state_version"]):
+                if (
+                    row is None
+                    or row["base_revision"] != workspace.base_revision
+                    or row["git_marker_sha256"] != payload["git_marker_sha256"]
+                    or state.state_version != payload["state_version"]
+                ):
                     raise WorkspaceStateStale("Native Git retirement durable registration changed")
-                connection.execute("DELETE FROM workspace_worktrees WHERE workspace_id=?", (workspace.workspace_id,))
+                connection.execute(
+                    "DELETE FROM workspace_worktrees WHERE workspace_id=?",
+                    (workspace.workspace_id,),
+                )
                 state = self._write_state(
-                    connection, current=state, next_state=WorkspaceLifecycleState.RELEASED,
+                    connection,
+                    current=state,
+                    next_state=WorkspaceLifecycleState.RELEASED,
                 )
             elif state.lifecycle_state is not WorkspaceLifecycleState.RELEASED:
                 raise WorkspaceStateStale("Native Git retirement crossed incompatible lifecycle")
             else:
                 row = connection.execute(
-                    "SELECT base_revision FROM workspace_worktrees WHERE workspace_id=?", (workspace.workspace_id,)
+                    "SELECT base_revision FROM workspace_worktrees WHERE workspace_id=?",
+                    (workspace.workspace_id,),
                 ).fetchone()
                 if row is not None:
                     raise WorkspaceStateStale("RELEASED native Git registration still persisted")
@@ -1184,7 +1395,9 @@ class RepositoryWorkspaceAuthority:
                 )
             observation = (git or GitService()).observe(path)
             if observation.head_sha != workspace.base_revision:
-                raise CandidateCheckpointStale("Candidate Git base revision changed after checkpoint")
+                raise CandidateCheckpointStale(
+                    "Candidate Git base revision changed after checkpoint"
+                )
         return checkpoint
 
     def create_candidate_checkpoint(
@@ -1220,7 +1433,9 @@ class RepositoryWorkspaceAuthority:
             )
         parent = self.candidate_checkpoint(expected_parent_checkpoint_id)
         if parent.workspace_id != workspace.workspace_id:
-            raise CandidateCheckpointStale("Candidate checkpoint parent belongs to another workspace")
+            raise CandidateCheckpointStale(
+                "Candidate checkpoint parent belongs to another workspace"
+            )
 
         path = self.physical_path(workspace)
         self._verify_worktree_metadata(workspace, path)
@@ -1308,9 +1523,13 @@ class RepositoryWorkspaceAuthority:
         """Advance lifecycle with explicit CAS; release/allocation keep physical ownership."""
 
         if next_state is WorkspaceLifecycleState.ALLOCATED:
-            raise WorkspaceTransitionInvalid("Use RepositoryWorkspaceAuthority.allocate for ALLOCATED")
+            raise WorkspaceTransitionInvalid(
+                "Use RepositoryWorkspaceAuthority.allocate for ALLOCATED"
+            )
         if next_state is WorkspaceLifecycleState.RELEASED:
-            raise WorkspaceTransitionInvalid("Use RepositoryWorkspaceAuthority.release for RELEASED")
+            raise WorkspaceTransitionInvalid(
+                "Use RepositoryWorkspaceAuthority.release for RELEASED"
+            )
         if (
             next_state is WorkspaceLifecycleState.READY
             and self.reference(workspace_id).kind is WorkspaceKind.READ_SNAPSHOT
@@ -1339,10 +1558,13 @@ class RepositoryWorkspaceAuthority:
         durable = self.reference(workspace_id)
         if durable.kind is WorkspaceKind.WORKTREE:
             observed = self.state(workspace_id)
-            if (observed.state_version == expected_state_version
-                    and observed.lifecycle_state is WorkspaceLifecycleState.FINALIZED):
+            if (
+                observed.state_version == expected_state_version
+                and observed.lifecycle_state is WorkspaceLifecycleState.FINALIZED
+            ):
                 return self.retire_worktree(
-                    durable, expected_state_version=expected_state_version,
+                    durable,
+                    expected_state_version=expected_state_version,
                 )
         renamed = False
         quarantine = self._release_quarantine_for_id(workspace_id)
@@ -1350,16 +1572,20 @@ class RepositoryWorkspaceAuthority:
             with self._database.transaction(write=True) as connection:
                 current = self._state_for_update(connection, workspace_id)
                 self._require_version(current, expected_state_version)
-                if (self._worktree_retirement_marker_for_id(workspace_id).exists()
-                        or self._worktree_retirement_marker_for_id(workspace_id).is_symlink()):
+                if (
+                    self._worktree_retirement_marker_for_id(workspace_id).exists()
+                    or self._worktree_retirement_marker_for_id(workspace_id).is_symlink()
+                ):
                     raise WorkspaceStateStale("Workspace has unresolved Git retirement")
                 if current.lifecycle_state is WorkspaceLifecycleState.RELEASED:
                     return current
                 self._require_transition(current.lifecycle_state, WorkspaceLifecycleState.RELEASED)
                 self._require_no_unsettled_writer(connection, current)
                 path = self._physical_path_for_id(workspace_id)
-                if (self._worktree_retirement_marker_for_id(workspace_id).exists()
-                        or self._worktree_retirement_marker_for_id(workspace_id).is_symlink()):
+                if (
+                    self._worktree_retirement_marker_for_id(workspace_id).exists()
+                    or self._worktree_retirement_marker_for_id(workspace_id).is_symlink()
+                ):
                     raise WorkspaceStateStale("Workspace has unresolved Git retirement")
                 if self._worktree_marker_for_id(workspace_id).exists():
                     raise WorkspaceStateStale(
@@ -1430,9 +1656,13 @@ class RepositoryWorkspaceAuthority:
         The current database transaction is the only recovery serialization owner.
         """
 
-        if (self._worktree_retirement_marker_for_id(workspace_id).exists()
-                        or self._worktree_retirement_marker_for_id(workspace_id).is_symlink()):
-            raise WorkspaceStateStale("Reconcile native Git retirement with original worktree owner")
+        if (
+            self._worktree_retirement_marker_for_id(workspace_id).exists()
+            or self._worktree_retirement_marker_for_id(workspace_id).is_symlink()
+        ):
+            raise WorkspaceStateStale(
+                "Reconcile native Git retirement with original worktree owner"
+            )
         with self._database.transaction(write=True) as connection:
             state = self._state_for_update(connection, workspace_id)
             quarantine = self._release_quarantine_for_id(workspace_id)
@@ -1447,11 +1677,15 @@ class RepositoryWorkspaceAuthority:
                             )
                     else:
                         self._verify_release_receipt(
-                            workspace_id, path, durable_version=state.state_version,
+                            workspace_id,
+                            path,
+                            durable_version=state.state_version,
                         )
                     self._clear_release_receipt(workspace_id)
                 return state
-            self._verify_release_receipt(workspace_id, quarantine, durable_version=state.state_version)
+            self._verify_release_receipt(
+                workspace_id, quarantine, durable_version=state.state_version
+            )
             if state.lifecycle_state is not WorkspaceLifecycleState.RELEASED:
                 self._restore_release_quarantine(workspace_id, durable_version=state.state_version)
                 self._clear_release_receipt(workspace_id)
@@ -1468,14 +1702,19 @@ class RepositoryWorkspaceAuthority:
         info = path.lstat()
         receipt = self._release_receipt_for_id(current.workspace_id)
         payload = {
-            "owner": "RepositoryWorkspaceAuthority", "workspace_id": current.workspace_id,
-            "state_version": current.state_version, "device": info.st_dev, "inode": info.st_ino,
+            "owner": "RepositoryWorkspaceAuthority",
+            "workspace_id": current.workspace_id,
+            "state_version": current.state_version,
+            "device": info.st_dev,
+            "inode": info.st_ino,
         }
         descriptor = os.open(
             receipt, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
         )
         try:
-            os.write(descriptor, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+            os.write(
+                descriptor, json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            )
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
@@ -1492,13 +1731,19 @@ class RepositoryWorkspaceAuthority:
             raise WorkspaceStateStale(f"Invalid release receipt: {workspace_id}")
         payload = json.loads(receipt.read_text(encoding="utf-8"))
         observed = path.lstat()
-        if (payload.get("owner") != "RepositoryWorkspaceAuthority"
-                or payload.get("workspace_id") != workspace_id
-                or not stat.S_ISDIR(observed.st_mode)
-                or payload.get("device") != observed.st_dev
-                or payload.get("inode") != observed.st_ino):
-            raise WorkspaceStateStale(f"Release receipt does not match exact owned directory: {workspace_id}")
-        version = self.state(workspace_id).state_version if durable_version is None else durable_version
+        if (
+            payload.get("owner") != "RepositoryWorkspaceAuthority"
+            or payload.get("workspace_id") != workspace_id
+            or not stat.S_ISDIR(observed.st_mode)
+            or payload.get("device") != observed.st_dev
+            or payload.get("inode") != observed.st_ino
+        ):
+            raise WorkspaceStateStale(
+                f"Release receipt does not match exact owned directory: {workspace_id}"
+            )
+        version = (
+            self.state(workspace_id).state_version if durable_version is None else durable_version
+        )
         if payload.get("state_version") not in (version, version - 1):
             raise WorkspaceStateStale(f"Release receipt state generation changed: {workspace_id}")
 
@@ -1514,9 +1759,7 @@ class RepositoryWorkspaceAuthority:
         path = self._physical_path_for_id(workspace_id)
         quarantine = path.with_name(f".release-{path.name}")
         if quarantine.is_symlink():
-            raise WorkspaceStateStale(
-                f"Release quarantine became a symlink: {workspace_id}"
-            )
+            raise WorkspaceStateStale(f"Release quarantine became a symlink: {workspace_id}")
         return quarantine
 
     def _restore_release_quarantine(
@@ -1578,7 +1821,9 @@ class RepositoryWorkspaceAuthority:
         if row["base_revision"] != workspace.base_revision:
             raise CandidateCheckpointStale("Candidate durable Git base revision changed")
         if _sha256_file(marker) != row["git_marker_sha256"]:
-            raise CandidateCheckpointStale("Candidate Git metadata marker changed after materialization")
+            raise CandidateCheckpointStale(
+                "Candidate Git metadata marker changed after materialization"
+            )
 
     @staticmethod
     def _insert_checkpoint(

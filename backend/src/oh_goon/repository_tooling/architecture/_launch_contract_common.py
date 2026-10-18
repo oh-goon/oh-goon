@@ -7,9 +7,7 @@ from pathlib import Path
 from oh_goon.repository_tooling.architecture.common import Violation, python_ast
 
 
-def _top_level_string_assignments(
-    path: Path, names: set[str]
-) -> dict[str, list[str | object]]:
+def _top_level_string_assignments(path: Path, names: set[str]) -> dict[str, list[str | object]]:
     if not path.is_file():
         return {}
     observed: dict[str, list[str | object]] = {}
@@ -85,7 +83,9 @@ def owned_string_constant_violations(
                     continue
                 if owners.get(name) == path.resolve() and len(values) == 1:
                     continue
-                duplicate_locations.setdefault(name, []).append(path.relative_to(scan_root).as_posix())
+                duplicate_locations.setdefault(name, []).append(
+                    path.relative_to(scan_root).as_posix()
+                )
     for name, locations in sorted(duplicate_locations.items()):
         violations.append(
             Violation(

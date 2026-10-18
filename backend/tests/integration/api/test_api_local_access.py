@@ -3,8 +3,8 @@ from fastapi.testclient import TestClient
 from oh_goon.api.app import create_app
 from oh_goon.api.local_access import (
     LOCAL_ACCESS_COOKIE,
-    LOCAL_ACCESS_HEADER,
     LOCAL_ACCESS_EXCHANGE_PATH,
+    LOCAL_ACCESS_HEADER,
 )
 
 TOKEN = "local-access-test-token"
@@ -20,14 +20,10 @@ def test_liveness_is_public_but_domain_api_is_fail_closed() -> None:
     assert unauthorized.status_code == 401
     assert unauthorized.json()["code"] == "LOCAL_ACCESS_REQUIRED"
 
-    wrong = client.get(
-        "/api/does-not-exist", headers={LOCAL_ACCESS_HEADER: "wrong-token"}
-    )
+    wrong = client.get("/api/does-not-exist", headers={LOCAL_ACCESS_HEADER: "wrong-token"})
     assert wrong.status_code == 401
 
-    authorized = client.get(
-        "/api/does-not-exist", headers={LOCAL_ACCESS_HEADER: TOKEN}
-    )
+    authorized = client.get("/api/does-not-exist", headers={LOCAL_ACCESS_HEADER: TOKEN})
     assert authorized.status_code == 404
 
 
@@ -36,10 +32,13 @@ def test_browser_exchange_creates_http_only_strict_api_cookie() -> None:
     client = TestClient(app)
 
     assert client.get(LOCAL_ACCESS_EXCHANGE_PATH).status_code == 401
-    assert client.post(
-        LOCAL_ACCESS_EXCHANGE_PATH,
-        headers={LOCAL_ACCESS_HEADER: "wrong-token"},
-    ).status_code == 401
+    assert (
+        client.post(
+            LOCAL_ACCESS_EXCHANGE_PATH,
+            headers={LOCAL_ACCESS_HEADER: "wrong-token"},
+        ).status_code
+        == 401
+    )
 
     exchange = client.post(
         LOCAL_ACCESS_EXCHANGE_PATH,

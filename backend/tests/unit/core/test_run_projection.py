@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 
 from oh_goon.core.errors import ErrorKind, InvalidRunTransition
-from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepCapabilities
@@ -24,6 +23,7 @@ from oh_goon.core.models.run_events import (
     RunFailedEvent,
     RunStartedEvent,
 )
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
@@ -392,7 +392,11 @@ def test_cancellation_remains_first_class_orchestration_state(tmp_path: Path) ->
 
 
 def test_projection_preserves_non_manual_source_across_lifecycle(tmp_path: Path) -> None:
-    from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, FleetRunAdmissionIntent, fleet_repository_scope
+    from oh_goon.core.models.run_admission import (
+        DirectFleetExecutionAdmission,
+        FleetRunAdmissionIntent,
+        fleet_repository_scope,
+    )
     from oh_goon.core.vocabulary import FleetRunSource, FleetRunTerminalIntent
     from oh_goon.runtime.database import LocalDatabase
     from oh_goon.runtime.journal import Journal
@@ -474,5 +478,3 @@ def test_scheduling_binding_rejects_priority_drift_on_idempotent_replay(tmp_path
     require_fleet_run_scheduling_binding(detail, SchedulingPriority.HIGH)
     with pytest.raises(JournalConflict, match="already bound to requested priority HIGH"):
         require_fleet_run_scheduling_binding(detail, SchedulingPriority.NORMAL)
-
-

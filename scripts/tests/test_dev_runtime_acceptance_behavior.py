@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import io
-import queue
-import subprocess
 import urllib.error
-from pathlib import Path
 
 import pytest
 
@@ -12,7 +9,9 @@ from oh_goon.repository_tooling import dev_runtime_acceptance as acceptance
 
 
 class _Response:
-    def __init__(self, *, status: int = 200, body: bytes = b"{}", cookie: str = "") -> None:
+    def __init__(
+        self, *, status: int = 200, body: bytes = b"{}", cookie: str = ""
+    ) -> None:
         self.status = status
         self._body = body
         self.headers = {"Set-Cookie": cookie} if cookie else {}
@@ -40,10 +39,13 @@ class _Running:
         self.token = token
         self.stop_calls = 0
         self.crash_calls = 0
+
     def stop(self) -> None:
         self.stop_calls += 1
+
     def crash(self) -> None:
         self.crash_calls += 1
+
     def diagnostic_tail(self) -> tuple[str, ...]:
         return ()
 
@@ -84,13 +86,16 @@ def test_http_helpers_preserve_headers_status_and_json(monkeypatch) -> None:
         return _Response(status=202, body=b'{"ready": true}')
 
     monkeypatch.setattr(acceptance.urllib.request, "urlopen", open_ok)
-    assert acceptance._http_status(
-        "http://example.test/check",
-        token="token",
-        cookie="sid=abc",
-        method="POST",
-        timeout=3.0,
-    ) == 202
+    assert (
+        acceptance._http_status(
+            "http://example.test/check",
+            token="token",
+            cookie="sid=abc",
+            method="POST",
+            timeout=3.0,
+        )
+        == 202
+    )
     request = observed[-1][0]
     assert request.get_header("X-oh-goon-local-access") == "token"
     assert request.get_header("Cookie") == "sid=abc"
@@ -101,7 +106,9 @@ def test_http_helpers_preserve_headers_status_and_json(monkeypatch) -> None:
         "urlopen",
         lambda request, timeout: _Response(body=b'{"value": 7}'),
     )
-    assert acceptance._request_json("http://example.test/data", token="secret") == {"value": 7}
+    assert acceptance._request_json("http://example.test/data", token="secret") == {
+        "value": 7
+    }
 
     def open_error(request, timeout):
         raise _http_error(401, {"code": "NOPE"})
@@ -110,7 +117,9 @@ def test_http_helpers_preserve_headers_status_and_json(monkeypatch) -> None:
     assert acceptance._http_status("http://example.test/check") == 401
 
 
-def test_expected_error_helper_accepts_exact_error_and_rejects_drift(monkeypatch) -> None:
+def test_expected_error_helper_accepts_exact_error_and_rejects_drift(
+    monkeypatch,
+) -> None:
     def exact(request, timeout):
         raise _http_error(409, {"code": "EXECUTION_BUSY"})
 
@@ -156,7 +165,9 @@ def test_expected_error_helper_accepts_exact_error_and_rejects_drift(monkeypatch
         (204, "broken; HttpOnly; SameSite=strict", "usable session cookie"),
     ],
 )
-def test_cookie_exchange_rejects_invalid_session_contract(monkeypatch, status, cookie, message) -> None:
+def test_cookie_exchange_rejects_invalid_session_contract(
+    monkeypatch, status, cookie, message
+) -> None:
     monkeypatch.setattr(
         acceptance.urllib.request,
         "urlopen",
@@ -179,7 +190,9 @@ def test_cookie_exchange_returns_only_cookie_pair(monkeypatch) -> None:
 
 def test_wait_helpers_cover_success_retry_and_timeout(monkeypatch) -> None:
     statuses = iter([503, 200])
-    monkeypatch.setattr(acceptance, "_http_status", lambda url, token=None: next(statuses))
+    monkeypatch.setattr(
+        acceptance, "_http_status", lambda url, token=None: next(statuses)
+    )
     monkeypatch.setattr(acceptance.time, "sleep", lambda delay: None)
     acceptance._wait_status("http://example.test", 200, timeout=1.0)
 
@@ -245,18 +258,26 @@ def test_access_boundaries_collect_wrong_token_and_cookie_failures(monkeypatch) 
         lambda url, expected, token=None: waits.append((url, expected, token)),
     )
     statuses = iter([403, 500])
-    monkeypatch.setattr(acceptance, "_http_status", lambda *args, **kwargs: next(statuses))
-    monkeypatch.setattr(acceptance, "_exchange_cookie", lambda base_url, token: "sid=abc")
+    monkeypatch.setattr(
+        acceptance, "_http_status", lambda *args, **kwargs: next(statuses)
+    )
+    monkeypatch.setattr(
+        acceptance, "_exchange_cookie", lambda base_url, token: "sid=abc"
+    )
     issues: list[str] = []
 
-    acceptance._exercise_access_boundaries(frontend_base="http://frontend", token="token", issues=issues)
+    acceptance._exercise_access_boundaries(
+        frontend_base="http://frontend", token="token", issues=issues
+    )
 
     assert len(waits) == 5
     assert "wrong local-access token returned HTTP 403" in issues[0]
     assert "browser-session cookie returned HTTP 500" in issues[1]
 
 
-def test_restart_persistence_accepts_complete_state_and_rejects_each_missing_surface(monkeypatch, tmp_path) -> None:
+def test_restart_persistence_accepts_complete_state_and_rejects_each_missing_surface(
+    monkeypatch, tmp_path
+) -> None:
     repositories = tmp_path / "repositories"
     repositories.mkdir()
     good = [
@@ -264,7 +285,9 @@ def test_restart_persistence_accepts_complete_state_and_rejects_each_missing_sur
         {"run": {"steps": ["acceptance-step"]}},
         {"name": "acceptance-shared"},
     ]
-    monkeypatch.setattr(acceptance, "_request_json", lambda *args, **kwargs: good.pop(0))
+    monkeypatch.setattr(
+        acceptance, "_request_json", lambda *args, **kwargs: good.pop(0)
+    )
     acceptance._verify_restart_persistence(
         frontend_base="http://frontend",
         token="token",
@@ -281,9 +304,17 @@ def test_restart_persistence_accepts_complete_state_and_rejects_each_missing_sur
             {"name": "wrong"},
         ],
     ]
-    messages = ["configured repository location", "historical Game Tape", "Shared Plan state"]
+    messages = [
+        "configured repository location",
+        "historical Game Tape",
+        "Shared Plan state",
+    ]
     for replies, message in zip(cases, messages, strict=True):
-        monkeypatch.setattr(acceptance, "_request_json", lambda *args, _replies=replies, **kwargs: _replies.pop(0))
+        monkeypatch.setattr(
+            acceptance,
+            "_request_json",
+            lambda *args, _replies=replies, **kwargs: _replies.pop(0),
+        )
         with pytest.raises(RuntimeError, match=message):
             acceptance._verify_restart_persistence(
                 frontend_base="http://frontend",
@@ -300,12 +331,22 @@ def test_parallel_restart_validators_cover_success_and_failure(monkeypatch) -> N
             {"run": {"status": "COMPLETED"}, "outcome": "SUCCESS"},
         ]
     )
-    monkeypatch.setattr(acceptance, "_request_json", lambda *args, **kwargs: next(replies))
-    acceptance._verify_parallel_cancel_restart("http://frontend", "token", "cancel", "success")
+    monkeypatch.setattr(
+        acceptance, "_request_json", lambda *args, **kwargs: next(replies)
+    )
+    acceptance._verify_parallel_cancel_restart(
+        "http://frontend", "token", "cancel", "success"
+    )
 
-    monkeypatch.setattr(acceptance, "_request_json", lambda *args, **kwargs: {"run": {"status": "FAILED"}})
+    monkeypatch.setattr(
+        acceptance,
+        "_request_json",
+        lambda *args, **kwargs: {"run": {"status": "FAILED"}},
+    )
     with pytest.raises(RuntimeError, match="cancelled parallel"):
-        acceptance._verify_parallel_cancel_restart("http://frontend", "token", "cancel", "success")
+        acceptance._verify_parallel_cancel_restart(
+            "http://frontend", "token", "cancel", "success"
+        )
 
     replies = iter(
         [
@@ -316,16 +357,25 @@ def test_parallel_restart_validators_cover_success_and_failure(monkeypatch) -> N
             {"run": {"status": "COMPLETED"}, "outcome": "SUCCESS"},
         ]
     )
-    monkeypatch.setattr(acceptance, "_request_json", lambda *args, **kwargs: next(replies))
-    acceptance._verify_parallel_repair_restart("http://frontend", "token", "failed", "repaired")
+    monkeypatch.setattr(
+        acceptance, "_request_json", lambda *args, **kwargs: next(replies)
+    )
+    acceptance._verify_parallel_repair_restart(
+        "http://frontend", "token", "failed", "repaired"
+    )
 
     monkeypatch.setattr(
         acceptance,
         "_request_json",
-        lambda *args, **kwargs: {"run": {"status": "FAILED"}, "evidence": ["parallel-failure-left"]},
+        lambda *args, **kwargs: {
+            "run": {"status": "FAILED"},
+            "evidence": ["parallel-failure-left"],
+        },
     )
     with pytest.raises(RuntimeError, match="per-repository attribution"):
-        acceptance._verify_parallel_repair_restart("http://frontend", "token", "failed", "repaired")
+        acceptance._verify_parallel_repair_restart(
+            "http://frontend", "token", "failed", "repaired"
+        )
 
     monkeypatch.setattr(
         acceptance,
@@ -333,9 +383,15 @@ def test_parallel_restart_validators_cover_success_and_failure(monkeypatch) -> N
         lambda *args, **kwargs: {"run": {"status": "COMPLETED"}, "outcome": "SUCCESS"},
     )
     acceptance._verify_parallel_stale_restart("http://frontend", "token", "recovered")
-    monkeypatch.setattr(acceptance, "_request_json", lambda *args, **kwargs: {"run": {"status": "FAILED"}})
+    monkeypatch.setattr(
+        acceptance,
+        "_request_json",
+        lambda *args, **kwargs: {"run": {"status": "FAILED"}},
+    )
     with pytest.raises(RuntimeError, match="post-stale"):
-        acceptance._verify_parallel_stale_restart("http://frontend", "token", "recovered")
+        acceptance._verify_parallel_stale_restart(
+            "http://frontend", "token", "recovered"
+        )
 
 
 def test_restart_history_and_primary_state_validate_durable_truth(monkeypatch) -> None:
@@ -345,7 +401,9 @@ def test_restart_history_and_primary_state_validate_durable_truth(monkeypatch) -
         rejected_id="run-rejected",
     )
     with pytest.raises(RuntimeError, match="did not retain"):
-        acceptance._verify_restart_history("run-a", required_ids=("run-a", "run-b"), rejected_id=None)
+        acceptance._verify_restart_history(
+            "run-a", required_ids=("run-a", "run-b"), rejected_id=None
+        )
     with pytest.raises(RuntimeError, match="did not retain"):
         acceptance._verify_restart_history(
             "run-a run-rejected", required_ids=("run-a",), rejected_id="run-rejected"
@@ -363,12 +421,22 @@ def test_restart_history_and_primary_state_validate_durable_truth(monkeypatch) -
             {"active_fleet_run": None},
         ]
     )
-    monkeypatch.setattr(acceptance, "_request_json", lambda *args, **kwargs: next(replies))
-    acceptance._verify_primary_restart_state("http://frontend", "token", "cancel", "interrupt")
+    monkeypatch.setattr(
+        acceptance, "_request_json", lambda *args, **kwargs: next(replies)
+    )
+    acceptance._verify_primary_restart_state(
+        "http://frontend", "token", "cancel", "interrupt"
+    )
 
-    monkeypatch.setattr(acceptance, "_request_json", lambda *args, **kwargs: {"run": {"status": "RUNNING"}})
+    monkeypatch.setattr(
+        acceptance,
+        "_request_json",
+        lambda *args, **kwargs: {"run": {"status": "RUNNING"}},
+    )
     with pytest.raises(RuntimeError, match="physically cancelled"):
-        acceptance._verify_primary_restart_state("http://frontend", "token", "cancel", "interrupt")
+        acceptance._verify_primary_restart_state(
+            "http://frontend", "token", "cancel", "interrupt"
+        )
 
 
 def _invoke_restart_journey(tmp_path, issues: list[str], *, parallel: bool) -> None:
@@ -388,29 +456,66 @@ def _invoke_restart_journey(tmp_path, issues: list[str], *, parallel: bool) -> N
         parallel_failed_run_id="parallel-failed" if parallel else None,
         parallel_repaired_run_id="parallel-repaired" if parallel else None,
         parallel_stale_rejected_run_id="parallel-stale-rejected" if parallel else None,
-        parallel_stale_recovered_run_id="parallel-stale-recovered" if parallel else None,
+        parallel_stale_recovered_run_id="parallel-stale-recovered"
+        if parallel
+        else None,
     )
 
 
-def test_crash_restart_journey_composes_all_durable_checks(monkeypatch, tmp_path) -> None:
+def test_crash_restart_journey_composes_all_durable_checks(
+    monkeypatch, tmp_path
+) -> None:
     running = _Running("token-2")
     monkeypatch.setattr(acceptance, "_launch_dev", lambda root, env: running)
     calls: list[str] = []
-    monkeypatch.setattr(acceptance, "_exercise_access_boundaries", lambda **kwargs: calls.append("access"))
-    monkeypatch.setattr(acceptance, "_verify_restart_persistence", lambda **kwargs: calls.append("persist"))
-    monkeypatch.setattr(acceptance, "_verify_parallel_cancel_restart", lambda *args: calls.append("cancel"))
-    monkeypatch.setattr(acceptance, "_verify_parallel_repair_restart", lambda *args: calls.append("repair"))
-    monkeypatch.setattr(acceptance, "_verify_parallel_stale_restart", lambda *args: calls.append("stale"))
-    monkeypatch.setattr(acceptance, "_verify_primary_restart_state", lambda *args: calls.append("primary"))
-    monkeypatch.setattr(acceptance, "run_acceptance_goon", lambda **kwargs: "run-second")
+    monkeypatch.setattr(
+        acceptance,
+        "_exercise_access_boundaries",
+        lambda **kwargs: calls.append("access"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "_verify_restart_persistence",
+        lambda **kwargs: calls.append("persist"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "_verify_parallel_cancel_restart",
+        lambda *args: calls.append("cancel"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "_verify_parallel_repair_restart",
+        lambda *args: calls.append("repair"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "_verify_parallel_stale_restart",
+        lambda *args: calls.append("stale"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "_verify_primary_restart_state",
+        lambda *args: calls.append("primary"),
+    )
+    monkeypatch.setattr(
+        acceptance, "run_acceptance_goon", lambda **kwargs: "run-second"
+    )
     monkeypatch.setattr(
         acceptance,
         "_request_json",
         lambda *args, **kwargs: [
             {"fleet_run_id": name}
             for name in (
-                "run-first", "run-cancel", "run-compete", "run-interrupt", "run-second",
-                "parallel-cancel", "parallel-success", "parallel-failed", "parallel-repaired",
+                "run-first",
+                "run-cancel",
+                "run-compete",
+                "run-interrupt",
+                "run-second",
+                "parallel-cancel",
+                "parallel-success",
+                "parallel-failed",
+                "parallel-repaired",
                 "parallel-stale-recovered",
             )
         ],
@@ -424,7 +529,9 @@ def test_crash_restart_journey_composes_all_durable_checks(monkeypatch, tmp_path
     assert running.stop_calls == 1
 
 
-def test_crash_restart_journey_records_restart_failure_and_still_stops(monkeypatch, tmp_path) -> None:
+def test_crash_restart_journey_records_restart_failure_and_still_stops(
+    monkeypatch, tmp_path
+) -> None:
     running = _Running("token-2")
     monkeypatch.setattr(acceptance, "_launch_dev", lambda root, env: running)
     monkeypatch.setattr(
@@ -440,7 +547,9 @@ def test_crash_restart_journey_records_restart_failure_and_still_stops(monkeypat
     assert running.stop_calls == 1
 
 
-def test_accept_dev_runtime_simulated_full_journey_preserves_authority(monkeypatch, tmp_path) -> None:
+def test_accept_dev_runtime_simulated_full_journey_preserves_authority(
+    monkeypatch, tmp_path
+) -> None:
     vite = tmp_path / "frontend" / "node_modules" / ".bin" / "vite"
     vite.parent.mkdir(parents=True)
     vite.write_text("", encoding="utf-8")
@@ -448,7 +557,11 @@ def test_accept_dev_runtime_simulated_full_journey_preserves_authority(monkeypat
     events: list[str] = []
 
     monkeypatch.setattr(acceptance, "_port_is_free", lambda port: True)
-    monkeypatch.setattr(acceptance, "prepare_acceptance_repository", lambda path: events.append(f"prepare:{path.name}"))
+    monkeypatch.setattr(
+        acceptance,
+        "prepare_acceptance_repository",
+        lambda path: events.append(f"prepare:{path.name}"),
+    )
     monkeypatch.setattr(
         acceptance,
         "prepare_interruptible_acceptance_repository",
@@ -457,18 +570,40 @@ def test_accept_dev_runtime_simulated_full_journey_preserves_authority(monkeypat
     monkeypatch.setattr(
         acceptance,
         "prepare_local_runtime_environment",
-        lambda *, temp, state, config: ({"OH_GOON_EXECUTORS_FILE": "/tmp/executors.toml"}, False, None),
+        lambda *, temp, state, config: (
+            {"OH_GOON_EXECUTORS_FILE": "/tmp/executors.toml"},
+            False,
+            None,
+        ),
     )
     monkeypatch.setattr(acceptance, "_launch_dev", lambda root, env: running)
-    monkeypatch.setattr(acceptance, "_exercise_access_boundaries", lambda **kwargs: events.append("access"))
+    monkeypatch.setattr(
+        acceptance,
+        "_exercise_access_boundaries",
+        lambda **kwargs: events.append("access"),
+    )
     run_ids = iter(["run-first", "run-compete"])
-    monkeypatch.setattr(acceptance, "run_acceptance_goon", lambda **kwargs: next(run_ids))
-    monkeypatch.setattr(acceptance, "exercise_location_lifecycle", lambda **kwargs: events.append("location"))
-    monkeypatch.setattr(acceptance, "exercise_shared_plan", lambda *args, **kwargs: events.append("shared"))
+    monkeypatch.setattr(
+        acceptance, "run_acceptance_goon", lambda **kwargs: next(run_ids)
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "exercise_location_lifecycle",
+        lambda **kwargs: events.append("location"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "exercise_shared_plan",
+        lambda *args, **kwargs: events.append("shared"),
+    )
     starts = iter(["run-cancel", "run-interrupt"])
-    monkeypatch.setattr(acceptance, "start_acceptance_goon", lambda **kwargs: next(starts))
+    monkeypatch.setattr(
+        acceptance, "start_acceptance_goon", lambda **kwargs: next(starts)
+    )
     pids = iter([111, 222])
-    monkeypatch.setattr(acceptance, "wait_for_interruptible_step", lambda **kwargs: next(pids))
+    monkeypatch.setattr(
+        acceptance, "wait_for_interruptible_step", lambda **kwargs: next(pids)
+    )
     monkeypatch.setattr(
         acceptance,
         "team_run_request_payload",
@@ -480,19 +615,31 @@ def test_accept_dev_runtime_simulated_full_journey_preserves_authority(monkeypat
             "inputs": {},
         },
     )
-    monkeypatch.setattr(acceptance, "_post_json_expect_error", lambda *args, **kwargs: {"code": kwargs["expected_code"]})
+    monkeypatch.setattr(
+        acceptance,
+        "_post_json_expect_error",
+        lambda *args, **kwargs: {"code": kwargs["expected_code"]},
+    )
     monkeypatch.setattr(acceptance, "_pid_is_alive", lambda pid: True)
     cancels = iter([{"status": "CANCELLING"}, {"status": "CANCELLED"}])
-    monkeypatch.setattr(acceptance, "cancel_acceptance_goon", lambda **kwargs: next(cancels))
+    monkeypatch.setattr(
+        acceptance, "cancel_acceptance_goon", lambda **kwargs: next(cancels)
+    )
     monkeypatch.setattr(
         acceptance,
         "wait_for_acceptance_run_status",
         lambda **kwargs: {"outcome": "CANCELLED"},
     )
     monkeypatch.setattr(acceptance, "_wait_pid_dead", lambda pid: True)
-    monkeypatch.setattr(acceptance, "_request_json", lambda *args, **kwargs: {"active_fleet_run": None})
+    monkeypatch.setattr(
+        acceptance, "_request_json", lambda *args, **kwargs: {"active_fleet_run": None}
+    )
     monkeypatch.setattr(acceptance, "_wait_ports_free", lambda: True)
-    monkeypatch.setattr(acceptance, "_verify_crash_restart_journey", lambda **kwargs: events.append("restart"))
+    monkeypatch.setattr(
+        acceptance,
+        "_verify_crash_restart_journey",
+        lambda **kwargs: events.append("restart"),
+    )
 
     issues = acceptance.accept_dev_runtime(tmp_path)
 
@@ -505,7 +652,9 @@ def test_accept_dev_runtime_simulated_full_journey_preserves_authority(monkeypat
     assert running.stop_calls == 0
 
 
-def test_accept_dev_runtime_stops_gracefully_when_pre_restart_journey_fails(monkeypatch, tmp_path) -> None:
+def test_accept_dev_runtime_stops_gracefully_when_pre_restart_journey_fails(
+    monkeypatch, tmp_path
+) -> None:
     vite = tmp_path / "frontend" / "node_modules" / ".bin" / "vite"
     vite.parent.mkdir(parents=True)
     vite.write_text("", encoding="utf-8")
@@ -513,11 +662,17 @@ def test_accept_dev_runtime_stops_gracefully_when_pre_restart_journey_fails(monk
 
     monkeypatch.setattr(acceptance, "_port_is_free", lambda port: True)
     monkeypatch.setattr(acceptance, "prepare_acceptance_repository", lambda path: None)
-    monkeypatch.setattr(acceptance, "prepare_interruptible_acceptance_repository", lambda path: None)
+    monkeypatch.setattr(
+        acceptance, "prepare_interruptible_acceptance_repository", lambda path: None
+    )
     monkeypatch.setattr(
         acceptance,
         "prepare_local_runtime_environment",
-        lambda *, temp, state, config: ({"OH_GOON_EXECUTORS_FILE": "/tmp/executors.toml"}, False, None),
+        lambda *, temp, state, config: (
+            {"OH_GOON_EXECUTORS_FILE": "/tmp/executors.toml"},
+            False,
+            None,
+        ),
     )
     monkeypatch.setattr(acceptance, "_launch_dev", lambda root, env: running)
     monkeypatch.setattr(

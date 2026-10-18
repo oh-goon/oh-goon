@@ -58,9 +58,7 @@ def _seal_projection(
             "--run-unit",
             "seal-source",
         ],
-        "status": "PASS"
-        if seal is not None
-        else ("PENDING" if all_source_pass else "BLOCKED"),
+        "status": "PASS" if seal is not None else ("PENDING" if all_source_pass else "BLOCKED"),
         "requires": [str(source_unit["unit"]) for source_unit in source_units],
     }
     if seal is not None:
@@ -146,9 +144,7 @@ def _fresh_zip_projection(
     identity_evidence: Evidence,
 ) -> tuple[Unit, Evidence]:
     evidence = (
-        load_fresh_zip_evidence(
-            state_dir, source_zip_sha256, source_identity, seal_identity
-        )
+        load_fresh_zip_evidence(state_dir, source_zip_sha256, source_identity, seal_identity)
         if identity_evidence is not None
         else None
     )
@@ -188,7 +184,9 @@ def _patch_projection(
         surface="cumulative-patch",
         status="PASS"
         if evidence is not None
-        else ("PENDING" if fresh_zip_evidence is not None and parent_input is not None else "BLOCKED"),
+        else (
+            "PENDING" if fresh_zip_evidence is not None and parent_input is not None else "BLOCKED"
+        ),
         budget=120,
         requires=["package/fresh-zip-acceptance", "input/parent-source-zip"],
         identity_payload={
@@ -280,9 +278,7 @@ def _sidecar_projection(
     handoff_evidence: Evidence,
 ) -> tuple[Unit, Evidence]:
     evidence = (
-        load_sidecar_evidence(
-            root, state_dir, source_zip_sha256, patch_evidence, handoff_evidence
-        )
+        load_sidecar_evidence(root, state_dir, source_zip_sha256, patch_evidence, handoff_evidence)
         if handoff_evidence is not None and patch_evidence is not None
         else None
     )
@@ -383,9 +379,7 @@ def _readback_projection(
     persist_evidence: Evidence,
 ) -> tuple[Unit, Evidence]:
     evidence = (
-        load_retained_readback_evidence(
-            root, state_dir, manifest_evidence, persist_evidence
-        )
+        load_retained_readback_evidence(root, state_dir, manifest_evidence, persist_evidence)
         if persist_evidence is not None and manifest_evidence is not None
         else None
     )

@@ -4,11 +4,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from oh_goon.integrations._shell_authority_flow import commands_from_script_lines
-from oh_goon.integrations.package_script_execution_authority import (
-    PackageExecutableAuthority,
-    derive_npm_run_authority,
-    npm_run_script,
-)
 from oh_goon.integrations._shell_authority_syntax import (
     CONTROL_WORDS,
     SHELLS,
@@ -22,14 +17,19 @@ from oh_goon.integrations._shell_authority_syntax import (
     forward_position,
     function_names,
     logical_lines,
+    mask_noncommand_expansions,
     materialized_executable_identity,
     materialized_executables_in_shell,
-    mask_noncommand_expansions,
     prefix_environment,
     project_path,
     segments,
     shebang_tools,
     shell_child_words,
+)
+from oh_goon.integrations.package_script_execution_authority import (
+    PackageExecutableAuthority,
+    derive_npm_run_authority,
+    npm_run_script,
 )
 
 
@@ -91,7 +91,9 @@ def _relative_script(builder: _Builder, path: Path, chain: tuple[str, ...]) -> s
         return None
 
 
-def _read_script(builder: _Builder, path: Path, relative: str, chain: tuple[str, ...]) -> str | None:
+def _read_script(
+    builder: _Builder, path: Path, relative: str, chain: tuple[str, ...]
+) -> str | None:
     try:
         return path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -190,10 +192,14 @@ def _scan_shell_command(
     if script is None:
         _reject_unresolved_shell_operand(builder, shell, words[cursor], chain)
         return
-    _scan_owned_script(builder, script, tuple(words[cursor + 1 :]), chain, environment, direct=False)
+    _scan_owned_script(
+        builder, script, tuple(words[cursor + 1 :]), chain, environment, direct=False
+    )
 
 
-def _reject_unresolved_shell_operand(builder: _Builder, shell: str, operand: str, chain: tuple[str, ...]) -> None:
+def _reject_unresolved_shell_operand(
+    builder: _Builder, shell: str, operand: str, chain: tuple[str, ...]
+) -> None:
     if operand.endswith(".sh") or operand.startswith(("$", "${")):
         builder.reject(f"unresolved {shell} script operand: {operand}", chain)
 
@@ -477,7 +483,9 @@ def _scan_fragment(
     )
     cleaned, substitutions = extract_command_substitutions(fragment)
     for substitution in substitutions:
-        _scan_fragment(builder, substitution, (*chain, "<command-substitution>"), functions, environment)
+        _scan_fragment(
+            builder, substitution, (*chain, "<command-substitution>"), functions, environment
+        )
     cleaned = mask_noncommand_expansions(cleaned)
     parsed = segments(cleaned)
     if parsed is None:

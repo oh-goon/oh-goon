@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from contextlib import closing
 import multiprocessing
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -25,7 +25,9 @@ def _overwrite_in_place(path: Path, payload: bytes) -> None:
 def _donor_payload(path: Path, admitted_cookie: int) -> bytes:
     donor = path.with_name(path.name + ".donor")
     LocalDatabase(donor, journal_mode="DELETE")
-    replacement_cookie = admitted_cookie + 1 if admitted_cookie < 0x7FFFFFFF else admitted_cookie - 1
+    replacement_cookie = (
+        admitted_cookie + 1 if admitted_cookie < 0x7FFFFFFF else admitted_cookie - 1
+    )
     with closing(sqlite3.connect(donor, isolation_level=None)) as connection:
         connection.execute(f"PRAGMA application_id = {replacement_cookie}")
         assert int(connection.execute("PRAGMA application_id").fetchone()[0]) == replacement_cookie
@@ -170,7 +172,9 @@ def test_observer_cache_release_detects_in_place_header_corruption_without_reope
         monkeypatch.setattr(
             database,
             "_open_admitted_observer_connection",
-            lambda: (_ for _ in ()).throw(AssertionError("observer reproof must not reopen SQLite")),
+            lambda: (_ for _ in ()).throw(
+                AssertionError("observer reproof must not reopen SQLite")
+            ),
         )
         payload = bytearray(path.read_bytes())
         payload[:16] = b"NOTADB-SAME-INOD"
@@ -191,7 +195,9 @@ def test_observer_cache_release_detects_valid_donor_overwrite_without_reopen(
         monkeypatch.setattr(
             database,
             "_open_admitted_observer_connection",
-            lambda: (_ for _ in ()).throw(AssertionError("observer reproof must not reopen SQLite")),
+            lambda: (_ for _ in ()).throw(
+                AssertionError("observer reproof must not reopen SQLite")
+            ),
         )
         _overwrite_in_place(path, _donor_payload(path, database._database_identity_cookie))
         with pytest.raises(DatabasePathIdentityLost, match="database instance identity changed"):
@@ -216,9 +222,12 @@ def test_explicit_write_rollback_preserves_identity_and_revision(tmp_path: Path)
     assert database._database_identity_cookie == cookie
     assert database._schema_cookie == schema_cookie
     with database.transaction() as connection:
-        assert connection.execute(
-            "SELECT 1 FROM locations WHERE path = ?", ("/tmp/explicit-rollback",)
-        ).fetchone() is None
+        assert (
+            connection.execute(
+                "SELECT 1 FROM locations WHERE path = ?", ("/tmp/explicit-rollback",)
+            ).fetchone()
+            is None
+        )
         assert str(connection.execute("PRAGMA integrity_check").fetchone()[0]).lower() == "ok"
 
 
@@ -251,9 +260,12 @@ def test_committed_child_process_write_advances_parent_revision_without_identity
     assert database.durable_revision() == 1
     assert database._database_identity_cookie == cookie
     with database.transaction() as connection:
-        assert connection.execute(
-            "SELECT 1 FROM locations WHERE path = ?", ("/tmp/process-commit",)
-        ).fetchone() is not None
+        assert (
+            connection.execute(
+                "SELECT 1 FROM locations WHERE path = ?", ("/tmp/process-commit",)
+            ).fetchone()
+            is not None
+        )
 
 
 def test_complete_process_restart_has_no_external_revision_anchor_for_old_same_instance_snapshot(
@@ -320,7 +332,9 @@ def test_observer_persistent_notadb_still_fails_closed_after_bounded_reproof(
         raise sqlite3.DatabaseError("file is not a database")
 
     monkeypatch.setattr(database, "_open_admitted_observer_connection", broken_open)
-    with pytest.raises(DatabasePathIdentityLost, match="3 bounded observation-only re-proof attempts"):
+    with pytest.raises(
+        DatabasePathIdentityLost, match="3 bounded observation-only re-proof attempts"
+    ):
         with database.admitted_observer_connection():
             pass
     assert opens == 3

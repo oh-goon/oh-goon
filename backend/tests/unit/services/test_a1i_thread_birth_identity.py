@@ -3,6 +3,7 @@
 These are synthetic negative stimuli. They do not attest a deployment host,
 independent issuer ownership, or the original M205 certificate.
 """
+
 from __future__ import annotations
 
 import os
@@ -47,11 +48,16 @@ def test_same_tid_recycled_during_or_after_status_is_rejected(monkeypatch, chang
         _census()
 
 
-@pytest.mark.parametrize("bad_stat", [
-    "", "222 (task) S 0 1\n", "999 (task) S " + " ".join(["0"] * 19),
-    "222 (task) S " + " ".join(["0"] * 18 + ["invalid"]),
-    "222 task S " + " ".join(["0"] * 18 + ["1000"]),
-])
+@pytest.mark.parametrize(
+    "bad_stat",
+    [
+        "",
+        "222 (task) S 0 1\n",
+        "999 (task) S " + " ".join(["0"] * 19),
+        "222 (task) S " + " ".join(["0"] * 18 + ["invalid"]),
+        "222 task S " + " ".join(["0"] * 18 + ["1000"]),
+    ],
+)
 def test_missing_or_corrupt_native_task_birth_identity_rejected(monkeypatch, bad_stat):
     _births(monkeypatch, changed_on=1, replacement=bad_stat)
     with pytest.raises(TrustProtocolError, match="birth identity"):
@@ -59,13 +65,16 @@ def test_missing_or_corrupt_native_task_birth_identity_rejected(monkeypatch, bad
 
 
 def test_original_admission_refuses_tid_reuse_before_any_work(tmp_path, monkeypatch):
-    args, _params, conn, calls, lifecycle, _binding, provisioner, _inv, _roots, admit = (
-        provisioned(tmp_path, monkeypatch))
+    args, _params, conn, calls, lifecycle, _binding, provisioner, _inv, _roots, admit = provisioned(
+        tmp_path, monkeypatch
+    )
     try:
         with monkeypatch.context() as patches:
-            patches.setattr(owner, "_native_unprivileged_signer_identity",
-                            lambda: owner._native_signer_thread_census(
-                                (1001,) * 4, (1001,) * 4, (1001, 2002)))
+            patches.setattr(
+                owner,
+                "_native_unprivileged_signer_identity",
+                lambda: owner._native_signer_thread_census((1001,) * 4, (1001,) * 4, (1001, 2002)),
+            )
             _births(patches, changed_on=2)
             patches.setattr(os, "geteuid", lambda: 1001)
             lifecycle._fleet_provisioner = replace(provisioner, public_root_owner_uid=0)

@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime
 
+from oh_goon.core.models.execution_authority_diagnostics import (
+    PlanExecutionAuthorityDiagnosticEvidence,
+)
 from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
@@ -14,17 +17,14 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedPlanStep,
     ResolvedPreCommitStep,
 )
-from oh_goon.core.models.execution_authority_diagnostics import (
-    PlanExecutionAuthorityDiagnosticEvidence,
-)
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     FailedPlanStepExecution,
     PlanArtifactEvidence,
     PlanEgressEvidence,
     PlanEgressRuleEvidence,
-    PlanExecutionRecoveryEventEvidence,
     PlanExecutionAuthorityEconomicsEvidence,
+    PlanExecutionRecoveryEventEvidence,
     PlanExecutionSupervisorEvidence,
     PlanOutputEvidence,
     PlanResourceEvidence,

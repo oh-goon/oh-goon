@@ -22,12 +22,6 @@ def _isolated_receipt_plugin():
     return module
 
 
-
-
-
-
-
-
 def test_receipt_plugin_loader_intentionally_isolates_module_global_state() -> None:
     first = _isolated_receipt_plugin()
     second = _isolated_receipt_plugin()
@@ -47,18 +41,18 @@ def test_failure_output_is_bounded_but_keeps_head_and_tail() -> None:
     assert len(bounded.splitlines()) == 31
 
 
-
-
 def test_resource_pressure_classifier_is_narrow() -> None:
-    assert _resource_pressure_failure(1, "BlockingIOError: [Errno 11] Resource temporarily unavailable")
+    assert _resource_pressure_failure(
+        1, "BlockingIOError: [Errno 11] Resource temporarily unavailable"
+    )
     assert _resource_pressure_failure(1, "RuntimeError: can't start new thread")
     assert not _resource_pressure_failure(1, "AssertionError: expected 2 got 3")
     assert not _resource_pressure_failure(124, "Resource temporarily unavailable")
 
 
-
-
-def test_timeout_bisection_recovers_multi_member_batch_without_weakening_leaf_timeout(monkeypatch) -> None:
+def test_timeout_bisection_recovers_multi_member_batch_without_weakening_leaf_timeout(
+    monkeypatch,
+) -> None:
     import oh_goon.repository_tooling.test_batches as batches
 
     calls: list[tuple[str, ...]] = []
@@ -85,7 +79,6 @@ def test_timeout_bisection_recovers_multi_member_batch_without_weakening_leaf_ti
         ("c.py",),
         ("d.py",),
     ]
-
 
 
 def test_timeout_refinement_probe_preserves_full_leaf_timeout() -> None:
@@ -120,6 +113,7 @@ def test_timeout_bisection_uses_probe_budgets_before_full_leaf_timeout(monkeypat
         (("d.py",), 120),
     ]
 
+
 def test_initial_batch_receives_declared_timeout_before_any_refinement(monkeypatch) -> None:
     import oh_goon.repository_tooling.test_batches as batches
 
@@ -149,8 +143,6 @@ def test_timeout_bisection_does_not_hide_single_member_timeout(monkeypatch) -> N
     assert rc == 124
     assert output == "leaf timeout\n"
     assert recovery_events == ()
-
-
 
 
 def test_timeout_refinement_history_reuses_known_split_on_retry(monkeypatch) -> None:
@@ -251,7 +243,9 @@ def test_run_members_disables_ambient_pytest_plugin_autoload(monkeypatch) -> Non
     assert env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
 
 
-def test_run_members_keeps_explicit_receipt_plugin_under_isolated_pytest(monkeypatch, tmp_path: Path) -> None:
+def test_run_members_keeps_explicit_receipt_plugin_under_isolated_pytest(
+    monkeypatch, tmp_path: Path
+) -> None:
     import oh_goon.repository_tooling.test_batches as batches
 
     captured: dict[str, object] = {}
@@ -274,7 +268,9 @@ def test_run_members_keeps_explicit_receipt_plugin_under_isolated_pytest(monkeyp
     command = captured["command"]
     env = captured["env"]
     assert isinstance(command, list)
-    assert ["-p", "oh_goon.repository_tooling.pytest_batch_receipts"] == command[command.index("-p") : command.index("-p") + 2]
+    assert ["-p", "oh_goon.repository_tooling.pytest_batch_receipts"] == command[
+        command.index("-p") : command.index("-p") + 2
+    ]
     assert isinstance(env, dict)
     assert env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
 
@@ -373,9 +369,7 @@ def test_pytest_receipt_plugin_persists_completed_file_member_before_later_failu
         for when in ("setup", "call", "teardown"):
             plugin.pytest_runtest_logreport(report(nodeid, when))
     for when in ("setup", "call", "teardown"):
-        plugin.pytest_runtest_logreport(
-            report("b.py::test_three", when, failed=(when == "call"))
-        )
+        plugin.pytest_runtest_logreport(report("b.py::test_three", when, failed=(when == "call")))
 
     store = MemberReceiptStore(receipt_dir, suite_identity=suite_identity)
     assert store.reusable("a.py")
@@ -459,24 +453,16 @@ def test_process_marker_selection_is_filename_invariant(tmp_path: Path) -> None:
 
     original = tmp_path / "test_original.py"
     renamed = tmp_path / "test_renamed.py"
-    source = (
-        "import pytest\n"
-        "pytestmark = pytest.mark.process\n"
-        "def test_process_owned(): pass\n"
-    )
+    source = "import pytest\npytestmark = pytest.mark.process\ndef test_process_owned(): pass\n"
     original.write_text(source, encoding="utf-8")
     original_member = f"{original.as_posix()}::test_process_owned"
-    runnable, pruned = selection.statically_pruned_members(
-        (original_member,), marker="not process"
-    )
+    runnable, pruned = selection.statically_pruned_members((original_member,), marker="not process")
     assert runnable == ()
     assert pruned == (original_member,)
 
     original.rename(renamed)
     renamed_member = f"{renamed.as_posix()}::test_process_owned"
-    runnable, pruned = selection.statically_pruned_members(
-        (renamed_member,), marker="not process"
-    )
+    runnable, pruned = selection.statically_pruned_members((renamed_member,), marker="not process")
     assert runnable == ()
     assert pruned == (renamed_member,)
 
@@ -486,10 +472,7 @@ def test_static_marker_pruning_parses_each_unique_file_once(monkeypatch, tmp_pat
 
     path = tmp_path / "test_many.py"
     path.write_text(
-        "import pytest\n"
-        "@pytest.mark.slow\n"
-        "def test_one(): pass\n"
-        "def test_two(): pass\n",
+        "import pytest\n@pytest.mark.slow\ndef test_one(): pass\ndef test_two(): pass\n",
         encoding="utf-8",
     )
     real_parse = selection.ast.parse
@@ -514,6 +497,7 @@ def test_static_marker_pruning_parses_each_unique_file_once(monkeypatch, tmp_pat
 
 def test_suite_timeout_requires_startup_headroom(monkeypatch, tmp_path: Path) -> None:
     import sys
+
     import oh_goon.repository_tooling.test_batches as batches
 
     test_file = tmp_path / "test_one.py"
@@ -534,7 +518,9 @@ def test_suite_timeout_requires_startup_headroom(monkeypatch, tmp_path: Path) ->
         batches.main()
 
 
-def test_static_marker_pruning_excludes_simple_file_when_every_test_is_excluded(tmp_path: Path) -> None:
+def test_static_marker_pruning_excludes_simple_file_when_every_test_is_excluded(
+    tmp_path: Path,
+) -> None:
     import oh_goon.repository_tooling.pytest_member_selection as selection
 
     path = tmp_path / "test_scale_only.py"
@@ -558,10 +544,7 @@ def test_static_marker_pruning_keeps_file_when_one_test_remains_runnable(tmp_pat
 
     path = tmp_path / "test_mixed.py"
     path.write_text(
-        "import pytest\n"
-        "@pytest.mark.scale\n"
-        "def test_scale(): pass\n"
-        "def test_fast(): pass\n",
+        "import pytest\n@pytest.mark.scale\ndef test_scale(): pass\ndef test_fast(): pass\n",
         encoding="utf-8",
     )
     runnable, pruned = selection.statically_pruned_members((path.as_posix(),), marker="not scale")

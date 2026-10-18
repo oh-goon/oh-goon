@@ -11,7 +11,6 @@ from oh_goon.core.dependency_version_filter import (
     version_matches_specifier,
 )
 from oh_goon.core.errors import InvalidRequest, RepositoryNotManaged, StateConflict
-from oh_goon.core.product_identity import repository_subject_instance_id, stable_id
 from oh_goon.core.models.dependency_fleet import (
     DependencyAdvisoryOverview,
     DependencyCoveragePopulation,
@@ -28,6 +27,7 @@ from oh_goon.core.models.dependency_fleet import (
     RepositoryDependencyPage,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.product_identity import repository_subject_instance_id, stable_id
 from oh_goon.runtime.dependency_observations import DependencyObservationStore
 from oh_goon.runtime.dependency_targets import DependencyTargetMaterializationStore
 from oh_goon.services.dependency_advisory import DependencyAdvisoryService
@@ -51,9 +51,7 @@ class DependencyFleetService:
         self._coverage = DependencyCoverageService(repositories, observations)
         self._advisory = DependencyAdvisoryService(repositories, observations)
 
-    def search(
-        self, query: str, *, offset: int = 0, limit: int = 20
-    ) -> DependencySearchResult:
+    def search(self, query: str, *, offset: int = 0, limit: int = 20) -> DependencySearchResult:
         if offset < 0:
             raise InvalidRequest("Dependency search offset must be zero or greater")
         normalized = _package_query(query)
@@ -192,7 +190,9 @@ class DependencyFleetService:
             items=tuple(items[offset : offset + limit]),
         )
 
-    def materialize(self, request: DependencyTargetMaterializeRequest) -> DependencyTargetMaterialization:
+    def materialize(
+        self, request: DependencyTargetMaterializeRequest
+    ) -> DependencyTargetMaterialization:
         query = request.filter
         normalized = query.model_copy(update={"package_name": _package_query(query.package_name)})
         if normalized.coverage == "matching":
@@ -200,12 +200,8 @@ class DependencyFleetService:
             repo_ids = tuple(sorted(item.repository.repository_id for item in matches))
             repository_instance_ids = _repository_instance_map(item.repository for item in matches)
         else:
-            coverage_items = self._coverage.items(
-                normalized.package_name, normalized.coverage
-            )
-            repo_ids = tuple(
-                sorted(item.repository.repository_id for item in coverage_items)
-            )
+            coverage_items = self._coverage.items(normalized.package_name, normalized.coverage)
+            repo_ids = tuple(sorted(item.repository.repository_id for item in coverage_items))
             repository_instance_ids = _repository_instance_map(
                 item.repository for item in coverage_items
             )

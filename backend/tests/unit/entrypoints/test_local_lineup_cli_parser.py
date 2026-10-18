@@ -96,9 +96,13 @@ def test_gitlab_import_accepts_explicit_expected_output_revision() -> None:
 
 def test_run_surfaces_parse_canonical_priority() -> None:
     parser = build_parser()
-    shared = parser.parse_args(["shared-plan", "run", "quality", "--all-teams", "--priority", "HIGH"])
+    shared = parser.parse_args(
+        ["shared-plan", "run", "quality", "--all-teams", "--priority", "HIGH"]
+    )
     team = parser.parse_args(["team", "run", "--priority", "LOW"])
-    plan = parser.parse_args(["plan", "run", "plan.yml", "--all-repositories", "--priority", "BACKGROUND"])
+    plan = parser.parse_args(
+        ["plan", "run", "plan.yml", "--all-repositories", "--priority", "BACKGROUND"]
+    )
 
     assert shared.priority is SchedulingPriority.HIGH
     assert team.priority is SchedulingPriority.LOW

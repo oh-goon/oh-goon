@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -11,7 +10,10 @@ import pytest
 
 from oh_goon import workflow as workflow_run
 
-def test_owned_workflow_process_group_escalates_and_reaps_descendants(tmp_path: Path) -> None:
+
+def test_owned_workflow_process_group_escalates_and_reaps_descendants(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("POSIX process-group contract")
     marker = tmp_path / "grandchild.pid"
@@ -53,17 +55,25 @@ def test_owned_workflow_process_group_escalates_and_reaps_descendants(tmp_path: 
             break
         time.sleep(0.01)
     else:
-        pytest.fail("owned grandchild remained live after bounded cancellation escalation")
+        pytest.fail(
+            "owned grandchild remained live after bounded cancellation escalation"
+        )
 
 
-def test_workflow_stream_launches_owned_command_in_separate_process_group(monkeypatch) -> None:
+def test_workflow_stream_launches_owned_command_in_separate_process_group(
+    monkeypatch,
+) -> None:
     observed: dict[str, object] = {}
 
     class FakeProcess:
         stdout = iter(())
         pid = 12345
-        def wait(self, timeout=None): return 0
-        def poll(self): return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def poll(self):
+            return 0
 
     def fake_popen(*args, **kwargs):
         observed.update(kwargs)
@@ -75,7 +85,9 @@ def test_workflow_stream_launches_owned_command_in_separate_process_group(monkey
         assert observed["start_new_session"] is True
 
 
-def test_owned_workflow_group_outlives_leader_until_stubborn_descendant_is_reaped(tmp_path: Path) -> None:
+def test_owned_workflow_group_outlives_leader_until_stubborn_descendant_is_reaped(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("POSIX process-group contract")
     marker = tmp_path / "leader-exit-grandchild.pid"
@@ -118,4 +130,6 @@ def test_owned_workflow_group_outlives_leader_until_stubborn_descendant_is_reape
             break
         time.sleep(0.01)
     else:
-        pytest.fail("stubborn descendant survived after its process-group leader exited")
+        pytest.fail(
+            "stubborn descendant survived after its process-group leader exited"
+        )

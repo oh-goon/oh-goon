@@ -10,7 +10,13 @@ from oh_goon import __version__
 from oh_goon.core.capability_registry import capability_for
 from oh_goon.core.errors import MigrationSourceUnsupported
 from oh_goon.core.models.target import UvRecipeTarget
-from oh_goon.core.vocabulary import FleetRunSource, FleetRunStatus, MigrationSource, OperationAction, UvRecipeId
+from oh_goon.core.vocabulary import (
+    FleetRunSource,
+    FleetRunStatus,
+    MigrationSource,
+    OperationAction,
+    UvRecipeId,
+)
 from oh_goon.integrations.migration_plan import automatic_migration_plan
 from oh_goon.integrations.recipe_advisories import extract_security_findings
 from oh_goon.integrations.recipe_command import prepare_recipe_command
@@ -91,12 +97,12 @@ def test_migration_plan_rejects_unsupported_source_with_typed_domain_error() -> 
 
 
 def _running_fleet_detail(execution, repository):
-    from oh_goon.core.product_identity import schedule_repository_fleet_run_id
     from oh_goon.core.models.run import FleetRunDetail, FleetRunProgress, RunningFleetRun
     from oh_goon.core.models.run_admission import (
         DirectFleetExecutionAdmission,
         ExplicitRepositoryScope,
     )
+    from oh_goon.core.product_identity import schedule_repository_fleet_run_id
     from oh_goon.core.time import utc_now
 
     now = utc_now()
@@ -121,12 +127,12 @@ def _running_fleet_detail(execution, repository):
 
 
 def _completed_fleet_detail(execution, repository):
-    from oh_goon.core.product_identity import schedule_repository_fleet_run_id
     from oh_goon.core.models.run import CompletedFleetRun, FleetRunDetail, FleetRunProgress
     from oh_goon.core.models.run_admission import (
         DirectFleetExecutionAdmission,
         ExplicitRepositoryScope,
     )
+    from oh_goon.core.product_identity import schedule_repository_fleet_run_id
     from oh_goon.core.time import utc_now
 
     now = utc_now()
@@ -210,9 +216,9 @@ def test_schedule_records_terminal_fleet_run_while_new_effect_admission_is_block
     tmp_path: Path,
 ) -> None:
     """Safety degradation must not hide already-completed Fleet Run evidence."""
-    from oh_goon.core.product_identity import schedule_repository_fleet_run_id
     from oh_goon.core.models.repository import RepositoryIdentity
     from oh_goon.core.models.schedule_execution import CompletedScheduleRun
+    from oh_goon.core.product_identity import schedule_repository_fleet_run_id
     from oh_goon.runtime.database import LocalDatabase
     from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
     from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
@@ -345,8 +351,11 @@ def test_schedule_occurrence_fans_out_one_canonical_run_per_repository_in_target
             # Simulate the original Fleet admission commit, which now binds
             # the Schedule row before start_bound returns.
             from oh_goon.core.schedule_transitions import mark_repository_running
+
             before = executions.get(execution.schedule_run_id)
-            executions.compare_and_set(before, mark_repository_running(before, repository_id, run_id))
+            executions.compare_and_set(
+                before, mark_repository_running(before, repository_id, run_id)
+            )
             return object()
 
         def get(self, fleet_run_id: str):
@@ -373,8 +382,8 @@ def test_schedule_occurrence_fans_out_one_canonical_run_per_repository_in_target
 
 def test_schedule_rejects_child_run_with_mismatched_structural_binding(tmp_path: Path) -> None:
     from oh_goon.core.errors import JournalConflict
-    from oh_goon.core.product_identity import schedule_repository_fleet_run_id
     from oh_goon.core.models.repository import RepositoryIdentity
+    from oh_goon.core.product_identity import schedule_repository_fleet_run_id
     from oh_goon.core.schedule_transitions import mark_repository_running
     from oh_goon.runtime.database import LocalDatabase
     from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
@@ -399,7 +408,9 @@ def test_schedule_rejects_child_run_with_mismatched_structural_binding(tmp_path:
         ),
     )
     wrong = _completed_fleet_detail(execution, repository)
-    wrong = wrong.model_copy(update={"run": wrong.run.model_copy(update={"source": FleetRunSource.MANUAL})})
+    wrong = wrong.model_copy(
+        update={"run": wrong.run.model_copy(update={"source": FleetRunSource.MANUAL})}
+    )
 
     class _Runs:
         def get(self, _fleet_run_id: str):
@@ -436,10 +447,12 @@ def test_schedule_child_run_uses_frozen_repository_instance_authority(tmp_path: 
             del args
             self.expected = kwargs["expected_repository_instance_ids"]
             from oh_goon.core.schedule_transitions import mark_repository_running
+
             before = executions.get(execution.schedule_run_id)
-            executions.compare_and_set(before, mark_repository_running(
-                before, repository.repository_id, kwargs["fleet_run_id"]
-            ))
+            executions.compare_and_set(
+                before,
+                mark_repository_running(before, repository.repository_id, kwargs["fleet_run_id"]),
+            )
             return object()
 
     runs = _Runs()

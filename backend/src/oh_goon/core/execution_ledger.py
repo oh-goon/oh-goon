@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from oh_goon.core.execution_lifecycle_ledger import PendingEvent as _PendingEvent
+from oh_goon.core.execution_lifecycle_ledger import _repo_event, _step_pending, lifecycle_events
 from oh_goon.core.game_tape_identity import repository_execution_id, step_execution_id
-from oh_goon.core.execution_lifecycle_ledger import PendingEvent as _PendingEvent, _repo_event, _step_pending, lifecycle_events
-from oh_goon.core.game_tape_lifecycle import repository_status, run_status, step_status
+from oh_goon.core.game_tape_lifecycle import repository_status
 from oh_goon.core.game_tape_timing import repository_time_bounds
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.fleet_plan_evidence import (
     FleetPlanResult,
     PlanStepExecution,
@@ -21,36 +21,14 @@ from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationR
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_events import (
-    DescendantsQuiescentEvent,
-    ProcessExitedEvent,
-    OutputFinalizedEvent,
-    OutputAbandonedEvent,
-    OutputQuarantinedEvent,
-    ProcessStartedEvent,
-    ProcessStateUnknownEvent,
-    ProcessStartingEvent,
     RepositoryCompletedEvent,
-    RepositoryStartedEvent,
-    ReconciliationCompletedEvent,
-    ReconciliationFailedEvent,
-    ReconciliationRequiredEvent,
-    ReconciliationStartedEvent,
-    RunAdmittedEvent,
     RunCancelledEvent,
-    RunCancelRequestedEvent,
     RunCompletedEvent,
     RunFailedEvent,
-    RunStartedEvent,
-    StepAttemptCreatedEvent,
-    StepCancelledEvent,
-    StepFailedEvent,
-    StepReachedEvent,
-    StepSkippedEvent,
-    StepStartedEvent,
-    StepSucceededEvent,
 )
 from oh_goon.core.models.target import FleetPlanTarget
-from oh_goon.core.vocabulary import FleetRunEventType, GameTapeEventType, GameTapeStatus
+from oh_goon.core.product_identity import stable_id
+from oh_goon.core.vocabulary import GameTapeEventType, GameTapeStatus
 
 _EVENT_PRIORITY = {
     GameTapeEventType.RUN_ADMITTED: 10,
@@ -304,7 +282,9 @@ def _run_terminal_type(status: GameTapeStatus) -> GameTapeEventType:
         GameTapeStatus.INTERRUPTED: GameTapeEventType.RUN_INTERRUPTED,
     }.get(status)
     if event_type is None:
-        raise AssertionError(f"Non-terminal Run status reached terminal ledger projection: {status.value}")
+        raise AssertionError(
+            f"Non-terminal Run status reached terminal ledger projection: {status.value}"
+        )
     return event_type
 
 
@@ -328,7 +308,9 @@ def _step_terminal_type(status: GameTapeStatus) -> GameTapeEventType:
         GameTapeStatus.SKIPPED: GameTapeEventType.STEP_SKIPPED,
     }.get(status)
     if event_type is None:
-        raise AssertionError(f"Non-terminal Step status reached terminal ledger projection: {status.value}")
+        raise AssertionError(
+            f"Non-terminal Step status reached terminal ledger projection: {status.value}"
+        )
     return event_type
 
 
@@ -341,7 +323,9 @@ def _run_terminal_message(status: GameTapeStatus) -> str:
         GameTapeStatus.INTERRUPTED: "Run was interrupted without a normal terminal execution outcome.",
     }.get(status)
     if message is None:
-        raise AssertionError(f"Non-terminal Run status reached terminal ledger projection: {status.value}")
+        raise AssertionError(
+            f"Non-terminal Run status reached terminal ledger projection: {status.value}"
+        )
     return message
 
 
@@ -363,7 +347,9 @@ def _step_terminal_message(status: GameTapeStatus, execution: PlanStepExecution)
     if status is GameTapeStatus.SKIPPED:
         return getattr(execution, "reason", None) or "Step was explicitly skipped."
     if status is not GameTapeStatus.FAILED:
-        raise AssertionError(f"Non-terminal Step status reached terminal ledger projection: {status.value}")
+        raise AssertionError(
+            f"Non-terminal Step status reached terminal ledger projection: {status.value}"
+        )
     returncode = getattr(execution, "returncode", 1)
     if returncode == PLAN_TIMEOUT_RETURN_CODE:
         return "Step timed out."

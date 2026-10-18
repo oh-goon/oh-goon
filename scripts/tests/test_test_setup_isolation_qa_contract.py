@@ -24,17 +24,29 @@ def _autouse_fixture_metadata(path: Path) -> tuple[str, bool]:
                 and item.func.attr == "fixture"
             ):
                 continue
-            keywords = {entry.arg: entry.value for entry in item.keywords if entry.arg is not None}
+            keywords = {
+                entry.arg: entry.value
+                for entry in item.keywords
+                if entry.arg is not None
+            }
             autouse_node = keywords.get("autouse")
             if isinstance(autouse_node, ast.Constant) and autouse_node.value is True:
                 fixtures.append(item)
-    assert len(fixtures) == 1, f"expected one autouse isolation fixture in {path}, found {len(fixtures)}"
+    assert len(fixtures) == 1, (
+        f"expected one autouse isolation fixture in {path}, found {len(fixtures)}"
+    )
     decorator = fixtures[0]
-    keywords = {item.arg: item.value for item in decorator.keywords if item.arg is not None}
+    keywords = {
+        item.arg: item.value for item in decorator.keywords if item.arg is not None
+    }
     scope_node = keywords.get("scope")
     autouse_node = keywords.get("autouse")
-    scope = str(scope_node.value) if isinstance(scope_node, ast.Constant) else "function"
-    autouse = bool(autouse_node.value) if isinstance(autouse_node, ast.Constant) else False
+    scope = (
+        str(scope_node.value) if isinstance(scope_node, ast.Constant) else "function"
+    )
+    autouse = (
+        bool(autouse_node.value) if isinstance(autouse_node, ast.Constant) else False
+    )
     return scope, autouse
 
 

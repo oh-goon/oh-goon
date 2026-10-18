@@ -1,7 +1,5 @@
 from pathlib import Path
 
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api import dependencies
 from oh_goon.api.app import app as api_app
 from oh_goon.core.vocabulary import EffectBoundaryKind, OperationAction
@@ -9,6 +7,7 @@ from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from tests.factories.capabilities import capability_snapshot
 from tests.factories.repository_state import baseline_for
+from tests.integration.api.client import authenticated_api_client
 
 
 def test_recovery_status_and_reconciliation_api(tmp_path: Path) -> None:
@@ -82,7 +81,9 @@ def test_recovery_acknowledgement_requires_reconciliation(tmp_path: Path) -> Non
             f"/api/recovery/effects/{attempt.operation_id}/acknowledge",
             json={
                 "note": "inspected",
-                "expected_record_version": reconciled.json()["effect_quarantines"][0]["record_version"],
+                "expected_record_version": reconciled.json()["effect_quarantines"][0][
+                    "record_version"
+                ],
             },
         )
 

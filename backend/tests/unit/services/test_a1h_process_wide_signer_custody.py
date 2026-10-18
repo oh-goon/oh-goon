@@ -3,6 +3,7 @@
 Synthetic kernel status responses here are negative-test stimuli, never
 external custody attestation or production trust provenance.
 """
+
 from __future__ import annotations
 
 import os
@@ -18,21 +19,33 @@ from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import facts
 from tests.unit.services.test_group_a_fleet_provisioning_authority import provisioned
 
 
-def _status(tid: int, *, pid: int = 77, uids: str = "1001\t1001\t1001\t1001",
-            gids: str = "1001\t1001\t1001\t1001", groups: str = "1001 2002",
-            nnp: str = "1", inh: str = "0", prm: str = "0", eff: str = "0",
-            amb: str = "0") -> str:
-    return (f"Name:\toh-goon\nPid:\t{tid}\nTgid:\t{pid}\nUid:\t{uids}\n"
-            f"Gid:\t{gids}\nGroups:\t{groups}\nNoNewPrivs:\t{nnp}\n"
-            f"CapInh:\t{inh}\nCapPrm:\t{prm}\nCapEff:\t{eff}\nCapAmb:\t{amb}\n")
+def _status(
+    tid: int,
+    *,
+    pid: int = 77,
+    uids: str = "1001\t1001\t1001\t1001",
+    gids: str = "1001\t1001\t1001\t1001",
+    groups: str = "1001 2002",
+    nnp: str = "1",
+    inh: str = "0",
+    prm: str = "0",
+    eff: str = "0",
+    amb: str = "0",
+) -> str:
+    return (
+        f"Name:\toh-goon\nPid:\t{tid}\nTgid:\t{pid}\nUid:\t{uids}\n"
+        f"Gid:\t{gids}\nGroups:\t{groups}\nNoNewPrivs:\t{nnp}\n"
+        f"CapInh:\t{inh}\nCapPrm:\t{prm}\nCapEff:\t{eff}\nCapAmb:\t{amb}\n"
+    )
 
 
 def _stat(tid: int, *, started: int = 10999) -> str:
     return f"{tid} (oh-goon ) thread) S " + " ".join(["0"] * 18 + [str(started)]) + "\n"
 
 
-def _kernel(monkeypatch, *, status: dict[int, str] | None = None,
-            ids: list[list[str]] | None = None):
+def _kernel(
+    monkeypatch, *, status: dict[int, str] | None = None, ids: list[list[str]] | None = None
+):
     entries = ids or [["111", "222"]]
     calls = 0
     monkeypatch.setattr(os, "getpid", lambda: 77)
@@ -69,13 +82,31 @@ def test_process_wide_credentials_include_every_linux_thread(monkeypatch):
     assert _census() == (77, 2, 111, 222, 10999, 10999)
 
 
-@pytest.mark.parametrize("attack", [
-    "saved_root", "effective_root", "filesystem_root", "foreign_gid",
-    "wrong_groups", "nnp_disabled", "cap_inheritable", "cap_permitted",
-    "cap_effective", "cap_ambient", "wrong_tgid", "wrong_pid",
-    "duplicate_cap", "no_uid", "missing_task", "new_task", "bad_task_name",
-    "caller_absent", "invalid_groups", "ambiguous_task",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "saved_root",
+        "effective_root",
+        "filesystem_root",
+        "foreign_gid",
+        "wrong_groups",
+        "nnp_disabled",
+        "cap_inheritable",
+        "cap_permitted",
+        "cap_effective",
+        "cap_ambient",
+        "wrong_tgid",
+        "wrong_pid",
+        "duplicate_cap",
+        "no_uid",
+        "missing_task",
+        "new_task",
+        "bad_task_name",
+        "caller_absent",
+        "invalid_groups",
+        "ambiguous_task",
+    ],
+)
 def test_other_thread_privilege_or_inventory_race_fails_closed(monkeypatch, attack):
     statuses = {222: _status(222)}
     ids = None
@@ -125,14 +156,20 @@ def test_other_thread_privilege_or_inventory_race_fails_closed(monkeypatch, atta
 
 
 def test_original_fleet_admission_refuses_other_thread_root_before_work(tmp_path, monkeypatch):
-    args, _params, conn, calls, lifecycle, binding, provisioner, _inventory, _roots, admit = provisioned(
-        tmp_path, monkeypatch)
+    args, _params, conn, calls, lifecycle, binding, provisioner, _inventory, _roots, admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     try:
         with monkeypatch.context() as patches:
             # This fixture reaches the original provisioner but MUST NOT bypass
             # the thread census even if the current thread has valid credentials.
-            patches.setattr(owner, "_native_unprivileged_signer_identity", lambda: (
-                owner._native_signer_thread_census((1001,) * 4, (1001,) * 4, (1001, 2002))))
+            patches.setattr(
+                owner,
+                "_native_unprivileged_signer_identity",
+                lambda: (
+                    owner._native_signer_thread_census((1001,) * 4, (1001,) * 4, (1001, 2002))
+                ),
+            )
             _kernel(patches, status={222: _status(222, eff="1")})
             patches.setattr(os, "geteuid", lambda: 1001)
             lifecycle._fleet_provisioner = replace(provisioner, public_root_owner_uid=0)
@@ -147,19 +184,27 @@ def test_original_fleet_admission_refuses_other_thread_root_before_work(tmp_path
 
 
 def test_original_readonly_custody_cut_rejects_process_change_between_resolves(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     _args, _params, conn, calls, _lifecycle, binding, provisioner, *_ = provisioned(
-        tmp_path, monkeypatch)
+        tmp_path, monkeypatch
+    )
     try:
         strict = replace(provisioner, public_root_owner_uid=65534)
         identities = iter(((1001,), (1002,)))
         with monkeypatch.context() as patches:
             patches.setattr(owner, "_native_unprivileged_signer_identity", lambda: next(identities))
-            patches.setattr(owner.FleetPreworkProvisioner, "inspect_deployment_readiness",
-                            lambda self, run: {"run_id": run, "executor_id": "e",
-                                               "executor_generation": "g",
-                                               "independently_verified_issuer_roots": 6})
+            patches.setattr(
+                owner.FleetPreworkProvisioner,
+                "inspect_deployment_readiness",
+                lambda self, run: {
+                    "run_id": run,
+                    "executor_id": "e",
+                    "executor_generation": "g",
+                    "independently_verified_issuer_roots": 6,
+                },
+            )
             patches.setattr(owner.FleetPreworkProvisioner, "resolve", lambda self, run: binding)
             with pytest.raises(TrustProtocolError, match="principal changed"):
                 strict.inspect_independent_root_custody("durable-run")

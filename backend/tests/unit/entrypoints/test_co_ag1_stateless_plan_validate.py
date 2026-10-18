@@ -1,4 +1,5 @@
 """CO-AG1: single original authoring resolver, independent of runtime startup."""
+
 from __future__ import annotations
 
 import json
@@ -7,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from oh_goon.cli import main
-from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.runtime.goon_templates import GoonTemplateStore
+from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 
@@ -61,9 +62,7 @@ def test_typed_input_is_resolved_once_without_runtime(
 ) -> None:
     _no_runtime(monkeypatch)
     path = PlanTemplateStore().source("python/quality").path
-    assert main([
-        "plan", "validate", str(path), "--input", "coverage_threshold=90", "--json"
-    ]) == 0
+    assert main(["plan", "validate", str(path), "--input", "coverage_threshold=90", "--json"]) == 0
     resolved = json.loads(capsys.readouterr().out)
     assert resolved["steps"]
     assert not any("hashmarks" in item.lower() for item in resolved.keys())

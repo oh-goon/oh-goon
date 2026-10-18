@@ -25,7 +25,10 @@ from oh_goon.core.models.fleet_plan_isolation import (
 )
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepCapabilities
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence, StrictFleetExecutionAdmission, fleet_repository_scope
+from oh_goon.core.models.run_admission import (
+    StrictFleetExecutionAdmission,
+    fleet_repository_scope,
+)
 from oh_goon.core.vocabulary import (
     FleetRunSource,
     FleetRunStatus,
@@ -33,11 +36,11 @@ from oh_goon.core.vocabulary import (
     OperationAction,
 )
 from oh_goon.integrations.fleet_plan_process_isolation import isolation_backend_evidence
-from oh_goon.runtime._executor_placement import _placement_order
 from oh_goon.runtime._executor_configuration import (
     ConfiguredFleetExecutor,
     ExecutorPoolConfiguration,
 )
+from oh_goon.runtime._executor_placement import _placement_order
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.executor_capacity import (
@@ -49,35 +52,43 @@ from oh_goon.runtime.journal import Journal
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from tests.factories.capabilities import resolved_intent
 from tests.factories.fleet_plan_targets import structural_fleet_plan_target
-from tests.factories.run_admission import repository_admission_for
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
-
-
+from tests.factories.run_admission import repository_admission_for
 
 
 def _control_identity(pool: FleetExecutorPool, executor_id: str = "executor-a") -> tuple[int, int]:
-    status = next(item for item in pool.executor_snapshot().executors if item.executor_id == executor_id)
+    status = next(
+        item for item in pool.executor_snapshot().executors if item.executor_id == executor_id
+    )
     return status.generation, status.operational_revision
 
 
 def _drain(pool: FleetExecutorPool, executor_id: str = "executor-a"):
     generation, revision = _control_identity(pool, executor_id)
-    return pool.drain_executor(executor_id, expected_generation=generation, expected_revision=revision)
+    return pool.drain_executor(
+        executor_id, expected_generation=generation, expected_revision=revision
+    )
 
 
 def _activate(pool: FleetExecutorPool, executor_id: str = "executor-a"):
     generation, revision = _control_identity(pool, executor_id)
-    return pool.activate_executor(executor_id, expected_generation=generation, expected_revision=revision)
+    return pool.activate_executor(
+        executor_id, expected_generation=generation, expected_revision=revision
+    )
 
 
 def _revoke(pool: FleetExecutorPool, executor_id: str = "executor-a"):
     generation, revision = _control_identity(pool, executor_id)
-    return pool.revoke_executor_trust(executor_id, expected_generation=generation, expected_revision=revision)
+    return pool.revoke_executor_trust(
+        executor_id, expected_generation=generation, expected_revision=revision
+    )
 
 
 def _restore(pool: FleetExecutorPool, executor_id: str = "executor-a"):
     generation, revision = _control_identity(pool, executor_id)
-    return pool.restore_executor_trust(executor_id, expected_generation=generation, expected_revision=revision)
+    return pool.restore_executor_trust(
+        executor_id, expected_generation=generation, expected_revision=revision
+    )
 
 
 class _Backend:
@@ -147,9 +158,7 @@ def _uv_plan() -> ResolvedFleetPlan:
         description="",
         execution=CicdExecutionPolicy(
             trust_repository_code=True,
-            resources=CicdResourcePolicy(
-                cpu_millis=1000, memory_mib=1024, max_processes=256
-            ),
+            resources=CicdResourcePolicy(cpu_millis=1000, memory_mib=1024, max_processes=256),
         ),
         requirements=(),
         steps=(
@@ -208,7 +217,9 @@ def _database(tmp_path: Path) -> LocalDatabase:
 
 def _targets(count: int, *, root: Path | None = None) -> tuple[RepositoryIdentity, ...]:
     base = (root or Path.cwd()).resolve()
-    return tuple(RepositoryIdentity(path=base / f"executor-target-{index}") for index in range(count))
+    return tuple(
+        RepositoryIdentity(path=base / f"executor-target-{index}") for index in range(count)
+    )
 
 
 def _lose_next_product_write_response(database: LocalDatabase) -> None:
@@ -383,7 +394,7 @@ def test_uv_placement_does_not_resolve_dependencies_before_admission(
     backend = repository / "backend"
     backend.mkdir(parents=True)
     (backend / "pyproject.toml").write_text(
-        "[project]\nname = \"demo\"\nversion = \"1\"\n",
+        '[project]\nname = "demo"\nversion = "1"\n',
         encoding="utf-8",
     )
     # Structurally present but intentionally not a valid uv lock. Placement owns
@@ -853,7 +864,9 @@ def test_executor_control_rejects_stale_operational_revision(tmp_path: Path) -> 
     _drain(pool)
     with pytest.raises(Exception, match="operational state is stale"):
         pool.activate_executor(
-            "executor-a", expected_generation=status.generation, expected_revision=status.operational_revision
+            "executor-a",
+            expected_generation=status.generation,
+            expected_revision=status.operational_revision,
         )
 
 

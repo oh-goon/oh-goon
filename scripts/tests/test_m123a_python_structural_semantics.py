@@ -88,18 +88,21 @@ def test_aliased_subprocess_call_is_still_self_cli_authority(tmp_path: Path) -> 
     )
 
 
-def test_certification_frontdoor_comment_is_not_process_authority(tmp_path: Path) -> None:
+def test_certification_frontdoor_comment_is_not_process_authority(
+    tmp_path: Path,
+) -> None:
     _certification_makefile(tmp_path)
     _write(
         tmp_path,
         "backend/src/oh_goon/services/certification_frontdoor.py",
-        "# subprocess.Popen is owned elsewhere.\n"
-        "def main():\n    return 0\n",
+        "# subprocess.Popen is owned elsewhere.\ndef main():\n    return 0\n",
     )
     assert _check_certification_preexecution_authority(tmp_path) == []
 
 
-def test_certification_frontdoor_aliased_process_authority_is_rejected(tmp_path: Path) -> None:
+def test_certification_frontdoor_aliased_process_authority_is_rejected(
+    tmp_path: Path,
+) -> None:
     _certification_makefile(tmp_path)
     _write(
         tmp_path,
@@ -113,7 +116,9 @@ def test_certification_frontdoor_aliased_process_authority_is_rejected(tmp_path:
     )
 
 
-def test_strict_step_comments_are_not_ambient_or_process_authority(tmp_path: Path) -> None:
+def test_strict_step_comments_are_not_ambient_or_process_authority(
+    tmp_path: Path,
+) -> None:
     _write(
         tmp_path,
         "backend/src/oh_goon/integrations/_fleet_plan_step_local_execution.py",
@@ -123,7 +128,9 @@ def test_strict_step_comments_are_not_ambient_or_process_authority(tmp_path: Pat
     assert _check_execution_authority_ii(tmp_path) == []
 
 
-def test_strict_step_aliases_cannot_hide_ambient_or_process_authority(tmp_path: Path) -> None:
+def test_strict_step_aliases_cannot_hide_ambient_or_process_authority(
+    tmp_path: Path,
+) -> None:
     _write(
         tmp_path,
         "backend/src/oh_goon/integrations/_fleet_plan_step_local_execution.py",
@@ -152,8 +159,7 @@ def test_placement_aliased_sleep_is_still_raw_polling_authority(tmp_path: Path) 
     _write(
         tmp_path,
         "backend/src/oh_goon/runtime/_executor_placement.py",
-        "from time import sleep as pause\n"
-        "def place():\n    pause(0.1)\n",
+        "from time import sleep as pause\ndef place():\n    pause(0.1)\n",
     )
     assert any(
         "never raw time polling" in message
@@ -189,11 +195,15 @@ def test_renamed_hashlib_owner_is_rejected(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(filesystem_identity_contract, "IDENTITY_MODULES", (identity,))
     assert any(
         "delegate to Hashmarks" in message
-        for message in _messages(filesystem_identity_contract.check_filesystem_identity_contract())
+        for message in _messages(
+            filesystem_identity_contract.check_filesystem_identity_contract()
+        )
     )
 
 
-def test_m120_private_helper_name_in_comment_is_not_release_authority(tmp_path: Path) -> None:
+def test_m120_private_helper_name_in_comment_is_not_release_authority(
+    tmp_path: Path,
+) -> None:
     _write(
         tmp_path,
         "backend/src/oh_goon/repository_tooling/release/accept_release.py",
@@ -234,7 +244,9 @@ def test_renamed_local_package_lock_parser_is_rejected(tmp_path: Path) -> None:
     )
 
 
-def test_exact_lock_bytes_may_be_transported_without_semantic_redecision(tmp_path: Path) -> None:
+def test_exact_lock_bytes_may_be_transported_without_semantic_redecision(
+    tmp_path: Path,
+) -> None:
     _write(
         tmp_path,
         "backend/src/oh_goon/repository_tooling/release/accept_release.py",
@@ -246,7 +258,9 @@ def test_exact_lock_bytes_may_be_transported_without_semantic_redecision(tmp_pat
     assert _check_native_authority_deduplication(tmp_path) == []
 
 
-def test_workflow_private_domain_words_in_comments_are_not_authority(tmp_path: Path) -> None:
+def test_workflow_private_domain_words_in_comments_are_not_authority(
+    tmp_path: Path,
+) -> None:
     _write(
         tmp_path,
         "backend/src/oh_goon/workflow.py",
@@ -274,7 +288,9 @@ def test_workflow_renamed_local_identity_helper_is_rejected(tmp_path: Path) -> N
     )
 
 
-def test_workflow_renamed_database_control_state_owner_is_rejected(tmp_path: Path) -> None:
+def test_workflow_renamed_database_control_state_owner_is_rejected(
+    tmp_path: Path,
+) -> None:
     _write(
         tmp_path,
         "backend/src/oh_goon/workflow.py",

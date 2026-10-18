@@ -7,8 +7,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_game_tape_flow_avoids_quadratic_step_accumulation_and_lane_rescans() -> None:
-    model = (ROOT / "frontend/src/features/game-tape/gameTapeFlowModel.ts").read_text(encoding="utf-8")
-    flow = (ROOT / "frontend/src/features/game-tape/components/GameTapeFlow.tsx").read_text(encoding="utf-8")
+    model = (ROOT / "frontend/src/features/game-tape/gameTapeFlowModel.ts").read_text(
+        encoding="utf-8"
+    )
+    flow = (
+        ROOT / "frontend/src/features/game-tape/components/GameTapeFlow.tsx"
+    ).read_text(encoding="utf-8")
 
     assert "previous.steps.push(step)" in model
     assert "previous.steps = [...previous.steps, step]" not in model
@@ -18,10 +22,12 @@ def test_game_tape_flow_avoids_quadratic_step_accumulation_and_lane_rescans() ->
     assert "group.statusCounts" in flow
 
 
-def test_execution_timeline_bucket_indexes_are_memoized_outside_row_render_loop() -> None:
-    source = (ROOT / "frontend/src/features/overview/components/ExecutionTimelineGrid.tsx").read_text(
-        encoding="utf-8"
-    )
+def test_execution_timeline_bucket_indexes_are_memoized_outside_row_render_loop() -> (
+    None
+):
+    source = (
+        ROOT / "frontend/src/features/overview/components/ExecutionTimelineGrid.tsx"
+    ).read_text(encoding="utf-8")
 
     table_start = source.index("function TimelineTable")
     table_end = source.index("function TimelineCell")
@@ -33,7 +39,9 @@ def test_execution_timeline_bucket_indexes_are_memoized_outside_row_render_loop(
 
 
 def test_scout_run_reader_has_no_per_step_database_query() -> None:
-    source = (ROOT / "backend/src/oh_goon/scout/run_reader.py").read_text(encoding="utf-8")
+    source = (ROOT / "backend/src/oh_goon/scout/run_reader.py").read_text(
+        encoding="utf-8"
+    )
     tree = ast.parse(source)
 
     # Helper names and boundaries are private. The structural performance

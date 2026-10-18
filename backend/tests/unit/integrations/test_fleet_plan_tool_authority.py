@@ -14,7 +14,6 @@ from oh_goon.core.fleet_plan_tool_requirements import (
     step_runtime_tool_names,
 )
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedDependencyInventoryStep
-from oh_goon.core.models.fleet_plan_step_contract import PlanStepCapabilities
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     CompletedPlanStepTeardownEvidence,
@@ -27,6 +26,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanStepAttemptEvidence,
     PlanToolEvidence,
 )
+from oh_goon.core.models.fleet_plan_step_contract import PlanStepCapabilities
 from oh_goon.core.models.fleet_plan_tool_authority import PlanHostToolAuthorityEvidence
 from oh_goon.core.path_authority import StrictHostPathAuthority
 from oh_goon.integrations._fleet_plan_host_resources import (
@@ -140,9 +140,7 @@ def test_explicit_shell_gets_fixed_frozen_runtime_support_without_broadening_aut
     assert required_execution_tool_names(plan) == ("bash", "make", "sh")  # type: ignore[arg-type]
     runtime = required_runtime_tool_names(plan)  # type: ignore[arg-type]
     assert set(SHELL_RUNTIME_SUPPORT_TOOLS) <= set(runtime)
-    assert {"curl", "git", "npm", "uv"}.isdisjoint(
-        set(runtime) - {"bash", "make", "sh"}
-    )
+    assert {"curl", "git", "npm", "uv"}.isdisjoint(set(runtime) - {"bash", "make", "sh"})
     assert step_runtime_tool_names(step) == runtime
 
 
@@ -259,14 +257,20 @@ def test_preflight_accepts_nvm_style_npm_and_npx_symlinks_from_admitted_bin(
     plan = SimpleNamespace(steps=(step,))
     preflight_run_capabilities(plan, authority)  # type: ignore[arg-type]
     bindings = capture_host_tools(
-        plan, tmp_path / "frozen-tools", authority, cancel_requested=None  # type: ignore[arg-type]
+        plan,
+        tmp_path / "frozen-tools",
+        authority,
+        cancel_requested=None,  # type: ignore[arg-type]
     )
 
     assert authority.tool("npm") == npm.resolve()
     assert authority.tool("npx") == npx.resolve()
     assert bindings["npm"].runtime_support is not None
     assert bindings["npx"].runtime_support is not None
-    assert bindings["npm"].runtime_support.snapshot_path == bindings["npx"].runtime_support.snapshot_path
+    assert (
+        bindings["npm"].runtime_support.snapshot_path
+        == bindings["npx"].runtime_support.snapshot_path
+    )
 
 
 def test_node_cli_host_tool_freezes_package_support_and_uses_identity_separate_launcher(
@@ -295,7 +299,10 @@ def test_node_cli_host_tool_freezes_package_support_and_uses_identity_separate_l
             return {"node": node, "npm": entry}[name]
 
     bindings = capture_host_tools(
-        plan, tmp_path / "frozen-tools", Authority(), cancel_requested=None  # type: ignore[arg-type]
+        plan,
+        tmp_path / "frozen-tools",
+        Authority(),
+        cancel_requested=None,  # type: ignore[arg-type]
     )
     npm = bindings["npm"]
 
@@ -304,8 +311,7 @@ def test_node_cli_host_tool_freezes_package_support_and_uses_identity_separate_l
     assert (npm.runtime_support.snapshot_path / "lib" / "cli.js").is_file()
     assert npm.runtime_support.entry_relative.as_posix() == "bin/npm-cli.js"
     assert npm.execution_snapshot_path.read_text(encoding="utf-8") == (
-        "#!/toolchain/bin/node\n"
-        'require("/toolchain/support/000/bin/npm-cli.js")\n'
+        '#!/toolchain/bin/node\nrequire("/toolchain/support/000/bin/npm-cli.js")\n'
     )
 
     runtime = capture_runtime_root(
@@ -339,7 +345,10 @@ def test_node_cli_host_tool_requires_explicit_node_capability(tmp_path: Path) ->
 
     with pytest.raises(FleetPlanInvalid, match="requires explicit child tool capability 'node'"):
         capture_host_tools(
-            plan, tmp_path / "frozen-tools", Authority(), cancel_requested=None  # type: ignore[arg-type]
+            plan,
+            tmp_path / "frozen-tools",
+            Authority(),
+            cancel_requested=None,  # type: ignore[arg-type]
         )
 
 
@@ -457,7 +466,9 @@ def test_direct_attempt_tool_evidence_survives_post_launch_executable_mutation(
         launched.unlink()
 
     def forbidden_path_lookup(*_args: object, **_kwargs: object) -> Path:
-        raise AssertionError("attempt evidence must report the launch receipt without re-resolution")
+        raise AssertionError(
+            "attempt evidence must report the launch receipt without re-resolution"
+        )
 
     monkeypatch.setattr(attempt_evidence_module, "_resolve_executable_path", forbidden_path_lookup)
     observation = GitService().observe(repository)

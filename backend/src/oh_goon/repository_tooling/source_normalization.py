@@ -10,7 +10,6 @@ from oh_goon.repository_tooling.source_layout import (
     TRANSIENT_DIRECTORY_NAMES,
     TRANSIENT_FILE_NAMES,
     TRANSIENT_RELATIVE_PATHS,
-    TRANSIENT_SUFFIXES,
     is_transient_source_path,
 )
 
@@ -20,7 +19,10 @@ EXACT_DIRS = tuple(
     sorted(
         path.as_posix()
         for path in TRANSIENT_RELATIVE_PATHS
-        if not any(path == protected or protected in path.parents for protected in LIVE_CHECKOUT_PROTECTED_PATHS)
+        if not any(
+            path == protected or protected in path.parents
+            for protected in LIVE_CHECKOUT_PROTECTED_PATHS
+        )
     )
 )
 EXACT_FILES = tuple(sorted(TRANSIENT_FILE_NAMES))

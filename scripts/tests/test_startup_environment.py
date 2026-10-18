@@ -44,8 +44,6 @@ def _root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-
-
 def test_startup_checks_only_standard_tool_boundaries(tmp_path: Path) -> None:
     runner = FakeRunner({"uv": "uv 0.12.5", "node": "v22.16.0", "npm": "10.9.2"})
     rows = startup_environment.startup_report(_root(tmp_path), runner=runner)
@@ -65,8 +63,9 @@ def test_startup_checks_only_standard_tool_boundaries(tmp_path: Path) -> None:
     assert not any(call[0].startswith("python") for call in runner.calls)
 
 
-
-def test_startup_does_not_reimplement_uv_required_version_semantics(tmp_path: Path) -> None:
+def test_startup_does_not_reimplement_uv_required_version_semantics(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path)
     for version in ("uv 0.9.99", "uv 0.12.5", "uv 0.13.0"):
         rows = startup_environment.startup_report(
@@ -83,7 +82,9 @@ def test_startup_does_not_reimplement_uv_required_version_semantics(tmp_path: Pa
         )
 
 
-def test_startup_reports_uv_requirement_without_parsing_its_shape(tmp_path: Path) -> None:
+def test_startup_reports_uv_requirement_without_parsing_its_shape(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path)
     pyproject = root / "backend/pyproject.toml"
     pyproject.write_text(
@@ -101,7 +102,10 @@ def test_startup_reports_uv_requirement_without_parsing_its_shape(tmp_path: Path
     assert rows[0][2] is True
     assert ">=0.10,!=0.12.7,<0.13" in rows[0][3]
 
-def test_startup_reports_python_selected_by_uv_without_second_version_check(tmp_path: Path) -> None:
+
+def test_startup_reports_python_selected_by_uv_without_second_version_check(
+    tmp_path: Path,
+) -> None:
     runner = FakeRunner({"uv": "uv 0.12.5", "node": "v22.16.0", "npm": "10.9.2"})
     rows = startup_environment.startup_report(
         _root(tmp_path), runner=runner, resolved_python_version="3.13.5"
@@ -115,7 +119,9 @@ def test_startup_reports_python_selected_by_uv_without_second_version_check(tmp_
     )
 
 
-def test_startup_fails_only_when_required_native_tool_is_missing(tmp_path: Path) -> None:
+def test_startup_fails_only_when_required_native_tool_is_missing(
+    tmp_path: Path,
+) -> None:
     runner = FakeRunner({"uv": "uv 0.9.9", "node": "v22.12.0"})
     rows = startup_environment.startup_report(_root(tmp_path), runner=runner)
     status = {name: ok for name, _version, ok, _detail in rows}
@@ -124,7 +130,9 @@ def test_startup_fails_only_when_required_native_tool_is_missing(tmp_path: Path)
     assert status["npm"] is False
 
 
-def test_startup_reports_npm_engine_declaration_without_reimplementing_it(tmp_path: Path) -> None:
+def test_startup_reports_npm_engine_declaration_without_reimplementing_it(
+    tmp_path: Path,
+) -> None:
     runner = FakeRunner({"uv": "uv 0.12.5", "node": "v22.16.0", "npm": "10.9.1"})
     rows = startup_environment.startup_report(_root(tmp_path), runner=runner)
     npm_row = next(row for row in rows if row[0] == "npm")
@@ -210,7 +218,9 @@ def test_ecosystem_startup_checks_do_not_probe_unrelated_tools(tmp_path: Path) -
     assert frontend_runner.calls == [("node", "--version"), ("npm", "--version")]
 
 
-def test_backend_component_check_does_not_read_frontend_manifest(tmp_path: Path) -> None:
+def test_backend_component_check_does_not_read_frontend_manifest(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path)
     (root / "frontend/package.json").unlink()
     runner = FakeRunner({"uv": "uv 0.12.5"})
@@ -226,7 +236,9 @@ def test_backend_component_check_does_not_read_frontend_manifest(tmp_path: Path)
     assert runner.calls == [("uv", "--version")]
 
 
-def test_frontend_component_check_does_not_read_backend_manifest(tmp_path: Path) -> None:
+def test_frontend_component_check_does_not_read_backend_manifest(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path)
     (root / "backend/pyproject.toml").unlink()
     runner = FakeRunner({"node": "v22.16.0", "npm": "10.9.2"})
@@ -241,7 +253,9 @@ def test_frontend_component_check_does_not_read_backend_manifest(tmp_path: Path)
     assert runner.calls == [("node", "--version"), ("npm", "--version")]
 
 
-def test_cli_component_filter_supports_bootstrap_only_check(monkeypatch, tmp_path) -> None:
+def test_cli_component_filter_supports_bootstrap_only_check(
+    monkeypatch, tmp_path
+) -> None:
     root = _root(tmp_path)
     monkeypatch.setattr(startup_environment, "ROOT", root)
     seen: list[tuple[str, ...] | None] = []

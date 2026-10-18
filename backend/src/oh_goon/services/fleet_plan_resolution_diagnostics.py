@@ -79,7 +79,6 @@ class FleetPlanResolutionDiagnostics:
                 )
             )
 
-
     def should_omit_step(
         self,
         *,

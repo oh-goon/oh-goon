@@ -47,10 +47,7 @@ def test_maintenance_caps_removed_objects_and_reports_unsatisfied_budget(
     ticks = iter((10, 20, 30))
     monkeypatch.setattr(lifecycle.time, "time_ns", lambda: next(ticks))
     store = FleetContentStore(tmp_path / "store")
-    retained = [
-        _put_file(store, tmp_path, f"item-{index}", str(index) * 4)
-        for index in range(3)
-    ]
+    retained = [_put_file(store, tmp_path, f"item-{index}", str(index) * 4) for index in range(3)]
     for item in retained:
         store.release_reference(item.reference_id, owner_repository_id=OWNER)
 

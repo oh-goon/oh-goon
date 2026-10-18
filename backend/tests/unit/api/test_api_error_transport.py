@@ -87,9 +87,7 @@ def test_unexpected_error_emits_request_correlated_diagnostic(monkeypatch) -> No
     diagnostics = Diagnostics()
 
     response = asyncio.run(
-        unexpected_exception_handler(
-            _request(diagnostics), RuntimeError("backend exploded")
-        )
+        unexpected_exception_handler(_request(diagnostics), RuntimeError("backend exploded"))
     )
     payload = json.loads(response.body)
 

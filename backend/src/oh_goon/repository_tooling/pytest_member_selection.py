@@ -3,6 +3,7 @@
 This module owns pre-execution pytest member selection only. It does not own batch
 partitioning, retries, timeouts, execution, receipts, or resume authority.
 """
+
 from __future__ import annotations
 
 import ast
@@ -15,7 +16,8 @@ def discover_test_nodes(path: Path) -> tuple[str, ...]:
     return tuple(
         f"{path.as_posix()}::{node.name}"
         for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_")
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
     )
 
 
@@ -36,7 +38,9 @@ def _module_marker_names(tree: ast.Module) -> frozenset[str]:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
-        if not any(isinstance(target, ast.Name) and target.id == "pytestmark" for target in targets):
+        if not any(
+            isinstance(target, ast.Name) and target.id == "pytestmark" for target in targets
+        ):
             continue
         value = node.value
         values = value.elts if isinstance(value, (ast.List, ast.Tuple, ast.Set)) else (value,)
@@ -90,9 +94,9 @@ def _function_marker_names(tree: ast.Module, test_name: str) -> frozenset[str]:
     return frozenset(names)
 
 
-
-
-def _top_level_test_functions(tree: ast.Module) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, ...] | None:
+def _top_level_test_functions(
+    tree: ast.Module,
+) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, ...] | None:
     tests: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -127,9 +131,8 @@ def _file_is_provably_excluded(tree: ast.Module, excluded: frozenset[str]) -> bo
         return False
     return all((_decorator_marker_names(test) | module_markers) & excluded for test in tests)
 
-def _member_marker_names(
-    tree: ast.Module, *, separator: str, test_name: str
-) -> frozenset[str]:
+
+def _member_marker_names(tree: ast.Module, *, separator: str, test_name: str) -> frozenset[str]:
     names = set(_module_marker_names(tree))
     if separator:
         names.update(_function_marker_names(tree, test_name))
@@ -155,10 +158,13 @@ def statically_pruned_members(
             continue
         excluded_member = (
             bool(separator)
-            and bool(_member_marker_names(tree, separator=separator, test_name=test_name) & excluded)
+            and bool(
+                _member_marker_names(tree, separator=separator, test_name=test_name) & excluded
+            )
         ) or (not separator and _file_is_provably_excluded(tree, excluded))
         (pruned if excluded_member else runnable).append(member)
     return tuple(runnable), tuple(pruned)
+
 
 def discover_test_files(paths: tuple[Path, ...], excludes: frozenset[str]) -> tuple[str, ...]:
     found: set[str] = set()

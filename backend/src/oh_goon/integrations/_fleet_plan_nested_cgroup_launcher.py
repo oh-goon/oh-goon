@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -94,10 +93,12 @@ def launch_nested_bubblewrap(
     # cannot bypass the original LACE kernel custody boundary. Check BEFORE
     # pipe creation, process launch, or cgroup.procs writes.
     _refuse_unprovisioned_kernel_effect(
-        nested_root, operation="native nested cgroup process launch",
+        nested_root,
+        operation="native nested cgroup process launch",
     )
     _refuse_unprovisioned_kernel_effect(
-        monitor_root, operation="native monitor cgroup process launch",
+        monitor_root,
+        operation="native monitor cgroup process launch",
     )
     # Do not resolve a substituted pathname into the new owner's authority.
     move_process(nested_root, os.getpid(), identity=nested_identity)
@@ -105,9 +106,7 @@ def launch_nested_bubblewrap(
     info_read, info_write = os.pipe()
     block_read, block_write = os.pipe()
     try:
-        command = _bwrap_with_coordination_fds(
-            argv, info_fd=info_write, block_fd=block_read
-        )
+        command = _bwrap_with_coordination_fds(argv, info_fd=info_write, block_fd=block_read)
         process = popen(command, pass_fds=(info_write, block_read))
         os.close(info_write)
         info_write = -1
@@ -151,8 +150,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if min(dev, ino, monitor_dev, monitor_ino) <= 0:
         raise FleetPlanInvalid("Nested strict execution launcher identity unproven")
     return launch_nested_bubblewrap(
-        Path(args[0]), Path(args[1]), args[separator + 1 :],
-        nested_identity=(dev, ino), monitor_identity=(monitor_dev, monitor_ino),
+        Path(args[0]),
+        Path(args[1]),
+        args[separator + 1 :],
+        nested_identity=(dev, ino),
+        monitor_identity=(monitor_dev, monitor_ino),
     )
 
 

@@ -5,6 +5,7 @@ run-local execution attempts and derives terminal membership coverage without ch
 which member receipts are reusable.  Physical batching, retries, and timeout refinement
 may create additional attempts, but they may never change the admitted logical set.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -133,7 +134,6 @@ class ExecutionMembershipStore:
     def run_directory(self) -> Path:
         return self.directory / "execution-runs" / self.run_identity.removeprefix("sha256:")
 
-
     def _attempt_path(self, member: str, attempt_identity: str) -> Path:
         return (
             self.run_directory
@@ -196,7 +196,9 @@ class ExecutionMembershipStore:
             "member_identity": pytest_member_identity(member),
         }
         if any(payload.get(key) != value for key, value in expected.items()):
-            raise RuntimeError("pytest execution-membership attempt identity changed before terminal write")
+            raise RuntimeError(
+                "pytest execution-membership attempt identity changed before terminal write"
+            )
         payload["status"] = status
         payload["completed_at_utc"] = datetime.now(UTC).isoformat()
         _atomic_json_write(path, payload)
@@ -295,10 +297,12 @@ class ExecutionMembershipStore:
         # receipts), but pytest exit 0 still closes run-local membership coverage.
         accepted_terminal_set = passed_set | terminal_by_status["NON_PASSED"]
         selected_set = set(selected)
-        duplicates = {
-            member for member, count in selected_counts.items() if count > 1
-        } | {member for member, count in pass_counts.items() if count > 1}
-        extras = set(self._extras()) | {member for member in attempted_set if member not in selected_set}
+        duplicates = {member for member, count in selected_counts.items() if count > 1} | {
+            member for member, count in pass_counts.items() if count > 1
+        }
+        extras = set(self._extras()) | {
+            member for member in attempted_set if member not in selected_set
+        }
         missing = selected_set - completed_set
         selected_identity = logical_membership_identity(selected_set)
         terminal_success = (
@@ -333,6 +337,7 @@ class ExecutionMembershipStore:
         path = self.run_directory / "membership-receipt.json"
         _atomic_json_write(path, receipt.as_dict())
         return receipt, path
+
 
 @dataclass(frozen=True, slots=True)
 class PytestExecutionMembershipContext:
@@ -394,7 +399,10 @@ class PytestExecutionMembershipSession:
         if remaining == members:
             return members, ""
         reused = len(members) - len(remaining)
-        return remaining, f"BATCH RECOVERY MEMBERSHIP: reusing {reused} current-run completed members\n"
+        return (
+            remaining,
+            f"BATCH RECOVERY MEMBERSHIP: reusing {reused} current-run completed members\n",
+        )
 
     def _receipt_kwargs(self, members: tuple[str, ...]) -> dict[str, object]:
         context = self.context

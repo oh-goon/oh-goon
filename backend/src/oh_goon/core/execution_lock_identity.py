@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.execution_lock_models import ExecutionLock, LockedExternalArtifact, LockedGoon
+from oh_goon.core.models.execution_lock_models import (
+    ExecutionLock,
+    LockedExternalArtifact,
+    LockedGoon,
+)
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedImport
 
 LOCK_VERSION = 1
@@ -43,8 +47,12 @@ def build_execution_lock(
         {
             "lock_version": LOCK_VERSION,
             "plan": plan_digest,
-            "execution": [item.model_dump(mode="json", exclude_computed_fields=True) for item in goons],
-            "external": [item.model_dump(mode="json", exclude_computed_fields=True) for item in external],
+            "execution": [
+                item.model_dump(mode="json", exclude_computed_fields=True) for item in goons
+            ],
+            "external": [
+                item.model_dump(mode="json", exclude_computed_fields=True) for item in external
+            ],
         }
     )
     return ExecutionLock(
@@ -85,7 +93,9 @@ def _plan_digest(
         for step_id in item.step_ids
     }
     root_steps = [
-        step.model_dump(mode="json", exclude_computed_fields=True) for step in plan.steps if step.step_id not in top_step_ids
+        step.model_dump(mode="json", exclude_computed_fields=True)
+        for step in plan.steps
+        if step.step_id not in top_step_ids
     ]
     payload = {
         "contract_version": plan.contract_version,
@@ -99,14 +109,22 @@ def _plan_digest(
 
 def _root_requirements(plan: ResolvedFleetPlan) -> list[dict[str, Any]]:
     imported = {
-        json.dumps(req.model_dump(mode="json", exclude_computed_fields=True), sort_keys=True, separators=(",", ":"))
+        json.dumps(
+            req.model_dump(mode="json", exclude_computed_fields=True),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         for item in plan.imports
         for req in item.requirements
     }
     return [
         req.model_dump(mode="json", exclude_computed_fields=True)
         for req in plan.requirements
-        if json.dumps(req.model_dump(mode="json", exclude_computed_fields=True), sort_keys=True, separators=(",", ":"))
+        if json.dumps(
+            req.model_dump(mode="json", exclude_computed_fields=True),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         not in imported
     ]
 
@@ -114,16 +132,25 @@ def _root_requirements(plan: ResolvedFleetPlan) -> list[dict[str, Any]]:
 def _goon_digest(plan: ResolvedFleetPlan, root: ResolvedImport) -> str:
     subtree = _import_subtree(plan.imports, root.import_id)
     step_ids = set(root.step_ids)
-    steps = [step.model_dump(mode="json", exclude_computed_fields=True) for step in plan.steps if step.step_id in step_ids]
+    steps = [
+        step.model_dump(mode="json", exclude_computed_fields=True)
+        for step in plan.steps
+        if step.step_id in step_ids
+    ]
     payload = {
         "goon": root.name,
-        "requirements": [item.model_dump(mode="json", exclude_computed_fields=True) for item in root.requirements],
+        "requirements": [
+            item.model_dump(mode="json", exclude_computed_fields=True) for item in root.requirements
+        ],
         "composition": [
             {
                 "import_id": item.import_id,
                 "parent_import_id": item.parent_import_id,
                 "name": item.name,
-                "requirements": [req.model_dump(mode="json", exclude_computed_fields=True) for req in item.requirements],
+                "requirements": [
+                    req.model_dump(mode="json", exclude_computed_fields=True)
+                    for req in item.requirements
+                ],
             }
             for item in subtree
         ],
@@ -149,8 +176,13 @@ def _recompute_overall(lock: ExecutionLock) -> str:
         {
             "lock_version": lock.lock_version,
             "plan": lock.plan,
-            "execution": [item.model_dump(mode="json", exclude_computed_fields=True) for item in lock.execution],
-            "external": [item.model_dump(mode="json", exclude_computed_fields=True) for item in lock.external],
+            "execution": [
+                item.model_dump(mode="json", exclude_computed_fields=True)
+                for item in lock.execution
+            ],
+            "external": [
+                item.model_dump(mode="json", exclude_computed_fields=True) for item in lock.external
+            ],
         }
     )
 

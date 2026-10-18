@@ -46,7 +46,10 @@ def _native_uv_environment_evidence(env: dict[str, str]) -> None:
         print(f"Native uv TLS configuration: UV_SYSTEM_CERTS={raw} (inherited)")
     index_names = tuple(name for name in ("UV_DEFAULT_INDEX", "UV_INDEX") if env.get(name))
     if index_names:
-        print("Native uv index configuration: " + ", ".join(f"{name} set (inherited)" for name in index_names))
+        print(
+            "Native uv index configuration: "
+            + ", ".join(f"{name} set (inherited)" for name in index_names)
+        )
     else:
         print(
             "Native uv index configuration: no inherited UV_DEFAULT_INDEX/UV_INDEX override; "

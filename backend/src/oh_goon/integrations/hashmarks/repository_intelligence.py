@@ -16,7 +16,6 @@ from oh_goon.integrations.hashmarks.runtime_contract import (
     require_loaded_hashmarks_runtime,
 )
 
-
 _SHA256_IDENTITY = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -200,12 +199,9 @@ def _native_identity_fields(
     return None, None
 
 
-
 def _require_observer_authority(payload: Mapping[str, object], expected: str, label: str) -> None:
     if payload.get("authority") != expected:
-        raise HashmarksRepositoryIntelligenceInputError(
-            f"Hashmarks {label} must remain {expected}"
-        )
+        raise HashmarksRepositoryIntelligenceInputError(f"Hashmarks {label} must remain {expected}")
 
 
 def _validate_snapshot_authority(payload: Mapping[str, object]) -> None:
@@ -218,7 +214,9 @@ def _validate_snapshot_authority(payload: Mapping[str, object]) -> None:
         raise HashmarksRepositoryIntelligenceInputError(
             "Hashmarks repository snapshot requires observer identity"
         )
-    _require_observer_authority(payload, "repository-intelligence-only", "repository observer evidence")
+    _require_observer_authority(
+        payload, "repository-intelligence-only", "repository observer evidence"
+    )
 
 
 def _validate_delta_authority(payload: Mapping[str, object]) -> None:
@@ -232,7 +230,9 @@ def _validate_delta_authority(payload: Mapping[str, object]) -> None:
             raise HashmarksRepositoryIntelligenceInputError(
                 f"Hashmarks repository delta requires {side} snapshot_identity"
             )
-    _require_observer_authority(payload, "repository-intelligence-only", "repository observer evidence")
+    _require_observer_authority(
+        payload, "repository-intelligence-only", "repository observer evidence"
+    )
 
 
 _OBSERVER_AUTHORITY_VALIDATORS = {
@@ -262,6 +262,7 @@ def _validate_hashmarks_observer_authority(
         raise HashmarksRepositoryIntelligenceInputError(
             "Hashmarks observer evidence cannot carry execution effect"
         )
+
 
 def bind_hashmarks_repository_evidence(
     payload: Mapping[str, object],

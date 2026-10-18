@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import CompiledExecutionTemplate, CompiledGoonImportStep
 
@@ -63,9 +64,7 @@ def apply_canonical_goon_tool_authority(
     independent permission ceiling before the repository can certify or release it.
     """
 
-    authority_map = (
-        load_canonical_goon_tool_authority() if authority is None else authority
-    )
+    authority_map = load_canonical_goon_tool_authority() if authority is None else authority
     template_authority = authority_map.get(template_key)
     if template_authority is None:
         return compiled

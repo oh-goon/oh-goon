@@ -81,10 +81,15 @@ def test_cli_reports_database_identity_replacement_without_traceback(monkeypatch
     output = capsys.readouterr().out
     assert "OH-GOON RUNTIME DATABASE IDENTITY LOST" in output
     assert "bounded observation-only checks" in output
-    assert "will not recreate/repair the database or replay a Plan, Step, or external effect" in output
+    assert (
+        "will not recreate/repair the database or replay a Plan, Step, or external effect" in output
+    )
     assert "preserve this diagnostic before using make certification-state-reset" in output
     assert "source/storage defect" in output
-    assert "Native package-manager state is outside certification control-state reset authority" in output
+    assert (
+        "Native package-manager state is outside certification control-state reset authority"
+        in output
+    )
 
 
 def test_cli_preserves_nonzero_primary_result_when_shutdown_loses_database_identity(
@@ -96,9 +101,7 @@ def test_cli_preserves_nonzero_primary_result_when_shutdown_loses_database_ident
     monkeypatch.setattr(
         runtime,
         "shutdown",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            DatabasePathIdentityLost("file is not a database")
-        ),
+        lambda **_kwargs: (_ for _ in ()).throw(DatabasePathIdentityLost("file is not a database")),
     )
 
     assert cli.main([]) == 7

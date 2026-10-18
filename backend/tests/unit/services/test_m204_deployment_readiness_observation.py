@@ -1,4 +1,5 @@
 """M204: read-only, original-owner deployment probe; never an admission artifact."""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -14,7 +15,9 @@ from tests.unit.services.test_group_a_fleet_provisioning_authority import provis
 
 
 def test_native_deployment_readiness_public_and_non_authorizing(tmp_path, monkeypatch):
-    args, _params, conn, calls, _lifecycle, binding, provisioner, _inventory, _roots, _admit = provisioned(tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, binding, provisioner, _inventory, _roots, _admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     try:
         observation = provisioner.inspect_deployment_readiness("durable-run")
         assert type(observation) is MappingProxyType
@@ -47,13 +50,25 @@ def test_native_deployment_readiness_public_and_non_authorizing(tmp_path, monkey
         conn.close()
 
 
-@pytest.mark.parametrize("attack", [
-    "unknown-run", "missing-inventory-selection", "inventory-generation-drift",
-    "changed-backend", "missing-key", "weak-key", "substituted-key",
-    "revoked-signer", "different-path-authority", "different-signer-custody",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "unknown-run",
+        "missing-inventory-selection",
+        "inventory-generation-drift",
+        "changed-backend",
+        "missing-key",
+        "weak-key",
+        "substituted-key",
+        "revoked-signer",
+        "different-path-authority",
+        "different-signer-custody",
+    ],
+)
 def test_untrusted_deployment_probe_fails_closed_before_any_work(tmp_path, monkeypatch, attack):
-    args, _params, conn, calls, _lifecycle, binding, provisioner, inventory, roots, _admit = provisioned(tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, binding, provisioner, inventory, roots, _admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     try:
         run_id = "durable-run"
         if attack == "unknown-run":
@@ -63,7 +78,9 @@ def test_untrusted_deployment_probe_fails_closed_before_any_work(tmp_path, monke
         elif attack == "inventory-generation-drift":
             inventory.write_text(inventory.read_text().replace("generation = 7", "generation = 8"))
         elif attack == "changed-backend":
-            inventory.write_text(inventory.read_text().replace('backend = "bubblewrap"', 'backend = "opensandbox"'))
+            inventory.write_text(
+                inventory.read_text().replace('backend = "bubblewrap"', 'backend = "opensandbox"')
+            )
         elif attack == "missing-key":
             (roots / "source_identity.pub").unlink()
         elif attack == "weak-key":
@@ -72,14 +89,19 @@ def test_untrusted_deployment_probe_fails_closed_before_any_work(tmp_path, monke
             (roots / "source_identity.pub").write_bytes(b"x" * 32)
         elif attack == "revoked-signer":
             import json
+
             path = binding.key_directory / "signers.json"
             payload = json.loads(path.read_bytes())
             payload["issuers"]["source_identity"]["state"] = "revoked"
             path.write_bytes(canonical_bytes(payload))
         elif attack == "different-path-authority":
-            provisioner = replace(provisioner, enrolled=(replace(binding, path_authority=object()),))
+            provisioner = replace(
+                provisioner, enrolled=(replace(binding, path_authority=object()),)
+            )
         elif attack == "different-signer-custody":
-            provisioner = replace(provisioner, enrolled=(replace(binding, key_directory=tmp_path / "unknown"),))
+            provisioner = replace(
+                provisioner, enrolled=(replace(binding, key_directory=tmp_path / "unknown"),)
+            )
         with pytest.raises((TrustProtocolError, FleetPlanInvalid)):
             provisioner.inspect_deployment_readiness(run_id)
         assert facts(args, conn) == (None, 0, 0)
@@ -91,14 +113,31 @@ def test_untrusted_deployment_probe_fails_closed_before_any_work(tmp_path, monke
 
 def test_readiness_does_not_enter_cli_or_create_ambient_deployment(monkeypatch):
     from oh_goon import cli
+
     monkeypatch.setenv("OH_GOON_FLEET_PROVISIONER", "fake")
     monkeypatch.setenv("OH_GOON_FLEET_ISSUER_KEYS", "fake")
     observed = []
     monkeypatch.setattr(cli, "_run_pre_runtime_command", lambda _args: None)
-    monkeypatch.setattr(cli.ApplicationRuntime, "build", classmethod(
-        lambda cls: observed.append("ordinary-no-provisioner") or object()))
+    monkeypatch.setattr(
+        cli.ApplicationRuntime,
+        "build",
+        classmethod(lambda cls: observed.append("ordinary-no-provisioner") or object()),
+    )
     monkeypatch.setattr(cli, "_execute_stateful_command", lambda _runtime, _args: 2)
-    assert cli.main(["plan", "run", "missing.yml", "--repository-id", "repo-1", "--fleet-run-id", "durable-run"]) == 2
+    assert (
+        cli.main(
+            [
+                "plan",
+                "run",
+                "missing.yml",
+                "--repository-id",
+                "repo-1",
+                "--fleet-run-id",
+                "durable-run",
+            ]
+        )
+        == 2
+    )
     assert observed == ["ordinary-no-provisioner"]
 
 

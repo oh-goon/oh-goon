@@ -7,8 +7,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from oh_goon.core.file_digest import read_prefix
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.file_digest import read_prefix
 from oh_goon.core.fleet_plan_tool_requirements import required_runtime_tool_names
 from oh_goon.core.models.fleet_plan import (
     ResolvedFleetPlan,
@@ -32,7 +32,6 @@ from oh_goon.integrations.fleet_plan_environment import step_host_environment_na
 
 
 @dataclass(frozen=True, slots=True)
-
 class HostToolRuntimeSupport:
     """Frozen support tree required by one non-standalone host tool launcher."""
 
@@ -220,9 +219,7 @@ def _capture_node_cli_support(
         return None
     package_root = _nearest_node_package_root(source)
     if package_root is None:
-        raise FleetPlanInvalid(
-            f"Strict Fleet Node CLI has no package.json runtime owner: {source}"
-        )
+        raise FleetPlanInvalid(f"Strict Fleet Node CLI has no package.json runtime owner: {source}")
     entry_relative = PurePosixPath(*source.relative_to(package_root).parts)
     cached = support_cache.get(package_root)
     if cached is None:
@@ -284,9 +281,7 @@ def _node_cli_launcher(support: HostToolRuntimeSupport) -> str:
     return "#!/toolchain/bin/node\nrequire(" + json.dumps(entry) + ")\n"
 
 
-def _preflight_tool_names(
-    names: tuple[str, ...], path_authority: StrictHostPathAuthority
-) -> None:
+def _preflight_tool_names(names: tuple[str, ...], path_authority: StrictHostPathAuthority) -> None:
     missing: list[str] = []
     for name in names:
         try:

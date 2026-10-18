@@ -1,4 +1,5 @@
 """M197: certification must report missing original-owner Fleet authority honestly."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,15 +13,21 @@ from oh_goon.core.enforcer_lace_trust import (
 )
 
 
-@pytest.mark.parametrize("denial", [
-    UNPROVISIONED_FLEET_PLAN_INGRESS,
-    UNPROVISIONED_FLEET_ADMISSION,
-])
+@pytest.mark.parametrize(
+    "denial",
+    [
+        UNPROVISIONED_FLEET_PLAN_INGRESS,
+        UNPROVISIONED_FLEET_ADMISSION,
+    ],
+)
 def test_unprovisioned_native_fleet_is_a_blocked_authority_not_application_bug(
-    denial: str, monkeypatch, capsys,
+    denial: str,
+    monkeypatch,
+    capsys,
 ) -> None:
     monkeypatch.setattr(
-        workflow_run, "_certification_environment",
+        workflow_run,
+        "_certification_environment",
         lambda: ("repo-verified", {}, Path("/state/locks")),
     )
     calls = []
@@ -43,14 +50,18 @@ def test_unprovisioned_native_fleet_is_a_blocked_authority_not_application_bug(
 
 
 def test_other_prework_failures_are_not_silently_classified_as_missing_provisioning(
-    monkeypatch, capsys,
+    monkeypatch,
+    capsys,
 ) -> None:
     monkeypatch.setattr(
-        workflow_run, "_certification_environment",
+        workflow_run,
+        "_certification_environment",
         lambda: ("repo-verified", {}, Path("/state/locks")),
     )
     monkeypatch.setattr(
-        workflow_run, "_run_plan", lambda **_: (2, "invalid canonical Plan source\n"),
+        workflow_run,
+        "_run_plan",
+        lambda **_: (2, "invalid canonical Plan source\n"),
     )
     assert workflow_run._run_self_plan("certify") == 2
     output = capsys.readouterr().out
@@ -59,14 +70,18 @@ def test_other_prework_failures_are_not_silently_classified_as_missing_provision
 
 
 def test_admitted_run_error_does_not_reclassify_as_missing_prework_enrollment(
-    monkeypatch, capsys,
+    monkeypatch,
+    capsys,
 ) -> None:
     monkeypatch.setattr(
-        workflow_run, "_certification_environment",
+        workflow_run,
+        "_certification_environment",
         lambda: ("repo-verified", {}, Path("/state/locks")),
     )
     monkeypatch.setattr(
-        workflow_run, "_run_plan", lambda **_: (
+        workflow_run,
+        "_run_plan",
+        lambda **_: (
             2,
             "Fleet Run ID: already-admitted\n" + UNPROVISIONED_FLEET_ADMISSION + "\n",
         ),

@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import tempfile
 import tarfile
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -19,9 +19,9 @@ from oh_goon.engine.command import (
     RuntimeAuthorityReceipt,
     run_command,
 )
-from oh_goon.integrations.content_snapshot import replace_tree_from_tar_gz_stream, verify_snapshot
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations._fleet_plan_sandbox_launch import sandbox_process_launch
+from oh_goon.integrations.content_snapshot import replace_tree_from_tar_gz_stream, verify_snapshot
 from oh_goon.integrations.fleet_plan_opensandbox_isolation import (
     _RUNNER_PROTOCOL,
     OpenSandboxSettings,
@@ -76,9 +76,13 @@ class OpenSandboxCliTransport:
         sandbox_id = _create_sandbox(settings, resources=resources, timeout=timeout)
         try:
             return _execute_open_sandbox_attempt(
-                settings, request, sandbox_id=sandbox_id,
-                expected_runtime_authority=expected_runtime_authority, timeout=timeout,
-                cancel_requested=cancel_requested, stream_output=stream_output,
+                settings,
+                request,
+                sandbox_id=sandbox_id,
+                expected_runtime_authority=expected_runtime_authority,
+                timeout=timeout,
+                cancel_requested=cancel_requested,
+                stream_output=stream_output,
             )
         finally:
             write_remote_resource_evidence(request.attempt.paths.root, resources)
@@ -112,9 +116,20 @@ def _execute_open_sandbox_attempt(
         os.chmod(request_file, 0o600)
         _require_cli_success(
             _run_osb(
-                settings, "command", "run", sandbox_id, "-o", "raw", "--",
-                "mkdir", "-p", "/fleet", _REMOTE_INPUT_ROOT, _REMOTE_OUTPUT_ROOT,
-                timeout=_command_timeout(timeout), cancel_requested=cancel_requested,
+                settings,
+                "command",
+                "run",
+                sandbox_id,
+                "-o",
+                "raw",
+                "--",
+                "mkdir",
+                "-p",
+                "/fleet",
+                _REMOTE_INPUT_ROOT,
+                _REMOTE_OUTPUT_ROOT,
+                timeout=_command_timeout(timeout),
+                cancel_requested=cancel_requested,
             ),
             "create Fleet sandbox work directory",
         )
@@ -123,8 +138,15 @@ def _execute_open_sandbox_attempt(
         )
         _require_cli_success(
             _run_osb(
-                settings, "file", "upload", sandbox_id, str(request_file), "/fleet/request.json",
-                "-o", "json", timeout=_command_timeout(timeout),
+                settings,
+                "file",
+                "upload",
+                sandbox_id,
+                str(request_file),
+                "/fleet/request.json",
+                "-o",
+                "json",
+                timeout=_command_timeout(timeout),
                 cancel_requested=cancel_requested,
             ),
             "upload Fleet sandbox request",
@@ -132,26 +154,50 @@ def _execute_open_sandbox_attempt(
         if cancel_requested is not None and cancel_requested():
             raise CommandCancelledError("Fleet OpenSandbox attempt cancelled before process launch")
         execution = _run_osb(
-            settings, "command", "run", sandbox_id, "-o", "raw", "--", *_RUNNER_COMMAND,
-            timeout=timeout, cancel_requested=cancel_requested,
+            settings,
+            "command",
+            "run",
+            sandbox_id,
+            "-o",
+            "raw",
+            "--",
+            *_RUNNER_COMMAND,
+            timeout=timeout,
+            cancel_requested=cancel_requested,
         )
         _require_cli_success(execution, "run Fleet sandbox helper")
         _require_cli_success(
             _run_osb(
-                settings, "file", "download", sandbox_id, "/fleet/result.json", str(result_file),
-                "-o", "json", timeout=_command_timeout(timeout),
+                settings,
+                "file",
+                "download",
+                sandbox_id,
+                "/fleet/result.json",
+                str(result_file),
+                "-o",
+                "json",
+                timeout=_command_timeout(timeout),
                 cancel_requested=cancel_requested,
             ),
             "download Fleet sandbox result",
         )
         result = _read_remote_result(result_file)
         result_archives = _download_result_archives(
-            settings, sandbox_id, request, result, local, timeout=timeout,
+            settings,
+            sandbox_id,
+            request,
+            result,
+            local,
+            timeout=timeout,
             cancel_requested=cancel_requested,
         )
         return _command_result_from_remote(
-            result, request, execution, result_archives=result_archives,
-            expected_runtime_authority=expected_runtime_authority, stream_output=stream_output,
+            result,
+            request,
+            execution,
+            result_archives=result_archives,
+            expected_runtime_authority=expected_runtime_authority,
+            stream_output=stream_output,
         )
 
 
@@ -235,7 +281,9 @@ def _httpx2() -> Any:
     try:
         import httpx2
     except ImportError as exc:  # pragma: no cover - dependency-complete surface owns this
-        raise FleetPlanInvalid("OpenSandbox lifecycle transport requires Oh-Goon's httpx2 runtime dependency") from exc
+        raise FleetPlanInvalid(
+            "OpenSandbox lifecycle transport requires Oh-Goon's httpx2 runtime dependency"
+        ) from exc
     return httpx2
 
 
@@ -306,10 +354,14 @@ def _destroy_sandbox(settings: OpenSandboxSettings, sandbox_id: str) -> None:
             timeout=_API_TIMEOUT_SECONDS,
         )
         if response.status_code not in {204, 404}:
-            _run_osb(settings, "sandbox", "kill", sandbox_id, "-o", "json", timeout=_API_TIMEOUT_SECONDS)
+            _run_osb(
+                settings, "sandbox", "kill", sandbox_id, "-o", "json", timeout=_API_TIMEOUT_SECONDS
+            )
     except Exception:
         try:
-            _run_osb(settings, "sandbox", "kill", sandbox_id, "-o", "json", timeout=_API_TIMEOUT_SECONDS)
+            _run_osb(
+                settings, "sandbox", "kill", sandbox_id, "-o", "json", timeout=_API_TIMEOUT_SECONDS
+            )
         except Exception:
             pass
 
@@ -330,8 +382,10 @@ def _run_osb(
     # Secret authority is environment-only. Never append api_key to argv.
     return run_command(
         settings.cli_executable,
-        "--domain", settings.domain,
-        "--protocol", settings.protocol,
+        "--domain",
+        settings.domain,
+        "--protocol",
+        settings.protocol,
         *args,
         timeout=timeout,
         env=_osb_environment(settings),
@@ -351,6 +405,7 @@ def _require_cli_success(result: CommandResult, action: str) -> None:
 def _command_timeout(timeout: float | None) -> float:
     return _API_TIMEOUT_SECONDS if timeout is None else max(_API_TIMEOUT_SECONDS, timeout)
 
+
 def _request_payload(
     request: IsolatedProcessRequest,
     *,
@@ -368,8 +423,12 @@ def _request_payload(
             raise FleetPlanInvalid("Managed runtime input is missing its sandbox path")
         if str(binding.sandbox_path) == "/cache":
             if read_only_cache is not None:
-                raise FleetPlanInvalid("Fleet attempt cannot carry multiple read-only /cache inputs")
-            verify_snapshot(binding.snapshot_path, binding.identity, label="OpenSandbox read-only cache input")
+                raise FleetPlanInvalid(
+                    "Fleet attempt cannot carry multiple read-only /cache inputs"
+                )
+            verify_snapshot(
+                binding.snapshot_path, binding.identity, label="OpenSandbox read-only cache input"
+            )
             read_only_cache = binding
             continue
         readonly.append(
@@ -501,7 +560,11 @@ def _upload_staged_inputs(
     cancel_requested: Callable[[], bool] | None,
 ) -> None:
     directories = sorted(
-        {path.parent.relative_to(input_root).as_posix() for path in input_root.rglob("*") if path.is_file()}
+        {
+            path.parent.relative_to(input_root).as_posix()
+            for path in input_root.rglob("*")
+            if path.is_file()
+        }
     )
     remote_directories = [
         _REMOTE_INPUT_ROOT if value == "." else f"{_REMOTE_INPUT_ROOT}/{value}"
@@ -555,7 +618,9 @@ def _download_result_archives(
     cancel_requested: Callable[[], bool] | None,
 ) -> dict[str, Path]:
     keys = ["workspace_archive"]
-    if not any(str(binding.sandbox_path) == "/cache" for binding in request.attempt.sandbox_bindings):
+    if not any(
+        str(binding.sandbox_path) == "/cache" for binding in request.attempt.sandbox_bindings
+    ):
         keys.append("cache_archive")
     downloaded: dict[str, Path] = {}
     for key in keys:

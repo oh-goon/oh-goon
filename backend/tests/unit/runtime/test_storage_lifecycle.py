@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 
 import pytest
 
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution.sqlite_lease import SQLiteExecutionLeaseStore
 from oh_goon.runtime.storage_lifecycle import (
@@ -25,7 +22,9 @@ def _environment(tmp_path: Path) -> dict[str, str]:
     }
 
 
-def test_storage_inventory_keeps_certification_journal_without_dependency_supply_owner(tmp_path: Path) -> None:
+def test_storage_inventory_keeps_certification_journal_without_dependency_supply_owner(
+    tmp_path: Path,
+) -> None:
     items = {item.storage_id: item for item in storage_inventory(_environment(tmp_path))}
 
     assert not any(item.storage_id == "certification.control-state" for item in items.values())
@@ -103,8 +102,9 @@ def test_generic_storage_prune_does_not_claim_unclassified_cache_authority(tmp_p
     assert (unclassified / "sentinel").read_text(encoding="utf-8") == "unclassified"
 
 
-
-def test_storage_census_reports_unknown_oh_goon_cache_and_state_without_cleanup_authority(tmp_path: Path) -> None:
+def test_storage_census_reports_unknown_oh_goon_cache_and_state_without_cleanup_authority(
+    tmp_path: Path,
+) -> None:
     from oh_goon.runtime.storage_lifecycle import storage_census
 
     env = _environment(tmp_path)
@@ -122,7 +122,9 @@ def test_storage_census_reports_unknown_oh_goon_cache_and_state_without_cleanup_
     assert all("no automatic cleanup authority" in item.reason for item in census.unclassified)
 
 
-def test_storage_census_accounts_for_pytest_receipts_without_claiming_package_manager_caches(tmp_path: Path) -> None:
+def test_storage_census_accounts_for_pytest_receipts_without_claiming_package_manager_caches(
+    tmp_path: Path,
+) -> None:
     from oh_goon.runtime.storage_lifecycle import storage_census
 
     census = storage_census(_environment(tmp_path))
@@ -148,8 +150,6 @@ def test_storage_census_exposes_every_unowned_cache_top_level(tmp_path: Path) ->
 
     assert residual == {"bootstrap", "developer", "certification-dependencies"}
     assert all("no automatic cleanup authority" in item.reason for item in census.unclassified)
-
-
 
 
 def test_storage_inventory_exposes_repository_certification_run_workspaces(tmp_path: Path) -> None:
@@ -194,7 +194,9 @@ def test_old_certification_schema_is_unclassified_not_cleanup_authority(tmp_path
     workspace.mkdir(parents=True)
 
     items = {item.storage_id: item for item in storage_inventory(env)}
-    assert not any(storage_id.startswith(f"certification.run-workspaces.{repository}") for storage_id in items)
+    assert not any(
+        storage_id.startswith(f"certification.run-workspaces.{repository}") for storage_id in items
+    )
     census = storage_census(env)
     assert schema in {item.path for item in census.unclassified}
     assert workspace.exists()

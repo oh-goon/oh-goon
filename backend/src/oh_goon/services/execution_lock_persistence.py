@@ -21,7 +21,9 @@ def render_execution_lock(lock: ExecutionLock) -> str:
     payload: dict[str, Any] = {
         "lock_version": lock.lock_version,
         "plan": lock.plan,
-        "execution": [item.model_dump(mode="json", exclude_computed_fields=True) for item in lock.execution],
+        "execution": [
+            item.model_dump(mode="json", exclude_computed_fields=True) for item in lock.execution
+        ],
     }
     if lock.external:
         payload["external"] = {item.path: item.digest for item in lock.external}

@@ -15,7 +15,6 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedPreCommitStep,
 )
 
-
 _SHELL_EXECUTION_TOOLS = frozenset({"bash", "dash", "sh"})
 # Fixed sandbox-local support for an explicitly admitted shell. These tools do not
 # grant host filesystem/network authority: they operate inside the already-bounded
@@ -42,11 +41,7 @@ SHELL_RUNTIME_SUPPORT_TOOLS = (
 def shell_runtime_support_tool_names(tool_names: tuple[str, ...]) -> tuple[str, ...]:
     """Return fixed sandbox support only when a shell is explicitly admitted."""
 
-    return (
-        SHELL_RUNTIME_SUPPORT_TOOLS
-        if _SHELL_EXECUTION_TOOLS.intersection(tool_names)
-        else ()
-    )
+    return SHELL_RUNTIME_SUPPORT_TOOLS if _SHELL_EXECUTION_TOOLS.intersection(tool_names) else ()
 
 
 def step_execution_tool(step: ResolvedPlanStep) -> str | None:

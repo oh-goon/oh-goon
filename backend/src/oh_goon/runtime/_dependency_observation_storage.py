@@ -263,7 +263,13 @@ def _upsert_snapshot_row(
             state.head_sha,
             state.pyproject_sha256,
             state.uv_lock_sha256,
-            json.dumps([item.model_dump(mode="json", exclude_computed_fields=True) for item in snapshot.sources], sort_keys=True),
+            json.dumps(
+                [
+                    item.model_dump(mode="json", exclude_computed_fields=True)
+                    for item in snapshot.sources
+                ],
+                sort_keys=True,
+            ),
             fleet_run_id,
             report.provenance.operation_id,
             producer_goon,

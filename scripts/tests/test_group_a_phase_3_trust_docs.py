@@ -6,13 +6,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-
-
 def test_phase_3_trust_and_journal_do_not_start_execution_or_duplicate_resolver():
     base = ROOT / "backend/src/oh_goon"
     for name in ["core/enforcer_lace_trust.py", "runtime/enforcer_lace_journal.py"]:
         ast.parse((base / name).read_text(encoding="utf-8"))
-    new_journal = (base / "runtime/enforcer_lace_journal.py").read_text(encoding="utf-8")
+    new_journal = (base / "runtime/enforcer_lace_journal.py").read_text(
+        encoding="utf-8"
+    )
     assert "BEGIN IMMEDIATE" in new_journal
     assert "RUN_ADMITTED" in new_journal
     assert "JOURNAL_UNRESOLVED" in new_journal
@@ -25,7 +25,10 @@ def test_phase_3_trust_and_journal_do_not_start_execution_or_duplicate_resolver(
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module == "oh_goon.runtime.enforcer_lace_journal":
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "oh_goon.runtime.enforcer_lace_journal"
+            ):
                 callers.append(str(path.relative_to(base)))
     assert set(callers) == {
         "services/fleet_admission.py",

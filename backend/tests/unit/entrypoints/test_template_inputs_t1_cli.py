@@ -1,4 +1,5 @@
 """T1: read-only canonical Plan/Goon input discovery through the public CLI."""
+
 from __future__ import annotations
 
 import hashlib
@@ -25,7 +26,8 @@ def test_cli_inspection_prints_canonical_json_and_exact_root_digest(monkeypatch,
     import oh_goon.cli as cli
 
     monkeypatch.setattr(
-        cli, "_build_application_runtime",
+        cli,
+        "_build_application_runtime",
         lambda **kwargs: pytest.fail("read-only CLI must never create runtime/SQLite"),
     )
     source = _plan()
@@ -56,7 +58,8 @@ def test_inspection_human_and_json_are_repeatable_and_read_only(monkeypatch, cap
     source = _plan("oci/release-deploy")
     before = source.read_bytes()
     monkeypatch.setattr(
-        cli, "_build_application_runtime",
+        cli,
+        "_build_application_runtime",
         lambda **kwargs: pytest.fail("inspection must not initialize application"),
     )
     assert main(["plan", "inputs", str(source)]) == 0
@@ -105,7 +108,8 @@ def test_cli_parser_accepts_source_closure_flags_but_rejects_plain_inspection_va
     import oh_goon.cli as cli
 
     monkeypatch.setattr(
-        cli, "_build_application_runtime",
+        cli,
+        "_build_application_runtime",
         lambda **kwargs: pytest.fail("plain input inspection cannot start runtime"),
     )
     parser = build_parser()
@@ -126,7 +130,8 @@ def test_invalid_or_missing_source_rejects_without_runtime(monkeypatch, capsys, 
     import oh_goon.cli as cli
 
     monkeypatch.setattr(
-        cli, "_build_application_runtime",
+        cli,
+        "_build_application_runtime",
         lambda **kwargs: pytest.fail("rejected inspection must not start runtime"),
     )
     missing = tmp_path / "missing.yml"

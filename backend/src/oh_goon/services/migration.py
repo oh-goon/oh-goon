@@ -6,8 +6,8 @@ from oh_goon.core.models.migration import AdoptUvPreview
 from oh_goon.core.models.repository import (
     IncludedRepositoryCatalogEntry,
 )
-from oh_goon.core.vocabulary import FleetScope, MigrationReadiness
 from oh_goon.core.path_authority import navigation_path
+from oh_goon.core.vocabulary import FleetScope, MigrationReadiness
 from oh_goon.runtime.state import LocalState, LocalStateReadView
 from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 

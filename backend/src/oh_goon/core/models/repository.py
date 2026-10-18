@@ -5,8 +5,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, Field, TypeAdapter, model_validator
 
-from oh_goon.core.product_identity import canonical_repository_path, repository_id
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.product_identity import canonical_repository_path, repository_id
 from oh_goon.core.vocabulary import FleetScope
 
 

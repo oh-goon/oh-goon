@@ -1,18 +1,19 @@
 """M196: installed-product native issuer and repository-tooling legacy import have one owner."""
+
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from oh_goon.integrations.native_uv_lock import native_uv_locked_project_issue
-from oh_goon.repository_tooling.dependency_locks import (
-    native_uv_locked_project_issue as tooling_native_uv_locked_project_issue,
-)
 from oh_goon.repository_tooling.architecture.backend_boundary_contract import (
     check_backend_boundaries,
+)
+from oh_goon.repository_tooling.dependency_locks import (
+    native_uv_locked_project_issue as tooling_native_uv_locked_project_issue,
 )
 
 NATIVE_NAMES = (

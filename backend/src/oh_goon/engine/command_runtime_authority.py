@@ -10,10 +10,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from oh_goon.core.file_digest import sha256_file_with_size
 from oh_goon.core import local_access_protocol
-from oh_goon.core.strict_executor_authority import STRICT_EXECUTOR_AUTHORITY_ENVIRONMENT
+from oh_goon.core.file_digest import sha256_file_with_size
 from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_MODE_ENV
+from oh_goon.core.strict_executor_authority import STRICT_EXECUTOR_AUTHORITY_ENVIRONMENT
 from oh_goon.engine.atomic_execution_bytes import (
     SealedExecutionBytes,
     atomic_execution_bytes_supported,
@@ -55,7 +55,9 @@ def sanitized_child_environment(
 
 def _requires_path_lookup(executable_name: str) -> bool:
     candidate = Path(executable_name)
-    return not candidate.is_absolute() and "/" not in executable_name and "\\" not in executable_name
+    return (
+        not candidate.is_absolute() and "/" not in executable_name and "\\" not in executable_name
+    )
 
 
 def _sha_identity(payload: object) -> str:
@@ -114,9 +116,7 @@ class RuntimeAuthorityReceipt:
 
     @property
     def receipt_identity(self) -> str:
-        return _sha_identity(
-            {"schema": "oh-goon.runtime-authority-receipt/v1", **asdict(self)}
-        )
+        return _sha_identity({"schema": "oh-goon.runtime-authority-receipt/v1", **asdict(self)})
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,9 +279,7 @@ def _binary_runtime_lease(
         child_env=child_env,
         path_value=path_value,
         admitted=admitted,
-        execution_materialization_identity=execution_materialization_identity(
-            executable, None
-        ),
+        execution_materialization_identity=execution_materialization_identity(executable, None),
     )
     return CommandRuntimeAuthorityLease(
         receipt=receipt,
@@ -443,7 +441,6 @@ def _runtime_authority_receipt(
     )
 
 
-
 def _require_runtime_executable_access(path: Path, *, display_name: str) -> None:
     try:
         metadata = path.stat()
@@ -458,6 +455,9 @@ def _require_runtime_executable_access(path: Path, *, display_name: str) -> None
             errno.EACCES, f"Executable is not runnable: {display_name}", display_name
         )
 
+
 def _requires_path_lookup(executable_name: str) -> bool:
     candidate = Path(executable_name)
-    return not candidate.is_absolute() and "/" not in executable_name and "\\" not in executable_name
+    return (
+        not candidate.is_absolute() and "/" not in executable_name and "\\" not in executable_name
+    )

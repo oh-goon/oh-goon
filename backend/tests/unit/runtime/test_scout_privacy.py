@@ -5,10 +5,10 @@ import sqlite3
 from datetime import timedelta
 from pathlib import Path
 
-from oh_goon.scout.evidence import ScoutEvidenceSnapshot
 from oh_goon.core.time import utc_now
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.scout.database import ScoutAnalyticalDatabase, scout_analytical_database_path
+from oh_goon.scout.evidence import ScoutEvidenceSnapshot
 from oh_goon.scout.store import ScoutObservationStore
 
 _RUN_COLUMNS = {

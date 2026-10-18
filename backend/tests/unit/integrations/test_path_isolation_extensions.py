@@ -164,7 +164,13 @@ def test_remote_extension_transport_and_checkout_use_distinct_authorities(
     )
     store.sync(declaration, catalog_root=tmp_path)
 
-    assert observed[0][0][:5] == ("-c", "core.hooksPath=/dev/null", "clone", "--no-checkout", "--template=")
+    assert observed[0][0][:5] == (
+        "-c",
+        "core.hooksPath=/dev/null",
+        "clone",
+        "--no-checkout",
+        "--template=",
+    )
     assert observed[0][1]["HOME"] == "/home/native-operator"
     assert observed[0][1]["SSH_AUTH_SOCK"] == "/run/native-ssh-agent.sock"
     assert observed[0][1]["GIT_CONFIG_GLOBAL"] == "/home/native-operator/.gitconfig"
@@ -231,9 +237,7 @@ def test_remote_extension_native_hooks_cannot_run_during_fleet_materialization(
     )
     transport_hook.chmod(0o755)
     checkout_hook = hooks / "post-checkout"
-    checkout_hook.write_text(
-        f'#!/bin/sh\nprintf hook > "{checkout_marker}"\n', encoding="utf-8"
-    )
+    checkout_hook.write_text(f'#!/bin/sh\nprintf hook > "{checkout_marker}"\n', encoding="utf-8")
     checkout_hook.chmod(0o755)
 
     template = tmp_path / "native-template"
@@ -251,8 +255,8 @@ def test_remote_extension_native_hooks_cannot_run_during_fleet_materialization(
     (native_home / ".gitconfig").write_text(
         '[protocol "file"]\n\tallow = always\n'
         f'[url "{source_url}"]\n\tinsteadOf = https://private.example.invalid/hooks.git\n'
-        f'[core]\n\thooksPath = {hooks}\n'
-        f'[init]\n\ttemplateDir = {template}\n',
+        f"[core]\n\thooksPath = {hooks}\n"
+        f"[init]\n\ttemplateDir = {template}\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("HOME", str(native_home))

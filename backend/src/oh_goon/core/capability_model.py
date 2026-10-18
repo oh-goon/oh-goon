@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.capability import (
     CapabilityInfo,
     CapabilityRequirement,
@@ -12,6 +11,7 @@ from oh_goon.core.models.capability import (
 )
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary import CommandSafety, OperationAction, UvRecipeId, Verdict
 
 

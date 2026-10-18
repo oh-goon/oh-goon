@@ -6,7 +6,12 @@ from pathlib import Path
 
 from oh_goon.cli_open import run_open_command
 from oh_goon.runtime.local_launch_access import LocalLaunchAccessStore
-from oh_goon.runtime.local_launch_owner import BACKEND_GENERATION, BACKEND_SERVICE, LocalLaunchOwner, built_local_intent
+from oh_goon.runtime.local_launch_owner import (
+    BACKEND_GENERATION,
+    BACKEND_SERVICE,
+    LocalLaunchOwner,
+    built_local_intent,
+)
 
 
 def _ready_built_launch(workspace: Path, *, observed_port: int) -> LocalLaunchOwner:
@@ -38,10 +43,13 @@ def test_open_uses_exact_observed_endpoint_and_private_capability_without_printi
     )
     opened: list[str] = []
 
-    assert run_open_command(
-        argparse.Namespace(command="open"),
-        browser_opener=lambda url: opened.append(url) or True,
-    ) == 0
+    assert (
+        run_open_command(
+            argparse.Namespace(command="open"),
+            browser_opener=lambda url: opened.append(url) or True,
+        )
+        == 0
+    )
 
     assert opened == ["http://127.0.0.1:8899/#access=launch-secret"]
     output = capsys.readouterr().out
@@ -60,10 +68,13 @@ def test_open_refuses_ready_launch_without_exact_published_capability(
     _ready_built_launch(workspace, observed_port=8899)
     opened: list[str] = []
 
-    assert run_open_command(
-        argparse.Namespace(command="open"),
-        browser_opener=lambda url: opened.append(url) or True,
-    ) == 1
+    assert (
+        run_open_command(
+            argparse.Namespace(command="open"),
+            browser_opener=lambda url: opened.append(url) or True,
+        )
+        == 1
+    )
     assert opened == []
     output = capsys.readouterr().out
     assert "OPEN UNAVAILABLE" in output

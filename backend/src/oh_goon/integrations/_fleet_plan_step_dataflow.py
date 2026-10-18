@@ -14,17 +14,14 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedExtensionStep,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
+    ResolvedLocalSearchAgentStep,
     ResolvedOciTagAssertStep,
     ResolvedPlanStep,
-    ResolvedLocalSearchAgentStep,
     StepStatusCondition,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanStepExecution,
     PublishedPlanOutputEvidence,
-)
-from oh_goon.core.models.fleet_plan_values import (
-    LiteralEnvironmentPart,
 )
 from oh_goon.core.path_authority import RepositoryPathSpace, repository_relative_parts
 
@@ -124,6 +121,7 @@ def collect_published_outputs(
         )
     return values, tuple(evidence)
 
+
 def _read_published_output(
     repository: Path,
     value: str,
@@ -159,8 +157,7 @@ def _read_published_output(
         descriptor = os.open(path, flags)
     except FileNotFoundError as exc:
         raise FleetPlanInvalid(
-            f"Fleet plan step {step_id} did not publish required output "
-            f"{output_name}: {value}"
+            f"Fleet plan step {step_id} did not publish required output {output_name}: {value}"
         ) from exc
     except OSError as exc:
         raise FleetPlanInvalid(
@@ -171,8 +168,7 @@ def _read_published_output(
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
             raise FleetPlanInvalid(
-                f"Fleet plan step {step_id} did not publish required output "
-                f"{output_name}: {value}"
+                f"Fleet plan step {step_id} did not publish required output {output_name}: {value}"
             )
         chunks: list[bytes] = []
         remaining = max_bytes + 1
@@ -219,7 +215,9 @@ def bind_step_outputs(
     if isinstance(step, ResolvedLocalSearchAgentStep) and step.feedback_reference is not None:
         value = bind(step.feedback_reference)
         if not value.strip() or len(value.encode("utf-8")) > 2048:
-            raise FleetPlanInvalid("Agent failed-test feedback must be nonempty and at most 2048 UTF-8 bytes")
+            raise FleetPlanInvalid(
+                "Agent failed-test feedback must be nonempty and at most 2048 UTF-8 bytes"
+            )
         updates["feedback_value"] = value
     if hasattr(step, "argv"):
         updates["argv"] = tuple(bind(item) for item in step.argv)

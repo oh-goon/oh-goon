@@ -9,9 +9,7 @@ _STEP_OUTPUT_REFERENCE = re.compile(
 _GOON_OUTPUT_REFERENCE = re.compile(
     r"\$\{\{\s*goons\.([A-Za-z0-9_.\-\[\]=]+)\.outputs\.([A-Za-z_][A-Za-z0-9_-]{0,63})\s*\}\}"
 )
-_GOON_WORKSPACE_REFERENCE = re.compile(
-    r"\$\{\{\s*goons\.([A-Za-z0-9_.\-\[\]=]+)\.workspace\s*\}\}"
-)
+_GOON_WORKSPACE_REFERENCE = re.compile(r"\$\{\{\s*goons\.([A-Za-z0-9_.\-\[\]=]+)\.workspace\s*\}\}")
 
 
 def step_output_reference(value: str) -> tuple[str, str] | None:

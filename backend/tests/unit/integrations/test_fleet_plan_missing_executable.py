@@ -135,6 +135,7 @@ def test_direct_step_transports_only_resolved_runtime_supervision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from datetime import datetime, timezone
+
     from oh_goon.core.models.runtime_supervision import RuntimeSupervisionPolicy
     from oh_goon.engine.command import CommandResult
     from oh_goon.engine.command_supervision import CommandRuntimeSupervision
@@ -169,7 +170,10 @@ def test_direct_step_transports_only_resolved_runtime_supervision(
         tmp_path,
         ResolvedCommandStep(step_id="supervised", argv=("echo", "ok"), timeout_seconds=10),
         StepRuntime(
-            git=GitService(), extensions=None, tools=None, cancel_requested=None,
+            git=GitService(),
+            extensions=None,
+            tools=None,
+            cancel_requested=None,
             runtime_supervision=supervision,
         ),
         step_order=1,

@@ -1,6 +1,6 @@
+import hashlib
 import os
 import stat
-import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +10,6 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceStale
 from oh_goon.core.models.goon_plan_source import SharedPlanSource
-from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.runtime.shared_plans import SharedPlanFileStore
 from oh_goon.services.shared_plans import SharedPlanService
 from tests.factories.shipped_templates import GOON_TEMPLATES as SHIPPED_GOONS
@@ -97,8 +96,6 @@ def test_template_selection_materializes_canonical_shared_plan_and_is_idempotent
     assert store.read("python-quality") == first
 
 
-
-
 def test_template_selection_rejects_changed_source_before_write(tmp_path: Path) -> None:
     from oh_goon.runtime.plan_templates import PlanTemplateStore
 
@@ -131,6 +128,7 @@ def test_template_selection_supports_explicit_destination_key(tmp_path: Path) ->
     assert document.plan_key == "shared-quality"
     assert store.read("shared-quality") == document
 
+
 def test_shared_plan_read_projects_typed_template_inputs_for_frontend(tmp_path: Path) -> None:
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
@@ -156,6 +154,7 @@ def test_shared_plan_read_projects_typed_template_inputs_for_frontend(tmp_path: 
     assert definition.default == 70
     assert definition.minimum == 70
     assert definition.maximum == 100
+
 
 def test_template_selection_never_overwrites_diverged_shared_plan(tmp_path: Path) -> None:
     from oh_goon.runtime.plan_templates import PlanTemplateStore
@@ -235,6 +234,7 @@ def test_shared_plan_preview_resolves_once_and_reports_each_team_without_repo_go
         repositories=Mock(return_value=(repository_a, repository_b)), team=Mock()
     )
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+
     resolver = FleetPlanResolver(goon_templates=SHIPPED_GOONS)
     resolved, source_sha256 = resolver.resolve_with_source(
         store.path("python-quality"),
@@ -259,7 +259,9 @@ def test_shared_plan_preview_resolves_once_and_reports_each_team_without_repo_go
     )
 
     assert preview.plan_id == resolved.plan_id
-    assert [(item.name, item.value) for item in preview.explicit_inputs] == [("coverage_threshold", "85")]
+    assert [(item.name, item.value) for item in preview.explicit_inputs] == [
+        ("coverage_threshold", "85")
+    ]
     assert preview.ready_count == 1
     assert preview.blocked_count == 1
     assert [item.state for item in preview.teams] == ["READY", "BLOCKED"]
@@ -358,8 +360,8 @@ def test_shared_plan_cli_team_paths_resolve_from_one_league_state_cut(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.runtime.database import LocalDatabase
-    from oh_goon.services.repository_discovery import RepositoryDiscoveryService
     from oh_goon.services.league import LeagueService
+    from oh_goon.services.repository_discovery import RepositoryDiscoveryService
     from tests.factories.local_state import local_state
 
     root = tmp_path / "league"
@@ -474,15 +476,15 @@ def test_shared_plan_history_pages_matching_runs_without_duplicates(tmp_path: Pa
     )
 
     first = service.history("python-quality", limit=2)
-    second = service.history(
-        "python-quality", limit=2, before_revision=first.next_before_revision
-    )
+    second = service.history("python-quality", limit=2, before_revision=first.next_before_revision)
 
     assert [run.fleet_run_id for run in first.runs] == ["fleet-12", "fleet-9"]
     assert first.next_before_revision == 9
     assert [run.fleet_run_id for run in second.runs] == ["fleet-7", "fleet-5"]
     assert second.next_before_revision is None
-    assert not ({run.fleet_run_id for run in first.runs} & {run.fleet_run_id for run in second.runs})
+    assert not (
+        {run.fleet_run_id for run in first.runs} & {run.fleet_run_id for run in second.runs}
+    )
 
 
 def test_shared_plan_history_rejects_invalid_cursor_before_reading_runs(tmp_path: Path) -> None:
@@ -514,7 +516,9 @@ def test_shared_plan_lock_preview_renders_exact_resolved_execution_without_writi
         SHIPPED_PLANS,
     )
     template_sha = next(
-        item.sha256 for item in service.templates().templates if item.template_key == "python/quality"
+        item.sha256
+        for item in service.templates().templates
+        if item.template_key == "python/quality"
     )
     service.create_from_template("python/quality", template_sha)
 
@@ -576,7 +580,9 @@ def test_shared_plan_preview_rejects_plan_revision_that_changed_after_read(tmp_p
     plans.resolve.assert_not_called()
 
 
-def test_shared_plan_lock_preview_rejects_plan_revision_that_changed_after_read(tmp_path: Path) -> None:
+def test_shared_plan_lock_preview_rejects_plan_revision_that_changed_after_read(
+    tmp_path: Path,
+) -> None:
     store = SharedPlanFileStore(tmp_path / "plans")
     original = store.write("python-quality", _shared_quality())
     service = SharedPlanService(
@@ -596,12 +602,15 @@ def test_shared_plan_lock_preview_rejects_plan_revision_that_changed_after_read(
         service.lock_preview("python-quality", expected_revision=original.sha256)
 
 
-
-def test_shared_plan_run_rejects_exact_source_revision_change_even_before_execution(tmp_path: Path) -> None:
+def test_shared_plan_run_rejects_exact_source_revision_change_even_before_execution(
+    tmp_path: Path,
+) -> None:
     store = SharedPlanFileStore(tmp_path / "plans")
     original = store.write("python-quality", _shared_quality())
     plans = SimpleNamespace(run=Mock(), require_plan_ingress_preparation=Mock())
-    service = SharedPlanService(store, SimpleNamespace(), plans, SimpleNamespace(), SimpleNamespace())
+    service = SharedPlanService(
+        store, SimpleNamespace(), plans, SimpleNamespace(), SimpleNamespace()
+    )
     changed = store.write(
         "python-quality",
         _shared_quality() + "\n# source-only revision change\n",
@@ -619,6 +628,7 @@ def test_shared_plan_run_rejects_exact_source_revision_change_even_before_execut
             repository_instance_ids={"repo-a": "instance-a"},
         )
     plans.run.assert_not_called()
+
 
 def test_shared_plan_save_validates_exact_content_once_before_commit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

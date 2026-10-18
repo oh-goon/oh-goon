@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture._launch_contract_common import (
-    owned_string_constant_violations,
     forbidden_import_violations,
+    owned_string_constant_violations,
 )
 from oh_goon.repository_tooling.architecture.common import Violation
 

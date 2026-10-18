@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from functools import cache
 import json
+from functools import cache
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,12 +24,13 @@ from oh_goon.integrations._fleet_plan_host_resources import (
 )
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
+from oh_goon.integrations.executable_materialization_authority import (
+    StepExecutableMaterializationReceipt,
+)
 from oh_goon.integrations.fleet_plan_attempt_evidence import build_strict_attempt_evidence
-from oh_goon.integrations.executable_materialization_authority import StepExecutableMaterializationReceipt
 from oh_goon.integrations.fleet_plan_oci_tag_execution import execute_oci_tag_assert
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.shipped_templates import GOON_TEMPLATES, PLAN_TEMPLATES
-
 
 
 def _resolver() -> FleetPlanResolver:

@@ -1,4 +1,5 @@
 """Command-line contract for the bounded pytest batch runner."""
+
 from __future__ import annotations
 
 import argparse
@@ -73,4 +74,6 @@ def _validate_batch_args(parser: argparse.ArgumentParser, args: argparse.Namespa
     if args.suite_timeout is not None and args.suite_timeout < 1:
         parser.error("suite-timeout must be positive")
     if args.suite_timeout is not None and args.suite_timeout <= args.batch_timeout:
-        parser.error("suite-timeout must exceed batch-timeout to preserve startup/checkpoint headroom")
+        parser.error(
+            "suite-timeout must exceed batch-timeout to preserve startup/checkpoint headroom"
+        )

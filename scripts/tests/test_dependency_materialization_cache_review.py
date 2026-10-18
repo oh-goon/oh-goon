@@ -16,9 +16,14 @@ def _target(name: str) -> str:
     return tail if end < 0 else tail[:end]
 
 
-def test_phase23_review_covers_every_normative_expensive_operation_with_identity_and_negative_proof() -> None:
+def test_phase23_review_covers_every_normative_expensive_operation_with_identity_and_negative_proof() -> (
+    None
+):
     payload = yaml.safe_load(REVIEW.read_text(encoding="utf-8"))
-    assert payload["rule"] == "native_tools_own_package_materialization_and_cache_semantics"
+    assert (
+        payload["rule"]
+        == "native_tools_own_package_materialization_and_cache_semantics"
+    )
     operations = payload["operations"]
     assert {item["id"] for item in operations} == {
         "python-environment",
@@ -34,9 +39,12 @@ def test_phase23_review_covers_every_normative_expensive_operation_with_identity
         assert item["reuse_identity"].strip()
 
 
-
-def test_app_certification_consumes_native_init_without_second_materialization_owner() -> None:
-    plan = (ROOT / "templates/plans/oh-goon/app-certification/plan.yml").read_text(encoding="utf-8")
+def test_app_certification_consumes_native_init_without_second_materialization_owner() -> (
+    None
+):
+    plan = (ROOT / "templates/plans/oh-goon/app-certification/plan.yml").read_text(
+        encoding="utf-8"
+    )
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 
     assert not (ROOT / "templates/goons/oh-goon/dependency-materialize").exists()
@@ -45,10 +53,15 @@ def test_app_certification_consumes_native_init_without_second_materialization_o
     assert "$(MAKE) init" not in _target("certify")
     assert 'test -x "$(CERTIFICATION_RUNNER)"' in _target("certify")
 
-    for removed in ("certification-setup:", "certification-workspace-setup:", "certification-backend-workspace-setup:"):
+    for removed in (
+        "certification-setup:",
+        "certification-workspace-setup:",
+        "certification-backend-workspace-setup:",
+    ):
         assert f"\n{removed}" not in f"\n{makefile}"
     assert not (ROOT / "scripts/certification_supply_import_authority.sh").exists()
     assert not (ROOT / "scripts/certification_workspace_setup.sh").exists()
+
 
 def test_phase23_reuse_owners_reprove_identity_instead_of_trusting_presence() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")

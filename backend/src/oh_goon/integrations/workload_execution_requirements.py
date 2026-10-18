@@ -12,7 +12,9 @@ from oh_goon.integrations.make_execution_authority import derive_make_target_aut
 from oh_goon.integrations.package_script_execution_authority import PackageExecutableAuthority
 
 MAKEFILE = "Makefile"
-_ANNOTATION = re.compile(r"^# OH_GOON_OPAQUE_TOOLS: (?P<tools>none|[A-Za-z0-9_.+-]+(?: [A-Za-z0-9_.+-]+)*)$")
+_ANNOTATION = re.compile(
+    r"^# OH_GOON_OPAQUE_TOOLS: (?P<tools>none|[A-Za-z0-9_.+-]+(?: [A-Za-z0-9_.+-]+)*)$"
+)
 _TARGET = re.compile(r"^(?P<target>[A-Za-z0-9_.-]+):(?:\s|$)")
 _OWNER_PREFIX = "make:"
 
@@ -79,8 +81,6 @@ def _load_opaque_tools(path: Path) -> dict[str, tuple[str, ...]]:
     return result
 
 
-
-
 def _registered_make_owners(root: Path) -> tuple[str, ...]:
     """Return Make workload owners carrying independent repository permission.
 
@@ -102,6 +102,7 @@ def _registered_make_owners(root: Path) -> tuple[str, ...]:
     if any(not isinstance(owner, str) or not owner.startswith(_OWNER_PREFIX) for owner in owners):
         raise ValueError(f"invalid Make workload permission owner in {path}")
     return owners
+
 
 def _close_owner(
     root: Path, owner: str, opaque_tools: tuple[str, ...]
@@ -153,9 +154,7 @@ def _requirements_identity(
                     "package_executables": [
                         list(item.identity_row()) for item in package_executables[owner]
                     ],
-                    "package_provenance": [
-                        list(item) for item in package_provenance[owner]
-                    ],
+                    "package_provenance": [list(item) for item in package_provenance[owner]],
                 }
                 for owner in sorted(closed)
             },

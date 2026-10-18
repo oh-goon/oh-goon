@@ -2,32 +2,34 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import statistics
+import subprocess
+import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 from pathlib import Path
-import socket
-import statistics
-import subprocess
-import sys
 from tempfile import TemporaryDirectory
-import time
 from typing import Any
 from urllib.parse import urlencode
-import urllib.error
-import urllib.request
 
 from oh_goon.core import local_access_protocol
 from oh_goon.core.time import utc_now
-from oh_goon.runtime.database import LocalDatabase
-from oh_goon.scout.store import ScoutObservationStore
+from oh_goon.repository_tooling.local_access_http import (
+    authorized_request,
+    new_certification_access_token,
+)
 from oh_goon.repository_tooling.network_certification import blocked_network_attempts
-from oh_goon.repository_tooling.local_access_http import authorized_request, new_certification_access_token
 from oh_goon.repository_tooling.release.runtime_journey import (
     prepare_acceptance_repository,
     run_acceptance_goon,
 )
 from oh_goon.repository_tooling.scout_load_probe import build_scout_load_snapshot
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.scout.store import ScoutObservationStore
 
 ROOT = Path(__file__).resolve().parents[4]
 SCOUT_HTTP_ACCESS_TOKEN = new_certification_access_token()
@@ -72,9 +74,7 @@ def _wait_json(
     while time.monotonic() < deadline:
         if process is not None and (returncode := process.poll()) is not None:
             detail = _server_exit_stderr(process)
-            message = (
-                f"Scout server exited with code {returncode} while waiting for {url}"
-            )
+            message = f"Scout server exited with code {returncode} while waiting for {url}"
             if detail:
                 message += f"\nScout server stderr:\n{detail}"
             raise RuntimeError(message)
@@ -152,9 +152,7 @@ def _stop_server(process: subprocess.Popen[bytes]) -> None:
 
 def _journal_revision(database: LocalDatabase) -> int:
     with database.transaction(track_revision=False) as connection:
-        row = connection.execute(
-            "SELECT MAX(revision) AS revision FROM journal_entries"
-        ).fetchone()
+        row = connection.execute("SELECT MAX(revision) AS revision FROM journal_entries").fetchone()
     return int(row["revision"] or 0)
 
 
@@ -166,9 +164,7 @@ def _seed_scout_sidecar(
     journal_revision: int,
 ) -> int:
     if journal_revision < 1:
-        raise RuntimeError(
-            "HTTP load setup requires canonical Journal truth before Scout seeding"
-        )
+        raise RuntimeError("HTTP load setup requires canonical Journal truth before Scout seeding")
     now = (utc_now() - timedelta(minutes=5)).replace(second=0, microsecond=0)
     snapshot = build_scout_load_snapshot(
         repositories=repositories,
@@ -186,16 +182,12 @@ def _seed_scout_sidecar(
         step_retain_after=now - timedelta(days=90),
     )
     if stored_revision != journal_revision:
-        raise RuntimeError(
-            "Scout load sidecar did not retain the canonical Journal revision"
-        )
+        raise RuntimeError("Scout load sidecar did not retain the canonical Journal revision")
     return len(snapshot.steps)
 
 
 def _representative_routes(base: str) -> dict[str, str]:
-    goon_query = urlencode(
-        {"name": "python/python-tests", "source_sha256": "a" * 64, "hours": 24}
-    )
+    goon_query = urlencode({"name": "python/python-tests", "source_sha256": "a" * 64, "hours": 24})
     return {
         "health": f"{base}/api/scout/health",
         "overview": f"{base}/api/scout/overview?hours=24&limit=20",
@@ -216,18 +208,14 @@ def _measure_routes(routes: dict[str, str]) -> dict[str, float]:
             payload = _get_json(url)
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"Scout route {name} failed with HTTP {exc.code}: {detail}"
-            ) from exc
+            raise RuntimeError(f"Scout route {name} failed with HTTP {exc.code}: {detail}") from exc
         if payload.get("enabled") is False:
             raise RuntimeError(f"Scout unexpectedly disabled for route {name}")
         measured[name] = round((time.perf_counter() - started) * 1000, 3)
     return measured
 
 
-def _concurrent_routes(
-    routes: dict[str, str], users: int
-) -> tuple[float, tuple[float, ...]]:
+def _concurrent_routes(routes: dict[str, str], users: int) -> tuple[float, tuple[float, ...]]:
     heavy = (
         routes["overview"],
         routes["findings"],
@@ -251,9 +239,7 @@ def _concurrent_routes(
         try:
             _get_json(url)
         except Exception as exc:
-            raise RuntimeError(
-                f"concurrent Scout request failed for {url}: {exc}"
-            ) from exc
+            raise RuntimeError(f"concurrent Scout request failed for {url}: {exc}") from exc
         return (time.perf_counter() - started) * 1000
 
     started = time.perf_counter()
@@ -333,16 +319,12 @@ def _measure_certified_http_runtime(
                 "HTTP Scout health does not expose the seeded repository/run population"
             )
         if health.get("retained_step_observations") != observations:
-            raise RuntimeError(
-                "HTTP Scout health does not expose the seeded Step population"
-            )
+            raise RuntimeError("HTTP Scout health does not expose the seeded Step population")
     except BaseException as exc:
         failure = exc
     finally:
         _stop_server(server)
-    server_stderr = (
-        server.stderr.read().decode("utf-8", errors="replace") if server.stderr else ""
-    )
+    server_stderr = server.stderr.read().decode("utf-8", errors="replace") if server.stderr else ""
     attempts = blocked_network_attempts(guard_log) if guard_log is not None else ()
     if attempts:
         raise RuntimeError(

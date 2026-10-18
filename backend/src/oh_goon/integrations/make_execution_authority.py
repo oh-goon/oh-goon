@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import re
 import shlex
 from dataclasses import dataclass, field
@@ -73,7 +72,6 @@ _SHELL_PUNCTUATION = frozenset({"&&", "||", ";", "|", "&"})
 
 
 @dataclass(frozen=True, slots=True)
-
 class MakeTargetAuthority:
     target: str
     tools: tuple[str, ...]
@@ -106,9 +104,7 @@ def _logical_lines(text: str) -> list[str]:
     return out
 
 
-def _merge_target(
-    targets: dict[str, _Target], name: str, prerequisites: tuple[str, ...]
-) -> None:
+def _merge_target(targets: dict[str, _Target], name: str, prerequisites: tuple[str, ...]) -> None:
     previous = targets.get(name)
     recipes = previous.recipes if previous is not None else ()
     inherited = previous.prerequisites if previous is not None else ()
@@ -249,8 +245,6 @@ def _resolve_variable_command(
     return _command_tool((replacement + " " + suffix).strip(), variables)
 
 
-
-
 def _expand_segment_command(segment: str, variables: dict[str, str]) -> str:
     try:
         words = shlex.split(segment, posix=True)
@@ -272,6 +266,7 @@ def _expand_segment_command(segment: str, variables: dict[str, str]) -> str:
     expanded_words = [*words[:index], *replacement_words, *words[index + 1 :]]
     rendered = shlex.join(expanded_words)
     return _VAR.sub("__OH_GOON_MAKEVAR__", rendered)
+
 
 def _classify_tool(word: str) -> tuple[str | None, str | None]:
     word = word.lstrip("({").rstrip(")}")
@@ -325,9 +320,7 @@ class _AuthorityBuilder:
 
     def _visit_prerequisite(self, prerequisite: str, chain: tuple[str, ...]) -> None:
         if "$" in prerequisite or "%" in prerequisite:
-            self.unresolved.add(
-                "dynamic make prerequisite: " + " -> ".join((*chain, prerequisite))
-            )
+            self.unresolved.add("dynamic make prerequisite: " + " -> ".join((*chain, prerequisite)))
             return
         if prerequisite in self.targets:
             self.visit(prerequisite, chain)

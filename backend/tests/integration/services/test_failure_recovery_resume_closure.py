@@ -22,13 +22,13 @@ from tests.factories.repository_effect_runtime import effect_recovery
 
 
 def _script_plan() -> str:
-    return '''version: 1
+    return """version: 1
 execution:
   purpose: verification
 steps:
   - id: recovery
     run: "./lifecycle-step.py"
-'''
+"""
 
 
 class _RestartLeaseEnvironment:

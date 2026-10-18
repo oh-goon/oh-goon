@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from oh_goon.core.process_birth import ProcessBirthIdentity
 from oh_goon.core.launch_events import LaunchEvent, LaunchEventKind
 from oh_goon.core.launch_manifest import (
     LaunchEndpointIntent,
@@ -16,6 +15,7 @@ from oh_goon.core.launch_manifest import (
     LaunchServiceIntent,
 )
 from oh_goon.core.launch_projection import project_launch_manifest
+from oh_goon.core.process_birth import ProcessBirthIdentity
 
 T0 = datetime(2026, 9, 3, 20, 30, tzinfo=UTC)
 IDENTITY = LaunchIdentity(
@@ -45,9 +45,18 @@ INTENT = LaunchIntent(
 def _event(sequence: int, event: LaunchEventKind, **kwargs) -> LaunchEvent:
     if event is LaunchEventKind.SERVICE_SPAWNED:
         payload = kwargs.get("payload")
-        if isinstance(payload, dict) and isinstance(payload.get("pid"), int) and "birth_identity" not in payload:
+        if (
+            isinstance(payload, dict)
+            and isinstance(payload.get("pid"), int)
+            and "birth_identity" not in payload
+        ):
             pid = payload["pid"]
-            kwargs["payload"] = {**payload, "birth_identity": ProcessBirthIdentity(pid=pid, boot_id="test-boot", start_ticks=sequence).to_payload()}
+            kwargs["payload"] = {
+                **payload,
+                "birth_identity": ProcessBirthIdentity(
+                    pid=pid, boot_id="test-boot", start_ticks=sequence
+                ).to_payload(),
+            }
     return LaunchEvent(
         launch_id=IDENTITY.launch_id,
         sequence=sequence,
@@ -62,18 +71,48 @@ def _event(sequence: int, event: LaunchEventKind, **kwargs) -> LaunchEvent:
 def _backend_ready_events() -> tuple[LaunchEvent, ...]:
     return (
         _event(1, LaunchEventKind.LAUNCH_RESOLVED),
-        _event(2, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=1, payload={"pid": 41}),
-        _event(3, LaunchEventKind.SERVICE_BOUND, service="backend", service_generation=1, asserted_by="backend-runtime", payload={"host": "127.0.0.1", "port": 8787}),
-        _event(4, LaunchEventKind.SERVICE_STARTUP_COMPLETE, service="backend", service_generation=1, asserted_by="backend-runtime"),
-        _event(5, LaunchEventKind.SERVICE_READY, service="backend", service_generation=1, asserted_by="backend-runtime"),
+        _event(
+            2,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=1,
+            payload={"pid": 41},
+        ),
+        _event(
+            3,
+            LaunchEventKind.SERVICE_BOUND,
+            service="backend",
+            service_generation=1,
+            asserted_by="backend-runtime",
+            payload={"host": "127.0.0.1", "port": 8787},
+        ),
+        _event(
+            4,
+            LaunchEventKind.SERVICE_STARTUP_COMPLETE,
+            service="backend",
+            service_generation=1,
+            asserted_by="backend-runtime",
+        ),
+        _event(
+            5,
+            LaunchEventKind.SERVICE_READY,
+            service="backend",
+            service_generation=1,
+            asserted_by="backend-runtime",
+        ),
     )
 
 
 def test_projection_preserves_provenance_for_every_positive_service_fact() -> None:
-    manifest = project_launch_manifest(identity=IDENTITY, intent=INTENT, events=_backend_ready_events())
+    manifest = project_launch_manifest(
+        identity=IDENTITY, intent=INTENT, events=_backend_ready_events()
+    )
     backend = manifest.observed.services[0]
     assert backend.process is not None and backend.process.pid.asserted_by == "launch-owner"
-    assert backend.bound_endpoint is not None and backend.bound_endpoint.host.asserted_by == "backend-runtime"
+    assert (
+        backend.bound_endpoint is not None
+        and backend.bound_endpoint.host.asserted_by == "backend-runtime"
+    )
     assert backend.startup is not None and backend.startup.asserted_by == "backend-runtime"
     assert backend.readiness is not None and backend.readiness.asserted_by == "backend-runtime"
     assert backend.health is None
@@ -88,7 +127,13 @@ def test_launch_ready_requires_all_required_services_ready() -> None:
 
     incomplete = (
         _event(1, LaunchEventKind.LAUNCH_RESOLVED),
-        _event(2, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=1, payload={"pid": 41}),
+        _event(
+            2,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=1,
+            payload={"pid": 41},
+        ),
         _event(3, LaunchEventKind.LAUNCH_READY),
     )
     with pytest.raises(ValueError, match="required service"):
@@ -107,8 +152,26 @@ def test_ready_cannot_be_inferred_from_spawn_or_bound() -> None:
 def test_service_failure_is_structured_and_does_not_invent_terminal_launch_state() -> None:
     events = (
         _event(1, LaunchEventKind.LAUNCH_RESOLVED),
-        _event(2, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=1, payload={"pid": 41}),
-        _event(3, LaunchEventKind.SERVICE_FAILED, service="backend", service_generation=1, asserted_by="backend-runtime", payload={"failure_kind": "process", "failure_code": "child_exit", "reason": "backend exited", "retryable": False}),
+        _event(
+            2,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=1,
+            payload={"pid": 41},
+        ),
+        _event(
+            3,
+            LaunchEventKind.SERVICE_FAILED,
+            service="backend",
+            service_generation=1,
+            asserted_by="backend-runtime",
+            payload={
+                "failure_kind": "process",
+                "failure_code": "child_exit",
+                "reason": "backend exited",
+                "retryable": False,
+            },
+        ),
     )
     manifest = project_launch_manifest(identity=IDENTITY, intent=INTENT, events=events)
     backend = manifest.observed.services[0]
@@ -122,7 +185,13 @@ def test_service_failure_is_structured_and_does_not_invent_terminal_launch_state
 def test_new_service_generation_resets_old_runtime_observations() -> None:
     events = (
         *_backend_ready_events(),
-        _event(6, LaunchEventKind.SERVICE_SPAWNED, service="backend", service_generation=2, payload={"pid": 99}),
+        _event(
+            6,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=2,
+            payload={"pid": 99},
+        ),
     )
     manifest = project_launch_manifest(identity=IDENTITY, intent=INTENT, events=events)
     backend = manifest.observed.services[0]
@@ -169,9 +238,7 @@ def test_projection_rejects_launch_identity_mismatch() -> None:
 
 
 def test_projection_rejects_owner_generation_mismatch() -> None:
-    events = (
-        dataclass_replace(_event(1, LaunchEventKind.LAUNCH_RESOLVED), owner_generation=4),
-    )
+    events = (dataclass_replace(_event(1, LaunchEventKind.LAUNCH_RESOLVED), owner_generation=4),)
     with pytest.raises(ValueError, match="owner generation"):
         project_launch_manifest(identity=IDENTITY, intent=INTENT, events=events)
 

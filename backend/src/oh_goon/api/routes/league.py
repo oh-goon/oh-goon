@@ -1,9 +1,5 @@
 from fastapi import APIRouter, Depends
 
-from oh_goon.core.enforcer_lace_trust import TrustProtocolError
-from oh_goon.core.errors import FleetPlanInvalid, StateConflict
-from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
-
 from oh_goon.api.dependencies import (
     goon_service,
     league_lineup_service,
@@ -13,13 +9,15 @@ from oh_goon.api.dependencies import (
 from oh_goon.api.schemas.league import (
     LeagueLineupSaveRequest,
     SharedPlanFromTemplateRequest,
-    SharedPlanLockPreviewRequest,
     SharedPlanInputInspection,
+    SharedPlanLockPreviewRequest,
     SharedPlanPreviewRequest,
     SharedPlanRunRequest,
     SharedPlanSaveRequest,
     TeamRunRequest,
 )
+from oh_goon.core.enforcer_lace_trust import TrustProtocolError
+from oh_goon.core.errors import FleetPlanInvalid, StateConflict
 from oh_goon.core.models.league import LeagueMap
 from oh_goon.core.models.plan_template import PlanTemplateCatalog
 from oh_goon.core.models.run import FleetRunState
@@ -33,6 +31,7 @@ from oh_goon.core.models.shared_plan import (
     SharedPlanPreview,
     SharedPlanRunHistory,
 )
+from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
 from oh_goon.services.goon import GoonService
 from oh_goon.services.league import LeagueService
 from oh_goon.services.league_lineups import LeagueLineupService
@@ -63,7 +62,9 @@ def run_team(
         )
     except TrustProtocolError as exc:
         # The Fleet lifecycle owns trust. HTTP exposes only a stable conflict.
-        raise StateConflict("Fleet Plan execution requires valid authenticated admission authority") from exc
+        raise StateConflict(
+            "Fleet Plan execution requires valid authenticated admission authority"
+        ) from exc
 
 
 @router.get(
@@ -87,9 +88,7 @@ def create_shared_plan_from_template(
     request: SharedPlanFromTemplateRequest,
     service: SharedPlanService = Depends(shared_plan_service),
 ) -> SharedPlanDocument:
-    return service.create_from_template(
-        request.template_key, request.expected_template_sha256
-    )
+    return service.create_from_template(request.template_key, request.expected_template_sha256)
 
 
 @router.get("/shared-plans", response_model=SharedPlanCatalog, operation_id="shared_plans")
@@ -221,7 +220,9 @@ def run_shared_plan(
     except TrustProtocolError as exc:
         # Trust is enforced by the original lifecycle, not by HTTP. Present a
         # stable conflict without leaking signer/root/enrollment internals.
-        raise StateConflict("Fleet Plan execution requires valid authenticated admission authority") from exc
+        raise StateConflict(
+            "Fleet Plan execution requires valid authenticated admission authority"
+        ) from exc
 
 
 @router.get("/lineups", response_model=LeagueLineupCatalog, operation_id="league_lineups")

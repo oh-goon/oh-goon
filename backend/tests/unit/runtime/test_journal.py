@@ -1,18 +1,15 @@
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
 from oh_goon.core.errors import InvalidRunTransition, JournalConflict, RunNotFound
-from oh_goon.core.product_identity import fleet_step_attempt_id, repository_attempt_operation_id
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.run import FleetRunFailure
-from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, FleetRunAdmissionIntent, fleet_repository_scope
+from oh_goon.core.product_identity import fleet_step_attempt_id, repository_attempt_operation_id
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
-    FleetRunSource,
     FleetRunStatus,
     FleetRunTerminalIntent,
     OperationAction,
@@ -21,9 +18,8 @@ from oh_goon.core.vocabulary import (
 )
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.journal import Journal
-from tests.factories.capabilities import admit_test_run, resolved_intent
+from tests.factories.capabilities import admit_test_run
 from tests.factories.journal import (
-    admit_run,
     commit_operation,
     start_repository,
     start_run,
@@ -219,9 +215,7 @@ def test_concurrent_lifecycle_writers_allocate_one_contiguous_sequence_and_survi
     batch = journal.run_events("run-concurrent")
     assert [event.sequence for event in batch.events] == list(range(1, len(batch.events) + 1))
     reached = [
-        event
-        for event in batch.events
-        if event.event_type is FleetRunEventType.STEP_REACHED
+        event for event in batch.events if event.event_type is FleetRunEventType.STEP_REACHED
     ]
     assert len(reached) == len(steps)
     assert {event.step_id for event in reached} == {step_id for step_id, _ in steps}
@@ -229,9 +223,9 @@ def test_concurrent_lifecycle_writers_allocate_one_contiguous_sequence_and_survi
     reopened = Journal(LocalDatabase(database_path))
     reopened_batch = reopened.run_events("run-concurrent")
     assert reopened_batch.events == batch.events
-    assert [event.sequence for event in reopened.run_events("run-concurrent", after=7).events] == list(
-        range(8, len(batch.events) + 1)
-    )
+    assert [
+        event.sequence for event in reopened.run_events("run-concurrent", after=7).events
+    ] == list(range(8, len(batch.events) + 1))
 
 
 def test_fleet_operation_commit_appends_report_and_completion_as_one_fact(tmp_path: Path) -> None:
@@ -408,5 +402,3 @@ def _complete_run(
     start_repository(journal, run_id, identity)
     commit_operation(journal, operation(identity, action, run_id, operation_id, verdict))
     terminalize_run(journal, run_id, FleetRunTerminalIntent.COMPLETE)
-
-

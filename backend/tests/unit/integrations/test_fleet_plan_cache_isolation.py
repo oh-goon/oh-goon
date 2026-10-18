@@ -348,9 +348,7 @@ def test_read_only_retained_cache_avoids_run_and_attempt_tree_copies(
         step_id="consume-readonly",
         argv=("true", "consume-readonly"),
         cache=PlanStepCache(
-            source=RetainedPlanCacheSource(
-                reference_id=retained.reference_id, access="read_only"
-            )
+            source=RetainedPlanCacheSource(reference_id=retained.reference_id, access="read_only")
         ),
     )
     executor = _executor(store)
@@ -364,9 +362,7 @@ def test_read_only_retained_cache_avoids_run_and_attempt_tree_copies(
     try:
         attempt = prepared.create_attempt(step, 1)
         readonly = [
-            binding
-            for binding in attempt.sandbox_bindings
-            if str(binding.sandbox_path) == "/cache"
+            binding for binding in attempt.sandbox_bindings if str(binding.sandbox_path) == "/cache"
         ]
         assert len(readonly) == 1
         assert readonly[0].snapshot_path == retained.path
@@ -380,9 +376,7 @@ def test_read_only_retained_cache_avoids_run_and_attempt_tree_copies(
 def test_read_only_retained_cache_cannot_publish_or_retain() -> None:
     with pytest.raises(ValueError, match="read-only retained cache input"):
         PlanStepCache(
-            source=RetainedPlanCacheSource(
-                reference_id="ref-" + "a" * 32, access="read_only"
-            ),
+            source=RetainedPlanCacheSource(reference_id="ref-" + "a" * 32, access="read_only"),
             publish=True,
         )
 
@@ -390,7 +384,6 @@ def test_read_only_retained_cache_cannot_publish_or_retain() -> None:
 def test_retained_preflight_skips_repository_applicability_when_plan_has_no_retained_inputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import oh_goon.services.fleet_run_lifecycle as lifecycle_module
     from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 
     plan = _cicd(
@@ -471,12 +464,12 @@ def test_mixed_retained_cache_access_modes_currently_fail_before_workload_launch
 def test_retained_preflight_consumes_admitted_inactive_import_without_reresolving(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import oh_goon.integrations.fleet_plan_repository_scope as scope_module
     from oh_goon.core.models.fleet_plan import ResolvedImport
     from oh_goon.core.models.fleet_plan_evidence import PlanImportApplicabilityEvidence
     from oh_goon.core.models.fleet_plan_requirements import RepositoryFileExistsRequirement
     from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
     from tests.factories.run_admission import repository_admission_for
-    import oh_goon.integrations.fleet_plan_repository_scope as scope_module
 
     repository = RepositoryIdentity(path=tmp_path / "repo-admitted-skip")
     step = ResolvedCommandStep(

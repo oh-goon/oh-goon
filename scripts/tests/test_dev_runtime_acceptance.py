@@ -20,17 +20,25 @@ def test_dev_has_one_python_frontdoor_and_plan_owns_exact_commands() -> None:
     assert plan.intent().services[0].command == plan.services[0].command
 
 
-def test_acceptance_refuses_to_compete_for_owned_runtime_port(monkeypatch, tmp_path: Path) -> None:
+def test_acceptance_refuses_to_compete_for_owned_runtime_port(
+    monkeypatch, tmp_path: Path
+) -> None:
     vite = tmp_path / "frontend" / "node_modules" / ".bin" / "vite"
     vite.parent.mkdir(parents=True)
     vite.write_text("", encoding="utf-8")
-    monkeypatch.setattr(dev_runtime_acceptance, "_port_is_free", lambda port: port != dev_runtime_acceptance.FRONTEND_PORT)
+    monkeypatch.setattr(
+        dev_runtime_acceptance,
+        "_port_is_free",
+        lambda port: port != dev_runtime_acceptance.FRONTEND_PORT,
+    )
     assert dev_runtime_acceptance.accept_dev_runtime(tmp_path) == (
         "local-access runtime acceptance requires free loopback ports before startup: 5173",
     )
 
 
-def test_acceptance_delegates_process_start_failure_to_native_launch_owner(monkeypatch, tmp_path: Path) -> None:
+def test_acceptance_delegates_process_start_failure_to_native_launch_owner(
+    monkeypatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         dev_runtime_acceptance,
         "prepare_local_runtime_environment",

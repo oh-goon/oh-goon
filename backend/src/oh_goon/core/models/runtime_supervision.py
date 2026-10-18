@@ -35,14 +35,22 @@ class RuntimeSupervisionPolicy(ImmutableModel):
 
     @model_validator(mode="after")
     def _ordered_boundaries(self) -> "RuntimeSupervisionPolicy":
-        if self.slow_after_seconds is not None and self.slow_after_seconds >= self.max_runtime_seconds:
+        if (
+            self.slow_after_seconds is not None
+            and self.slow_after_seconds >= self.max_runtime_seconds
+        ):
             raise ValueError("slow_after_seconds must be below max_runtime_seconds")
-        if self.no_progress_timeout_seconds is not None and self.no_progress_timeout_seconds >= self.max_runtime_seconds:
+        if (
+            self.no_progress_timeout_seconds is not None
+            and self.no_progress_timeout_seconds >= self.max_runtime_seconds
+        ):
             raise ValueError("no_progress_timeout_seconds must be below max_runtime_seconds")
         if self.progress_start_grace_seconds >= self.max_runtime_seconds:
             raise ValueError("progress_start_grace_seconds must be below max_runtime_seconds")
         if self.heartbeat_timeout_seconds < self.heartbeat_interval_seconds:
-            raise ValueError("heartbeat_timeout_seconds must not be below heartbeat_interval_seconds")
+            raise ValueError(
+                "heartbeat_timeout_seconds must not be below heartbeat_interval_seconds"
+            )
         return self
 
 
@@ -72,16 +80,28 @@ class RuntimeObservation(ImmutableModel):
     def _consistent_identity(self) -> "RuntimeObservation":
         if self.observed_at < self.started_at:
             raise ValueError("observed_at cannot precede started_at")
-        if self.last_heartbeat_at is not None and not (self.started_at <= self.last_heartbeat_at <= self.observed_at):
+        if self.last_heartbeat_at is not None and not (
+            self.started_at <= self.last_heartbeat_at <= self.observed_at
+        ):
             raise ValueError("heartbeat timestamp is outside the observation window")
         if self.last_progress is not None:
-            if self.last_progress.execution_id != self.execution_id or self.last_progress.generation != self.generation:
+            if (
+                self.last_progress.execution_id != self.execution_id
+                or self.last_progress.generation != self.generation
+            ):
                 raise ValueError("semantic progress belongs to another execution generation")
-            if self.last_progress.observed_at < self.started_at or self.last_progress.observed_at > self.observed_at:
+            if (
+                self.last_progress.observed_at < self.started_at
+                or self.last_progress.observed_at > self.observed_at
+            ):
                 raise ValueError("semantic progress timestamp is outside the observation window")
-        if self.completed_at is not None and not (self.started_at <= self.completed_at <= self.observed_at):
+        if self.completed_at is not None and not (
+            self.started_at <= self.completed_at <= self.observed_at
+        ):
             raise ValueError("completion timestamp is outside the observation window")
-        if self.yield_requested_at is not None and not (self.started_at <= self.yield_requested_at <= self.observed_at):
+        if self.yield_requested_at is not None and not (
+            self.started_at <= self.yield_requested_at <= self.observed_at
+        ):
             raise ValueError("yield request timestamp is outside the observation window")
         return self
 

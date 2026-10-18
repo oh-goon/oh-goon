@@ -68,7 +68,9 @@ def exercise_operator_parallel_acceptance(
     if not enabled:
         return (None, None, None, None, None, None)
     if not environment.get(EXECUTORS_FILE_ENV, "").strip():
-        raise RuntimeError("resolved operator executor authority is missing from runtime environment")
+        raise RuntimeError(
+            "resolved operator executor authority is missing from runtime environment"
+        )
     cancelled, success = exercise_parallel_shared_plan_cancellation(
         frontend_base, repositories, access_token=access_token
     )

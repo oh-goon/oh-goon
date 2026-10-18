@@ -13,8 +13,6 @@ def blocked_network_attempts(path: Path) -> tuple[dict[str, object], ...]:
             continue
         payload = json.loads(line)
         if not isinstance(payload, dict):
-            raise RuntimeError(
-                "loopback network certification audit row must be a JSON object"
-            )
+            raise RuntimeError("loopback network certification audit row must be a JSON object")
         attempts.append(payload)
     return tuple(attempts)

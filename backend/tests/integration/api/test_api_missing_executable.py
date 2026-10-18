@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api.app import app as api_app
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from tests.integration.api.client import authenticated_api_client
 
 TERMINAL = {"COMPLETED", "CANCELLED", "FAILED"}
 
@@ -24,9 +23,7 @@ def _team_authority(client, repository: Path) -> tuple[str, str]:
     response = client.get("/api/league")
     assert response.status_code == 200
     teams = response.json()["teams"]
-    team = next(
-        item for item in teams if Path(item["repository"]["path"]) == repository
-    )
+    team = next(item for item in teams if Path(item["repository"]["path"]) == repository)
     assert team["pipeline"]["state"] == "CONFIGURED"
     return team["pipeline"]["sha256"], team["repository_instance_id"]
 
@@ -75,7 +72,10 @@ steps:
         assert accepted.status_code == 409
         body = accepted.json()
         assert body["code"] == "STATE_CONFLICT"
-        assert body["message"] == "Fleet Plan execution requires valid authenticated admission authority"
+        assert (
+            body["message"]
+            == "Fleet Plan execution requires valid authenticated admission authority"
+        )
         assert client.get("/api/fleet/runs/missing-executable-api").status_code == 404
 
 
@@ -125,7 +125,10 @@ steps:
         assert accepted.status_code == 409
         body = accepted.json()
         assert body["code"] == "STATE_CONFLICT"
-        assert body["message"] == "Fleet Plan execution requires valid authenticated admission authority"
+        assert (
+            body["message"]
+            == "Fleet Plan execution requires valid authenticated admission authority"
+        )
         assert client.get("/api/fleet/runs/permission-executable-api").status_code == 404
 
 
@@ -175,7 +178,10 @@ steps:
         assert accepted.status_code == 409
         body = accepted.json()
         assert body["code"] == "STATE_CONFLICT"
-        assert body["message"] == "Fleet Plan execution requires valid authenticated admission authority"
+        assert (
+            body["message"]
+            == "Fleet Plan execution requires valid authenticated admission authority"
+        )
         assert client.get("/api/fleet/runs/invalid-format-executable-api").status_code == 404
 
 
@@ -225,5 +231,8 @@ steps:
         assert accepted.status_code == 409
         body = accepted.json()
         assert body["code"] == "STATE_CONFLICT"
-        assert body["message"] == "Fleet Plan execution requires valid authenticated admission authority"
+        assert (
+            body["message"]
+            == "Fleet Plan execution requires valid authenticated admission authority"
+        )
         assert client.get("/api/fleet/runs/missing-interpreter-api").status_code == 404

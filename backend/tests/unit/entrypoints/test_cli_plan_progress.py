@@ -187,8 +187,14 @@ def test_wait_progress_surfaces_bounded_activity_markers(monkeypatch, capsys) ->
 
     output = capsys.readouterr().out
     assert output.count("Observed activity: Goon 1/1") == 1
-    assert "Activity detail: Goon 1/1 — oh-goon/dependency-materialize | import Python environment" in output
-    assert "Activity detail: Goon 1/1 — oh-goon/dependency-materialize | import frontend node_modules" in output
+    assert (
+        "Activity detail: Goon 1/1 — oh-goon/dependency-materialize | import Python environment"
+        in output
+    )
+    assert (
+        "Activity detail: Goon 1/1 — oh-goon/dependency-materialize | import frontend node_modules"
+        in output
+    )
     assert "noise that must not stream" not in output
 
 
@@ -215,14 +221,10 @@ def test_repair_handoff_falls_back_to_durable_game_tape_step(capsys) -> None:
     detail = SimpleNamespace(
         run=run,
         operations=(),
-        game_tape=SimpleNamespace(
-            repositories=(SimpleNamespace(steps=(failed,)),)
-        ),
+        game_tape=SimpleNamespace(repositories=(SimpleNamespace(steps=(failed,)),)),
     )
     runtime = SimpleNamespace(
-        runs=SimpleNamespace(
-            game_tape_live_output=lambda _run_id: SimpleNamespace(available=False)
-        )
+        runs=SimpleNamespace(game_tape_live_output=lambda _run_id: SimpleNamespace(available=False))
     )
 
     plans._print_repair_handoff(runtime, detail)
@@ -301,6 +303,8 @@ def test_repair_handoff_declares_incomplete_evidence_instead_of_claiming_complet
 
 
 def test_repair_handoff_projects_durable_step_teardown_failure(capsys) -> None:
+    import hashlib
+
     from oh_goon.core.models.fleet_plan_evidence import (
         CompletedPlanStepExecution,
         FailedPlanStepTeardownEvidence,
@@ -308,7 +312,6 @@ def test_repair_handoff_projects_durable_step_teardown_failure(capsys) -> None:
         PlanOutputEvidence,
     )
     from oh_goon.core.models.operation import FleetPlanOperationEvidence
-    import hashlib
 
     def output() -> PlanOutputEvidence:
         return PlanOutputEvidence(
@@ -347,9 +350,7 @@ def test_repair_handoff_projects_durable_step_teardown_failure(capsys) -> None:
         game_tape=SimpleNamespace(repositories=()),
     )
     runtime = SimpleNamespace(
-        runs=SimpleNamespace(
-            game_tape_live_output=lambda _run_id: SimpleNamespace(available=False)
-        )
+        runs=SimpleNamespace(game_tape_live_output=lambda _run_id: SimpleNamespace(available=False))
     )
 
     plans._print_repair_handoff(runtime, detail)
@@ -395,7 +396,9 @@ def test_wait_progress_surfaces_pre_step_run_activity(monkeypatch, capsys) -> No
 def test_wait_progress_uses_admitted_plan_without_durable_owner_lookup(monkeypatch, capsys) -> None:
     detail = object()
     runs = _Runs(detail)
-    runs.get = lambda _run_id: (_ for _ in ()).throw(AssertionError("active progress must not read durable Run detail"))
+    runs.get = lambda _run_id: (_ for _ in ()).throw(
+        AssertionError("active progress must not read durable Run detail")
+    )
     plan = SimpleNamespace(
         imports=(SimpleNamespace(name="oh-goon/dependency-materialize", step_ids=("goon-a.step",)),)
     )

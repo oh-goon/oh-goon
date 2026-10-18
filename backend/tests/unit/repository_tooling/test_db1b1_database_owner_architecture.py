@@ -1,16 +1,17 @@
 """DB1B1 original X0: named atomic operations cannot silently lose their owner."""
+
 from __future__ import annotations
 
 from pathlib import Path
 from shutil import copyfile
 
 import pytest
+from tests.unit.repository_tooling.test_db0db1a_database_owner_architecture import fixture
 
 from oh_goon.repository_tooling.architecture.canonical_database_owner_contract import (
     check_canonical_database_owner,
 )
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
-from tests.unit.repository_tooling.test_db0db1a_database_owner_architecture import fixture
 
 
 def _source(tmp_path: Path) -> Path:
@@ -24,14 +25,33 @@ def _source(tmp_path: Path) -> Path:
     return package
 
 
-@pytest.mark.parametrize("mutation", [
-    ("database.py", "connection.set_authorizer(deny_transaction)", "connection.set_authorizer(None)"),
-    ("database.py", "self.require_atomic_write_cut(connection)", "pass"),
-    ("database.py", "SignerTrustEpochAuthority(connection, owner=self).revoke_in", "SignerTrustEpochAuthority(connection).revoke_in"),
-    ("database.py", "with self._guard_atomic_domain_participant(connection):", "if True:"),
-    ("enforcer_lace_signer_trust_epoch.py", "self._database_owner.require_atomic_write_cut(connection)", "pass"),
-    ("enforcer_lace_signer_trust_epoch.py", "self._require_participant_cut(connection)", "pass"),
-])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        (
+            "database.py",
+            "connection.set_authorizer(deny_transaction)",
+            "connection.set_authorizer(None)",
+        ),
+        ("database.py", "self.require_atomic_write_cut(connection)", "pass"),
+        (
+            "database.py",
+            "SignerTrustEpochAuthority(connection, owner=self).revoke_in",
+            "SignerTrustEpochAuthority(connection).revoke_in",
+        ),
+        ("database.py", "with self._guard_atomic_domain_participant(connection):", "if True:"),
+        (
+            "enforcer_lace_signer_trust_epoch.py",
+            "self._database_owner.require_atomic_write_cut(connection)",
+            "pass",
+        ),
+        (
+            "enforcer_lace_signer_trust_epoch.py",
+            "self._require_participant_cut(connection)",
+            "pass",
+        ),
+    ],
+)
 def test_owner_mutations_are_rejected(tmp_path: Path, mutation: tuple[str, str, str]):
     package = _source(tmp_path)
     file, before, after = mutation
@@ -39,7 +59,9 @@ def test_owner_mutations_are_rejected(tmp_path: Path, mutation: tuple[str, str, 
     source = target.read_text()
     assert before in source
     target.write_text(source.replace(before, after))
-    assert any("DB1B1" in violation.message for violation in check_canonical_database_owner(tmp_path))
+    assert any(
+        "DB1B1" in violation.message for violation in check_canonical_database_owner(tmp_path)
+    )
 
 
 def test_no_second_sqlite_engine_or_writer_is_added(tmp_path: Path):
@@ -47,4 +69,7 @@ def test_no_second_sqlite_engine_or_writer_is_added(tmp_path: Path):
     (package / "runtime/second_owner.py").write_text(
         "import sqlite3\ndef new_writer(path):\n    return sqlite3.connect(path)\n"
     )
-    assert any("unowned connection" in violation.message for violation in check_canonical_database_owner(tmp_path))
+    assert any(
+        "unowned connection" in violation.message
+        for violation in check_canonical_database_owner(tmp_path)
+    )

@@ -51,7 +51,9 @@ def test_plan_identity_changes_when_unit_contract_changes() -> None:
     assert subject._plan_identity(first) != subject._plan_identity(second)
 
 
-def test_session_budget_soft_stops_before_unfittable_unit(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_session_budget_soft_stops_before_unfittable_unit(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
     unit = subject.QualificationUnit("long", ("long",), 120, expected_runtime_seconds=40.0)
     calls: list[str] = []
     monkeypatch.setattr(subject, "maintenance_release_units", lambda: (unit,))
@@ -60,7 +62,9 @@ def test_session_budget_soft_stops_before_unfittable_unit(monkeypatch, tmp_path:
     monkeypatch.setattr(subject, "_state_root", lambda: tmp_path)
     monkeypatch.setattr(subject, "_run_unit", lambda current: calls.append(current.name) or 0)
 
-    assert subject.main(["--session-budget-seconds", "50", "--checkpoint-reserve-seconds", "20"]) == 0
+    assert (
+        subject.main(["--session-budget-seconds", "50", "--checkpoint-reserve-seconds", "20"]) == 0
+    )
     assert calls == []
     assert "SOFT STOP" in capsys.readouterr().out
     assert not list(tmp_path.rglob("*.json"))
@@ -77,14 +81,20 @@ def test_unit_receipt_persists_runtime_separately_from_timeout(monkeypatch, tmp_
     monkeypatch.setattr(subject, "_run_unit", lambda _unit: 0)
 
     assert subject.main([]) == 0
-    payload = __import__("json").loads(next(tmp_path.rglob("fast.json")).read_text(encoding="utf-8"))
+    payload = __import__("json").loads(
+        next(tmp_path.rglob("fast.json")).read_text(encoding="utf-8")
+    )
     assert payload["timeout_seconds"] == 120
     assert payload["expected_runtime_seconds"] == 10.0
     assert payload["observed_runtime_seconds"] == 2.5
 
 
 def test_repository_understanding_safety_timeout_is_separate_from_runtime_estimate() -> None:
-    unit = next(item for item in subject.maintenance_release_units() if item.name == "repository-understanding")
+    unit = next(
+        item
+        for item in subject.maintenance_release_units()
+        if item.name == "repository-understanding"
+    )
     assert unit.expected_runtime_seconds == 90.0
     assert unit.timeout_seconds == 1200
     assert unit.timeout_seconds > unit.expected_runtime_seconds
@@ -238,7 +248,9 @@ def test_resume_credits_only_contiguous_owner_prefix(monkeypatch, tmp_path: Path
     assert calls == ["first", "second"]
 
 
-def test_budget_boundary_commits_completed_owner_then_resumes_exact_next_owner(monkeypatch, tmp_path: Path) -> None:
+def test_budget_boundary_commits_completed_owner_then_resumes_exact_next_owner(
+    monkeypatch, tmp_path: Path
+) -> None:
     units = (
         subject.QualificationUnit("first", ("first",), 10, expected_runtime_seconds=2.0),
         subject.QualificationUnit("second", ("second",), 10, expected_runtime_seconds=8.0),
@@ -252,20 +264,42 @@ def test_budget_boundary_commits_completed_owner_then_resumes_exact_next_owner(m
     calls: list[str] = []
     monkeypatch.setattr(subject, "_run_unit", lambda unit: calls.append(unit.name) or 0)
 
-    assert subject.main(["--max-units", "2", "--session-budget-seconds", "10", "--checkpoint-reserve-seconds", "2"]) == 0
+    assert (
+        subject.main(
+            [
+                "--max-units",
+                "2",
+                "--session-budget-seconds",
+                "10",
+                "--checkpoint-reserve-seconds",
+                "2",
+            ]
+        )
+        == 0
+    )
     assert calls == ["first"]
 
     monkeypatch.setattr(subject.time, "monotonic", lambda: 0.0)
-    assert subject.main(["--max-units", "2", "--session-budget-seconds", "20", "--checkpoint-reserve-seconds", "2"]) == 0
+    assert (
+        subject.main(
+            [
+                "--max-units",
+                "2",
+                "--session-budget-seconds",
+                "20",
+                "--checkpoint-reserve-seconds",
+                "2",
+            ]
+        )
+        == 0
+    )
     assert calls == ["first", "second"]
 
 
 def test_qualification_unit_runtime_environment_is_identity_bound() -> None:
     default = (subject.QualificationUnit("unit", ("tool",), 10),)
     custom = (
-        subject.QualificationUnit(
-            "unit", ("tool",), 10, environment=(("TERM", "xterm-test"),)
-        ),
+        subject.QualificationUnit("unit", ("tool",), 10, environment=(("TERM", "xterm-test"),)),
     )
     assert dict(default[0].environment) == {"TERM": "dumb"}
     assert subject._plan_identity(default) != subject._plan_identity(custom)

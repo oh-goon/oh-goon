@@ -59,7 +59,11 @@ def prune_run_log_tree(root: Path) -> tuple[RunLogPruneResult, ...]:
         raise RuntimeError(f"run-log root must be a real directory: {root}")
     results: list[RunLogPruneResult] = []
     for directory in sorted(path for path in root.rglob("*") if path.is_dir()):
-        if any(_COMPLETED_RUN_LOG_NAME.fullmatch(item.name) for item in directory.iterdir() if item.is_file()):
+        if any(
+            _COMPLETED_RUN_LOG_NAME.fullmatch(item.name)
+            for item in directory.iterdir()
+            if item.is_file()
+        ):
             results.append(prune_run_log_directory(directory))
     return tuple(results)
 

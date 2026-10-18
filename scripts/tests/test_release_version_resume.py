@@ -35,8 +35,12 @@ def test_set_version_resumes_without_reauthoring_when_native_versions_already_ma
     monkeypatch.setattr(stamp_release_version, "BACKEND_LOCK", backend_lock)
     monkeypatch.setattr(stamp_release_version, "FRONTEND_PACKAGE", package)
     monkeypatch.setattr(stamp_release_version, "FRONTEND_LOCK", package_lock)
-    monkeypatch.setattr(stamp_release_version, "OPENAPI", tmp_path / "generated/openapi/openapi.json")
-    monkeypatch.setattr(stamp_release_version, "GENERATED_FRONTEND", tmp_path / "generated/frontend")
+    monkeypatch.setattr(
+        stamp_release_version, "OPENAPI", tmp_path / "generated/openapi/openapi.json"
+    )
+    monkeypatch.setattr(
+        stamp_release_version, "GENERATED_FRONTEND", tmp_path / "generated/frontend"
+    )
     monkeypatch.setattr(
         stamp_release_version,
         "GOON_TOOL_AUTHORITY",
@@ -47,9 +51,13 @@ def test_set_version_resumes_without_reauthoring_when_native_versions_already_ma
         frontend_lock_sha256=stamp_release_version._sha256_file(package_lock),
     )
     monkeypatch.setattr(
-        stamp_release_version, "_assert_release_authoring_prerequisites", lambda: receipt
+        stamp_release_version,
+        "_assert_release_authoring_prerequisites",
+        lambda: receipt,
     )
-    monkeypatch.setattr(stamp_release_version, "assert_canonical_source_layout", lambda _root: None)
+    monkeypatch.setattr(
+        stamp_release_version, "assert_canonical_source_layout", lambda _root: None
+    )
     monkeypatch.setattr(
         stamp_release_version,
         "observed_versions",
@@ -127,7 +135,9 @@ def test_already_stamped_resume_does_not_require_dependency_freshness_reconcilia
     assert stamp_release_version._source_identity_matches("2.0.0", receipt) is True
 
 
-def test_release_version_target_stamps_and_regenerates_without_dependency_materialization() -> None:
+def test_release_version_target_stamps_and_regenerates_without_dependency_materialization() -> (
+    None
+):
     root = Path(__file__).resolve().parents[2]
     makefile = (root / "Makefile").read_text(encoding="utf-8")
     body = makefile.split("release-version-set:", 1)[1].split("\n\n", 1)[0]
@@ -137,7 +147,9 @@ def test_release_version_target_stamps_and_regenerates_without_dependency_materi
         "$(OH_GOON_RELEASE_VERSION)",
     ]
     assert "backend-dependencies-check" not in body
-    assert any(shlex.split(line.lstrip("@-+ ")) == stamp_argv for line in body.splitlines())
+    assert any(
+        shlex.split(line.lstrip("@-+ ")) == stamp_argv for line in body.splitlines()
+    )
     assert "uv sync" not in body
     assert "uv pip install" not in body
     assert "oh-goon-export-openapi" not in body
@@ -177,12 +189,16 @@ def test_release_version_transition_rejects_invalid_source_before_any_mutation(
         assert root == tmp_path
         raise ValueError("repository source layout is invalid: transport contamination")
 
-    monkeypatch.setattr(stamp_release_version, "assert_canonical_source_layout", reject_source)
+    monkeypatch.setattr(
+        stamp_release_version, "assert_canonical_source_layout", reject_source
+    )
     monkeypatch.setattr(
         stamp_release_version,
         "_run",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("native authoring must not run after failed source admission")
+            AssertionError(
+                "native authoring must not run after failed source admission"
+            )
         ),
     )
 
@@ -242,10 +258,14 @@ def test_release_version_transition_rolls_back_version_and_generated_authority_o
         frontend_lock_sha256=stamp_release_version._sha256_file(package_lock),
     )
     monkeypatch.setattr(
-        stamp_release_version, "_assert_release_authoring_prerequisites", lambda: incoming_receipt
+        stamp_release_version,
+        "_assert_release_authoring_prerequisites",
+        lambda: incoming_receipt,
     )
     monkeypatch.setattr(
-        stamp_release_version, "_source_identity_matches", lambda _value, _receipt: False
+        stamp_release_version,
+        "_source_identity_matches",
+        lambda _value, _receipt: False,
     )
 
     def fake_stamp() -> None:
@@ -261,8 +281,12 @@ def test_release_version_transition_rolls_back_version_and_generated_authority_o
         raise RuntimeError("simulated generated-authority failure")
 
     monkeypatch.setattr(stamp_release_version, "stamp", fake_stamp)
-    monkeypatch.setattr(stamp_release_version, "assert_public_source_privacy", lambda _root: None)
-    monkeypatch.setattr(stamp_release_version, "_regenerate_generated_authority", fail_generation)
+    monkeypatch.setattr(
+        stamp_release_version, "assert_public_source_privacy", lambda _root: None
+    )
+    monkeypatch.setattr(
+        stamp_release_version, "_regenerate_generated_authority", fail_generation
+    )
 
     with pytest.raises(RuntimeError, match="generated-authority failure"):
         stamp_release_version.set_version("2.0.0")
@@ -271,7 +295,10 @@ def test_release_version_transition_rolls_back_version_and_generated_authority_o
     assert pyproject.read_text(encoding="utf-8").endswith('version="1.0.0"\n')
     assert backend_lock.read_text(encoding="utf-8") == "old lock\n"
     assert package.read_text(encoding="utf-8") == '{"version":"1.0.0"}\n'
-    assert package_lock.read_text(encoding="utf-8") == '{"version":"1.0.0","packages":{}}\n'
+    assert (
+        package_lock.read_text(encoding="utf-8")
+        == '{"version":"1.0.0","packages":{}}\n'
+    )
     assert openapi.read_text(encoding="utf-8") == '{"info":{"version":"1.0.0"}}\n'
     assert existing_generated.read_text(encoding="utf-8") == "old models\n"
     assert not (generated_frontend / "new.ts").exists()
@@ -383,9 +410,7 @@ def test_release_stamp_requires_uv_frozen_to_leave_lock_byte_identical(
     pyproject = backend / "pyproject.toml"
     pyproject.write_text('[project]\nname="x"\nversion="2.0.0"\n', encoding="utf-8")
     backend_lock = backend / "uv.lock"
-    original_lock = (
-        'version = 1\n[[package]]\nname = "oh-goon"\nversion = "1.9.9"\nsource = { editable = "." }\n'
-    )
+    original_lock = 'version = 1\n[[package]]\nname = "oh-goon"\nversion = "1.9.9"\nsource = { editable = "." }\n'
     backend_lock.write_text(original_lock, encoding="utf-8")
     package = frontend / "package.json"
     package.write_text('{"version":"2.0.0"}\n', encoding="utf-8")
@@ -406,6 +431,8 @@ def test_release_stamp_requires_uv_frozen_to_leave_lock_byte_identical(
         raise AssertionError(command)
 
     monkeypatch.setattr(stamp_release_version, "_run", fake_run)
-    with pytest.raises(RuntimeError, match="must leave committed resolution authority byte-identical"):
+    with pytest.raises(
+        RuntimeError, match="must leave committed resolution authority byte-identical"
+    ):
         stamp_release_version.stamp()
     assert backend_lock.read_text(encoding="utf-8") == original_lock

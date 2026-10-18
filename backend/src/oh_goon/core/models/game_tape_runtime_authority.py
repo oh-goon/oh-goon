@@ -37,4 +37,3 @@ class GameTapeRuntimeAuthorityReceipt(ImmutableModel):
     truncated: bool
     max_evidence: int = Field(default=256, ge=1, le=256)
     ui_execution_authority: Literal[False] = False
-

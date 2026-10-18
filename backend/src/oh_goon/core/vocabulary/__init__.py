@@ -32,8 +32,8 @@ from oh_goon.core.vocabulary.policy import (
     WorkspaceScope,
 )
 from oh_goon.core.vocabulary.readiness import LockPresenceState, PythonPinReadiness
-from oh_goon.core.vocabulary.result_semantics import CanonicalResultStatus, FailureImpact
 from oh_goon.core.vocabulary.recipe import CommandSafety, UvRecipeId
+from oh_goon.core.vocabulary.result_semantics import CanonicalResultStatus, FailureImpact
 from oh_goon.core.vocabulary.run import (
     FleetRunEventType,
     FleetRunFailureStage,
@@ -49,7 +49,6 @@ from oh_goon.core.vocabulary.schedule import (
     ScheduleRepositoryRunStatus,
     ScheduleState,
 )
-from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
 from oh_goon.core.vocabulary.system import (
     BackgroundFailureStage,
     RuntimeSafetyStatus,
@@ -57,6 +56,7 @@ from oh_goon.core.vocabulary.system import (
     ToolHealthReason,
     ToolStatus,
 )
+from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
 
 __all__ = [
     "AuditState",

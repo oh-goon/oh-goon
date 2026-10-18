@@ -26,7 +26,9 @@ def test_nonprojected_root_inputs_have_no_invented_goon_owner():
     for key in plans.keys():
         source = plans.source(key)
         if source.compiled.inputs and not source.compiled.projected_inputs:
-            inspected = resolver.inspect_inputs(source.path, containment_root=plans.root.parent.parent)
+            inspected = resolver.inspect_inputs(
+                source.path, containment_root=plans.root.parent.parent
+            )
             assert all(item.owner_paths == () for item in inspected)
             return
     # Templates may all use projection; the projected-contract regression above remains valid.
@@ -39,7 +41,9 @@ def test_every_shipped_plan_inspection_matches_canonical_materialization():
     for key in plans.keys():
         source = plans.source(key)
         inspected = resolver.inspect_inputs(source.path, containment_root=plans.root.parent.parent)
-        canonical = resolver.input_definitions(source.path, containment_root=plans.root.parent.parent)
+        canonical = resolver.input_definitions(
+            source.path, containment_root=plans.root.parent.parent
+        )
         assert tuple(item.definition for item in inspected) == canonical, key
         assert len({item.definition.name for item in inspected}) == len(inspected), key
         for item in inspected:

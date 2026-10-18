@@ -6,15 +6,14 @@ import time
 from pathlib import Path
 
 from oh_goon.runtime.execution import shards as subject
-from ._shard_execution_support import context as _context, plan as _plan
+
+from ._shard_execution_support import context as _context
+from ._shard_execution_support import plan as _plan
 
 
 def test_cancellation_interrupts_admitted_retry_delay_without_launching_another_attempt(
     tmp_path: Path,
 ) -> None:
-    import threading
-    import time
-
     cancel = threading.Event()
     plan = _plan(
         subject.ShardWork(

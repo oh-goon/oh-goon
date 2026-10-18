@@ -104,7 +104,11 @@ def _facts(tmp_path: Path):
         fleet_run_id=run_id,
         generated_at=now,
     )
-    return report, (admitted, started, repository_started, completed, maintenance, terminal), maintenance
+    return (
+        report,
+        (admitted, started, repository_started, completed, maintenance, terminal),
+        maintenance,
+    )
 
 
 def test_storage_maintenance_survives_run_projection_and_game_tape(tmp_path: Path) -> None:
@@ -126,7 +130,9 @@ def test_storage_maintenance_must_follow_canonical_operation(tmp_path: Path) -> 
     completed = events[3].model_copy(update={"sequence": 5})
 
     with pytest.raises(InvalidRunTransition, match="must follow"):
-        project_fleet_run_detail((events[0], events[1], events[2], out_of_order, completed), lambda _: report)
+        project_fleet_run_detail(
+            (events[0], events[1], events[2], out_of_order, completed), lambda _: report
+        )
 
 
 def test_storage_maintenance_rejects_duplicate_operation_fact(tmp_path: Path) -> None:

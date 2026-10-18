@@ -1,4 +1,5 @@
 """M166 structural documentation guard for an explicitly non-live pre-work step."""
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]

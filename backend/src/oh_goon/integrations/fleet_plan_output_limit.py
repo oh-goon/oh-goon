@@ -16,9 +16,7 @@ def bounded_execution_failure_outcome(
     return timeout_outcome(step, error)
 
 
-def _output_limit_outcome(
-    step: ResolvedPlanStep, error: CommandOutputLimitExceeded
-) -> StepOutcome:
+def _output_limit_outcome(step: ResolvedPlanStep, error: CommandOutputLimitExceeded) -> StepOutcome:
     message = (
         f"Fleet plan step {step.step_id} {error.stream} exceeded the "
         f"{error.limit_bytes}-byte capture limit; output is bounded to protect executor memory"

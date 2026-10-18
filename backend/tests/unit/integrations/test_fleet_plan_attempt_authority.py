@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import fields
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -282,7 +282,6 @@ def test_attempt_creation_hashes_only_the_copied_workspace(
         assert observed_paths == [attempt.paths.workspace.resolve()]
 
 
-
 def test_attempt_copy_identity_still_rejects_frozen_source_drift(tmp_path: Path) -> None:
     repository = tmp_path / "repo"
     seed_cicd_repository(repository)
@@ -319,9 +318,7 @@ def test_attempt_mutation_cannot_change_frozen_source_or_next_attempt(tmp_path: 
         original_identity = snapshot_identity(source)
 
         first = context.create_attempt(step, 1)
-        (first.paths.workspace / "authority.txt").write_text(
-            "attempt-mutated\n", encoding="utf-8"
-        )
+        (first.paths.workspace / "authority.txt").write_text("attempt-mutated\n", encoding="utf-8")
 
         assert source_file.read_bytes() == original_bytes
         assert snapshot_identity(source) == original_identity
@@ -344,6 +341,7 @@ def test_strict_attempt_cannot_bind_step_added_after_run_preparation(tmp_path: P
     ) as context:
         with pytest.raises(FleetPlanInvalid, match="was not bound during strict run preparation"):
             context.create_attempt(unbound, 1)
+
 
 def test_attempt_exposes_only_the_current_steps_frozen_host_tools(tmp_path: Path) -> None:
     repository = tmp_path / "repo"
@@ -411,7 +409,6 @@ def test_attempt_does_not_inherit_unrelated_steps_host_tools(tmp_path: Path) -> 
         assert "git" not in shell_names
         assert git_names == {"git"}
         assert "sh" not in git_names
-
 
 
 def test_attempt_exposes_only_the_current_steps_imported_host_environment(

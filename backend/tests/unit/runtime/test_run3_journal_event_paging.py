@@ -1,4 +1,5 @@
 """RUN-3: one indexed immutable journal cut owns event pages and continuation."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from oh_goon.core.errors import InvalidRequest, RunNotFound
-from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import FleetRunEventType, OperationAction
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.journal import Journal
@@ -53,9 +54,12 @@ def test_immutable_read_cut_uses_original_snapshot_after_new_commit(tmp_path: Pa
     original = before.run_events("run-3", limit=2)
     # Later commit in the same Run must not mutate the original read cut.
     journal.record_execution_lifecycle(
-        fleet_run_id="run-3", repository_id=identity.repository_id,
+        fleet_run_id="run-3",
+        repository_id=identity.repository_id,
         operation_id=repository_attempt_operation_id("run-3", identity.repository_id),
-        event_type=FleetRunEventType.STEP_REACHED, step_id="build", step_order=1,
+        event_type=FleetRunEventType.STEP_REACHED,
+        step_id="build",
+        step_order=1,
     )
     assert before.run_events("run-3", limit=2) == original
     assert journal.run_events("run-3", limit=2).events == original.events
@@ -87,9 +91,12 @@ def test_resume_after_new_durable_event_uses_original_run_sequence(tmp_path: Pat
     previous = journal.run_events("run-3", limit=100)
     assert not previous.has_more
     journal.record_execution_lifecycle(
-        fleet_run_id="run-3", repository_id=identity.repository_id,
+        fleet_run_id="run-3",
+        repository_id=identity.repository_id,
         operation_id=repository_attempt_operation_id("run-3", identity.repository_id),
-        event_type=FleetRunEventType.STEP_REACHED, step_id="build", step_order=1,
+        event_type=FleetRunEventType.STEP_REACHED,
+        step_id="build",
+        step_order=1,
     )
     resumed = journal.run_events("run-3", after=previous.next_sequence, limit=1)
     assert len(resumed.events) == 1
@@ -98,8 +105,9 @@ def test_resume_after_new_durable_event_uses_original_run_sequence(tmp_path: Pat
     assert resumed.journal_revision > previous.journal_revision
 
 
-@pytest.mark.parametrize("after,limit", [(-1, 1), (0, 0), (0, 101), (0, -1),
-                                        (True, 1), (0, True), (0, 1.5)])
+@pytest.mark.parametrize(
+    "after,limit", [(-1, 1), (0, 0), (0, 101), (0, -1), (True, 1), (0, True), (0, 1.5)]
+)
 def test_invalid_cursors_and_page_limits_fail_at_canonical_owner(
     tmp_path: Path, after: int, limit: int
 ) -> None:

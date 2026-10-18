@@ -5,7 +5,9 @@ from pathlib import Path
 
 from oh_goon.api.app import create_app
 from oh_goon.repository_tooling.generation.export_openapi import rendered_schema
-from oh_goon.repository_tooling.generation.generate_api_types import render_generated_files
+from oh_goon.repository_tooling.generation.generate_api_types import (
+    render_generated_files,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI_PATH = ROOT / "generated" / "openapi" / "openapi.json"

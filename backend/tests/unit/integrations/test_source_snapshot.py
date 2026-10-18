@@ -9,7 +9,9 @@ from oh_goon.integrations.content_snapshot import snapshot_identity
 from oh_goon.integrations.source_snapshot import snapshot_source_directory, source_snapshot_identity
 
 
-def test_source_snapshot_excludes_generated_operational_state_but_retains_committed_dependency_lock(tmp_path: Path) -> None:
+def test_source_snapshot_excludes_generated_operational_state_but_retains_committed_dependency_lock(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "source"
     destination = tmp_path / "snapshot"
     (source / "backend/.venv").mkdir(parents=True)
@@ -61,7 +63,9 @@ def test_source_snapshot_rejects_symlink_escape(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.write_text("secret", encoding="utf-8")
     (source / "escape").symlink_to(outside)
-    with pytest.raises(FleetPlanInvalid, match="escaping symlink|must be relative|escapes repository root"):
+    with pytest.raises(
+        FleetPlanInvalid, match="escaping symlink|must be relative|escapes repository root"
+    ):
         source_snapshot_identity(source)
 
 

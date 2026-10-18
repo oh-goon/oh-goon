@@ -15,8 +15,8 @@ from oh_goon.integrations.fleet_plan_source_snapshot import (
 from oh_goon.runtime.template_discovery import (
     discover_template_packages,
     template_package,
-    validate_template_package,
     template_readme_description,
+    validate_template_package,
 )
 
 

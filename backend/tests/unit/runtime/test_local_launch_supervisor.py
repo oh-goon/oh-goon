@@ -13,19 +13,23 @@ from oh_goon.runtime.local_launch_context import (
     LocalLaunchRuntimeContext,
 )
 from oh_goon.runtime.local_launch_owner import LocalLaunchOwner
-from oh_goon.runtime.local_launch_state import LocalLaunchEventStore
 from oh_goon.runtime.local_launch_plan import LocalLaunchPlan, LocalServicePlan
+from oh_goon.runtime.local_launch_state import LocalLaunchEventStore
 from oh_goon.runtime.local_launch_supervisor import stop_process_group
 
 
 def test_stop_process_group_kills_descendant_after_group_leader_exits(tmp_path: Path) -> None:
     pid_file = tmp_path / "child.pid"
     leader = subprocess.Popen(
-        [sys.executable, "-c", (
-            "import subprocess,sys; "
-            "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
-            f"open({str(pid_file)!r},'w').write(str(p.pid))"
-        )],
+        [
+            sys.executable,
+            "-c",
+            (
+                "import subprocess,sys; "
+                "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
+                f"open({str(pid_file)!r},'w').write(str(p.pid))"
+            ),
+        ],
         process_group=0,
     )
     pgid = leader.pid
@@ -52,18 +56,23 @@ def test_stop_process_group_kills_descendant_after_group_leader_exits(tmp_path: 
 
 
 def test_startup_budget_is_one_plan_level_value() -> None:
-    plan = LocalLaunchPlan(profile="test", services=(
-        LocalServicePlan("one", 1, ("true",), None, "127.0.0.1", 1, "/", 200),
-        LocalServicePlan("two", 1, ("true",), None, "127.0.0.1", 2, "/", 200),
-    ))
+    plan = LocalLaunchPlan(
+        profile="test",
+        services=(
+            LocalServicePlan("one", 1, ("true",), None, "127.0.0.1", 1, "/", 200),
+            LocalServicePlan("two", 1, ("true",), None, "127.0.0.1", 2, "/", 200),
+        ),
+    )
     assert plan.startup_timeout_seconds == 30.0
     assert not hasattr(plan.services[0], "timeout_seconds")
     assert not hasattr(plan.services[1], "timeout_seconds")
+
 
 class _FakeProcess:
     def __init__(self, codes):
         self._codes = iter(codes)
         self._last = None
+
     def poll(self):
         try:
             self._last = next(self._codes)
@@ -75,29 +84,52 @@ class _FakeProcess:
 class _FakeOwner:
     def __init__(self):
         self.events = []
-    def service_failed(self, *args, **kwargs): self.events.append(("service_failed", args, kwargs))
-    def launch_failed(self, *args, **kwargs): self.events.append(("launch_failed", args, kwargs))
-    def bound(self, *args, **kwargs): self.events.append(("bound", args, kwargs))
-    def startup_complete(self, *args, **kwargs): self.events.append(("startup_complete", args, kwargs))
-    def ready(self, *args, **kwargs): self.events.append(("ready", args, kwargs))
-    def launch_ready(self): self.events.append(("launch_ready", (), {}))
+
+    def service_failed(self, *args, **kwargs):
+        self.events.append(("service_failed", args, kwargs))
+
+    def launch_failed(self, *args, **kwargs):
+        self.events.append(("launch_failed", args, kwargs))
+
+    def bound(self, *args, **kwargs):
+        self.events.append(("bound", args, kwargs))
+
+    def startup_complete(self, *args, **kwargs):
+        self.events.append(("startup_complete", args, kwargs))
+
+    def ready(self, *args, **kwargs):
+        self.events.append(("ready", args, kwargs))
+
+    def launch_ready(self):
+        self.events.append(("launch_ready", (), {}))
 
 
 def _two_service_plan(timeout=30.0):
-    return LocalLaunchPlan(profile="test", startup_timeout_seconds=timeout, services=(
-        LocalServicePlan("backend", 1, ("backend",), None, "127.0.0.1", 1, "/healthz", 204),
-        LocalServicePlan("frontend", 1, ("frontend",), None, "127.0.0.1", 2, "/", 200),
-    ))
+    return LocalLaunchPlan(
+        profile="test",
+        startup_timeout_seconds=timeout,
+        services=(
+            LocalServicePlan("backend", 1, ("backend",), None, "127.0.0.1", 1, "/healthz", 204),
+            LocalServicePlan("frontend", 1, ("frontend",), None, "127.0.0.1", 2, "/", 200),
+        ),
+    )
 
 
 def test_required_service_exit_wins_over_readiness_timeout() -> None:
-    from oh_goon.runtime.local_launch_supervisor import LocalLaunchStartupError, wait_for_services_ready
+    from oh_goon.runtime.local_launch_supervisor import (
+        LocalLaunchStartupError,
+        wait_for_services_ready,
+    )
+
     owner = _FakeOwner()
     try:
         wait_for_services_ready(
-            owner=owner, plan=_two_service_plan(),
+            owner=owner,
+            plan=_two_service_plan(),
             processes=(_FakeProcess([7]), _FakeProcess([None])),
-            now=lambda: 0.0, sleep=lambda _: None, probe=lambda _: (False, "refused"),
+            now=lambda: 0.0,
+            sleep=lambda _: None,
+            probe=lambda _: (False, "refused"),
         )
     except LocalLaunchStartupError as exc:
         assert "backend exited before readiness (status 7)" in str(exc)
@@ -112,7 +144,10 @@ def test_required_service_exit_includes_bounded_redacted_startup_output() -> Non
 
     import pytest
 
-    from oh_goon.runtime.local_launch_supervisor import LocalLaunchStartupError, wait_for_services_ready
+    from oh_goon.runtime.local_launch_supervisor import (
+        LocalLaunchStartupError,
+        wait_for_services_ready,
+    )
 
     owner = _FakeOwner()
     logs = collections.deque(
@@ -126,9 +161,12 @@ def test_required_service_exit_includes_bounded_redacted_startup_output() -> Non
     )
     with pytest.raises(LocalLaunchStartupError) as exc:
         wait_for_services_ready(
-            owner=owner, plan=_two_service_plan(),
+            owner=owner,
+            plan=_two_service_plan(),
             processes=(_FakeProcess([7]), _FakeProcess([None])),
-            now=lambda: 0.0, sleep=lambda _: None, probe=lambda _: (False, "refused"),
+            now=lambda: 0.0,
+            sleep=lambda _: None,
+            probe=lambda _: (False, "refused"),
             log_tail=logs,
         )
 
@@ -140,19 +178,33 @@ def test_required_service_exit_includes_bounded_redacted_startup_output() -> Non
 
 
 def test_all_services_share_one_absolute_startup_budget() -> None:
-    from oh_goon.runtime.local_launch_supervisor import LocalLaunchStartupError, wait_for_services_ready
+    from oh_goon.runtime.local_launch_supervisor import (
+        LocalLaunchStartupError,
+        wait_for_services_ready,
+    )
+
     owner = _FakeOwner()
     clock = [0.0]
-    def now(): return clock[0]
-    def sleep(seconds): clock[0] += seconds
+
+    def now():
+        return clock[0]
+
+    def sleep(seconds):
+        clock[0] += seconds
+
     def probe(service):
-        if service.service == "backend": return True, "HTTP 204"
+        if service.service == "backend":
+            return True, "HTTP 204"
         return False, "connection refused"
+
     try:
         wait_for_services_ready(
-            owner=owner, plan=_two_service_plan(timeout=0.3),
+            owner=owner,
+            plan=_two_service_plan(timeout=0.3),
             processes=(_FakeProcess([None]), _FakeProcess([None])),
-            now=now, sleep=sleep, probe=probe,
+            now=now,
+            sleep=sleep,
+            probe=probe,
         )
     except LocalLaunchStartupError as exc:
         assert "within 0.3 seconds" in str(exc)
@@ -165,11 +217,15 @@ def test_all_services_share_one_absolute_startup_budget() -> None:
 
 def test_ready_publishes_only_after_every_required_service_is_ready() -> None:
     from oh_goon.runtime.local_launch_supervisor import wait_for_services_ready
+
     owner = _FakeOwner()
     wait_for_services_ready(
-        owner=owner, plan=_two_service_plan(),
+        owner=owner,
+        plan=_two_service_plan(),
         processes=(_FakeProcess([None]), _FakeProcess([None])),
-        now=lambda: 0.0, sleep=lambda _: None, probe=lambda _: (True, "ready"),
+        now=lambda: 0.0,
+        sleep=lambda _: None,
+        probe=lambda _: (True, "ready"),
     )
     assert owner.events[-1][0] == "launch_ready"
     assert [event[0] for event in owner.events].count("ready") == 2
@@ -226,20 +282,29 @@ def test_inprocess_readiness_failure_requests_native_server_shutdown(tmp_path: P
     assert requested == ["shutdown"]
 
 
-
 def test_immediate_exit_is_valid_after_spawn_registration(tmp_path: Path) -> None:
-    from oh_goon.runtime.local_launch_supervisor import LocalLaunchStartupError, wait_for_services_ready
+    from oh_goon.runtime.local_launch_supervisor import (
+        LocalLaunchStartupError,
+        wait_for_services_ready,
+    )
 
     store = LocalLaunchEventStore.from_database(tmp_path / "state" / "oh-goon.db")
-    plan = LocalLaunchPlan(profile="test", services=(
-        LocalServicePlan("backend", 1, ("backend",), None, "127.0.0.1", 1, "/", 204),
-    ))
-    owner = LocalLaunchOwner.create(intent=plan.intent(), workspace=tmp_path, asserted_by="test", store=store)
+    plan = LocalLaunchPlan(
+        profile="test",
+        services=(LocalServicePlan("backend", 1, ("backend",), None, "127.0.0.1", 1, "/", 204),),
+    )
+    owner = LocalLaunchOwner.create(
+        intent=plan.intent(), workspace=tmp_path, asserted_by="test", store=store
+    )
     owner.spawned("backend", 1, os.getpid())
     try:
         wait_for_services_ready(
-            owner=owner, plan=plan, processes=(_FakeProcess([7]),),
-            now=lambda: 0.0, sleep=lambda _: None, probe=lambda _: (False, "refused"),
+            owner=owner,
+            plan=plan,
+            processes=(_FakeProcess([7]),),
+            now=lambda: 0.0,
+            sleep=lambda _: None,
+            probe=lambda _: (False, "refused"),
         )
     except LocalLaunchStartupError:
         pass
@@ -259,8 +324,12 @@ def test_spawn_bridge_ack_is_required_before_runtime_observation(monkeypatch) ->
     os.close(write_fd)
     process = _FakeProcess([None])
     supervisor._await_spawn_registration(
-        owner=_FakeOwner(), service=_two_service_plan().services[0], process=process,
-        read_fd=read_fd, deadline=1.0, now=lambda: 0.0,
+        owner=_FakeOwner(),
+        service=_two_service_plan().services[0],
+        process=process,
+        read_fd=read_fd,
+        deadline=1.0,
+        now=lambda: 0.0,
     )
 
 
@@ -272,8 +341,12 @@ def test_spawn_bridge_close_fails_before_readiness() -> None:
     os.close(write_fd)
     try:
         supervisor._await_spawn_registration(
-            owner=owner, service=_two_service_plan().services[0], process=_FakeProcess([7]),
-            read_fd=read_fd, deadline=1.0, now=lambda: 0.0,
+            owner=owner,
+            service=_two_service_plan().services[0],
+            process=_FakeProcess([7]),
+            read_fd=read_fd,
+            deadline=1.0,
+            now=lambda: 0.0,
         )
     except supervisor.LocalLaunchStartupError as exc:
         assert "before service.spawned registration" in str(exc)
@@ -282,7 +355,9 @@ def test_spawn_bridge_close_fails_before_readiness() -> None:
     assert owner.events[0][0] == "launch_failed"
 
 
-def test_spawn_helper_kills_child_when_registration_bridge_fails(tmp_path: Path, monkeypatch) -> None:
+def test_spawn_helper_kills_child_when_registration_bridge_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
     import oh_goon.runtime.local_launch_supervisor as supervisor
 
     fake_exec = tmp_path / "backend/.venv/bin/oh-goon-local-launch-exec"
@@ -290,16 +365,27 @@ def test_spawn_helper_kills_child_when_registration_bridge_fails(tmp_path: Path,
     fake_exec.write_text("#!/bin/sh\nexit 7\n")
     fake_exec.chmod(0o755)
     killed: list[tuple[int, tuple[object, ...]]] = []
-    monkeypatch.setattr(supervisor, "stop_process_group", lambda pgid, processes: killed.append((pgid, processes)))
+    monkeypatch.setattr(
+        supervisor, "stop_process_group", lambda pgid, processes: killed.append((pgid, processes))
+    )
     service = LocalServicePlan("backend", 1, ("unused",), tmp_path, "127.0.0.1", 1, "/", 204)
-    owner = type("Owner", (), {
-        "identity": type("Identity", (), {"launch_id": "launch-test"})(),
-        "launch_failed": lambda self, **_: None,
-    })()
+    owner = type(
+        "Owner",
+        (),
+        {
+            "identity": type("Identity", (), {"launch_id": "launch-test"})(),
+            "launch_failed": lambda self, **_: None,
+        },
+    )()
     try:
         supervisor._spawn_registered_service(
-            root=tmp_path, owner=owner, service=service, child_env=dict(os.environ),
-            pgid=None, deadline=time.monotonic() + 2, now=time.monotonic,
+            root=tmp_path,
+            owner=owner,
+            service=service,
+            child_env=dict(os.environ),
+            pgid=None,
+            deadline=time.monotonic() + 2,
+            now=time.monotonic,
         )
     except supervisor.LocalLaunchStartupError:
         pass
@@ -307,7 +393,6 @@ def test_spawn_helper_kills_child_when_registration_bridge_fails(tmp_path: Path,
         raise AssertionError("spawn registration failure must fail startup")
     assert len(killed) == 1
     assert killed[0][0] == killed[0][1][0].pid
-
 
 
 def test_contributor_launch_state_uses_supplied_environment_database(
@@ -446,18 +531,28 @@ def test_contributor_launch_rejects_incomplete_runtime_context_before_spawn(
 
 
 def test_readiness_timeout_exposes_bounded_structured_failure_evidence() -> None:
-    from oh_goon.runtime.local_launch_supervisor import LocalLaunchStartupError, wait_for_services_ready
+    from oh_goon.runtime.local_launch_supervisor import (
+        LocalLaunchStartupError,
+        wait_for_services_ready,
+    )
 
     owner = _FakeOwner()
     plan = _two_service_plan(timeout=0.2)
     clock = [0.0]
-    def now(): return clock[0]
-    def sleep(seconds): clock[0] += seconds
+
+    def now():
+        return clock[0]
+
+    def sleep(seconds):
+        clock[0] += seconds
+
     try:
         wait_for_services_ready(
-            owner=owner, plan=plan,
+            owner=owner,
+            plan=plan,
             processes=(_FakeProcess([None]), _FakeProcess([None])),
-            now=now, sleep=sleep,
+            now=now,
+            sleep=sleep,
             probe=lambda service: (False, f"{service.service}-not-ready"),
         )
     except LocalLaunchStartupError as exc:
@@ -475,14 +570,19 @@ def test_readiness_timeout_exposes_bounded_structured_failure_evidence() -> None
 
 
 def test_required_child_exit_exposes_service_identity_without_token() -> None:
-    from oh_goon.runtime.local_launch_supervisor import LocalLaunchStartupError, wait_for_services_ready
+    from oh_goon.runtime.local_launch_supervisor import (
+        LocalLaunchStartupError,
+        wait_for_services_ready,
+    )
 
     owner = _FakeOwner()
     try:
         wait_for_services_ready(
-            owner=owner, plan=_two_service_plan(),
+            owner=owner,
+            plan=_two_service_plan(),
             processes=(_FakeProcess([17]), _FakeProcess([None])),
-            now=lambda: 0.0, sleep=lambda _seconds: None,
+            now=lambda: 0.0,
+            sleep=lambda _seconds: None,
             probe=lambda _service: (False, "not-ready"),
         )
     except LocalLaunchStartupError as exc:

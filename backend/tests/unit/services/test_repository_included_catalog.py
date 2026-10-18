@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import json
-
-import pytest
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from oh_goon.core.errors import StateConflict
-from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.models.repository import (
     ExcludedRepositoryCatalogEntry,
     IncludedRepositoryCatalogEntry,
     RepositoryCatalogEntry,
     RepositoryIdentity,
 )
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary import FleetScope
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.services.repositories import RepositoryService
@@ -83,8 +83,9 @@ def test_repository_write_openapi_results_are_scope_specific() -> None:
     assert include_schema == {"$ref": "#/components/schemas/IncludedRepositoryCatalogEntry"}
 
 
-
-def test_repository_scope_commands_fail_closed_when_displayed_scope_is_stale(tmp_path: Path) -> None:
+def test_repository_scope_commands_fail_closed_when_displayed_scope_is_stale(
+    tmp_path: Path,
+) -> None:
     repository = tmp_path / "repo-stale"
     repository.mkdir()
     (repository / ".git").mkdir()
@@ -95,11 +96,17 @@ def test_repository_scope_commands_fail_closed_when_displayed_scope_is_stale(tmp
             del locations
             record = exclusions.get(str(repository.resolve()))
             if record is None:
-                return [IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=identity)]
-            return [ExcludedRepositoryCatalogEntry(
-                scope=FleetScope.EXCLUDED, repository=identity,
-                exclusion_reason=record["reason"], excluded_at=record["excluded_at"],
-            )]
+                return [
+                    IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=identity)
+                ]
+            return [
+                ExcludedRepositoryCatalogEntry(
+                    scope=FleetScope.EXCLUDED,
+                    repository=identity,
+                    exclusion_reason=record["reason"],
+                    excluded_at=record["excluded_at"],
+                )
+            ]
 
     state = local_state(LocalDatabase(tmp_path / "stale-state.db"))
     service = RepositoryService(state, ScopeAwareDiscovery())  # type: ignore[arg-type]

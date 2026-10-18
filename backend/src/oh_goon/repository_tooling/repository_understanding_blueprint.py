@@ -1,4 +1,5 @@
 """Deterministic Repository Understanding exam blueprint metadata and release gate."""
+
 from __future__ import annotations
 
 from collections import Counter
@@ -66,7 +67,9 @@ def concept_family(section: str) -> str:
     try:
         return CONCEPT_FAMILIES[section]
     except KeyError as exc:
-        raise ValueError(f"repository-understanding section has no concept family: {section}") from exc
+        raise ValueError(
+            f"repository-understanding section has no concept family: {section}"
+        ) from exc
 
 
 def criticality_class(severity: str) -> str:
@@ -107,7 +110,9 @@ def audit_exam(questions: Iterable[Any]) -> dict[str, Any]:
     violations: list[dict[str, Any]] = []
     for name, (minimum, maximum) in DIMENSION_TARGET_RANGES.items():
         share = _percent(dimensions.get(name, 0), total)
-        status = "IN_RANGE" if minimum <= share <= maximum else "UNDER" if share < minimum else "OVER"
+        status = (
+            "IN_RANGE" if minimum <= share <= maximum else "UNDER" if share < minimum else "OVER"
+        )
         dimension_audit[name] = {
             "questions": dimensions.get(name, 0),
             "share_percent": share,
@@ -122,7 +127,11 @@ def audit_exam(questions: Iterable[Any]) -> dict[str, Any]:
     for form in QUESTION_FORMS:
         count = forms.get(form, 0)
         status = "ENOUGH" if count >= QUESTION_FORM_MINIMUM else "UNDER"
-        form_audit[form] = {"questions": count, "minimum_questions": QUESTION_FORM_MINIMUM, "status": status}
+        form_audit[form] = {
+            "questions": count,
+            "minimum_questions": QUESTION_FORM_MINIMUM,
+            "status": status,
+        }
         if status != "ENOUGH":
             violations.append({"kind": "question_form_coverage", "form": form, "status": status})
 
@@ -163,5 +172,7 @@ def audit_exam(questions: Iterable[Any]) -> dict[str, Any]:
 def assert_exam_release_ready(questions: Iterable[Any]) -> dict[str, Any]:
     audit = audit_exam(questions)
     if audit["status"] != "BALANCED":
-        raise ValueError(f"repository-understanding bank fails blueprint release gate: {audit['violations']}")
+        raise ValueError(
+            f"repository-understanding bank fails blueprint release gate: {audit['violations']}"
+        )
     return audit

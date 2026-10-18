@@ -6,16 +6,15 @@ from dataclasses import asdict, dataclass
 from typing import Literal
 
 from oh_goon.core.models.pytest_selection import StructuredPytestMember
-from oh_goon.runtime.execution.executed_membership_identity import (
-    executed_verification_membership_identity,
-)
-from oh_goon.runtime.execution.pytest_projection import project_pytest_argv
-
 from oh_goon.core.models.shard_execution import (
     CanonicalShardAttemptEvidence,
     CanonicalShardExecutionEvidence,
     CanonicalShardResultEvidence,
 )
+from oh_goon.runtime.execution.executed_membership_identity import (
+    executed_verification_membership_identity,
+)
+from oh_goon.runtime.execution.pytest_projection import project_pytest_argv
 
 ExecutionStatus = Literal[
     "PASS",
@@ -43,9 +42,7 @@ def _identity(payload: dict[str, object]) -> str:
 
 
 def _validate_sha256(name: str, value: str | None) -> None:
-    if value is not None and (
-        not value.startswith("sha256:") or len(value) != 71
-    ):
+    if value is not None and (not value.startswith("sha256:") or len(value) != 71):
         raise ValueError(f"{name} must be a sha256 identity")
 
 
@@ -66,9 +63,7 @@ class ShardExecutionContext:
         ):
             _validate_sha256(name, value)
         if self.execution_contract_version != EXECUTION_CONTRACT_VERSION:
-            raise ValueError(
-                f"execution_contract_version must be {EXECUTION_CONTRACT_VERSION!r}"
-            )
+            raise ValueError(f"execution_contract_version must be {EXECUTION_CONTRACT_VERSION!r}")
 
     @property
     def context_identity(self) -> str:
@@ -119,7 +114,9 @@ def _validate_shard_work(value: "ShardWork") -> None:
             raise ValueError(
                 "structured pytest work must explicitly bind original admitted member identities"
             )
-        if len(set(value.original_admitted_member_identities)) != len(value.original_admitted_member_identities):
+        if len(set(value.original_admitted_member_identities)) != len(
+            value.original_admitted_member_identities
+        ):
             raise ValueError("original admitted member identities must be unique")
     elif value.original_admitted_member_identities:
         raise ValueError("original admitted member identities require structured pytest members")
@@ -148,7 +145,9 @@ class ShardWork:
 def _validate_structured_plan(shards: tuple[ShardWork, ...], admitted: tuple[str, ...]) -> None:
     structured = tuple(member for shard in shards for member in shard.pytest_members)
     if structured and tuple(member.executable_selector for member in structured) != admitted:
-        raise ValueError("structured pytest membership must conserve admitted verification order exactly")
+        raise ValueError(
+            "structured pytest membership must conserve admitted verification order exactly"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,7 +185,10 @@ class ShardExecutionPlan:
             ("producer_artifact_identity", self.producer_artifact_identity),
             ("producer_implementation_identity", self.producer_implementation_identity),
             ("producer_contract_identity", self.producer_contract_identity),
-            ("verification_selection_evidence_identity", self.verification_selection_evidence_identity),
+            (
+                "verification_selection_evidence_identity",
+                self.verification_selection_evidence_identity,
+            ),
             ("selected_membership_identity", self.selected_membership_identity),
             ("verification_revision_identity", self.verification_revision_identity),
         ):
@@ -206,16 +208,26 @@ class ShardExecutionPlan:
             self.selected_membership_identity,
             self.verification_revision_identity,
         )
-        if any(value is not None for value in verification_fields) or self.selected_test_nodes or self.unproven_owner_members:
+        if (
+            any(value is not None for value in verification_fields)
+            or self.selected_test_nodes
+            or self.unproven_owner_members
+        ):
             if any(value is None for value in verification_fields) or not self.selected_test_nodes:
-                raise ValueError("verification selection binding requires evidence, membership, revision, and selected test nodes")
+                raise ValueError(
+                    "verification selection binding requires evidence, membership, revision, and selected test nodes"
+                )
             if len(set(self.selected_test_nodes)) != len(self.selected_test_nodes):
                 raise ValueError("selected verification test nodes must be unique")
             if not set(self.unproven_owner_members).issubset(self.selected_test_nodes):
                 raise ValueError("unproven owner members must be selected test nodes")
             admitted = tuple(member for shard in self.shards for member in shard.members)
-            if len(admitted) != len(set(admitted)) or set(admitted) != set(self.selected_test_nodes):
-                raise ValueError("Oh-Goon shard grouping must conserve admitted verification membership exactly")
+            if len(admitted) != len(set(admitted)) or set(admitted) != set(
+                self.selected_test_nodes
+            ):
+                raise ValueError(
+                    "Oh-Goon shard grouping must conserve admitted verification membership exactly"
+                )
             _validate_structured_plan(self.shards, admitted)
 
 
@@ -445,10 +457,14 @@ def build_execution_report(
 ) -> ShardExecutionReport:
     def accepted_leaf_members(result: ShardResult) -> tuple[str, ...]:
         if result.children:
-            return tuple(member for child in result.children for member in accepted_leaf_members(child))
+            return tuple(
+                member for child in result.children for member in accepted_leaf_members(child)
+            )
         return result.members if result.passed else ()
 
-    executed_members = tuple(member for result in results for member in accepted_leaf_members(result))
+    executed_members = tuple(
+        member for result in results for member in accepted_leaf_members(result)
+    )
     executed_unique = len(executed_members) == len(set(executed_members))
     if plan.selected_test_nodes:
         membership_complete = (
@@ -456,9 +472,7 @@ def build_execution_report(
             and len(executed_members) == len(plan.selected_test_nodes)
             and set(executed_members) == set(plan.selected_test_nodes)
         )
-        actual_membership_identity = executed_verification_membership_identity(
-            executed_members
-        )
+        actual_membership_identity = executed_verification_membership_identity(executed_members)
     else:
         membership_complete = all(result.passed for result in results)
         actual_membership_identity = None

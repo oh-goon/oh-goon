@@ -3,6 +3,7 @@
 The deployed owner alone can establish independently owned public roots.
 Neither these mocks nor the original test signer qualify production provisioning.
 """
+
 from __future__ import annotations
 
 import os
@@ -11,15 +12,25 @@ import pytest
 
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from tests.unit.runtime.test_b12d2c3b8_original_issuer_restart_fence import (
-    _snapshot, _transfer, owner,  # noqa: F401 - dependent test fixture
+    _snapshot,  # noqa: F401 - dependent test fixture
+    _transfer,
 )
 
 
-@pytest.mark.parametrize("attack", [
-    "missing_owner", "same_uid", "observer_reject", "insufficient_roots",
-    "wrong_run", "foreign_schema", "mismatched_owner", "changed_signer_uid",
-    "fake_attestation",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "missing_owner",
+        "same_uid",
+        "observer_reject",
+        "insufficient_roots",
+        "wrong_run",
+        "foreign_schema",
+        "mismatched_owner",
+        "changed_signer_uid",
+        "fake_attestation",
+    ],
+)
 def test_absent_independent_root_custody_blocks_before_transfer(owner, attack):
     conn, journal, service, provisioner, *_ = owner
     if attack == "missing_owner":
@@ -47,6 +58,7 @@ def test_custody_lost_after_provisional_transfer_rolls_back(owner, monkeypatch):
     conn, journal, service, provisioner, *_ = owner
     before = _snapshot(conn)
     from oh_goon.runtime import enforcer_lace_restart_transfer as transfer
+
     original = transfer.commit_original_restart_transfer_in
 
     def revoke_after_provisional(*args, **kwargs):

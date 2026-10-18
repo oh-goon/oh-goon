@@ -4,12 +4,14 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from oh_goon.integrations.native_uv_lock import (
+    native_uv_locked_project_issue as _product_native_uv_locked_project_issue,
+)
 from oh_goon.repository_tooling.public_dependency_privacy import (
     backend_uv_lock_privacy_issues,
     frontend_package_lock_privacy_issues,
 )
 from oh_goon.repository_tooling.source_layout import canonical_source_layout_issues
-from oh_goon.integrations.native_uv_lock import native_uv_locked_project_issue as _product_native_uv_locked_project_issue
 
 ROOT = Path(__file__).resolve().parents[4]
 BACKEND_LOCK = Path("backend/uv.lock")

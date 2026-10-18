@@ -31,7 +31,6 @@ class _NoFleetTargets:
         raise AssertionError("target execution must not start")
 
 
-
 class _DatabaseIdentityLosingTargets:
     def execute(self, *args: object, **kwargs: object) -> None:
         raise DatabasePathIdentityLost("primary fleet database identity lost")

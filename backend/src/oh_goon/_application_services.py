@@ -10,6 +10,7 @@ from oh_goon.runtime.league_lineups import LeagueLineupFileStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.runtime.schedule_scheduler import ScheduleScheduler
 from oh_goon.runtime.shared_plans import SharedPlanFileStore
+from oh_goon.scout.service import ScoutService, scout_enabled_from_environment
 from oh_goon.services.command_center import CommandCenterService
 from oh_goon.services.dependencies import DependencyFleetService
 from oh_goon.services.filesystem import FilesystemService
@@ -17,6 +18,7 @@ from oh_goon.services.fleet import FleetService
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plans import FleetPlanService
+from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
@@ -29,11 +31,9 @@ from oh_goon.services.migration import MigrationService
 from oh_goon.services.recovery import RecoveryService
 from oh_goon.services.repositories import RepositoryService
 from oh_goon.services.repository_discovery import RepositoryDiscoveryService
-from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.schedule_admission import ScheduleAdmissionPlanner
 from oh_goon.services.schedule_execution import ScheduleExecutionEngine
 from oh_goon.services.schedules import ScheduleService
-from oh_goon.scout.service import ScoutService, scout_enabled_from_environment
 from oh_goon.services.security import SecurityService
 from oh_goon.services.shared_plan_schedules import SharedPlanScheduleService
 from oh_goon.services.shared_plans import SharedPlanService
@@ -51,18 +51,25 @@ def _build_fleet_services(
     # even when a manually constructed RuntimeFoundation is supplied here.
     from oh_goon.core.enforcer_lace_trust import TrustProtocolError
     from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
+
     standard = foundation.standard_local_fleet is True
     if standard:
-        if (foundation.require_authenticated_fleet is not False
-                or foundation.require_compiled_fleet_contract is not False
-                or foundation.fleet_prework is not None
-                or foundation.fleet_provisioner is not None):
+        if (
+            foundation.require_authenticated_fleet is not False
+            or foundation.require_compiled_fleet_contract is not False
+            or foundation.fleet_prework is not None
+            or foundation.fleet_provisioner is not None
+        ):
             raise TrustProtocolError("standard-local mode cannot inherit native Fleet enrollment")
-    elif (foundation.require_authenticated_fleet is not True
-          or foundation.require_compiled_fleet_contract is not True
-          or foundation.fleet_prework is not None
-          or (foundation.fleet_provisioner is not None
-              and type(foundation.fleet_provisioner) is not FleetPreworkProvisioner)):
+    elif (
+        foundation.require_authenticated_fleet is not True
+        or foundation.require_compiled_fleet_contract is not True
+        or foundation.fleet_prework is not None
+        or (
+            foundation.fleet_provisioner is not None
+            and type(foundation.fleet_provisioner) is not FleetPreworkProvisioner
+        )
+    ):
         raise TrustProtocolError("production Fleet requires authenticated admission")
     admission = FleetAdmissionPlanner(
         foundation.state,
@@ -194,8 +201,11 @@ def build_product_services(foundation: RuntimeFoundation):
         shared_plan=shared_plan,
         shared_plan_schedules=shared_plan_schedules,
         lineups=LeagueLineupService(LeagueLineupFileStore(), league),
-        scout=ScoutService(foundation.state.journal, database=foundation.database,
-                           enabled=scout_enabled_from_environment()),
+        scout=ScoutService(
+            foundation.state.journal,
+            database=foundation.database,
+            enabled=scout_enabled_from_environment(),
+        ),
         _lifecycle=foundation.lifecycle,
         _schedule_scheduler=schedule_scheduler,
     )

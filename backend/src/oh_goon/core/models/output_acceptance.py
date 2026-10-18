@@ -70,9 +70,7 @@ class OutputAcceptance(ImmutableModel):
     @model_validator(mode="after")
     def _producer_must_be_exact_execution(self) -> "OutputAcceptance":
         if self.producer_execution_identity != self.execution.identity:
-            raise ValueError(
-                "output producer identity must match the exact execution generation"
-            )
+            raise ValueError("output producer identity must match the exact execution generation")
         return self
 
     @property
@@ -90,6 +88,9 @@ class SideEffectReceipt(ImmutableModel):
     def _accepted_receipt_requires_output(self) -> "SideEffectReceipt":
         if self.disposition is SideEffectDisposition.ACCEPTED and self.accepted_output_id is None:
             raise ValueError("accepted side effect requires durable output acceptance identity")
-        if self.disposition is not SideEffectDisposition.ACCEPTED and self.accepted_output_id is not None:
+        if (
+            self.disposition is not SideEffectDisposition.ACCEPTED
+            and self.accepted_output_id is not None
+        ):
             raise ValueError("non-accepted side effect cannot carry output acceptance identity")
         return self

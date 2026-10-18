@@ -58,7 +58,9 @@ def test_m136_every_shipped_artifact_is_explicit_and_documented() -> None:
 
 @pytest.mark.parametrize("mutation", ["duplicate", "invalid", "missing"])
 def test_m136_invalid_or_ambiguous_retention_is_detected(mutation: str) -> None:
-    _, exemplar = next((path, item) for path, item in _shipped_artifact_goons() if _artifacts(item))
+    _, exemplar = next(
+        (path, item) for path, item in _shipped_artifact_goons() if _artifacts(item)
+    )
     changed = copy.deepcopy(exemplar)
     first = next(step for step in changed["steps"] if step.get("artifacts"))
     if mutation == "duplicate":
@@ -73,10 +75,17 @@ def test_m136_invalid_or_ambiguous_retention_is_detected(mutation: str) -> None:
 def test_m136_guide_covers_runtime_owners_and_every_shipped_choice() -> None:
     text = GUIDE.read_text(encoding="utf-8")
     for contract in (
-        "PlanArtifactDeclaration", "PresentPlanArtifact", "MissingPlanArtifact",
-        "PlanRetainedContentEvidence", "fleet_plan_step_publication.py",
-        "fleet_content_maintenance.py", "fleet_content_retention.py",
-        "repository-scoped", "strict execution", "Run ID", "Plan ID",
+        "PlanArtifactDeclaration",
+        "PresentPlanArtifact",
+        "MissingPlanArtifact",
+        "PlanRetainedContentEvidence",
+        "fleet_plan_step_publication.py",
+        "fleet_content_maintenance.py",
+        "fleet_content_retention.py",
+        "repository-scoped",
+        "strict execution",
+        "Run ID",
+        "Plan ID",
     ):
         assert contract in text
     for path, _ in _shipped_artifact_goons():
@@ -89,8 +98,10 @@ def test_m136_guide_covers_runtime_owners_and_every_shipped_choice() -> None:
 
 def test_m136_navigation_links_to_one_canonical_guide() -> None:
     for relative in (
-        "docs/README.md", "templates/README.md",
-        "templates/goons/README.md", "docs/development/GOON_AUTHORING.md",
+        "docs/README.md",
+        "templates/README.md",
+        "templates/goons/README.md",
+        "docs/development/GOON_AUTHORING.md",
     ):
         page = ROOT / relative
         text = page.read_text(encoding="utf-8")

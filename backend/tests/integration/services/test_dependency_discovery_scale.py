@@ -3,7 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from time import perf_counter
 
-from oh_goon.core.models.dependency_fleet import DependencyTargetFilter, DependencyTargetMaterializeRequest
+from oh_goon.core.models.dependency_fleet import (
+    DependencyTargetFilter,
+    DependencyTargetMaterializeRequest,
+)
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.vocabulary import FleetScope
 from oh_goon.runtime.database import LocalDatabase
@@ -74,21 +77,25 @@ def test_five_thousand_repository_mlflow_flow_is_indexed_bounded_and_truthful(
         evidence="current",
         limit=25,
     )
-    selection = service.materialize(DependencyTargetMaterializeRequest(
-        filter=DependencyTargetFilter(
-            package_name="mlflow",
-            version_specifier="<2.18.0",
-            advisory_id="CVE-2026-MLFLOW",
-            evidence="current",
-        ),
-        expected_population_id=page.population_id,
-    ))
+    selection = service.materialize(
+        DependencyTargetMaterializeRequest(
+            filter=DependencyTargetFilter(
+                package_name="mlflow",
+                version_specifier="<2.18.0",
+                advisory_id="CVE-2026-MLFLOW",
+                evidence="current",
+            ),
+            expected_population_id=page.population_id,
+        )
+    )
     proven_page = service.coverage_repositories("mlflow", coverage="proven_no_match", limit=25)
     missing_page = service.coverage_repositories("mlflow", coverage="no_current_evidence", limit=25)
-    missing_selection = service.materialize(DependencyTargetMaterializeRequest(
-        filter=DependencyTargetFilter(package_name="mlflow", coverage="no_current_evidence"),
-        expected_population_id=missing_page.population_id,
-    ))
+    missing_selection = service.materialize(
+        DependencyTargetMaterializeRequest(
+            filter=DependencyTargetFilter(package_name="mlflow", coverage="no_current_evidence"),
+            expected_population_id=missing_page.population_id,
+        )
+    )
     elapsed = perf_counter() - started
 
     assert search.items[0].repositories == 137

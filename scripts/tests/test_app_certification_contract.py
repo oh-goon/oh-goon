@@ -16,7 +16,9 @@ def _target_body(name: str) -> str:
     marker = f"{name}:"
     lines_all = MAKEFILE.splitlines()
     start_line = next(
-        i for i, line in enumerate(lines_all) if line == marker or line.startswith(marker + " ")
+        i
+        for i, line in enumerate(lines_all)
+        if line == marker or line.startswith(marker + " ")
     )
     rest = "\n".join(lines_all[start_line:])
     lines = rest.splitlines()
@@ -60,9 +62,9 @@ def test_app_plan_is_direct_verification_of_initialized_repository() -> None:
 def test_make_certify_has_one_certification_frontdoor() -> None:
     body = _target_body("certify")
     assert "$(CERTIFICATION_FRONTDOOR)" in body
-    assert 'CERTIFICATION_RUNNER = backend/.venv/bin/oh-goon-workflow' in MAKEFILE
-    assert 'CERTIFICATION INITIALIZATION REQUIRED' in body
-    assert 'Run: make init' in body
+    assert "CERTIFICATION_RUNNER = backend/.venv/bin/oh-goon-workflow" in MAKEFILE
+    assert "CERTIFICATION INITIALIZATION REQUIRED" in body
+    assert "Run: make init" in body
     assert "app-certification" not in body
     for goon in _plan_goons():
         assert f"make {_goon_make_command(goon)}" not in body
@@ -75,7 +77,9 @@ def test_make_certify_rejects_stale_generated_authority_before_run_frontdoor() -
     assert body.index(generated) < body.index("$(CERTIFICATION_FRONTDOOR)")
 
 
-def test_template_startability_gate_is_plan_owned_and_uses_exact_catalog_harness() -> None:
+def test_template_startability_gate_is_plan_owned_and_uses_exact_catalog_harness() -> (
+    None
+):
     body = _target_body("template-startability-certification")
     assert "tests/integration/services/test_catalog_template_startability.py" in body
     assert ".venv/bin/oh-goon-qualification-exec pytest -q" in body
@@ -128,7 +132,12 @@ def test_app_certification_does_not_own_dependency_materialization() -> None:
     assert "dependency-materialize" not in plan_text
     assert "make init" not in plan_text
     for goon in _plan_goons():
-        path = ROOT / "templates/goons/oh-goon" / goon.removeprefix("oh-goon/") / "goon.yml"
+        path = (
+            ROOT
+            / "templates/goons/oh-goon"
+            / goon.removeprefix("oh-goon/")
+            / "goon.yml"
+        )
         assert "make init" not in path.read_text(encoding="utf-8")
     for removed_target in (
         "certification-setup:",
@@ -139,6 +148,7 @@ def test_app_certification_does_not_own_dependency_materialization() -> None:
         "certification-dependencies-seal:",
     ):
         assert removed_target not in MAKEFILE
+
 
 def test_backend_p0_uses_repository_owned_native_test_launcher() -> None:
     target = _target_body("verify-p0")
@@ -179,9 +189,16 @@ def test_backend_p0_owns_exact_nested_test_tool_authority() -> None:
     ]
 
     generated = json.loads(
-        (ROOT / "backend/src/oh_goon/canonical_goon_tool_authority.json").read_text(encoding="utf-8")
+        (ROOT / "backend/src/oh_goon/canonical_goon_tool_authority.json").read_text(
+            encoding="utf-8"
+        )
     )
-    assert generated["goons"]["oh-goon/backend-p0"]["make"] == ["git", "ldd", "sh", "uv"]
+    assert generated["goons"]["oh-goon/backend-p0"]["make"] == [
+        "git",
+        "ldd",
+        "sh",
+        "uv",
+    ]
 
 
 def test_app_certification_docs_match_executable_goon_authority() -> None:
@@ -216,35 +233,47 @@ def test_template_startability_goon_owns_exact_nested_tool_authority() -> None:
 
 def test_certification_plan_has_no_release_or_browser_matrix_replay() -> None:
     goons = set(_plan_goons())
-    assert not {
-        "oh-goon/backend-tests",
-        "oh-goon/tooling-tests",
-        "oh-goon/integration-tests",
-        "oh-goon/backend-p1",
-        "oh-goon/browser-targeted",
-        "oh-goon/browser-required",
-        "oh-goon/release-locks",
-        "oh-goon/release-package-store",
-    } & goons
+    assert (
+        not {
+            "oh-goon/backend-tests",
+            "oh-goon/tooling-tests",
+            "oh-goon/integration-tests",
+            "oh-goon/backend-p1",
+            "oh-goon/browser-targeted",
+            "oh-goon/browser-required",
+            "oh-goon/release-locks",
+            "oh-goon/release-package-store",
+        }
+        & goons
+    )
 
 
 def test_help_separates_development_verify_and_lean_certification() -> None:
     assert "make check            Fast inner development feedback" in MAKEFILE
     assert "make verify           Exhaustive whole-app diagnosis" in MAKEFILE
-    assert "make certify          Lean APP verification of the initialized checkout; no strict executor required" in MAKEFILE
+    assert (
+        "make certify          Lean APP verification of the initialized checkout; no strict executor required"
+        in MAKEFILE
+    )
     assert "make certification-setup" not in MAKEFILE
 
 
-def test_app_local_runtime_verification_is_separate_from_strict_real_world_acceptance() -> None:
+def test_app_local_runtime_verification_is_separate_from_strict_real_world_acceptance() -> (
+    None
+):
     body = _target_body("local-runtime-verification")
     assert "oh-goon-dev-runtime-acceptance verification" in body
     assert "strict-local-runtime-acceptance" not in body
     assert "local-access-runtime-acceptance:" not in MAKEFILE
     assert "$(MAKE) strict-local-runtime-acceptance" in _target_body("test-real-world")
-    assert "$(MAKE) strict-local-runtime-acceptance" in _target_body("test-real-world-parallel")
+    assert "$(MAKE) strict-local-runtime-acceptance" in _target_body(
+        "test-real-world-parallel"
+    )
 
     goon = yaml.safe_load(
-        (ROOT / "templates/goons/oh-goon/local-runtime/goon.yml").read_text(encoding="utf-8")
+        (ROOT / "templates/goons/oh-goon/local-runtime/goon.yml").read_text(
+            encoding="utf-8"
+        )
     )
     assert "execution" not in goon
     assert "tools" not in goon
@@ -252,22 +281,33 @@ def test_app_local_runtime_verification_is_separate_from_strict_real_world_accep
     requirements = json.loads(
         (ROOT / "backend/goon-execution-requirements.json").read_text(encoding="utf-8")
     )
-    assert requirements["workload_tool_permissions"]["make:local-runtime-verification"] == [
+    assert requirements["workload_tool_permissions"][
+        "make:local-runtime-verification"
+    ] == [
         "node",
         "npm",
     ]
     assert "make:local-access-runtime-acceptance" not in json.dumps(requirements)
 
     generated = json.loads(
-        (ROOT / "backend/src/oh_goon/canonical_goon_tool_authority.json").read_text(encoding="utf-8")
+        (ROOT / "backend/src/oh_goon/canonical_goon_tool_authority.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert generated["goons"]["oh-goon/local-runtime"]["make"] == ["node", "npm"]
 
 
 def test_unknown_make_target_lists_lean_certification_frontdoor() -> None:
     result = subprocess.run(
-        ["make", "certify2"], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        ["make", "certify2"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
     )
     assert result.returncode != 0
     assert "Unknown Oh-Goon make target: certify2" in result.stdout
-    assert "make certify          Lean APP verification of the initialized checkout; no strict executor required" in result.stdout
+    assert (
+        "make certify          Lean APP verification of the initialized checkout; no strict executor required"
+        in result.stdout
+    )

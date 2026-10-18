@@ -1,4 +1,5 @@
 """AG-01 source-closure boundaries: no agent effects, no second parser/launcher."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,7 +16,8 @@ def _setup(tmp_path: Path):
     goon = goons / "agent" / "source-preview"
     goon.mkdir(parents=True)
     (goon / "README.md").write_text("# source-preview\n", encoding="utf-8")
-    (goon / "goon.yml").write_text("""inputs:
+    (goon / "goon.yml").write_text(
+        """inputs:
   repo:
     type: repository_reference
   skill:
@@ -24,11 +26,16 @@ def _setup(tmp_path: Path):
     type: acceptance_profile
 steps:
 - run: echo preview-only
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     plan = tmp_path / "plan.yml"
-    plan.write_text("""inputs: [repo, skill, acceptance]
+    plan.write_text(
+        """inputs: [repo, skill, acceptance]
 goons: [agent/source-preview]
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     repositories = tmp_path / "approved-repositories"
     repo = repositories / "team" / "app"
     repo.mkdir(parents=True)
@@ -65,7 +72,10 @@ def test_canonical_resolver_readonly_explain_includes_full_skill_and_source_iden
     assert report["transported_immutable_snapshot"] is False
     assert report["original_enforcer_admission"] == "NOT_ATTEMPTED"
     assert {entry["path"] for entry in report["skill"]["members"]} == {
-        "SKILL.md", "references/RULES.md", "scripts/check.sh", "assets/spec.json"
+        "SKILL.md",
+        "references/RULES.md",
+        "scripts/check.sh",
+        "assets/spec.json",
     }
     assert report["skill"]["entry_count"] == 4
     assert not (skill / ".oh-goon-data").exists()
@@ -96,14 +106,20 @@ def test_same_skill_bytes_have_same_content_identity_at_distinct_authorized_orig
     assert third["skill"]["content_identity"] != initial["skill"]["content_identity"]
 
 
-@pytest.mark.parametrize("override, match", [
-    ({"repo": "local:../secrets"}, "invalid repository_reference"),
-    ({"repo": "local:team/../secrets"}, "invalid repository_reference"),
-    ({"repo": "local:/etc"}, "invalid repository_reference"),
-    ({"skill": "github:team/skills@main:reviews/semantic"}, "invalid skill_reference"),
-    ({"skill": "github:team/skills@" + "a"*40 + ":reviews/semantic"}, "original source-acquisition proof"),
-    ({"acceptance": "not-authorized"}, "not explicitly authorized"),
-])
+@pytest.mark.parametrize(
+    "override, match",
+    [
+        ({"repo": "local:../secrets"}, "invalid repository_reference"),
+        ({"repo": "local:team/../secrets"}, "invalid repository_reference"),
+        ({"repo": "local:/etc"}, "invalid repository_reference"),
+        ({"skill": "github:team/skills@main:reviews/semantic"}, "invalid skill_reference"),
+        (
+            {"skill": "github:team/skills@" + "a" * 40 + ":reviews/semantic"},
+            "original source-acquisition proof",
+        ),
+        ({"acceptance": "not-authorized"}, "not explicitly authorized"),
+    ],
+)
 def test_reject_invalid_or_unavailable_authority_before_effects(tmp_path, override, match):
     resolver, plan, values, options, *_ = _setup(tmp_path)
     values.update(override)
@@ -120,6 +136,7 @@ def test_reject_symlink_and_hardlink_skill_escape(tmp_path):
     external = tmp_path / "outside"
     external.write_text("top secret", encoding="utf-8")
     import os
+
     os.link(external, skill / "assets" / "hardlink")
     with pytest.raises(FleetPlanInvalid, match="hardlink"):
         resolver.explain_agent_sources(plan, inputs=values, **options)
@@ -128,7 +145,9 @@ def test_reject_symlink_and_hardlink_skill_escape(tmp_path):
 def test_reject_missing_skill_and_stale_plan(tmp_path):
     resolver, plan, values, options, _, skill = _setup(tmp_path)
     with pytest.raises(FleetPlanInvalid, match="revision changed"):
-        resolver.explain_agent_sources(plan, inputs=values, **{**options, "expected_source_sha256": "0" * 64})
+        resolver.explain_agent_sources(
+            plan, inputs=values, **{**options, "expected_source_sha256": "0" * 64}
+        )
     (skill / "SKILL.md").unlink()
     with pytest.raises(FleetPlanInvalid, match="SKILL.md"):
         resolver.explain_agent_sources(plan, inputs=values, **options)
@@ -141,25 +160,39 @@ def test_reject_unbounded_and_duplicate_role_definitions(tmp_path):
         resolver.explain_agent_sources(plan, inputs=values, **options)
     (repo / "huge.bin").unlink()
     goon = tmp_path / "goons" / "agent" / "source-preview" / "goon.yml"
-    goon.write_text(goon.read_text().replace("steps:\n", "  repo2:\n    type: repository_reference\nsteps:\n"))
-    plan.write_text(plan.read_text().replace("repo, skill, acceptance", "repo, repo2, skill, acceptance"))
+    goon.write_text(
+        goon.read_text().replace("steps:\n", "  repo2:\n    type: repository_reference\nsteps:\n")
+    )
+    plan.write_text(
+        plan.read_text().replace("repo, skill, acceptance", "repo, repo2, skill, acceptance")
+    )
     with pytest.raises(FleetPlanInvalid, match="duplicate repository_reference"):
         # Force reread the canonical graph by updating the SHA supplied.
         _, next_sha = resolver.input_definitions_with_source(plan)
-        resolver.explain_agent_sources(plan, inputs={**values, "repo2": "local:team/app"}, **{**options, "expected_source_sha256": next_sha})
+        resolver.explain_agent_sources(
+            plan,
+            inputs={**values, "repo2": "local:team/app"},
+            **{**options, "expected_source_sha256": next_sha},
+        )
 
 
-def test_existing_plan_inputs_cli_uses_pre_runtime_owner_without_new_agent_command(tmp_path, capsys, monkeypatch):
+def test_existing_plan_inputs_cli_uses_pre_runtime_owner_without_new_agent_command(
+    tmp_path, capsys, monkeypatch
+):
     from oh_goon import cli
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+
     root = tmp_path / "goon.yml"
-    root.write_text("""inputs:
+    root.write_text(
+        """inputs:
   repo: {type: repository_reference}
   skill: {type: skill_reference}
   acceptance: {type: acceptance_profile}
 steps:
 - run: echo preview-only
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     repo_root = tmp_path / "repositories"
     repo = repo_root / "target"
     repo.mkdir(parents=True)
@@ -172,13 +205,31 @@ steps:
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError("AG-01 must not create ApplicationRuntime or Run state")
+
     monkeypatch.setattr(cli, "_build_application_runtime", forbidden)
-    args = ["plan", "inputs", str(root), "--source-closure", "--expect-sha256", digest,
-            "--repository-root", str(repo_root), "--skill-root", str(skill_root),
-            "--allow-acceptance", "semantic-verifier", "--input", "repo=local:target",
-            "--input", "skill=local:review", "--input", "acceptance=semantic-verifier"]
+    args = [
+        "plan",
+        "inputs",
+        str(root),
+        "--source-closure",
+        "--expect-sha256",
+        digest,
+        "--repository-root",
+        str(repo_root),
+        "--skill-root",
+        str(skill_root),
+        "--allow-acceptance",
+        "semantic-verifier",
+        "--input",
+        "repo=local:target",
+        "--input",
+        "skill=local:review",
+        "--input",
+        "acceptance=semantic-verifier",
+    ]
     assert cli.main(args) == 0
     import json
+
     report = json.loads(capsys.readouterr().out)
     assert report["original_enforcer_admission"] == "NOT_ATTEMPTED"
     assert report["skill"]["members"][0]["path"] == "SKILL.md"
@@ -207,13 +258,16 @@ def test_team_skill_alias_is_explicitly_frozen_and_cannot_chain_or_expand_author
 def test_nested_nonprojected_agent_inputs_cannot_bypass_original_execution_fence(tmp_path):
     resolver, plan, values, options, _, _ = _setup(tmp_path)
     goon = tmp_path / "goons" / "agent" / "source-preview" / "goon.yml"
-    goon.write_text("""inputs:
+    goon.write_text(
+        """inputs:
   repo: {type: repository_reference, default: 'local:team/app'}
   skill: {type: skill_reference, default: 'local:reviews/semantic'}
   acceptance: {type: acceptance_profile, default: semantic-verifier}
 steps:
 - run: echo unreachable
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     plan.write_text("goons: [agent/source-preview]\n", encoding="utf-8")
     # No projected root input can conceal this nested agent source type.
     with pytest.raises(FleetPlanInvalid, match="preview-only"):

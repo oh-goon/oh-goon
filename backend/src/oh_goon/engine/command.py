@@ -5,7 +5,6 @@ import hashlib
 import io
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -16,16 +15,18 @@ from pathlib import Path
 from threading import Thread
 from typing import Literal
 
-from oh_goon.engine.command_capture import CommandCapture, TextCapture
-from oh_goon.engine.command_process_tree import (
-    _finish_process_output, _process_group_exists, _terminate_process_group, terminate_owned_process_tree,
-)
-
 from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.product_identity import new_physical_execution_id
+from oh_goon.engine.command_capture import CommandCapture, TextCapture
+from oh_goon.engine.command_process_tree import (
+    _finish_process_output,
+    _process_group_exists,
+    _terminate_process_group,
+    terminate_owned_process_tree,
+)
 from oh_goon.engine.command_runtime_authority import (
     RuntimeAuthorityBinding,
     RuntimeAuthorityReceipt,
@@ -44,10 +45,10 @@ OUTPUT_DRAIN_TIMEOUT_SECONDS = 5.0
 _EXEC_GUARD_PATH = Path(__file__).resolve().parents[1] / "runtime" / "exec_guard.py"
 
 
-
-
 def _sha_identity(payload: object) -> str:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
@@ -66,6 +67,7 @@ class CommandSupervisorReceipt:
     @property
     def receipt_identity(self) -> str:
         from dataclasses import asdict
+
         return _sha_identity({"schema": "oh-goon.command-supervisor-receipt/v1", **asdict(self)})
 
 
@@ -99,7 +101,16 @@ class CommandProcessLifecycleEvent:
 
 
 class CommandTimeoutExpired(subprocess.TimeoutExpired):
-    def __init__(self, cmd, timeout, *, output=None, stderr=None, supervisor: CommandSupervisorReceipt, runtime_authority: RuntimeAuthorityReceipt | None = None):
+    def __init__(
+        self,
+        cmd,
+        timeout,
+        *,
+        output=None,
+        stderr=None,
+        supervisor: CommandSupervisorReceipt,
+        runtime_authority: RuntimeAuthorityReceipt | None = None,
+    ):
         super().__init__(cmd, timeout, output=output, stderr=stderr)
         self.supervisor = supervisor
         self.runtime_authority = runtime_authority
@@ -108,7 +119,14 @@ class CommandTimeoutExpired(subprocess.TimeoutExpired):
 class CommandSupervisionTerminated(RuntimeError):
     """Non-deadline watchdog termination with canonical decision evidence."""
 
-    def __init__(self, message: str, *, decision, supervisor: CommandSupervisorReceipt, runtime_authority: RuntimeAuthorityReceipt | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        decision,
+        supervisor: CommandSupervisorReceipt,
+        runtime_authority: RuntimeAuthorityReceipt | None = None,
+    ) -> None:
         super().__init__(message)
         self.decision = decision
         self.supervisor = supervisor
@@ -254,17 +272,48 @@ class _StartedCommand:
     readers: tuple[Thread, Thread]
 
 
-def _start_supervised_command(argv: tuple[str, ...], *, cwd: Path | None, env: Mapping[str, str] | None, stream_output: CommandOutputObserver | None, process_observer: CommandProcessObserver | None, merge_stderr: bool, parent_death_signal: bool, runtime_authority: RuntimeAuthorityBinding | None, pass_fds: tuple[int, ...], max_capture_bytes_per_stream: int | None) -> _StartedCommand:
+def _start_supervised_command(
+    argv: tuple[str, ...],
+    *,
+    cwd: Path | None,
+    env: Mapping[str, str] | None,
+    stream_output: CommandOutputObserver | None,
+    process_observer: CommandProcessObserver | None,
+    merge_stderr: bool,
+    parent_death_signal: bool,
+    runtime_authority: RuntimeAuthorityBinding | None,
+    pass_fds: tuple[int, ...],
+    max_capture_bytes_per_stream: int | None,
+) -> _StartedCommand:
     child_env = sanitized_child_environment(argv, env)
     physical_execution_id = new_physical_execution_id()
     if process_observer is not None:
-        process_observer(CommandProcessLifecycleEvent(kind="PROCESS_STARTING", physical_execution_id=physical_execution_id))
-    process, authority_receipt = _spawn_command_process(argv, cwd=cwd, child_env=child_env, merge_stderr=merge_stderr, parent_death_signal=parent_death_signal, runtime_authority=runtime_authority, pass_fds=pass_fds)
+        process_observer(
+            CommandProcessLifecycleEvent(
+                kind="PROCESS_STARTING", physical_execution_id=physical_execution_id
+            )
+        )
+    process, authority_receipt = _spawn_command_process(
+        argv,
+        cwd=cwd,
+        child_env=child_env,
+        merge_stderr=merge_stderr,
+        parent_death_signal=parent_death_signal,
+        runtime_authority=runtime_authority,
+        pass_fds=pass_fds,
+    )
     process_identity = None
     if process_observer is not None:
         try:
             process_identity = _process_identity(process.pid)
-            process_observer(CommandProcessLifecycleEvent(kind="PROCESS_STARTED", physical_execution_id=physical_execution_id, pid=process.pid, process_identity=process_identity))
+            process_observer(
+                CommandProcessLifecycleEvent(
+                    kind="PROCESS_STARTED",
+                    physical_execution_id=physical_execution_id,
+                    pid=process.pid,
+                    process_identity=process_identity,
+                )
+            )
         except BaseException:
             _terminate_process_group(process)
             raise
@@ -272,11 +321,17 @@ def _start_supervised_command(argv: tuple[str, ...], *, cwd: Path | None, env: M
         raise ValueError("max_capture_bytes_per_stream must be positive when provided")
     capture = CommandCapture(max_capture_bytes_per_stream)
     stdout_reader = _reader(process.stdout, "stdout", capture.stdout, stream_output)
-    stderr_reader = _reader(process.stderr, "stderr", capture.stderr, stream_output) if not merge_stderr else Thread(target=lambda: None, name="oh-goon-stderr-merged", daemon=True)
+    stderr_reader = (
+        _reader(process.stderr, "stderr", capture.stderr, stream_output)
+        if not merge_stderr
+        else Thread(target=lambda: None, name="oh-goon-stderr-merged", daemon=True)
+    )
     readers = (stdout_reader, stderr_reader)
     for reader in readers:
         reader.start()
-    return _StartedCommand(process, authority_receipt, physical_execution_id, process_identity, capture, readers)
+    return _StartedCommand(
+        process, authority_receipt, physical_execution_id, process_identity, capture, readers
+    )
 
 
 def run_command(
@@ -299,7 +354,18 @@ def run_command(
     """Run one command while optionally projecting transient output as it is read."""
 
     argv = tuple(args)
-    started_command = _start_supervised_command(argv, cwd=cwd, env=env, stream_output=stream_output, process_observer=process_observer, merge_stderr=merge_stderr, parent_death_signal=parent_death_signal, runtime_authority=runtime_authority, pass_fds=pass_fds, max_capture_bytes_per_stream=max_capture_bytes_per_stream)
+    started_command = _start_supervised_command(
+        argv,
+        cwd=cwd,
+        env=env,
+        stream_output=stream_output,
+        process_observer=process_observer,
+        merge_stderr=merge_stderr,
+        parent_death_signal=parent_death_signal,
+        runtime_authority=runtime_authority,
+        pass_fds=pass_fds,
+        max_capture_bytes_per_stream=max_capture_bytes_per_stream,
+    )
     process = started_command.process
     authority_receipt = started_command.authority_receipt
     physical_execution_id = started_command.physical_execution_id
@@ -315,7 +381,9 @@ def run_command(
         else None
     )
     if watchdog is not None and timeout is not None:
-        raise ValueError("runtime_supervision and fixed timeout cannot both own the runtime deadline")
+        raise ValueError(
+            "runtime_supervision and fixed timeout cannot both own the runtime deadline"
+        )
     leader_exited_before_group_quiescence = False
     completion_cleanup_requested = False
     try:
@@ -340,7 +408,15 @@ def run_command(
                         process_observer=process_observer,
                     )
             if cancel_requested is not None and cancel_requested():
-                raise _cancel_command(process, readers, args, authority_receipt, physical_execution_id=physical_execution_id, process_identity=process_identity, process_observer=process_observer)
+                raise _cancel_command(
+                    process,
+                    readers,
+                    args,
+                    authority_receipt,
+                    physical_execution_id=physical_execution_id,
+                    process_identity=process_identity,
+                    process_observer=process_observer,
+                )
             _raise_if_output_limited(process, readers, capture, authority_receipt)
             leader_running = process.poll() is None
             descendants_running = (
@@ -363,19 +439,43 @@ def run_command(
                 break
             elapsed = time.monotonic() - started
             supervision_error = _runtime_supervision_error(
-                watchdog, runtime_supervision, process, readers, args, authority_receipt,
-                physical_execution_id, process_identity, process_observer, leader_exited_before_group_quiescence,
+                watchdog,
+                runtime_supervision,
+                process,
+                readers,
+                args,
+                authority_receipt,
+                physical_execution_id,
+                process_identity,
+                process_observer,
+                leader_exited_before_group_quiescence,
             )
             if supervision_error is not None:
                 raise supervision_error
             if timeout is not None and elapsed >= timeout:
-                request = TerminationRequest(execution_id=physical_execution_id, generation=1, cause="watchdog", reason="max_runtime_exceeded", grace_seconds=TERMINATION_GRACE_SECONDS)
+                request = TerminationRequest(
+                    execution_id=physical_execution_id,
+                    generation=1,
+                    cause="watchdog",
+                    reason="max_runtime_exceeded",
+                    grace_seconds=TERMINATION_GRACE_SECONDS,
+                )
                 if process_observer is not None:
-                    process_observer(CommandProcessLifecycleEvent(kind="TERMINATION_REQUESTED", physical_execution_id=physical_execution_id, pid=process.pid, process_identity=process_identity, termination_reason=request.reason))
+                    process_observer(
+                        CommandProcessLifecycleEvent(
+                            kind="TERMINATION_REQUESTED",
+                            physical_execution_id=physical_execution_id,
+                            pid=process.pid,
+                            process_identity=process_identity,
+                            termination_reason=request.reason,
+                        )
+                    )
                 termination_receipt = terminate_owned_process_tree(process, request)
                 forced_termination = termination_receipt.escalated_to_kill
                 forced_termination = _finish_process_output(process, readers) or forced_termination
-                final_quiescent = termination_receipt.quiescent and (os.name == "nt" or not _process_group_exists(process.pid))
+                final_quiescent = termination_receipt.quiescent and (
+                    os.name == "nt" or not _process_group_exists(process.pid)
+                )
                 raise CommandTimeoutExpired(
                     args,
                     timeout,
@@ -388,7 +488,14 @@ def run_command(
                         cleanup_reason="timeout",
                         forced_termination=forced_termination,
                         final_process_group_quiescent=final_quiescent,
-                        recovery_events=(ExecutionRecoveryEvent(kind="process_group_cleanup", action="terminate_process_group", reason_code="deadline_expired", outcome="requested"),),
+                        recovery_events=(
+                            ExecutionRecoveryEvent(
+                                kind="process_group_cleanup",
+                                action="terminate_process_group",
+                                reason_code="deadline_expired",
+                                outcome="requested",
+                            ),
+                        ),
                         termination_receipt=termination_receipt,
                     ),
                 )
@@ -411,7 +518,9 @@ def run_command(
         )
         final_quiescent = os.name == "nt" or not _process_group_exists(process.pid)
         return CommandResult(
-            argv=tuple(args), returncode=process.returncode, runtime_authority=authority_receipt,
+            argv=tuple(args),
+            returncode=process.returncode,
+            runtime_authority=authority_receipt,
             physical_execution_id=physical_execution_id,
             stdout=stdout_capture.text.rstrip(),
             stderr=stderr_capture.text.rstrip(),
@@ -444,16 +553,21 @@ def run_command(
         if any(reader.is_alive() for reader in readers):
             _terminate_process_group(process)
             _finish_process_output(process, readers)
-        _report_terminal_process_state(process, process_observer, physical_execution_id, process_identity)
-
-
+        _report_terminal_process_state(
+            process, process_observer, physical_execution_id, process_identity
+        )
 
 
 def _runtime_supervision_error(
-    watchdog: CommandWatchdog | None, supervision: CommandRuntimeSupervision | None,
-    process: subprocess.Popen[str], readers: tuple[Thread, Thread], args: Sequence[str],
-    authority_receipt: RuntimeAuthorityReceipt | None, physical_execution_id: str,
-    process_identity: str | None, process_observer: CommandProcessObserver | None,
+    watchdog: CommandWatchdog | None,
+    supervision: CommandRuntimeSupervision | None,
+    process: subprocess.Popen[str],
+    readers: tuple[Thread, Thread],
+    args: Sequence[str],
+    authority_receipt: RuntimeAuthorityReceipt | None,
+    physical_execution_id: str,
+    process_identity: str | None,
+    process_observer: CommandProcessObserver | None,
     leader_exited_before_group_quiescence: bool,
 ) -> BaseException | None:
     if watchdog is None or supervision is None:
@@ -461,10 +575,15 @@ def _runtime_supervision_error(
 
     def record_termination(reason: str) -> None:
         if process_observer is not None:
-            process_observer(CommandProcessLifecycleEvent(
-                kind="TERMINATION_REQUESTED", physical_execution_id=physical_execution_id, pid=process.pid,
-                process_identity=process_identity, termination_reason=reason,
-            ))
+            process_observer(
+                CommandProcessLifecycleEvent(
+                    kind="TERMINATION_REQUESTED",
+                    physical_execution_id=physical_execution_id,
+                    pid=process.pid,
+                    process_identity=process_identity,
+                    termination_reason=reason,
+                )
+            )
 
     termination = evaluate_owned_process_watchdog(
         watchdog, supervision, process, readers, termination_requested=record_termination
@@ -473,49 +592,115 @@ def _runtime_supervision_error(
         return None
     supervisor = CommandSupervisorReceipt(
         leader_exited_before_group_quiescence=leader_exited_before_group_quiescence,
-        process_group_cleanup_requested=True, cleanup_reason="timeout",
-        forced_termination=termination.forced_termination, final_process_group_quiescent=termination.final_quiescent,
-        recovery_events=(ExecutionRecoveryEvent(
-            kind="process_group_cleanup", action="terminate_process_group",
-            reason_code=termination.decision.reason, outcome="requested",
-        ),),
+        process_group_cleanup_requested=True,
+        cleanup_reason="timeout",
+        forced_termination=termination.forced_termination,
+        final_process_group_quiescent=termination.final_quiescent,
+        recovery_events=(
+            ExecutionRecoveryEvent(
+                kind="process_group_cleanup",
+                action="terminate_process_group",
+                reason_code=termination.decision.reason,
+                outcome="requested",
+            ),
+        ),
         termination_receipt=termination.receipt,
     )
     if termination.decision.reason == "max_runtime_exceeded":
         return CommandTimeoutExpired(
-            args, supervision.policy.max_runtime_seconds, runtime_authority=authority_receipt, supervisor=supervisor
+            args,
+            supervision.policy.max_runtime_seconds,
+            runtime_authority=authority_receipt,
+            supervisor=supervisor,
         )
     return CommandSupervisionTerminated(
         f"Command terminated by runtime supervision: {termination.decision.reason}",
-        decision=termination.decision, supervisor=supervisor, runtime_authority=authority_receipt,
+        decision=termination.decision,
+        supervisor=supervisor,
+        runtime_authority=authority_receipt,
     )
 
 
-def _report_terminal_process_state(process: subprocess.Popen[str], observer: CommandProcessObserver | None, physical_execution_id: str, process_identity: str | None) -> None:
+def _report_terminal_process_state(
+    process: subprocess.Popen[str],
+    observer: CommandProcessObserver | None,
+    physical_execution_id: str,
+    process_identity: str | None,
+) -> None:
     if observer is None or process.poll() is None:
         return
-    observer(CommandProcessLifecycleEvent(kind="PROCESS_EXITED", physical_execution_id=physical_execution_id, pid=process.pid, process_identity=process_identity, returncode=process.returncode))
+    observer(
+        CommandProcessLifecycleEvent(
+            kind="PROCESS_EXITED",
+            physical_execution_id=physical_execution_id,
+            pid=process.pid,
+            process_identity=process_identity,
+            returncode=process.returncode,
+        )
+    )
     if os.name == "nt" or not _process_group_exists(process.pid):
-        observer(CommandProcessLifecycleEvent(kind="DESCENDANTS_QUIESCENT", physical_execution_id=physical_execution_id, pid=process.pid, process_identity=process_identity))
+        observer(
+            CommandProcessLifecycleEvent(
+                kind="DESCENDANTS_QUIESCENT",
+                physical_execution_id=physical_execution_id,
+                pid=process.pid,
+                process_identity=process_identity,
+            )
+        )
 
 
 def _cancel_command(
-    process: subprocess.Popen[str], readers: tuple[Thread, Thread], args: Sequence[str],
-    runtime_authority: RuntimeAuthorityReceipt | None, *, physical_execution_id: str,
-    process_identity: str | None, process_observer: CommandProcessObserver | None,
+    process: subprocess.Popen[str],
+    readers: tuple[Thread, Thread],
+    args: Sequence[str],
+    runtime_authority: RuntimeAuthorityReceipt | None,
+    *,
+    physical_execution_id: str,
+    process_identity: str | None,
+    process_observer: CommandProcessObserver | None,
 ) -> CommandCancelledError:
-    request = TerminationRequest(execution_id=physical_execution_id, generation=1, cause="cancel", reason="cancellation_requested", grace_seconds=TERMINATION_GRACE_SECONDS)
+    request = TerminationRequest(
+        execution_id=physical_execution_id,
+        generation=1,
+        cause="cancel",
+        reason="cancellation_requested",
+        grace_seconds=TERMINATION_GRACE_SECONDS,
+    )
     if process_observer is not None:
-        process_observer(CommandProcessLifecycleEvent(kind="TERMINATION_REQUESTED", physical_execution_id=physical_execution_id, pid=process.pid, process_identity=process_identity, termination_reason=request.reason))
+        process_observer(
+            CommandProcessLifecycleEvent(
+                kind="TERMINATION_REQUESTED",
+                physical_execution_id=physical_execution_id,
+                pid=process.pid,
+                process_identity=process_identity,
+                termination_reason=request.reason,
+            )
+        )
     termination_receipt = terminate_owned_process_tree(process, request)
-    forced_termination = _finish_process_output(process, readers) or termination_receipt.escalated_to_kill
-    final_quiescent = termination_receipt.quiescent and (os.name == "nt" or not _process_group_exists(process.pid))
+    forced_termination = (
+        _finish_process_output(process, readers) or termination_receipt.escalated_to_kill
+    )
+    final_quiescent = termination_receipt.quiescent and (
+        os.name == "nt" or not _process_group_exists(process.pid)
+    )
     return CommandCancelledError(
-        f"Command cancelled: {' '.join(args)}", runtime_authority=runtime_authority,
-        supervisor=CommandSupervisorReceipt(process_group_cleanup_requested=True, cleanup_reason="cancel",
-            forced_termination=forced_termination, final_process_group_quiescent=final_quiescent,
-            recovery_events=(ExecutionRecoveryEvent(kind="process_group_cleanup", action="terminate_process_group", reason_code="cancellation_requested", outcome="requested"),),
-            termination_receipt=termination_receipt),
+        f"Command cancelled: {' '.join(args)}",
+        runtime_authority=runtime_authority,
+        supervisor=CommandSupervisorReceipt(
+            process_group_cleanup_requested=True,
+            cleanup_reason="cancel",
+            forced_termination=forced_termination,
+            final_process_group_quiescent=final_quiescent,
+            recovery_events=(
+                ExecutionRecoveryEvent(
+                    kind="process_group_cleanup",
+                    action="terminate_process_group",
+                    reason_code="cancellation_requested",
+                    outcome="requested",
+                ),
+            ),
+            termination_receipt=termination_receipt,
+        ),
     )
 
 
@@ -567,6 +752,7 @@ def _terminate_for_authority_loss(
         ),
     )
 
+
 def _raise_if_output_limited(
     process: subprocess.Popen[str],
     readers: tuple[Thread, Thread],
@@ -578,7 +764,11 @@ def _raise_if_output_limited(
     if not capture.overflow.is_set():
         return
     raise _output_limit_error(
-        process, readers, capture.stdout, capture.stderr, runtime_authority,
+        process,
+        readers,
+        capture.stdout,
+        capture.stderr,
+        runtime_authority,
         already_finished=already_finished,
     )
 
@@ -609,7 +799,9 @@ def _output_limit_error(
             process_group_cleanup_requested=True,
             cleanup_reason="output_limit",
             forced_termination=forced_termination,
-            final_process_group_quiescent=(os.name == "nt" or not _process_group_exists(process.pid)),
+            final_process_group_quiescent=(
+                os.name == "nt" or not _process_group_exists(process.pid)
+            ),
             recovery_events=(
                 ExecutionRecoveryEvent(
                     kind="process_group_cleanup",
@@ -620,6 +812,7 @@ def _output_limit_error(
             ),
         ),
     )
+
 
 def _reader(
     pipe,
@@ -665,5 +858,3 @@ def _reader(
                 pipe.close()
 
     return Thread(target=read, name=f"oh-goon-{stream}", daemon=True)
-
-

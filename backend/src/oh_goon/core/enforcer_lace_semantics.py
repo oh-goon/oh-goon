@@ -85,7 +85,9 @@ class FrozenRules:
 
     def __post_init__(self) -> None:
         # An admitted contract must not depend on a caller's mutable dict/set.
-        object.__setattr__(self, "observation_classes", MappingProxyType(dict(self.observation_classes)))
+        object.__setattr__(
+            self, "observation_classes", MappingProxyType(dict(self.observation_classes))
+        )
         object.__setattr__(self, "execution_permissions", frozenset(self.execution_permissions))
         object.__setattr__(self, "teardown_permissions", frozenset(self.teardown_permissions))
         object.__setattr__(self, "expected_exit_codes", frozenset(self.expected_exit_codes))
@@ -125,9 +127,15 @@ def verify_committed_prefix(facts: Sequence[CommittedFact]) -> None:
             raise SemanticError("RUN_ADMITTED must be the first Run-scoped event")
         if fact.kind is FactKind.RUN_BINDING_FAILED and fact.step_id is not None:
             raise SemanticError("Run binding failure cannot be attributed to a Step")
-        if fact.kind in {FactKind.STEP_BINDING_FAILED, FactKind.STEP_WORK_STARTED} and not fact.step_id:
+        if (
+            fact.kind in {FactKind.STEP_BINDING_FAILED, FactKind.STEP_WORK_STARTED}
+            and not fact.step_id
+        ):
             raise SemanticError("Step lifecycle event requires explicit Step identity")
-        if fact.kind in {FactKind.WORKLOAD_COMPLETED, FactKind.WORKLOAD_FAILED} and fact.exit_code is None:
+        if (
+            fact.kind in {FactKind.WORKLOAD_COMPLETED, FactKind.WORKLOAD_FAILED}
+            and fact.exit_code is None
+        ):
             raise SemanticError("workload exit must carry exact exit code")
         # step_id=None identifies Run-scoped teardown, not an ambiguous Step.
 
@@ -141,8 +149,10 @@ def envelope_at(facts: Sequence[CommittedFact], run_seq: int, *, step_id: str) -
         raise SemanticError("Step envelope owner required")
     return (
         "teardown"
-        if any(f.kind is FactKind.TEARDOWN_ENTERED and f.step_id == step_id and f.run_seq < run_seq
-               for f in facts)
+        if any(
+            f.kind is FactKind.TEARDOWN_ENTERED and f.step_id == step_id and f.run_seq < run_seq
+            for f in facts
+        )
         else "execution"
     )
 
@@ -163,7 +173,10 @@ def evaluate(rules: FrozenRules, observation: str, *, envelope: str) -> Evaluati
 
 
 def derive_base_execution_result(
-    facts: Sequence[CommittedFact], *, step_id: str | None, rules: FrozenRules,
+    facts: Sequence[CommittedFact],
+    *,
+    step_id: str | None,
+    rules: FrozenRules,
     prior_step_work_started: bool = False,
 ) -> BaseResult | None:
     """First committed causal result wins; teardown-policy violations can supersede.
@@ -197,7 +210,9 @@ def derive_base_execution_result(
         kind = f.kind
         outcome: CanonicalOutcome | None = None
         if teardown_entered and kind in {
-            FactKind.WORKLOAD_COMPLETED, FactKind.WORKLOAD_FAILED, FactKind.RUN_BINDING_FAILED,
+            FactKind.WORKLOAD_COMPLETED,
+            FactKind.WORKLOAD_FAILED,
+            FactKind.RUN_BINDING_FAILED,
             FactKind.STEP_BINDING_FAILED,
         }:
             raise SemanticError("new workload/binding result after committed teardown")
@@ -228,14 +243,20 @@ def derive_base_execution_result(
                 else CanonicalOutcome.EXECUTION_FAILED
             )
         if outcome is not None:
-            if base is None or (teardown_entered and outcome is CanonicalOutcome.ENFORCEMENT_TERMINATED):
+            if base is None or (
+                teardown_entered and outcome is CanonicalOutcome.ENFORCEMENT_TERMINATED
+            ):
                 base = BaseResult(outcome=outcome, cause_run_seq=f.run_seq)
     return base
 
 
 def classify_step_outcome(
-    facts: Sequence[CommittedFact], *, step_id: str, rules: FrozenRules,
-    physical_authority_existed: bool, prior_step_work_started: bool = False,
+    facts: Sequence[CommittedFact],
+    *,
+    step_id: str,
+    rules: FrozenRules,
+    physical_authority_existed: bool,
+    prior_step_work_started: bool = False,
 ) -> ClassifiedStep | None:
     """Classify only with a durable base cause and teardown evidence.
 
@@ -256,19 +277,35 @@ def classify_step_outcome(
         raise SemanticError("conflicting teardown/quiescence evidence")
     if (proven or unproven) and not entered:
         raise SemanticError("quiescence evidence without committed teardown entry")
-    quiescence_seq = next((f.run_seq for f in relevant if f.kind in {
-        FactKind.QUIESCENCE_PROVEN, FactKind.QUIESCENCE_UNPROVEN
-    }), None)
+    quiescence_seq = next(
+        (
+            f.run_seq
+            for f in relevant
+            if f.kind in {FactKind.QUIESCENCE_PROVEN, FactKind.QUIESCENCE_UNPROVEN}
+        ),
+        None,
+    )
     if quiescence_seq is not None and any(
-        f.run_seq > quiescence_seq and f.kind in {
-            FactKind.OBSERVED, FactKind.VIOLATION_MATCHED, FactKind.EVALUATION_FAILED,
-            FactKind.STEP_WORK_STARTED, FactKind.WORKLOAD_COMPLETED, FactKind.WORKLOAD_FAILED,
-        } for f in relevant
+        f.run_seq > quiescence_seq
+        and f.kind
+        in {
+            FactKind.OBSERVED,
+            FactKind.VIOLATION_MATCHED,
+            FactKind.EVALUATION_FAILED,
+            FactKind.STEP_WORK_STARTED,
+            FactKind.WORKLOAD_COMPLETED,
+            FactKind.WORKLOAD_FAILED,
+        }
+        for f in relevant
     ):
         raise SemanticError("new effect evidence after Step quiescence invalidates its proof")
     entry_seq = next((f.run_seq for f in relevant if f.kind is FactKind.TEARDOWN_ENTERED), None)
-    if any(f.kind in {FactKind.QUIESCENCE_PROVEN, FactKind.QUIESCENCE_UNPROVEN} and
-           entry_seq is not None and f.run_seq <= entry_seq for f in relevant):
+    if any(
+        f.kind in {FactKind.QUIESCENCE_PROVEN, FactKind.QUIESCENCE_UNPROVEN}
+        and entry_seq is not None
+        and f.run_seq <= entry_seq
+        for f in relevant
+    ):
         raise SemanticError("quiescence must be proven after teardown entry")
     if not entered or (not proven and not unproven):
         return None
@@ -278,13 +315,17 @@ def classify_step_outcome(
     return ClassifiedStep(
         step_id=step_id,
         base=base,
-        outcome=CanonicalOutcome.CONTAINMENT_FAILED if physical_authority_existed and unproven else base.outcome,
+        outcome=CanonicalOutcome.CONTAINMENT_FAILED
+        if physical_authority_existed and unproven
+        else base.outcome,
         containment_proven=proven,
     )
 
 
 def rollup_run(
-    steps: Sequence[ClassifiedStep], *, run_teardown_proven: bool | None,
+    steps: Sequence[ClassifiedStep],
+    *,
+    run_teardown_proven: bool | None,
     run_physical_authority_existed: bool,
     run_prework: BaseResult | None = None,
     any_step_work_started: bool | None = None,
@@ -298,7 +339,10 @@ def rollup_run(
     if run_teardown_proven is None:
         return None
     if run_prework is not None:
-        if steps or run_prework.outcome not in {CanonicalOutcome.RUN_BINDING_FAILED, CanonicalOutcome.PREWORK_ABORTED}:
+        if steps or run_prework.outcome not in {
+            CanonicalOutcome.RUN_BINDING_FAILED,
+            CanonicalOutcome.PREWORK_ABORTED,
+        }:
             raise SemanticError("Run prework outcome cannot own Step work")
         if run_physical_authority_existed and not run_teardown_proven:
             return CanonicalOutcome.CONTAINMENT_FAILED

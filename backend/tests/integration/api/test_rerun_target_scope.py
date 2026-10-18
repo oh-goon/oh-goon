@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api import dependencies
 from oh_goon.api.app import app as api_app
 from oh_goon.core.models.explanation import ReasonCode
@@ -13,6 +11,7 @@ from oh_goon.runtime.database import LocalDatabase
 from tests.factories.local_state import local_state
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.runtime_stack import fleet_stack
+from tests.integration.api.client import authenticated_api_client
 
 
 class _PartialRunner:
@@ -123,15 +122,18 @@ def test_partial_failure_rerun_excludes_durably_successful_sibling(tmp_path: Pat
     _bind(fleet, manager)
     client = authenticated_api_client(api_app)
     try:
-        assert client.post(
-            "/api/fleet/runs", json={"fleet_run_id": "partial-parent", "action": "init"}
-        ).status_code == 202
+        assert (
+            client.post(
+                "/api/fleet/runs", json={"fleet_run_id": "partial-parent", "action": "init"}
+            ).status_code
+            == 202
+        )
         manager.wait_for_terminal("partial-parent", timeout=2)
         parent = client.get("/api/fleet/runs/partial-parent").json()
         assert parent["run"]["status"] == "FAILED"
-        assert [(row["repository"]["name"], row["outcome"]["state"]) for row in parent["operations"]] == [
-            ("alpha", "successful")
-        ]
+        assert [
+            (row["repository"]["name"], row["outcome"]["state"]) for row in parent["operations"]
+        ] == [("alpha", "successful")]
     finally:
         client.close()
         _clear(manager)
@@ -172,14 +174,16 @@ def test_committed_failed_operation_rerun_replays_only_failed_repository(tmp_pat
     _bind(fleet, manager)
     client = authenticated_api_client(api_app)
     try:
-        assert client.post(
-            "/api/fleet/runs", json={"fleet_run_id": "reported-parent", "action": "init"}
-        ).status_code == 202
+        assert (
+            client.post(
+                "/api/fleet/runs", json={"fleet_run_id": "reported-parent", "action": "init"}
+            ).status_code
+            == 202
+        )
         manager.wait_for_terminal("reported-parent", timeout=2)
         parent = client.get("/api/fleet/runs/reported-parent").json()
         assert {
-            (row["repository"]["name"], row["outcome"]["state"])
-            for row in parent["operations"]
+            (row["repository"]["name"], row["outcome"]["state"]) for row in parent["operations"]
         } == {
             ("alpha", "successful"),
             ("beta", "failed"),
@@ -218,9 +222,12 @@ def test_successful_multi_repository_rerun_preserves_full_target_set(tmp_path: P
     _bind(fleet, manager)
     client = authenticated_api_client(api_app)
     try:
-        assert client.post(
-            "/api/fleet/runs", json={"fleet_run_id": "successful-parent", "action": "init"}
-        ).status_code == 202
+        assert (
+            client.post(
+                "/api/fleet/runs", json={"fleet_run_id": "successful-parent", "action": "init"}
+            ).status_code
+            == 202
+        )
         manager.wait_for_terminal("successful-parent", timeout=2)
         assert sorted(parent_runner.repositories) == ["alpha", "beta"]
     finally:

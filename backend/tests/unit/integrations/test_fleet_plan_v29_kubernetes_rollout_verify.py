@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from functools import cache
 import json
+from functools import cache
 from pathlib import Path
 
 import pytest
 
 from oh_goon.cli_plan_summary import resolved_plan_summary
-from oh_goon.core.fleet_plan_tool_requirements import required_execution_tool_names
 from oh_goon.core.fleet_plan_output_refs import step_output_reference
+from oh_goon.core.fleet_plan_tool_requirements import required_execution_tool_names
 from oh_goon.core.models.fleet_plan import (
     ResolvedFleetPlan,
     ResolvedKubernetesRolloutVerifyStep,
@@ -32,7 +32,6 @@ from oh_goon.integrations.fleet_plan_kubernetes_rollout_execution import (
 )
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.shipped_templates import GOON_TEMPLATES, PLAN_TEMPLATES
-
 
 
 def _resolver() -> FleetPlanResolver:

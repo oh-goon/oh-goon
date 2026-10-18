@@ -7,10 +7,10 @@ import pytest
 
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import JournalConflict, OperationNotFound
-from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import (
     EffectAttemptStatus,
     EffectBoundaryKind,
@@ -321,10 +321,13 @@ def test_restart_terminalizes_running_run_with_all_results_exactly_once(tmp_path
     assert after is not None
     assert after.run.status is FleetRunStatus.COMPLETED
     assert after.run.progress.completed == 2
-    assert sum(
-        event.event_type is FleetRunEventType.RUN_COMPLETED
-        for event in journal.run_events(fleet_run_id).events
-    ) == 1
+    assert (
+        sum(
+            event.event_type is FleetRunEventType.RUN_COMPLETED
+            for event in journal.run_events(fleet_run_id).events
+        )
+        == 1
+    )
 
 
 def test_restart_completes_run_when_all_repository_results_are_already_durable(

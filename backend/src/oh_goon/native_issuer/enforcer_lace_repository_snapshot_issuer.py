@@ -13,10 +13,15 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from oh_goon.core.enforcer_lace_issuer_evidence import (
-    ISSUER_PROTOCOL, SIGNATURE_DOMAIN, IssuerEvidence,
+    ISSUER_PROTOCOL,
+    SIGNATURE_DOMAIN,
+    IssuerEvidence,
 )
 from oh_goon.core.enforcer_lace_trust import (
-    AdmittedRunContract, TrustProtocolError, canonical_bytes, digest,
+    AdmittedRunContract,
+    TrustProtocolError,
+    canonical_bytes,
+    digest,
 )
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.product_identity import repository_subject_instance_id
@@ -38,16 +43,24 @@ def admitted_repository_source_identity(authority: RepositorySourceAuthority) ->
     verified = RepositorySourceAuthority.model_validate(authority.model_dump(mode="python"))
     if verified != authority:
         raise TrustProtocolError("repository source authority is not canonical")
-    return digest(SOURCE_IDENTITY_DOMAIN, canonical_bytes({
-        "authority_id": authority.authority_id,
-        "subject_instance_id": authority.subject_instance_id,
-        "snapshot": authority.source_snapshot.model_dump(mode="json"),
-    }))
+    return digest(
+        SOURCE_IDENTITY_DOMAIN,
+        canonical_bytes(
+            {
+                "authority_id": authority.authority_id,
+                "subject_instance_id": authority.subject_instance_id,
+                "snapshot": authority.source_snapshot.model_dump(mode="json"),
+            }
+        ),
+    )
 
 
 def issue_observed_repository_source_identity(
-    *, root: Path, authority: RepositorySourceAuthority,
-    contract: AdmittedRunContract, issuer_id: str,
+    *,
+    root: Path,
+    authority: RepositorySourceAuthority,
+    contract: AdmittedRunContract,
+    issuer_id: str,
     signing_key: Ed25519PrivateKey,
 ) -> IssuerEvidence:
     """Sign only after *two* matching native snapshot and subject observations.
@@ -58,18 +71,29 @@ def issue_observed_repository_source_identity(
     after issuance: LACE must rebind/check physical source before any work.
     """
     contract.verify()
-    if (not isinstance(root, Path) or not root.is_absolute() or root.is_symlink()
-            or not root.is_dir() or root.resolve() != root
-            or not isinstance(authority, RepositorySourceAuthority)
-            or not isinstance(issuer_id, str) or not issuer_id or not issuer_id.isascii()
-            or any(char in issuer_id for char in "\x00\n/")
-            or not isinstance(signing_key, Ed25519PrivateKey)):
-        raise TrustProtocolError("explicit native repository authority and private issuer key required")
+    if (
+        not isinstance(root, Path)
+        or not root.is_absolute()
+        or root.is_symlink()
+        or not root.is_dir()
+        or root.resolve() != root
+        or not isinstance(authority, RepositorySourceAuthority)
+        or not isinstance(issuer_id, str)
+        or not issuer_id
+        or not issuer_id.isascii()
+        or any(char in issuer_id for char in "\x00\n/")
+        or not isinstance(signing_key, Ed25519PrivateKey)
+    ):
+        raise TrustProtocolError(
+            "explicit native repository authority and private issuer key required"
+        )
 
     expected = contract.fields
     projected = admitted_repository_source_identity(authority)
     if expected[SOURCE_FIELD] != projected:
-        raise TrustProtocolError("contract source identity differs from admitted repository authority")
+        raise TrustProtocolError(
+            "contract source identity differs from admitted repository authority"
+        )
 
     def observe() -> tuple[str, str, int, int]:
         try:
@@ -80,18 +104,28 @@ def issue_observed_repository_source_identity(
         return (subject, snapshot.sha256, snapshot.byte_count, snapshot.entry_count)
 
     expected_snapshot = authority.source_snapshot
-    admitted = (authority.subject_instance_id, expected_snapshot.sha256,
-                expected_snapshot.byte_count, expected_snapshot.entry_count)
+    admitted = (
+        authority.subject_instance_id,
+        expected_snapshot.sha256,
+        expected_snapshot.byte_count,
+        expected_snapshot.entry_count,
+    )
     first = observe()
     if first != admitted:
-        raise TrustProtocolError("native repository source snapshot differs from admitted authority")
+        raise TrustProtocolError(
+            "native repository source snapshot differs from admitted authority"
+        )
 
-    payload = canonical_bytes({
-        "protocol": ISSUER_PROTOCOL, "field": SOURCE_FIELD,
-        "run_id": expected["run_id"], "contract_identity": contract.identity,
-        "identity": projected,
-        "executor_generation": expected["executor_generation"],
-    })
+    payload = canonical_bytes(
+        {
+            "protocol": ISSUER_PROTOCOL,
+            "field": SOURCE_FIELD,
+            "run_id": expected["run_id"],
+            "contract_identity": contract.identity,
+            "identity": projected,
+            "executor_generation": expected["executor_generation"],
+        }
+    )
     if observe() != first:
         raise TrustProtocolError("native repository source snapshot changed during issuance")
     signed = SIGNATURE_DOMAIN + SOURCE_FIELD.encode("ascii") + b"\x00" + payload

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sqlite3
-from math import ceil
 from contextlib import contextmanager
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 
 if os.name == "nt":
@@ -15,16 +14,14 @@ else:
     import fcntl
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.product_identity import repository_id
+from oh_goon.core.source_layout_policy import assert_canonical_source_layout
 from oh_goon.core.strict_executor_authority import (
     CERTIFICATION_CGROUP_ROOT_ENV,
     EXECUTORS_FILE_ENV,
-    STRICT_EXECUTOR_AUTHORITY_ENVIRONMENT,
     SYSTEMD_DELEGATED_ENV,
     SYSTEMD_SUBGROUP_ENV,
 )
-from oh_goon.services.certification_host_tools import certification_tool_search_paths, required_certification_tool
-from oh_goon.core.product_identity import repository_id
-from oh_goon.core.source_layout_policy import assert_canonical_source_layout
 from oh_goon.integrations._fleet_plan_cgroup_resources import (
     delegated_process_subgroup,
     enable_delegated_cgroup_v2_controllers,
@@ -53,6 +50,10 @@ from oh_goon.runtime.storage_health import (
     require_storage_capacity,
     resolve_storage_capacity_policy,
 )
+from oh_goon.services.certification_host_tools import (
+    certification_tool_search_paths,
+    required_certification_tool,
+)
 from oh_goon.services.certification_workspace_retention import (
     CertificationRunWorkspaceReconciliation,
     certification_run_workspace_names,
@@ -61,7 +62,6 @@ from oh_goon.services.certification_workspace_retention import (
     certification_state_roots,
     reconcile_certification_run_workspaces_under_lease,
 )
-
 
 REQUIRED_CERTIFICATION_CONTROLLERS = {"cpu", "memory", "pids"}
 CERTIFICATION_EXECUTOR_UNAVAILABLE = "CERTIFICATION EXECUTOR UNAVAILABLE"
@@ -83,6 +83,8 @@ CERTIFICATION_DATABASE_ADMITTED_READ_PROOFS = ceil(
 CERTIFICATION_DATABASE_FULL_INTEGRITY_INTERVAL = max(
     1, CERTIFICATION_DATABASE_ADMITTED_READ_PROOFS // 2
 )
+
+
 class CertificationEnvironmentError(RuntimeError):
     """A physical/local prerequisite prevents certification bootstrap."""
 
@@ -120,15 +122,19 @@ def reconcile_certification_run_workspaces(
             continue
         try:
             result = _reconcile_certification_state(state=state, owned=owned)
-        except (CertificationStateBusy, FleetPlanInvalid, OSError, RuntimeError, sqlite3.Error) as exc:
+        except (
+            CertificationStateBusy,
+            FleetPlanInvalid,
+            OSError,
+            RuntimeError,
+            sqlite3.Error,
+        ) as exc:
             del exc
             refused.extend(f"{label}/{name}" for name in names)
             continue
         removed.extend(f"{label}/{name}" for name in result.removed)
         refused.extend(f"{label}/{name}" for name in result.refused)
-        cleanup_incomplete.extend(
-            f"{label}/{name}" for name in result.cleanup_incomplete
-        )
+        cleanup_incomplete.extend(f"{label}/{name}" for name in result.cleanup_incomplete)
     return CertificationRunWorkspaceReconciliation(
         removed=tuple(removed),
         refused=tuple(refused),
@@ -242,7 +248,6 @@ class CertificationBootstrapContext:
         return payload
 
 
-
 def preflight_certification_database(
     *,
     source_root: Path,
@@ -301,7 +306,9 @@ def _require_database_path_identity(database: Path, identity, *, proof: str) -> 
     )
 
 
-def _prove_certification_database_endurance(admitted: LocalDatabase, database: Path, identity) -> None:
+def _prove_certification_database_endurance(
+    admitted: LocalDatabase, database: Path, identity
+) -> None:
     for _ in range(CERTIFICATION_DATABASE_INDEPENDENT_REOPEN_PROOFS):
         LocalDatabase(database, journal_mode="DELETE").durable_revision()
         _require_database_path_identity(database, identity, proof="independent reopen proof")
@@ -328,7 +335,9 @@ def _require_certification_database_integrity(database: Path) -> None:
     )
 
 
-def _certification_database_preflight_payload(database: Path, filesystem: str | None) -> dict[str, object]:
+def _certification_database_preflight_payload(
+    database: Path, filesystem: str | None
+) -> dict[str, object]:
     return {
         "database": str(database),
         "schema": DATABASE_SCHEMA_VERSION,
@@ -339,7 +348,9 @@ def _certification_database_preflight_payload(database: Path, filesystem: str | 
         "foreign_key_check": "ok",
         "reopen_proofs": CERTIFICATION_DATABASE_INDEPENDENT_REOPEN_PROOFS,
         "admitted_read_proofs": CERTIFICATION_DATABASE_ADMITTED_READ_PROOFS,
-        "compressed_observation_seconds": float(CERTIFICATION_DATABASE_COMPRESSED_PREPARATION_SECONDS),
+        "compressed_observation_seconds": float(
+            CERTIFICATION_DATABASE_COMPRESSED_PREPARATION_SECONDS
+        ),
         "runtime_preparation_observer": "persistent-query-only-connection-per-preparation",
         "runtime_observation_reproof_attempts": ADMITTED_SQLITE_REPROOF_ATTEMPTS,
     }
@@ -378,6 +389,7 @@ def preflight_certification_database_under_lease(
             "Native dependency materialization is separate; rerun make init only if the native environment itself needs repair."
         ) from exc
     return _certification_database_preflight_payload(database, filesystem)
+
 
 def prepare_certification_bootstrap(
     *,
@@ -456,9 +468,7 @@ def prepare_certification_bootstrap(
     )
 
 
-def materialize_local_executor_inventory(
-    *, state: Path, environment: dict[str, str]
-) -> Path:
+def materialize_local_executor_inventory(*, state: Path, environment: dict[str, str]) -> Path:
     """Materialize the canonical local Bubblewrap executor inventory."""
 
     bwrap = required_certification_tool("bwrap")
@@ -490,7 +500,9 @@ def materialize_local_executor_inventory(
 
     search_paths = certification_tool_search_paths(environment)
     if not search_paths:
-        raise FleetPlanInvalid("No absolute executable search paths are available for certification")
+        raise FleetPlanInvalid(
+            "No absolute executable search paths are available for certification"
+        )
     trusted_roots = sorted({path.resolve() for path in search_paths} | {runtime_inspector.parent})
 
     inventory = state / "executors.toml"

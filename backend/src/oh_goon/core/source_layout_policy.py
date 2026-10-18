@@ -117,11 +117,11 @@ def summarize_source_layout_issues(
 
     resolved_root = root.resolve()
     transport = [
-        issue for issue in issues
-        if is_disposable_source_transport_artifact_name(issue.path.name)
+        issue for issue in issues if is_disposable_source_transport_artifact_name(issue.path.name)
     ]
     other = [
-        issue for issue in issues
+        issue
+        for issue in issues
         if not is_disposable_source_transport_artifact_name(issue.path.name)
     ]
     if not transport or debug:

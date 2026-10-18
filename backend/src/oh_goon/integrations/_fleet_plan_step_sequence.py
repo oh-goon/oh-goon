@@ -100,16 +100,16 @@ class FleetPlanStepSequence:
         try:
             record = self._run(
                 step,
-            source=source,
-            imported_reason=None,
-            execute_retries=lambda bound, before, step_order: execute_direct_with_retries(
-                self._repository,
-                bound,
-                step,
-                self._runtime,
-                before,
-                self._output_observer,
-                step_order=step_order,
+                source=source,
+                imported_reason=None,
+                execute_retries=lambda bound, before, step_order: execute_direct_with_retries(
+                    self._repository,
+                    bound,
+                    step,
+                    self._runtime,
+                    before,
+                    self._output_observer,
+                    step_order=step_order,
                 ),
             )
         except OperationCancelledError:
@@ -343,9 +343,11 @@ class FleetPlanStepSequence:
         self._results.append(evidence)
         if isinstance(evidence, CompletedPlanStepExecution):
             self._published[step.step_id] = record.outputs
-        elif (isinstance(evidence, FailedPlanStepExecution)
-              and failure_policy(step) is StepFailurePolicy.CONTINUE
-              and record.outputs):
+        elif (
+            isinstance(evidence, FailedPlanStepExecution)
+            and failure_policy(step) is StepFailurePolicy.CONTINUE
+            and record.outputs
+        ):
             # Only the existing direct publication owner can supply validated
             # failed-command diagnostics. Publishing data never changes FAILURE.
             self._published[step.step_id] = record.outputs

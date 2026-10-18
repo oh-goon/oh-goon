@@ -7,9 +7,15 @@ from dataclasses import asdict, dataclass
 from oh_goon.integrations.hashmarks.verification_selection import (
     VerifiedHashmarksVerificationSelection,
 )
-from oh_goon.repository_tooling._hashmarks_verification_execution_primitives import build_execution_coverage
+from oh_goon.repository_tooling._hashmarks_verification_execution_primitives import (
+    build_execution_coverage,
+)
 from oh_goon.runtime.execution.pytest_projection import project_pytest_argv
-from oh_goon.runtime.execution.shard_models import ShardExecutionPlan, ShardExecutionReport, ShardWork
+from oh_goon.runtime.execution.shard_models import (
+    ShardExecutionPlan,
+    ShardExecutionReport,
+    ShardWork,
+)
 
 _RECEIPT_SCHEMA = "oh-goon.hashmarks-verification-execution-receipt.v4"
 _GROUPING_POLICY_SCHEMA = "oh-goon.verification-execution-grouping-policy.v1"
@@ -36,15 +42,13 @@ class VerificationExecutionGroupingPolicy:
             }
         )
 
-    def group(
-        self, members: tuple[object, ...]
-    ) -> tuple[tuple[object, ...], ...]:
+    def group(self, members: tuple[object, ...]) -> tuple[tuple[object, ...], ...]:
         """Partition in admitted order without selecting, dropping, duplicating, or reordering."""
 
         if not members:
             raise ValueError("verification grouping requires nonempty admitted membership")
         groups = tuple(
-            members[index:index + self.max_members_per_group]
+            members[index : index + self.max_members_per_group]
             for index in range(0, len(members), self.max_members_per_group)
         )
         if tuple(member for group in groups for member in group) != members:
@@ -53,7 +57,9 @@ class VerificationExecutionGroupingPolicy:
 
 
 def _identity(payload: object) -> str:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
@@ -90,9 +96,13 @@ def build_verification_execution_plan(
             members=group,
             command_prefix=command_prefix,
             pytest_members=structured_group,
-            original_admitted_member_identities=tuple(member.member_id for member in structured_group),
+            original_admitted_member_identities=tuple(
+                member.member_id for member in structured_group
+            ),
         )
-        for index, (group, structured_group) in enumerate(zip(groups, structured_groups, strict=True))
+        for index, (group, structured_group) in enumerate(
+            zip(groups, structured_groups, strict=True)
+        )
     )
     return ShardExecutionPlan(
         plan_identity=_identity(
@@ -102,11 +112,16 @@ def build_verification_execution_plan(
                 "grouping_policy_identity": grouping_policy.policy_identity,
                 "command_prefix": list(command_prefix),
                 "groups": [list(group) for group in groups],
-                "pytest_projection_identities": [member.projection_identity for member in selection.members],
+                "pytest_projection_identities": [
+                    member.projection_identity for member in selection.members
+                ],
             }
         ),
         generation_identity=_identity(
-            {"repository_identity": selection.repository_identity, "source_identity": selection.source_identity}
+            {
+                "repository_identity": selection.repository_identity,
+                "source_identity": selection.source_identity,
+            }
         ),
         shards=shards,
         source_schema="hashmarks.downstream-verification-contract.v2",
@@ -163,13 +178,27 @@ def build_verification_execution_receipt(
 
     expected = (
         (report.selected_membership_identity, selection.membership_identity, "membership identity"),
-        (report.verification_selection_evidence_identity, selection.repository_provenance_identity, "provenance"),
-        (report.producer_artifact_identity, selection.producer_artifact_identity, "Hashmarks artifact identity"),
-        (report.producer_implementation_identity, selection.producer_implementation_identity, "Hashmarks producer implementation identity"),
+        (
+            report.verification_selection_evidence_identity,
+            selection.repository_provenance_identity,
+            "provenance",
+        ),
+        (
+            report.producer_artifact_identity,
+            selection.producer_artifact_identity,
+            "Hashmarks artifact identity",
+        ),
+        (
+            report.producer_implementation_identity,
+            selection.producer_implementation_identity,
+            "Hashmarks producer implementation identity",
+        ),
     )
     for observed, admitted, label in expected:
         if observed != admitted:
-            raise ValueError(f"execution report {label} does not match admitted Hashmarks selection")
+            raise ValueError(
+                f"execution report {label} does not match admitted Hashmarks selection"
+            )
 
     coverage = build_execution_coverage(selection.selected_test_nodes, report)
     terminal_identity = selection.membership_identity if coverage.terminal_success else None
@@ -183,7 +212,9 @@ def build_verification_execution_receipt(
         "repository_provenance_identity": selection.repository_provenance_identity,
         "selected_membership_identity": selection.membership_identity,
         "selected": list(selection.selected_test_nodes),
-        "selected_projection_identities": [member.projection_identity for member in selection.members],
+        "selected_projection_identities": [
+            member.projection_identity for member in selection.members
+        ],
         "attempted": list(coverage.attempted),
         "resumed": list(coverage.resumed),
         "completed": list(coverage.completed),
@@ -192,7 +223,11 @@ def build_verification_execution_receipt(
         "extras": list(coverage.extras),
         "retry_bisection_lineage": list(coverage.lineage),
         "terminal_membership_identity": terminal_identity,
-        "terminal_projection_identities": [member.projection_identity for member in selection.members] if coverage.terminal_success else [],
+        "terminal_projection_identities": [
+            member.projection_identity for member in selection.members
+        ]
+        if coverage.terminal_success
+        else [],
         "terminal_success": coverage.terminal_success,
     }
     return HashmarksVerificationExecutionReceipt(
@@ -205,7 +240,9 @@ def build_verification_execution_receipt(
         repository_provenance_identity=selection.repository_provenance_identity,
         selected_membership_identity=selection.membership_identity,
         selected=selection.selected_test_nodes,
-        selected_projection_identities=tuple(member.projection_identity for member in selection.members),
+        selected_projection_identities=tuple(
+            member.projection_identity for member in selection.members
+        ),
         attempted=coverage.attempted,
         resumed=coverage.resumed,
         completed=coverage.completed,
@@ -214,8 +251,11 @@ def build_verification_execution_receipt(
         extras=coverage.extras,
         retry_bisection_lineage=coverage.lineage,
         terminal_membership_identity=terminal_identity,
-        terminal_projection_identities=tuple(member.projection_identity for member in selection.members) if coverage.terminal_success else (),
+        terminal_projection_identities=tuple(
+            member.projection_identity for member in selection.members
+        )
+        if coverage.terminal_success
+        else (),
         terminal_success=coverage.terminal_success,
         receipt_identity=_identity(payload),
     )
-

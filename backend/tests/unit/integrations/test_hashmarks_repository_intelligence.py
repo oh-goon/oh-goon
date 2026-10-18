@@ -6,20 +6,20 @@ from pathlib import Path
 
 import pytest
 
-
 pytest.importorskip("hashmarks")
-pytestmark = pytest.mark.dependency_complete
 
-from tests.hashmarks_test_support import (
-    TEST_HASHMARKS_ARTIFACT_IDENTITY,
-    TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY,
-)
 from oh_goon.integrations.hashmarks.repository_intelligence import (
     HashmarksEvidenceKind,
     HashmarksRepositoryIntelligenceInputError,
     bind_hashmarks_repository_evidence,
     load_hashmarks_repository_evidence,
 )
+from tests.hashmarks_test_support import (
+    TEST_HASHMARKS_ARTIFACT_IDENTITY,
+    TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY,
+)
+
+pytestmark = pytest.mark.dependency_complete
 
 SOURCE = "sha256:" + "1" * 64
 ARTIFACT = TEST_HASHMARKS_ARTIFACT_IDENTITY
@@ -58,7 +58,9 @@ def test_decision_packet_binds_producer_contract_source_and_payload_identity() -
     assert verified.contract_schema == "hashmarks.task-decision-packet.v2"
     assert verified.producer_name == "hashmarks"
     assert verified.producer_artifact_identity == ARTIFACT
-    assert verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    assert (
+        verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    )
     assert verified.repository_generation_identity == SOURCE
     assert verified.input_provenance_identity == PROVENANCE
     assert verified.producer_repository_identity == "git-tree:" + "a" * 40
@@ -119,7 +121,9 @@ def test_artifact_identity_is_recorded_as_provenance_not_copied_release_authorit
         input_provenance_identity=PROVENANCE,
     )
     assert verified.producer_artifact_identity == observed
-    assert verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    assert (
+        verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    )
 
 
 def test_unknown_contract_fails_closed() -> None:
@@ -173,7 +177,11 @@ def test_exact_contract_mismatch_fails_closed() -> None:
 
 
 def test_non_identity_provenance_or_source_is_rejected() -> None:
-    for field in ("repository_generation_identity", "producer_artifact_identity", "input_provenance_identity"):
+    for field in (
+        "repository_generation_identity",
+        "producer_artifact_identity",
+        "input_provenance_identity",
+    ):
         kwargs = {
             "repository_generation_identity": SOURCE,
             "producer_artifact_identity": ARTIFACT,
@@ -195,7 +203,13 @@ def test_verified_evidence_is_non_executable_and_payload_projection_is_read_only
         input_provenance_identity=PROVENANCE,
     )
     assert verified.kind is HashmarksEvidenceKind.VERIFICATION
-    for forbidden in ("argv", "capabilities", "publish_authority", "network_authority", "timeout_seconds"):
+    for forbidden in (
+        "argv",
+        "capabilities",
+        "publish_authority",
+        "network_authority",
+        "timeout_seconds",
+    ):
         assert not hasattr(verified, forbidden)
     projection = verified.payload()
     assert projection["argv"] == ["pytest", "x"]
@@ -240,7 +254,6 @@ def test_context_disclosure_is_identity_only_and_never_leaks_payload() -> None:
     assert secret not in rendered
     assert "hidden-token" not in rendered
     assert not hasattr(disclosure, "canonical_payload_json")
-
 
 
 def _repository_snapshot(identity: str = "4") -> dict[str, object]:

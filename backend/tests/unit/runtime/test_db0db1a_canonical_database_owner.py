@@ -1,4 +1,5 @@
 """DB0/DB1A: admitted SQLite cut, not a new database engine or scheduler."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -6,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.runtime.database import LocalDatabase
 from oh_goon.repository_tooling.architecture.canonical_database_owner_contract import (
     check_canonical_database_owner,
 )
+from oh_goon.runtime.database import LocalDatabase
 
 
 def test_only_actual_local_database_write_cut_can_admit_atomic_domain_operation(tmp_path: Path):
@@ -70,4 +71,5 @@ def test_nested_or_read_cut_cannot_be_promoted_to_second_write_cut(tmp_path: Pat
 
 def test_original_database_owner_inventory_passes():
     from oh_goon.repository_tooling.architecture.repository_layout import ROOT
+
     assert check_canonical_database_owner(ROOT) == []

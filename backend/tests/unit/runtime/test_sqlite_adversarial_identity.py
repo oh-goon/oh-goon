@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from contextlib import closing
 import multiprocessing
 import os
 import signal
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from threading import Event, Thread
 
@@ -60,7 +60,6 @@ def test_valid_oh_goon_database_substitution_same_inode_is_rejected(
         admitted.durable_revision()
 
 
-
 def test_durable_revision_proof_cannot_compare_against_future_published_floor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -78,7 +77,9 @@ def test_durable_revision_proof_cannot_compare_against_future_published_floor(
 
     monkeypatch.setattr("oh_goon.runtime.database.read_durable_revision", paused_read)
 
-    with closing(sqlite3.connect(path, timeout=30.0, isolation_level=None, check_same_thread=False)) as connection:
+    with closing(
+        sqlite3.connect(path, timeout=30.0, isolation_level=None, check_same_thread=False)
+    ) as connection:
         database._configure_common_connection(connection)
 
         def prove() -> None:
@@ -203,9 +204,12 @@ def test_observer_can_read_while_delete_journal_writer_holds_reserved_lock(
         with database.transaction(write=True, track_revision=False) as writer:
             writer.execute("UPDATE state_metadata SET durable_revision = durable_revision")
             database.reprove_admitted_observer(observer)
-            assert observer.execute(
-                "SELECT durable_revision FROM state_metadata WHERE singleton = 1"
-            ).fetchone()[0] == 0
+            assert (
+                observer.execute(
+                    "SELECT durable_revision FROM state_metadata WHERE singleton = 1"
+                ).fetchone()[0]
+                == 0
+            )
 
 
 def test_runtime_connections_enable_sqlite_defensive_integrity_controls(tmp_path: Path) -> None:
@@ -279,9 +283,12 @@ def test_delete_journal_sigkill_recovery_preserves_admitted_identity(tmp_path: P
     assert database._database_identity_cookie == cookie
     assert database._schema_cookie == schema_cookie
     with database.transaction() as connection:
-        assert connection.execute(
-            "SELECT 1 FROM locations WHERE path = ?", ("/tmp/crash-uncommitted",)
-        ).fetchone() is None
+        assert (
+            connection.execute(
+                "SELECT 1 FROM locations WHERE path = ?", ("/tmp/crash-uncommitted",)
+            ).fetchone()
+            is None
+        )
         assert str(connection.execute("PRAGMA integrity_check").fetchone()[0]).lower() == "ok"
 
 
@@ -310,7 +317,9 @@ def test_independent_local_database_instances_share_identity_and_revision_monoto
     assert first._durable_revision_floor == 2
 
 
-def test_current_database_without_identity_cookie_is_rejected_without_mutation(tmp_path: Path) -> None:
+def test_current_database_without_identity_cookie_is_rejected_without_mutation(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "missing-cookie.db"
     first = LocalDatabase(path, journal_mode="DELETE")
     with first.transaction(write=True) as connection:
@@ -322,15 +331,20 @@ def test_current_database_without_identity_cookie_is_rejected_without_mutation(t
         external.execute("PRAGMA application_id = 0")
         assert int(external.execute("PRAGMA application_id").fetchone()[0]) == 0
 
-    with pytest.raises(DatabaseSchemaMismatch, match="missing its required application_id identity"):
+    with pytest.raises(
+        DatabaseSchemaMismatch, match="missing its required application_id identity"
+    ):
         LocalDatabase(path, journal_mode="DELETE")
 
     with closing(sqlite3.connect(path, isolation_level=None)) as external:
         assert int(external.execute("PRAGMA application_id").fetchone()[0]) == 0
-        assert external.execute(
-            "SELECT 1 FROM locations WHERE path = ?",
-            ("/tmp/preserved-before-identity-loss",),
-        ).fetchone() is not None
+        assert (
+            external.execute(
+                "SELECT 1 FROM locations WHERE path = ?",
+                ("/tmp/preserved-before-identity-loss",),
+            ).fetchone()
+            is not None
+        )
 
 
 def test_defensive_mode_refuses_writable_schema_enablement(tmp_path: Path) -> None:

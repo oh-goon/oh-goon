@@ -14,6 +14,7 @@ from oh_goon.runtime.execution.shard_models import (
     _identity,
 )
 
+
 def _resume_payload(
     *,
     plan: ShardExecutionPlan,
@@ -171,8 +172,12 @@ def _refinement_payload(
                 "parent_work_identity": child.parent_work_identity,
                 "refinement_depth": child.refinement_depth,
                 "members": list(child.members),
-                "pytest_projection_identities": [member.projection_identity for member in child.pytest_members],
-                "original_admitted_member_identities": list(child.original_admitted_member_identities),
+                "pytest_projection_identities": [
+                    member.projection_identity for member in child.pytest_members
+                ],
+                "original_admitted_member_identities": list(
+                    child.original_admitted_member_identities
+                ),
             }
             for child in children
         ],
@@ -266,5 +271,3 @@ def _resumable_refinement(
     ):
         return None
     return children
-
-

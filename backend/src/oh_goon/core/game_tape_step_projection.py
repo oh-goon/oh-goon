@@ -5,7 +5,6 @@ from datetime import datetime
 from oh_goon.core.game_tape_attempt_comparison import compare_adjacent_attempts
 from oh_goon.core.game_tape_identity import step_execution_id
 from oh_goon.core.game_tape_lifecycle import step_status
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.fleet_plan import ResolvedPlanStep, ResolvedStepSource
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepTeardownEvidence,
@@ -32,6 +31,7 @@ from oh_goon.core.models.game_tape import (
     GameTapeStepExecution,
     GameTapeWhy,
 )
+from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary import GameTapeStatus
 
 
@@ -52,7 +52,11 @@ def project_steps(
     for order, step in enumerate(planned_steps, start=1):
         execution = by_id.get(step.step_id)
         live_start = (live_started_at or {}).get(step.step_id)
-        status = GameTapeStatus.RUNNING if execution is None and live_start is not None else step_status(execution, terminal=terminal)
+        status = (
+            GameTapeStatus.RUNNING
+            if execution is None and live_start is not None
+            else step_status(execution, terminal=terminal)
+        )
         previous = projected[-1] if projected else None
         projected.append(
             _step_execution(

@@ -10,7 +10,9 @@ def test_admitted_pytest_failure_outranks_environment_like_child_output(
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
-    monkeypatch.setattr(workflow_run, "_certification_product_version", lambda: "1267.0.878")
+    monkeypatch.setattr(
+        workflow_run, "_certification_product_version", lambda: "1267.0.878"
+    )
     monkeypatch.setattr(
         workflow_run,
         "_certification_environment",

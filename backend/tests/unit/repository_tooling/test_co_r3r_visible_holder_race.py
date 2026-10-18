@@ -2,6 +2,7 @@
 
 No mock or local read-only observation may authorize physical cleanup.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +17,9 @@ from oh_goon.repository_tooling.local_lace_physical_preflight import parse_scope
 def _pid(proc: Path, pid: int, start: int, ns: str, mount: str = "/unrelated") -> None:
     directory = proc / str(pid)
     (directory / "ns").mkdir(parents=True)
-    (directory / "stat").write_text(f"{pid} (worker) " + " ".join(["S"] + ["0"] * 18 + [str(start)]))
+    (directory / "stat").write_text(
+        f"{pid} (worker) " + " ".join(["S"] + ["0"] * 18 + [str(start)])
+    )
     (directory / "ns/mnt").symlink_to(f"mnt:[{ns}]")
     (directory / "mountinfo").write_text(f"42 1 0:5 / {mount} rw - tmpfs tmpfs rw\n")
 
@@ -30,17 +33,27 @@ def _scope(tmp_path: Path, *, foreign: bool = False):
     _pid(proc, 710, 87, "4026531100")
     if foreign:
         _pid(proc, 711, 88, "4026531199")
-    return parse_scope({
-        "run_id": "original-r3r", "subject_identity": "sha256:" + "e" * 64,
-        "cgroup_path": str(cg), "cgroup_device": cg.stat().st_dev,
-        "cgroup_inode": cg.stat().st_ino, "tracked_pid": 710,
-        "tracked_birth": "boot-r3r:87", "mount_targets": ["/original"],
-        "network_namespace": "net", "host_veth": "veth", "nft_table": "table",
-    }), proc
+    return parse_scope(
+        {
+            "run_id": "original-r3r",
+            "subject_identity": "sha256:" + "e" * 64,
+            "cgroup_path": str(cg),
+            "cgroup_device": cg.stat().st_dev,
+            "cgroup_inode": cg.stat().st_ino,
+            "tracked_pid": 710,
+            "tracked_birth": "boot-r3r:87",
+            "mount_targets": ["/original"],
+            "network_namespace": "net",
+            "host_veth": "veth",
+            "nft_table": "table",
+        }
+    ), proc
 
 
 @pytest.mark.parametrize("change", ["appears", "disappears"])
-def test_foreign_pid_roster_drift_is_unknown_at_original_kernel_observer(tmp_path, monkeypatch, change):
+def test_foreign_pid_roster_drift_is_unknown_at_original_kernel_observer(
+    tmp_path, monkeypatch, change
+):
     scope, proc = _scope(tmp_path, foreign=change == "disappears")
     read = linux._read_regular
     observations = 0

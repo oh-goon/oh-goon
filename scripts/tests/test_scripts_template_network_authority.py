@@ -31,7 +31,9 @@ def _errors(document: dict) -> tuple[str, ...]:
         egress = capabilities.get("egress", {})
         if egress and egress.get("mode") not in NETWORK_MODES:
             errors.append("unknown egress mode")
-        if egress.get("mode") == "host_unrestricted" and egress != {"mode": "host_unrestricted"}:
+        if egress.get("mode") == "host_unrestricted" and egress != {
+            "mode": "host_unrestricted"
+        }:
             errors.append("unrestricted egress must have one explicit mode owner")
     return tuple(errors)
 
@@ -56,9 +58,13 @@ def test_m137_shipped_network_capabilities_are_explicit_and_exceptional() -> Non
 @pytest.mark.parametrize("mutation", ["shorthand", "unknown", "mixed"])
 def test_m137_ambiguous_unrestricted_network_is_detected(mutation: str) -> None:
     _, source = next(
-        (path, document) for path, document in _shipped_goons()
-        if any(step.get("capabilities", {}).get("egress", {}).get("mode") == "host_unrestricted"
-               for step in document.get("steps", ()))
+        (path, document)
+        for path, document in _shipped_goons()
+        if any(
+            step.get("capabilities", {}).get("egress", {}).get("mode")
+            == "host_unrestricted"
+            for step in document.get("steps", ())
+        )
     )
     changed = copy.deepcopy(source)
     step = changed["steps"][0]
@@ -75,14 +81,27 @@ def test_m137_ambiguous_unrestricted_network_is_detected(mutation: str) -> None:
 def test_m137_guide_explains_both_live_scanners_and_runtime_ownership() -> None:
     guide = GUIDE.read_text(encoding="utf-8")
     for item in (
-        "host_unrestricted", "hostname_allowlist", "cidr_allowlist", "none",
-        "FleetPlanResolver", "preview_plan", "Enforcer", "Run", "admission",
-        "uv --preview audit", "trivy fs", "--no-python-downloads", "--skip-version-check",
+        "host_unrestricted",
+        "hostname_allowlist",
+        "cidr_allowlist",
+        "none",
+        "FleetPlanResolver",
+        "preview_plan",
+        "Enforcer",
+        "Run",
+        "admission",
+        "uv --preview audit",
+        "trivy fs",
+        "--no-python-downloads",
+        "--skip-version-check",
     ):
         assert item in guide, item
     for path, document in _shipped_goons():
-        if any(step.get("capabilities", {}).get("egress", {}).get("mode") == "host_unrestricted"
-               for step in document.get("steps", ())):
+        if any(
+            step.get("capabilities", {}).get("egress", {}).get("mode")
+            == "host_unrestricted"
+            for step in document.get("steps", ())
+        ):
             identity = "/".join(path.parent.parts[-2:])
             assert f"`{identity}`" in guide, identity
     for link in re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", guide):
@@ -92,12 +111,16 @@ def test_m137_guide_explains_both_live_scanners_and_runtime_ownership() -> None:
 
 def test_m137_canonical_navigation_to_network_guide() -> None:
     for location in (
-        "docs/README.md", "templates/README.md", "templates/goons/README.md",
+        "docs/README.md",
+        "templates/README.md",
+        "templates/goons/README.md",
         "docs/development/GOON_AUTHORING.md",
     ):
         page = ROOT / location
         content = page.read_text(encoding="utf-8")
         links = re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", content)
-        guide_links = [link for link in links if "TEMPLATE_NETWORK_AUTHORITY.md" in link]
+        guide_links = [
+            link for link in links if "TEMPLATE_NETWORK_AUTHORITY.md" in link
+        ]
         assert guide_links, location
         assert all((page.parent / link).is_file() for link in guide_links), location

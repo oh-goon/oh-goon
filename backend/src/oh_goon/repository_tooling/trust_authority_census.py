@@ -1,4 +1,5 @@
 """Read-only T0A projection; refuses unaccounted trust implementation drift."""
+
 from __future__ import annotations
 
 import sys

@@ -16,15 +16,8 @@ from hashmarks.verification_selection import (
     verification_selection_envelope,
 )
 
-
-pytestmark = pytest.mark.dependency_complete
-
-from tests.hashmarks_test_support import (
-    TEST_HASHMARKS_ARTIFACT_IDENTITY,
-)
 from oh_goon.core.models.pytest_selection import StructuredPytestMember, StructuredPytestMemberError
 from oh_goon.engine.command import CommandResult
-from tests.factories.runtime_authority import authorized_command_result
 from oh_goon.integrations.hashmarks.verification_selection import (
     HashmarksVerificationSelectionInputError,
     load_hashmarks_verification_selection,
@@ -36,6 +29,12 @@ from oh_goon.repository_tooling.hashmarks_verification_execution import (
 )
 from oh_goon.runtime.execution import shards as shard_runtime
 from oh_goon.runtime.execution.pytest_projection import project_pytest_argv
+from tests.factories.runtime_authority import authorized_command_result
+from tests.hashmarks_test_support import (
+    TEST_HASHMARKS_ARTIFACT_IDENTITY,
+)
+
+pytestmark = pytest.mark.dependency_complete
 
 
 def _sha(char: str) -> str:
@@ -91,7 +90,9 @@ def test_core_rejects_ambiguous_path_representations(path: str) -> None:
         StructuredPytestMember(path, None, _sha("f"))
 
 
-def test_hashmarks_normalized_relative_path_is_admitted_without_oh_goon_rewrite(tmp_path: Path) -> None:
+def test_hashmarks_normalized_relative_path_is_admitted_without_oh_goon_rewrite(
+    tmp_path: Path,
+) -> None:
     posix = _admit(tmp_path, [("./tests/test_x.py", None)])
     windows = _admit(tmp_path, [(r"tests\test_x.py", None)])
     assert posix.members[0].path == windows.members[0].path == "tests/test_x.py"
@@ -102,7 +103,6 @@ def test_hashmarks_normalized_relative_path_is_admitted_without_oh_goon_rewrite(
 def test_admission_rejects_ambiguous_node_id_representations(tmp_path: Path, symbol: str) -> None:
     with pytest.raises(HashmarksVerificationSelectionInputError, match="projected safely"):
         _admit(tmp_path, [("tests/test_x.py", symbol)])
-
 
 
 @pytest.mark.parametrize(
@@ -219,7 +219,6 @@ def test_projector_rejects_duplicate_executable_projection() -> None:
         project_pytest_argv(("pytest",), members)
 
 
-
 def test_projector_rejects_duplicate_projection_identity_even_when_selectors_differ(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -240,7 +239,9 @@ def test_projector_rejects_duplicate_projection_identity_even_when_selectors_dif
 def test_real_pytest_execution_cannot_turn_option_looking_path_into_option(
     tmp_path: Path, filename: str
 ) -> None:
-    (tmp_path / filename).write_text("def test_option_guard():\n    assert True\n", encoding="utf-8")
+    (tmp_path / filename).write_text(
+        "def test_option_guard():\n    assert True\n", encoding="utf-8"
+    )
     selection = _admit(tmp_path, [(filename, "test_option_guard")])
     plan = build_verification_execution_plan(
         selection,
@@ -273,7 +274,11 @@ def test_structured_identity_survives_bisection_resume_and_receipt(
             ("tests/punctuation.py", "TestOuter::TestInner::test_x[a-b_[]!@#]"),
         ],
     )
-    plan = build_verification_execution_plan(selection, command_prefix=("fake-pytest", "-q"), grouping_policy=VerificationExecutionGroupingPolicy(4))
+    plan = build_verification_execution_plan(
+        selection,
+        command_prefix=("fake-pytest", "-q"),
+        grouping_policy=VerificationExecutionGroupingPolicy(4),
+    )
     calls: list[tuple[str, ...]] = []
 
     def fake_run(*args: str, **kwargs: object) -> CommandResult:
@@ -321,7 +326,9 @@ def test_structured_identity_survives_bisection_resume_and_receipt(
     assert all(call.index("--") >= 1 for call in calls)
 
 
-def test_refinement_children_explicitly_bind_original_admitted_member_identities(tmp_path: Path) -> None:
+def test_refinement_children_explicitly_bind_original_admitted_member_identities(
+    tmp_path: Path,
+) -> None:
     selection = _admit(
         tmp_path,
         [
@@ -342,9 +349,11 @@ def test_refinement_children_explicitly_bind_original_admitted_member_identities
     assert parent.original_admitted_member_identities == expected
     assert left.original_admitted_member_identities == expected[:2]
     assert right.original_admitted_member_identities == expected[2:]
-    assert left.original_admitted_member_identities + right.original_admitted_member_identities == expected
+    assert (
+        left.original_admitted_member_identities + right.original_admitted_member_identities
+        == expected
+    )
     assert left.parent_work_identity == right.parent_work_identity == parent.work_identity
-
 
 
 def _leaf_results(result: shard_runtime.ShardResult) -> tuple[shard_runtime.ShardResult, ...]:
@@ -371,9 +380,7 @@ def _assert_recovery_identity_conservation(selection, plan, report) -> None:
         assert recovered.member_id == admitted.member_id
         assert recovered.projection_identity == admitted.projection_identity
     assert all(
-        leaf.parent_work_identity is not None
-        for leaf in leaves
-        if leaf.refinement_depth > 0
+        leaf.parent_work_identity is not None for leaf in leaves if leaf.refinement_depth > 0
     )
     assert plan.selected_membership_identity == selection.membership_identity
 
@@ -424,7 +431,9 @@ def test_timeout_bisection_to_singletons_conserves_original_structured_identity(
     receipt = build_verification_execution_receipt(selection, report)
     assert receipt.terminal_success is False
     assert set(receipt.missing) == {
-        member.executable_selector for member in selection.members if "hang" in member.executable_selector
+        member.executable_selector
+        for member in selection.members
+        if "hang" in member.executable_selector
     }
     assert receipt.duplicates == receipt.extras == ()
     assert receipt.selected_projection_identities == tuple(
@@ -528,7 +537,9 @@ def test_real_timeout_cleanup_preserves_structured_member_identity(
     assert result.attempts[0].physical_work_identity == result.work_identity
 
 
-def test_structured_work_rejects_missing_or_reconstructed_original_member_identity(tmp_path: Path) -> None:
+def test_structured_work_rejects_missing_or_reconstructed_original_member_identity(
+    tmp_path: Path,
+) -> None:
     selection = _admit(tmp_path, [("tests/a.py", "test_a")])
     member = selection.members[0]
     with pytest.raises(ValueError, match="original admitted member identities"):

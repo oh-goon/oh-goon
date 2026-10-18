@@ -10,7 +10,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from oh_goon.scout.database import scout_analytical_database_path
 from oh_goon.repository_tooling.network_certification import blocked_network_attempts
 from oh_goon.repository_tooling.scout_http_load_probe import (
     ROOT,
@@ -25,6 +24,7 @@ from oh_goon.repository_tooling.scout_http_load_probe import (
     _stop_server,
     _wait_json,
 )
+from oh_goon.scout.database import scout_analytical_database_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,9 +50,7 @@ def _crash_server(process) -> None:
     os.kill(process.pid, signal.SIGKILL)
     process.wait(timeout=10)
     if process.returncode != -signal.SIGKILL:
-        raise RuntimeError(
-            f"Scout crash certification expected SIGKILL, got {process.returncode}"
-        )
+        raise RuntimeError(f"Scout crash certification expected SIGKILL, got {process.returncode}")
 
 
 def _sidecar_bytes(state: Path) -> int:
@@ -64,9 +62,7 @@ def _sidecar_bytes(state: Path) -> int:
 def _stable_payload(value):
     if isinstance(value, dict):
         return {
-            key: _stable_payload(item)
-            for key, item in sorted(value.items())
-            if key != "window"
+            key: _stable_payload(item) for key, item in sorted(value.items()) if key != "window"
         }
     if isinstance(value, list):
         return [_stable_payload(item) for item in value]
@@ -79,9 +75,7 @@ def _route_fingerprints(routes: dict[str, str]) -> dict[str, str]:
         if name == "health":
             continue
         payload = _stable_payload(_get_json(url))
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         fingerprints[name] = hashlib.sha256(encoded).hexdigest()
     return fingerprints
 
@@ -139,9 +133,7 @@ def _pre_crash_phase(
         raise
     bytes_after_crash = _sidecar_bytes(state)
     if bytes_after_crash <= 0:
-        raise RuntimeError(
-            "Scout analytical sidecar disappeared after abrupt server crash"
-        )
+        raise RuntimeError("Scout analytical sidecar disappeared after abrupt server crash")
     return fingerprints, bytes_after_crash
 
 
@@ -173,9 +165,7 @@ def _post_restart_phase(
         )
         after_fingerprints = _route_fingerprints(routes)
         if after_fingerprints != before_fingerprints:
-            raise RuntimeError(
-                "Scout analytical responses changed across crash/restart"
-            )
+            raise RuntimeError("Scout analytical responses changed across crash/restart")
         wave_total, latencies = _concurrent_routes(routes, concurrent_users)
         final_health = _get_json(routes["health"])
         _assert_health_persistence(
@@ -266,9 +256,7 @@ def run_crash_restart_certification(
 
 
 def main() -> int:
-    print(
-        json.dumps(asdict(run_crash_restart_certification()), indent=2, sort_keys=True)
-    )
+    print(json.dumps(asdict(run_crash_restart_certification()), indent=2, sort_keys=True))
     return 0
 
 

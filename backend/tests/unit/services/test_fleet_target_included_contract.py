@@ -4,10 +4,10 @@ from oh_goon.core.capability_plan_definitions import PLAN_CAPABILITIES
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry
 from oh_goon.core.models.run_admission import AllRepositoryScope
 from oh_goon.runtime.database import LocalDatabase
-from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.league import LeagueService
 from oh_goon.services.migration import MigrationService
 from oh_goon.services.repositories import RepositoryService
+from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.target_selection import FleetTargetSelector
 from tests.factories.local_state import local_state
 

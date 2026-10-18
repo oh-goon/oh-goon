@@ -10,12 +10,22 @@ SCRIPT = ROOT / "scripts/application_verify.sh"
 
 def _verify_rows() -> list[tuple[str, str, str]]:
     completed = subprocess.run(
-        ["bash", str(SCRIPT), "--list"], cwd=ROOT, text=True, capture_output=True, check=True
+        ["bash", str(SCRIPT), "--list"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
     )
-    return [tuple(line.split("|", 2)) for line in completed.stdout.splitlines() if line.strip()]  # type: ignore[misc]
+    return [
+        tuple(line.split("|", 2))
+        for line in completed.stdout.splitlines()
+        if line.strip()
+    ]  # type: ignore[misc]
 
 
-def test_verify_is_broader_than_lean_certification_and_keeps_browser_diagnostics() -> None:
+def test_verify_is_broader_than_lean_certification_and_keeps_browser_diagnostics() -> (
+    None
+):
     rows = _verify_rows()
     targets = [row[2] for row in rows]
     assert targets[:5] == [
@@ -32,7 +42,9 @@ def test_verify_is_broader_than_lean_certification_and_keeps_browser_diagnostics
     assert len(set(targets)) == len(targets)
 
 
-def test_verify_goon_identity_is_provenance_not_scheduling_authority(tmp_path: Path) -> None:
+def test_verify_goon_identity_is_provenance_not_scheduling_authority(
+    tmp_path: Path,
+) -> None:
     original = SCRIPT.read_text(encoding="utf-8")
     renamed = original.replace(
         "oh-goon/frontend-functional", "oh-goon/frontend-functional-renamed"
@@ -51,9 +63,9 @@ def test_verify_goon_identity_is_provenance_not_scheduling_authority(tmp_path: P
         fake_make.write_text(
             "#!/bin/sh\n"
             "target=''\n"
-            "for arg in \"$@\"; do case \"$arg\" in --*) ;; *) target=\"$arg\" ;; esac; done\n"
+            'for arg in "$@"; do case "$arg" in --*) ;; *) target="$arg" ;; esac; done\n'
             f"printf '%s\\n' \"$target\" >> {calls}\n"
-            "case \"$target\" in frontend-functional-certification) exit 19 ;; *) exit 0 ;; esac\n",
+            'case "$target" in frontend-functional-certification) exit 19 ;; *) exit 0 ;; esac\n',
             encoding="utf-8",
         )
         fake_make.chmod(0o755)
@@ -64,7 +76,11 @@ def test_verify_goon_identity_is_provenance_not_scheduling_authority(tmp_path: P
             text=True,
             capture_output=True,
         )
-        return completed.returncode, calls.read_text(encoding="utf-8").splitlines(), completed.stdout
+        return (
+            completed.returncode,
+            calls.read_text(encoding="utf-8").splitlines(),
+            completed.stdout,
+        )
 
     original_result = run(original, tmp_path / "original")
     renamed_result = run(renamed, tmp_path / "renamed")
@@ -76,13 +92,15 @@ def test_verify_goon_identity_is_provenance_not_scheduling_authority(tmp_path: P
     assert "RESULT: FAILED" in renamed_result[2]
 
 
-def test_verify_uses_native_init_as_its_only_materialization_prerequisite(tmp_path: Path) -> None:
+def test_verify_uses_native_init_as_its_only_materialization_prerequisite(
+    tmp_path: Path,
+) -> None:
     calls = tmp_path / "calls.txt"
     fake_make = tmp_path / "make"
     fake_make.write_text(
         "#!/bin/sh\n"
         "target=''\n"
-        "for arg in \"$@\"; do case \"$arg\" in --*) ;; *) target=\"$arg\" ;; esac; done\n"
+        'for arg in "$@"; do case "$arg" in --*) ;; *) target="$arg" ;; esac; done\n'
         f"printf '%s\\n' \"$target\" >> {calls}\n"
         "exit 0\n",
         encoding="utf-8",
@@ -108,15 +126,17 @@ def test_verify_blocks_broad_diagnostics_when_native_init_fails(tmp_path: Path) 
     fake_make.write_text(
         "#!/bin/sh\n"
         "target=''\n"
-        "for arg in \"$@\"; do case \"$arg\" in --*) ;; *) target=\"$arg\" ;; esac; done\n"
-        "case \"$target\" in init) exit 17 ;; *) exit 0 ;; esac\n",
+        'for arg in "$@"; do case "$arg" in --*) ;; *) target="$arg" ;; esac; done\n'
+        'case "$target" in init) exit 17 ;; *) exit 0 ;; esac\n',
         encoding="utf-8",
     )
     fake_make.chmod(0o755)
     isolated = tmp_path / "checkout"
     (isolated / "scripts").mkdir(parents=True)
     (isolated / "scripts/application_verify.sh").write_bytes(SCRIPT.read_bytes())
-    (isolated / "scripts/command_banner.sh").write_bytes((ROOT / "scripts/command_banner.sh").read_bytes())
+    (isolated / "scripts/command_banner.sh").write_bytes(
+        (ROOT / "scripts/command_banner.sh").read_bytes()
+    )
     completed = subprocess.run(
         ["bash", str(isolated / "scripts/application_verify.sh")],
         cwd=isolated,

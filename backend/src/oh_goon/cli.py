@@ -10,32 +10,29 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_developer import run_state_free_developer_command
 from oh_goon.cli_enforcer import run_enforcer_compare_command
 from oh_goon.cli_local_state import check_local_state_for_startup, run_local_state_command
+from oh_goon.cli_logs import run_logs_command
+from oh_goon.cli_open import run_open_command
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime import run_stateful_command
+from oh_goon.cli_self import run_self_command
 from oh_goon.cli_start import run_start_command
 from oh_goon.cli_status import run_status_command
-from oh_goon.cli_storage import run_storage_command
-from oh_goon.cli_open import run_open_command
-from oh_goon.cli_logs import run_logs_command
 from oh_goon.cli_stop import run_stop_command
-from oh_goon.cli_self import run_self_command
-from oh_goon.core.errors import DatabaseSchemaMismatch
+from oh_goon.cli_storage import run_storage_command
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
-from oh_goon.runtime.storage_health import storage_unavailable_reason
+from oh_goon.core.errors import DatabaseSchemaMismatch
 from oh_goon.runtime.database import DatabasePathIdentityLost
-
+from oh_goon.runtime.storage_health import storage_unavailable_reason
 
 
 def _print_runtime_database_identity_lost(reason: str) -> None:
     print("OH-GOON RUNTIME DATABASE IDENTITY LOST")
     print(f"Reason: {reason}")
     print(
-        "The admitted SQLite identity could not be re-proven after bounded "
-        "observation-only checks."
+        "The admitted SQLite identity could not be re-proven after bounded observation-only checks."
     )
     print(
-        "Oh-Goon will not recreate/repair the database or replay a Plan, Step, "
-        "or external effect."
+        "Oh-Goon will not recreate/repair the database or replay a Plan, Step, or external effect."
     )
     print(
         "For isolated certification state, preserve this diagnostic before using "
@@ -46,6 +43,7 @@ def _print_runtime_database_identity_lost(reason: str) -> None:
         "not as disposable-cache damage."
     )
     print("Native package-manager state is outside certification control-state reset authority.")
+
 
 def _print_runtime_storage_unavailable(reason: str) -> None:
     print("OH-GOON RUNTIME STORAGE UNAVAILABLE")
@@ -129,7 +127,8 @@ def _run_serve_command(args) -> int:
 
 
 def _build_application_runtime(
-    *, fleet_provisioner: FleetPreworkProvisioner | None = None,
+    *,
+    fleet_provisioner: FleetPreworkProvisioner | None = None,
     standard_local: bool = False,
 ) -> ApplicationRuntime | None:
     try:
@@ -174,7 +173,8 @@ def _execute_stateful_command(runtime: ApplicationRuntime, args) -> int:
 
 
 def main(
-    argv: list[str] | None = None, *,
+    argv: list[str] | None = None,
+    *,
     fleet_provisioner: FleetPreworkProvisioner | None = None,
 ) -> int:
     """Run the CLI; only an in-process deployment can transport Fleet authority.
@@ -188,6 +188,7 @@ def main(
     args = parser.parse_args(argv)
     if fleet_provisioner is not None:
         from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
+
         if type(fleet_provisioner) is not FleetPreworkProvisioner:
             raise TrustProtocolError("original deployment FleetPreworkProvisioner required")
         if args.command != "plan" or args.plan_command != "run":
@@ -233,6 +234,7 @@ def main(
     # FleetPlanService lock writer. It must not construct the app/Fleet database.
     if args.command == "agent":
         from oh_goon.cli_agent_patch_apply import run_selected_proposal
+
         return run_selected_proposal(args)
 
     if args.command == "lock":

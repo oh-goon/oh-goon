@@ -4,7 +4,6 @@ import re
 import shlex
 from dataclasses import dataclass
 
-
 _SHELL_VARIABLE = re.compile(
     r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*|[0-9]+)(?:(:?)-([^}]*))?\}|([A-Za-z_][A-Za-z0-9_]*|[0-9]+))"
 )
@@ -214,7 +213,7 @@ def _trim_shell_control(statement: str) -> str:
         if candidate.startswith(prefix):
             candidate = candidate[len(prefix) :].strip()
             break
-    if candidate in {"then", "do", "done", "fi", "esac", "else", "{" , "}"}:
+    if candidate in {"then", "do", "done", "fi", "esac", "else", "{", "}"}:
         return ""
     if candidate.startswith("else "):
         candidate = candidate[5:].strip()
@@ -249,7 +248,9 @@ def _apply_shell_assignment(
     array_match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=\((.*)\)", candidate)
     if array_match is not None:
         name, body = array_match.groups()
-        arrays[name] = tuple(_resolve_shell_value(word, scalars) for word in _parse_shell_words(body))
+        arrays[name] = tuple(
+            _resolve_shell_value(word, scalars) for word in _parse_shell_words(body)
+        )
         if exported:
             exports.add(name)
         return True
@@ -289,7 +290,9 @@ def _expand_shell_command(
     return expanded, environment
 
 
-def shell_semantic_commands(text: str, *, include_function_bodies: bool = True) -> tuple[ShellCommand, ...]:
+def shell_semantic_commands(
+    text: str, *, include_function_bodies: bool = True
+) -> tuple[ShellCommand, ...]:
     """Project executable shell commands with bounded static alias resolution.
 
     The projection intentionally ignores comments and function/private variable
@@ -319,7 +322,9 @@ def shell_semantic_commands(text: str, *, include_function_bodies: bool = True) 
                     continue
                 if _apply_shell_assignment(statement, local_scalars, local_arrays, local_exports):
                     continue
-                argv, local_environment = _expand_shell_command(statement, local_scalars, local_arrays)
+                argv, local_environment = _expand_shell_command(
+                    statement, local_scalars, local_arrays
+                )
                 if not argv:
                     continue
                 command_name = argv[0]
@@ -339,8 +344,7 @@ def shell_semantic_commands(text: str, *, include_function_bodies: bool = True) 
                     )
                     continue
                 environment = {
-                    name: local_scalars.get(name, f"<VAR:{name}>")
-                    for name in local_exports
+                    name: local_scalars.get(name, f"<VAR:{name}>") for name in local_exports
                 }
                 environment.update(local_environment)
                 commands.append(
@@ -434,7 +438,9 @@ def make_semantic_facts(text: str) -> MakeSemanticFacts:
         joined = join_shell_lines(list(enumerate(raw_lines, start=1)))
         resolved_lines = tuple(_expand_make_value(line, variables) for _, line in joined)
         targets[name] = resolved_lines
-        target_commands[name] = shell_semantic_commands("\n".join(resolved_lines), include_function_bodies=False)
+        target_commands[name] = shell_semantic_commands(
+            "\n".join(resolved_lines), include_function_bodies=False
+        )
     return MakeSemanticFacts(
         variables=variables,
         raw_variables=dict(raw_variables),

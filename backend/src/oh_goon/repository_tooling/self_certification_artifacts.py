@@ -1,31 +1,42 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
-import stat
 import subprocess
 import tempfile
-import tomllib
-import zipfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Iterable
 
-from oh_goon.repository_tooling.release.package_slim import archive_source_identity, package_slim
-from oh_goon.repository_tooling._self_certification_artifact_retention import (
-    load_persist_evidence_impl as _load_persist_evidence,
-    load_retained_readback_evidence_impl as _load_retained_readback_evidence,
-    persist_artifact_set_impl as _persist_artifact_set,
-    retained_artifact_directory as _retained_artifact_directory,
-    verify_retained_artifact_set_impl as _verify_retained_artifact_set,
+from oh_goon.repository_tooling._self_certification_artifact_reporting import (
+    _write_sidecar,
 )
 from oh_goon.repository_tooling._self_certification_artifact_reporting import (
     build_artifact_sidecars_report as _build_artifact_sidecars_report,
+)
+from oh_goon.repository_tooling._self_certification_artifact_reporting import (
     build_handoff_report as _build_handoff_report,
+)
+from oh_goon.repository_tooling._self_certification_artifact_reporting import (
     load_handoff_report_evidence as _load_handoff_report_evidence,
+)
+from oh_goon.repository_tooling._self_certification_artifact_reporting import (
     load_sidecar_report_evidence as _load_sidecar_report_evidence,
-    _write_sidecar,
+)
+from oh_goon.repository_tooling._self_certification_artifact_retention import (
+    load_persist_evidence_impl as _load_persist_evidence,
+)
+from oh_goon.repository_tooling._self_certification_artifact_retention import (
+    load_retained_readback_evidence_impl as _load_retained_readback_evidence,
+)
+from oh_goon.repository_tooling._self_certification_artifact_retention import (
+    persist_artifact_set_impl as _persist_artifact_set,
+)
+from oh_goon.repository_tooling._self_certification_artifact_retention import (
+    retained_artifact_directory as _retained_artifact_directory,
+)
+from oh_goon.repository_tooling._self_certification_artifact_retention import (
+    verify_retained_artifact_set_impl as _verify_retained_artifact_set,
 )
 from oh_goon.repository_tooling._self_certification_artifact_verification import (
     _archive_version,
@@ -36,11 +47,18 @@ from oh_goon.repository_tooling._self_certification_artifact_verification import
     _record_evidence,
     _sha256_file,
     _sha256_json,
-    load_fresh_zip_evidence,
-    load_patch_replay_evidence,
     verify_cumulative_patch_replay_impl,
-    verify_fresh_source_zip,
 )
+from oh_goon.repository_tooling._self_certification_artifact_verification import (
+    load_fresh_zip_evidence as load_fresh_zip_evidence,
+)
+from oh_goon.repository_tooling._self_certification_artifact_verification import (
+    load_patch_replay_evidence as load_patch_replay_evidence,
+)
+from oh_goon.repository_tooling._self_certification_artifact_verification import (
+    verify_fresh_source_zip as verify_fresh_source_zip,
+)
+from oh_goon.repository_tooling.release.package_slim import package_slim
 
 PARENT_METADATA = Path("generated/release/checkpoint-parent.json")
 
@@ -66,7 +84,11 @@ def parent_checkpoint_spec(root: Path) -> dict[str, object]:
         raise ValueError("checkpoint parent version is missing")
     if artifact != f"oh-goon-{version}.zip":
         raise ValueError("checkpoint parent artifact name must match its version")
-    if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(c not in "0123456789abcdef" for c in digest)
+    ):
         raise ValueError("checkpoint parent sha256 must be a lowercase SHA-256 digest")
     return {"schema": 1, "version": version, "artifact": artifact, "sha256": digest}
 
@@ -171,7 +193,9 @@ def build_cumulative_patch(
         raise RuntimeError("source ZIP changed before cumulative patch creation")
     output = cumulative_patch_path(root, state_dir)
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="oh-goon-cumulative-patch-", dir=output.parent) as directory:
+    with tempfile.TemporaryDirectory(
+        prefix="oh-goon-cumulative-patch-", dir=output.parent
+    ) as directory:
         workspace = Path(directory)
         before = workspace / "a"
         after = workspace / "b"
@@ -191,7 +215,9 @@ def build_cumulative_patch(
                 timeout=120,
             )
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeError("cumulative patch generation exceeded its 120s execution budget") from exc
+            raise RuntimeError(
+                "cumulative patch generation exceeded its 120s execution budget"
+            ) from exc
         if result.returncode not in (0, 1):
             raise RuntimeError(
                 f"cumulative git diff failed with exit {result.returncode}: "
@@ -505,7 +531,9 @@ def load_manifest_evidence(
             artifact = artifact_dir / str(row.get("name", ""))
             if not artifact.is_file() or artifact.is_symlink():
                 return None
-            if _sha256_file(artifact) != row.get("sha256") or artifact.stat().st_size != row.get("byte_count"):
+            if _sha256_file(artifact) != row.get("sha256") or artifact.stat().st_size != row.get(
+                "byte_count"
+            ):
                 return None
         expected_sidecar = f"{_sha256_file(manifest)}  {manifest.name}\n"
         if sidecar.read_text(encoding="utf-8") != expected_sidecar:

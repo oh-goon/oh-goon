@@ -7,7 +7,12 @@ from threading import Lock
 
 import pytest
 
-from oh_goon.core.errors import ExecutionBusy, ExecutorAdmissionCancelled, StateConflict, TargetSelectionError
+from oh_goon.core.errors import (
+    ExecutionBusy,
+    ExecutorAdmissionCancelled,
+    StateConflict,
+    TargetSelectionError,
+)
 from oh_goon.core.models.fleet_executor import (
     ExecutorCapacityEvidenceInput,
     FleetExecutorIdentity,
@@ -28,7 +33,9 @@ from oh_goon.core.models.repository import (
     RepositoryCatalogEntry,
     RepositoryIdentity,
 )
-from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence, fleet_repository_scope
+from oh_goon.core.models.run_admission import (
+    fleet_repository_scope,
+)
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
@@ -44,8 +51,8 @@ from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
 from oh_goon.services.fleet_admission import FleetAdmissionPlan
-from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
+from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from tests.factories.capabilities import resolved_intent
 from tests.factories.fleet_plan_targets import structural_fleet_plan_target
 from tests.factories.run_admission import repository_admission_for

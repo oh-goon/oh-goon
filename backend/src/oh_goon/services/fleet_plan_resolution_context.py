@@ -7,8 +7,8 @@ from oh_goon.core.models.fleet_plan import ExtensionCatalog
 from oh_goon.core.models.fleet_plan_execution_policy import PlanExecutionPolicy
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
-from oh_goon.services.fleet_plan_resolution_diagnostics import FleetPlanResolutionDiagnostics
 from oh_goon.services.fleet_plan_input_resolution import InputResolutionContext
+from oh_goon.services.fleet_plan_resolution_diagnostics import FleetPlanResolutionDiagnostics
 from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
 
 

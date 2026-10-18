@@ -94,7 +94,9 @@ class LocalLaunchAccessStore:
             if payload.get("launch_id") != launch_id:
                 raise ValueError("local launch access capability belongs to another launch")
             if payload.get("owner_generation") != owner_generation:
-                raise ValueError("local launch access capability belongs to another owner generation")
+                raise ValueError(
+                    "local launch access capability belongs to another owner generation"
+                )
             target.unlink()
         return True
 
@@ -117,7 +119,10 @@ class LocalLaunchAccessStore:
                 continue
             try:
                 payload = json.loads(target.read_text(encoding="utf-8"))
-                if not isinstance(payload, dict) or payload.get("schema") != LOCAL_LAUNCH_ACCESS_SCHEMA:
+                if (
+                    not isinstance(payload, dict)
+                    or payload.get("schema") != LOCAL_LAUNCH_ACCESS_SCHEMA
+                ):
                     raise ValueError("invalid capability")
                 launch_id = payload.get("launch_id")
                 owner_generation = payload.get("owner_generation")
@@ -131,9 +136,7 @@ class LocalLaunchAccessStore:
                 if not manifest.lifecycle.is_terminal:
                     refused.append(target.name)
                     continue
-                if self.revoke(
-                    launch_id=launch_id, owner_generation=owner_generation
-                ):
+                if self.revoke(launch_id=launch_id, owner_generation=owner_generation):
                     removed.append(target.name)
             except (OSError, ValueError, json.JSONDecodeError):
                 refused.append(target.name)

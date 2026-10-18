@@ -8,7 +8,9 @@ from oh_goon.repository_tooling.architecture._structural_project_dependency_cont
 
 
 def _project_capability(root: Path, source: str) -> Path:
-    path = root / "backend/src/oh_goon/repository_tooling/project_dependency_capability.py"
+    path = (
+        root / "backend/src/oh_goon/repository_tooling/project_dependency_capability.py"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
     return path
@@ -40,7 +42,9 @@ def test_passive_projection_is_representation_invariant(tmp_path: Path) -> None:
     assert _messages(tmp_path) == ()
 
 
-def test_old_private_helper_spellings_are_non_authoritative_decoys(tmp_path: Path) -> None:
+def test_old_private_helper_spellings_are_non_authoritative_decoys(
+    tmp_path: Path,
+) -> None:
     _project_capability(
         tmp_path,
         "# _package_capability _python_supported _minimum( are historical names only\n"
@@ -70,7 +74,10 @@ def test_renamed_python_compatibility_redecision_is_rejected(tmp_path: Path) -> 
         "        'python_status': 'compatible' if accepts_runtime(declared) else 'incompatible',\n"
         "    }\n",
     )
-    assert any("must not independently decide project compatibility" in item for item in _messages(tmp_path))
+    assert any(
+        "must not independently decide project compatibility" in item
+        for item in _messages(tmp_path)
+    )
 
 
 def test_helper_extracted_python_redecision_is_rejected(tmp_path: Path) -> None:
@@ -92,7 +99,10 @@ def test_helper_extracted_python_redecision_is_rejected(tmp_path: Path) -> None:
         "        'python_ok': verdict(payload),\n"
         "    }\n",
     )
-    assert any("must not independently decide project compatibility" in item for item in _messages(tmp_path))
+    assert any(
+        "must not independently decide project compatibility" in item
+        for item in _messages(tmp_path)
+    )
 
 
 def test_external_specifier_membership_redecision_is_rejected(tmp_path: Path) -> None:
@@ -109,10 +119,15 @@ def test_external_specifier_membership_redecision_is_rejected(tmp_path: Path) ->
         "        'python_status': 'compatible' if accepted else 'incompatible',\n"
         "    }\n",
     )
-    assert any("must not independently decide project compatibility" in item for item in _messages(tmp_path))
+    assert any(
+        "must not independently decide project compatibility" in item
+        for item in _messages(tmp_path)
+    )
 
 
-def test_package_version_redecision_is_rejected_but_observation_is_allowed(tmp_path: Path) -> None:
+def test_package_version_redecision_is_rejected_but_observation_is_allowed(
+    tmp_path: Path,
+) -> None:
     _project_capability(
         tmp_path,
         "import importlib.metadata\n"
@@ -126,4 +141,7 @@ def test_package_version_redecision_is_rejected_but_observation_is_allowed(tmp_p
         "        'local_compatibility': locally_accepted,\n"
         "    }\n",
     )
-    assert any("must not independently decide project compatibility" in item for item in _messages(tmp_path))
+    assert any(
+        "must not independently decide project compatibility" in item
+        for item in _messages(tmp_path)
+    )

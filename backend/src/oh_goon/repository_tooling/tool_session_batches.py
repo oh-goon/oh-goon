@@ -6,6 +6,7 @@ records a PASS receipt bound to exact source, plan, and Python toolchain identit
 Re-running the command skips only exact-identity PASS units, so an outer tool/session
 cutoff loses at most the currently executing unit instead of the entire qualification.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,12 +20,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from oh_goon.core.file_digest import sha256_file
 from oh_goon.engine.command import run_command
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.test_batch_receipts import python_toolchain_identity
-
-from oh_goon.core.file_digest import sha256_file
 
 RECEIPT_SCHEMA = "oh-goon.tool-session-unit-receipt/v2"
 PLAN_SCHEMA = "oh-goon.tool-session-plan/v1"
@@ -61,13 +61,25 @@ def maintenance_release_units() -> tuple[QualificationUnit, ...]:
         ),
         QualificationUnit(
             "hashmarks-boundary",
-            (python, "-m", "pytest", "-q", "scripts/tests/test_hashmarks_harness_boundary_contract.py"),
+            (
+                python,
+                "-m",
+                "pytest",
+                "-q",
+                "scripts/tests/test_hashmarks_harness_boundary_contract.py",
+            ),
             180,
             30.0,
         ),
         QualificationUnit(
             "repository-understanding",
-            (python, "-m", "pytest", "-q", "scripts/tests/test_repository_understanding_certification.py"),
+            (
+                python,
+                "-m",
+                "pytest",
+                "-q",
+                "scripts/tests/test_repository_understanding_certification.py",
+            ),
             1200,
             90.0,
         ),
@@ -110,19 +122,21 @@ def _identity(payload: object) -> str:
 
 
 def _plan_identity(units: tuple[QualificationUnit, ...]) -> str:
-    return _identity({
-        "schema": PLAN_SCHEMA,
-        "units": [
-            {
-                "name": unit.name,
-                "command": list(unit.command),
-                "timeout_seconds": unit.timeout_seconds,
-                "expected_runtime_seconds": unit.expected_runtime_seconds,
-                "environment": [list(pair) for pair in unit.environment],
-            }
-            for unit in units
-        ],
-    })
+    return _identity(
+        {
+            "schema": PLAN_SCHEMA,
+            "units": [
+                {
+                    "name": unit.name,
+                    "command": list(unit.command),
+                    "timeout_seconds": unit.timeout_seconds,
+                    "expected_runtime_seconds": unit.expected_runtime_seconds,
+                    "environment": [list(pair) for pair in unit.environment],
+                }
+                for unit in units
+            ],
+        }
+    )
 
 
 def _state_root() -> Path:
@@ -135,11 +149,13 @@ def _state_root() -> Path:
 
 
 def _receipt_dir(*, source_identity: str, plan_identity: str, toolchain_identity: str) -> Path:
-    key = _identity({
-        "source_identity": source_identity,
-        "plan_identity": plan_identity,
-        "toolchain_identity": toolchain_identity,
-    }).removeprefix("sha256:")
+    key = _identity(
+        {
+            "source_identity": source_identity,
+            "plan_identity": plan_identity,
+            "toolchain_identity": toolchain_identity,
+        }
+    ).removeprefix("sha256:")
     return _state_root() / key
 
 
@@ -147,28 +163,49 @@ def _receipt_path(directory: Path, unit: QualificationUnit) -> Path:
     return directory / f"{unit.name}.json"
 
 
-def _receipt_valid(path: Path, *, source_identity: str, plan_identity: str, toolchain_identity: str, unit: QualificationUnit) -> bool:
+def _receipt_valid(
+    path: Path,
+    *,
+    source_identity: str,
+    plan_identity: str,
+    toolchain_identity: str,
+    unit: QualificationUnit,
+) -> bool:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    return payload == {
-        "schema": RECEIPT_SCHEMA,
-        "source_identity": source_identity,
-        "plan_identity": plan_identity,
-        "toolchain_identity": toolchain_identity,
-        "unit": unit.name,
-        "command": list(unit.command),
-        "timeout_seconds": unit.timeout_seconds,
-        "expected_runtime_seconds": unit.expected_runtime_seconds,
-        "environment": [list(pair) for pair in unit.environment],
-        "observed_runtime_seconds": payload.get("observed_runtime_seconds"),
-        "result": "PASS",
-        "completed_utc": payload.get("completed_utc"),
-    } and isinstance(payload.get("completed_utc"), str) and isinstance(payload.get("observed_runtime_seconds"), (int, float)) and payload.get("observed_runtime_seconds", -1) >= 0
+    return (
+        payload
+        == {
+            "schema": RECEIPT_SCHEMA,
+            "source_identity": source_identity,
+            "plan_identity": plan_identity,
+            "toolchain_identity": toolchain_identity,
+            "unit": unit.name,
+            "command": list(unit.command),
+            "timeout_seconds": unit.timeout_seconds,
+            "expected_runtime_seconds": unit.expected_runtime_seconds,
+            "environment": [list(pair) for pair in unit.environment],
+            "observed_runtime_seconds": payload.get("observed_runtime_seconds"),
+            "result": "PASS",
+            "completed_utc": payload.get("completed_utc"),
+        }
+        and isinstance(payload.get("completed_utc"), str)
+        and isinstance(payload.get("observed_runtime_seconds"), (int, float))
+        and payload.get("observed_runtime_seconds", -1) >= 0
+    )
 
 
-def _write_receipt(path: Path, *, source_identity: str, plan_identity: str, toolchain_identity: str, unit: QualificationUnit, observed_runtime_seconds: float) -> None:
+def _write_receipt(
+    path: Path,
+    *,
+    source_identity: str,
+    plan_identity: str,
+    toolchain_identity: str,
+    unit: QualificationUnit,
+    observed_runtime_seconds: float,
+) -> None:
     payload = {
         "schema": RECEIPT_SCHEMA,
         "source_identity": source_identity,
@@ -231,13 +268,30 @@ def _run_unit(unit: QualificationUnit) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--status", action="store_true", help="show exact-identity unit progress without executing")
-    parser.add_argument("--status-json", action="store_true", help="emit machine-readable exact-identity progress without executing")
-    parser.add_argument("--max-units", type=int, default=1, help="maximum pending units to execute this invocation")
-    parser.add_argument("--session-budget-seconds", type=float, default=None, help="soft wall-clock budget for this invocation; units that cannot fit are not started")
-    parser.add_argument("--checkpoint-reserve-seconds", type=float, default=30.0, help="budget reserved for receipt/status persistence before soft close")
+    parser.add_argument(
+        "--status", action="store_true", help="show exact-identity unit progress without executing"
+    )
+    parser.add_argument(
+        "--status-json",
+        action="store_true",
+        help="emit machine-readable exact-identity progress without executing",
+    )
+    parser.add_argument(
+        "--max-units", type=int, default=1, help="maximum pending units to execute this invocation"
+    )
+    parser.add_argument(
+        "--session-budget-seconds",
+        type=float,
+        default=None,
+        help="soft wall-clock budget for this invocation; units that cannot fit are not started",
+    )
+    parser.add_argument(
+        "--checkpoint-reserve-seconds",
+        type=float,
+        default=30.0,
+        help="budget reserved for receipt/status persistence before soft close",
+    )
     return parser
-
 
 
 def _validate_args(args: argparse.Namespace) -> None:
@@ -257,8 +311,14 @@ def _receipt_hash(path: Path) -> str | None:
 
 
 def _status_payload(
-    *, units: tuple[QualificationUnit, ...], completed: list[QualificationUnit], pending: list[QualificationUnit],
-    directory: Path, source_identity: str, plan_identity: str, toolchain_identity: str,
+    *,
+    units: tuple[QualificationUnit, ...],
+    completed: list[QualificationUnit],
+    pending: list[QualificationUnit],
+    directory: Path,
+    source_identity: str,
+    plan_identity: str,
+    toolchain_identity: str,
 ) -> dict[str, object]:
     completed_names = {unit.name for unit in completed}
     return {
@@ -271,7 +331,9 @@ def _status_payload(
             {
                 "owner": unit.name,
                 "state": "PASS" if unit.name in completed_names else "PENDING",
-                "receipt_hash": _receipt_hash(_receipt_path(directory, unit)) if unit.name in completed_names else None,
+                "receipt_hash": _receipt_hash(_receipt_path(directory, unit))
+                if unit.name in completed_names
+                else None,
             }
             for unit in units
         ],
@@ -279,14 +341,32 @@ def _status_payload(
 
 
 def _handle_early_exit(
-    *, status: bool, status_json: bool, units: tuple[QualificationUnit, ...], completed: list[QualificationUnit],
-    pending: list[QualificationUnit], directory: Path, source_identity: str, plan_identity: str, toolchain_identity: str,
+    *,
+    status: bool,
+    status_json: bool,
+    units: tuple[QualificationUnit, ...],
+    completed: list[QualificationUnit],
+    pending: list[QualificationUnit],
+    directory: Path,
+    source_identity: str,
+    plan_identity: str,
+    toolchain_identity: str,
 ) -> bool:
     if status_json:
-        print(json.dumps(_status_payload(
-            units=units, completed=completed, pending=pending, directory=directory, source_identity=source_identity,
-            plan_identity=plan_identity, toolchain_identity=toolchain_identity,
-        ), sort_keys=True))
+        print(
+            json.dumps(
+                _status_payload(
+                    units=units,
+                    completed=completed,
+                    pending=pending,
+                    directory=directory,
+                    source_identity=source_identity,
+                    plan_identity=plan_identity,
+                    toolchain_identity=toolchain_identity,
+                ),
+                sort_keys=True,
+            )
+        )
         return True
     if status:
         for unit in units:
@@ -297,6 +377,7 @@ def _handle_early_exit(
         print("TOOL SESSION QUALIFICATION COMPLETE")
         return True
     return False
+
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
@@ -329,8 +410,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     pending = [unit for unit in units if unit not in completed]
     if _handle_early_exit(
-        status=args.status, status_json=args.status_json, units=units, completed=completed, pending=pending,
-        directory=directory, source_identity=source_identity, plan_identity=plan_identity, toolchain_identity=toolchain_identity,
+        status=args.status,
+        status_json=args.status_json,
+        units=units,
+        completed=completed,
+        pending=pending,
+        directory=directory,
+        source_identity=source_identity,
+        plan_identity=plan_identity,
+        toolchain_identity=toolchain_identity,
     ):
         return 0
     executed = 0
@@ -351,7 +439,9 @@ def main(argv: list[str] | None = None) -> int:
         code = _run_unit(unit)
         observed_runtime_seconds = time.monotonic() - unit_started
         if code != 0:
-            print(f"TOOL SESSION QUALIFICATION FAILED unit={unit.name} exit={code}", file=sys.stderr)
+            print(
+                f"TOOL SESSION QUALIFICATION FAILED unit={unit.name} exit={code}", file=sys.stderr
+            )
             return code
         _write_receipt(
             _receipt_path(directory, unit),

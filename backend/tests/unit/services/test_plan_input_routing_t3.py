@@ -1,4 +1,5 @@
 """T3: exact occurrence routing is a presentation over one canonical resolved cut."""
+
 from __future__ import annotations
 
 import hashlib
@@ -10,8 +11,8 @@ import pytest
 from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceNotFound
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
-from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_input_routing import CallerFileRoutingOrigin, _binding_origin
+from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 
 def _resolver() -> FleetPlanResolver:
@@ -48,10 +49,16 @@ def test_file_origin_only_for_selected_file_keys():
     routed = _resolver().explain_routing(
         _source("python/quality"),
         inputs={"coverage_threshold": 85},
-        caller_file=CallerFileRoutingOrigin(relative_path="values/stage.yml", sha256="a" * 64, names=frozenset({"coverage_threshold"})),
+        caller_file=CallerFileRoutingOrigin(
+            relative_path="values/stage.yml",
+            sha256="a" * 64,
+            names=frozenset({"coverage_threshold"}),
+        ),
     )
     assert routed["inputs"][0]["origin"] == {
-        "kind": "inputs_file", "path": "values/stage.yml", "sha256": "a" * 64,
+        "kind": "inputs_file",
+        "path": "values/stage.yml",
+        "sha256": "a" * 64,
     }
     assert "85" not in json.dumps(routed["inputs"] + routed["bindings"])
 
@@ -98,16 +105,23 @@ def test_oci_kubernetes_producer_output_is_identity_not_runtime_value():
         "producer_import_instance_id": "kubernetes-release.kubernetes-set-image",
         "output": "KUBERNETES_GENERATION",
     }
-    image = next(x for x in routed["bindings"] if x["input"] == "image"
-                 and x["import_instance_id"] == "kubernetes-release")
+    image = next(
+        x
+        for x in routed["bindings"]
+        if x["input"] == "image" and x["import_instance_id"] == "kubernetes-release"
+    )
     assert image["origin"] == {
-        "kind": "deferred_goon_output", "producer_import_instance_id": "oci-publish-image",
+        "kind": "deferred_goon_output",
+        "producer_import_instance_id": "oci-publish-image",
         "output": "OCI_REFERENCE",
     }
     # Root namespace is forwarded to both distinct Kubernetes child instances.
-    recipients = routed["inputs"][[x["name"] for x in routed["inputs"]].index("namespace")]["recipients"]
+    recipients = routed["inputs"][[x["name"] for x in routed["inputs"]].index("namespace")][
+        "recipients"
+    ]
     assert {x["import_instance_id"] for x in recipients} == {
-        "kubernetes-release", "kubernetes-release.kubernetes-set-image",
+        "kubernetes-release",
+        "kubernetes-release.kubernetes-set-image",
         "kubernetes-release.kubernetes-rollout-verify",
     }
     assert "staging" not in json.dumps(routed["inputs"] + routed["bindings"])
@@ -130,7 +144,10 @@ def _package(root: Path, key: str, source: str) -> None:
 
 def test_repeated_nested_goon_occurrences_and_no_ambient_fanout(tmp_path: Path):
     goons = tmp_path / "goons"
-    _package(goons, "general/leaf", """version: 1
+    _package(
+        goons,
+        "general/leaf",
+        """version: 1
 inputs:
   token:
     type: string
@@ -138,8 +155,12 @@ inputs:
 steps:
 - id: check
   run: echo ${{ inputs.token }}
-""")
-    _package(goons, "general/outer", """version: 1
+""",
+    )
+    _package(
+        goons,
+        "general/outer",
+        """version: 1
 inputs: [token]
 goons:
 - import: general/leaf
@@ -147,19 +168,25 @@ goons:
 - import: general/leaf
   pass: [token]
 - import: general/leaf
-""")
+""",
+    )
     plan = tmp_path / "plan.yml"
-    plan.write_text("""version: 1
+    plan.write_text(
+        """version: 1
 inputs: [token]
 goons:
 - import: general/outer
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(goons))
     first = resolver.explain_routing(plan, inputs={"token": "known"})
     second = resolver.explain_routing(plan, inputs={"token": "known"})
     assert first == second
     assert [item["import_instance_id"] for item in first["occurrences"]] == [
-        "general-outer", "general-outer.general-leaf", "general-outer.general-leaf-2",
+        "general-outer",
+        "general-outer.general-leaf",
+        "general-outer.general-leaf-2",
         "general-outer.general-leaf-3",
     ]
     ids = [x["import_instance_id"] for x in first["inputs"][0]["recipients"]]
@@ -170,26 +197,36 @@ goons:
 
 def test_renamed_edge_identifies_original_public_input(tmp_path: Path):
     goons = tmp_path / "goons"
-    _package(goons, "general/leaf", """version: 1
+    _package(
+        goons,
+        "general/leaf",
+        """version: 1
 inputs:
   target:
     type: string
     default: safe
 steps:
 - run: echo ${{ inputs.target }}
-""")
-    _package(goons, "general/outer", """version: 1
+""",
+    )
+    _package(
+        goons,
+        "general/outer",
+        """version: 1
 inputs: [public]
 goons:
 - import: general/leaf
   with:
     target: ${{ inputs.public }}
-""")
+""",
+    )
     plan = tmp_path / "plan.yml"
     plan.write_text("version: 1\ninputs: [public]\ngoons:\n- general/outer\n", encoding="utf-8")
     resolved = FleetPlanResolver(goon_templates=GoonTemplateStore(goons)).explain_routing(plan)
     assert resolved["inputs"][0]["recipients"][-1] == {
-        "import_instance_id": "general-outer.general-leaf", "goon": "general/leaf", "input": "target",
+        "import_instance_id": "general-outer.general-leaf",
+        "goon": "general/leaf",
+        "input": "target",
     }
 
 
@@ -250,13 +287,17 @@ def test_host_source_descriptor_omits_credential_values():
 
 def test_with_and_pass_normalize_to_identical_occurrence_routes(tmp_path: Path):
     goons = tmp_path / "goons"
-    _package(goons, "general/leaf", """version: 1
+    _package(
+        goons,
+        "general/leaf",
+        """version: 1
 inputs:
   token:
     default: safe
 steps:
 - run: echo ${{ inputs.token }}
-""")
+""",
+    )
     base = """version: 1
 inputs: [token]
 goons:
@@ -269,7 +310,9 @@ goons:
     plan.write_text("version: 1\ninputs: [token]\ngoons:\n- general/outer\n", encoding="utf-8")
     r = FleetPlanResolver(goon_templates=GoonTemplateStore(goons))
     shorthand = r.explain_routing(plan)
-    (child_path / "goon.yml").write_text(base.format(binding="with: {token: '${{ inputs.token }}'}"), encoding="utf-8")
+    (child_path / "goon.yml").write_text(
+        base.format(binding="with: {token: '${{ inputs.token }}'}"), encoding="utf-8"
+    )
     legacy = r.explain_routing(plan)
     assert shorthand["inputs"] == legacy["inputs"]
     assert shorthand["bindings"] == legacy["bindings"]
@@ -300,7 +343,8 @@ def test_every_shipped_plan_route_has_exact_resolved_import_occurrences():
         canonical = resolver.inspect_inputs(path)
         values = {
             item.definition.name: representative[item.definition.input_type.value]
-            for item in canonical if item.definition.required
+            for item in canonical
+            if item.definition.required
         }
         graph = resolver.analyze_source(path)
         resolved = resolver.resolve_source_graph(graph, inputs=values)

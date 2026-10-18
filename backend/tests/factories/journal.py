@@ -44,9 +44,7 @@ def start_run(journal: Journal, fleet_run_id: str) -> FleetRunState:
     return _write(journal, lambda connection: journal.start_run_in(connection, fleet_run_id))
 
 
-def start_repository(
-    journal: Journal, fleet_run_id: str, repository: RepositoryIdentity
-) -> str:
+def start_repository(journal: Journal, fleet_run_id: str, repository: RepositoryIdentity) -> str:
     operation_id = repository_attempt_operation_id(fleet_run_id, repository.repository_id)
     journal.record_execution_lifecycle(
         fleet_run_id=fleet_run_id,

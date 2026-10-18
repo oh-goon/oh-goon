@@ -3,8 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from oh_goon.repository_tooling.architecture.common import Violation, python_ast
-
 from oh_goon.repository_tooling.architecture._launch_contract_control import (
     check_launch_activity_control,
     check_launch_birth_identity,
@@ -20,6 +18,8 @@ from oh_goon.repository_tooling.architecture._launch_contract_navigation import 
 from oh_goon.repository_tooling.architecture._launch_contract_status import (
     check_launch_status_schemas,
 )
+from oh_goon.repository_tooling.architecture.common import Violation, python_ast
+
 
 def _observed_runtime_authority_owners(root: Path) -> set[str]:
     observed: set[str] = set()
@@ -52,15 +52,26 @@ def _check_runtime_authority_registry(root: Path) -> list[Violation]:
         return [Violation(registry_path, f"runtime authority registry is invalid: {exc}")]
     owners = payload.get("owners")
     if not isinstance(owners, dict) or not owners:
-        return [Violation(registry_path, "runtime authority registry must classify physical lifecycle owners")]
+        return [
+            Violation(
+                registry_path, "runtime authority registry must classify physical lifecycle owners"
+            )
+        ]
 
     observed = _observed_runtime_authority_owners(root)
     classified = set(owners)
     violations: list[Violation] = []
     for path in sorted(observed - classified):
-        violations.append(Violation(root / path, "physical process lifecycle authority is unclassified"))
+        violations.append(
+            Violation(root / path, "physical process lifecycle authority is unclassified")
+        )
     for path in sorted(classified - observed):
-        violations.append(Violation(root / path, "runtime authority registry entry is stale; no physical lifecycle primitive remains"))
+        violations.append(
+            Violation(
+                root / path,
+                "runtime authority registry entry is stale; no physical lifecycle primitive remains",
+            )
+        )
     return violations
 
 

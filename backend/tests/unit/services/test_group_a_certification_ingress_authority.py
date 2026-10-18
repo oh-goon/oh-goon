@@ -45,9 +45,7 @@ def test_invalid_certification_ingress_rejects_before_source_or_work(
         (["explain", "run-id"], "explain"),
     ],
 )
-def test_workflow_command_intent_is_the_single_parser_owner(
-    args: list[str], intent: str
-) -> None:
+def test_workflow_command_intent_is_the_single_parser_owner(args: list[str], intent: str) -> None:
     assert workflow_intent(args) == intent
 
 

@@ -7,7 +7,9 @@ from oh_goon.services import shared_plan_preview_diagnostics as subject
 
 
 def _team(*cache_sources: str):
-    return SimpleNamespace(preview=SimpleNamespace(steps=tuple(SimpleNamespace(cache_source=s) for s in cache_sources)))
+    return SimpleNamespace(
+        preview=SimpleNamespace(steps=tuple(SimpleNamespace(cache_source=s) for s in cache_sources))
+    )
 
 
 def test_preview_readiness_does_not_claim_host_storage_or_cache_proof() -> None:

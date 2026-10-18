@@ -33,7 +33,6 @@ def test_shipped_template_classification_is_category_owned() -> None:
         assert observed == expected
 
 
-
 def test_every_shipped_plan_is_a_small_ordered_goon_roster() -> None:
     for key in PLANS.keys():
         source = PLANS.source(key)
@@ -81,7 +80,6 @@ def test_every_shipped_goon_is_atomic_or_composite_never_both() -> None:
                     actual = {binding.name: binding.value for binding in compiled.inputs}
                     for name in passed:
                         assert actual[name] == "${{ inputs." + name + " }}", (key, item)
-
 
 
 def test_every_shipped_plan_builds_one_complete_goon_source_graph() -> None:
@@ -163,6 +161,7 @@ def test_core_python_goons_do_not_author_runtime_plumbing() -> None:
         assert "timeout_seconds:" not in content, key
         assert "uv lock --check" not in content, key
         assert "python -c" not in content, key
+
 
 def test_ml_iris_training_uses_project_command_and_locked_group() -> None:
     source = GOONS.source("ml/iris-train")
@@ -349,9 +348,7 @@ def test_typed_executor_templates_do_not_repeat_fixed_backend_policy() -> None:
         assert "policy" not in step, key
         assert "timeout_seconds" not in step, key
     publish = yaml.safe_load(GOONS.source("oci/publish").content)["steps"][0]
-    assert publish["target"]["registry"] == {
-        "hostname": "${{ inputs.publish_registry_hostname }}"
-    }
+    assert publish["target"]["registry"] == {"hostname": "${{ inputs.publish_registry_hostname }}"}
     assert "output" not in publish
 
 
@@ -359,4 +356,3 @@ def test_shipped_plan_template_descriptions_are_plain_text_for_browser_ui() -> N
     description = PLANS.catalog().templates[0].description
     assert not description.startswith("**")
     assert not description.endswith("**")
-

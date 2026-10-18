@@ -1,4 +1,5 @@
 """T1: one inspected source cut and no duplicated input-schema owner."""
+
 from __future__ import annotations
 
 import hashlib

@@ -3,6 +3,7 @@
 This verifier validates already-produced evidence only.  It never launches work,
 reuses proof, reconstructs producer semantics, or upgrades a nonterminal result.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -16,7 +17,9 @@ from oh_goon.runtime.execution.shard_models import ShardExecutionReport
 
 
 def _identity(payload: object) -> str:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
@@ -27,17 +30,25 @@ class OfflineProofVerification:
     proof_identity: str
 
 
-def _authority_reasons(report: ShardExecutionReport, expected: tuple[tuple[str | None, str | None, str], ...]) -> list[str]:
+def _authority_reasons(
+    report: ShardExecutionReport, expected: tuple[tuple[str | None, str | None, str], ...]
+) -> list[str]:
     reasons: list[str] = []
-    expected_context = _identity({
-        "execution_contract_version": report.execution_contract_version,
-        "runner_toolchain_identity": report.runner_toolchain_identity,
-        "dependency_identity": report.dependency_identity,
-        "environment_identity": report.environment_identity,
-    })
+    expected_context = _identity(
+        {
+            "execution_contract_version": report.execution_contract_version,
+            "runner_toolchain_identity": report.runner_toolchain_identity,
+            "dependency_identity": report.dependency_identity,
+            "environment_identity": report.environment_identity,
+        }
+    )
     if report.execution_context_identity != expected_context:
         reasons.append("execution context identity mismatch")
-    reasons.extend(f"{label} mismatch" for observed, wanted, label in expected if wanted is not None and observed != wanted)
+    reasons.extend(
+        f"{label} mismatch"
+        for observed, wanted, label in expected
+        if wanted is not None and observed != wanted
+    )
     return reasons
 
 
@@ -73,9 +84,21 @@ def verify_completed_shard_proof(
     expected = (
         (report.plan_identity, expected_plan_identity, "plan identity"),
         (report.generation_identity, expected_generation_identity, "generation identity"),
-        (report.execution_policy_identity, expected_execution_policy_identity, "execution policy identity"),
-        (report.producer_artifact_identity, expected_producer_artifact_identity, "producer artifact identity"),
-        (report.producer_implementation_identity, expected_producer_implementation_identity, "producer implementation identity"),
+        (
+            report.execution_policy_identity,
+            expected_execution_policy_identity,
+            "execution policy identity",
+        ),
+        (
+            report.producer_artifact_identity,
+            expected_producer_artifact_identity,
+            "producer artifact identity",
+        ),
+        (
+            report.producer_implementation_identity,
+            expected_producer_implementation_identity,
+            "producer implementation identity",
+        ),
     )
     reasons = _authority_reasons(report, expected) + _membership_reasons(report)
     proof_payload = {

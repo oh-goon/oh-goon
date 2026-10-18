@@ -7,10 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from oh_goon.repository_tooling import hosted_diagnostic_receipt
-from oh_goon.repository_tooling import pytest_batch_orchestration
-from oh_goon.repository_tooling import pytest_execution_report
-
+from oh_goon.repository_tooling import (
+    hosted_diagnostic_receipt,
+    pytest_batch_orchestration,
+    pytest_execution_report,
+)
 
 ROOT = Path(__file__).resolve().parents[4]
 PRODUCTION_ROOT = ROOT / "backend/src/oh_goon"
@@ -140,7 +141,6 @@ def test_execution_report_owner_fails_closed_on_invalid_version(monkeypatch) -> 
     )
     with pytest.raises(RuntimeError, match="schema version owner is invalid"):
         _schema()
-
 
 
 def test_production_has_one_pytest_batch_execution_report_schema_owner() -> None:

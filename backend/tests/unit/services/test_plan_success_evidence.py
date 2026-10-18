@@ -53,13 +53,16 @@ def test_exact_plan_success_rejects_when_history_has_no_match(tmp_path: Path, mo
         runs=_Runs([SimpleNamespace(items=(), next_before_revision=None)], {}),
     )
     lock_path = tmp_path / "app.goon.lock"
-    assert plan_success_evidence.has_exact_plan_success(
-        runtime,
-        plan=Path("plan.yml"),
-        repository_id=repository_id,
-        source_root=tmp_path,
-        lock_path=lock_path,
-    ) is False
+    assert (
+        plan_success_evidence.has_exact_plan_success(
+            runtime,
+            plan=Path("plan.yml"),
+            repository_id=repository_id,
+            source_root=tmp_path,
+            lock_path=lock_path,
+        )
+        is False
+    )
     assert calls == [lock_path]
 
 
@@ -85,15 +88,20 @@ def test_exact_plan_success_matches_same_repository_admission_for_every_executio
     )
     runtime = SimpleNamespace(
         plans=SimpleNamespace(prepare_execution_target=lambda _plan, *, lock_path: expected),
-        runs=_Runs([SimpleNamespace(items=(run_item,), next_before_revision=None)], {"run-1": detail}),
+        runs=_Runs(
+            [SimpleNamespace(items=(run_item,), next_before_revision=None)], {"run-1": detail}
+        ),
     )
-    assert plan_success_evidence.has_exact_plan_success(
-        runtime,
-        plan=Path("plan.yml"),
-        repository_id=repository_id,
-        source_root=tmp_path,
-        lock_path=tmp_path / "app.goon.lock",
-    ) is True
+    assert (
+        plan_success_evidence.has_exact_plan_success(
+            runtime,
+            plan=Path("plan.yml"),
+            repository_id=repository_id,
+            source_root=tmp_path,
+            lock_path=tmp_path / "app.goon.lock",
+        )
+        is True
+    )
 
 
 def test_exact_plan_success_rejects_stale_repository_admission(tmp_path: Path, monkeypatch) -> None:
@@ -113,12 +121,17 @@ def test_exact_plan_success_rejects_stale_repository_admission(tmp_path: Path, m
     detail = SimpleNamespace(repository_admissions=(stale_admission,), operations=())
     runtime = SimpleNamespace(
         plans=SimpleNamespace(prepare_execution_target=lambda _plan, *, lock_path: expected),
-        runs=_Runs([SimpleNamespace(items=(run_item,), next_before_revision=None)], {"run-1": detail}),
+        runs=_Runs(
+            [SimpleNamespace(items=(run_item,), next_before_revision=None)], {"run-1": detail}
+        ),
     )
-    assert plan_success_evidence.has_exact_plan_success(
-        runtime,
-        plan=Path("plan.yml"),
-        repository_id=repository_id,
-        source_root=tmp_path,
-        lock_path=tmp_path / "app.goon.lock",
-    ) is False
+    assert (
+        plan_success_evidence.has_exact_plan_success(
+            runtime,
+            plan=Path("plan.yml"),
+            repository_id=repository_id,
+            source_root=tmp_path,
+            lock_path=tmp_path / "app.goon.lock",
+        )
+        is False
+    )

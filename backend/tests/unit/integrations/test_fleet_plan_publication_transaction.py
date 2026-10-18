@@ -17,9 +17,9 @@ from oh_goon.engine.command import CommandResult
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations.fleet_plan_run import PreparedPlanRun
-from tests.factories.runtime_authority import authorized_command_result
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import PhysicalFleetPlanExecutorHarness
+from tests.factories.runtime_authority import authorized_command_result
 
 
 class _UnitProcessIsolation:
@@ -91,7 +91,9 @@ def test_workspace_publication_failure_is_step_failure_and_always_releases_step(
     original_release = PreparedPlanRun.release_step
 
     def fake_run(*argv: str, **kwargs) -> CommandResult:
-        return authorized_command_result(argv=tuple(argv), returncode=0, stdout="command passed", stderr="")
+        return authorized_command_result(
+            argv=tuple(argv), returncode=0, stdout="command passed", stderr=""
+        )
 
     def fail_publish(self: PreparedPlanRun, step, workspace: Path) -> None:
         raise FleetPlanInvalid("synthetic workspace publication failure")
@@ -129,7 +131,9 @@ def test_cache_publication_failure_rolls_back_workspace_and_releases_step(
     def fake_run(*argv: str, **kwargs) -> CommandResult:
         cwd = Path(kwargs["cwd"])
         (cwd / "published-before-cache-failure.txt").write_text("attempt\n", encoding="utf-8")
-        return authorized_command_result(argv=tuple(argv), returncode=0, stdout="command passed", stderr="")
+        return authorized_command_result(
+            argv=tuple(argv), returncode=0, stdout="command passed", stderr=""
+        )
 
     def fail_cache(self: PreparedPlanRun, step, cache: Path):
         raise FleetPlanInvalid("synthetic cache publication failure")
@@ -176,7 +180,9 @@ def test_unexpected_publication_exception_rolls_back_and_still_releases_step(
     original_discard = PreparedPlanRun.discard_publications
 
     def fake_run(*argv: str, **kwargs) -> CommandResult:
-        return authorized_command_result(argv=tuple(argv), returncode=0, stdout="command passed", stderr="")
+        return authorized_command_result(
+            argv=tuple(argv), returncode=0, stdout="command passed", stderr=""
+        )
 
     def explode(self: PreparedPlanRun, step, workspace: Path) -> None:
         raise RuntimeError("synthetic unexpected publication error")
@@ -218,7 +224,9 @@ def test_artifact_collection_failure_rolls_back_publication_and_records_step_fai
     def fake_run(*argv: str, **kwargs) -> CommandResult:
         cwd = Path(kwargs["cwd"])
         (cwd / "artifact.txt").write_text("artifact\n", encoding="utf-8")
-        return authorized_command_result(argv=tuple(argv), returncode=0, stdout="command passed", stderr="")
+        return authorized_command_result(
+            argv=tuple(argv), returncode=0, stdout="command passed", stderr=""
+        )
 
     def fail_artifacts(*args, **kwargs):
         raise FleetPlanInvalid("synthetic artifact publication failure")
@@ -254,4 +262,3 @@ def test_artifact_collection_failure_rolls_back_publication_and_records_step_fai
     assert outcome.steps[0].returncode != 0
     assert "artifact publication failure" in outcome.stderr
     assert "command passed" in outcome.stdout
-

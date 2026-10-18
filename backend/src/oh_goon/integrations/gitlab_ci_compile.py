@@ -10,9 +10,9 @@ import yaml
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import (
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
     CommandPlanStep,
     CompiledExecutionTemplate,
-    DEFAULT_COMMAND_TIMEOUT_SECONDS,
     GitNativeAction,
     GitPlanStep,
     MissingConfigPolicy,

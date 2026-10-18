@@ -15,7 +15,9 @@ class StructuredPytestMemberError(ValueError):
 
 
 def _identity(payload: object) -> str:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
@@ -29,9 +31,13 @@ def _validate_path(path: str) -> None:
     if _contains_control_character(path):
         raise StructuredPytestMemberError("pytest member path must not contain control characters")
     if "::" in path:
-        raise StructuredPytestMemberError("pytest member path must not embed a pytest node separator")
+        raise StructuredPytestMemberError(
+            "pytest member path must not embed a pytest node separator"
+        )
     if "\\" in path or _DRIVE_PREFIX.match(path):
-        raise StructuredPytestMemberError("pytest member path must use unambiguous repository-relative POSIX separators")
+        raise StructuredPytestMemberError(
+            "pytest member path must use unambiguous repository-relative POSIX separators"
+        )
     if path.startswith("/"):
         raise StructuredPytestMemberError("pytest member path must be repository-relative")
     segments = path.split("/")
@@ -44,20 +50,26 @@ def _bracket_depth(char: str, depth: int) -> int:
         return depth + 1
     if char == "]":
         if depth == 0:
-            raise StructuredPytestMemberError("pytest member test_symbol has an unmatched closing bracket")
+            raise StructuredPytestMemberError(
+                "pytest member test_symbol has an unmatched closing bracket"
+            )
         return depth - 1
     return depth
 
 
 def _require_component(value: str) -> str:
     if not value:
-        raise StructuredPytestMemberError("pytest member test_symbol contains an empty node component")
+        raise StructuredPytestMemberError(
+            "pytest member test_symbol contains an empty node component"
+        )
     return value
 
 
 def _split_symbol(symbol: str) -> tuple[str, ...]:
     if not symbol or _contains_control_character(symbol):
-        raise StructuredPytestMemberError("pytest member test_symbol must be nonempty and free of control characters")
+        raise StructuredPytestMemberError(
+            "pytest member test_symbol must be nonempty and free of control characters"
+        )
     parts: list[str] = []
     start = 0
     bracket_depth = 0
@@ -72,7 +84,9 @@ def _split_symbol(symbol: str) -> tuple[str, ...]:
             continue
         index += 1
     if bracket_depth:
-        raise StructuredPytestMemberError("pytest member test_symbol has an unmatched opening bracket")
+        raise StructuredPytestMemberError(
+            "pytest member test_symbol has an unmatched opening bracket"
+        )
     parts.append(_require_component(symbol[start:]))
     return tuple(parts)
 

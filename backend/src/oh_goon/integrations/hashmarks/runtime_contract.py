@@ -108,9 +108,7 @@ def loaded_hashmarks_producer_provenance() -> GameTapeProducerImplementationProv
         return None
 
 
-def require_loaded_hashmarks_runtime(
-    *, expected_implementation_identity: str | None = None
-) -> str:
+def require_loaded_hashmarks_runtime(*, expected_implementation_identity: str | None = None) -> str:
     """Return loaded producer identity and fail closed on evidence mismatch.
 
     Dependency selection/version/artifact authority belongs to pyproject.toml + uv.lock.
@@ -127,4 +125,3 @@ def require_loaded_hashmarks_runtime(
             "Hashmarks evidence producer implementation identity does not match the loaded Hashmarks runtime"
         )
     return implementation_identity
-

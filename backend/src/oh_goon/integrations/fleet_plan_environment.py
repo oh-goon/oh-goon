@@ -4,8 +4,8 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core import local_access_protocol
+from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import ResolvedGitStep, ResolvedPlanStep
 from oh_goon.core.models.fleet_plan_values import (
     HostEnvironmentPart,
@@ -26,6 +26,7 @@ def _non_exportable_host_environment() -> frozenset[str]:
             SQLITE_JOURNAL_MODE_ENV,
         }
     )
+
 
 _RUNTIME_OWNED_ENV = frozenset(
     {
@@ -123,7 +124,9 @@ def step_host_environment_names(step: ResolvedPlanStep) -> tuple[str, ...]:
 def require_environment(step: ResolvedPlanStep) -> None:
     for binding in getattr(step, "environment", ()):
         _require_exportable_host_environment_name(binding.name)
-        if isinstance(step, ResolvedGitStep) and _is_git_execution_control_environment(binding.name):
+        if isinstance(step, ResolvedGitStep) and _is_git_execution_control_environment(
+            binding.name
+        ):
             raise FleetPlanInvalid(
                 f"Fleet git steps cannot replace Git execution-control environment value {binding.name}"
             )
@@ -216,9 +219,7 @@ def _plan_environment(
             raise FleetPlanInvalid(
                 f"Fleet steps cannot replace runtime-owned environment value {binding.name}"
             )
-        env[binding.name] = _environment_binding_value(
-            binding, host_environment=host_environment
-        )
+        env[binding.name] = _environment_binding_value(binding, host_environment=host_environment)
     return env
 
 

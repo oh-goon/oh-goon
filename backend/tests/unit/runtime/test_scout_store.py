@@ -6,14 +6,14 @@ from datetime import timedelta
 from pathlib import Path
 
 from oh_goon.core.execution_observability import RepositoryRunObservation
-from oh_goon.scout.evidence import (
-    ScoutEvidenceSnapshot,
-    ScoutStepObservation,
-)
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import GameTapeStatus
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.scout.database import scout_analytical_database_path
+from oh_goon.scout.evidence import (
+    ScoutEvidenceSnapshot,
+    ScoutStepObservation,
+)
 from oh_goon.scout.search import ScoutSearchReader
 from oh_goon.scout.store import ScoutObservationStore
 
@@ -576,10 +576,9 @@ def test_scout_sidecar_never_moves_processed_revision_backward(tmp_path: Path) -
     assert loaded.steps[0].complete_cpu_seconds == 11.0
 
 
-
-
 def test_scout_run_reader_uses_constant_query_count_for_multiple_steps(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     from oh_goon.scout.database import ScoutAnalyticalDatabase
     from oh_goon.scout.run_reader import ScoutRunReader
@@ -592,9 +591,7 @@ def test_scout_run_reader_uses_constant_query_count_for_multiple_steps(
     previous_steps = tuple(
         replace(previous.steps[0], step_id=f"step-{index}") for index in range(4)
     )
-    current_steps = tuple(
-        replace(current.steps[0], step_id=f"step-{index}") for index in range(4)
-    )
+    current_steps = tuple(replace(current.steps[0], step_id=f"step-{index}") for index in range(4))
     store.replace_changed_runs(
         run_ids=("run-previous", "run-current"),
         snapshot=ScoutEvidenceSnapshot(
@@ -626,6 +623,7 @@ def test_scout_run_reader_uses_constant_query_count_for_multiple_steps(
     assert all(step.comparable_runs == 1 for step in evidence.repositories[0].steps)
     assert len(statements) == 3
     assert sum("ranked_peers" in statement for statement in statements) == 1
+
 
 def test_scout_run_reader_exposes_exact_run_resources_and_prior_typical_values(
     tmp_path: Path,

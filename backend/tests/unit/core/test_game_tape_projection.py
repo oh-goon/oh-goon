@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import hashlib
 from datetime import timedelta
 from pathlib import Path
@@ -19,7 +20,6 @@ from oh_goon.core.models.fleet_plan import (
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     FailedPlanStepExecution,
-    FailedPlanStepTeardownEvidence,
     FleetPlanResult,
     PlanEgressEvidence,
     PlanOutputEvidence,
@@ -51,6 +51,7 @@ from oh_goon.core.models.run import (
 )
 from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, fleet_repository_scope
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
     FleetRunOutcome,
@@ -62,12 +63,12 @@ from oh_goon.core.vocabulary import (
     Verdict,
     WorktreeState,
 )
-from tests.factories.capabilities import capability_snapshot
 from tests.factories.canonical_journal import CanonicalFleetJournalBuilder
+from tests.factories.capabilities import capability_snapshot
 from tests.factories.fleet_plan_targets import structural_execution_identity
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.run_admission import repository_admissions_for
-from oh_goon.core.product_identity import repository_attempt_operation_id
+
 
 def _output(text: str) -> PlanOutputEvidence:
     encoded = text.encode()
@@ -161,15 +162,21 @@ def _assert_tape_derived_views_are_not_source_facts(tape) -> None:
         assert field in normal
 
 
-
 _FAILED_PLAN_PLAY_BY_PLAY = [
-    GameTapeEventType.RUN_ADMITTED, GameTapeEventType.RUN_STARTED,
-    GameTapeEventType.REPOSITORY_STARTED, GameTapeEventType.STEP_REACHED,
-    GameTapeEventType.STEP_STARTED, GameTapeEventType.STEP_PASSED,
-    GameTapeEventType.STEP_REACHED, GameTapeEventType.STEP_STARTED,
-    GameTapeEventType.STEP_FAILED, GameTapeEventType.STEP_NOT_REACHED,
-    GameTapeEventType.REPOSITORY_FAILED, GameTapeEventType.RUN_ATTENTION_REQUIRED,
+    GameTapeEventType.RUN_ADMITTED,
+    GameTapeEventType.RUN_STARTED,
+    GameTapeEventType.REPOSITORY_STARTED,
+    GameTapeEventType.STEP_REACHED,
+    GameTapeEventType.STEP_STARTED,
+    GameTapeEventType.STEP_PASSED,
+    GameTapeEventType.STEP_REACHED,
+    GameTapeEventType.STEP_STARTED,
+    GameTapeEventType.STEP_FAILED,
+    GameTapeEventType.STEP_NOT_REACHED,
+    GameTapeEventType.REPOSITORY_FAILED,
+    GameTapeEventType.RUN_ATTENTION_REQUIRED,
 ]
+
 
 def test_game_tape_projects_plan_order_timing_outcomes_and_safe_provenance(tmp_path: Path) -> None:
     repository = RepositoryIdentity(path=tmp_path / "repo")
@@ -255,9 +262,15 @@ def test_game_tape_projects_plan_order_timing_outcomes_and_safe_provenance(tmp_p
                 CanonicalFleetJournalBuilder(detail)
                 .run_started(now)
                 .repository_started(repository.repository_id, operation_id, now)
-                .step_reached(repository.repository_id, operation_id, "prepare", 1, prepare.started_at)
-                .step_started(repository.repository_id, operation_id, "prepare", 1, prepare.started_at)
-                .step_succeeded(repository.repository_id, operation_id, "prepare", 1, 0, prepare.finished_at)
+                .step_reached(
+                    repository.repository_id, operation_id, "prepare", 1, prepare.started_at
+                )
+                .step_started(
+                    repository.repository_id, operation_id, "prepare", 1, prepare.started_at
+                )
+                .step_succeeded(
+                    repository.repository_id, operation_id, "prepare", 1, 0, prepare.finished_at
+                )
                 .step_reached(repository.repository_id, operation_id, "test", 2, test.started_at)
                 .step_started(repository.repository_id, operation_id, "test", 2, test.started_at)
                 .step_failed(repository.repository_id, operation_id, "test", 2, 1, test.finished_at)
@@ -397,7 +410,11 @@ def test_recovery_failure_is_interrupted_without_inventing_step_execution(tmp_pa
         failure=FleetRunFailure.recovery("restart interrupted execution"),
         progress=FleetRunProgress(total=1, succeeded=0, failed=0, needs_attention=0),
     )
-    detail = FleetRunDetail(repository_admissions=repository_admissions_for(run.target, run.targets), run=run, execution=DirectFleetExecutionAdmission())
+    detail = FleetRunDetail(
+        repository_admissions=repository_admissions_for(run.target, run.targets),
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+    )
     detail = detail.model_copy(
         update={
             "lifecycle_events": (
@@ -445,7 +462,11 @@ def test_game_tape_uses_journal_sequence_for_equal_timestamp_parallel_repository
         started_at=now,
         progress=FleetRunProgress(total=2, succeeded=0, failed=0, needs_attention=0),
     )
-    detail = FleetRunDetail(repository_admissions=repository_admissions_for(run.target, run.targets), run=run, execution=DirectFleetExecutionAdmission())
+    detail = FleetRunDetail(
+        repository_admissions=repository_admissions_for(run.target, run.targets),
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+    )
     first_operation = repository_attempt_operation_id(run.fleet_run_id, first.repository_id)
     second_operation = repository_attempt_operation_id(run.fleet_run_id, second.repository_id)
     detail = detail.model_copy(
@@ -546,7 +567,9 @@ def test_game_tape_diff_compares_only_debugging_facts(tmp_path: Path) -> None:
         )
         return FleetRunDetail(
             repository_admissions=repository_admissions_for(run.target, run.targets),
-            run=run, execution=DirectFleetExecutionAdmission(), operations=(report,)
+            run=run,
+            execution=DirectFleetExecutionAdmission(),
+            operations=(report,),
         )
 
     base = detail("run-base", 1000, 0)
@@ -674,7 +697,9 @@ def test_execution_ledger_rejects_non_terminal_status_at_terminal_boundary() -> 
         _step_terminal_type(GameTapeStatus.RUNNING)
 
 
-def test_game_tape_lifecycle_rejects_unprojectable_terminal_facts(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_game_tape_lifecycle_rejects_unprojectable_terminal_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from types import SimpleNamespace
 
     import oh_goon.core.game_tape_lifecycle as lifecycle
@@ -690,5 +715,3 @@ def test_game_tape_lifecycle_rejects_unprojectable_terminal_facts(monkeypatch: p
 
     with pytest.raises(AssertionError, match="Unsupported step execution"):
         lifecycle.step_status(object(), terminal=True)  # type: ignore[arg-type]
-
-

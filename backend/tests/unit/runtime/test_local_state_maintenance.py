@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from contextlib import closing
-
 import sqlite3
+from contextlib import closing
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 from oh_goon.cli import main
 from oh_goon.runtime.database import DATABASE_SCHEMA_VERSION, LocalDatabase, inspect_local_database
@@ -33,7 +32,6 @@ def test_local_state_check_reports_new_database_without_creating_it(
     assert str(path) in output
 
 
-
 def test_local_state_diagnostics_path_uses_canonical_state_layout(
     tmp_path, monkeypatch, capsys
 ) -> None:
@@ -44,6 +42,7 @@ def test_local_state_diagnostics_path_uses_canonical_state_layout(
     assert capsys.readouterr().out.strip() == str(
         (tmp_path / "diagnostics" / "diagnostics.jsonl").resolve()
     )
+
 
 def test_local_state_check_gives_one_reset_command_for_stale_epoch(
     tmp_path, monkeypatch, capsys
@@ -172,6 +171,7 @@ def test_make_dev_has_one_python_launch_frontdoor() -> None:
     assert "npm run dev" not in script
     assert "observe-ready" not in script
 
+
 def test_reset_does_not_delete_existing_league_preferences(tmp_path, monkeypatch) -> None:
     path = tmp_path / "state.db"
     _set_database(monkeypatch, path)
@@ -193,6 +193,7 @@ def test_source_dev_recovery_target_remains_repository_owned() -> None:
     makefile = (root / "Makefile").read_text(encoding="utf-8")
     assert "local-state-reset:" in makefile
     assert "backend/.venv/bin/oh-goon-local-state reset" in makefile
+
 
 def test_source_operator_docs_use_make_owned_local_state_recovery() -> None:
     root = Path(__file__).resolve().parents[4]
@@ -220,17 +221,18 @@ def test_make_owns_source_local_state_check_path_and_reset_commands() -> None:
     assert "diagnostics-log:" in makefile
     assert "backend/.venv/bin/oh-goon-local-state check" in makefile
     assert "backend/.venv/bin/oh-goon-local-state path" in makefile
-    assert (
-        "backend/.venv/bin/oh-goon-local-state diagnostics-path"
-        in makefile
-    )
+    assert "backend/.venv/bin/oh-goon-local-state diagnostics-path" in makefile
     assert "backend/.venv/bin/oh-goon-local-state reset" in makefile
-    local_owner = (root / "backend/src/oh_goon/repository_tooling/local_state_source.py").read_text(encoding="utf-8")
+    local_owner = (root / "backend/src/oh_goon/repository_tooling/local_state_source.py").read_text(
+        encoding="utf-8"
+    )
     assert "from oh_goon.runtime.database import" in local_owner
     assert "from oh_goon.runtime.local_state_maintenance import reset_local_state" in local_owner
 
 
-def test_local_state_inspection_distinguishes_future_schema_from_stale(tmp_path, monkeypatch) -> None:
+def test_local_state_inspection_distinguishes_future_schema_from_stale(
+    tmp_path, monkeypatch
+) -> None:
     path = tmp_path / "future.db"
     _set_database(monkeypatch, path)
     with closing(sqlite3.connect(path)) as connection, connection:
@@ -264,9 +266,7 @@ def test_deep_inspection_rejects_foreign_key_damage_that_schema_and_quick_check_
     with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(f"PRAGMA user_version = {DATABASE_SCHEMA_VERSION}")
         connection.execute("CREATE TABLE parent(id INTEGER PRIMARY KEY)")
-        connection.execute(
-            "CREATE TABLE child(parent_id INTEGER REFERENCES parent(id))"
-        )
+        connection.execute("CREATE TABLE child(parent_id INTEGER REFERENCES parent(id))")
         connection.execute("INSERT INTO child(parent_id) VALUES (999)")
 
     schema_only = inspect_local_database()
@@ -290,9 +290,7 @@ def test_local_state_check_stops_before_launch_on_foreign_key_damage(
     with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(f"PRAGMA user_version = {DATABASE_SCHEMA_VERSION}")
         connection.execute("CREATE TABLE parent(id INTEGER PRIMARY KEY)")
-        connection.execute(
-            "CREATE TABLE child(parent_id INTEGER REFERENCES parent(id))"
-        )
+        connection.execute("CREATE TABLE child(parent_id INTEGER REFERENCES parent(id))")
         connection.execute("INSERT INTO child(parent_id) VALUES (999)")
 
     assert main(["local-state", "check"]) == 2
@@ -302,11 +300,11 @@ def test_local_state_check_stops_before_launch_on_foreign_key_damage(
     assert "make local-state-reset" in output
 
 
-
 def test_source_local_state_reset_entrypoint_accepts_make_confirmation(
     tmp_path, monkeypatch, capsys
 ) -> None:
     import sys
+
     from oh_goon.repository_tooling.local_state_source import main as source_local_state_main
 
     path = tmp_path / "source-reset.db"
@@ -325,6 +323,7 @@ def test_source_local_state_reset_entrypoint_refuses_unconfirmed_deletion(
     tmp_path, monkeypatch, capsys
 ) -> None:
     import sys
+
     from oh_goon.repository_tooling.local_state_source import main as source_local_state_main
 
     path = tmp_path / "source-reset-unconfirmed.db"
@@ -335,6 +334,7 @@ def test_source_local_state_reset_entrypoint_refuses_unconfirmed_deletion(
     assert source_local_state_main() == 2
     assert path.is_file()
     assert "Nothing was deleted." in capsys.readouterr().out
+
 
 def test_source_make_local_state_reset_is_explicit_confirmed_recovery() -> None:
     root = Path(__file__).resolve().parents[4]

@@ -5,8 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import pytest
-
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_league import run_league_command
 from oh_goon.core.errors import FleetPlanInvalid
@@ -123,7 +121,9 @@ def test_team_run_interrupt_before_admission_and_cancel_failure(capsys) -> None:
     admitted = SimpleNamespace(fleet_run_id="run-1")
     runtime = SimpleNamespace(
         league=SimpleNamespace(
-            configured_team=Mock(return_value=SimpleNamespace(pipeline=SimpleNamespace(sha256="abc")))
+            configured_team=Mock(
+                return_value=SimpleNamespace(pipeline=SimpleNamespace(sha256="abc"))
+            )
         ),
         goon=SimpleNamespace(run=Mock(return_value=admitted)),
         runs=SimpleNamespace(
@@ -137,10 +137,16 @@ def test_team_run_interrupt_before_admission_and_cancel_failure(capsys) -> None:
 
 def test_team_run_json_and_admission_error(capsys) -> None:
     args = _args("team", "run", "--json")
-    detail = _Json('{"run": "done"}', outcome=FleetRunOutcome.SUCCESS, run=SimpleNamespace(status=FleetRunStatus.COMPLETED))
+    detail = _Json(
+        '{"run": "done"}',
+        outcome=FleetRunOutcome.SUCCESS,
+        run=SimpleNamespace(status=FleetRunStatus.COMPLETED),
+    )
     runtime = SimpleNamespace(
         league=SimpleNamespace(
-            configured_team=Mock(return_value=SimpleNamespace(pipeline=SimpleNamespace(sha256="abc")))
+            configured_team=Mock(
+                return_value=SimpleNamespace(pipeline=SimpleNamespace(sha256="abc"))
+            )
         ),
         goon=SimpleNamespace(run=Mock(return_value=SimpleNamespace(fleet_run_id="run-1"))),
         runs=SimpleNamespace(wait_for_terminal=Mock(return_value=detail)),
@@ -189,12 +195,12 @@ def test_shared_plan_templates_history_and_save_paths(tmp_path: Path, capsys) ->
     templates = _Json(
         '{"templates": []}',
         templates=(
-            SimpleNamespace(template_key="python/quality", template_path="path/plan.yml", description="Quality"),
+            SimpleNamespace(
+                template_key="python/quality", template_path="path/plan.yml", description="Quality"
+            ),
         ),
     )
-    empty_history = _Json(
-        '{"history": []}', plan_key="plan", current_sha256="a" * 64, runs=()
-    )
+    empty_history = _Json('{"history": []}', plan_key="plan", current_sha256="a" * 64, runs=())
     run_history = _Json(
         '{"history": [1]}',
         plan_key="plan",
@@ -247,9 +253,9 @@ def test_shared_plan_from_template_unknown_is_domain_safe(capsys) -> None:
     runtime = SimpleNamespace(
         shared_plan=SimpleNamespace(templates=Mock(return_value=SimpleNamespace(templates=())))
     )
-    assert run_league_command(
-        runtime, _args("shared-plan", "from-template", "missing", "saved")
-    ) == 2
+    assert (
+        run_league_command(runtime, _args("shared-plan", "from-template", "missing", "saved")) == 2
+    )
     assert "Unknown Plan template" in capsys.readouterr().out
 
 
@@ -287,16 +293,20 @@ def test_shared_plan_preview_text_json_and_repository_selection(capsys) -> None:
         ),
         lineups=SimpleNamespace(repository_ids=Mock(return_value={"lineup"})),
     )
-    assert run_league_command(
-        runtime, _args("shared-plan", "preview", "shared", "--team", "/repo")
-    ) == 1
+    assert (
+        run_league_command(runtime, _args("shared-plan", "preview", "shared", "--team", "/repo"))
+        == 1
+    )
     output = capsys.readouterr().out
     assert "READY   ready" in output
     assert "BLOCKED blocked: invalid input" in output
 
-    assert run_league_command(
-        runtime, _args("shared-plan", "preview", "shared", "--all-teams", "--json")
-    ) == 0
+    assert (
+        run_league_command(
+            runtime, _args("shared-plan", "preview", "shared", "--all-teams", "--json")
+        )
+        == 0
+    )
     assert '{"preview": true}' in capsys.readouterr().out
 
     assert run_league_command(
@@ -306,27 +316,54 @@ def test_shared_plan_preview_text_json_and_repository_selection(capsys) -> None:
 
 
 def test_shared_plan_run_text_json_interrupt_and_terminal_failure(capsys) -> None:
-    completed = SimpleNamespace(outcome=FleetRunOutcome.SUCCESS, run=SimpleNamespace(status=FleetRunStatus.COMPLETED))
-    failed = SimpleNamespace(outcome=FleetRunOutcome.FAILED, run=SimpleNamespace(status=FleetRunStatus.FAILED))
+    completed = SimpleNamespace(
+        outcome=FleetRunOutcome.SUCCESS, run=SimpleNamespace(status=FleetRunStatus.COMPLETED)
+    )
+    failed = SimpleNamespace(
+        outcome=FleetRunOutcome.FAILED, run=SimpleNamespace(status=FleetRunStatus.FAILED)
+    )
     admitted = SimpleNamespace(fleet_run_id="run-1")
     runtime = SimpleNamespace(
         shared_plan=SimpleNamespace(
             repository_ids=Mock(return_value={"repo"}),
-            preview=Mock(return_value=SimpleNamespace(blocked_count=0, plan_id="reviewed-plan", execution_digest="sha256:" + "d" * 64, sha256="a" * 64, teams=(SimpleNamespace(repository=SimpleNamespace(repository_id="repo"), repository_instance_id="instance-repo"),))),
+            preview=Mock(
+                return_value=SimpleNamespace(
+                    blocked_count=0,
+                    plan_id="reviewed-plan",
+                    execution_digest="sha256:" + "d" * 64,
+                    sha256="a" * 64,
+                    teams=(
+                        SimpleNamespace(
+                            repository=SimpleNamespace(repository_id="repo"),
+                            repository_instance_id="instance-repo",
+                        ),
+                    ),
+                )
+            ),
             run=Mock(side_effect=[admitted, admitted, admitted, KeyboardInterrupt()]),
         ),
-        runs=SimpleNamespace(wait_for_terminal=Mock(side_effect=[completed, failed, KeyboardInterrupt()])),
+        runs=SimpleNamespace(
+            wait_for_terminal=Mock(side_effect=[completed, failed, KeyboardInterrupt()])
+        ),
     )
 
-    assert run_league_command(runtime, _args("shared-plan", "run", "shared", "--team", "/repo")) == 0
+    assert (
+        run_league_command(runtime, _args("shared-plan", "run", "shared", "--team", "/repo")) == 0
+    )
     assert "Status: COMPLETED" in capsys.readouterr().out
-    assert run_league_command(runtime, _args("shared-plan", "run", "shared", "--team", "/repo")) == 1
+    assert (
+        run_league_command(runtime, _args("shared-plan", "run", "shared", "--team", "/repo")) == 1
+    )
 
     runtime.runs.cancel = Mock(side_effect=FleetPlanInvalid("cancel failed"))
-    assert run_league_command(runtime, _args("shared-plan", "run", "shared", "--team", "/repo")) == 130
+    assert (
+        run_league_command(runtime, _args("shared-plan", "run", "shared", "--team", "/repo")) == 130
+    )
     assert "Cancellation could not be confirmed" in capsys.readouterr().out
 
-    assert run_league_command(runtime, _args("shared-plan", "run", "shared", "--team", "/repo")) == 130
+    assert (
+        run_league_command(runtime, _args("shared-plan", "run", "shared", "--team", "/repo")) == 130
+    )
     assert "interrupted before admission" in capsys.readouterr().out
 
 
@@ -340,15 +377,17 @@ def test_shared_plan_run_blocked_preview_is_domain_safe_and_never_starts_work(ca
         ),
     )
 
-    assert run_league_command(
-        runtime, _args("shared-plan", "run", "shared", "--team", "/repo")
-    ) == 2
+    assert (
+        run_league_command(runtime, _args("shared-plan", "run", "shared", "--team", "/repo")) == 2
+    )
     assert "preview blocked 1 selected Team(s)" in capsys.readouterr().out
     run.assert_not_called()
 
 
 def test_shared_plan_dispatch_converts_domain_and_os_errors(capsys) -> None:
-    runtime = SimpleNamespace(shared_plan=SimpleNamespace(catalog=Mock(side_effect=OSError("disk"))))
+    runtime = SimpleNamespace(
+        shared_plan=SimpleNamespace(catalog=Mock(side_effect=OSError("disk")))
+    )
     assert run_league_command(runtime, _args("shared-plan", "list")) == 2
     assert "disk" in capsys.readouterr().out
 
@@ -358,9 +397,7 @@ def test_lineup_list_save_inspect_text_json_and_error(capsys) -> None:
         '{"lineups": []}',
         lineups=(SimpleNamespace(lineup_key="release", name="Release", team_count=2),),
     )
-    document = _Json(
-        '{"lineup": "saved"}', lineup_key="release", team_count=2, revision="a" * 64
-    )
+    document = _Json('{"lineup": "saved"}', lineup_key="release", team_count=2, revision="a" * 64)
     ready = _Json(
         '{"inspect": "ready"}',
         name="Release",
@@ -368,7 +405,9 @@ def test_lineup_list_save_inspect_text_json_and_error(capsys) -> None:
         unavailable_count=1,
         revision="b" * 64,
         teams=(
-            SimpleNamespace(state="READY", repository=SimpleNamespace(name="api"), configured_path="/api"),
+            SimpleNamespace(
+                state="READY", repository=SimpleNamespace(name="api"), configured_path="/api"
+            ),
             SimpleNamespace(state="UNAVAILABLE", repository=None, configured_path="/missing"),
         ),
     )
@@ -385,15 +424,23 @@ def test_lineup_list_save_inspect_text_json_and_error(capsys) -> None:
     assert run_league_command(runtime, _args("lineup", "list", "--json")) == 0
     assert '{"lineups": []}' in capsys.readouterr().out
 
-    assert run_league_command(
-        runtime,
-        _args("lineup", "save", "release", "--name", "Release", "--team", "/api", "--team", "/web"),
-    ) == 0
+    assert (
+        run_league_command(
+            runtime,
+            _args(
+                "lineup", "save", "release", "--name", "Release", "--team", "/api", "--team", "/web"
+            ),
+        )
+        == 0
+    )
     assert "Saved Lineup: release" in capsys.readouterr().out
-    assert run_league_command(
-        runtime,
-        _args("lineup", "save", "release", "--name", "Release", "--team", "/api", "--json"),
-    ) == 0
+    assert (
+        run_league_command(
+            runtime,
+            _args("lineup", "save", "release", "--name", "Release", "--team", "/api", "--json"),
+        )
+        == 0
+    )
     assert '{"lineup": "saved"}' in capsys.readouterr().out
 
     assert run_league_command(runtime, _args("lineup", "inspect", "release")) == 1

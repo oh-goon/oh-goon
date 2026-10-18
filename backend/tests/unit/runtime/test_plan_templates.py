@@ -7,7 +7,6 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceNotFound
 from oh_goon.core.fleet_plan_tool_requirements import (
-    required_execution_tool_names,
     required_runtime_tool_names,
     shell_runtime_support_tool_names,
 )
@@ -17,12 +16,10 @@ from oh_goon.integrations.workload_execution_requirements import (
     make_target_owner,
     required_tools_for_owner,
 )
-from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.shipped_templates import GOON_TEMPLATES as SHIPPED_GOONS
 from tests.factories.shipped_templates import PLAN_TEMPLATES as SHIPPED_PLANS
-
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -73,11 +70,9 @@ def test_shipped_plan_catalog_is_category_name_and_contains_only_rosters() -> No
 
 
 def test_plan_parser_forbids_executable_and_implementation_fields() -> None:
-    base = (
-        """version: 1\n"""
-    )
+    base = """version: 1\n"""
     for fragment in (
-        'steps:\n  - run: true\n',
+        "steps:\n  - run: true\n",
         "run: echo hi\n",
         "command: echo hi\n",
         "script: ./ci.sh\n",
@@ -93,9 +88,7 @@ def test_plan_parser_forbids_executable_and_implementation_fields() -> None:
 
 def test_plan_parser_requires_non_empty_ordered_goon_roster() -> None:
     with pytest.raises(FleetPlanInvalid, match="non-empty goons list"):
-        parse_plan_template(
-            """version: 1\n"""
-        )
+        parse_plan_template("""version: 1\n""")
 
 
 def test_plan_package_is_exact_two_file_source(tmp_path: Path) -> None:
@@ -134,7 +127,7 @@ def test_plan_template_key_is_exact_category_name(tmp_path: Path) -> None:
 
 def test_shipped_plan_rejects_redundant_yaml_identity(tmp_path: Path) -> None:
     _package(tmp_path, "python/secure", redundant_name="python-secure")
-    with pytest.raises(FleetPlanInvalid, match='unsupported fields: name'):
+    with pytest.raises(FleetPlanInvalid, match="unsupported fields: name"):
         PlanTemplateStore(tmp_path).source("python/secure")
 
 
@@ -172,7 +165,9 @@ def test_plan_source_snapshot_is_exact_bytes_and_readme_is_human_only(tmp_path: 
     assert after.compiled == before.compiled
 
 
-def test_oh_goon_app_certification_plan_verifies_initialized_product_without_reacquisition() -> None:
+def test_oh_goon_app_certification_plan_verifies_initialized_product_without_reacquisition() -> (
+    None
+):
     source = SHIPPED_PLANS.source("oh-goon/app-certification")
     plan = FleetPlanResolver(goon_templates=SHIPPED_GOONS).resolve(source.path, inputs={})
 
@@ -200,6 +195,7 @@ def test_oh_goon_app_certification_plan_verifies_initialized_product_without_rea
     assert all(step.workspace.source.kind == "repository" for step in plan.steps)
     assert all(step.capabilities.egress.mode == "none" for step in plan.steps)
     assert all(step.argv != ("make", "init") for step in plan.steps)
+
 
 def test_oh_goon_prepare_release_plan_packages_exact_repository_authority_only() -> None:
     source = SHIPPED_PLANS.source("oh-goon/prepare-release")
@@ -233,16 +229,11 @@ def test_oh_goon_prepare_release_plan_packages_exact_repository_authority_only()
 
 
 def test_strict_test_path_authority_exposes_only_declared_backend_p0_tools() -> None:
-    from tests.factories.path_authority import TEST_PATH_AUTHORITY
-    from oh_goon.repository_tooling.goon_static_admission import canonical_step_required_tools
-
     from oh_goon.core.fleet_plan_tool_requirements import SHELL_RUNTIME_SUPPORT_TOOLS
+    from oh_goon.repository_tooling.goon_static_admission import canonical_step_required_tools
+    from tests.factories.path_authority import TEST_PATH_AUTHORITY
 
-    required = set(
-        canonical_step_required_tools(
-            ROOT, goon="oh-goon/backend-p0", step_id="make"
-        )
-    )
+    required = set(canonical_step_required_tools(ROOT, goon="oh-goon/backend-p0", step_id="make"))
     search_root = TEST_PATH_AUTHORITY.tool_search_paths[0]
     exposed = {path.name for path in search_root.iterdir()}
     assert exposed == required | set(SHELL_RUNTIME_SUPPORT_TOOLS)

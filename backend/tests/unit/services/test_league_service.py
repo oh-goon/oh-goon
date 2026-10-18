@@ -7,8 +7,8 @@ import pytest
 
 from oh_goon.core.errors import LeagueTeamNotManaged, TeamPipelineNotConfigured
 from oh_goon.runtime.database import LocalDatabase
-from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.league import LeagueService
+from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from tests.factories.local_state import local_state
 
 
@@ -170,7 +170,9 @@ def test_managed_repository_identity_does_not_inspect_repository_goon_yml(tmp_pa
     assert service.repository(repository / "src").path == repository.resolve()
 
 
-def test_league_discovery_git_root_is_independent_of_ancestor_directory_name(tmp_path: Path) -> None:
+def test_league_discovery_git_root_is_independent_of_ancestor_directory_name(
+    tmp_path: Path,
+) -> None:
     discovery = RepositoryDiscoveryService()
     for ancestor in ("build", "dist", ".hidden", "node_modules", "workspace"):
         root = tmp_path / ancestor.replace(".", "hidden-") / "league"

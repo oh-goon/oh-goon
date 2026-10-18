@@ -4,24 +4,29 @@ import os
 import stat
 from pathlib import Path, PurePosixPath
 
-from oh_goon.core.source_transport_metadata import is_disposable_source_transport_artifact_name
 from oh_goon.core.source_layout_policy import (
     SourceLayoutIssue,
-    assert_canonical_source_layout,
     canonical_source_layout_issues,
-    render_source_layout_issues as _render_source_layout_issues,
-    source_transport_artifact_issues,
-    summarize_source_layout_issues,
 )
+from oh_goon.core.source_layout_policy import (
+    assert_canonical_source_layout as assert_canonical_source_layout,
+)
+from oh_goon.core.source_layout_policy import (
+    render_source_layout_issues as _render_source_layout_issues,
+)
+from oh_goon.core.source_layout_policy import (
+    source_transport_artifact_issues as source_transport_artifact_issues,
+)
+from oh_goon.core.source_layout_policy import (
+    summarize_source_layout_issues as summarize_source_layout_issues,
+)
+from oh_goon.core.source_transport_metadata import is_disposable_source_transport_artifact_name
+from oh_goon.core.source_tree_policy import CANONICAL_BACKEND_LOCK as CANONICAL_BACKEND_LOCK
+from oh_goon.core.source_tree_policy import CANONICAL_BACKEND_VENV as CANONICAL_BACKEND_VENV
+from oh_goon.core.source_tree_policy import TRANSIENT_DIRECTORY_NAMES as TRANSIENT_DIRECTORY_NAMES
+from oh_goon.core.source_tree_policy import TRANSIENT_FILE_NAMES as TRANSIENT_FILE_NAMES
+from oh_goon.core.source_tree_policy import TRANSIENT_RELATIVE_PATHS as TRANSIENT_RELATIVE_PATHS
 from oh_goon.core.source_tree_policy import (
-    CANONICAL_BACKEND_LOCK,
-    CANONICAL_BACKEND_VENV,
-    CANONICAL_FRONTEND_LOCK,
-    OPERATIONAL_STATE_ROOT,
-    TRANSIENT_DIRECTORY_NAMES,
-    TRANSIENT_FILE_NAMES,
-    TRANSIENT_RELATIVE_PATHS,
-    TRANSIENT_SUFFIXES,
     is_transient_source_path,
 )
 
@@ -32,6 +37,7 @@ class SourceTransportArtifactCleanupError(ValueError):
     def __init__(self, path: Path) -> None:
         self.path = path
         super().__init__("refusing non-regular source transport cleanup target")
+
 
 def prepared_source_tree_issues(root: Path) -> tuple[SourceLayoutIssue, ...]:
     """Require a copied/certifiable tree to contain source only, never generated state."""
@@ -82,7 +88,9 @@ def clean_generated_venvs(root: Path = ROOT) -> tuple[Path, ...]:
                 kept.append(name)
                 continue
             if path.is_symlink():
-                raise ValueError(f"refusing symlink virtualenv cleanup target: {path.relative_to(root)}")
+                raise ValueError(
+                    f"refusing symlink virtualenv cleanup target: {path.relative_to(root)}"
+                )
             candidates.append(path)
         dirnames[:] = kept
     removed: list[Path] = []
@@ -125,8 +133,7 @@ def clean_source_transport_artifacts(root: Path = ROOT) -> tuple[Path, ...]:
 def _venv_clean_command() -> int:
     removed = clean_generated_venvs(ROOT)
     print(
-        f"Removed {len(removed)} generated virtualenv "
-        f"director{'y' if len(removed) == 1 else 'ies'}"
+        f"Removed {len(removed)} generated virtualenv director{'y' if len(removed) == 1 else 'ies'}"
     )
     for path in removed:
         print(path.as_posix())
@@ -190,7 +197,9 @@ def main(argv: list[str] | None = None) -> int:
     except SourceTransportArtifactCleanupError as exc:
         import sys
 
-        detail = f": {exc.path.as_posix()}" if args.debug else " (rerun with --debug for exact path)"
+        detail = (
+            f": {exc.path.as_posix()}" if args.debug else " (rerun with --debug for exact path)"
+        )
         print(f"{exc}{detail}", file=sys.stderr)
         return 2
     except (OSError, ValueError) as exc:

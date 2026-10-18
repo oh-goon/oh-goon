@@ -11,11 +11,14 @@ from oh_goon.repository_tooling.release import package_slim
 
 @pytest.fixture(autouse=True)
 def _valid_dependency_locks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(package_slim, "assert_public_source_privacy", lambda _root: None)
+    monkeypatch.setattr(
+        package_slim, "assert_public_source_privacy", lambda _root: None
+    )
 
 
-
-def test_canonical_source_identity_reuses_unchanged_byte_digest_and_invalidates_on_mutation(tmp_path: Path) -> None:
+def test_canonical_source_identity_reuses_unchanged_byte_digest_and_invalidates_on_mutation(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "root"
     root.mkdir()
     (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
@@ -34,10 +37,15 @@ def test_canonical_source_identity_reuses_unchanged_byte_digest_and_invalidates_
     source.write_text("bravo\n", encoding="utf-8")
     changed = package_slim.canonical_source_identity(root)
     assert changed != first
-    assert package_slim._canonical_source_identity_cached.cache_info().misses == after_second.misses + 1
+    assert (
+        package_slim._canonical_source_identity_cached.cache_info().misses
+        == after_second.misses + 1
+    )
 
 
-def test_shipped_example_bytes_are_packaged_and_bind_source_identity(tmp_path: Path) -> None:
+def test_shipped_example_bytes_are_packaged_and_bind_source_identity(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "root"
     example = root / "examples/standard-atomic/goon.yml"
     example.parent.mkdir(parents=True)
@@ -51,7 +59,9 @@ def test_shipped_example_bytes_are_packaged_and_bind_source_identity(tmp_path: P
     package_slim.package_slim(output, root=root)
 
     with zipfile.ZipFile(output) as archive:
-        assert archive.read("oh-goon-1.2.3/examples/standard-atomic/goon.yml") == original
+        assert (
+            archive.read("oh-goon-1.2.3/examples/standard-atomic/goon.yml") == original
+        )
     assert package_slim.archive_source_identity(output) == before
 
     example.write_bytes(b"steps:\n  - run: echo changed-example\n")
@@ -113,9 +123,6 @@ def test_package_slim_writes_complete_archive_atomically(
     assert not list(tmp_path.glob(".out.zip.sha256.*.tmp"))
 
 
-
-
-
 def test_package_slim_refuses_disposable_source_transport_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -123,7 +130,9 @@ def test_package_slim_refuses_disposable_source_transport_artifacts(
     root.mkdir()
     (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
     (root / "README.md").write_text("hello\n", encoding="utf-8")
-    (root / "README.md:Zone.Identifier").write_text("[ZoneTransfer]\n", encoding="utf-8")
+    (root / "README.md:Zone.Identifier").write_text(
+        "[ZoneTransfer]\n", encoding="utf-8"
+    )
     (root / "phase.patch").write_text("transport-only patch\n", encoding="utf-8")
     (root / "phase.patch.sha256").write_text("abc  phase.patch\n", encoding="utf-8")
     source = root / "backend/src/pkg/source.py"
@@ -135,7 +144,9 @@ def test_package_slim_refuses_disposable_source_transport_artifacts(
     monkeypatch.setattr(package_slim, "ROOT", root)
     output = tmp_path / "out.zip"
 
-    with pytest.raises(ValueError, match="refuses 4 source transport artifacts") as exc_info:
+    with pytest.raises(
+        ValueError, match="refuses 4 source transport artifacts"
+    ) as exc_info:
         package_slim.package_slim(output)
 
     assert "Zone.Identifier" not in str(exc_info.value)
@@ -160,13 +171,17 @@ def test_archive_source_identity_refuses_transient_or_local_only_payload(
         archive.writestr("oh-goon-1.2.3/VERSION", "1.2.3\n")
         archive.writestr(f"oh-goon-1.2.3/{member}", "must-not-be-source-identity\n")
 
-    with pytest.raises(ValueError, match="forbidden transient or local-only payload") as exc_info:
+    with pytest.raises(
+        ValueError, match="forbidden transient or local-only payload"
+    ) as exc_info:
         package_slim.archive_source_identity(archive_path)
 
     assert member not in str(exc_info.value)
 
 
-def test_archive_source_identity_refuses_source_transport_artifacts(tmp_path: Path) -> None:
+def test_archive_source_identity_refuses_source_transport_artifacts(
+    tmp_path: Path,
+) -> None:
     archive_path = tmp_path / "source.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("oh-goon-1.2.3/VERSION", "1.2.3\n")
@@ -175,7 +190,9 @@ def test_archive_source_identity_refuses_source_transport_artifacts(tmp_path: Pa
             "[ZoneTransfer]\n",
         )
 
-    with pytest.raises(ValueError, match="forbidden source transport artifact") as exc_info:
+    with pytest.raises(
+        ValueError, match="forbidden source transport artifact"
+    ) as exc_info:
         package_slim.archive_source_identity(archive_path)
 
     assert "Zone.Identifier" not in str(exc_info.value)
@@ -187,19 +204,25 @@ def test_archive_source_identity_refuses_patch_transport_file(tmp_path: Path) ->
         archive.writestr("oh-goon-1.2.3/VERSION", "1.2.3\n")
         archive.writestr("oh-goon-1.2.3/phase.patch", "transport-only patch\n")
 
-    with pytest.raises(ValueError, match="forbidden source transport artifact") as exc_info:
+    with pytest.raises(
+        ValueError, match="forbidden source transport artifact"
+    ) as exc_info:
         package_slim.archive_source_identity(archive_path)
 
     assert ".patch" not in str(exc_info.value)
 
 
-def test_archive_source_identity_refuses_patch_checksum_transport_file(tmp_path: Path) -> None:
+def test_archive_source_identity_refuses_patch_checksum_transport_file(
+    tmp_path: Path,
+) -> None:
     archive_path = tmp_path / "source-patch-sha.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("oh-goon-1.2.3/VERSION", "1.2.3\n")
         archive.writestr("oh-goon-1.2.3/phase.patch.sha256", "abc  phase.patch\n")
 
-    with pytest.raises(ValueError, match="forbidden source transport artifact") as exc_info:
+    with pytest.raises(
+        ValueError, match="forbidden source transport artifact"
+    ) as exc_info:
         package_slim.archive_source_identity(archive_path)
 
     assert ".patch.sha256" not in str(exc_info.value)
@@ -235,7 +258,9 @@ def test_package_slim_retains_committed_native_dependency_locks(
     (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
     (root / "backend").mkdir()
     (root / "frontend").mkdir()
-    (root / "backend/uv.lock").write_text('version = 1\nrequires-python = ">=3.12"\npackage = []\n', encoding="utf-8")
+    (root / "backend/uv.lock").write_text(
+        'version = 1\nrequires-python = ">=3.12"\npackage = []\n', encoding="utf-8"
+    )
     (root / "frontend/package-lock.json").write_text(
         '{"name":"oh-goon-frontend","version":"1.2.3","lockfileVersion":3,'
         '"packages":{"":{"name":"oh-goon-frontend","version":"1.2.3"}}}\n',
@@ -395,14 +420,18 @@ def test_slim_archive_excludes_all_playwright_reports(
     assert not any("report.txt" in name for name in names)
 
 
-def test_package_slim_owns_template_certification_fixture_source(tmp_path: Path) -> None:
+def test_package_slim_owns_template_certification_fixture_source(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "root"
     fixture = root / "template-certification/fixtures/ml/iris"
     fixture.mkdir(parents=True)
     pyproject = fixture / "pyproject.toml"
     lock = fixture / "uv.lock"
-    pyproject.write_text('[project]\nname = "fixture"\nversion = "0.0.0"\n', encoding="utf-8")
-    lock.write_text('version = 1\npackage = []\n', encoding="utf-8")
+    pyproject.write_text(
+        '[project]\nname = "fixture"\nversion = "0.0.0"\n', encoding="utf-8"
+    )
+    lock.write_text("version = 1\npackage = []\n", encoding="utf-8")
 
     files = package_slim.canonical_source_files(root)
     relative = {path.relative_to(root).as_posix() for path in files}
@@ -463,7 +492,6 @@ def test_package_slim_allows_but_excludes_hashmarks_derived_state(
         assert not any("/.hashmarks/" in name for name in archive.namelist())
 
 
-
 def test_package_slim_allows_but_excludes_known_top_level_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -492,8 +520,12 @@ def test_package_slim_is_a_byte_builder_not_a_second_native_lock_validator(
     (root / "backend/uv.lock").write_text("not a real uv lock\n", encoding="utf-8")
     (root / "frontend/package-lock.json").write_text("not json\n", encoding="utf-8")
     monkeypatch.setattr(package_slim, "ROOT", root)
-    monkeypatch.setattr(package_slim, "_require_generated_contract_projection", lambda _root: None)
-    monkeypatch.setattr(package_slim, "require_source_version_coherence", lambda _root, _version: None)
+    monkeypatch.setattr(
+        package_slim, "_require_generated_contract_projection", lambda _root: None
+    )
+    monkeypatch.setattr(
+        package_slim, "require_source_version_coherence", lambda _root, _version: None
+    )
 
     output = tmp_path / "out.zip"
     package_slim.package_slim(output)
@@ -571,7 +603,13 @@ def test_canonical_source_discovery_prunes_excluded_dependency_trees_before_desc
     venv_ignored.parent.mkdir(parents=True, exist_ok=True)
     venv_ignored.write_text("ignored\n", encoding="utf-8")
 
-    monkeypatch.setattr(Path, "rglob", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unpruned rglob traversal")))
+    monkeypatch.setattr(
+        Path,
+        "rglob",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unpruned rglob traversal")
+        ),
+    )
     files = package_slim.canonical_source_files(root)
     relative = {path.relative_to(root).as_posix() for path in files}
     assert "backend/src/kept.py" in relative
@@ -611,7 +649,9 @@ def test_canonical_source_identity_ignores_exact_current_transient_state(
     (root / "backend/src").mkdir(parents=True)
     (root / "backend/src/tracked.py").write_text("authority = True\n", encoding="utf-8")
     monkeypatch.setattr(package_slim, "ROOT", root)
-    monkeypatch.setattr(package_slim, "assert_public_source_privacy", lambda _root: None)
+    monkeypatch.setattr(
+        package_slim, "assert_public_source_privacy", lambda _root: None
+    )
     package_slim._canonical_source_identity_cached.cache_clear()
     before = package_slim.canonical_source_identity(root)
     for relative in (

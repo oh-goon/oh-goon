@@ -4,12 +4,29 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from oh_goon.repository_tooling.repository_understanding_graph import evidence_authority_assessment, evidence_profile
-from oh_goon.repository_tooling.repository_understanding_material import (
-    CANDIDATE_GOLD_MARKER, EVIDENCE_REFERENCE, GRADER_SCHEMA_VERSION, QA_SCHEMA_VERSION, QUESTION_SCHEMA_VERSION, RUBRIC_VERSION, SECRET_SCHEMA_VERSION, _canonical_json_sha256,
+from oh_goon.repository_tooling._repository_understanding_exam_inputs import (
+    _validate_candidate_submission,
 )
-from oh_goon.repository_tooling.repository_understanding_policy import QUALIFICATION_POLICY_VERSION, QUALIFICATION_PROFILES, SCORING_POLICY_VERSION
-from oh_goon.repository_tooling._repository_understanding_exam_inputs import _validate_candidate_submission
+from oh_goon.repository_tooling.repository_understanding_graph import (
+    evidence_authority_assessment,
+    evidence_profile,
+)
+from oh_goon.repository_tooling.repository_understanding_material import (
+    CANDIDATE_GOLD_MARKER,
+    EVIDENCE_REFERENCE,
+    GRADER_SCHEMA_VERSION,
+    QA_SCHEMA_VERSION,
+    QUESTION_SCHEMA_VERSION,
+    RUBRIC_VERSION,
+    SECRET_SCHEMA_VERSION,
+    _canonical_json_sha256,
+)
+from oh_goon.repository_tooling.repository_understanding_policy import (
+    QUALIFICATION_POLICY_VERSION,
+    QUALIFICATION_PROFILES,
+    SCORING_POLICY_VERSION,
+)
+
 
 def _validated_graded_at(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
@@ -19,10 +36,13 @@ def _validated_graded_at(value: Any) -> str:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as error:
         raise ValueError("graded_at_utc must be an ISO-8601 timestamp") from error
-    if parsed.tzinfo is None or parsed.utcoffset() is None or parsed.utcoffset().total_seconds() != 0:
+    if (
+        parsed.tzinfo is None
+        or parsed.utcoffset() is None
+        or parsed.utcoffset().total_seconds() != 0
+    ):
         raise ValueError("graded_at_utc must be UTC")
     return text
-
 
 
 def _validated_grader(value: Any) -> dict[str, Any]:
@@ -45,7 +65,6 @@ def _validated_grader(value: Any) -> dict[str, Any]:
         "rubric_version": RUBRIC_VERSION,
         "configuration": configuration,
     }
-
 
 
 def _validate_snapshot(snapshot: Any, expected_sha256: str | None = None) -> dict[str, Any]:
@@ -71,7 +90,6 @@ def _validate_snapshot(snapshot: Any, expected_sha256: str | None = None) -> dic
     return snapshot
 
 
-
 def _candidate_reference_validation(reference: str, index: dict[str, Any]) -> bool:
     match = EVIDENCE_REFERENCE.fullmatch(reference)
     if match is None:
@@ -88,7 +106,6 @@ def _candidate_reference_validation(reference: str, index: dict[str, Any]) -> bo
     start = int(match.group("start"))
     end = int(match.group("end") or start)
     return 1 <= start <= end <= line_count
-
 
 
 def _evidence_validation(
@@ -112,14 +129,18 @@ def _evidence_validation(
         expected_claim_ids = [claim["id"] for claim in question["secret"]["expected_claims"]]
         by_claim_id = {claim.get("claim_id"): claim for claim in claims if isinstance(claim, dict)}
         if list(by_claim_id) != expected_claim_ids:
-            raise ValueError(f"{qid} claim observations must match expected claims in canonical order")
+            raise ValueError(
+                f"{qid} claim observations must match expected claims in canonical order"
+            )
         claim_results: dict[str, dict[str, Any]] = {}
         for claim_id in expected_claim_ids:
             evidence = by_claim_id[claim_id].get("evidence")
             if not isinstance(evidence, dict):
                 raise ValueError(f"{qid}/{claim_id} evidence must be an object")
             references = evidence.get("references")
-            if not isinstance(references, list) or not all(isinstance(ref, str) for ref in references):
+            if not isinstance(references, list) or not all(
+                isinstance(ref, str) for ref in references
+            ):
                 raise ValueError(f"{qid}/{claim_id} evidence references must be a list of strings")
             if not references:
                 minimum_authority = question["secret"]["evidence_authority_roles"][
@@ -132,9 +153,7 @@ def _evidence_validation(
                     "references": [],
                     "invalid_references": [],
                     "evidence_profile": evidence_profile([]),
-                    "authority_assessment": evidence_authority_assessment(
-                        [], minimum_authority
-                    ),
+                    "authority_assessment": evidence_authority_assessment([], minimum_authority),
                 }
                 continue
             invalid = [ref for ref in references if not _candidate_reference_validation(ref, index)]
@@ -157,10 +176,20 @@ def _evidence_validation(
     return results
 
 
-
-def _score_inputs(payload: dict[str, Any], submission: Path | None) -> tuple[
-    dict[str, Any], list[dict[str, Any]], dict[str, dict[str, Any]], dict[str, Any], str,
-    dict[str, Any], str, dict[str, Any] | None, str | None, str | None, bool
+def _score_inputs(
+    payload: dict[str, Any], submission: Path | None
+) -> tuple[
+    dict[str, Any],
+    list[dict[str, Any]],
+    dict[str, dict[str, Any]],
+    dict[str, Any],
+    str,
+    dict[str, Any],
+    str,
+    dict[str, Any] | None,
+    str | None,
+    str | None,
+    bool,
 ]:
     if payload.get("artifact_type") == "repository-understanding-result":
         bundle = payload.get("regrade_bundle")
@@ -183,17 +212,31 @@ def _score_inputs(payload: dict[str, Any], submission: Path | None) -> tuple[
         if not isinstance(candidate_submission, dict):
             raise ValueError("regrade_bundle candidate_submission is missing")
         if candidate_configuration is not None:
-            if not isinstance(candidate_configuration, dict) or candidate_configuration.get("sha256") != candidate_configuration_identity:
+            if (
+                not isinstance(candidate_configuration, dict)
+                or candidate_configuration.get("sha256") != candidate_configuration_identity
+            ):
                 raise ValueError("regrade_bundle candidate configuration identity is inconsistent")
         elif candidate_configuration_identity is not None:
             raise ValueError("regrade_bundle candidate configuration is missing")
         if candidate_run_identity is not None and (
-            not isinstance(candidate_run_identity, str) or not candidate_run_identity.strip() or len(candidate_run_identity) > 128
+            not isinstance(candidate_run_identity, str)
+            or not candidate_run_identity.strip()
+            or len(candidate_run_identity) > 128
         ):
             raise ValueError("regrade_bundle candidate run identity is invalid")
         return (
-            snapshot, observations, evidence_validation, grader, graded_at, candidate_submission,
-            qualification_profile, candidate_configuration, candidate_configuration_identity, candidate_run_identity, True
+            snapshot,
+            observations,
+            evidence_validation,
+            grader,
+            graded_at,
+            candidate_submission,
+            qualification_profile,
+            candidate_configuration,
+            candidate_configuration_identity,
+            candidate_run_identity,
+            True,
         )
 
     if payload.get("artifact_type") != "repository-understanding-grader-observations":
@@ -227,12 +270,17 @@ def _score_inputs(payload: dict[str, Any], submission: Path | None) -> tuple[
     candidate_configuration_identity = payload.get("candidate_configuration_identity")
     candidate_run_identity = payload.get("candidate_run_identity")
     if candidate_configuration is not None:
-        if not isinstance(candidate_configuration, dict) or candidate_configuration.get("sha256") != candidate_configuration_identity:
+        if (
+            not isinstance(candidate_configuration, dict)
+            or candidate_configuration.get("sha256") != candidate_configuration_identity
+        ):
             raise ValueError("candidate configuration identity is inconsistent")
     elif candidate_configuration_identity is not None:
         raise ValueError("candidate configuration bundle is missing")
     if candidate_run_identity is not None and (
-        not isinstance(candidate_run_identity, str) or not candidate_run_identity.strip() or len(candidate_run_identity) > 128
+        not isinstance(candidate_run_identity, str)
+        or not candidate_run_identity.strip()
+        or len(candidate_run_identity) > 128
     ):
         raise ValueError("candidate run identity is invalid")
     grader = _validated_grader(payload.get("grader"))
@@ -244,6 +292,15 @@ def _score_inputs(payload: dict[str, Any], submission: Path | None) -> tuple[
         )
     evidence_validation = _evidence_validation(snapshot, observations)
     return (
-        snapshot, observations, evidence_validation, grader, graded_at, candidate_submission,
-        qualification_profile, candidate_configuration, candidate_configuration_identity, candidate_run_identity, False
+        snapshot,
+        observations,
+        evidence_validation,
+        grader,
+        graded_at,
+        candidate_submission,
+        qualification_profile,
+        candidate_configuration,
+        candidate_configuration_identity,
+        candidate_run_identity,
+        False,
     )

@@ -11,7 +11,9 @@ def _args() -> argparse.Namespace:
     return argparse.Namespace(command="stop")
 
 
-def test_stop_requests_exact_owner_without_writing_lifecycle_itself(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_stop_requests_exact_owner_without_writing_lifecycle_itself(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     workspace = tmp_path / "repo"
     workspace.mkdir()
     monkeypatch.chdir(workspace)
@@ -33,7 +35,9 @@ def test_stop_requests_exact_owner_without_writing_lifecycle_itself(tmp_path: Pa
     assert "Lifecycle: unchanged until the launch owner publishes terminal evidence" in output
 
 
-def test_stop_without_owner_birth_proof_refuses_instead_of_killing_pid(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_stop_without_owner_birth_proof_refuses_instead_of_killing_pid(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     workspace = tmp_path / "repo"
     workspace.mkdir()
     monkeypatch.chdir(workspace)

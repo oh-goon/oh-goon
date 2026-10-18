@@ -1,13 +1,12 @@
-from __future__ import annotations
-
 """Canonical process-environment vocabulary for strict executor authority.
 
 These variables carry release/CI or explicit strict-acceptance placement authority.
 APP/self verification does not consume them and must strip them before orchestration.
 """
 
-from collections.abc import MutableMapping
+from __future__ import annotations
 
+from collections.abc import MutableMapping
 
 EXECUTORS_FILE_ENV = "OH_GOON_EXECUTORS_FILE"
 CERTIFICATION_CGROUP_ROOT_ENV = "OH_GOON_CERTIFICATION_CGROUP_ROOT"

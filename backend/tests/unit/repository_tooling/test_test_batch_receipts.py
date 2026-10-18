@@ -112,4 +112,7 @@ def test_receipt_identity_module_keeps_heavy_product_imports_lazy() -> None:
             top_level_imports.add(node.module)
     assert not any(name.startswith("oh_goon") for name in top_level_imports)
     source = path.read_text(encoding="utf-8")
-    assert "from oh_goon.repository_tooling.release.package_slim import canonical_source_identity" in source
+    assert (
+        "from oh_goon.repository_tooling.release.package_slim import canonical_source_identity"
+        in source
+    )

@@ -105,9 +105,7 @@ def _source_package_chain(
         seal_identity,
         build_evidence,
     )
-    source_zip_sha256 = (
-        str(build_evidence["artifact_sha256"]) if build_evidence is not None else ""
-    )
+    source_zip_sha256 = str(build_evidence["artifact_sha256"]) if build_evidence is not None else ""
     fresh_unit, fresh_evidence = _fresh_zip_projection(
         state_dir,
         source_zip_sha256,
@@ -137,9 +135,7 @@ def _retention_chain(
     patch_unit, patch_evidence, parent_spec, parent_input = _patch_projection(
         root, state_dir, source_zip_sha256, fresh_evidence
     )
-    replay_unit, replay_evidence = _replay_projection(
-        state_dir, source_zip_sha256, patch_evidence
-    )
+    replay_unit, replay_evidence = _replay_projection(state_dir, source_zip_sha256, patch_evidence)
     handoff_unit, handoff_evidence = _handoff_projection(
         root,
         state_dir,
@@ -159,9 +155,7 @@ def _retention_chain(
         fresh_evidence,
         seal_identity,
     )
-    persist_unit, persist_evidence = _persist_projection(
-        root, state_dir, manifest_evidence
-    )
+    persist_unit, persist_evidence = _persist_projection(root, state_dir, manifest_evidence)
     readback_unit, readback_evidence = _readback_projection(
         root, state_dir, manifest_evidence, persist_evidence
     )
@@ -247,9 +241,7 @@ def _artifact_payload(
         manifest = str(manifest_path(root, state_dir))
         artifact_set_identity = manifest_evidence.get("artifact_set_identity")
     if readback_evidence is not None and artifact_set_identity is not None:
-        retained_directory = str(
-            retained_artifact_directory(state_dir, str(artifact_set_identity))
-        )
+        retained_directory = str(retained_artifact_directory(state_dir, str(artifact_set_identity)))
     return {
         "source_zip": source_zip,
         "source_zip_sha256": source_zip_sha256,

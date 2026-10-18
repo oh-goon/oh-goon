@@ -1,4 +1,5 @@
 """SKILL-2: committed Gitlink pin and portable original prework bytes, offline."""
+
 from __future__ import annotations
 
 import subprocess
@@ -14,9 +15,23 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 
 def git(repo: Path, *args: str) -> str:
-    proc = subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
-                           "-c", "protocol.file.allow=always", *args], cwd=repo,
-                          check=True, capture_output=True, text=True, timeout=10)
+    proc = subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "-c",
+            "protocol.file.allow=always",
+            *args,
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     return proc.stdout.strip()
 
 
@@ -46,7 +61,7 @@ def setup(tmp_path: Path):
     goon = tmp_path / "goons" / "agent" / "review"
     goon.mkdir(parents=True)
     (goon / "README.md").write_text("# Agent\n")
-    (goon / "goon.yml").write_text('''inputs:
+    (goon / "goon.yml").write_text("""inputs:
   repo: {type: repository_reference}
   skill: {type: skill_reference}
   acceptance: {type: acceptance_profile}
@@ -54,19 +69,25 @@ steps:
 - uses: agent
   harness: opencode
   task: review the repository
-''')
+""")
     plan = tmp_path / "plan.yml"
-    plan.write_text('inputs: [repo, skill, acceptance]\ngoons: [agent/review]\n')
+    plan.write_text("inputs: [repo, skill, acceptance]\ngoons: [agent/review]\n")
     registry = tmp_path / ".goonskills"
-    registry.write_text(f'[skill "team/review"]\nsource = gitlink\npath = libs/agent-skills/review\ngitlink = libs/agent-skills\nrevision = {revision}\n')
+    registry.write_text(
+        f'[skill "team/review"]\nsource = gitlink\npath = libs/agent-skills/review\ngitlink = libs/agent-skills\nrevision = {revision}\n'
+    )
     repos = tmp_path / "repositories"
     (repos / "product").mkdir(parents=True)
     (repos / "product" / "app.py").write_text("print('hi')\n")
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(tmp_path / "goons"))
     _, sha = resolver.input_definitions_with_source(plan)
     inputs = {"repo": "local:product", "skill": "team/review", "acceptance": "review"}
-    kwargs = dict(repository_root=repos, skill_root=root,
-                  allowed_acceptance=("review",), expected_source_sha256=sha)
+    kwargs = dict(
+        repository_root=repos,
+        skill_root=root,
+        allowed_acceptance=("review",),
+        expected_source_sha256=sha,
+    )
     return resolver, plan, registry, root, remote, revision, inputs, kwargs
 
 
@@ -78,7 +99,10 @@ def test_pin_accepts_full_source_once_and_offline_handoff_round_trip(tmp_path):
     assert preview["skill"]["reference"] == f"gitlink:{revision}:libs/agent-skills/review"
     assert preview["skill"]["source_origin"] == "COMMITTED_GITLINK_OFFLINE_CAPTURE"
     assert {m["path"] for m in preview["skill"]["members"]} == {
-        "SKILL.md", "references/checklist.md", "scripts/review.sh", "assets/policy.json",
+        "SKILL.md",
+        "references/checklist.md",
+        "scripts/review.sh",
+        "assets/policy.json",
     }
     capture = resolver.capture_agent_sources(plan, inputs=inputs, **kwargs)
     capture.verify()
@@ -91,19 +115,25 @@ def test_pin_accepts_full_source_once_and_offline_handoff_round_trip(tmp_path):
     renamed = root / "libs" / "offline"
     gitlink.rename(renamed)
     restored = FrozenAgentStepHandoff.decode_prework_delivery(
-        packet, expected_handoff_identity=handoff.handoff_identity,
+        packet,
+        expected_handoff_identity=handoff.handoff_identity,
     )
     assert restored.encode_prework_delivery() == packet
     assert restored.source.skill.content_identity == capture.skill.content_identity
     assert {m.path for m in restored.source.skill.members} == {
-        "SKILL.md", "references/checklist.md", "scripts/review.sh", "assets/policy.json",
+        "SKILL.md",
+        "references/checklist.md",
+        "scripts/review.sh",
+        "assets/policy.json",
     }
     assert restored.effect_permission == "NONE"
     with pytest.raises(FleetPlanInvalid):
         resolver.resolve(plan, inputs=inputs)
 
 
-@pytest.mark.parametrize("mutation", ["changed", "untracked", "missing", "wrong-pin", "wrong-link", "stale-head"])
+@pytest.mark.parametrize(
+    "mutation", ["changed", "untracked", "missing", "wrong-pin", "wrong-link", "stale-head"]
+)
 def test_pin_refuses_changed_untracked_or_uncommitted_sources(tmp_path, mutation):
     resolver, plan, registry, root, remote, revision, inputs, kwargs = setup(tmp_path)
     checkout = root / "libs" / "agent-skills"
@@ -116,7 +146,9 @@ def test_pin_refuses_changed_untracked_or_uncommitted_sources(tmp_path, mutation
     elif mutation == "wrong-pin":
         registry.write_text(registry.read_text().replace(revision, "a" * 40))
     elif mutation == "wrong-link":
-        registry.write_text(registry.read_text().replace("gitlink = libs/agent-skills", "gitlink = libs/another"))
+        registry.write_text(
+            registry.read_text().replace("gitlink = libs/agent-skills", "gitlink = libs/another")
+        )
     elif mutation == "stale-head":
         (remote / "review" / "SKILL.md").write_text("# next revision\n")
         git(remote, "add", ".")
@@ -143,7 +175,9 @@ def test_gitlink_rejects_unpinned_and_ambiguous_registry_fields(tmp_path):
             resolver.explain_agent_sources(plan, inputs=inputs, **kwargs)
     registry.write_text(original)
     with pytest.raises(FleetPlanInvalid, match="cannot be mixed"):
-        resolver.explain_agent_sources(plan, inputs=inputs, skill_aliases={"team/review": "local:else"}, **kwargs)
+        resolver.explain_agent_sources(
+            plan, inputs=inputs, skill_aliases={"team/review": "local:else"}, **kwargs
+        )
 
 
 def test_offline_template_relocation_preserves_complete_skill_bytes(tmp_path):
@@ -163,12 +197,19 @@ def test_offline_template_relocation_preserves_complete_skill_bytes(tmp_path):
         resolver = FleetPlanResolver()
         _, sha = resolver.input_definitions_with_source(plan)
         values = {"repo": "local:product", "skill": "team/review", "acceptance": "review"}
-        kwargs = dict(repository_root=target / "approved-repos", skill_root=target,
-                      allowed_acceptance=("review",), expected_source_sha256=sha)
+        kwargs = dict(
+            repository_root=target / "approved-repos",
+            skill_root=target,
+            allowed_acceptance=("review",),
+            expected_source_sha256=sha,
+        )
         preview = resolver.explain_agent_sources(plan, inputs=values, **kwargs)
         assert preview["skill"]["reference"] == "local:skills/team/review"
         assert {m["path"] for m in preview["skill"]["members"]} == {
-            "SKILL.md", "references/checklist.md", "scripts/verify.sh", "assets/rules.json"
+            "SKILL.md",
+            "references/checklist.md",
+            "scripts/verify.sh",
+            "assets/rules.json",
         }
         options.append(preview["skill"]["content_identity"])
         captured = resolver.capture_agent_sources(plan, inputs=values, **kwargs)

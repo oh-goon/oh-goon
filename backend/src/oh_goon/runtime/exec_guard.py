@@ -11,6 +11,7 @@ the immediate parent dies, then atomically replaces itself with the requested co
 therefore keeps the guard PID/process-group identity without running Python callbacks in
 the vulnerable fork-before-exec window.
 """
+
 from __future__ import annotations
 
 import ctypes

@@ -4,16 +4,18 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations._fleet_plan_cgroup_resources import NESTED_CGROUP_DELEGATED_ENV
-
 from oh_goon.repository_tooling.acceptance import local_delegation
 from oh_goon.repository_tooling.acceptance.timing import RESOLVED_TIMING_ENV
 
 
 def test_delegated_reentry_does_not_recurse(monkeypatch):
     monkeypatch.setattr(local_delegation.os, "name", "posix")
-    assert local_delegation.needs_systemd_delegation(
-        {local_delegation.LOCAL_RUNTIME_DELEGATED_ENV: "1"}
-    ) is False
+    assert (
+        local_delegation.needs_systemd_delegation(
+            {local_delegation.LOCAL_RUNTIME_DELEGATED_ENV: "1"}
+        )
+        is False
+    )
 
 
 def test_missing_physical_authority_requests_systemd_delegation(monkeypatch):
@@ -46,14 +48,16 @@ def test_valid_nested_delegation_never_requests_systemd(monkeypatch, tmp_path: P
         "resolve_certification_cgroup_root",
         lambda _environment: tmp_path,
     )
-    assert local_delegation.needs_systemd_delegation(
-        {NESTED_CGROUP_DELEGATED_ENV: "1"}
-    ) is False
+    assert local_delegation.needs_systemd_delegation({NESTED_CGROUP_DELEGATED_ENV: "1"}) is False
 
 
-def test_systemd_reentry_uses_canonical_controller_establishment_contract(monkeypatch, tmp_path: Path):
+def test_systemd_reentry_uses_canonical_controller_establishment_contract(
+    monkeypatch, tmp_path: Path
+):
     observed = {}
-    monkeypatch.setattr(local_delegation.shutil, "which", lambda name, path=None: "/usr/bin/systemd-run")
+    monkeypatch.setattr(
+        local_delegation.shutil, "which", lambda name, path=None: "/usr/bin/systemd-run"
+    )
 
     class Completed:
         returncode = 23
@@ -65,15 +69,18 @@ def test_systemd_reentry_uses_canonical_controller_establishment_contract(monkey
         return Completed()
 
     monkeypatch.setattr(local_delegation.subprocess, "run", fake_run)
-    assert local_delegation.run_under_systemd_delegation(
-        tmp_path,
-        environment={
-            "PATH": "/custom/node/bin:/usr/bin",
-            "OH_GOON_EXECUTORS_FILE": "/tmp/executors.toml",
-            "OH_GOON_RUNTIME_ACCEPTANCE_STEP_START_TIMEOUT_SECONDS": "300",
-            "OH_GOON_RUNTIME_ACCEPTANCE_INTERRUPTIBLE_STEP_SECONDS": "480",
-        },
-    ) == 23
+    assert (
+        local_delegation.run_under_systemd_delegation(
+            tmp_path,
+            environment={
+                "PATH": "/custom/node/bin:/usr/bin",
+                "OH_GOON_EXECUTORS_FILE": "/tmp/executors.toml",
+                "OH_GOON_RUNTIME_ACCEPTANCE_STEP_START_TIMEOUT_SECONDS": "300",
+                "OH_GOON_RUNTIME_ACCEPTANCE_INTERRUPTIBLE_STEP_SECONDS": "480",
+            },
+        )
+        == 23
+    )
     command = observed["command"]
     assert "--property=Delegate=yes" in command
     assert f"--setenv={local_delegation.LOCAL_RUNTIME_DELEGATED_ENV}=1" in command
@@ -99,7 +106,9 @@ def test_systemd_unavailable_fails_closed(monkeypatch, tmp_path: Path):
 
 
 def test_systemd_reentry_without_path_fails_closed(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(local_delegation.shutil, "which", lambda name, path=None: "/usr/bin/systemd-run")
+    monkeypatch.setattr(
+        local_delegation.shutil, "which", lambda name, path=None: "/usr/bin/systemd-run"
+    )
     monkeypatch.setattr(
         local_delegation.subprocess,
         "run",

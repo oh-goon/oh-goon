@@ -54,7 +54,9 @@ def _validate_next_phase(payload: dict[str, Any]) -> None:
 
 
 def continuation_input_from_bytes(
-    content: bytes, *, qualification_state: str,
+    content: bytes,
+    *,
+    qualification_state: str,
 ) -> dict[str, Any]:
     payload = _json_object(content, label="continuation input")
     if payload.get("schema") != CONTINUATION_INPUT_SCHEMA:

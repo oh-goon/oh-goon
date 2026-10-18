@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import json
+import urllib.error
+import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import urllib.error
-import urllib.request
 
-from oh_goon.scout.database import scout_analytical_database_path
-from oh_goon.repository_tooling.network_certification import blocked_network_attempts
 from oh_goon.repository_tooling.local_access_http import authorized_request
+from oh_goon.repository_tooling.network_certification import blocked_network_attempts
 from oh_goon.repository_tooling.release.runtime_journey import (
     prepare_acceptance_repository,
     run_acceptance_goon,
@@ -23,6 +22,7 @@ from oh_goon.repository_tooling.scout_http_load_probe import (
     _stop_server,
     _wait_json,
 )
+from oh_goon.scout.database import scout_analytical_database_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,9 +48,7 @@ def _scout_failure_status(base: str) -> int:
         return int(exc.code)
 
 
-def run_failure_isolation_certification(
-    *, root: Path = ROOT
-) -> ScoutFailureIsolationResult:
+def run_failure_isolation_certification(*, root: Path = ROOT) -> ScoutFailureIsolationResult:
     with TemporaryDirectory(prefix="oh-goon-scout-failure-isolation-") as directory:
         temp = Path(directory)
         state = temp / "state" / "oh-goon.db"
@@ -96,13 +94,9 @@ def run_failure_isolation_certification(
     outcome = fleet.get("outcome") if isinstance(fleet, dict) else None
     game_tape_ok = "acceptance-step" in json.dumps(fleet.get("game_tape"))
     if status != "COMPLETED" or outcome != "SUCCESS" or not game_tape_ok:
-        raise RuntimeError(
-            "Scout analytical failure changed the real acceptance Goon outcome"
-        )
+        raise RuntimeError("Scout analytical failure changed the real acceptance Goon outcome")
     if scout_after < 500:
-        raise RuntimeError(
-            "Scout analytical failure unexpectedly disappeared during execution"
-        )
+        raise RuntimeError("Scout analytical failure unexpectedly disappeared during execution")
     return ScoutFailureIsolationResult(
         scout_failure_status=scout_status,
         execution_run_id=run_id,
@@ -115,11 +109,7 @@ def run_failure_isolation_certification(
 
 
 def main() -> int:
-    print(
-        json.dumps(
-            asdict(run_failure_isolation_certification()), indent=2, sort_keys=True
-        )
-    )
+    print(json.dumps(asdict(run_failure_isolation_certification()), indent=2, sort_keys=True))
     return 0
 
 

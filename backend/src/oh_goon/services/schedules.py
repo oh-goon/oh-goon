@@ -10,7 +10,6 @@ from oh_goon.core.errors import (
     ScheduleNotFound,
     StateConflict,
 )
-from oh_goon.core.product_identity import new_schedule_run_id
 from oh_goon.core.models.schedule import (
     ScheduleCatalog,
     ScheduleCreate,
@@ -22,6 +21,7 @@ from oh_goon.core.models.schedule import (
     ScheduleStatus,
 )
 from oh_goon.core.models.schedule_execution import FailedScheduleRun, ScheduleRunRecord
+from oh_goon.core.product_identity import new_schedule_run_id
 from oh_goon.core.vocabulary import (
     ScheduleOccurrenceFilter,
     ScheduleRepositoryRunStatus,
@@ -60,9 +60,7 @@ class ScheduleService:
     def definition(self, schedule_id: str) -> ScheduleDefinition:
         return self._definitions.get(schedule_id)
 
-    def create_prepared(
-        self, schedule_id: str, request: ScheduleCreate
-    ) -> ScheduleDefinition:
+    def create_prepared(self, schedule_id: str, request: ScheduleCreate) -> ScheduleDefinition:
         """Persist a Schedule whose execution target was prepared by an execution-entry owner."""
         return self._definitions.create(schedule_id, request)
 
@@ -82,9 +80,7 @@ class ScheduleService:
             )
         return self._definitions.replace(schedule_id, request)
 
-    def replace_prepared(
-        self, schedule_id: str, request: ScheduleReplace
-    ) -> ScheduleDefinition:
+    def replace_prepared(self, schedule_id: str, request: ScheduleReplace) -> ScheduleDefinition:
         """Persist a replacement whose target was prepared by FleetPlanService."""
         return self._definitions.replace(schedule_id, request)
 
@@ -251,6 +247,4 @@ def _require_expected_schedule_authority(
         expected_generation_id,
         expected_record_version,
     ):
-        raise StateConflict(
-            "Schedule definition changed since this occurrence command was created"
-        )
+        raise StateConflict("Schedule definition changed since this occurrence command was created")

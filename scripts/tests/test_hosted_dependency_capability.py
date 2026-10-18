@@ -17,9 +17,9 @@ from oh_goon.repository_tooling import hosted_dependency_capability as capabilit
 ROOT = Path(__file__).resolve().parents[2]
 
 
-
 def _build(**kwargs):
     return capability.build_capability(**kwargs)
+
 
 def _versions(**overrides: str):
     defaults = {
@@ -59,7 +59,9 @@ def test_host_capability_accepts_exact_declared_cryptography_minimum() -> None:
         interpreter="/host/python",
         python_version="3.13.5",
     )
-    crypto = next(row for row in payload["packages"] if row["distribution"] == "cryptography")
+    crypto = next(
+        row for row in payload["packages"] if row["distribution"] == "cryptography"
+    )
     assert crypto == {
         "distribution": "cryptography",
         "import": "cryptography",
@@ -76,7 +78,9 @@ def test_host_capability_accepts_exact_declared_cryptography_minimum() -> None:
 
 
 @pytest.mark.parametrize("version", ("3.11.9", "3.15.0"))
-def test_host_capability_blocks_interpreter_outside_project_python_range(version: str) -> None:
+def test_host_capability_blocks_interpreter_outside_project_python_range(
+    version: str,
+) -> None:
     payload = _build(
         version_reader=_versions(),
         import_probe=_no_op_import_probe,
@@ -92,18 +96,27 @@ def test_host_capability_rejects_cryptography_below_declared_minimum() -> None:
         version_reader=_versions(cryptography="46.0.3"),
         import_probe=_no_op_import_probe,
     )
-    crypto = next(row for row in payload["packages"] if row["distribution"] == "cryptography")
+    crypto = next(
+        row for row in payload["packages"] if row["distribution"] == "cryptography"
+    )
     assert crypto["status"] == "incompatible"
     assert payload["result"] == "HOST-CAPABILITY-BLOCKED"
-    assert "cryptography: 46.0.3 does not satisfy cryptography>=46.0.4" in payload["blockers"]
+    assert (
+        "cryptography: 46.0.3 does not satisfy cryptography>=46.0.4"
+        in payload["blockers"]
+    )
 
 
-def test_host_capability_rejects_prerelease_that_numeric_prefix_would_overaccept() -> None:
+def test_host_capability_rejects_prerelease_that_numeric_prefix_would_overaccept() -> (
+    None
+):
     payload = _build(
         version_reader=_versions(cryptography="46.0.4rc1"),
         import_probe=_no_op_import_probe,
     )
-    crypto = next(row for row in payload["packages"] if row["distribution"] == "cryptography")
+    crypto = next(
+        row for row in payload["packages"] if row["distribution"] == "cryptography"
+    )
     assert crypto["status"] == "incompatible"
     assert "final numeric releases" in crypto["detail"]
     assert payload["result"] == "HOST-CAPABILITY-BLOCKED"
@@ -114,13 +127,17 @@ def test_host_capability_blocks_when_required_cryptography_is_missing() -> None:
         version_reader=_versions(cryptography="MISSING"),
         import_probe=_no_op_import_probe,
     )
-    crypto = next(row for row in payload["packages"] if row["distribution"] == "cryptography")
+    crypto = next(
+        row for row in payload["packages"] if row["distribution"] == "cryptography"
+    )
     assert crypto["status"] == "missing"
     assert payload["result"] == "HOST-CAPABILITY-BLOCKED"
     assert "cryptography: missing" in payload["blockers"]
 
 
-def test_missing_nonrequired_leaf_is_recorded_without_disabling_other_hosted_work() -> None:
+def test_missing_nonrequired_leaf_is_recorded_without_disabling_other_hosted_work() -> (
+    None
+):
     payload = _build(
         version_reader=_versions(httpx2="MISSING"),
         import_probe=_no_op_import_probe,
@@ -136,31 +153,47 @@ def test_host_capability_blocks_broken_cryptography_import_or_native_binding() -
             raise ImportError("OpenSSL binding unavailable")
 
     payload = _build(version_reader=_versions(), import_probe=broken)
-    crypto = next(row for row in payload["packages"] if row["distribution"] == "cryptography")
+    crypto = next(
+        row for row in payload["packages"] if row["distribution"] == "cryptography"
+    )
     assert crypto["status"] == "import-broken"
     assert "OpenSSL binding unavailable" in crypto["detail"]
     assert payload["result"] == "HOST-CAPABILITY-BLOCKED"
 
 
-def test_cryptography_requirement_is_read_from_pyproject_not_duplicated_policy(tmp_path: Path) -> None:
+def test_cryptography_requirement_is_read_from_pyproject_not_duplicated_policy(
+    tmp_path: Path,
+) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(original.replace("cryptography>=46.0.4", "cryptography>=47.0.0"), encoding="utf-8")
+    pyproject.write_text(
+        original.replace("cryptography>=46.0.4", "cryptography>=47.0.0"),
+        encoding="utf-8",
+    )
     payload = _build(
         pyproject=pyproject,
         version_reader=_versions(cryptography="46.0.4"),
         import_probe=_no_op_import_probe,
     )
-    crypto = next(row for row in payload["packages"] if row["distribution"] == "cryptography")
+    crypto = next(
+        row for row in payload["packages"] if row["distribution"] == "cryptography"
+    )
     assert crypto["requirement"] == "cryptography>=47.0.0"
     assert crypto["status"] == "incompatible"
 
 
-def test_host_capability_fails_closed_if_crypto_intent_stops_using_minimum_policy(tmp_path: Path) -> None:
+def test_host_capability_fails_closed_if_crypto_intent_stops_using_minimum_policy(
+    tmp_path: Path,
+) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(original.replace("cryptography>=46.0.4", "cryptography==46.0.4"), encoding="utf-8")
-    with pytest.raises(capability.HostedCapabilityError, match="minimum-compatible >= policy"):
+    pyproject.write_text(
+        original.replace("cryptography>=46.0.4", "cryptography==46.0.4"),
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        capability.HostedCapabilityError, match="minimum-compatible >= policy"
+    ):
         _build(
             pyproject=pyproject,
             version_reader=_versions(),
@@ -168,11 +201,18 @@ def test_host_capability_fails_closed_if_crypto_intent_stops_using_minimum_polic
         )
 
 
-def test_host_capability_fails_closed_if_crypto_intent_disappears(tmp_path: Path) -> None:
+def test_host_capability_fails_closed_if_crypto_intent_disappears(
+    tmp_path: Path,
+) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(original.replace('  "cryptography>=46.0.4",\n', ""), encoding="utf-8")
-    with pytest.raises(capability.HostedCapabilityError, match="missing hosted capability requirements: cryptography"):
+    pyproject.write_text(
+        original.replace('  "cryptography>=46.0.4",\n', ""), encoding="utf-8"
+    )
+    with pytest.raises(
+        capability.HostedCapabilityError,
+        match="missing hosted capability requirements: cryptography",
+    ):
         _build(
             pyproject=pyproject,
             version_reader=_versions(),
@@ -183,7 +223,12 @@ def test_host_capability_fails_closed_if_crypto_intent_disappears(tmp_path: Path
 def test_host_capability_blocks_unsupported_python_policy_shape(tmp_path: Path) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(original.replace('requires-python = ">=3.12,<3.15"', 'requires-python = ">=3.12"'), encoding="utf-8")
+    pyproject.write_text(
+        original.replace(
+            'requires-python = ">=3.12,<3.15"', 'requires-python = ">=3.12"'
+        ),
+        encoding="utf-8",
+    )
     payload = _build(
         pyproject=pyproject,
         version_reader=_versions(),
@@ -192,10 +237,15 @@ def test_host_capability_blocks_unsupported_python_policy_shape(tmp_path: Path) 
     )
     assert payload["python_status"] == "incompatible"
     assert payload["result"] == "HOST-CAPABILITY-BLOCKED"
-    assert any("requires project.requires-python in >=MIN,<MAX form" in item for item in payload["blockers"])
+    assert any(
+        "requires project.requires-python in >=MIN,<MAX form" in item
+        for item in payload["blockers"]
+    )
 
 
-def test_host_capability_does_not_require_portable_resolution_artifact(tmp_path: Path) -> None:
+def test_host_capability_does_not_require_portable_resolution_artifact(
+    tmp_path: Path,
+) -> None:
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_bytes((ROOT / "backend/pyproject.toml").read_bytes())
     payload = _build(
@@ -203,7 +253,9 @@ def test_host_capability_does_not_require_portable_resolution_artifact(tmp_path:
         version_reader=_versions(cryptography="46.0.4"),
         import_probe=_no_op_import_probe,
     )
-    crypto = next(row for row in payload["packages"] if row["distribution"] == "cryptography")
+    crypto = next(
+        row for row in payload["packages"] if row["distribution"] == "cryptography"
+    )
     assert crypto["status"] == "compatible"
     assert payload["result"] == "HOST-CAPABILITY-READY"
 
@@ -293,11 +345,13 @@ def test_default_cryptography_probe_blocks_when_x509_load_is_broken(
 
 
 def test_default_cryptography_probe_succeeds_with_real_declared_host_package() -> None:
-    declared, requirements, _requires_python, native_only = capability._project_contract(
-        ROOT / "backend/pyproject.toml"
+    declared, requirements, _requires_python, native_only = (
+        capability._project_contract(ROOT / "backend/pyproject.toml")
     )
     observed = importlib.metadata.version("cryptography")
-    assert capability._release(observed) >= capability._minimum(requirements["cryptography"])
+    assert capability._release(observed) >= capability._minimum(
+        requirements["cryptography"]
+    )
     capability._default_import_probe("cryptography", "cryptography")
 
 
@@ -313,30 +367,40 @@ def test_default_import_probe_accepts_repository_local_virtualenv_dependency(
     capability._default_import_probe("fastapi", "fastapi")
 
 
-def test_default_import_probe_rejects_repository_shadow(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_import_probe_rejects_repository_shadow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     shadow = ROOT / "backend/src/shadow.py"
     monkeypatch.setattr(
         capability.importlib,
         "import_module",
         lambda _name: SimpleNamespace(__file__=str(shadow)),
     )
-    with pytest.raises(capability.HostedCapabilityError, match="shadowed by repository source"):
+    with pytest.raises(
+        capability.HostedCapabilityError, match="shadowed by repository source"
+    ):
         capability._default_import_probe("fastapi", "fastapi")
 
 
 def test_default_cryptography_probe_rejects_module_metadata_version_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = SimpleNamespace(__file__="/host/site-packages/cryptography/__init__.py", __version__="46.0.5")
+    module = SimpleNamespace(
+        __file__="/host/site-packages/cryptography/__init__.py", __version__="46.0.5"
+    )
     monkeypatch.setattr(capability.importlib, "import_module", lambda _name: module)
-    monkeypatch.setattr(capability.importlib.metadata, "version", lambda _name: "46.0.4")
-    with pytest.raises(capability.HostedCapabilityError, match="cryptography import metadata mismatch"):
+    monkeypatch.setattr(
+        capability.importlib.metadata, "version", lambda _name: "46.0.4"
+    )
+    with pytest.raises(
+        capability.HostedCapabilityError, match="cryptography import metadata mismatch"
+    ):
         capability._default_import_probe("cryptography", "cryptography")
 
 
 def test_host_capability_inventory_covers_every_declared_python_dependency() -> None:
-    declared, requirements, _requires_python, native_only = capability._project_contract(
-        ROOT / "backend/pyproject.toml"
+    declared, requirements, _requires_python, native_only = (
+        capability._project_contract(ROOT / "backend/pyproject.toml")
     )
     payload = _build(
         version_reader=_versions(),
@@ -349,19 +413,32 @@ def test_host_capability_inventory_covers_every_declared_python_dependency() -> 
     assert payload["excluded_python_dependencies"] == sorted(native_only)
     assert {row["distribution"] for row in payload["packages"]} == set(requirements)
     assert {
-        "cryptography", "fastapi", "httpx2", "hashmarks", "pydantic", "pyyaml",
-        "uvicorn", "pytest", "pytest-cov", "mypy", "ruff", "editables", "hatchling",
+        "cryptography",
+        "fastapi",
+        "httpx2",
+        "hashmarks",
+        "pydantic",
+        "pyyaml",
+        "uvicorn",
+        "pytest",
+        "pytest-cov",
+        "mypy",
+        "ruff",
+        "editables",
+        "hatchling",
     } <= set(declared)
     assert "hashmarks" not in requirements
 
 
-def test_native_only_policy_changes_once_without_capability_code_change(tmp_path: Path) -> None:
+def test_native_only_policy_changes_once_without_capability_code_change(
+    tmp_path: Path,
+) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
         original.replace(
-            'hashmarks @ https://github.com/Hugloss/Hashmarks/releases/download/v0.25.1/hashmarks-0.25.1-py3-none-any.whl',
-            'native-observer>=1.0.0',
+            "hashmarks @ https://github.com/Hugloss/Hashmarks/releases/download/v0.25.1/hashmarks-0.25.1-py3-none-any.whl",
+            "native-observer>=1.0.0",
         ).replace(
             'native-only-dependencies = ["hashmarks"]',
             'native-only-dependencies = ["native-observer"]',
@@ -377,7 +454,9 @@ def test_native_only_policy_changes_once_without_capability_code_change(tmp_path
     assert payload["excluded_python_dependencies"] == ["native-observer"]
     assert "native-observer" in payload["declared_python_dependencies"]
     assert "native-observer" not in payload["evaluated_python_dependencies"]
-    assert {row["distribution"] for row in payload["packages"]} == set(payload["evaluated_python_dependencies"])
+    assert {row["distribution"] for row in payload["packages"]} == set(
+        payload["evaluated_python_dependencies"]
+    )
 
 
 def test_native_only_policy_rejects_undeclared_dependency(tmp_path: Path) -> None:
@@ -390,7 +469,9 @@ def test_native_only_policy_rejects_undeclared_dependency(tmp_path: Path) -> Non
         ),
         encoding="utf-8",
     )
-    with pytest.raises(capability.HostedCapabilityError, match="not declared dependencies"):
+    with pytest.raises(
+        capability.HostedCapabilityError, match="not declared dependencies"
+    ):
         capability._project_contract(pyproject)
 
 
@@ -405,20 +486,28 @@ def test_registry_or_uv_cache_state_is_not_part_of_host_package_availability() -
     assert all(row["status"] == "compatible" for row in payload["packages"])
 
 
-def test_new_declared_dependency_is_automatically_inventoried_without_allowlist(tmp_path: Path) -> None:
+def test_new_declared_dependency_is_automatically_inventoried_without_allowlist(
+    tmp_path: Path,
+) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
-        original.replace('  "uvicorn>=0.48.0",', '  "uvicorn>=0.48.0",\n  "future-lib>=1.2.3",'),
+        original.replace(
+            '  "uvicorn>=0.48.0",', '  "uvicorn>=0.48.0",\n  "future-lib>=1.2.3",'
+        ),
         encoding="utf-8",
     )
     versions = _versions()
+
     def read(name: str) -> str:
         return "1.2.3" if name == "future-lib" else versions(name)
+
     payload = _build(
         pyproject=pyproject, version_reader=read, import_probe=_no_op_import_probe
     )
-    future = next(row for row in payload["packages"] if row["distribution"] == "future-lib")
+    future = next(
+        row for row in payload["packages"] if row["distribution"] == "future-lib"
+    )
     assert future["requirement"] == "future-lib>=1.2.3"
     assert future["import"] == "future_lib"
     assert future["status"] == "compatible"
@@ -450,25 +539,34 @@ def test_capability_payload_is_json_serializable() -> None:
     json.dumps(payload, sort_keys=True)
 
 
-def test_capability_parsers_fail_closed_on_missing_requirement_and_project_contract() -> None:
+def test_capability_parsers_fail_closed_on_missing_requirement_and_project_contract() -> (
+    None
+):
     with pytest.raises(capability.HostedCapabilityError, match="cannot normalize"):
         capability._requirement_name("")
     with pytest.raises(capability.HostedCapabilityError, match="cannot parse"):
         capability._minimum("")
     with pytest.raises(capability.HostedCapabilityError, match=r"missing \[project\]"):
         capability._python_range({})
-    with pytest.raises(capability.HostedCapabilityError, match="missing project.requires-python"):
+    with pytest.raises(
+        capability.HostedCapabilityError, match="missing project.requires-python"
+    ):
         capability._python_range({"project": {}})
 
 
-def test_project_contract_rejects_duplicate_hosted_dependency_owner(tmp_path: Path) -> None:
+def test_project_contract_rejects_duplicate_hosted_dependency_owner(
+    tmp_path: Path,
+) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
-        original.replace('dev = [\n', 'dev = [\n  "cryptography>=46.0.4",\n'),
+        original.replace("dev = [\n", 'dev = [\n  "cryptography>=46.0.4",\n'),
         encoding="utf-8",
     )
-    with pytest.raises(capability.HostedCapabilityError, match="duplicate hosted dependency requirement"):
+    with pytest.raises(
+        capability.HostedCapabilityError,
+        match="duplicate hosted dependency requirement",
+    ):
         capability._project_contract(pyproject)
 
 
@@ -507,9 +605,7 @@ def test_capability_main_probe_mode_reports_semantic_required_capability_result(
     monkeypatch.setattr(
         capability,
         "_parse_args",
-        lambda: argparse.Namespace(
-            output=None, probe_required_host_capabilities=True
-        ),
+        lambda: argparse.Namespace(output=None, probe_required_host_capabilities=True),
     )
     monkeypatch.setattr(
         capability,
@@ -532,7 +628,9 @@ def test_capability_main_writes_ready_receipt_and_reports_separate_uv_cache(
         interpreter="/host/python",
         python_version="3.13.5",
     )
-    monkeypatch.setattr(capability, "_parse_args", lambda: argparse.Namespace(output=output))
+    monkeypatch.setattr(
+        capability, "_parse_args", lambda: argparse.Namespace(output=output)
+    )
     monkeypatch.setattr(capability, "build_capability", lambda **_kwargs: payload)
     assert capability.main() == 0
     written = json.loads(output.read_text(encoding="utf-8"))
@@ -553,7 +651,9 @@ def test_capability_main_returns_blocked_without_claiming_native_failure(
         import_probe=_no_op_import_probe,
         python_version="3.13.5",
     )
-    monkeypatch.setattr(capability, "_parse_args", lambda: argparse.Namespace(output=output))
+    monkeypatch.setattr(
+        capability, "_parse_args", lambda: argparse.Namespace(output=output)
+    )
     monkeypatch.setattr(capability, "build_capability", lambda **_kwargs: payload)
     assert capability.main() == 3
     captured = capsys.readouterr()
@@ -561,8 +661,12 @@ def test_capability_main_returns_blocked_without_claiming_native_failure(
     assert "cryptography: missing" in captured.err
 
 
-def test_capability_direct_stdlib_launch_does_not_require_installed_oh_goon(tmp_path: Path) -> None:
-    script = ROOT / "backend/src/oh_goon/repository_tooling/hosted_dependency_capability.py"
+def test_capability_direct_stdlib_launch_does_not_require_installed_oh_goon(
+    tmp_path: Path,
+) -> None:
+    script = (
+        ROOT / "backend/src/oh_goon/repository_tooling/hosted_dependency_capability.py"
+    )
     output = tmp_path / "capability.json"
     environment = {"PATH": os.environ.get("PATH", ""), "PYTHONNOUSERSITE": "1"}
     result = subprocess.run(

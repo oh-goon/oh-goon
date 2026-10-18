@@ -2,12 +2,11 @@
 
 Never authorize deletion from a process liveness probe for journal-owned leases.
 """
+
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import replace
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -27,14 +26,27 @@ def _proof():
     return LocalLaceIntentProof("run-one", "step-1", 1, 2, "sha256:" + "d" * 64)
 
 
-def test_lace_recovery_native_record_survives_crash_and_refuses_unfenced_delete(tmp_path, monkeypatch):
-    root = tmp_path / "root"; root.mkdir()
-    state_dir = tmp_path / "cgstate"; state_dir.mkdir()
+def test_lace_recovery_native_record_survives_crash_and_refuses_unfenced_delete(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "root"
+    root.mkdir()
+    state_dir = tmp_path / "cgstate"
+    state_dir.mkdir()
     name = "attempt-" + "a" * 16
-    resource = root / name; resource.mkdir()
+    resource = root / name
+    resource.mkdir()
     record = state_dir / "a.json"
-    record.write_text(json.dumps({"pid": 99999, "process_identity": "dead-birth", "cgroup": name,
-                                  "lace_intent": lace_resource_binding(_proof())}))
+    record.write_text(
+        json.dumps(
+            {
+                "pid": 99999,
+                "process_identity": "dead-birth",
+                "cgroup": name,
+                "lace_intent": lace_resource_binding(_proof()),
+            }
+        )
+    )
     resource_kill = Mock()
     monkeypatch.setattr(cg, "_process_identity", lambda _pid: None)
     monkeypatch.setattr(cg, "_kill_cgroup", resource_kill)
@@ -57,11 +69,22 @@ def test_lace_recovery_native_record_survives_crash_and_refuses_unfenced_delete(
 
 
 def test_live_lace_lease_is_not_scavenged_by_parallel_resource_creator(tmp_path, monkeypatch):
-    root = tmp_path / "root"; root.mkdir()
-    state_dir = tmp_path / "cgstate"; state_dir.mkdir()
-    name = "attempt-" + "a" * 16; (root / name).mkdir()
-    (state_dir / "a.json").write_text(json.dumps({"pid": 22, "process_identity": "active", "cgroup": name,
-                                                  "lace_intent": lace_resource_binding(_proof())}))
+    root = tmp_path / "root"
+    root.mkdir()
+    state_dir = tmp_path / "cgstate"
+    state_dir.mkdir()
+    name = "attempt-" + "a" * 16
+    (root / name).mkdir()
+    (state_dir / "a.json").write_text(
+        json.dumps(
+            {
+                "pid": 22,
+                "process_identity": "active",
+                "cgroup": name,
+                "lace_intent": lace_resource_binding(_proof()),
+            }
+        )
+    )
     monkeypatch.setattr(cg, "_process_identity", lambda _pid: "active")
     cg._reconcile_stale_cgroups(root, state_dir)
 
@@ -70,13 +93,21 @@ def test_original_cgroup_and_network_records_write_same_journal_identity(tmp_pat
     # Existing transport test simulates post-provisioning; not a native custody grant.
     monkeypatch.setattr(net, "require_independent_native_parent_custody", lambda **_kwargs: None)
     binding = lace_resource_binding(_proof())
-    original = tmp_path / "cg"; original.mkdir()
-    state = tmp_path / "cgstate" / "c.json"; state.parent.mkdir()
+    original = tmp_path / "cg"
+    original.mkdir()
+    state = tmp_path / "cgstate" / "c.json"
+    state.parent.mkdir()
     policy = SimpleNamespace()
-    lease = cg.CgroupV2AttemptLease(root=original, cgroup=original,
-                                   state_file=state, lock_path=tmp_path / "cg.lock", policy=policy,
-                                   attempt_root=tmp_path / "attempt", lace_intent=binding,
-                                   cgroup_identity=cg._exact_cgroup_identity(original))
+    lease = cg.CgroupV2AttemptLease(
+        root=original,
+        cgroup=original,
+        state_file=state,
+        lock_path=tmp_path / "cg.lock",
+        policy=policy,
+        attempt_root=tmp_path / "attempt",
+        lace_intent=binding,
+        cgroup_identity=cg._exact_cgroup_identity(original),
+    )
     monkeypatch.setattr(cg, "_process_identity", lambda pid: "boot:1")
     cg._write_resource_lease(lease)
     recorded = json.loads(state.read_text())
@@ -92,34 +123,51 @@ def test_native_observer_rejects_changed_recovery_identity(tmp_path, monkeypatch
     cgroup = _cgroup(tmp_path, monkeypatch)
     original = json.loads(cgroup.state_file.read_text())
     original["lace_intent"] = lace_resource_binding(_proof())
-    cgroup.state_file.write_text(json.dumps(original)); cgroup.state_file.chmod(0o600)
-    result = collector.observe_local_allocation(cgroup, None, _observed_request(tmp_path), proof=_proof())
+    cgroup.state_file.write_text(json.dumps(original))
+    cgroup.state_file.chmod(0o600)
+    result = collector.observe_local_allocation(
+        cgroup, None, _observed_request(tmp_path), proof=_proof()
+    )
     assert result.cgroup_identity.startswith("sha256:")
     original["lace_intent"]["intent_run_seq"] = 88
-    cgroup.state_file.write_text(json.dumps(original)); cgroup.state_file.chmod(0o600)
+    cgroup.state_file.write_text(json.dumps(original))
+    cgroup.state_file.chmod(0o600)
     with pytest.raises(FleetPlanInvalid, match="does not bind original LACE journal"):
-        collector.observe_local_allocation(cgroup, None, _observed_request(tmp_path), proof=_proof())
-    cgroup.state_file.write_text(json.dumps({k:v for k,v in original.items() if k != "lace_intent"}))
+        collector.observe_local_allocation(
+            cgroup, None, _observed_request(tmp_path), proof=_proof()
+        )
+    cgroup.state_file.write_text(
+        json.dumps({k: v for k, v in original.items() if k != "lace_intent"})
+    )
     with pytest.raises(FleetPlanInvalid, match="differs from live executor"):
-        collector.observe_local_allocation(cgroup, None, _observed_request(tmp_path), proof=_proof())
+        collector.observe_local_allocation(
+            cgroup, None, _observed_request(tmp_path), proof=_proof()
+        )
 
 
 @pytest.mark.parametrize("attack", ["bad-type", "bad-digest", "no-intent-sequence"])
 def test_bad_transport_identity_does_not_authorize_any_native_record(attack):
     proof = _proof()
-    if attack == "bad-type": proof = object()
-    if attack == "bad-digest": proof = replace(proof, attempt_identity="foreign")
-    if attack == "no-intent-sequence": proof = replace(proof, run_seq=1)
+    if attack == "bad-type":
+        proof = object()
+    if attack == "bad-digest":
+        proof = replace(proof, attempt_identity="foreign")
+    if attack == "no-intent-sequence":
+        proof = replace(proof, run_seq=1)
     with pytest.raises(FleetPlanInvalid, match="original committed LACE identity"):
         lace_resource_binding(proof)
 
 
 def test_production_bubblewrap_tags_both_native_leases_before_open(tmp_path, monkeypatch):
     """No physical owner may be created without the same original journal identity."""
-    from oh_goon.integrations import fleet_plan_bubblewrap_isolation as owner
-    from tests.unit.integrations.test_b12c_live_prework_resource_bridge import _backend, _permit, _request
-    from tests.unit.core.test_enforcer_lace_trust import authenticator
     from oh_goon.core.errors import FleetPlanInvalid
+    from oh_goon.integrations import fleet_plan_bubblewrap_isolation as owner
+    from tests.unit.core.test_enforcer_lace_trust import authenticator
+    from tests.unit.integrations.test_b12c_live_prework_resource_bridge import (
+        _backend,
+        _permit,
+        _request,
+    )
 
     backend, _unused = _backend(monkeypatch)
     request = _request(tmp_path)
@@ -128,8 +176,12 @@ def test_production_bubblewrap_tags_both_native_leases_before_open(tmp_path, mon
     order = []
     cgroup = SimpleNamespace(lace_intent=None, close=Mock())
     network = SimpleNamespace(lace_intent=None, close=Mock())
-    expected = {"run_id": "run-one", "step_id": "step-1", "intent_run_seq": 2,
-                "attempt_identity": None}
+    expected = {
+        "run_id": "run-one",
+        "step_id": "step-1",
+        "intent_run_seq": 2,
+        "attempt_identity": None,
+    }
 
     def cgroup_open():
         order.append("cgroup")
@@ -148,13 +200,15 @@ def test_production_bubblewrap_tags_both_native_leases_before_open(tmp_path, mon
     assert network.lace_intent == expected
     network.open.assert_not_called()
     assert [e["kind"] for e in journal.verify("run-one", auth=authenticator())] == [
-        "RUN_ADMITTED", "RESOURCE_INTENT",
+        "RUN_ADMITTED",
+        "RESOURCE_INTENT",
     ]
     conn.close()
 
 
 def test_egress_precreate_recovery_rejection_never_tears_down_foreign_lease(tmp_path, monkeypatch):
     from tests.unit.integrations.test_b12_egress_teardown_truth import _lease
+
     lease = _lease(tmp_path)
     before = lease.state_file.read_bytes()
     cleanup = Mock()
@@ -162,9 +216,13 @@ def test_egress_precreate_recovery_rejection_never_tears_down_foreign_lease(tmp_
     # Test only the already-custody-approved recovery branch with a simulated
     # future host. Unqualified native refusal is separately regression tested.
     monkeypatch.setattr(net, "require_independent_native_parent_custody", lambda **_kwargs: None)
+
     def deny_before_creation():
         raise FleetPlanInvalid("orphaned LACE lease must be reconciled by journal")
-    monkeypatch.setattr(net, "_reconcile_stale_egress_leases", lambda _lease: deny_before_creation())
+
+    monkeypatch.setattr(
+        net, "_reconcile_stale_egress_leases", lambda _lease: deny_before_creation()
+    )
     with pytest.raises(FleetPlanInvalid, match="orphaned LACE"):
         lease.open(cancel_requested=None)
     cleanup.assert_not_called()

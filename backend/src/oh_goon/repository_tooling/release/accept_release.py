@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
@@ -11,16 +9,21 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
+from pathlib import Path
 
 from oh_goon.core import local_access_protocol
-from oh_goon.repository_tooling.release.check_release_artifact import release_artifact_issues
-from oh_goon.repository_tooling.local_access_http import authorized_request, new_certification_access_token
 from oh_goon.repository_tooling.acceptance.product import (
     exercise_location_lifecycle,
     exercise_product_api,
     exercise_product_runtime,
 )
 from oh_goon.repository_tooling.acceptance.shared_plan import exercise_shared_plan
+from oh_goon.repository_tooling.local_access_http import (
+    authorized_request,
+    new_certification_access_token,
+)
+from oh_goon.repository_tooling.release.check_release_artifact import release_artifact_issues
 
 ROOT = Path(__file__).resolve().parents[5]
 HOST = "127.0.0.1"
@@ -141,9 +144,7 @@ def _verify_installed_package_origin(
     venv = command.parent.parent.resolve()
     module_path = Path(lines[0]).resolve()
     if not module_path.is_relative_to(venv):
-        return (
-            f"installed release imported oh_goon outside clean venv: {module_path}",
-        )
+        return (f"installed release imported oh_goon outside clean venv: {module_path}",)
     if lines[1].strip() != expected_version:
         return (
             f"installed release imported version {lines[1].strip()!r}, expected {expected_version!r}",
@@ -179,7 +180,12 @@ def _accept_installed_runtime(
         html = _wait_http(f"{base_url}/")
         if b"<html" not in html.lower() and b"<!doctype html" not in html.lower():
             raise RuntimeError("installed release root did not return bundled HTML")
-        _request_json("POST", f"{base_url}/api/locations", access_token=access_token, payload={"path": str(repositories)})
+        _request_json(
+            "POST",
+            f"{base_url}/api/locations",
+            access_token=access_token,
+            payload={"path": str(repositories)},
+        )
         run_id = exercise_product_runtime(
             root=root,
             base_url=base_url,
@@ -208,27 +214,22 @@ def _accept_installed_runtime(
     try:
         _wait_http(f"{base_url}/healthz", process=process)
         locations = _request_json("GET", f"{base_url}/api/locations", access_token=access_token)
-        if not isinstance(locations, dict) or str(
-            repositories.resolve()
-        ) not in locations.get("locations", []):
+        if not isinstance(locations, dict) or str(repositories.resolve()) not in locations.get(
+            "locations", []
+        ):
             return ("installed release did not preserve location state across restart",)
-        historical_run = _request_json("GET", f"{base_url}/api/fleet/runs/{run_id}", access_token=access_token)
+        historical_run = _request_json(
+            "GET", f"{base_url}/api/fleet/runs/{run_id}", access_token=access_token
+        )
         if "acceptance-step" not in json.dumps(historical_run):
-            return (
-                "installed release did not preserve historical Game Tape across restart",
-            )
+            return ("installed release did not preserve historical Game Tape across restart",)
         shared_plan = _request_json(
             "GET",
             f"{base_url}/api/league/shared-plans/acceptance-shared",
             access_token=access_token,
         )
-        if (
-            not isinstance(shared_plan, dict)
-            or shared_plan.get("name") != "acceptance-shared"
-        ):
-            return (
-                "installed release did not preserve Shared Plan state across restart",
-            )
+        if not isinstance(shared_plan, dict) or shared_plan.get("name") != "acceptance-shared":
+            return ("installed release did not preserve Shared Plan state across restart",)
         post_restart_run_id = exercise_product_api(
             base_url=base_url,
             acceptance_repository=acceptance_repository,
@@ -315,9 +316,7 @@ def _install_locked_runtime(
     return venv
 
 
-def accept_release(
-    root: Path = ROOT, *, runner: Runner = subprocess.run
-) -> tuple[str, ...]:
+def accept_release(root: Path = ROOT, *, runner: Runner = subprocess.run) -> tuple[str, ...]:
     # build-release owns the one pre-materialization native lock-validity proof.
     # Do not preflight the same uv/npm state again here.
     runner(("make", "build-release"), cwd=root, check=True)
@@ -327,9 +326,7 @@ def accept_release(
     if artifact_issues := release_artifact_issues(root):
         return tuple(f"release artifact: {issue}" for issue in artifact_issues)
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
-    wheel = (
-        root / "generated" / "release" / "dist" / f"oh_goon-{version}-py3-none-any.whl"
-    )
+    wheel = root / "generated" / "release" / "dist" / f"oh_goon-{version}-py3-none-any.whl"
     if not wheel.is_file():
         return (f"verified release wheel is missing: {wheel.relative_to(root)}",)
 
@@ -337,12 +334,8 @@ def accept_release(
         temp = Path(temporary)
         venv = _install_locked_runtime(root, temp=temp, wheel=wheel, runner=runner)
         command = _venv_command(venv, "oh-goon")
-        runner(
-            (str(command), "--help"), cwd=temp, check=True, stdout=subprocess.DEVNULL
-        )
-        return _accept_installed_runtime(
-            root, command, temp, port=_allocate_acceptance_port()
-        )
+        runner((str(command), "--help"), cwd=temp, check=True, stdout=subprocess.DEVNULL)
+        return _accept_installed_runtime(root, command, temp, port=_allocate_acceptance_port())
 
 
 def main() -> int:

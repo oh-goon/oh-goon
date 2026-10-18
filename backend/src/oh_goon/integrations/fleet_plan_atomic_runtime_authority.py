@@ -9,7 +9,9 @@ from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
 from oh_goon.engine.atomic_execution_bytes import (
-    SealedExecutionBytes, seal_execution_bytes, verify_sealed_execution_descriptor,
+    SealedExecutionBytes,
+    seal_execution_bytes,
+    verify_sealed_execution_descriptor,
 )
 from oh_goon.engine.command import RuntimeAuthorityReceipt
 from oh_goon.integrations._fleet_plan_sandbox_launch import (
@@ -21,6 +23,7 @@ from oh_goon.integrations.fleet_plan_runtime_authority import (
     RuntimeAuthoritySources,
     expected_runtime_authority_sources,
 )
+
 
 @dataclass(frozen=True, slots=True)
 class AtomicRuntimeFile:
@@ -84,14 +87,16 @@ class AtomicRuntimeAuthorityLease:
         ):
             raise _divergence("atomic runtime interpreter FD not bound to original receipt")
         for runtime_file in files:
-            verify_sealed_execution_descriptor(SealedExecutionBytes(
-                descriptor=runtime_file.descriptor,
-                identity=runtime_file.identity,
-                byte_count=runtime_file.byte_count,
-                mode=runtime_file.mode,
-                kernel_device=runtime_file.kernel_device,
-                kernel_inode=runtime_file.kernel_inode,
-            ))
+            verify_sealed_execution_descriptor(
+                SealedExecutionBytes(
+                    descriptor=runtime_file.descriptor,
+                    identity=runtime_file.identity,
+                    byte_count=runtime_file.byte_count,
+                    mode=runtime_file.mode,
+                    kernel_device=runtime_file.kernel_device,
+                    kernel_inode=runtime_file.kernel_inode,
+                )
+            )
 
     def close(self) -> None:
         if self._closed:

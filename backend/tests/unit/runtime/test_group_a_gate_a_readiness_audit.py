@@ -40,7 +40,8 @@ def _authenticated_lifecycle(database: LocalDatabase) -> FleetRunLifecycle:
 
 @pytest.mark.parametrize("lineage_field", ["readmitted_from_run_id", "rerun_from_run_id"])
 def test_original_lifecycle_denies_authenticated_replay_before_provisioner(
-    tmp_path: Path, lineage_field: str,
+    tmp_path: Path,
+    lineage_field: str,
 ) -> None:
     lifecycle = _authenticated_lifecycle(LocalDatabase(tmp_path / "authority.db"))
     kwargs = {lineage_field: "parent"}
@@ -57,7 +58,13 @@ def test_real_journal_missing_child_cannot_initiate_authenticated_readmission(
     journal = Journal(database)
     repository = RepositoryIdentity(path=tmp_path / "repo")
     scope = fleet_repository_scope({repository.repository_id})
-    admit_run(journal, "parent", _intent("parent", repository, source=FleetRunSource.CICD), scope, [repository])
+    admit_run(
+        journal,
+        "parent",
+        _intent("parent", repository, source=FleetRunSource.CICD),
+        scope,
+        [repository],
+    )
     terminalize_run(journal, "parent", FleetRunTerminalIntent.FAIL, _placement_lost_failure())
     assert journal.read_view().readmission_child("parent") is None
 
@@ -82,11 +89,23 @@ def test_real_journal_existing_child_is_read_only_not_new_replay_authority(
     journal = Journal(database)
     repository = RepositoryIdentity(path=tmp_path / "repo")
     scope = fleet_repository_scope({repository.repository_id})
-    admit_run(journal, "parent", _intent("parent", repository, source=FleetRunSource.CICD), scope, [repository])
+    admit_run(
+        journal,
+        "parent",
+        _intent("parent", repository, source=FleetRunSource.CICD),
+        scope,
+        [repository],
+    )
     terminalize_run(journal, "parent", FleetRunTerminalIntent.FAIL, _placement_lost_failure())
     # This is a historical, already-admitted Journal child, not an authenticated
     # positive Replay issuer. The read path may return it but cannot recreate it.
-    admit_run(journal, "child", _intent("child", repository, parent_id="parent", source=FleetRunSource.CICD), scope, [repository])
+    admit_run(
+        journal,
+        "child",
+        _intent("child", repository, parent_id="parent", source=FleetRunSource.CICD),
+        scope,
+        [repository],
+    )
     original = journal.read_view().readmission_child("parent")
     assert original is not None
 

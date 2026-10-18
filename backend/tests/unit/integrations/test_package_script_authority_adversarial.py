@@ -163,7 +163,9 @@ def test_script_scanner_rejects_dynamic_nested_npx_paths_tokens_cycles_and_missi
         },
         lock_packages={},
     )
-    root = subject.derive_npm_run_authority(tmp_path, "root", chain=("root",), package_dir=directory)
+    root = subject.derive_npm_run_authority(
+        tmp_path, "root", chain=("root",), package_dir=directory
+    )
     text = "\n".join(root.unresolved)
     assert "dynamic npm script name" in text
     assert "npx execution" in text
@@ -188,7 +190,9 @@ def test_package_provider_contract_rejects_unavailable_selected_provider(tmp_pat
     payload["dependencies"] = {"a": "1", "b": "1"}
     payload["ohGoonExecutionAuthority"] = {"packageBinProviders": {"runner": "missing"}}
     (directory / "package.json").write_text(json.dumps(payload), encoding="utf-8")
-    authority = subject.derive_npm_run_authority(tmp_path, "test", chain=("test",), package_dir=directory)
+    authority = subject.derive_npm_run_authority(
+        tmp_path, "test", chain=("test",), package_dir=directory
+    )
     assert any("selects unavailable provider" in item for item in authority.unresolved)
 
 

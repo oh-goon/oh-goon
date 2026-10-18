@@ -33,8 +33,8 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     IsolatedProcessRequest,
     isolation_backend_evidence,
 )
-from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.bubblewrap_command import prepared_bubblewrap_command as _prepared
+from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import (
     TEST_ISOLATION_BACKEND,
     PhysicalFleetPlanExecutorHarness,
@@ -292,7 +292,11 @@ def test_cidr_egress_builds_kernel_allowlist_and_runs_bwrap_inside_netns(
         # Exit 0 alone is deliberately NOT cleanup proof.
         output = ""
         if "-j" in argv and argv[0] == "/usr/bin/true":
-            output = '{"nftables":[{"metainfo":{"version":"1"}}]}' if "nft" in argv or "tables" in argv else '[]'
+            output = (
+                '{"nftables":[{"metainfo":{"version":"1"}}]}'
+                if "nft" in argv or "tables" in argv
+                else "[]"
+            )
         return CommandResult(argv=tuple(argv), returncode=0, stdout=output, stderr="")
 
     monkeypatch.setattr(isolation, "run_command", fake_run)
@@ -481,7 +485,9 @@ def test_restricted_egress_reconciles_only_dead_owner_resources(
             ("-j", "link", "show"): "[]",
             ("-j", "list", "tables"): '{"nftables":[]}',
         }
-        return CommandResult(argv=tuple(argv), returncode=0, stdout=observations.get(argv[1:], ""), stderr="")
+        return CommandResult(
+            argv=tuple(argv), returncode=0, stdout=observations.get(argv[1:], ""), stderr=""
+        )
 
     retired: list[Path] = []
 
@@ -677,8 +683,9 @@ def test_hostname_resolution_changes_execution_input_identity(
 
 def test_sealed_attempt_outputs_rejects_cross_attempt_publication(tmp_path: Path) -> None:
     from types import SimpleNamespace
-    from oh_goon.integrations.fleet_plan_run import SealedAttemptOutputs
+
     from oh_goon.core.errors import FleetPlanInvalid
+    from oh_goon.integrations.fleet_plan_run import SealedAttemptOutputs
 
     first = tmp_path / "a"
     second = tmp_path / "b"
@@ -777,7 +784,9 @@ def test_callback_lifetime_regression_proof_goes_red_when_boundary_is_mutated(
 
     # Reintroduce the two pieces of the historical defect: preparation authority is
     # retained, and execution does not replace it with the live execution callback.
-    monkeypatch.setattr(_RunLineage, "clear_preparation_cancellation_observation", lambda self: None)
+    monkeypatch.setattr(
+        _RunLineage, "clear_preparation_cancellation_observation", lambda self: None
+    )
     monkeypatch.setattr(
         PreparedPlanRun,
         "bind_execution_cancel_requested",

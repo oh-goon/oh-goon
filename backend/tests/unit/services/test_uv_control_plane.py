@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 from oh_goon.core.capability_registry import capability_for
@@ -21,10 +20,10 @@ from oh_goon.core.vocabulary import (
 )
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.services.command_center import CommandCenterService
-from oh_goon.services.repository_discovery import RepositoryDiscoveryService
+from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.migration import MigrationService
 from oh_goon.services.repositories import RepositoryService
-from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
+from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.security import SecurityService
 from tests.factories.capabilities import (
     capability_request,
@@ -127,7 +126,9 @@ def test_command_center_and_security_are_target_aware_journal_projections(tmp_pa
 
     center = CommandCenterService(repositories, state).status()
     assert len(center.repository_ids) == 2
-    assert set(center.repository_ids) == {entry.repository.repository_id for entry in repositories.included(state.read_view())}
+    assert set(center.repository_ids) == {
+        entry.repository.repository_id for entry in repositories.included(state.read_view())
+    }
     lock = next(row for row in center.recipes if row.spec.recipe is UvRecipeId.LOCK_CHECK)
     audit = next(row for row in center.recipes if row.spec.recipe is UvRecipeId.AUDIT)
     assert (lock.successful, lock.needs_attention, lock.not_run) == (2, 0, 0)

@@ -3,13 +3,17 @@
 Loaded lazily by repository_understanding_material so the canonical material owner remains
 singular while large pure audit calculations stay independently maintainable.
 """
+
 from __future__ import annotations
 
 import re
 from typing import Any
 
 from oh_goon.repository_tooling.repository_understanding_blueprint import question_blueprint
-from oh_goon.repository_tooling.repository_understanding_graph import EVIDENCE_ROLE_POLICY_VERSION, evidence_expectation_roles
+from oh_goon.repository_tooling.repository_understanding_graph import (
+    EVIDENCE_ROLE_POLICY_VERSION,
+    evidence_expectation_roles,
+)
 from oh_goon.repository_tooling.repository_understanding_material import (
     ANSWERABILITY_POLICY_VERSION,
     BROAD_MISCONCEPTIONS,
@@ -22,6 +26,7 @@ from oh_goon.repository_tooling.repository_understanding_material import (
     _validate_evidence,
 )
 
+
 def _severity_encoded_misconception_ids(misconceptions: tuple[str, ...]) -> list[str]:
     return [
         name
@@ -31,7 +36,9 @@ def _severity_encoded_misconception_ids(misconceptions: tuple[str, ...]) -> list
 
 
 def _misconception_coverage_facts(questions: tuple[ExamQuestion, ...]) -> dict[str, Any]:
-    ownership = tuple(question for question in questions if question.blueprint_dimension == "ownership")
+    ownership = tuple(
+        question for question in questions if question.blueprint_dimension == "ownership"
+    )
     critical = tuple(question for question in questions if question.severity == "critical")
     counts = {name: 0 for name in MISCONCEPTIONS}
     contradiction_count = 0
@@ -46,14 +53,18 @@ def _misconception_coverage_facts(questions: tuple[ExamQuestion, ...]) -> dict[s
         "ownership": ownership,
         "critical": critical,
         "ownership_gaps": [question.id for question in ownership if not question.contradictions],
-        "critical_contradiction_gaps": [question.id for question in critical if not question.contradictions],
+        "critical_contradiction_gaps": [
+            question.id for question in critical if not question.contradictions
+        ],
         "critical_severity_gaps": [
-            question.id for question in critical
+            question.id
+            for question in critical
             if question.contradictions
             and not any(item.severity == "critical" for item in question.contradictions)
         ],
         "critical_claim_gaps": [
-            question.id for question in critical
+            question.id
+            for question in critical
             if not any(claim.critical for claim in question.expected_claims)
         ],
         "counts": counts,
@@ -75,7 +86,16 @@ def _misconception_coverage_audit(questions: tuple[ExamQuestion, ...]) -> dict[s
     misconception_counts = facts["counts"]
     broad_counts = {name: misconception_counts[name] for name in BROAD_MISCONCEPTIONS}
     broad_count = sum(broad_counts.values())
-    ready = not any((ownership_gaps, critical_contradiction_gaps, critical_severity_gaps, critical_claim_gaps, taxonomy_gaps, severity_encoded_ids))
+    ready = not any(
+        (
+            ownership_gaps,
+            critical_contradiction_gaps,
+            critical_severity_gaps,
+            critical_claim_gaps,
+            taxonomy_gaps,
+            severity_encoded_ids,
+        )
+    )
     return {
         "policy_version": MISCONCEPTION_COVERAGE_POLICY_VERSION,
         "question_count": len(questions),
@@ -87,18 +107,25 @@ def _misconception_coverage_audit(questions: tuple[ExamQuestion, ...]) -> dict[s
         "specific_contradiction_count": facts["contradiction_count"] - broad_count,
         "covered_misconception_count": len(MISCONCEPTIONS) - len(taxonomy_gaps),
         "misconception_count": len(MISCONCEPTIONS),
-        "taxonomy_gap_count": len(taxonomy_gaps), "taxonomy_gaps": taxonomy_gaps,
-        "severity_encoded_id_count": len(severity_encoded_ids), "severity_encoded_ids": severity_encoded_ids,
+        "taxonomy_gap_count": len(taxonomy_gaps),
+        "taxonomy_gaps": taxonomy_gaps,
+        "severity_encoded_id_count": len(severity_encoded_ids),
+        "severity_encoded_ids": severity_encoded_ids,
         "ownership_question_count": len(ownership),
         "ownership_with_contradiction_count": len(ownership) - len(ownership_gaps),
-        "ownership_gap_count": len(ownership_gaps), "ownership_gaps": ownership_gaps,
+        "ownership_gap_count": len(ownership_gaps),
+        "ownership_gaps": ownership_gaps,
         "critical_question_count": len(critical),
         "critical_with_contradiction_count": len(critical) - len(critical_contradiction_gaps),
-        "critical_contradiction_gap_count": len(critical_contradiction_gaps), "critical_contradiction_gaps": critical_contradiction_gaps,
-        "critical_with_critical_severity_contradiction_count": len(critical) - len(critical_severity_gaps),
-        "critical_severity_gap_count": len(critical_severity_gaps), "critical_severity_gaps": critical_severity_gaps,
+        "critical_contradiction_gap_count": len(critical_contradiction_gaps),
+        "critical_contradiction_gaps": critical_contradiction_gaps,
+        "critical_with_critical_severity_contradiction_count": len(critical)
+        - len(critical_severity_gaps),
+        "critical_severity_gap_count": len(critical_severity_gaps),
+        "critical_severity_gaps": critical_severity_gaps,
         "critical_with_critical_claim_count": len(critical) - len(critical_claim_gaps),
-        "critical_claim_gap_count": len(critical_claim_gaps), "critical_claim_gaps": critical_claim_gaps,
+        "critical_claim_gap_count": len(critical_claim_gaps),
+        "critical_claim_gaps": critical_claim_gaps,
         "status": "READY" if ready else "READY_WITH_COVERAGE_GAPS",
         "rule": (
             "every ownership-blueprint question must grade at least one explicit wrong-owner or authority misconception; "
@@ -110,7 +137,10 @@ def _misconception_coverage_audit(questions: tuple[ExamQuestion, ...]) -> dict[s
         ),
     }
 
-def _assert_misconception_coverage_release_ready(questions: tuple[ExamQuestion, ...]) -> dict[str, Any]:
+
+def _assert_misconception_coverage_release_ready(
+    questions: tuple[ExamQuestion, ...],
+) -> dict[str, Any]:
     audit = _misconception_coverage_audit(questions)
     if (
         audit["ownership_gap_count"]
@@ -172,7 +202,6 @@ def _evidence_authority_audit(questions: tuple[ExamQuestion, ...]) -> dict[str, 
     }
 
 
-
 def _external_answerability_audit(
     questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]
 ) -> dict[str, Any]:
@@ -192,7 +221,11 @@ def _external_answerability_audit(
         qid = lifecycle_row["id"]
         question = by_id[qid]
         refs = list(question.evidence_expectations)
-        blind_prompt = bool(question.prompt.strip()) and CANDIDATE_GOLD_MARKER not in question.prompt and INLINE_SOURCE_REFERENCE.search(question.prompt) is None
+        blind_prompt = (
+            bool(question.prompt.strip())
+            and CANDIDATE_GOLD_MARKER not in question.prompt
+            and INLINE_SOURCE_REFERENCE.search(question.prompt) is None
+        )
         external_refs = True
         for reference in refs:
             try:
@@ -204,7 +237,11 @@ def _external_answerability_audit(
         roles = evidence_expectation_roles(refs, blueprint["minimum_evidence_authority"])
         minimum_met = bool(roles["declared_minimum_met"])
         eligible_state = lifecycle_row["state"] in {"SHADOW", "CALIBRATING"}
-        status = "STATICALLY_ANSWERABLE" if blind_prompt and refs and external_refs and minimum_met and eligible_state else "BLOCKED"
+        status = (
+            "STATICALLY_ANSWERABLE"
+            if blind_prompt and refs and external_refs and minimum_met and eligible_state
+            else "BLOCKED"
+        )
         row = {
             "id": qid,
             "lifecycle_state": lifecycle_row["state"],
@@ -233,7 +270,9 @@ def _external_answerability_audit(
     }
 
 
-def _assert_external_answerability_ready(questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]) -> dict[str, Any]:
+def _assert_external_answerability_ready(
+    questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]
+) -> dict[str, Any]:
     audit = _external_answerability_audit(questions, lifecycle)
     if audit["gap_count"]:
         raise ValueError(
@@ -308,13 +347,15 @@ def _question_health_maintenance_audit(
         lifecycle_row = lifecycle_by_id[question.id]
         if lifecycle_row["qualification_bank_member"]:
             continue
-        rows.append(_question_health_row(
-            question,
-            lifecycle_row=lifecycle_row,
-            audit_row=audit_by_id[question.id],
-            answerability_row=answerability_by_id[question.id],
-            duplicate_ids=sorted(duplicate_peers[question.id]),
-        ))
+        rows.append(
+            _question_health_row(
+                question,
+                lifecycle_row=lifecycle_row,
+                audit_row=audit_by_id[question.id],
+                answerability_row=answerability_by_id[question.id],
+                duplicate_ids=sorted(duplicate_peers[question.id]),
+            )
+        )
     blockers = [row for row in rows if row["structural_status"] != "READY"]
     return {
         "policy_version": QUESTION_HEALTH_MAINTENANCE_POLICY_VERSION,
@@ -323,10 +364,16 @@ def _question_health_maintenance_audit(
         "structurally_ready_count": len(rows) - len(blockers),
         "structural_blocker_count": len(blockers),
         "status": "READY" if not blockers else "BLOCKED",
-        "questions": rows, "blockers": blockers,
+        "questions": rows,
+        "blockers": blockers,
         "health_state_authority": "SECRET_QUESTION_AUDIT",
-        "automatic_health_mutation": False, "automatic_lifecycle_transition": False,
-        "semantic_states_requiring_independent_review": ["AMBIGUOUS", "MULTIPLE_VALID_ANSWERS", "TRIVIALLY_LEAKED"],
+        "automatic_health_mutation": False,
+        "automatic_lifecycle_transition": False,
+        "semantic_states_requiring_independent_review": [
+            "AMBIGUOUS",
+            "MULTIPLE_VALID_ANSWERS",
+            "TRIVIALLY_LEAKED",
+        ],
         "empirical_states_requiring_observations": ["NON_DISCRIMINATING"],
         "rule": (
             "machine-provable structural defects or duplicate-like PUBLIC prompts block shadow promotion; "
@@ -334,6 +381,7 @@ def _question_health_maintenance_audit(
             "never mutates SECRET question health, and never owns lifecycle transitions"
         ),
     }
+
 
 def _assert_question_health_maintenance_ready(
     questions: tuple[ExamQuestion, ...],
@@ -348,4 +396,3 @@ def _assert_question_health_maintenance_ready(
             + ", ".join(row["id"] for row in report["blockers"])
         )
     return report
-

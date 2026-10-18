@@ -57,7 +57,6 @@ class _BoundedCancellationProbe:
             return observed
 
 
-
 @dataclass(frozen=True, slots=True)
 class ExecutionTicket:
     """Opaque admission token passed from request admission to the worker."""
@@ -234,11 +233,17 @@ class ExecutionCoordinator:
         return session
 
     def transfer_dead_fleet_to_recovery_in(
-        self, connection: sqlite3.Connection, *, run_id: str,
-        predecessor_token: str, predecessor_epoch: int,
+        self,
+        connection: sqlite3.Connection,
+        *,
+        run_id: str,
+        predecessor_token: str,
+        predecessor_epoch: int,
     ) -> tuple[ExecutionTicket, dict[str, str | int]]:
         lease, predecessor = self._leases.transfer_dead_fleet_to_recovery_in(
-            connection, run_id=run_id, predecessor_token=predecessor_token,
+            connection,
+            run_id=run_id,
+            predecessor_token=predecessor_token,
             predecessor_epoch=predecessor_epoch,
         )
         return ExecutionTicket(lease, recovery_only=True), predecessor

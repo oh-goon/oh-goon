@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+import oh_goon.integrations._fleet_plan_runtime_root as runtime_root
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import (
@@ -28,29 +29,28 @@ from oh_goon.core.models.fleet_plan_step_contract import (
 from oh_goon.core.models.fleet_plan_values import HostEnvironmentPart, ResolvedEnvironmentBinding
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.path_authority import StrictHostPathAuthority
-from oh_goon.core.path_layouts import RunPathLayout, SANDBOX_PATHS
+from oh_goon.core.path_layouts import SANDBOX_PATHS, RunPathLayout
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
-import oh_goon.integrations._fleet_plan_runtime_root as runtime_root
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
+from oh_goon.integrations._fleet_plan_sandbox_launch import _sandbox_environment
 from oh_goon.integrations.content_snapshot import snapshot_directory
 from oh_goon.integrations.content_snapshot_dereferenced import snapshot_directory_dereferenced
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
-from oh_goon.integrations._fleet_plan_sandbox_launch import _sandbox_environment
 from oh_goon.integrations.fleet_plan_run import PreparedPlanRun, _teardown_step_attempts
-from tests.factories.runtime_authority import authorized_command_result
-from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.bubblewrap_command import prepared_bubblewrap_command as _prepared
+from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import (
     TEST_ISOLATION_BACKEND,
     PhysicalFleetPlanExecutorHarness,
     prepare_physical_test_run,
-    strict_test_plan,
     source_authority_for_test,
+    strict_test_plan,
 )
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
+from tests.factories.runtime_authority import authorized_command_result
 
 
 class _UnitProcessIsolation:
@@ -205,9 +205,7 @@ def test_bound_host_tool_is_frozen_and_live_host_mutation_is_irrelevant(
         path_authority=authority,
     ) as session:
         attempt = session.create_attempt(step, 1)
-        binding = next(
-            item for item in attempt.host_tools if item.name == "fleet-test-tool"
-        )
+        binding = next(item for item in attempt.host_tools if item.name == "fleet-test-tool")
         frozen_before = binding.snapshot_path.read_text(encoding="utf-8")
         tool.write_text("#!/bin/sh\nexit 9\n", encoding="utf-8")
         _prepared(
@@ -342,9 +340,7 @@ def test_strict_preparation_rejects_source_drift_after_admission(tmp_path: Path)
     seed_cicd_repository(repository)
     authored = repository / "tracked.txt"
     authored.write_text("before\n", encoding="utf-8")
-    plan = _cicd(
-        ResolvedCommandStep(timeout_seconds=60, step_id="check", argv=("true",))
-    )
+    plan = _cicd(ResolvedCommandStep(timeout_seconds=60, step_id="check", argv=("true",)))
     repository_identity = RepositoryIdentity(path=repository)
     admitted_source = source_authority_for_test(repository_identity)
     authored.write_text("after\n", encoding="utf-8")
@@ -409,7 +405,9 @@ def test_step_attempts_and_snapshots_are_released_after_last_consumer(
     executor = _executor()
     monkeypatch.setattr(
         "oh_goon.integrations.fleet_plan_step_execution.run_command",
-        lambda *argv, **kwargs: authorized_command_result(argv=tuple(argv), returncode=0, stdout="", stderr=""),
+        lambda *argv, **kwargs: authorized_command_result(
+            argv=tuple(argv), returncode=0, stdout="", stderr=""
+        ),
     )
 
     session = executor.prepare_strict_run(
@@ -724,7 +722,9 @@ def test_uv_system_python_exact_prepared_path_is_preserved_as_runtime_alias(
     monkeypatch.setattr(runtime_root, "_dynamic_dependencies", lambda *args, **kwargs: set())
     monkeypatch.setattr(runtime_root, "_python_runtime_directories", lambda _python: set())
     monkeypatch.setattr(runtime_root, "_nss_runtime_files", lambda _files: set())
-    monkeypatch.setattr(runtime_root, "_materialize_host_tool_runtime_support", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        runtime_root, "_materialize_host_tool_runtime_support", lambda *args, **kwargs: None
+    )
 
     def freeze_file(source: Path, target: Path, **_kwargs: object) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -768,7 +768,9 @@ def test_uv_system_python_exact_prepared_path_is_preserved_as_runtime_alias(
     )
 
     assert binding.uv_system_python == PurePosixPath(str(selected_python))
-    exact = destination / selected_python.relative_to("/") if selected_python.is_absolute() else None
+    exact = (
+        destination / selected_python.relative_to("/") if selected_python.is_absolute() else None
+    )
     # tmp_path is absolute, so the selected uv-visible path must exist in the frozen root
     # and contain the same immutable bytes as its dereferenced interpreter.
     assert exact is not None
@@ -842,7 +844,9 @@ def test_teardown_failure_is_recorded_and_stops_later_steps(
     executor = _executor()
     monkeypatch.setattr(
         "oh_goon.integrations.fleet_plan_step_execution.run_command",
-        lambda *argv, **kwargs: authorized_command_result(argv=tuple(argv), returncode=0, stdout="", stderr=""),
+        lambda *argv, **kwargs: authorized_command_result(
+            argv=tuple(argv), returncode=0, stdout="", stderr=""
+        ),
     )
     original = PreparedPlanRun.release_step
     calls = 0
@@ -930,7 +934,9 @@ def test_python_runtime_native_dependencies_ignore_non_native_stdlib_files(
     assert calls == []
 
 
-def test_private_attempt_teardown_handles_read_only_materialized_directories(tmp_path: Path) -> None:
+def test_private_attempt_teardown_handles_read_only_materialized_directories(
+    tmp_path: Path,
+) -> None:
     run_root = tmp_path / "run"
     layout = RunPathLayout.from_root(run_root)
     attempt = layout.attempt_root("dependency-materialize", 1)

@@ -4,6 +4,7 @@ The registry never acquires source bytes or authorizes execution. A Gitlink pin
 is checked against Git object identities *for the bytes read by AG-01*; no
 network operation or independent skill copier exists here.
 """
+
 from __future__ import annotations
 
 import configparser
@@ -31,12 +32,19 @@ _REVISION = re.compile(r"[0-9a-f]{40}")
 
 
 def _valid_path(value: str) -> bool:
-    return (bool(value) and not value.startswith("/") and "\\" not in value
-            and all(33 <= ord(c) <= 126 for c in value)
-            and all(part and part not in {".", ".."} and not part.startswith(".")
-                    for part in value.split("/"))
-            and str(PurePosixPath(value)) == value and ":" not in value
-            and all(c.isalnum() or c in "-_./" for c in value))
+    return (
+        bool(value)
+        and not value.startswith("/")
+        and "\\" not in value
+        and all(33 <= ord(c) <= 126 for c in value)
+        and all(
+            part and part not in {".", ".."} and not part.startswith(".")
+            for part in value.split("/")
+        )
+        and str(PurePosixPath(value)) == value
+        and ":" not in value
+        and all(c.isalnum() or c in "-_./" for c in value)
+    )
 
 
 def _git(cwd: Path, *args: str, missing_ok: bool = False) -> bytes:
@@ -46,10 +54,22 @@ def _git(cwd: Path, *args: str, missing_ok: bool = False) -> bytes:
     """
     try:
         result = GitService().run(
-            "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
-            "-c", "submodule.recurse=false", *args, cwd=cwd, timeout=10,
-            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0",
-                 "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull},
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "submodule.recurse=false",
+            *args,
+            cwd=cwd,
+            timeout=10,
+            env={
+                **os.environ,
+                "GIT_OPTIONAL_LOCKS": "0",
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+            },
         )
     except (OSError, RuntimeError) as exc:
         raise FleetPlanInvalid("SKILL-2 Git metadata is not locally accessible") from exc
@@ -84,7 +104,8 @@ class GitlinkSkillPin:
             raise FleetPlanInvalid("SKILL-2 requires a SHA-1 Gitlink repository")
         entry = _git(root, "ls-tree", "-z", "HEAD", "--", self.gitlink)
         match = re.fullmatch(
-            rb"160000 commit ([0-9a-f]{40})\t" + re.escape(self.gitlink.encode()) + rb"\x00", entry,
+            rb"160000 commit ([0-9a-f]{40})\t" + re.escape(self.gitlink.encode()) + rb"\x00",
+            entry,
         )
         if match is None or match.group(1).decode() != self.revision:
             raise FleetPlanInvalid("SKILL-2 declared revision does not match committed Gitlink")
@@ -107,7 +128,7 @@ class GitlinkSkillPin:
             raise FleetPlanInvalid("SKILL-2 checkout HEAD differs from Gitlink pin")
         if _git(checkout, "status", "--porcelain", "--untracked-files=all"):
             raise FleetPlanInvalid("SKILL-2 Gitlink checkout has modified or untracked content")
-        inside = self.path[len(self.gitlink):].lstrip("/")
+        inside = self.path[len(self.gitlink) :].lstrip("/")
         return checkout, inside
 
     def verify(self, root: Path, captured: FrozenSourceTree | None = None) -> None:
@@ -118,7 +139,11 @@ class GitlinkSkillPin:
         from being falsely described as the committed Gitlink.
         """
         checkout, inside = self._context(root)
-        tree_args = ("ls-tree", "-r", "-z", "HEAD", "--", inside) if inside else ("ls-tree", "-r", "-z", "HEAD")
+        tree_args = (
+            ("ls-tree", "-r", "-z", "HEAD", "--", inside)
+            if inside
+            else ("ls-tree", "-r", "-z", "HEAD")
+        )
         entries = _git(checkout, *tree_args).split(b"\x00")
         expected: dict[str, str] = {}
         for entry in entries:
@@ -131,7 +156,7 @@ class GitlinkSkillPin:
             if inside:
                 if not full_path.startswith(inside + "/"):
                     raise FleetPlanInvalid("SKILL-2 Git tree source escaped skill selection")
-                full_path = full_path[len(inside) + 1:]
+                full_path = full_path[len(inside) + 1 :]
             if not full_path or full_path in expected:
                 raise FleetPlanInvalid("SKILL-2 duplicate or empty Git member")
             expected[full_path] = match.group(2).decode()
@@ -139,7 +164,9 @@ class GitlinkSkillPin:
             raise FleetPlanInvalid("SKILL-2 pinned Git tree lacks SKILL.md")
         if captured is not None:
             observed = {
-                m.path: hashlib.sha1(b"blob " + str(len(m.data)).encode() + b"\x00" + m.data).hexdigest()
+                m.path: hashlib.sha1(
+                    b"blob " + str(len(m.data)).encode() + b"\x00" + m.data
+                ).hexdigest()
                 for m in captured.members
             }
             if observed != expected:
@@ -180,14 +207,19 @@ def read_goonskills(path: Path) -> FrozenSkillRegistry:
         with os.fdopen(fd, "rb", closefd=False) as file:
             raw = file.read(_MAX_BYTES + 1)
         after = os.fstat(fd)
-        if (len(raw) > _MAX_BYTES or before.st_size != len(raw)
-                or (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_ctime_ns)
-                != (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_ctime_ns)):
+        if (
+            len(raw) > _MAX_BYTES
+            or before.st_size != len(raw)
+            or (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_ctime_ns)
+            != (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_ctime_ns)
+        ):
             raise FleetPlanInvalid("SKILL-1 registry changed while being read or exceeds budget")
     finally:
         os.close(fd)
     try:
-        parser = configparser.ConfigParser(interpolation=None, strict=True, default_section="DEFAULT")
+        parser = configparser.ConfigParser(
+            interpolation=None, strict=True, default_section="DEFAULT"
+        )
         parser.optionxform = str
         parser.read_string(raw.decode("utf-8"))
     except (UnicodeError, configparser.Error) as exc:
@@ -211,19 +243,29 @@ def read_goonskills(path: Path) -> FrozenSkillRegistry:
         elif source == "gitlink" and set(data) == {"path", "source", "gitlink", "revision"}:
             link = data["gitlink"]
             commit = data["revision"]
-            if (not _valid_path(link) or not _REVISION.fullmatch(commit)
-                    or not (value == link or value.startswith(link + "/"))):
+            if (
+                not _valid_path(link)
+                or not _REVISION.fullmatch(commit)
+                or not (value == link or value.startswith(link + "/"))
+            ):
                 raise FleetPlanInvalid("SKILL-2 invalid Gitlink path or immutable revision")
             pin = GitlinkSkillPin(path=value, gitlink=link, revision=commit)
             pins[name] = pin
             aliases[name] = pin.reference
         else:
-            raise FleetPlanInvalid("SKILL-1/2 requires source = local or pinned gitlink with exact fields")
-    return FrozenSkillRegistry(sha256=hashlib.sha256(raw).hexdigest(),
-                               aliases=MappingProxyType(aliases), pins=MappingProxyType(pins))
+            raise FleetPlanInvalid(
+                "SKILL-1/2 requires source = local or pinned gitlink with exact fields"
+            )
+    return FrozenSkillRegistry(
+        sha256=hashlib.sha256(raw).hexdigest(),
+        aliases=MappingProxyType(aliases),
+        pins=MappingProxyType(pins),
+    )
 
 
-def original_skill_aliases(plan_path: Path, explicit_aliases: Mapping[str, str] | None) -> Mapping[str, str] | None:
+def original_skill_aliases(
+    plan_path: Path, explicit_aliases: Mapping[str, str] | None
+) -> Mapping[str, str] | None:
     """Exactly one source of aliases; AG-01 still owns expansion and capture."""
     registry = plan_path.parent / ".goonskills"
     if not os.path.lexists(registry):

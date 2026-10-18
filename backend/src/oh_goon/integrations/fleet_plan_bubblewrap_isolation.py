@@ -6,15 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from oh_goon.core.ports.local_lace_intent import LocalLaceIntentProof
-from oh_goon.integrations.fleet_plan_local_lace_allocation import observe_local_allocation
-from oh_goon.integrations.fleet_plan_local_lace_intent import (
-    local_resource_identities, prepared_original_native_mounts,
-    require_original_agent_source_mount_authority,
-)
-from oh_goon.integrations.fleet_plan_local_lace_recovery import lace_resource_binding
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_isolation import (
@@ -22,18 +14,20 @@ from oh_goon.core.models.fleet_plan_isolation import (
     IsolationKernelBoundary,
 )
 from oh_goon.core.path_layouts import SANDBOX_PATHS
-from oh_goon.engine.command_supervision import CommandRuntimeSupervision
+from oh_goon.core.ports.local_lace_intent import LocalLaceIntentProof
+from oh_goon.core.product_identity import stable_id
 from oh_goon.engine.command import (
     CommandOutputObserver,
     CommandProcessObserver,
     CommandResult,
     run_command,
 )
+from oh_goon.engine.command_supervision import CommandRuntimeSupervision
 from oh_goon.integrations._fleet_plan_cgroup_resources import (
-    CgroupV2AttemptLease,
     NESTED_CGROUP_DELEGATED_ENV,
     NESTED_CGROUP_PROCESS_SUBGROUP,
     NESTED_CGROUP_SUBGROUP_ENV,
+    CgroupV2AttemptLease,
     cgroup_configuration_identity,
     require_cgroup_v2_host,
 )
@@ -45,17 +39,25 @@ from oh_goon.integrations._fleet_plan_restricted_egress import (
 from oh_goon.integrations._fleet_plan_runtime_root import verify_runtime_root
 from oh_goon.integrations._fleet_plan_sandbox_launch import sandbox_process_launch
 from oh_goon.integrations.content_snapshot import verify_snapshot
+from oh_goon.integrations.fleet_plan_atomic_runtime_authority import (
+    AtomicRuntimeAuthorityLease,
+    bind_atomic_runtime_authority,
+)
+from oh_goon.integrations.fleet_plan_bind_source_custody import (
+    OriginalBindSourceLease,
+    require_bubblewrap_fd_binding,
+)
+from oh_goon.integrations.fleet_plan_local_lace_allocation import observe_local_allocation
+from oh_goon.integrations.fleet_plan_local_lace_intent import (
+    local_resource_identities,
+    prepared_original_native_mounts,
+    require_original_agent_source_mount_authority,
+)
+from oh_goon.integrations.fleet_plan_local_lace_recovery import lace_resource_binding
 from oh_goon.integrations.fleet_plan_process_isolation import (
     MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
     IsolatedProcessRequest,
     verify_selected_backend,
-)
-from oh_goon.integrations.fleet_plan_bind_source_custody import (
-    OriginalBindSourceLease, require_bubblewrap_fd_binding,
-)
-from oh_goon.integrations.fleet_plan_atomic_runtime_authority import (
-    AtomicRuntimeAuthorityLease,
-    bind_atomic_runtime_authority,
 )
 from oh_goon.integrations.source_snapshot import verify_clean_source_snapshot
 
@@ -100,7 +102,9 @@ class BubblewrapProcessIsolation:
         self.ip_executable = ip_executable
         self.nft_executable = nft_executable
         self.egress_pool = egress_pool
-        control_root = control_state_root or Path.home() / ".local" / "share" / "oh-goon" / "executor-control"
+        control_root = (
+            control_state_root or Path.home() / ".local" / "share" / "oh-goon" / "executor-control"
+        )
         self.egress_lock = egress_lock or control_root / "egress.lock"
         self.egress_state_dir = egress_state_dir or control_root / "egress"
         self.cgroup_root = cgroup_root
@@ -157,28 +161,35 @@ class BubblewrapProcessIsolation:
         # Strict opt-in: journal commit precedes cgroup/native network/mount effects.
         # No synthetic intent, implicit admission, or fallback when required.
         if self.require_local_resource_intent and request.local_resource_intent is None:
-            raise FleetPlanInvalid("authenticated local LACE RESOURCE_INTENT missing before physical work")
+            raise FleetPlanInvalid(
+                "authenticated local LACE RESOURCE_INTENT missing before physical work"
+            )
         if request.local_resource_intent is not None:
             if not callable(getattr(request.local_resource_intent, "reserve", None)):
                 raise FleetPlanInvalid("original local LACE reservation owner required")
             proof = request.local_resource_intent.reserve(request, self)
-            if (type(proof) is not LocalLaceIntentProof
-                    or proof.run_id != request.fleet_run_id
-                    or proof.step_id != request.step_id
-                    or proof.command_ordinal != request.command_ordinal
-                    or type(proof.run_seq) is not int or proof.run_seq < 2
-                    or type(proof.attempt_identity) is not str
-                    or not proof.attempt_identity.startswith("sha256:")
-                    or len(proof.attempt_identity) != 71
-                    or type(proof.mounts_identity) is not str
-                    or not proof.mounts_identity.startswith("sha256:")
-                    or len(proof.mounts_identity) != 71):
+            if (
+                type(proof) is not LocalLaceIntentProof
+                or proof.run_id != request.fleet_run_id
+                or proof.step_id != request.step_id
+                or proof.command_ordinal != request.command_ordinal
+                or type(proof.run_seq) is not int
+                or proof.run_seq < 2
+                or type(proof.attempt_identity) is not str
+                or not proof.attempt_identity.startswith("sha256:")
+                or len(proof.attempt_identity) != 71
+                or type(proof.mounts_identity) is not str
+                or not proof.mounts_identity.startswith("sha256:")
+                or len(proof.mounts_identity) != 71
+            ):
                 raise FleetPlanInvalid("local LACE journal did not return exact committed intent")
             _require_original_signed_mount_identity(request, proof.mounts_identity)
         if self.require_local_resource_intent and not callable(
             getattr(request.local_resource_intent, "observe", None)
         ):
-            raise FleetPlanInvalid("original local LACE allocation recorder required before physical work")
+            raise FleetPlanInvalid(
+                "original local LACE allocation recorder required before physical work"
+            )
         if self.require_local_resource_intent and not callable(
             getattr(request.local_resource_intent, "require_effect_authority", None)
         ):
@@ -193,6 +204,7 @@ class BubblewrapProcessIsolation:
         termination_requested = request.termination_requested
         effective_cancel_requested = cancel_requested
         if termination_requested is not None:
+
             def effective_cancel_requested() -> bool:
                 if termination_requested() is not None:
                     return True
@@ -233,7 +245,9 @@ class BubblewrapProcessIsolation:
                 if self.require_local_resource_intent:
                     # The collector reads original cgroup and native network owner
                     # state; it cannot accept workload-supplied resource names.
-                    observed = observe_local_allocation(resource_lease, network_lease, request, proof=proof)
+                    observed = observe_local_allocation(
+                        resource_lease, network_lease, request, proof=proof
+                    )
                     request.local_resource_intent.observe(proof, observed)
                 if request.attempt.nested_strict_execution:
                     mount_source_lease.pin_dynamic_cgroup(resource_lease.nested_delegation)
@@ -258,7 +272,9 @@ class BubblewrapProcessIsolation:
                     # One last original-lease check immediately before process
                     # handoff. This is not a claim about kernel mount teardown.
                     inherited_fds = _require_original_native_fd_handoff(
-                        argv, atomic_authority, mount_source_lease,
+                        argv,
+                        atomic_authority,
+                        mount_source_lease,
                     )
                     require_effect_authority()
                     result = run_command(
@@ -334,22 +350,26 @@ def _require_original_native_fd_handoff(
     # This is the completed Bubblewrap argv, unlike the pre-command mount
     # builder. A lost separator must not let Step-controlled tokens count as
     # mount options or otherwise impersonate the original signed FD roster.
-    if '--' not in argv or argv.index('--') == 0 or argv.index('--') == len(argv) - 1:
-        raise FleetPlanInvalid('Original Bubblewrap child-command boundary missing')
+    if "--" not in argv or argv.index("--") == 0 or argv.index("--") == len(argv) - 1:
+        raise FleetPlanInvalid("Original Bubblewrap child-command boundary missing")
     atomic_authority.verify_kernel_custody()
     mount_source_lease.verify_fd_argv(list(argv))
     atomic_fds = atomic_authority.pass_fds
     mount_fds = mount_source_lease.pass_fds
     inherited_fds = (*atomic_fds, *mount_fds)
-    if (not atomic_fds or not mount_fds or
-            any(type(fd) is not int or fd < 3 for fd in inherited_fds) or
-            len(set(inherited_fds)) != len(inherited_fds)):
-        raise FleetPlanInvalid('Original sealed and native bind FD custody overlaps or is invalid')
+    if (
+        not atomic_fds
+        or not mount_fds
+        or any(type(fd) is not int or fd < 3 for fd in inherited_fds)
+        or len(set(inherited_fds)) != len(inherited_fds)
+    ):
+        raise FleetPlanInvalid("Original sealed and native bind FD custody overlaps or is invalid")
     return inherited_fds
 
 
 def _close_local_resource_leases(
-    network_lease: RestrictedEgressLease | None, resource_lease: CgroupV2AttemptLease,
+    network_lease: RestrictedEgressLease | None,
+    resource_lease: CgroupV2AttemptLease,
 ) -> None:
     """Try both native teardown owners even if the first one fails.
 
@@ -371,7 +391,8 @@ def _close_local_resource_leases(
 
 
 def _require_original_signed_mount_identity(
-    request: IsolatedProcessRequest, signed_mounts_identity: str,
+    request: IsolatedProcessRequest,
+    signed_mounts_identity: str,
 ) -> None:
     """Consume one original signed mount meaning, never infer mount authority.
 
@@ -379,9 +400,13 @@ def _require_original_signed_mount_identity(
     independent kernel mount or teardown proof. Agent source remains denied by
     require_original_agent_source_mount_authority at both effect boundaries.
     """
-    if (type(signed_mounts_identity) is not str
-            or local_resource_identities(request)["mounts"] != signed_mounts_identity):
-        raise FleetPlanInvalid("Bubblewrap mount sources differ from original signed RESOURCE_INTENT")
+    if (
+        type(signed_mounts_identity) is not str
+        or local_resource_identities(request)["mounts"] != signed_mounts_identity
+    ):
+        raise FleetPlanInvalid(
+            "Bubblewrap mount sources differ from original signed RESOURCE_INTENT"
+        )
 
 
 def _prepare_mounts(
@@ -400,7 +425,7 @@ def _prepare_mounts(
     # Both the original RESOURCE_INTENT and the final mount builder consume
     # that exact identity; the compiler must not re-infer it from the request.
     if request.local_resource_intent is not None and signed_mounts_identity is None:
-        raise FleetPlanInvalid('Original signed RESOURCE_INTENT mount identity required at launch')
+        raise FleetPlanInvalid("Original signed RESOURCE_INTENT mount identity required at launch")
     if signed_mounts_identity is not None:
         _require_original_signed_mount_identity(request, signed_mounts_identity)
     verify_runtime_root(request.attempt.runtime_root)
@@ -438,11 +463,11 @@ def _prepare_mounts(
     if not any(binding.sandbox_path == SANDBOX_PATHS.cache for binding in attempt.sandbox_bindings):
         args.extend(("--bind", str(attempt.paths.cache), str(SANDBOX_PATHS.cache)))
     args.extend(("--bind", str(attempt.paths.config), str(SANDBOX_PATHS.config)))
-    if getattr(request, 'agent_source_mount', None) is not None:
-        mount = getattr(request, 'agent_source_mount', None)
+    if getattr(request, "agent_source_mount", None) is not None:
+        mount = getattr(request, "agent_source_mount", None)
         # Physical entry still refuses this path; once native custody is
         # qualified, it must be the SAME source/target/mode as signed intent.
-        args.extend(('--ro-bind', mount.source, mount.target))
+        args.extend(("--ro-bind", mount.source, mount.target))
     _append_managed_inputs(args, request)
     _append_toolchain(args, request.attempt.host_tools)
     _append_atomic_execution_mounts(args, atomic_authority)
@@ -455,9 +480,9 @@ def _prepare_mounts(
     return args
 
 
-
 def _require_original_native_mount_argv(
-    args: list[str], request: IsolatedProcessRequest,
+    args: list[str],
+    request: IsolatedProcessRequest,
     atomic_authority: AtomicRuntimeAuthorityLease,
     nested_cgroup_root: Path | None,
 ) -> None:
@@ -477,25 +502,26 @@ def _require_original_native_mount_argv(
         for mount in prepared_original_native_mounts(request)
     ]
     if nested_cgroup_root is not None:
-        expected.append(('--bind', str(nested_cgroup_root), '/sys/fs/cgroup'))
+        expected.append(("--bind", str(nested_cgroup_root), "/sys/fs/cgroup"))
     expected += [
-        ('--ro-bind', str(b.snapshot_path), str(b.sandbox_path))
-        for b in attempt.sandbox_bindings
+        ("--ro-bind", str(b.snapshot_path), str(b.sandbox_path)) for b in attempt.sandbox_bindings
     ]
     for t in attempt.host_tools:
-        expected.append(('--ro-bind', str(t.execution_snapshot_path),
-                         str(SANDBOX_PATHS.toolchain / t.name)))
-        if t.name == 'sh':
-            expected.append(('--ro-bind', str(t.execution_snapshot_path), '/bin/sh'))
+        expected.append(
+            ("--ro-bind", str(t.execution_snapshot_path), str(SANDBOX_PATHS.toolchain / t.name))
+        )
+        if t.name == "sh":
+            expected.append(("--ro-bind", str(t.execution_snapshot_path), "/bin/sh"))
     expected += [
-        ('--ro-bind-data', str(f.descriptor), str(f.sandbox_path))
+        ("--ro-bind-data", str(f.descriptor), str(f.sandbox_path))
         for f in atomic_authority.bubblewrap_bindings
     ]
-    if getattr(request, 'agent_source_mount', None) is not None:
+    if getattr(request, "agent_source_mount", None) is not None:
         # A sealed --ro-bind-data is still an overlay: it must not shadow
         # any path below (or enclosing) the signed Agent source. Reuse the
         # original mount-descriptor rule rather than inventing another rule.
         from oh_goon.core.ports.original_mount_intent import require_unshadowed_agent_mount_targets
+
         try:
             require_unshadowed_agent_mount_targets(
                 tuple(target for _, _, target in expected),
@@ -507,26 +533,44 @@ def _require_original_native_mount_argv(
     # bind or substituted sealed FD. Only the original builder constructs argv.
     # Fail-closed on a new mount-producing Bubblewrap switch: future mounts
     # must first join the original prepared-resource inventory.
-    forbidden = {'--bind-try', '--ro-bind-try', '--dev-bind', '--dev-bind-try',
-                 '--tmpfs', '--overlay', '--ro-overlay', '--file', '--dir', '--symlink'}
+    forbidden = {
+        "--bind-try",
+        "--ro-bind-try",
+        "--dev-bind",
+        "--dev-bind-try",
+        "--tmpfs",
+        "--overlay",
+        "--ro-overlay",
+        "--file",
+        "--dir",
+        "--symlink",
+    }
     if any(flag in forbidden for flag in args):
-        raise FleetPlanInvalid('Bubblewrap unregistered native mount switch')
-    observed = [tuple(args[i:i+3]) for i, value in enumerate(args)
-                if value in ('--bind', '--ro-bind', '--ro-bind-data')]
-    if (len(observed) != len(expected)
-            or len(set(observed)) != len(observed)
-            or sorted(observed) != sorted(expected)
-            or len({target for _, _, target in observed}) != len(observed)):
-        raise FleetPlanInvalid('Bubblewrap native mount argv differs from original prepared resources')
-    for option, target in (('--proc', str(SANDBOX_PATHS.proc)),
-                           ('--dev', str(SANDBOX_PATHS.dev))):
-        if sum(args[i:i+2] == [option, target] for i in range(len(args)-1)) != 1:
-            raise FleetPlanInvalid('Bubblewrap synthetic native mount differs from prepared target')
+        raise FleetPlanInvalid("Bubblewrap unregistered native mount switch")
+    observed = [
+        tuple(args[i : i + 3])
+        for i, value in enumerate(args)
+        if value in ("--bind", "--ro-bind", "--ro-bind-data")
+    ]
+    if (
+        len(observed) != len(expected)
+        or len(set(observed)) != len(observed)
+        or sorted(observed) != sorted(expected)
+        or len({target for _, _, target in observed}) != len(observed)
+    ):
+        raise FleetPlanInvalid(
+            "Bubblewrap native mount argv differs from original prepared resources"
+        )
+    for option, target in (("--proc", str(SANDBOX_PATHS.proc)), ("--dev", str(SANDBOX_PATHS.dev))):
+        if sum(args[i : i + 2] == [option, target] for i in range(len(args) - 1)) != 1:
+            raise FleetPlanInvalid("Bubblewrap synthetic native mount differs from prepared target")
     for f in atomic_authority.bubblewrap_bindings:
-        item = ['--ro-bind-data', str(f.descriptor), str(f.sandbox_path)]
-        at = next((i for i in range(len(args)-2) if args[i:i+3] == item), -1)
-        if at < 2 or args[at-2:at] != ['--perms', f'{f.mode:o}']:
-            raise FleetPlanInvalid('Bubblewrap sealed runtime FD or mode differs from original authority')
+        item = ["--ro-bind-data", str(f.descriptor), str(f.sandbox_path)]
+        at = next((i for i in range(len(args) - 2) if args[i : i + 3] == item), -1)
+        if at < 2 or args[at - 2 : at] != ["--perms", f"{f.mode:o}"]:
+            raise FleetPlanInvalid(
+                "Bubblewrap sealed runtime FD or mode differs from original authority"
+            )
     # The root and writable/atomic targets are still NOT signed as a complete
     # independent native resource envelope; never promote this to Gate B.
 

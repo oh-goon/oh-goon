@@ -8,7 +8,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from oh_goon.runtime.database import LocalDatabase
 from oh_goon.repository_tooling.network_certification import blocked_network_attempts
 from oh_goon.repository_tooling.release.runtime_journey import (
     prepare_acceptance_repository,
@@ -29,6 +28,7 @@ from oh_goon.repository_tooling.scout_http_load_probe import (
     _stop_server,
     _wait_json,
 )
+from oh_goon.runtime.database import LocalDatabase
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,9 +48,7 @@ class ScoutReverseProxyResult:
 
 
 def _nginx_version(executable: str) -> str:
-    result = subprocess.run(
-        [executable, "-v"], text=True, capture_output=True, check=True
-    )
+    result = subprocess.run([executable, "-v"], text=True, capture_output=True, check=True)
     return (result.stderr or result.stdout).strip()
 
 
@@ -96,9 +94,7 @@ def _start_nginx(
     (prefix / "proxy_temp").mkdir()
     config = prefix / "nginx.conf"
     config.write_text(
-        _nginx_config(
-            prefix=prefix, listen_port=listen_port, upstream_port=upstream_port
-        ),
+        _nginx_config(prefix=prefix, listen_port=listen_port, upstream_port=upstream_port),
         encoding="utf-8",
     )
     process = subprocess.Popen(
@@ -116,11 +112,7 @@ def _stop_process(process: subprocess.Popen[bytes]) -> str:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=5)
-    return (
-        process.stderr.read().decode("utf-8", errors="replace")
-        if process.stderr
-        else ""
-    )
+    return process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
 
 
 def _prepare_proxy_state(
@@ -144,14 +136,10 @@ def _prepare_proxy_state(
         port=backend_port,
         loopback_guard_log=guard_log,
     )
-    proxy, version = _start_nginx(
-        temp=temp, listen_port=proxy_port, upstream_port=backend_port
-    )
+    proxy, version = _start_nginx(temp=temp, listen_port=proxy_port, upstream_port=backend_port)
     base = f"http://127.0.0.1:{proxy_port}"
     try:
-        _wait_json(
-            f"http://127.0.0.1:{backend_port}/api/health", process=backend
-        )
+        _wait_json(f"http://127.0.0.1:{backend_port}/api/health", process=backend)
         _wait_json(f"{base}/api/health", process=proxy)
         run_acceptance_goon(
             base_url=base,
@@ -162,9 +150,7 @@ def _prepare_proxy_state(
         proxy_error = _stop_process(proxy)
         _stop_server(backend)
     if proxy.returncode not in (0, -15):
-        raise RuntimeError(
-            f"nginx failed during acceptance setup: {proxy_error[-4000:]}"
-        )
+        raise RuntimeError(f"nginx failed during acceptance setup: {proxy_error[-4000:]}")
     database = LocalDatabase(state)
     revision = _journal_revision(database)
     observations = _seed_scout_sidecar(
@@ -196,15 +182,11 @@ def _run_proxy_workload(
         port=backend_port,
         loopback_guard_log=guard_log,
     )
-    proxy, _ = _start_nginx(
-        temp=temp, listen_port=proxy_port, upstream_port=backend_port
-    )
+    proxy, _ = _start_nginx(temp=temp, listen_port=proxy_port, upstream_port=backend_port)
     base = f"http://127.0.0.1:{proxy_port}"
     failure: BaseException | None = None
     try:
-        _wait_json(
-            f"http://127.0.0.1:{backend_port}/api/health", process=backend
-        )
+        _wait_json(f"http://127.0.0.1:{backend_port}/api/health", process=backend)
         _wait_json(f"{base}/api/health", process=proxy)
         routes = _representative_routes(base)
         route_latencies = _measure_routes(routes)
@@ -226,9 +208,7 @@ def _run_proxy_workload(
             + json.dumps(attempts[:5], sort_keys=True)
         ) from failure
     if failure is not None:
-        raise RuntimeError(
-            f"{failure}\nnginx stderr:\n{proxy_error[-8000:]}"
-        ) from failure
+        raise RuntimeError(f"{failure}\nnginx stderr:\n{proxy_error[-8000:]}") from failure
     return route_latencies, concurrent_total, latencies
 
 
@@ -287,9 +267,7 @@ def run_reverse_proxy_certification(
 
 
 def main() -> int:
-    print(
-        json.dumps(asdict(run_reverse_proxy_certification()), indent=2, sort_keys=True)
-    )
+    print(json.dumps(asdict(run_reverse_proxy_certification()), indent=2, sort_keys=True))
     return 0
 
 

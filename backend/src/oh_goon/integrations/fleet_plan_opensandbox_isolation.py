@@ -5,10 +5,10 @@ import hashlib
 import json
 import os
 import re
-from datetime import UTC, datetime
 from collections.abc import Callable
-from pathlib import Path
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Protocol
 
 from cryptography.exceptions import InvalidSignature
@@ -20,25 +20,25 @@ from oh_goon.core.errors import (
     ExecutorPlacementLost,
     FleetPlanInvalid,
 )
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_isolation import (
     IsolationBackendCapabilities,
     IsolationKernelBoundary,
 )
-from oh_goon.engine.command_supervision import CommandRuntimeSupervision
+from oh_goon.core.models.termination import TerminationSignal
+from oh_goon.core.product_identity import stable_id
 from oh_goon.engine.command import (
     CommandOutputObserver,
     CommandProcessObserver,
     CommandResult,
     RuntimeAuthorityReceipt,
 )
+from oh_goon.engine.command_supervision import CommandRuntimeSupervision
 from oh_goon.integrations.fleet_plan_process_isolation import (
     IsolatedProcessRequest,
     verify_selected_backend,
 )
 from oh_goon.integrations.fleet_plan_runtime_authority import expected_runtime_authority_sources
-from oh_goon.core.models.termination import TerminationSignal
 
 _RUNNER_PROTOCOL = 4
 
@@ -173,7 +173,9 @@ class OpenSandboxProcessIsolation:
     ) -> CommandResult:
         del process_observer
         if runtime_supervision is not None:
-            raise FleetPlanInvalid("OpenSandbox runtime supervision requires remote canonical signal transport")
+            raise FleetPlanInvalid(
+                "OpenSandbox runtime supervision requires remote canonical signal transport"
+            )
         verify_selected_backend(self, request)
         try:
             self._transport.require_available(self.settings)
@@ -306,7 +308,9 @@ def _validate_runtime_attestation(settings: OpenSandboxSettings) -> None:
         "expires_at",
     }
     if set(claims) != required:
-        raise FleetPlanInvalid("OpenSandbox runtime attestation claims are incomplete or contain unknown authority fields")
+        raise FleetPlanInvalid(
+            "OpenSandbox runtime attestation claims are incomplete or contain unknown authority fields"
+        )
     expected = {
         "schema": "oh-goon.opensandbox-runtime-attestation.v1",
         "domain": settings.domain,
@@ -328,12 +332,18 @@ def _validate_runtime_attestation(settings: OpenSandboxSettings) -> None:
     if issued > now:
         raise FleetPlanInvalid("OpenSandbox runtime attestation is not yet valid")
     if expires <= now or expires <= issued:
-        raise FleetPlanInvalid("OpenSandbox runtime attestation is expired or has an invalid validity window")
-    canonical = json.dumps(claims, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        raise FleetPlanInvalid(
+            "OpenSandbox runtime attestation is expired or has an invalid validity window"
+        )
+    canonical = json.dumps(claims, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "utf-8"
+    )
     try:
         signature = base64.b64decode(signature_text, validate=True)
     except Exception as exc:
-        raise FleetPlanInvalid("OpenSandbox runtime attestation signature is not valid base64") from exc
+        raise FleetPlanInvalid(
+            "OpenSandbox runtime attestation signature is not valid base64"
+        ) from exc
     try:
         key = serialization.load_pem_public_key(key_path.read_bytes())
     except (OSError, ValueError, TypeError) as exc:
@@ -343,7 +353,9 @@ def _validate_runtime_attestation(settings: OpenSandboxSettings) -> None:
     try:
         key.verify(signature, canonical)
     except InvalidSignature as exc:
-        raise FleetPlanInvalid("OpenSandbox runtime attestation signature verification failed") from exc
+        raise FleetPlanInvalid(
+            "OpenSandbox runtime attestation signature verification failed"
+        ) from exc
 
 
 def _attestation_time(value: object, *, field: str) -> datetime:
@@ -352,8 +364,9 @@ def _attestation_time(value: object, *, field: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise FleetPlanInvalid(f"OpenSandbox runtime attestation {field} is not valid RFC3339") from exc
+        raise FleetPlanInvalid(
+            f"OpenSandbox runtime attestation {field} is not valid RFC3339"
+        ) from exc
     if parsed.tzinfo is None:
         raise FleetPlanInvalid(f"OpenSandbox runtime attestation {field} must include timezone")
     return parsed.astimezone(UTC)
-

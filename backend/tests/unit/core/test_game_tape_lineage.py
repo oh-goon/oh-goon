@@ -1,16 +1,7 @@
 from __future__ import annotations
+
 import hashlib
-from datetime import timedelta
-from pathlib import Path
 
-import pytest
-
-from oh_goon.core.game_tape_comparison import compare_game_tapes
-from oh_goon.core.game_tape_run_facts import (
-    project_issue_focus,
-    project_repository_failure_focus,
-)
-from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet_plan import (
     ResolvedCommandStep,
     ResolvedFleetPlan,
@@ -18,7 +9,6 @@ from oh_goon.core.models.fleet_plan import (
 )
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
-    FailedPlanStepExecution,
     FailedPlanStepTeardownEvidence,
     FleetPlanResult,
     PlanEgressEvidence,
@@ -30,7 +20,6 @@ from oh_goon.core.models.fleet_plan_evidence import (
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
 from oh_goon.core.models.fleet_plan_retry import (
     AttemptsExhaustedPlanRetryDecisionEvidence,
-    ScheduledPlanRetryDecisionEvidence,
 )
 from oh_goon.core.models.fleet_plan_values import (
     HostEnvironmentPart,
@@ -38,35 +27,12 @@ from oh_goon.core.models.fleet_plan_values import (
     ResolvedEnvironmentBinding,
 )
 from oh_goon.core.models.goon_plan_source import PlanFileSource
-from oh_goon.core.models.operation import FleetPlanOperationEvidence
-from oh_goon.core.models.provenance import RepositoryStateFingerprint
-from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.run import (
-    CompletedFleetRun,
-    FailedFleetRun,
-    FleetRunDetail,
-    FleetRunFailure,
-    FleetRunProgress,
-    RunningFleetRun,
-)
-from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, fleet_repository_scope
 from oh_goon.core.models.target import FleetPlanTarget
-from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
-    FleetRunOutcome,
-    FleetRunStatus,
-    GameTapeEventType,
     GameTapeStatus,
-    GitBranchState,
-    OperationAction,
-    Verdict,
-    WorktreeState,
 )
-from tests.factories.capabilities import capability_snapshot
-from tests.factories.canonical_journal import CanonicalFleetJournalBuilder
 from tests.factories.fleet_plan_targets import structural_execution_identity
-from tests.factories.operation_reports import make_operation_report
-from oh_goon.core.product_identity import repository_attempt_operation_id
+
 
 def _output(text: str) -> PlanOutputEvidence:
     encoded = text.encode()
@@ -163,9 +129,7 @@ def _assert_tape_derived_views_are_not_source_facts(tape) -> None:
 def test_game_tape_marks_successful_command_with_failed_teardown_as_failed() -> None:
     from oh_goon.core.game_tape_step_projection import project_steps
 
-    planned = ResolvedCommandStep(
-        timeout_seconds=60, step_id="cleanup-sensitive", argv=("true",)
-    )
+    planned = ResolvedCommandStep(timeout_seconds=60, step_id="cleanup-sensitive", argv=("true",))
     execution = CompletedPlanStepExecution(
         step_id="cleanup-sensitive",
         kind="command",
@@ -239,7 +203,9 @@ def test_game_tape_projects_canonical_shard_execution_identities_behaviorally() 
     assert projected.execution_policy_identity == shard_execution.execution_policy_identity
 
 
-def test_game_tape_projects_hashmarks_described_work_and_oh_goon_attempt_lineage_separately() -> None:
+def test_game_tape_projects_hashmarks_described_work_and_oh_goon_attempt_lineage_separately() -> (
+    None
+):
     from oh_goon.core.game_tape_projection import _shard_lineage
     from oh_goon.core.models.shard_execution import (
         CanonicalShardAttemptEvidence,

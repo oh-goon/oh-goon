@@ -1,5 +1,7 @@
 """Transport-only local physical intent port; no journal/issuer dependencies."""
+
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -7,6 +9,7 @@ from typing import Protocol
 @dataclass(frozen=True, slots=True)
 class LocalLaceIntentProof:
     """Acknowledgment of a committed intent, not physical containment evidence."""
+
     run_id: str
     step_id: str
     command_ordinal: int

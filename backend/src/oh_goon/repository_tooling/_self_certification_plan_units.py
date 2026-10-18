@@ -3,46 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
-import shutil
-import tempfile
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
 
 from oh_goon.core.file_digest import sha256_file_with_size, update_digest_from_file
-from oh_goon.repository_tooling.release.package_slim import (
-    archive_source_identity,
-    canonical_source_files,
-    canonical_source_identity,
-    package_slim,
-)
-from oh_goon.repository_tooling.self_certification_artifacts import (
-    build_artifact_manifest,
-    build_artifact_sidecars,
-    build_cumulative_patch,
-    build_handoff,
-    cumulative_patch_path,
-    load_cumulative_patch_evidence,
-    load_fresh_zip_evidence,
-    load_handoff_evidence,
-    load_manifest_evidence,
-    load_parent_source_input,
-    load_patch_replay_evidence,
-    load_persist_evidence,
-    load_retained_readback_evidence,
-    load_sidecar_evidence,
-    manifest_path,
-    parent_checkpoint_spec,
-    parent_input_path,
-    persist_artifact_set,
-    retained_artifact_directory,
-    stage_parent_source_zip,
-    verify_cumulative_patch_replay,
-    verify_fresh_source_zip,
-    verify_retained_artifact_set,
-)
 
 PLAN_NAME = "builtin:self-verification-v4"
 SCRIPTS_SURFACE = "scripts-non-certification"
@@ -69,6 +34,7 @@ INHERITED_CLOSURE_CONTRACTS: dict[str, tuple[str, ...]] = {
         "init-doctor-diagnostic-only",
     ),
 }
+
 
 def _source_gate_dependencies(source_units: list[dict[str, object]]) -> dict[str, tuple[str, ...]]:
     script_units = tuple(
@@ -275,10 +241,17 @@ def _direct_unit_specs() -> tuple[dict[str, object], ...]:
             "strategy": "bounded",
             "execution_budget_seconds": 240,
             "command": [
-                "backend/.venv/bin/python", "-m", "pytest", "-c", "backend/pyproject.toml",
-                "backend/tests/integration", "tests/integration",
-                "--ignore", LIFECYCLE_INTEGRATION_FILES[0],
-                "--ignore", LIFECYCLE_INTEGRATION_FILES[1],
+                "backend/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-c",
+                "backend/pyproject.toml",
+                "backend/tests/integration",
+                "tests/integration",
+                "--ignore",
+                LIFECYCLE_INTEGRATION_FILES[0],
+                "--ignore",
+                LIFECYCLE_INTEGRATION_FILES[1],
             ],
         },
         *_lifecycle_certification_unit_specs(),
@@ -309,8 +282,14 @@ def _direct_unit_specs() -> tuple[dict[str, object], ...]:
             "strategy": "bounded",
             "execution_budget_seconds": 120,
             "command": [
-                "backend/.venv/bin/python", "-m", "compileall", "-q",
-                "backend/src", "backend/tests", "scripts", "tests",
+                "backend/.venv/bin/python",
+                "-m",
+                "compileall",
+                "-q",
+                "backend/src",
+                "backend/tests",
+                "scripts",
+                "tests",
             ],
         },
         {
@@ -323,10 +302,13 @@ def _direct_unit_specs() -> tuple[dict[str, object], ...]:
     )
 
 
-
 def _executable_identity(root: Path, command: list[str]) -> dict[str, object]:
     executable = command[0] if command else ""
-    candidate = (root / executable) if executable and not Path(executable).is_absolute() else Path(executable)
+    candidate = (
+        (root / executable)
+        if executable and not Path(executable).is_absolute()
+        else Path(executable)
+    )
     if not executable or not candidate.is_file():
         return {"executable": executable, "state": "UNAVAILABLE"}
     try:
@@ -345,6 +327,7 @@ def _executable_identity(root: Path, command: list[str]) -> dict[str, object]:
 
 def _toolchain_identity(root: Path, unit: dict[str, object]) -> str:
     return _sha256_json(_executable_identity(root, list(unit["command"])))
+
 
 def _source_units(root: Path) -> list[dict[str, object]]:
     units: list[dict[str, object]] = []

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-from collections.abc import Callable
 import json
 import os
 import re
@@ -9,12 +7,12 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
 from oh_goon.core.strict_executor_authority import EXECUTORS_FILE_ENV
 from oh_goon.repository_tooling import certification_bootstrap_protocol
-
 
 ROOT = Path.cwd().resolve()
 APP_PLAN = "templates/plans/oh-goon/app-certification/plan.yml"
@@ -89,7 +87,9 @@ ENVIRONMENT_HINTS = (
 )
 
 
-def _run_capture(args: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def _run_capture(
+    args: list[str], *, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
         cwd=ROOT,
@@ -130,7 +130,9 @@ def _wait_for_process_group_exit(proc: subprocess.Popen[str], pgid: int) -> bool
     return not _process_group_exists(pgid)
 
 
-def _terminate_owned_process_group(proc: subprocess.Popen[str], *, first_signal: int = signal.SIGINT) -> None:
+def _terminate_owned_process_group(
+    proc: subprocess.Popen[str], *, first_signal: int = signal.SIGINT
+) -> None:
     """Boundedly stop the exact process group created for one workflow child."""
 
     if proc.poll() is not None:
@@ -203,6 +205,7 @@ def _classify(rendered: str) -> str:
         return "application"
     return "environment" if any(hint in lowered for hint in ENVIRONMENT_HINTS) else "application"
 
+
 def _app_attempted_dependency_acquisition(rendered: str) -> bool:
     lowered = rendered.lower()
     return any(hint in lowered for hint in APP_FORBIDDEN_ACQUISITION_HINTS)
@@ -227,7 +230,6 @@ def _certification_product_version() -> str:
     if _PRODUCT_VERSION.fullmatch(value) is None:
         raise RuntimeError(f"VERSION must contain canonical x.y.z product identity, got {value!r}")
     return value
-
 
 
 def _backend_cli_executable() -> str:
@@ -274,7 +276,9 @@ def _backend_cli(
             start_new_session=(os.name != "nt"),
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        return subprocess.CompletedProcess(command, 127, stdout=f"Cannot run {' '.join(command)}: {exc}\n")
+        return subprocess.CompletedProcess(
+            command, 127, stdout=f"Cannot run {' '.join(command)}: {exc}\n"
+        )
     assert proc.stdout is not None
     lines: list[str] = []
     try:
@@ -289,6 +293,7 @@ def _backend_cli(
     finally:
         if proc.poll() is None:
             _terminate_owned_process_group(proc, first_signal=signal.SIGTERM)
+
 
 class CertificationContextFailure(RuntimeError):
     def __init__(self, message: str, *, classification: str) -> None:
@@ -332,9 +337,7 @@ def _certification_environment(
                 pass
         rendered_command = "oh-goon " + " ".join(command)
         raise CertificationContextFailure(
-            f"{CERTIFICATION_CONTEXT_FAILURE_PREFIX}\n"
-            f"Command: {rendered_command}\n"
-            f"{message}",
+            f"{CERTIFICATION_CONTEXT_FAILURE_PREFIX}\nCommand: {rendered_command}\n{message}",
             classification=classification,
         )
 
@@ -411,7 +414,9 @@ def _fail_bootstrap(
         print("\nAPPLICATION FAILED")
         print(message)
         print("This is a source/bootstrap defect, not an environment failure.")
-        print(f"Give the complete output above to the coding agent, then rerun: {final_command} after repair.")
+        print(
+            f"Give the complete output above to the coding agent, then rerun: {final_command} after repair."
+        )
     print("No certification Goon ran.")
     return 2
 
@@ -457,24 +462,20 @@ def _run_plan(
         result = _backend_cli(command, env=env)
         if result.returncode != 0:
             rendered_command = "oh-goon " + " ".join(command)
-            output = (
-                f"{BOOTSTRAP_FAILURE_PREFIX}\n"
-                f"Command: {rendered_command}\n"
-                f"{result.stdout}"
-            )
+            output = f"{BOOTSTRAP_FAILURE_PREFIX}\nCommand: {rendered_command}\n{result.stdout}"
             return result.returncode, output
 
     plan_args = [
-            "plan",
-            "run",
-            plan,
-            "--repository-id",
-            repo_id,
-            *input_args,
-            "--lock-file",
-            str(lock_path),
-            "--wait",
-            "--repair-handoff",
+        "plan",
+        "run",
+        plan,
+        "--repository-id",
+        repo_id,
+        *input_args,
+        "--lock-file",
+        str(lock_path),
+        "--wait",
+        "--repair-handoff",
     ]
     if deployment_plan_run is not None:
         # Explicit same-process deployment handoff: only APP, never verify or
@@ -486,7 +487,10 @@ def _run_plan(
 
 
 def _require_current_app_pass(
-    *, repo_id: str, env: dict[str, str], lock_root: Path,
+    *,
+    repo_id: str,
+    env: dict[str, str],
+    lock_root: Path,
     fleet_run_id: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Ask the backend evidence owner whether current source has canonical APP PASS."""
@@ -523,7 +527,8 @@ def _prepare_plan_context(*, command: str) -> tuple[str, dict[str, str], Path] |
 
 
 def _run_self_plan(
-    command: str, *,
+    command: str,
+    *,
     deployment_plan_run: Callable[[list[str], dict[str, str]], tuple[int, str]] | None = None,
     deployment_context_guard: Callable[[dict[str, str]], str | None] | None = None,
     deployment_fleet_run_id: str | None = None,
@@ -554,9 +559,15 @@ def _run_self_plan(
     if deployment_plan_run is not None:
         deployment_owner = deployment_plan_run
         expected_args = [
-            "plan", "run", APP_PLAN, "--repository-id", repo_id,
-            "--lock-file", str(_plan_lock_path(lock_root, APP_PLAN)),
-            "--wait", "--repair-handoff",
+            "plan",
+            "run",
+            APP_PLAN,
+            "--repository-id",
+            repo_id,
+            "--lock-file",
+            str(_plan_lock_path(lock_root, APP_PLAN)),
+            "--wait",
+            "--repair-handoff",
         ]
 
         def guarded_deployment_run(args: list[str], child_env: dict[str, str]) -> tuple[int, str]:
@@ -590,7 +601,9 @@ def _run_self_plan(
         # The in-process callback is transport, not APP PASS authority. The
         # canonical persisted success verifier must independently agree.
         confirmed = _require_current_app_pass(
-            repo_id=repo_id, env=env, lock_root=lock_root,
+            repo_id=repo_id,
+            env=env,
+            lock_root=lock_root,
             fleet_run_id=deployment_fleet_run_id,
         )
         if confirmed.returncode != 0:
@@ -599,7 +612,9 @@ def _run_self_plan(
     if rc == 0:
         print(f"\n{descriptor['success']}")
         if command == "certify":
-            print("APP certification passed for this exact checkout and native locked dependency materialization.")
+            print(
+                "APP certification passed for this exact checkout and native locked dependency materialization."
+            )
         return 0
     if tail.startswith(BOOTSTRAP_FAILURE_PREFIX):
         return _fail_bootstrap(
@@ -647,7 +662,8 @@ def run_app_for_deployment(
     print("OH-GOON CERTIFICATION IDENTITY")
     print(f"Product version: {product_version}", flush=True)
     return _run_self_plan(
-        "certify", deployment_plan_run=deployment_plan_run,
+        "certify",
+        deployment_plan_run=deployment_plan_run,
         deployment_context_guard=deployment_context_guard,
         deployment_fleet_run_id=fleet_run_id,
     )
@@ -659,9 +675,10 @@ def run_self_verify() -> int:
         print("OH_GOON_SELF_VERIFICATION_STATUS=COMPLETE")
     else:
         print("OH_GOON_SELF_VERIFICATION_STATUS=INCOMPLETE")
-        print("Self-verification execution did not complete successfully; missing proof is not a test failure.")
+        print(
+            "Self-verification execution did not complete successfully; missing proof is not a test failure."
+        )
     return rc
-
 
 
 def self_plan_descriptor(command: str) -> dict[str, object]:
@@ -676,47 +693,45 @@ def self_plan_descriptor(command: str) -> dict[str, object]:
 
 
 def _render_app_failure(*, rc: int, tail: str) -> int:
-        if (
-            rc == 2
-            and "Fleet Run ID:" not in tail
-            and (
-                certification_bootstrap_protocol.is_missing_fleet_provisioning(tail)
-            )
-        ):
-            # The original runtime lifecycle owns this denial. Certification only
-            # reports it; it must never substitute a key, issuer, executor or
-            # enrollment to turn a missing deployment authority into APP PASS.
-            print("\nBLOCKED BY FLEET ENFORCER PROVISIONING")
-            print("An exact Fleet Run has no explicitly enrolled native Enforcer authority.")
-            print(
-                "Provision the Run through the deployment's original FleetPreworkProvisioner "
-                "with trusted public roots, native issuer and executor inventory evidence."
-            )
-            print("No default signing keys or fallback issuer will be created.")
-            print("No certification Goon ran. APP PASS and release remain blocked.")
-            print(certification_bootstrap_protocol.render_missing_fleet_provisioning_blocker())
-        elif rc == 2 and "Fleet Run ID:" not in tail:
-            print("\nAPPLICATION FAILED")
-            print("APP certification was rejected before any certification Goon ran.")
-            print(
-                "Give the complete output above to the coding agent, then rerun: "
-                "make certify after repair."
-            )
-        elif _classify(tail) == "environment":
-            print("\nBLOCKED BY ENVIRONMENT")
-            print("A certification prerequisite failed because of the runtime environment.")
-            print(
-                "Use the canonical focused diagnostic command from the failure block above "
-                "for the observed runtime/environment problem."
-            )
-            print("Fix the reported environment cause, then rerun: make certify")
-            print("The handoff retains the canonical failing command for focused diagnosis only.")
-        else:
-            print("\nAPPLICATION FAILED")
-            print("Give the complete CERTIFICATION PLAN FAILED block above to the coding agent.")
-            print("The handoff retains the canonical failing command for focused diagnosis.")
-            print("After repair, rerun: make certify")
-        return rc or 1
+    if (
+        rc == 2
+        and "Fleet Run ID:" not in tail
+        and (certification_bootstrap_protocol.is_missing_fleet_provisioning(tail))
+    ):
+        # The original runtime lifecycle owns this denial. Certification only
+        # reports it; it must never substitute a key, issuer, executor or
+        # enrollment to turn a missing deployment authority into APP PASS.
+        print("\nBLOCKED BY FLEET ENFORCER PROVISIONING")
+        print("An exact Fleet Run has no explicitly enrolled native Enforcer authority.")
+        print(
+            "Provision the Run through the deployment's original FleetPreworkProvisioner "
+            "with trusted public roots, native issuer and executor inventory evidence."
+        )
+        print("No default signing keys or fallback issuer will be created.")
+        print("No certification Goon ran. APP PASS and release remain blocked.")
+        print(certification_bootstrap_protocol.render_missing_fleet_provisioning_blocker())
+    elif rc == 2 and "Fleet Run ID:" not in tail:
+        print("\nAPPLICATION FAILED")
+        print("APP certification was rejected before any certification Goon ran.")
+        print(
+            "Give the complete output above to the coding agent, then rerun: "
+            "make certify after repair."
+        )
+    elif _classify(tail) == "environment":
+        print("\nBLOCKED BY ENVIRONMENT")
+        print("A certification prerequisite failed because of the runtime environment.")
+        print(
+            "Use the canonical focused diagnostic command from the failure block above "
+            "for the observed runtime/environment problem."
+        )
+        print("Fix the reported environment cause, then rerun: make certify")
+        print("The handoff retains the canonical failing command for focused diagnosis only.")
+    else:
+        print("\nAPPLICATION FAILED")
+        print("Give the complete CERTIFICATION PLAN FAILED block above to the coding agent.")
+        print("The handoff retains the canonical failing command for focused diagnosis.")
+        print("After repair, rerun: make certify")
+    return rc or 1
 
 
 def run_release() -> int:
@@ -771,7 +786,6 @@ def _run_release_with_certification_state(
     return rc or 0
 
 
-
 def run_explain(fleet_run_id: str) -> int:
     if not fleet_run_id.strip():
         print("OH_GOON_RUN_ID=<fleet-run-id> is required", file=sys.stderr)
@@ -788,6 +802,7 @@ def run_explain(fleet_run_id: str) -> int:
     result = _backend_cli(["dev", "explain-run", fleet_run_id], env=env)
     print(result.stdout, end="")
     return result.returncode
+
 
 def workflow_intent(argv: list[str]) -> Literal["app", "verify", "release", "explain"] | None:
     """Classify the canonical workflow grammar without observing or changing state."""

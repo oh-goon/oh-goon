@@ -1,9 +1,14 @@
-from oh_goon.core.canonical_result_semantics import CanonicalResultSemantics
 import pytest
 
+from oh_goon.core.canonical_result_semantics import CanonicalResultSemantics
 from oh_goon.core.models.execution_evidence_acceptance import AcceptedExecutionEvidence
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan, ResolvedImport
-from oh_goon.core.models.fleet_plan_evidence import CompletedPlanStepExecution, FailedPlanStepExecution, FleetPlanResult, PlanOutputEvidence
+from oh_goon.core.models.fleet_plan_evidence import (
+    CompletedPlanStepExecution,
+    FailedPlanStepExecution,
+    FleetPlanResult,
+    PlanOutputEvidence,
+)
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy, CicdResourcePolicy
 from oh_goon.core.vocabulary.result_semantics import CanonicalResultStatus, FailureImpact
 
@@ -30,32 +35,50 @@ def _execution(step_id: str, *, failed: bool = False):
     return CompletedPlanStepExecution(returncode=0, **common)
 
 
-def _plan(*, impact: FailureImpact, nested_impact: FailureImpact | None = None) -> ResolvedFleetPlan:
+def _plan(
+    *, impact: FailureImpact, nested_impact: FailureImpact | None = None
+) -> ResolvedFleetPlan:
     imports = []
     if nested_impact is None:
-        imports.append(ResolvedImport(
-            import_id="child", name="general/child", source_sha256="a" * 64,
-            step_ids=("child.test",), failure_impact=impact,
-        ))
+        imports.append(
+            ResolvedImport(
+                import_id="child",
+                name="general/child",
+                source_sha256="a" * 64,
+                step_ids=("child.test",),
+                failure_impact=impact,
+            )
+        )
     else:
-        imports.extend((
-            ResolvedImport(
-                import_id="outer", name="general/outer", source_sha256="a" * 64,
-                step_ids=("outer.inner.test",), failure_impact=impact,
-            ),
-            ResolvedImport(
-                import_id="outer.inner", parent_import_id="outer", name="general/inner",
-                source_sha256="b" * 64, step_ids=("outer.inner.test",), failure_impact=nested_impact,
-            ),
-        ))
+        imports.extend(
+            (
+                ResolvedImport(
+                    import_id="outer",
+                    name="general/outer",
+                    source_sha256="a" * 64,
+                    step_ids=("outer.inner.test",),
+                    failure_impact=impact,
+                ),
+                ResolvedImport(
+                    import_id="outer.inner",
+                    parent_import_id="outer",
+                    name="general/inner",
+                    source_sha256="b" * 64,
+                    step_ids=("outer.inner.test",),
+                    failure_impact=nested_impact,
+                ),
+            )
+        )
     step_id = imports[0].step_ids[0]
     return ResolvedFleetPlan.create(
-        name="result-semantics", description="",
+        name="result-semantics",
+        description="",
         execution=CicdExecutionPolicy(
             trust_repository_code=True,
             resources=CicdResourcePolicy(cpu_millis=1000, memory_mib=512, max_processes=64),
         ),
-        imports=tuple(imports), steps=(_step(step_id),),
+        imports=tuple(imports),
+        steps=(_step(step_id),),
     )
 
 
@@ -80,7 +103,9 @@ def test_non_blocking_child_failure_preserves_fact_and_changes_only_parent_impac
 
 def test_nested_non_blocking_failure_does_not_reappear_as_blocking_at_outer_edge() -> None:
     plan = _plan(impact=FailureImpact.BLOCKING, nested_impact=FailureImpact.NON_BLOCKING)
-    result = FleetPlanResult(plan_id=plan.plan_id, steps=(_execution("outer.inner.test", failed=True),))
+    result = FleetPlanResult(
+        plan_id=plan.plan_id, steps=(_execution("outer.inner.test", failed=True),)
+    )
     projected = CanonicalResultSemantics().interpret_plan(plan, result)
     by_id = {item.import_id: item for item in projected.children}
     assert by_id["outer.inner"].factual_status is CanonicalResultStatus.FAILED
@@ -97,7 +122,9 @@ def test_success_is_unchanged_by_non_blocking_policy() -> None:
 
 
 def test_accepted_fact_interpretation_is_bound_to_phase6_result_identity() -> None:
-    accepted = AcceptedExecutionEvidence.model_construct(acceptance_id="accept-1", result_identity="result-1")
+    accepted = AcceptedExecutionEvidence.model_construct(
+        acceptance_id="accept-1", result_identity="result-1"
+    )
     projected = CanonicalResultSemantics().interpret_accepted(
         accepted, result_identity="result-1", status=CanonicalResultStatus.CANCELLED
     )

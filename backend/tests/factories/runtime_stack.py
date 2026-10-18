@@ -12,9 +12,9 @@ from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.runtime.state import LocalState
 from oh_goon.services.capability_executor import CapabilityExecutor
 from oh_goon.services.direct_effect_admission import DirectEffectAdmission
-from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.fleet import FleetService
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
+from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
@@ -22,7 +22,7 @@ from oh_goon.services.invariant_auditor import SystemInvariantAuditor
 from oh_goon.services.league import LeagueService
 from oh_goon.services.migration import MigrationService
 from oh_goon.services.repositories import RepositoryService
-from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
+from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.runtime_safety import RuntimeSafetyService
 from oh_goon.services.target_selection import FleetTargetSelector
 from tests.factories.repository_effect_runtime import effect_execution

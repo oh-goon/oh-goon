@@ -4,6 +4,7 @@ The resolver captures the authorized trees once and returns the passive core
 source contract. The original Fleet transaction consumes that exact delivery;
 neither source capture nor its journal bridge launches an Agent Step.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -49,9 +50,14 @@ def capture_agent_sources(
     """
     captured: dict[str, agent_source.FrozenSourceTree] = {}
     preview = explain_agent_sources(
-        definitions, values, repository_root=repository_root, skill_root=skill_root,
-        allowed_acceptance=allowed_acceptance, plan_source_sha256=plan_source_sha256,
-        skill_aliases=skill_aliases, _captured=captured,
+        definitions,
+        values,
+        repository_root=repository_root,
+        skill_root=skill_root,
+        allowed_acceptance=allowed_acceptance,
+        plan_source_sha256=plan_source_sha256,
+        skill_aliases=skill_aliases,
+        _captured=captured,
     )
     frozen = agent_source.FrozenAgentSourceCapture(
         plan_source_sha256=plan_source_sha256,
@@ -60,7 +66,8 @@ def capture_agent_sources(
         repository_reference=str(preview["repository"]["reference"]),
         resolved_skill_reference=str(preview["skill"]["reference"]),
         authored_skill_reference=str(preview["authored_skill_reference"]),
-        repository=captured["repository"], skill=captured["skill"],
+        repository=captured["repository"],
+        skill=captured["skill"],
     )
     frozen.verify()
     return frozen
@@ -97,10 +104,16 @@ def explain_agent_sources(
         PlanInputType.SKILL_REFERENCE,
         PlanInputType.ACCEPTANCE_PROFILE,
     }:
-        raise FleetPlanInvalid("AG-01 requires repository_reference, skill_reference and acceptance_profile")
+        raise FleetPlanInvalid(
+            "AG-01 requires repository_reference, skill_reference and acceptance_profile"
+        )
 
     accepted = declared[PlanInputType.ACCEPTANCE_PROFILE]
-    if not allowed_acceptance or accepted not in allowed_acceptance or len(set(allowed_acceptance)) != len(allowed_acceptance):
+    if (
+        not allowed_acceptance
+        or accepted not in allowed_acceptance
+        or len(set(allowed_acceptance)) != len(allowed_acceptance)
+    ):
         raise FleetPlanInvalid("AG-01 acceptance profile is not explicitly authorized")
     repo_ref = declared[PlanInputType.REPOSITORY_REFERENCE]
     authored_skill_ref = declared[PlanInputType.SKILL_REFERENCE]
@@ -126,29 +139,47 @@ def explain_agent_sources(
         try:
             validate_domain_input_value(
                 PlanInputDefinition(name="skill", input_type=PlanInputType.SKILL_REFERENCE),
-                skill_ref, label="alias expansion",
+                skill_ref,
+                label="alias expansion",
             )
         except ValueError as exc:
-            raise FleetPlanInvalid("AG-01 skill alias expands to an invalid source reference") from exc
+            raise FleetPlanInvalid(
+                "AG-01 skill alias expands to an invalid source reference"
+            ) from exc
         if not skill_ref.startswith(("local:", "github:")):
             raise FleetPlanInvalid("AG-01 chained aliases are not allowed")
     if not repo_ref.startswith("local:"):
-        raise FleetPlanInvalid("AG-01 repository acquisition requires an explicitly authorized local root")
+        raise FleetPlanInvalid(
+            "AG-01 repository acquisition requires an explicitly authorized local root"
+        )
     if skill_ref.startswith("github:"):
         # A full SHA alone cannot authenticate *where* content was acquired.
         # Only original source-acquisition authority may verify/publish a
         # pinned global checkout. Do not invent a parallel network fetcher.
-        raise FleetPlanInvalid("AG-01 pinned GitHub skill requires original source-acquisition proof; unavailable")
+        raise FleetPlanInvalid(
+            "AG-01 pinned GitHub skill requires original source-acquisition proof; unavailable"
+        )
     if not skill_ref.startswith("local:"):
         raise FleetPlanInvalid("AG-01 skill must use a bounded, immutable source reference")
 
-    repository = _snapshot_authorized_tree(repository_root, repo_ref, label="repository", max_bytes=agent_source.MAX_REPOSITORY_BYTES, captured=_captured)
+    repository = _snapshot_authorized_tree(
+        repository_root,
+        repo_ref,
+        label="repository",
+        max_bytes=agent_source.MAX_REPOSITORY_BYTES,
+        captured=_captured,
+    )
     # For a Gitlink, retain the *same* single AG-01 fd-anchored byte read.
     # Compare those already-captured bytes to the committed Git blob identities;
     # Git metadata is not a second reader or materialization authority.
     skill_capture = _captured if _captured is not None else {}
-    skill = _snapshot_authorized_tree(skill_root, skill_ref, label="skill", max_bytes=agent_source.MAX_SKILL_BYTES,
-                                      captured=skill_capture if git_pin is not None else _captured)
+    skill = _snapshot_authorized_tree(
+        skill_root,
+        skill_ref,
+        label="skill",
+        max_bytes=agent_source.MAX_SKILL_BYTES,
+        captured=skill_capture if git_pin is not None else _captured,
+    )
     if git_pin is not None:
         git_pin.verify(skill_root, skill_capture["skill"])
         skill["reference"] = git_pin.reference
@@ -173,7 +204,11 @@ def explain_agent_sources(
 
 
 def _snapshot_authorized_tree(
-    root: Path, reference: str, *, label: str, max_bytes: int,
+    root: Path,
+    reference: str,
+    *,
+    label: str,
+    max_bytes: int,
     captured: dict[str, agent_source.FrozenSourceTree] | None = None,
 ) -> dict[str, Any]:
     """Read exactly once from an fd-anchored authorized tree.
@@ -202,8 +237,14 @@ def _snapshot_authorized_tree(
     directory_count = 0
 
     def identity(item: os.stat_result) -> tuple[int, ...]:
-        return (item.st_dev, item.st_ino, item.st_mode, item.st_size,
-                item.st_mtime_ns, item.st_ctime_ns)
+        return (
+            item.st_dev,
+            item.st_ino,
+            item.st_mode,
+            item.st_size,
+            item.st_mtime_ns,
+            item.st_ctime_ns,
+        )
 
     def read_dir(dir_fd: int, subpath: Path, depth: int, root_device: int) -> None:
         nonlocal total, directory_count
@@ -237,19 +278,30 @@ def _snapshot_authorized_tree(
             if before.st_nlink != 1:
                 raise FleetPlanInvalid(f"AG-01 {label} contains hardlink: {rel.as_posix()}")
             if not stat.S_ISREG(before.st_mode):
-                raise FleetPlanInvalid(f"AG-01 {label} contains non-regular source: {rel.as_posix()}")
+                raise FleetPlanInvalid(
+                    f"AG-01 {label} contains non-regular source: {rel.as_posix()}"
+                )
             if before.st_dev != root_device:
-                raise FleetPlanInvalid(f"AG-01 {label} contains foreign filesystem file: {rel.as_posix()}")
-            if before.st_size > agent_source.MAX_SOURCE_FILE_BYTES or total + before.st_size > max_bytes:
+                raise FleetPlanInvalid(
+                    f"AG-01 {label} contains foreign filesystem file: {rel.as_posix()}"
+                )
+            if (
+                before.st_size > agent_source.MAX_SOURCE_FILE_BYTES
+                or total + before.st_size > max_bytes
+            ):
                 raise FleetPlanInvalid(f"AG-01 {label} exceeds source byte budget")
             fd = os.open(entry.name, file_flags, dir_fd=dir_fd)
             try:
                 if identity(os.fstat(fd)) != identity(before):
-                    raise FleetPlanInvalid(f"AG-01 {label} source changed before read: {rel.as_posix()}")
+                    raise FleetPlanInvalid(
+                        f"AG-01 {label} source changed before read: {rel.as_posix()}"
+                    )
                 digest = hashlib.sha256()
                 chunks: list[bytes] | None = [] if captured is not None else None
                 count = 0
-                while chunk := os.read(fd, min(1024 * 1024, agent_source.MAX_SOURCE_FILE_BYTES + 1 - count)):
+                while chunk := os.read(
+                    fd, min(1024 * 1024, agent_source.MAX_SOURCE_FILE_BYTES + 1 - count)
+                ):
                     count += len(chunk)
                     if count > agent_source.MAX_SOURCE_FILE_BYTES or total + count > max_bytes:
                         raise FleetPlanInvalid(f"AG-01 {label} source grew beyond budget")
@@ -260,14 +312,24 @@ def _snapshot_authorized_tree(
             finally:
                 os.close(fd)
             after_path = os.stat(entry.name, dir_fd=dir_fd, follow_symlinks=False)
-            if identity(before) != identity(after_fd) or identity(after_fd) != identity(after_path) or count != before.st_size:
-                raise FleetPlanInvalid(f"AG-01 {label} source changed during inspection: {rel.as_posix()}")
+            if (
+                identity(before) != identity(after_fd)
+                or identity(after_fd) != identity(after_path)
+                or count != before.st_size
+            ):
+                raise FleetPlanInvalid(
+                    f"AG-01 {label} source changed during inspection: {rel.as_posix()}"
+                )
             total += count
             members.append({"path": rel.as_posix(), "sha256": digest.hexdigest(), "bytes": count})
             if chunks is not None:
-                frozen_members.append(agent_source.FrozenSourceMember(
-                    path=rel.as_posix(), sha256=digest.hexdigest(), data=b"".join(chunks),
-                ))
+                frozen_members.append(
+                    agent_source.FrozenSourceMember(
+                        path=rel.as_posix(),
+                        sha256=digest.hexdigest(),
+                        data=b"".join(chunks),
+                    )
+                )
         if identity(before_dir) != identity(os.fstat(dir_fd)):
             raise FleetPlanInvalid(f"AG-01 {label} directory changed during inspection")
 
@@ -289,11 +351,16 @@ def _snapshot_authorized_tree(
             current = next_fd
         read_dir(current, Path("."), 0, root_before.st_dev)
         for index, fd in enumerate(opened_dirs):
-            ancestor_now = root.lstat() if index == 0 else os.stat(
-                relative.parts[index - 1], dir_fd=opened_dirs[index - 1], follow_symlinks=False
+            ancestor_now = (
+                root.lstat()
+                if index == 0
+                else os.stat(
+                    relative.parts[index - 1], dir_fd=opened_dirs[index - 1], follow_symlinks=False
+                )
             )
-            if (identity(os.fstat(fd)) != identity(opened_states[index])
-                    or identity(ancestor_now) != identity(opened_states[index])):
+            if identity(os.fstat(fd)) != identity(opened_states[index]) or identity(
+                ancestor_now
+            ) != identity(opened_states[index]):
                 raise FleetPlanInvalid(f"AG-01 {label} source ancestry changed")
         # The original path still names the opened root, not a replacement.
         if identity(root.lstat()) != identity(os.fstat(root_fd)):
@@ -310,7 +377,8 @@ def _snapshot_authorized_tree(
     content_id = stable_id("agent-source-closure-v1", {"members": members})
     if captured is not None:
         frozen = agent_source.FrozenSourceTree(
-            kind=label, content_identity=content_id,
+            kind=label,
+            content_identity=content_id,
             members=tuple(sorted(frozen_members, key=lambda item: item.path)),
         )
         frozen.verify()
@@ -327,10 +395,18 @@ def _snapshot_authorized_tree(
 
 
 def reserve_verified_agent_source_in(
-    journal: "CausalRunJournal", run_id: str, *, epoch: int, lease_identity: str,
-    auth: "ReceiptAuthenticator", signer_grant: "SignerTrustGrant",
-    step_id: str, attempt_identity: str, executor_generation: int,
-    packet: bytes, expected_handoff_identity: str,
+    journal: "CausalRunJournal",
+    run_id: str,
+    *,
+    epoch: int,
+    lease_identity: str,
+    auth: "ReceiptAuthenticator",
+    signer_grant: "SignerTrustGrant",
+    step_id: str,
+    attempt_identity: str,
+    executor_generation: int,
+    packet: bytes,
+    expected_handoff_identity: str,
     after_reservation: Callable[[agent_source.FrozenAgentStepHandoff, int], None] | None = None,
 ) -> int:
     """Single AG-02B2A canonical decoder -> original Fleet journal write cut.
@@ -344,21 +420,29 @@ def reserve_verified_agent_source_in(
     if type(journal) is not CausalRunJournal or not journal.connection.in_transaction:
         raise CausalJournalError("original Fleet journal write transaction required")
     handoff = agent_source.FrozenAgentStepHandoff.decode_prework_delivery(
-        packet, expected_handoff_identity=expected_handoff_identity,
+        packet,
+        expected_handoff_identity=expected_handoff_identity,
     )
     if handoff.step_id != step_id:
         raise CausalJournalError("agent delivery Step differs from admitted Step")
     reservation_seq = journal.reserve_agent_source_prework_in(
-        run_id, epoch=epoch, lease_identity=lease_identity, auth=auth,
-        signer_grant=signer_grant, step_id=step_id,
-        attempt_identity=attempt_identity, executor_generation=executor_generation,
-        packet=packet, expected_handoff_identity=expected_handoff_identity,
+        run_id,
+        epoch=epoch,
+        lease_identity=lease_identity,
+        auth=auth,
+        signer_grant=signer_grant,
+        step_id=step_id,
+        attempt_identity=attempt_identity,
+        executor_generation=executor_generation,
+        packet=packet,
+        expected_handoff_identity=expected_handoff_identity,
         # SKILL-3C: only the original, fully verified AG-02 source is allowed
         # to supply an effect demand to the original Enforcer journal cut.
         # This is NOT a grant, even when the Run envelope agrees with it.
         requested_effects=(
             handoff.requested_effects.model_dump(mode="json")
-            if handoff.requested_effects != AgentStepRequestedEffects() else None
+            if handoff.requested_effects != AgentStepRequestedEffects()
+            else None
         ),
     )
     if after_reservation is not None:

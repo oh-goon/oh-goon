@@ -5,7 +5,6 @@ import sys
 import time
 from pathlib import Path
 
-
 PROCESS_GROUP_POLL_INTERVAL_SECONDS = 0.1
 
 

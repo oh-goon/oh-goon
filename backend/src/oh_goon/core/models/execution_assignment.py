@@ -4,8 +4,8 @@ from typing import Literal
 
 from pydantic import AwareDatetime, Field, model_validator
 
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.product_identity import stable_id
 
 
 class AttemptBudget(ImmutableModel):
@@ -69,6 +69,8 @@ def execution_assignment_fingerprint(assignment: ExecutionAssignment) -> str:
             "delegation_limit": assignment.delegation_limit,
             "isolation_requirements": list(assignment.isolation_requirements),
             "input_artifact_ids": list(assignment.input_artifact_ids),
-            "attempt_budget": assignment.attempt_budget.model_dump(mode="json", exclude_computed_fields=True),
+            "attempt_budget": assignment.attempt_budget.model_dump(
+                mode="json", exclude_computed_fields=True
+            ),
         },
     )

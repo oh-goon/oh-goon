@@ -15,15 +15,14 @@ from hashmarks.verification_selection import (
     verification_selection_envelope,
 )
 
-
-pytestmark = pytest.mark.dependency_complete
-
+from oh_goon.repository_tooling import hashmarks_shard_execution as subject
+from oh_goon.repository_tooling.hashmarks_shard_execution import main
 from tests.hashmarks_test_support import (
     TEST_HASHMARKS_ARTIFACT_IDENTITY,
     TEST_HASHMARKS_VERSION,
 )
-from oh_goon.repository_tooling import hashmarks_shard_execution as subject
-from oh_goon.repository_tooling.hashmarks_shard_execution import main
+
+pytestmark = pytest.mark.dependency_complete
 
 _REPOSITORY = "git-tree:cli"
 _SOURCE = "sha256:" + "1" * 64
@@ -75,7 +74,9 @@ def _argv(contract: Path, envelope: Path, repository: Path, state: Path, report:
     ]
 
 
-def test_hashmarks_cli_executes_native_flat_selection_then_resumes(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_hashmarks_cli_executes_native_flat_selection_then_resumes(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
     tests = tmp_path / "tests"
     tests.mkdir()
     (tests / "test_smoke.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
@@ -99,7 +100,9 @@ def test_hashmarks_cli_executes_native_flat_selection_then_resumes(monkeypatch, 
     assert second["retry_bisection_lineage"][0]["resumed"] is True
 
 
-def test_hashmarks_cli_rejects_repository_tamper_before_process_launch(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_hashmarks_cli_rejects_repository_tamper_before_process_launch(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
     contract, envelope = _selection_files(tmp_path, "tests/test_smoke.py::test_ok")
     called = False
 
@@ -108,7 +111,9 @@ def test_hashmarks_cli_rejects_repository_tamper_before_process_launch(monkeypat
         called = True
         raise AssertionError("execution must not start")
 
-    monkeypatch.setattr("oh_goon.repository_tooling.hashmarks_shard_execution.execute_shard_plan", forbidden)
+    monkeypatch.setattr(
+        "oh_goon.repository_tooling.hashmarks_shard_execution.execute_shard_plan", forbidden
+    )
     argv = _argv(contract, envelope, tmp_path, tmp_path / "state", tmp_path / "receipt.json")
     argv[argv.index(_REPOSITORY)] = "git-tree:wrong"
     monkeypatch.setattr("sys.argv", argv)
@@ -120,9 +125,17 @@ def test_hashmarks_cli_rejects_repository_tamper_before_process_launch(monkeypat
     assert "repository identity" in capsys.readouterr().err
 
 
-def test_hashmarks_cli_requires_exact_artifact_and_source_identity(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_hashmarks_cli_requires_exact_artifact_and_source_identity(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
     contract, envelope = _selection_files(tmp_path, "tests/test_smoke.py::test_ok")
-    argv = ["oh-goon-hashmarks-shards", str(contract), str(envelope), "--admitted-repository-identity", _REPOSITORY]
+    argv = [
+        "oh-goon-hashmarks-shards",
+        str(contract),
+        str(envelope),
+        "--admitted-repository-identity",
+        _REPOSITORY,
+    ]
     monkeypatch.setattr("sys.argv", argv)
     try:
         main()
@@ -141,7 +154,9 @@ def test_cli_transports_execution_window_and_timeout_refinement_semantically(
     report = object()
     receipt = object()
     captured: dict[str, object] = {}
-    monkeypatch.setattr(subject, "load_hashmarks_verification_selection", lambda *_a, **_k: selection)
+    monkeypatch.setattr(
+        subject, "load_hashmarks_verification_selection", lambda *_a, **_k: selection
+    )
     monkeypatch.setattr(subject, "build_verification_execution_plan", lambda *_a, **_k: plan)
 
     def execute(*_args, **kwargs):

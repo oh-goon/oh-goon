@@ -155,7 +155,9 @@ def verify_cumulative_patch_replay_impl(
                 timeout=120,
             )
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeError("cumulative patch replay exceeded its 120s execution budget") from exc
+            raise RuntimeError(
+                "cumulative patch replay exceeded its 120s execution budget"
+            ) from exc
         if result.returncode != 0:
             raise RuntimeError(
                 f"cumulative patch replay failed with exit {result.returncode}: "
@@ -201,7 +203,9 @@ def _verify_packaged_dependency_scope(archive: zipfile.ZipFile, prefix: str) -> 
         lock_bytes = archive.read(lock_name)
         tomllib.loads(pyproject_bytes.decode("utf-8"))
     except (KeyError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-        raise RuntimeError("fresh source ZIP dependency authorities are missing or unreadable") from exc
+        raise RuntimeError(
+            "fresh source ZIP dependency authorities are missing or unreadable"
+        ) from exc
     return {
         "intent_sha256": hashlib.sha256(pyproject_bytes).hexdigest(),
         "backend_lock_sha256": hashlib.sha256(lock_bytes).hexdigest(),
@@ -267,5 +271,3 @@ def load_fresh_zip_evidence(
             "archive_source_identity": source_identity,
         },
     )
-
-

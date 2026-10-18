@@ -8,6 +8,8 @@ from oh_goon.repository_tooling.generation.export_openapi import openapi_documen
 from oh_goon.repository_tooling.generation.generate_api_types import render_generated_files
 from oh_goon.repository_tooling.generation.goon_tool_authority import (
     OUTPUT as GOON_TOOL_AUTHORITY_PATH,
+)
+from oh_goon.repository_tooling.generation.goon_tool_authority import (
     render_goon_tool_authority,
 )
 
@@ -33,9 +35,7 @@ def main() -> int:
     expected_openapi = rendered_schema(backend_document)
 
     failures: list[str] = []
-    actual_openapi = (
-        OPENAPI_PATH.read_text(encoding="utf-8") if OPENAPI_PATH.is_file() else None
-    )
+    actual_openapi = OPENAPI_PATH.read_text(encoding="utf-8") if OPENAPI_PATH.is_file() else None
     if actual_openapi != expected_openapi:
         failures.append("generated/openapi/openapi.json")
 
@@ -48,9 +48,7 @@ def main() -> int:
         except json.JSONDecodeError:
             pass
     expected_frontend = (
-        render_generated_files(captured_document)
-        if captured_document is not None
-        else {}
+        render_generated_files(captured_document) if captured_document is not None else {}
     )
     actual_frontend = _actual_frontend_files()
     for relative in sorted(set(expected_frontend) | set(actual_frontend)):

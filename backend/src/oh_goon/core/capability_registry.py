@@ -187,7 +187,6 @@ def recipe_capability(recipe: UvRecipeId) -> CapabilityDefinition:
     return CAPABILITY_REGISTRY.recipe(recipe)
 
 
-
 def capability_for(
     action: OperationAction, target: OperationTarget | None = None
 ) -> CapabilityDefinition:

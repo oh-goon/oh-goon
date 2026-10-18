@@ -4,7 +4,6 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-
 _REPOSITORY_STATE_ENVIRONMENT = frozenset(
     {
         "GIT_DIR",

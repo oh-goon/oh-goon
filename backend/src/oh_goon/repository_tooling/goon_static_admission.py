@@ -50,8 +50,7 @@ def _print_human(payload: dict[str, object]) -> None:
     )
     print(f"Unresolved execution edges: {payload['unresolved_execution_edge_count']}")
     print(
-        "Locked package-local executables: "
-        f"{payload['package_executable_authority_count']} proven"
+        f"Locked package-local executables: {payload['package_executable_authority_count']} proven"
     )
     issues = payload["issues"]
     if not issues:

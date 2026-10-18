@@ -6,11 +6,11 @@ import pytest
 
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import OperationNotFound, RepositoryEffectQuarantined
-from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.models.effect_origin import FleetEffectOrigin
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import (
     CommandSafety,
     EffectAttemptOwner,

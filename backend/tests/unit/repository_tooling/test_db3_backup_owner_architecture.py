@@ -1,4 +1,5 @@
 """DB3 remains part of the one original X0 database authority gate."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -19,13 +20,34 @@ def _db3_fixture(tmp_path: Path) -> Path:
     return package
 
 
-@pytest.mark.parametrize("target,old,replacement", [
-    ("runtime/database.py", 'connection.execute("VACUUM INTO ?", (str(staged),))', 'connection.execute("SELECT 1")'),
-    ("runtime/database.py", 'os.link(staged, target, follow_symlinks=False)', 'os.replace(staged, target)'),
-    ("scout/database.py", 'self._require_disposable_identity()', 'pass # bypass Scout identity'),
-    ("runtime/database.py", '_require_private_backup_directory(requested.parent)', 'requested.parent'),
-])
-def test_owner_shortcut_fails_original_x0(tmp_path: Path, target: str, old: str, replacement: str) -> None:
+@pytest.mark.parametrize(
+    "target,old,replacement",
+    [
+        (
+            "runtime/database.py",
+            'connection.execute("VACUUM INTO ?", (str(staged),))',
+            'connection.execute("SELECT 1")',
+        ),
+        (
+            "runtime/database.py",
+            "os.link(staged, target, follow_symlinks=False)",
+            "os.replace(staged, target)",
+        ),
+        (
+            "scout/database.py",
+            "self._require_disposable_identity()",
+            "pass # bypass Scout identity",
+        ),
+        (
+            "runtime/database.py",
+            "_require_private_backup_directory(requested.parent)",
+            "requested.parent",
+        ),
+    ],
+)
+def test_owner_shortcut_fails_original_x0(
+    tmp_path: Path, target: str, old: str, replacement: str
+) -> None:
     package = _db3_fixture(tmp_path)
     path = package / target
     text = path.read_text()

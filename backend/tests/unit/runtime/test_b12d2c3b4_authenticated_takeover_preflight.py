@@ -1,4 +1,5 @@
 """B12D2C3B4: restart boundary refuses forged lineage before native effects."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -29,19 +30,42 @@ def original(tmp_path):
 def test_enrolled_generation_issuer_and_intent_verified_before_cleanup_claim(tmp_path):
     conn, journal, owner = original(tmp_path)
     assert owner.pending_takeover_recovery()[0].effect_permission == "NONE"
-    result = owner.session.mutate(lambda connection: require_original_takeover_lineage_in(
-        journal, run_id="run-one", intent_run_seq=2, epoch=2,
-        lease_identity="new", auth=authenticator(),
-        admitted_executor_generation=8, admitted_issuer_key_id="key-1"))
-    assert (result.run_id, result.issuer_key_id, result.executor_generation,
-            result.effect_permission) == ("run-one", "key-1", 8, "NONE")
+    result = owner.session.mutate(
+        lambda connection: require_original_takeover_lineage_in(
+            journal,
+            run_id="run-one",
+            intent_run_seq=2,
+            epoch=2,
+            lease_identity="new",
+            auth=authenticator(),
+            admitted_executor_generation=8,
+            admitted_issuer_key_id="key-1",
+        )
+    )
+    assert (
+        result.run_id,
+        result.issuer_key_id,
+        result.executor_generation,
+        result.effect_permission,
+    ) == ("run-one", "key-1", 8, "NONE")
     conn.close()
 
 
-@pytest.mark.parametrize("attack", [
-    "generation", "issuer", "missing-generation", "missing-issuer", "missing-intent",
-    "foreign-run", "admission-mac", "foreign-lease", "epoch", "cancelled",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "generation",
+        "issuer",
+        "missing-generation",
+        "missing-issuer",
+        "missing-intent",
+        "foreign-run",
+        "admission-mac",
+        "foreign-lease",
+        "epoch",
+        "cancelled",
+    ],
+)
 def test_unproven_lineage_never_claims_or_scans(tmp_path, attack):
     conn, journal, owner = original(tmp_path)
     if attack == "generation":
@@ -57,8 +81,9 @@ def test_unproven_lineage_never_claims_or_scans(tmp_path, attack):
     elif attack == "foreign-lease":
         owner.session.token = "foreign"
     elif attack == "epoch":
-        journal.transfer_control("run-one", epoch=2, lease_identity="new",
-                                 next_epoch=3, next_lease_identity="later")
+        journal.transfer_control(
+            "run-one", epoch=2, lease_identity="new", next_epoch=3, next_lease_identity="later"
+        )
     elif attack == "cancelled":
         owner.session.cancelled = True
     # Wrong intent/run cannot become another Run's recovery task.
@@ -68,10 +93,18 @@ def test_unproven_lineage_never_claims_or_scans(tmp_path, attack):
         if attack == "missing-intent":
             owner.resume_reconciled_takeover(intent_run_seq=999, native_observer=native)
         elif attack == "foreign-run":
-            owner.session.mutate(lambda _: require_original_takeover_lineage_in(
-                journal, run_id="foreign", intent_run_seq=2, epoch=2,
-                lease_identity="new", auth=authenticator(),
-                admitted_executor_generation=8, admitted_issuer_key_id="key-1"))
+            owner.session.mutate(
+                lambda _: require_original_takeover_lineage_in(
+                    journal,
+                    run_id="foreign",
+                    intent_run_seq=2,
+                    epoch=2,
+                    lease_identity="new",
+                    auth=authenticator(),
+                    admitted_executor_generation=8,
+                    admitted_issuer_key_id="key-1",
+                )
+            )
         else:
             owner.resume_reconciled_takeover(intent_run_seq=2, native_observer=native)
     except (CausalJournalError, TrustProtocolError):
@@ -87,9 +120,15 @@ def test_preflight_requires_original_write_cut(tmp_path):
     conn, journal, _ = original(tmp_path)
     with pytest.raises(CausalJournalError, match="transaction"):
         require_original_takeover_lineage_in(
-            journal, run_id="run-one", intent_run_seq=2, epoch=2,
-            lease_identity="new", auth=authenticator(),
-            admitted_executor_generation=8, admitted_issuer_key_id="key-1")
+            journal,
+            run_id="run-one",
+            intent_run_seq=2,
+            epoch=2,
+            lease_identity="new",
+            auth=authenticator(),
+            admitted_executor_generation=8,
+            admitted_issuer_key_id="key-1",
+        )
     conn.close()
 
 
@@ -111,17 +150,22 @@ def _lease_connection():
         singleton INTEGER, lease_token TEXT, owner_session_id TEXT, owner_pid INTEGER,
         owner_identity TEXT, kind TEXT, fleet_run_id TEXT, cancel_requested_at TEXT
     )""")
-    conn.execute("INSERT INTO execution_lease VALUES (1,'tok','old-session',41,'birth-41','FLEET','run-one',NULL)")
+    conn.execute(
+        "INSERT INTO execution_lease VALUES (1,'tok','old-session',41,'birth-41','FLEET','run-one',NULL)"
+    )
     return conn
 
 
-@pytest.mark.parametrize("session,pid,birth,expected", [
-    ("old-session", 41, "birth-41", True),
-    ("new-session", 41, "birth-41", False),  # process restart / new database session
-    ("old-session", 41, "birth-99", False),  # PID reuse
-    ("old-session", 41, None, False),  # birth cannot be proven
-    ("old-session", 42, "birth-41", False),
-])
+@pytest.mark.parametrize(
+    "session,pid,birth,expected",
+    [
+        ("old-session", 41, "birth-41", True),
+        ("new-session", 41, "birth-41", False),  # process restart / new database session
+        ("old-session", 41, "birth-99", False),  # PID reuse
+        ("old-session", 41, None, False),  # birth cannot be proven
+        ("old-session", 42, "birth-41", False),
+    ],
+)
 def test_original_worker_ticket_cannot_be_minted_after_restart(session, pid, birth, expected):
     conn = _lease_connection()
     lease = _owned_fleet_lease_in(conn, "run-one", session, pid, birth)
@@ -138,7 +182,9 @@ def test_cancelled_ticket_is_not_recoverable():
 
 def test_control_plane_may_delegate_live_ticket_but_never_create_one():
     plane = object.__new__(FleetRunControlPlane)
-    lifecycle = SimpleNamespace(existing_owned_local_lace_ticket=Mock(return_value="original-ticket"))
+    lifecycle = SimpleNamespace(
+        existing_owned_local_lace_ticket=Mock(return_value="original-ticket")
+    )
     plane._lifecycle = lifecycle
     assert plane.existing_owned_local_lace_ticket("run-one") == "original-ticket"
     lifecycle.existing_owned_local_lace_ticket.assert_called_once_with("run-one")

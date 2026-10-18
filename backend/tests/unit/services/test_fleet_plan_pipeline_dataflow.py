@@ -15,9 +15,9 @@ from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_reso
 from oh_goon.integrations.fleet_plan_compilation import parse_goon_template
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
-from tests.factories.runtime_authority import authorized_command_result
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import PhysicalFleetPlanExecutorHarness
+from tests.factories.runtime_authority import authorized_command_result
 
 
 class _UnitProcessIsolation:
@@ -109,7 +109,9 @@ def test_direct_dataflow_and_explicit_step_environment(
             output = Path(kwargs["cwd"]) / ".fleet" / "image-tag.txt"
             output.parent.mkdir()
             output.write_text("example-service:1.7.0\n", encoding="utf-8")
-        return authorized_command_result(argv=tuple(argv), returncode=0, stdout="", stderr="", duration_ms=1)
+        return authorized_command_result(
+            argv=tuple(argv), returncode=0, stdout="", stderr="", duration_ms=1
+        )
 
     monkeypatch.setattr(
         "oh_goon.integrations.fleet_plan_step_execution.run_command", fake_run_command
@@ -230,4 +232,3 @@ steps:
 - run: "true"
 """
         )
-

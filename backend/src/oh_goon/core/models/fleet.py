@@ -4,7 +4,6 @@ from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field, computed_field, model_validator
 
-from oh_goon.core.product_identity import operation_intent_key
 from oh_goon.core.models.attention import FleetAttention
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.explanation import RepositoryExplanation
@@ -18,6 +17,7 @@ from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.review import ReviewPreparation
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.product_identity import operation_intent_key
 from oh_goon.core.vocabulary import (
     FleetRunStatus,
     FleetScope,

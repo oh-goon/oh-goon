@@ -44,8 +44,6 @@ def _phony_targets() -> set[str]:
     return {target for declaration in declarations for target in declaration.split()}
 
 
-
-
 def _defined_make_targets() -> list[str]:
     return [
         match.group(1)
@@ -53,6 +51,7 @@ def _defined_make_targets() -> list[str]:
         if (match := re.match(r"^([A-Za-z0-9_.-]+):(?:\s|$)", line)) is not None
         and not match.group(1).startswith(".")
     ]
+
 
 def _recipe_targets() -> set[str]:
     lines = MAKEFILE.splitlines()
@@ -87,12 +86,18 @@ def _documented_make_targets(path: Path) -> list[str]:
             targets.append(shell.group(1))
     return targets
 
+
 def test_every_make_target_has_exactly_one_frozen_surface_classification() -> None:
     data = yaml.safe_load(SURFACE_PATH.read_text(encoding="utf-8"))
     canonical = data["canonical_human_workflow"]["make_targets"]
     assert canonical == CANONICAL_TARGETS
     classes = data["noncanonical_make_target_classes"]
-    assert set(classes) == {"owner-local-validation", "diagnostic", "internal-generated", "deprecated"}
+    assert set(classes) == {
+        "owner-local-validation",
+        "diagnostic",
+        "internal-generated",
+        "deprecated",
+    }
     occurrences: dict[str, int] = {}
     for target in canonical:
         occurrences[target] = occurrences.get(target, 0) + 1
@@ -103,7 +108,9 @@ def test_every_make_target_has_exactly_one_frozen_surface_classification() -> No
     assert all(count == 1 for count in occurrences.values())
 
 
-def test_focused_schedule_regression_has_exact_owner_local_validation_classification() -> None:
+def test_focused_schedule_regression_has_exact_owner_local_validation_classification() -> (
+    None
+):
     """Every new Make owner must join the frozen surface before native execution."""
     target = "frontend-schedule-plan-input-regression"
     data = yaml.safe_load(SURFACE_PATH.read_text(encoding="utf-8"))
@@ -120,7 +127,9 @@ def test_focused_schedule_regression_has_exact_owner_local_validation_classifica
     ) in MAKEFILE
 
 
-def test_candidate_convergence_preflight_uses_source_authorities_without_archive_history() -> None:
+def test_candidate_convergence_preflight_uses_source_authorities_without_archive_history() -> (
+    None
+):
     data = yaml.safe_load(SURFACE_PATH.read_text(encoding="utf-8"))
     internal = set(data["noncanonical_make_target_classes"]["internal-generated"])
     required = {
@@ -142,9 +151,14 @@ def test_canonical_surface_has_one_release_plan_and_no_wrapper_aliases() -> None
     data = yaml.safe_load(SURFACE_PATH.read_text(encoding="utf-8"))
     canonical = data["canonical_human_workflow"]
     assert canonical["ordered_frontdoors"] == [
-        "make init", "make check", "make verify", "make certify"
+        "make init",
+        "make check",
+        "make verify",
+        "make certify",
     ]
-    assert canonical["release_plan"] == "templates/plans/oh-goon/prepare-release/plan.yml"
+    assert (
+        canonical["release_plan"] == "templates/plans/oh-goon/prepare-release/plan.yml"
+    )
     assert canonical["release_frontdoor"] == "make prepare-release"
     forbidden = set(data["forbidden_wrapper_aliases"])
     assert forbidden == {"quick", "dev-first", "certify-fast"}
@@ -155,16 +169,24 @@ def test_canonical_surface_has_one_release_plan_and_no_wrapper_aliases() -> None
 
 def test_canonical_self_verification_is_a_normal_bounded_plan() -> None:
     plan = yaml.safe_load(SELF_PLAN.read_text(encoding="utf-8"))
-    goons = [item if isinstance(item, str) else item["import"] for item in plan["goons"]]
+    goons = [
+        item if isinstance(item, str) else item["import"] for item in plan["goons"]
+    ]
     assert set(goons) == SELF_GOONS
     for goon in SELF_GOONS:
         name = goon.removeprefix("oh-goon/")
-        data = yaml.safe_load((ROOT / "templates/goons/oh-goon" / name / "goon.yml").read_text(encoding="utf-8"))
+        data = yaml.safe_load(
+            (ROOT / "templates/goons/oh-goon" / name / "goon.yml").read_text(
+                encoding="utf-8"
+            )
+        )
         assert len(data["steps"]) == 1
         # Normal run Steps intentionally do not author a second timeout policy.
         # Fleet-plan resolution applies the backend-owned bounded default before execution.
         assert "timeout_seconds" not in data["steps"][0]
-    model = (ROOT / "backend/src/oh_goon/core/models/fleet_plan.py").read_text(encoding="utf-8")
+    model = (ROOT / "backend/src/oh_goon/core/models/fleet_plan.py").read_text(
+        encoding="utf-8"
+    )
     assert "DEFAULT_COMMAND_TIMEOUT_SECONDS = 3600.0" in model
     assert "Field(default=DEFAULT_COMMAND_TIMEOUT_SECONDS" in model
     source = WORKFLOW.read_text(encoding="utf-8")
@@ -172,7 +194,9 @@ def test_canonical_self_verification_is_a_normal_bounded_plan() -> None:
     assert '"pipeline": ["resolve", "lock", "admit", "execute", "evidence"]' in source
 
 
-def test_self_verification_reports_complete_or_incomplete_without_turning_timeout_into_test_failure() -> None:
+def test_self_verification_reports_complete_or_incomplete_without_turning_timeout_into_test_failure() -> (
+    None
+):
     source = WORKFLOW.read_text(encoding="utf-8")
     assert "OH_GOON_SELF_VERIFICATION_STATUS=COMPLETE" in source
     assert "OH_GOON_SELF_VERIFICATION_STATUS=INCOMPLETE" in source
@@ -234,12 +258,10 @@ def test_live_operator_documentation_only_names_real_phony_make_targets() -> Non
 
 def test_storage_maintenance_make_frontdoors_use_repository_local_cli() -> None:
     assert (
-        "storage-status:\n"
-        "\t@backend/.venv/bin/oh-goon storage status --measure"
+        "storage-status:\n\t@backend/.venv/bin/oh-goon storage status --measure"
     ) in MAKEFILE
     assert (
-        "storage-prune:\n"
-        "\t@backend/.venv/bin/oh-goon storage prune --yes"
+        "storage-prune:\n\t@backend/.venv/bin/oh-goon storage prune --yes"
     ) in MAKEFILE
 
 

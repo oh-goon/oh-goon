@@ -15,7 +15,9 @@ def _source_with_lock(root: Path) -> Path:
     return root
 
 
-def test_bootstrap_rejects_invalid_source_before_creating_control_state(tmp_path) -> None:
+def test_bootstrap_rejects_invalid_source_before_creating_control_state(
+    tmp_path,
+) -> None:
     source = _source_with_lock(tmp_path / "repo")
     (source / "repair.patch").write_text("transport only\n", encoding="utf-8")
     state_home = tmp_path / "state-home"
@@ -31,14 +33,18 @@ def test_bootstrap_rejects_invalid_source_before_creating_control_state(tmp_path
     assert not state_home.exists()
 
 
-def test_existing_executor_inventory_is_validated_by_runtime_owner(tmp_path, monkeypatch) -> None:
+def test_existing_executor_inventory_is_validated_by_runtime_owner(
+    tmp_path, monkeypatch
+) -> None:
     source = _source_with_lock(tmp_path / "repo")
     state_home = tmp_path / "state-home"
     inventory = tmp_path / "operator-executors.toml"
     inventory.write_text("version = 6\n", encoding="utf-8")
     observed: list[Path] = []
 
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-test")
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-test"
+    )
     monkeypatch.setattr(
         certification_bootstrap,
         "load_executor_pool",
@@ -59,23 +65,31 @@ def test_existing_executor_inventory_is_validated_by_runtime_owner(tmp_path, mon
     assert context.lock_root == context.state_root / "locks"
     assert context.lock_root.is_dir()
     assert observed == [inventory.resolve()]
-    assert f"schema-{certification_bootstrap.DATABASE_SCHEMA_VERSION}" in str(context.state_root)
+    assert f"schema-{certification_bootstrap.DATABASE_SCHEMA_VERSION}" in str(
+        context.state_root
+    )
 
 
 def test_app_bootstrap_does_not_discover_validate_or_materialize_strict_executor(
     tmp_path, monkeypatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo")
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-app")
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-app"
+    )
     monkeypatch.setattr(
         certification_bootstrap,
         "load_executor_pool",
-        lambda _path: (_ for _ in ()).throw(AssertionError("APP must not validate strict executor authority")),
+        lambda _path: (_ for _ in ()).throw(
+            AssertionError("APP must not validate strict executor authority")
+        ),
     )
     monkeypatch.setattr(
         certification_bootstrap,
         "materialize_local_executor_inventory",
-        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("APP must not materialize strict executor authority")),
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("APP must not materialize strict executor authority")
+        ),
     )
 
     context = certification_bootstrap.prepare_certification_bootstrap(
@@ -118,8 +132,12 @@ def test_existing_state_must_be_actually_writable_before_certification_admission
     source = _source_with_lock(tmp_path / "repo")
     inventory = tmp_path / "operator-executors.toml"
     inventory.write_text("version = 6\n", encoding="utf-8")
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-test")
-    monkeypatch.setattr(certification_bootstrap, "load_executor_pool", lambda _path: None)
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-test"
+    )
+    monkeypatch.setattr(
+        certification_bootstrap, "load_executor_pool", lambda _path: None
+    )
 
     def fail_probe(_path):
         raise OSError(30, "Read-only file system")
@@ -135,15 +153,22 @@ def test_existing_state_must_be_actually_writable_before_certification_admission
     assert "mutable state is not writable" in str(exc.value)
     assert "Read-only file system" in str(exc.value)
 
-def test_invalid_operator_inventory_is_environment_failure(tmp_path, monkeypatch) -> None:
+
+def test_invalid_operator_inventory_is_environment_failure(
+    tmp_path, monkeypatch
+) -> None:
     source = _source_with_lock(tmp_path / "repo")
     inventory = tmp_path / "bad.toml"
     inventory.write_text("version = 1\n", encoding="utf-8")
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-test")
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-test"
+    )
     monkeypatch.setattr(
         certification_bootstrap,
         "load_executor_pool",
-        lambda _path: (_ for _ in ()).throw(FleetPlanInvalid("invalid executor inventory")),
+        lambda _path: (_ for _ in ()).throw(
+            FleetPlanInvalid("invalid executor inventory")
+        ),
     )
 
     with pytest.raises(certification_bootstrap.CertificationEnvironmentError) as exc:
@@ -156,10 +181,14 @@ def test_invalid_operator_inventory_is_environment_failure(tmp_path, monkeypatch
     assert "invalid executor inventory" in str(exc.value)
 
 
-def test_local_inventory_is_materialized_then_reparsed_by_runtime_owner(tmp_path, monkeypatch) -> None:
+def test_local_inventory_is_materialized_then_reparsed_by_runtime_owner(
+    tmp_path, monkeypatch
+) -> None:
     source = _source_with_lock(tmp_path / "repo")
     observed: list[Path] = []
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-test")
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-test"
+    )
     monkeypatch.setattr(
         certification_bootstrap,
         "materialize_local_executor_inventory",
@@ -183,10 +212,16 @@ def test_local_inventory_is_materialized_then_reparsed_by_runtime_owner(tmp_path
     assert observed == [context.executors_file]
 
 
-def test_systemd_reentry_validates_unit_root_through_canonical_cgroup_owner(monkeypatch) -> None:
-    current = Path("/sys/fs/cgroup/user.slice/user-1000.slice/run-r123.service/oh-goon-workflow")
+def test_systemd_reentry_validates_unit_root_through_canonical_cgroup_owner(
+    monkeypatch,
+) -> None:
+    current = Path(
+        "/sys/fs/cgroup/user.slice/user-1000.slice/run-r123.service/oh-goon-workflow"
+    )
     observed: list[tuple[Path, set[str]]] = []
-    monkeypatch.setattr(certification_bootstrap, "_current_process_cgroup_root", lambda: current)
+    monkeypatch.setattr(
+        certification_bootstrap, "_current_process_cgroup_root", lambda: current
+    )
 
     def validate(root: Path, *, required_controllers: set[str]) -> Path:
         observed.append((root, required_controllers))
@@ -209,7 +244,9 @@ def test_systemd_reentry_validates_unit_root_through_canonical_cgroup_owner(monk
     assert observed == [(current.parent, {"cpu", "memory", "pids"})]
 
 
-def test_systemd_reentry_self_places_process_before_enabling_controllers(monkeypatch) -> None:
+def test_systemd_reentry_self_places_process_before_enabling_controllers(
+    monkeypatch,
+) -> None:
     unit = Path("/sys/fs/cgroup/user.slice/user-1000.slice/run-r123.service")
     child = unit / "oh-goon-workflow"
     observed_roots = iter((unit, child))
@@ -253,7 +290,9 @@ def test_systemd_reentry_self_places_process_before_enabling_controllers(monkeyp
     assert enabled == [(unit, required)]
 
 
-def test_nested_strict_reentry_self_places_process_before_enabling_controllers(monkeypatch) -> None:
+def test_nested_strict_reentry_self_places_process_before_enabling_controllers(
+    monkeypatch,
+) -> None:
     delegated = Path("/sys/fs/cgroup/nested-execution")
     child = delegated / "oh-goon-nested-process"
     observed_roots = iter((delegated, child))
@@ -342,10 +381,16 @@ def test_missing_committed_backend_lock_is_source_failure(tmp_path) -> None:
     assert "committed backend dependency lock is missing" in str(exc.value)
 
 
-def test_local_certification_reserves_attempt_plus_control_plane_memory(tmp_path, monkeypatch) -> None:
+def test_local_certification_reserves_attempt_plus_control_plane_memory(
+    tmp_path, monkeypatch
+) -> None:
     state = tmp_path / "state"
     state.mkdir()
-    monkeypatch.setattr(certification_bootstrap, "required_certification_tool", lambda name: tmp_path / name)
+    monkeypatch.setattr(
+        certification_bootstrap,
+        "required_certification_tool",
+        lambda name: tmp_path / name,
+    )
     monkeypatch.setattr(
         certification_bootstrap,
         "resolve_certification_cgroup_root",
@@ -354,11 +399,15 @@ def test_local_certification_reserves_attempt_plus_control_plane_memory(tmp_path
     monkeypatch.setattr(
         certification_bootstrap,
         "observe_local_executor_capacity",
-        lambda _root: type("Capacity", (), {
-            "cpu_millis": 8000,
-            "memory_bytes": 4096 * 1024 * 1024,
-            "max_processes": 512,
-        })(),
+        lambda _root: type(
+            "Capacity",
+            (),
+            {
+                "cpu_millis": 8000,
+                "memory_bytes": 4096 * 1024 * 1024,
+                "max_processes": 512,
+            },
+        )(),
     )
 
     with pytest.raises(FleetPlanInvalid) as exc:
@@ -374,13 +423,19 @@ def test_local_certification_reserves_attempt_plus_control_plane_memory(tmp_path
     assert "reserves 1024 MiB headroom" in message
 
 
-def test_local_certification_inventory_advertises_four_gib_attempt_memory(tmp_path, monkeypatch) -> None:
+def test_local_certification_inventory_advertises_four_gib_attempt_memory(
+    tmp_path, monkeypatch
+) -> None:
     state = tmp_path / "state"
     state.mkdir()
     for name in ("bwrap", "ldd"):
         tool = tmp_path / name
         tool.write_text("tool", encoding="utf-8")
-    monkeypatch.setattr(certification_bootstrap, "required_certification_tool", lambda name: tmp_path / name)
+    monkeypatch.setattr(
+        certification_bootstrap,
+        "required_certification_tool",
+        lambda name: tmp_path / name,
+    )
     monkeypatch.setattr(
         certification_bootstrap,
         "resolve_certification_cgroup_root",
@@ -389,11 +444,15 @@ def test_local_certification_inventory_advertises_four_gib_attempt_memory(tmp_pa
     monkeypatch.setattr(
         certification_bootstrap,
         "observe_local_executor_capacity",
-        lambda _root: type("Capacity", (), {
-            "cpu_millis": 8000,
-            "memory_bytes": 16 * 1024 * 1024 * 1024,
-            "max_processes": 512,
-        })(),
+        lambda _root: type(
+            "Capacity",
+            (),
+            {
+                "cpu_millis": 8000,
+                "memory_bytes": 16 * 1024 * 1024 * 1024,
+                "max_processes": 512,
+            },
+        )(),
     )
 
     inventory = certification_bootstrap.materialize_local_executor_inventory(
@@ -405,10 +464,14 @@ def test_local_certification_inventory_advertises_four_gib_attempt_memory(tmp_pa
     assert "max_processes = 64" in text
 
 
-def test_corrupt_certification_database_fails_before_executor_admission(tmp_path, monkeypatch) -> None:
+def test_corrupt_certification_database_fails_before_executor_admission(
+    tmp_path, monkeypatch
+) -> None:
     source = _source_with_lock(tmp_path / "repo")
     state_home = tmp_path / "state-home"
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-corrupt")
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-corrupt"
+    )
     state = certification_bootstrap.certification_state_root(
         source_root=source,
         state_home=state_home,
@@ -435,13 +498,19 @@ def test_certification_state_lease_refuses_second_controller(tmp_path) -> None:
     with certification_bootstrap.certification_state_lease(state):
         with pytest.raises(certification_bootstrap.CertificationStateBusy):
             with certification_bootstrap.certification_state_lease(state):
-                raise AssertionError("second certification controller must never acquire the lease")
+                raise AssertionError(
+                    "second certification controller must never acquire the lease"
+                )
 
 
-def test_certification_state_reset_preserves_retained_dependency_supply(tmp_path, monkeypatch) -> None:
+def test_certification_state_reset_preserves_retained_dependency_supply(
+    tmp_path, monkeypatch
+) -> None:
     source = _source_with_lock(tmp_path / "repo")
     state_home = tmp_path / "state-home"
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-reset")
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-reset"
+    )
     state = certification_bootstrap.certification_state_root(
         source_root=source,
         state_home=state_home,
@@ -468,18 +537,26 @@ def test_certification_state_reset_preserves_retained_dependency_supply(tmp_path
     assert sentinel.read_text(encoding="utf-8") == '{"sealed": true}\n'
 
 
-def test_unclassified_cache_bytes_are_not_certification_control_authority(tmp_path, monkeypatch) -> None:
+def test_unclassified_cache_bytes_are_not_certification_control_authority(
+    tmp_path, monkeypatch
+) -> None:
     source = _source_with_lock(tmp_path / "repo")
     state_home = tmp_path / "state-home"
     cache = tmp_path / "cache"
     inventory = tmp_path / "operator-executors.toml"
     inventory.write_text("version = 6\n", encoding="utf-8")
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-state-split")
-    monkeypatch.setattr(certification_bootstrap, "load_executor_pool", lambda _path: None)
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-state-split"
+    )
+    monkeypatch.setattr(
+        certification_bootstrap, "load_executor_pool", lambda _path: None
+    )
 
     unclassified = cache / "unclassified" / "state"
     unclassified.mkdir(parents=True, exist_ok=True)
-    (unclassified / "oh-goon.db").write_bytes(b"unclassified bytes are not control state")
+    (unclassified / "oh-goon.db").write_bytes(
+        b"unclassified bytes are not control state"
+    )
 
     context = certification_bootstrap.prepare_certification_bootstrap(
         source_root=source,
@@ -498,9 +575,15 @@ def test_certification_database_preflight_initializes_reopens_and_quick_checks(
 ) -> None:
     source = _source_with_lock(tmp_path / "repo-preflight")
     state_home = tmp_path / "state-home"
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-preflight")
-    monkeypatch.setattr(certification_bootstrap, "database_filesystem_type", lambda _path: "ext4")
-    monkeypatch.setattr(certification_bootstrap, "database_filesystem_is_local", lambda _path: True)
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-preflight"
+    )
+    monkeypatch.setattr(
+        certification_bootstrap, "database_filesystem_type", lambda _path: "ext4"
+    )
+    monkeypatch.setattr(
+        certification_bootstrap, "database_filesystem_is_local", lambda _path: True
+    )
 
     payload = certification_bootstrap.preflight_certification_database(
         source_root=source,
@@ -514,10 +597,19 @@ def test_certification_database_preflight_initializes_reopens_and_quick_checks(
     assert payload["quick_check"] == "ok"
     assert payload["integrity_check"] == "ok"
     assert payload["foreign_key_check"] == "ok"
-    assert payload["reopen_proofs"] == certification_bootstrap.CERTIFICATION_DATABASE_INDEPENDENT_REOPEN_PROOFS
-    assert payload["admitted_read_proofs"] == certification_bootstrap.CERTIFICATION_DATABASE_ADMITTED_READ_PROOFS
+    assert (
+        payload["reopen_proofs"]
+        == certification_bootstrap.CERTIFICATION_DATABASE_INDEPENDENT_REOPEN_PROOFS
+    )
+    assert (
+        payload["admitted_read_proofs"]
+        == certification_bootstrap.CERTIFICATION_DATABASE_ADMITTED_READ_PROOFS
+    )
     assert payload["compressed_observation_seconds"] == 150.0
-    assert payload["runtime_preparation_observer"] == "persistent-query-only-connection-per-preparation"
+    assert (
+        payload["runtime_preparation_observer"]
+        == "persistent-query-only-connection-per-preparation"
+    )
     assert payload["runtime_observation_reproof_attempts"] == 3
     inspection = certification_bootstrap.inspect_database_path(
         database, integrity_check=True, foreign_key_check=True
@@ -525,15 +617,20 @@ def test_certification_database_preflight_initializes_reopens_and_quick_checks(
     assert inspection.status is certification_bootstrap.LocalStateCompatibility.READY
 
 
-
 def test_certification_database_preflight_detects_same_inode_notadb_during_endurance(
     tmp_path, monkeypatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo-preflight-corrupt")
     state_home = tmp_path / "state-home"
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-preflight-corrupt")
-    monkeypatch.setattr(certification_bootstrap, "database_filesystem_type", lambda _path: "ext4")
-    monkeypatch.setattr(certification_bootstrap, "database_filesystem_is_local", lambda _path: True)
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-preflight-corrupt"
+    )
+    monkeypatch.setattr(
+        certification_bootstrap, "database_filesystem_type", lambda _path: "ext4"
+    )
+    monkeypatch.setattr(
+        certification_bootstrap, "database_filesystem_is_local", lambda _path: True
+    )
 
     original = certification_bootstrap.LocalDatabase.durable_revision
     calls = 0
@@ -578,11 +675,20 @@ def test_certification_database_preflight_rejects_nonlocal_storage_before_sqlite
 ) -> None:
     source = _source_with_lock(tmp_path / "repo-preflight")
     state_home = tmp_path / "state-home"
-    monkeypatch.setattr(certification_bootstrap, "repository_id", lambda _root: "repo-preflight")
-    monkeypatch.setattr(certification_bootstrap, "database_filesystem_type", lambda _path: "drvfs")
-    monkeypatch.setattr(certification_bootstrap, "database_filesystem_is_local", lambda _path: False)
+    monkeypatch.setattr(
+        certification_bootstrap, "repository_id", lambda _root: "repo-preflight"
+    )
+    monkeypatch.setattr(
+        certification_bootstrap, "database_filesystem_type", lambda _path: "drvfs"
+    )
+    monkeypatch.setattr(
+        certification_bootstrap, "database_filesystem_is_local", lambda _path: False
+    )
 
-    with pytest.raises(certification_bootstrap.CertificationEnvironmentError, match="local Linux filesystem"):
+    with pytest.raises(
+        certification_bootstrap.CertificationEnvironmentError,
+        match="local Linux filesystem",
+    ):
         certification_bootstrap.preflight_certification_database(
             source_root=source,
             state_home=state_home,

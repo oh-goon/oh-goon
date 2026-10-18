@@ -47,24 +47,27 @@ def test_grade_template_command_persists_exact_observation_payload(
 
     monkeypatch.setattr(exam, "grade_template", fake_grade_template)
     profile = exam.DEFAULT_QUALIFICATION_PROFILE
-    assert _run(
-        monkeypatch,
-        "grade-template",
-        "--submission",
-        str(submission),
-        "--candidate",
-        "candidate-a",
-        "--mode",
-        "release",
-        "--candidate-configuration",
-        str(configuration),
-        "--candidate-run-identity",
-        "run-1",
-        "--profile",
-        profile,
-        "--output",
-        str(output),
-    ) == 0
+    assert (
+        _run(
+            monkeypatch,
+            "grade-template",
+            "--submission",
+            str(submission),
+            "--candidate",
+            "candidate-a",
+            "--mode",
+            "release",
+            "--candidate-configuration",
+            str(configuration),
+            "--candidate-run-identity",
+            "run-1",
+            "--profile",
+            profile,
+            "--output",
+            str(output),
+        )
+        == 0
+    )
     assert observed["submission"] == submission
     assert observed["candidate_configuration"] == configuration
     assert observed["qualification_profile"] == profile
@@ -80,10 +83,19 @@ def test_grade_template_command_persists_exact_observation_payload(
             "capability-certificate",
             "capability_certificate",
             [
-                "r1.json", "r2.json", "r3.json",
-                "--integrity", "i1.json", "i2.json", "i3.json",
-                "--adversarial", "a1.json", "a2.json", "a3.json",
-                "--issued-at", "2026-09-15T00:00:00Z",
+                "r1.json",
+                "r2.json",
+                "r3.json",
+                "--integrity",
+                "i1.json",
+                "i2.json",
+                "i3.json",
+                "--adversarial",
+                "a1.json",
+                "a2.json",
+                "a3.json",
+                "--issued-at",
+                "2026-09-15T00:00:00Z",
             ],
         ),
         (
@@ -91,12 +103,19 @@ def test_grade_template_command_persists_exact_observation_payload(
             "capability_check",
             [
                 "certificate.json",
-                "--repository-identity", "sha256:repo",
-                "--candidate-configuration-identity", "sha256:candidate",
-                "--requested-capability", exam.CAPABILITY_ACTIONS[0],
+                "--repository-identity",
+                "sha256:repo",
+                "--candidate-configuration-identity",
+                "sha256:candidate",
+                "--requested-capability",
+                exam.CAPABILITY_ACTIONS[0],
             ],
         ),
-        ("recertification-plan", "differential_recertification_plan", ["certificate.json", "result.json"]),
+        (
+            "recertification-plan",
+            "differential_recertification_plan",
+            ["certificate.json", "result.json"],
+        ),
         ("adversarial", "adversarial_report", ["challenge.json", "observations.json"]),
         ("score", "score", ["grades.json", "--submission", "submission.json"]),
         ("regrade", "score", ["result.json"]),
@@ -122,7 +141,12 @@ def test_json_commands_route_arguments_and_optional_output(
     if command == "adversarial":
         monkeypatch.setattr(exam, "benchmark_registry", lambda: {"registry": True})
     output = tmp_path / command / "result.json"
-    argv = [command, *[str(tmp_path / value) if value.endswith(".json") else value for value in args], "--output", str(output)]
+    argv = [
+        command,
+        *[str(tmp_path / value) if value.endswith(".json") else value for value in args],
+        "--output",
+        str(output),
+    ]
     assert _run(monkeypatch, *argv) == 0
     assert calls
     assert json.loads(output.read_text(encoding="utf-8")) == {"command": command, "ok": True}
@@ -185,15 +209,18 @@ def test_lifecycle_transition_loads_optional_evidence_and_routes_current_authori
         return {"authorized": True}
 
     monkeypatch.setattr(exam, "authorize_question_transition", authorize)
-    assert _run(
-        monkeypatch,
-        "lifecycle-transition",
-        str(request),
-        "--calibration-report",
-        str(calibration),
-        "--human-baseline-report",
-        str(human),
-    ) == 0
+    assert (
+        _run(
+            monkeypatch,
+            "lifecycle-transition",
+            str(request),
+            "--calibration-report",
+            str(calibration),
+            "--human-baseline-report",
+            str(human),
+        )
+        == 0
+    )
     assert calls[0]["calibration_report"] == {"calibration": True}
     assert calls[0]["human_baseline"] == {"human": True}
     assert json.loads(capsys.readouterr().out) == {"authorized": True}
@@ -229,13 +256,16 @@ def test_challenge_and_integrity_commands_bind_current_snapshot(
 
     evidence = tmp_path / "evidence.json"
     challenge_path = tmp_path / "challenge.json"
-    assert _run(
-        monkeypatch,
-        "integrity",
-        str(evidence),
-        "--challenge-set",
-        str(challenge_path),
-    ) == 0
+    assert (
+        _run(
+            monkeypatch,
+            "integrity",
+            str(evidence),
+            "--challenge-set",
+            str(challenge_path),
+        )
+        == 0
+    )
     assert integrity_calls[0]["challenge_instance_path"] == challenge_path
     assert integrity_calls[0]["exam_snapshot_sha256"] == "sha256:snapshot"
     assert json.loads(capsys.readouterr().out) == {"kind": "integrity"}
@@ -246,27 +276,30 @@ def test_game_tape_and_human_reports_route_without_mutating_evidence(
 ) -> None:
     monkeypatch.setattr(exam, "game_tape", lambda *args, **kwargs: {"game": "tape"})
     output = tmp_path / "game.json"
-    assert _run(
-        monkeypatch,
-        "game-tape",
-        str(tmp_path / "r1.json"),
-        str(tmp_path / "r2.json"),
-        str(tmp_path / "r3.json"),
-        "--integrity",
-        str(tmp_path / "i1.json"),
-        str(tmp_path / "i2.json"),
-        str(tmp_path / "i3.json"),
-        "--adversarial",
-        str(tmp_path / "a1.json"),
-        str(tmp_path / "a2.json"),
-        str(tmp_path / "a3.json"),
-        "--certificate",
-        str(tmp_path / "certificate.json"),
-        "--recertification",
-        str(tmp_path / "retest.json"),
-        "--output",
-        str(output),
-    ) == 0
+    assert (
+        _run(
+            monkeypatch,
+            "game-tape",
+            str(tmp_path / "r1.json"),
+            str(tmp_path / "r2.json"),
+            str(tmp_path / "r3.json"),
+            "--integrity",
+            str(tmp_path / "i1.json"),
+            str(tmp_path / "i2.json"),
+            str(tmp_path / "i3.json"),
+            "--adversarial",
+            str(tmp_path / "a1.json"),
+            str(tmp_path / "a2.json"),
+            str(tmp_path / "a3.json"),
+            "--certificate",
+            str(tmp_path / "certificate.json"),
+            "--recertification",
+            str(tmp_path / "retest.json"),
+            "--output",
+            str(output),
+        )
+        == 0
+    )
     assert json.loads(output.read_text(encoding="utf-8")) == {"game": "tape"}
     capsys.readouterr()
 

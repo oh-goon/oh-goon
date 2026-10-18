@@ -17,7 +17,7 @@ def test_vitest_keeps_pure_typescript_tests_out_of_jsdom() -> None:
     assert 'environment: "jsdom"' in config
     assert 'include: ["src/**/*.test.tsx", ...domBackedTypeScriptTests]' in config
     assert 'setupFiles: ["./tests/setup.ts"]' in config
-    assert 'globals: true' in config
+    assert "globals: true" in config
 
 
 def test_dom_backed_typescript_tests_are_explicit_and_bounded() -> None:
@@ -36,17 +36,16 @@ def test_dom_backed_typescript_tests_are_explicit_and_bounded() -> None:
     assert config.count('environment: "jsdom"') == 1
 
 
-
-
-
 def test_run_step_url_stays_node_only_by_using_explicit_base_href() -> None:
     config = (FRONTEND / "vitest.config.ts").read_text(encoding="utf-8")
-    test_source = (FRONTEND / "src/app/pages/runStepUrl.test.ts").read_text(encoding="utf-8")
+    test_source = (FRONTEND / "src/app/pages/runStepUrl.test.ts").read_text(
+        encoding="utf-8"
+    )
 
     assert '"src/app/pages/runStepUrl.test.ts"' not in config
     assert "window.location" not in test_source
-    assert 'runReviewUrl(state, baseHref)' in test_source
-    assert 'window.location' not in test_source
+    assert "runReviewUrl(state, baseHref)" in test_source
+    assert "window.location" not in test_source
 
 
 def test_vitest_uses_one_threaded_file_worker_to_avoid_wsl_transport_failures() -> None:
@@ -68,11 +67,15 @@ def test_dom_setup_is_the_single_test_side_effect_i18n_owner() -> None:
     assert redundant_side_effect_imports == []
 
 
-def test_development_runner_warns_but_never_blocks_on_windows_mounted_wsl_workspace() -> None:
+def test_development_runner_warns_but_never_blocks_on_windows_mounted_wsl_workspace() -> (
+    None
+):
     runner = (ROOT / "scripts" / "development_test.sh").read_text(encoding="utf-8")
     assert "WSL Windows-mounted workspace detected" in runner
     assert "performance note only" in runner
-    warning_block = runner.split('if [[ "$ROOT" == /mnt/?/* ]]', 1)[1].split("\nfi", 1)[0]
+    warning_block = runner.split('if [[ "$ROOT" == /mnt/?/* ]]', 1)[1].split("\nfi", 1)[
+        0
+    ]
     assert "exit" not in warning_block
 
 

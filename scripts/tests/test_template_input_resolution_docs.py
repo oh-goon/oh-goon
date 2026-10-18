@@ -32,7 +32,9 @@ def _issues_for_navigation(path: Path, markdown: str) -> list[str]:
         if reference.startswith(("https://", "http://", "mailto:")):
             continue
         if not (path.parent / reference).resolve().is_file():
-            problems.append(f"broken local documentation link: {path.name}: {reference}")
+            problems.append(
+                f"broken local documentation link: {path.name}: {reference}"
+            )
     return problems
 
 
@@ -48,10 +50,15 @@ def test_m133_navigation_has_no_missing_or_dangling_local_links() -> None:
 
 def test_m133_navigation_negative_malformed_link_and_missing_guide() -> None:
     page = ROOT / "templates/plans/README.md"
-    assert "missing M133 guide navigation" in _issues_for_navigation(page, "# Shipped Plans")[0]
+    assert (
+        "missing M133 guide navigation"
+        in _issues_for_navigation(page, "# Shipped Plans")[0]
+    )
     assert any(
         "broken local documentation link" in problem
-        for problem in _issues_for_navigation(page, f"[{REFERENCE}](missing-contract.md)")
+        for problem in _issues_for_navigation(
+            page, f"[{REFERENCE}](missing-contract.md)"
+        )
     )
 
 
@@ -105,5 +112,7 @@ def test_m133_documented_output_and_workspace_edges_match_shipped_catalog() -> N
         "report once",
     ),
 )
-def test_m133_documentation_names_each_real_authority_and_failure_boundary(required: str) -> None:
+def test_m133_documentation_names_each_real_authority_and_failure_boundary(
+    required: str,
+) -> None:
     assert required in GUIDE.read_text(encoding="utf-8")

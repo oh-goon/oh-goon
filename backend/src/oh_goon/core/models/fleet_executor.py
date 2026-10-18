@@ -5,9 +5,9 @@ from typing import Literal
 
 from pydantic import Field, computed_field, model_validator
 
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
+from oh_goon.core.product_identity import stable_id
 
 
 @dataclass(frozen=True, slots=True)

@@ -20,7 +20,9 @@ def _write_lock(root: Path) -> None:
     (frontend / "package-lock.json").write_text("{}\n", encoding="utf-8")
 
 
-def _npm_tree(*, test: str = "1.62.1", playwright: str = "1.62.1", core: str = "1.62.1") -> str:
+def _npm_tree(
+    *, test: str = "1.62.1", playwright: str = "1.62.1", core: str = "1.62.1"
+) -> str:
     return json.dumps(
         {
             "dependencies": {
@@ -39,7 +41,9 @@ def _npm_tree(*, test: str = "1.62.1", playwright: str = "1.62.1", core: str = "
 
 
 def _npm_runner(payload: str):
-    def runner(command: tuple[str, ...], **kwargs) -> subprocess.CompletedProcess[object]:
+    def runner(
+        command: tuple[str, ...], **kwargs
+    ) -> subprocess.CompletedProcess[object]:
         assert command == (
             "npm",
             "ls",
@@ -57,11 +61,17 @@ def _npm_runner(payload: str):
     return runner
 
 
-def test_locked_playwright_version_delegates_selection_to_native_npm(tmp_path: Path) -> None:
+def test_locked_playwright_version_delegates_selection_to_native_npm(
+    tmp_path: Path,
+) -> None:
     _write_lock(tmp_path)
-    assert locked_playwright_version(tmp_path, runner=_npm_runner(_npm_tree())) == "1.62.1"
+    assert (
+        locked_playwright_version(tmp_path, runner=_npm_runner(_npm_tree())) == "1.62.1"
+    )
 
-    with pytest.raises(BrowserAcceptanceEnvironmentError, match="one exact Playwright version"):
+    with pytest.raises(
+        BrowserAcceptanceEnvironmentError, match="one exact Playwright version"
+    ):
         locked_playwright_version(
             tmp_path,
             runner=_npm_runner(_npm_tree(core="1.62.0")),
@@ -83,11 +93,15 @@ def test_container_runner_uses_locked_image_and_disposable_shm_bounded_run(
     dockerfile.write_text("FROM scratch\n", encoding="utf-8")
     commands: list[tuple[str, ...]] = []
 
-    def runner(command: tuple[str, ...], **kwargs) -> subprocess.CompletedProcess[object]:
+    def runner(
+        command: tuple[str, ...], **kwargs
+    ) -> subprocess.CompletedProcess[object]:
         if command[0] == "npm":
             assert kwargs["cwd"] == tmp_path / "frontend"
             assert kwargs["check"] is False
-            return subprocess.CompletedProcess(command, 0, stdout=_npm_tree(), stderr="")
+            return subprocess.CompletedProcess(
+                command, 0, stdout=_npm_tree(), stderr=""
+            )
         assert kwargs["cwd"] == tmp_path
         assert kwargs["check"] is True
         commands.append(command)

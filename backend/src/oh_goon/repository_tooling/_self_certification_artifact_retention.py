@@ -150,7 +150,10 @@ def load_retained_readback_evidence_impl(
         payload = json.loads(retained_manifest.read_text(encoding="utf-8"))
         if payload.get("artifact_set_identity") != manifest_evidence["artifact_set_identity"]:
             return None
-        if payload.get("persistence", {}).get("identity") != manifest_evidence["persistence_identity"]:
+        if (
+            payload.get("persistence", {}).get("identity")
+            != manifest_evidence["persistence_identity"]
+        ):
             return None
         for row in payload.get("artifacts", []):
             if not isinstance(row, dict):
@@ -158,7 +161,9 @@ def load_retained_readback_evidence_impl(
             artifact = destination / str(row.get("name", ""))
             if not artifact.is_file() or artifact.is_symlink():
                 return None
-            if _sha256_file(artifact) != row.get("sha256") or artifact.stat().st_size != row.get("byte_count"):
+            if _sha256_file(artifact) != row.get("sha256") or artifact.stat().st_size != row.get(
+                "byte_count"
+            ):
                 return None
         manifest_sha = _sha256_file(retained_manifest)
         if manifest_sha != manifest_evidence["manifest_sha256"]:

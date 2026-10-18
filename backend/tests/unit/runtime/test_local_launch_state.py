@@ -52,7 +52,9 @@ def _intent() -> LaunchIntent:
 
 def test_store_persists_events_and_projects_manifest_without_secret_state(tmp_path: Path) -> None:
     store = _store(tmp_path)
-    manifest = store.create(identity=_identity(), intent=_intent(), asserted_by="dev-launch-owner", timestamp=T0)
+    manifest = store.create(
+        identity=_identity(), intent=_intent(), asserted_by="dev-launch-owner", timestamp=T0
+    )
     assert manifest.lifecycle.state.value == "resolving"
 
     manifest = store.append(

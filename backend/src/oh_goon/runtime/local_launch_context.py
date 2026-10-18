@@ -57,7 +57,9 @@ class LocalLaunchRuntimeContext:
             return None
         missing = [name for name, value in values.items() if value is None]
         if missing:
-            raise ValueError(f"incomplete local launch context: missing {', '.join(sorted(missing))}")
+            raise ValueError(
+                f"incomplete local launch context: missing {', '.join(sorted(missing))}"
+            )
         launch_id = values[LOCAL_LAUNCH_ID_ENV]
         owner = values[LOCAL_LAUNCH_OWNER_GENERATION_ENV]
         backend = values[LOCAL_LAUNCH_BACKEND_GENERATION_ENV]

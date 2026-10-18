@@ -5,6 +5,7 @@ module checks only repository-specific publication properties: the committed
 lock may reference approved public registries/release artifacts, but it must
 not publish host-local or repository-local dependency sources.
 """
+
 from __future__ import annotations
 
 import re

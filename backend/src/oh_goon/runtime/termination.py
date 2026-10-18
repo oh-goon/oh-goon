@@ -5,8 +5,9 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-from oh_goon.core.models.termination import TerminationCause, TerminationSignal
 from oh_goon.core.models.runtime_supervision import WatchdogDecision
+from oh_goon.core.models.termination import TerminationCause
+from oh_goon.core.models.termination import TerminationSignal as TerminationSignal
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +32,11 @@ class TerminationRequest:
 
     @property
     def request_identity(self) -> str:
-        raw = json.dumps({"schema": "oh-goon.termination-request/v1", **asdict(self)}, sort_keys=True, separators=(",", ":")).encode()
+        raw = json.dumps(
+            {"schema": "oh-goon.termination-request/v1", **asdict(self)},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
         return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
@@ -50,7 +55,11 @@ class ProcessTreeTerminationReceipt:
 
     @property
     def receipt_identity(self) -> str:
-        raw = json.dumps({"schema": "oh-goon.process-tree-termination-receipt/v1", **asdict(self)}, sort_keys=True, separators=(",", ":")).encode()
+        raw = json.dumps(
+            {"schema": "oh-goon.process-tree-termination-receipt/v1", **asdict(self)},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
         return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 

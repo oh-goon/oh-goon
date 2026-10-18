@@ -56,12 +56,8 @@ class BrokenToolHealth(_ToolHealthBase):
     detail: str | None = None
 
 
-
 type ToolHealth = Annotated[
-    ReadyToolHealth
-    | MissingRequiredToolHealth
-    | MissingOptionalToolHealth
-    | BrokenToolHealth,
+    ReadyToolHealth | MissingRequiredToolHealth | MissingOptionalToolHealth | BrokenToolHealth,
     Field(discriminator="status"),
 ]
 

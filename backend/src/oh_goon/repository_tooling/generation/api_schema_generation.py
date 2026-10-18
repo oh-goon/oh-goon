@@ -13,9 +13,7 @@ _TS_IDENTIFIER = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
 def _discriminator_type_name(schema_name: str, property_name: str) -> str:
     schema_tokens = _PASCAL_TOKEN.findall(schema_name)
-    property_tokens = [
-        part[:1].upper() + part[1:] for part in property_name.split("_") if part
-    ]
+    property_tokens = [part[:1].upper() + part[1:] for part in property_name.split("_") if part]
     if property_name == "status" and schema_tokens[-1:] == ["State"]:
         schema_tokens = schema_tokens[:-1]
     overlap = 0
@@ -34,8 +32,7 @@ def component_schemas(openapi: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if not isinstance(schemas, dict):
         raise ValueError("OpenAPI components.schemas must be an object")
     if not all(
-        isinstance(name, str) and isinstance(schema, dict)
-        for name, schema in schemas.items()
+        isinstance(name, str) and isinstance(schema, dict) for name, schema in schemas.items()
     ):
         raise ValueError("OpenAPI component schemas must map names to schema objects")
     return dict(schemas)
@@ -46,11 +43,7 @@ def runtime_enums(openapi: dict[str, Any]) -> dict[str, tuple[str, ...]]:
     enums: dict[str, tuple[str, ...]] = {}
     for schema_name, schema in sorted(component_schemas(openapi).items()):
         values = schema.get("enum")
-        if (
-            isinstance(values, list)
-            and values
-            and all(isinstance(value, str) for value in values)
-        ):
+        if isinstance(values, list) and values and all(isinstance(value, str) for value in values):
             enums[schema_name] = tuple(values)
 
         discriminator = schema.get("discriminator")
@@ -58,19 +51,11 @@ def runtime_enums(openapi: dict[str, Any]) -> dict[str, tuple[str, ...]]:
             continue
         property_name = discriminator.get("propertyName")
         mapping = discriminator.get("mapping")
-        if (
-            not isinstance(property_name, str)
-            or not isinstance(mapping, dict)
-            or not mapping
-        ):
+        if not isinstance(property_name, str) or not isinstance(mapping, dict) or not mapping:
             continue
-        discriminator_values = tuple(
-            sorted(value for value in mapping if isinstance(value, str))
-        )
+        discriminator_values = tuple(sorted(value for value in mapping if isinstance(value, str)))
         if len(discriminator_values) != len(mapping):
-            raise ValueError(
-                f"Discriminator mapping keys must be strings for {schema_name}"
-            )
+            raise ValueError(f"Discriminator mapping keys must be strings for {schema_name}")
         enum_name = _discriminator_type_name(schema_name, property_name)
         existing = enums.get(enum_name)
         if existing is not None and set(existing) != set(discriminator_values):
@@ -212,18 +197,14 @@ def render_models(openapi: dict[str, Any]) -> str:
     ]
     for name in sorted(schemas):
         if not _TS_IDENTIFIER.fullmatch(name):
-            raise ValueError(
-                f"OpenAPI schema name is not a TypeScript identifier: {name!r}"
-            )
+            raise ValueError(f"OpenAPI schema name is not a TypeScript identifier: {name!r}")
         lines.append(f'export type {name} = components["schemas"]["{name}"];')
     lines.append("")
     return "\n".join(lines)
 
 
 def enum_member_name(value: str) -> str:
-    candidate = (
-        "".join(char if char.isalnum() else "_" for char in value).upper().strip("_")
-    )
+    candidate = "".join(char if char.isalnum() else "_" for char in value).upper().strip("_")
     if not candidate:
         candidate = "VALUE"
     if candidate[0].isdigit():

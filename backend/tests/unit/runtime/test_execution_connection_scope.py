@@ -27,12 +27,16 @@ def test_execution_connection_scope_reuses_one_native_handle_for_many_transactio
     with database.execution_connection_scope():
         for _ in range(200):
             with database.transaction() as connection:
-                assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == DATABASE_SCHEMA_VERSION
-
+                assert (
+                    int(connection.execute("PRAGMA user_version").fetchone()[0])
+                    == DATABASE_SCHEMA_VERSION
+                )
 
     assert admitted_opens == 1
     with database.transaction() as connection:
-        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == DATABASE_SCHEMA_VERSION
+        assert (
+            int(connection.execute("PRAGMA user_version").fetchone()[0]) == DATABASE_SCHEMA_VERSION
+        )
     assert admitted_opens == 2
 
 
@@ -109,6 +113,9 @@ def test_execution_scope_removes_fresh_reconnect_surface_after_first_admitted_op
     with database.execution_connection_scope():
         for _ in range(500):
             with database.transaction() as connection:
-                assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == DATABASE_SCHEMA_VERSION
+                assert (
+                    int(connection.execute("PRAGMA user_version").fetchone()[0])
+                    == DATABASE_SCHEMA_VERSION
+                )
 
     assert admitted_opens == 1

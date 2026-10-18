@@ -5,11 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from oh_goon.core.canonical_result_semantics import CanonicalResultSemantics
 from oh_goon.core.errors import CapabilityUnavailable, StateConflict
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution, FleetPlanResult
-from oh_goon.core.canonical_result_semantics import CanonicalResultSemantics
-from oh_goon.core.vocabulary.result_semantics import CanonicalResultStatus
 from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
 from oh_goon.core.models.operation import (
     CompletedAttentionOperationOutcome,
@@ -30,12 +29,13 @@ from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import EffectBoundaryKind, OperationAction, Verdict
+from oh_goon.core.vocabulary.result_semantics import CanonicalResultStatus
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.fleet_content_store import FleetContentStore
-from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
 from oh_goon.integrations.fleet_plan_preview import require_repository_plan_admission_current
+from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
 from oh_goon.integrations.fleet_plan_run import PreparedPlanRun
 from oh_goon.integrations.fleet_plan_run_execution import FleetPlanRunExecutor, PlanExecutionOutcome
 from oh_goon.integrations.fleet_plan_step_execution import StepLifecycleObserver
@@ -189,29 +189,37 @@ class FleetPlanRunner:
             repository_id=attempt.repository.repository_id,
             lifecycle_observer=self._lifecycle_observer(request),
             agent_delivery_for=self._agent_delivery_for(
-                target, attempt.repository.repository_id,
-            ) if target.agent_deliveries else None,
+                target,
+                attempt.repository.repository_id,
+            )
+            if target.agent_deliveries
+            else None,
         )
         after = self._git.fingerprint(attempt.repository.path, request.cancel_requested)
         return self._operation_execution(request, execution, after=after)
 
     def _agent_delivery_for(self, target: FleetPlanTarget, repository_id: str):
         """One content-store transport port, bound to original admitted Step identity."""
-        from oh_goon.core.errors import FleetPlanInvalid
         import hashlib
+
+        from oh_goon.core.errors import FleetPlanInvalid
+
         references = {item.step_id: item for item in target.agent_deliveries}
+
         def deliver(step_id: str, handoff_identity: str) -> bytes:
             reference = references.get(step_id)
             if reference is None or reference.handoff_identity != handoff_identity:
                 raise FleetPlanInvalid("Agent original admitted Step delivery identity mismatch")
             stored = self._content_store.get(
-                reference.reference_id, owner_repository_id=repository_id,
+                reference.reference_id,
+                owner_repository_id=repository_id,
                 expected_kind="file",
             )
             packet = stored.path.read_bytes()
             if hashlib.sha256(packet).hexdigest() != reference.delivery_sha256:
                 raise FleetPlanInvalid("retained Agent source changed before Step execution")
             return packet
+
         return deliver
 
     def _run_strict(
@@ -243,7 +251,9 @@ class FleetPlanRunner:
         fleet_run_id = request.attempt.fleet_run_id
         if factory is None or fleet_run_id is None:
             return None
-        return factory(fleet_run_id, request.attempt.repository.repository_id, request.attempt.operation_id)
+        return factory(
+            fleet_run_id, request.attempt.repository.repository_id, request.attempt.operation_id
+        )
 
     def _output_observer(self, request: CapabilityExecutionRequest) -> StepOutputObserver | None:
         factory = self._output_observer_factory
@@ -305,6 +315,8 @@ class FleetPlanRunner:
                     reason_code=ReasonCode.OPERATION_FAILED,
                 )
             ),
-            evidence=FleetPlanOperationEvidence(kind="FLEET_PLAN", plan=result, canonical_result=canonical_result),
+            evidence=FleetPlanOperationEvidence(
+                kind="FLEET_PLAN", plan=result, canonical_result=canonical_result
+            ),
         )
         return OperationExecution(stdout=execution.stdout, stderr=execution.stderr, report=report)

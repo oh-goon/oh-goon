@@ -124,9 +124,7 @@ class _FleetPlanRunInputs:
         self.repository_admission = repository_scope.admission
         self.import_applicability = repository_scope.import_applicability
         self.import_skips = repository_scope.import_skips
-        active_steps = tuple(
-            step for step in plan.steps if step.step_id not in self.import_skips
-        )
+        active_steps = tuple(step for step in plan.steps if step.step_id not in self.import_skips)
         active_plan = plan.model_copy(update={"steps": active_steps})
         combined_managed = dict(managed_runtimes or {})
         uv_managed = prepare_uv_project_runtimes(

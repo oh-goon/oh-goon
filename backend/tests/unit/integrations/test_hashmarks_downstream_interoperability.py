@@ -15,14 +15,7 @@ from hashmarks.verification_selection import (
     verification_selection_envelope,
 )
 
-
-pytestmark = pytest.mark.dependency_complete
-
-from tests.hashmarks_test_support import (
-    TEST_HASHMARKS_ARTIFACT_IDENTITY,
-)
 from oh_goon.engine.command import CommandResult
-from tests.factories.runtime_authority import authorized_command_result
 from oh_goon.integrations.hashmarks.verification_selection import (
     load_hashmarks_verification_selection,
 )
@@ -32,6 +25,12 @@ from oh_goon.repository_tooling.hashmarks_verification_execution import (
     build_verification_execution_receipt,
 )
 from oh_goon.runtime.execution import shards as subject
+from tests.factories.runtime_authority import authorized_command_result
+from tests.hashmarks_test_support import (
+    TEST_HASHMARKS_ARTIFACT_IDENTITY,
+)
+
+pytestmark = pytest.mark.dependency_complete
 
 
 def _sha(char: str) -> str:
@@ -44,7 +43,10 @@ def _context() -> subject.ShardExecutionContext:
 
 def _selection(tmp_path: Path, count: int = 4):
     membership = verification_membership(
-        [verification_member("tests/test_x.py", test_symbol=f"test_{index}") for index in range(count)]
+        [
+            verification_member("tests/test_x.py", test_symbol=f"test_{index}")
+            for index in range(count)
+        ]
     )
     envelope = verification_selection_envelope(
         VerificationSelectionEnvelopeState(
@@ -76,7 +78,9 @@ def test_native_selection_timeout_bisection_preserves_hashmarks_membership(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     selection = _selection(tmp_path)
-    plan = build_verification_execution_plan(selection, command_prefix=("fake",), grouping_policy=VerificationExecutionGroupingPolicy(4))
+    plan = build_verification_execution_plan(
+        selection, command_prefix=("fake",), grouping_policy=VerificationExecutionGroupingPolicy(4)
+    )
     calls: list[tuple[str, ...]] = []
 
     def fake_run(*args: str, **kwargs: object) -> CommandResult:
@@ -107,7 +111,9 @@ def test_native_selection_retry_keeps_terminal_coverage_unique(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     selection = _selection(tmp_path, count=1)
-    plan = build_verification_execution_plan(selection, command_prefix=("fake",), grouping_policy=VerificationExecutionGroupingPolicy(1))
+    plan = build_verification_execution_plan(
+        selection, command_prefix=("fake",), grouping_policy=VerificationExecutionGroupingPolicy(1)
+    )
     attempts = 0
 
     def fake_run(*args: str, **kwargs: object) -> CommandResult:
@@ -142,7 +148,9 @@ def test_native_selection_resume_reuses_exact_receipts_without_relaunch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     selection = _selection(tmp_path, count=2)
-    plan = build_verification_execution_plan(selection, command_prefix=("fake",), grouping_policy=VerificationExecutionGroupingPolicy(1))
+    plan = build_verification_execution_plan(
+        selection, command_prefix=("fake",), grouping_policy=VerificationExecutionGroupingPolicy(1)
+    )
     state = tmp_path / "state"
     calls: list[tuple[str, ...]] = []
 

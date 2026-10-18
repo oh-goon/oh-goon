@@ -75,9 +75,7 @@ def load_goon_execution_requirements(
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid {REQUIREMENTS_FILE}: {exc}") from exc
     if not isinstance(payload, dict) or payload.get("schema") != REQUIREMENTS_SCHEMA:
-        raise ValueError(
-            f"{REQUIREMENTS_FILE} must use schema {REQUIREMENTS_SCHEMA}"
-        )
+        raise ValueError(f"{REQUIREMENTS_FILE} must use schema {REQUIREMENTS_SCHEMA}")
     permissions = payload.get(_POLICY_FIELD)
     if not isinstance(permissions, dict):
         raise ValueError(f"{REQUIREMENTS_FILE} {_POLICY_FIELD} must be an object")
@@ -110,9 +108,7 @@ def workload_tool_permissions(payload: dict[str, Any]) -> dict[str, tuple[str, .
     return result
 
 
-def canonical_step_required_tools(
-    root: Path, *, goon: str, step_id: str
-) -> tuple[str, ...]:
+def canonical_step_required_tools(root: Path, *, goon: str, step_id: str) -> tuple[str, ...]:
     """Return the generated exact tool projection for one canonical Step.
 
     The projection is derived from compiled canonical Step semantics plus workload
@@ -150,8 +146,7 @@ def validate_goon_execution_requirements(
                 StaticAdmissionIssue(
                     code="INVALID_TOOL_PERMISSION_OWNER",
                     message=(
-                        "workload permission owner must be a make:<target> identity: "
-                        f"{owner!r}"
+                        f"workload permission owner must be a make:<target> identity: {owner!r}"
                     ),
                 )
             )

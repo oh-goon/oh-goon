@@ -11,7 +11,7 @@ def editable_uv_lock(
     )
     return (
         'version = 1\nrevision = 3\nrequires-python = ">=3.11"\n\n'
-        '[[package]]\n'
+        "[[package]]\n"
         f'name = "{distribution_name}"\n'
         f'version = "{version}"\n'
         'source = { editable = "." }\n'
@@ -25,7 +25,7 @@ def editable_console_build_backend(
     wheel_name = distribution_name.replace("-", "_")
     metadata_name = f"Name: {distribution_name}\n"
     entry_point = f"[console_scripts]\n{command_name} = {module_name}:main\n"
-    return f'''from __future__ import annotations
+    return f"""from __future__ import annotations
 
 import base64
 import csv
@@ -46,7 +46,7 @@ def _digest(payload: bytes) -> tuple[str, str]:
 
 def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     files = {{
-        {module_name + '.py'!r}: Path({module_name + '.py'!r}).read_bytes(),
+        {module_name + ".py"!r}: Path({module_name + ".py"!r}).read_bytes(),
         f"{{DIST_INFO}}/METADATA": (
             "Metadata-Version: 2.1\\n"
             {metadata_name!r}
@@ -80,4 +80,4 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 
 def build_editable(wheel_directory, config_settings=None, metadata_directory=None):
     return build_wheel(wheel_directory, config_settings, metadata_directory)
-'''
+"""

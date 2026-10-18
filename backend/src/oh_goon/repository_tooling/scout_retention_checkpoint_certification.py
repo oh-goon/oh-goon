@@ -6,11 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from oh_goon.scout.evidence import ScoutEvidenceSnapshot
 from oh_goon.core.time import utc_now
-from oh_goon.runtime.database import LocalDatabase
-from oh_goon.scout.database import scout_analytical_database_path
-from oh_goon.scout.store import ScoutObservationStore
 from oh_goon.repository_tooling.network_certification import blocked_network_attempts
 from oh_goon.repository_tooling.release.runtime_journey import (
     prepare_acceptance_repository,
@@ -27,6 +23,10 @@ from oh_goon.repository_tooling.scout_http_load_probe import (
     _wait_json,
 )
 from oh_goon.repository_tooling.scout_load_probe import build_scout_load_snapshot
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.scout.database import scout_analytical_database_path
+from oh_goon.scout.evidence import ScoutEvidenceSnapshot
+from oh_goon.scout.store import ScoutObservationStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,9 +105,7 @@ def _mixed_age_snapshot(*, revision: int) -> ScoutEvidenceSnapshot:
     )
 
 
-def run_retention_checkpoint_certification(
-    *, root: Path = ROOT
-) -> ScoutRetentionCheckpointResult:
+def run_retention_checkpoint_certification(*, root: Path = ROOT) -> ScoutRetentionCheckpointResult:
     with TemporaryDirectory(prefix="oh-goon-scout-retention-") as directory:
         temp = Path(directory)
         state = temp / "state" / "oh-goon.db"
@@ -169,22 +167,16 @@ def run_retention_checkpoint_certification(
         wal = Path(f"{scout_analytical_database_path(state)}-wal")
         wal_bytes = wal.stat().st_size if wal.is_file() else 0
     if revision_after != revision:
-        raise RuntimeError(
-            "Scout retention maintenance changed canonical Journal revision"
-        )
+        raise RuntimeError("Scout retention maintenance changed canonical Journal revision")
     if (
         health.get("retained_run_observations") != 2
         or health.get("retained_step_observations") != 1
     ):
-        raise RuntimeError(
-            f"Scout retention counts are wrong after real maintenance: {health!r}"
-        )
+        raise RuntimeError(f"Scout retention counts are wrong after real maintenance: {health!r}")
     if health.get("lag_revisions") != 0:
         raise RuntimeError("Scout retention maintenance introduced Journal lag")
     if wal_bytes != 0:
-        raise RuntimeError(
-            f"Scout retention maintenance did not truncate WAL: {wal_bytes} bytes"
-        )
+        raise RuntimeError(f"Scout retention maintenance did not truncate WAL: {wal_bytes} bytes")
     return ScoutRetentionCheckpointResult(
         canonical_revision_before=revision,
         canonical_revision_after=revision_after,
@@ -197,11 +189,7 @@ def run_retention_checkpoint_certification(
 
 
 def main() -> int:
-    print(
-        json.dumps(
-            asdict(run_retention_checkpoint_certification()), indent=2, sort_keys=True
-        )
-    )
+    print(json.dumps(asdict(run_retention_checkpoint_certification()), indent=2, sort_keys=True))
     return 0
 
 

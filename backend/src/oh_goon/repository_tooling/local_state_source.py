@@ -4,20 +4,27 @@ This script is intentionally an implementation detail behind Make targets. It im
 only the canonical runtime database-path/inspection/reset owners and can run with
 its named pyproject entrypoint through ``uv run`` before the APP workspace dependency graph is materialized.
 """
+
 from __future__ import annotations
 
 import argparse
 import sqlite3
 
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.runtime.database import DATABASE_SCHEMA_VERSION, default_database_path, inspect_local_database
+from oh_goon.runtime.database import (
+    DATABASE_SCHEMA_VERSION,
+    default_database_path,
+    inspect_local_database,
+)
 from oh_goon.runtime.local_state_maintenance import reset_local_state
 from oh_goon.runtime.storage_health import probe_sqlite_prelaunch
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("action", choices=("check", "prelaunch-check", "path", "diagnostics-path", "reset"))
+    parser.add_argument(
+        "action", choices=("check", "prelaunch-check", "path", "diagnostics-path", "reset")
+    )
     parser.add_argument(
         "--yes",
         action="store_true",
@@ -45,7 +52,9 @@ def main() -> int:
         if inspection.found_schema_version is None:
             print(f"Schema:      not created (expected {inspection.expected_schema_version})")
         else:
-            print(f"Schema:      {inspection.found_schema_version} (expected {inspection.expected_schema_version})")
+            print(
+                f"Schema:      {inspection.found_schema_version} (expected {inspection.expected_schema_version})"
+            )
         print(inspection.detail)
         if not inspection.compatible:
             print("Source checkout recovery: make local-state-reset")

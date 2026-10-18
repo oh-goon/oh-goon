@@ -2,6 +2,7 @@
 
 No separate reducer, journal read, output retention, or outcome classification.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -64,8 +65,10 @@ def _logs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         print(f"Fleet Run ID: {batch.fleet_run_id}")
         print(f"Live output: {batch.state}")
         for chunk in batch.chunks:
-            print(f"[{chunk.sequence} {chunk.repository_id}/{chunk.step_id} "
-                  f"{chunk.stream}] {chunk.text}")
+            print(
+                f"[{chunk.sequence} {chunk.repository_id}/{chunk.step_id} "
+                f"{chunk.stream}] {chunk.text}"
+            )
         print(f"Next sequence: {batch.next_sequence}")
         if not batch.available:
             print("Transient output unavailable; consult durable Run events/Game Tape.")
@@ -84,10 +87,13 @@ def _tape(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         for repo in tape.repositories:
             print(f"Repository: {repo.repository.name} ({repo.repository_execution_id})")
             for step in repo.steps:
-                print(f"  {step.order}: {step.step_id} [{step.status.value}] "
-                      f"({step.step_execution_id})")
-        print("For durable output evidence use 'plan outputs'; "
-              "for transient bytes use 'plan logs'.")
+                print(
+                    f"  {step.order}: {step.step_id} [{step.status.value}] "
+                    f"({step.step_execution_id})"
+                )
+        print(
+            "For durable output evidence use 'plan outputs'; for transient bytes use 'plan logs'."
+        )
     return 0
 
 
@@ -117,8 +123,10 @@ def _steps(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         for repo in tape.repositories:
             print(f"Repository: {repo.repository.name} ({repo.repository_execution_id})")
             for step in repo.steps:
-                print(f"  {step.order}: {step.step_id} [{step.status.value}] "
-                      f"({step.step_execution_id})")
+                print(
+                    f"  {step.order}: {step.step_id} [{step.status.value}] "
+                    f"({step.step_execution_id})"
+                )
         if tape.issue_focus:
             print("Original issue focus is available with --json or 'plan tape'.")
     return 0
@@ -132,26 +140,32 @@ def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     for repo in tape.repositories:
         steps = []
         for step in repo.steps:
-            steps.append({
-                "step_execution_id": step.step_execution_id,
-                "step_id": step.step_id,
-                "output_names": list(step.output_names),
-                "outputs": [item.model_dump(mode="json") for item in step.outputs],
-                "artifacts": [item.model_dump(mode="json") for item in step.artifacts],
-                "stdout_evidence": (
-                    step.stdout_evidence.model_dump(mode="json")
-                    if step.stdout_evidence is not None else None
-                ),
-                "stderr_evidence": (
-                    step.stderr_evidence.model_dump(mode="json")
-                    if step.stderr_evidence is not None else None
-                ),
-            })
-        repositories.append({
-            "repository_execution_id": repo.repository_execution_id,
-            "repository": repo.repository.model_dump(mode="json"),
-            "steps": steps,
-        })
+            steps.append(
+                {
+                    "step_execution_id": step.step_execution_id,
+                    "step_id": step.step_id,
+                    "output_names": list(step.output_names),
+                    "outputs": [item.model_dump(mode="json") for item in step.outputs],
+                    "artifacts": [item.model_dump(mode="json") for item in step.artifacts],
+                    "stdout_evidence": (
+                        step.stdout_evidence.model_dump(mode="json")
+                        if step.stdout_evidence is not None
+                        else None
+                    ),
+                    "stderr_evidence": (
+                        step.stderr_evidence.model_dump(mode="json")
+                        if step.stderr_evidence is not None
+                        else None
+                    ),
+                }
+            )
+        repositories.append(
+            {
+                "repository_execution_id": repo.repository_execution_id,
+                "repository": repo.repository.model_dump(mode="json"),
+                "steps": steps,
+            }
+        )
     result = {
         "schema": "oh-goon.plan-run-outputs/v1",
         "fleet_run_id": tape.fleet_run_id,
@@ -162,12 +176,13 @@ def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     else:
         print(f"Fleet Run ID: {tape.fleet_run_id}")
         for repo in repositories:
-            print(f"Repository: {repo['repository']['name']} "
-                  f"({repo['repository_execution_id']})")
-            for step in repo['steps']:
-                print(f"  {step['step_id']} ({step['step_execution_id']}): "
-                      f"{len(step['outputs'])} published outputs, "
-                      f"{len(step['artifacts'])} artifacts")
+            print(f"Repository: {repo['repository']['name']} ({repo['repository_execution_id']})")
+            for step in repo["steps"]:
+                print(
+                    f"  {step['step_id']} ({step['step_execution_id']}): "
+                    f"{len(step['outputs'])} published outputs, "
+                    f"{len(step['artifacts'])} artifacts"
+                )
         print("Evidence metadata only; raw output uses 'plan logs' when available.")
     return 0
 
@@ -241,21 +256,29 @@ def _handoff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         print(f"Plan ID: {result['plan_id'] or 'unknown'}")
         print(f"Status: {result['status']} | Outcome: {result['outcome']}")
         print(f"Game Tape status: {result['game_tape_status']}")
-        print(f"Issues: {tape.issue_count} (displayed: {len(tape.issue_focus)}, "
-              f"hidden: {tape.hidden_issue_count})")
+        print(
+            f"Issues: {tape.issue_count} (displayed: {len(tape.issue_focus)}, "
+            f"hidden: {tape.hidden_issue_count})"
+        )
         for focus in tape.issue_focus:
             identity = focus.step_execution_id or focus.repository_execution_id or "run"
             print(f"  {focus.scope}: {identity} | {focus.code or 'no code'}")
         if tape.why_not is not None:
             print(f"Original guidance: {tape.why_not.safe_next_action}")
-        print("Inspect exact evidence using the structured readback argv references "
-              "from --json; raw logs may be unavailable.")
+        print(
+            "Inspect exact evidence using the structured readback argv references "
+            "from --json; raw logs may be unavailable."
+        )
     return 0
 
 
 _READ_COMMANDS = {
-    "status": _status, "events": _events, "logs": _logs,
-    "tape": _tape, "steps": _steps, "outputs": _outputs,
+    "status": _status,
+    "events": _events,
+    "logs": _logs,
+    "tape": _tape,
+    "steps": _steps,
+    "outputs": _outputs,
     "handoff": _handoff,
 }
 
@@ -266,9 +289,14 @@ def run_plan_readback(runtime: ApplicationRuntime, args: argparse.Namespace) -> 
         return _READ_COMMANDS[args.plan_command](runtime, args)
     except FleetDomainError as exc:
         if args.as_json:
-            _print_json({"schema": "oh-goon.plan-run-read-error/v1",
-                         "fleet_run_id": args.fleet_run_id,
-                         "status": "error", "message": str(exc)})
+            _print_json(
+                {
+                    "schema": "oh-goon.plan-run-read-error/v1",
+                    "fleet_run_id": args.fleet_run_id,
+                    "status": "error",
+                    "message": str(exc),
+                }
+            )
         else:
             print(str(exc))
         return 2

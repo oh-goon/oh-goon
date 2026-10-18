@@ -25,7 +25,9 @@ class TerminalClaim(ImmutableModel):
 
     @property
     def claim_id(self) -> str:
-        return stable_id("terminal-claim", self.model_dump(mode="json", exclude_computed_fields=True))
+        return stable_id(
+            "terminal-claim", self.model_dump(mode="json", exclude_computed_fields=True)
+        )
 
 
 class RecoveryBudget(ImmutableModel):
@@ -56,7 +58,10 @@ class RecoveryBudget(ImmutableModel):
 
     @property
     def exhausted(self) -> bool:
-        return self.attempts_consumed >= self.max_attempts or self.runtime_consumed_seconds >= self.max_runtime_seconds
+        return (
+            self.attempts_consumed >= self.max_attempts
+            or self.runtime_consumed_seconds >= self.max_runtime_seconds
+        )
 
 
 class WorkMembership(ImmutableModel):

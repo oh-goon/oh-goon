@@ -4,6 +4,7 @@ These tests do NOT establish exclusive cgroup parent mutation custody and do
 NOT make rmdir identity-conditional. Such native privileges must be qualified
 independently by the original Enforcer/LACE owner.
 """
+
 from __future__ import annotations
 
 import os
@@ -25,7 +26,8 @@ def test_unchanged_parent_can_retire_original_inode(tmp_path: Path) -> None:
 
 
 def test_displaced_parent_is_rejected_before_destructive_cut(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = tmp_path / "parent"
     parent.mkdir()
@@ -53,7 +55,8 @@ def test_displaced_parent_is_rejected_before_destructive_cut(
 
 
 def test_parent_replaced_at_native_rmdir_cannot_ack_success(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = tmp_path / "parent"
     parent.mkdir()
@@ -64,7 +67,9 @@ def test_parent_replaced_at_native_rmdir_cannot_ack_success(
     native_rmdir = os.rmdir
     raced = False
 
-    def displace_parent_at_cut(name: str | os.PathLike[str], *args: object, **kwargs: object) -> None:
+    def displace_parent_at_cut(
+        name: str | os.PathLike[str], *args: object, **kwargs: object
+    ) -> None:
         nonlocal raced
         if name == target.name and "dir_fd" in kwargs and not raced:
             raced = True
@@ -82,7 +87,8 @@ def test_parent_replaced_at_native_rmdir_cannot_ack_success(
 
 
 def test_parent_postcut_observation_failure_refuses_ack(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent = tmp_path / "parent"
     parent.mkdir()

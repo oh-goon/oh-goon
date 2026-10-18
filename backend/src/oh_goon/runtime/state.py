@@ -123,8 +123,13 @@ class LocalState:
                 with self.database.transaction(write=True) as connection:
                     self._mutation_guard.require_idle(connection)
                     previous_folders = self._league_folders.list()
-                    if expected_revision is not None and locations_revision(previous_folders) != expected_revision:
-                        raise StateConflict("Configured locations changed since they were displayed")
+                    if (
+                        expected_revision is not None
+                        and locations_revision(previous_folders) != expected_revision
+                    ):
+                        raise StateConflict(
+                            "Configured locations changed since they were displayed"
+                        )
                     folders = change(previous_folders)
                     projected = tuple(self._locations(connection))
                     if projected != folders:

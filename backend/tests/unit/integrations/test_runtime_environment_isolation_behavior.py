@@ -7,7 +7,10 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan_values import LiteralEnvironmentPart, ResolvedEnvironmentBinding
-from oh_goon.integrations.fleet_plan_environment import direct_plan_environment, strict_plan_environment
+from oh_goon.integrations.fleet_plan_environment import (
+    direct_plan_environment,
+    strict_plan_environment,
+)
 
 
 def _binding(name: str, value: str) -> ResolvedEnvironmentBinding:
@@ -28,7 +31,9 @@ def test_step_cannot_redirect_runtime_state_or_data_outside_private_home(tmp_pat
     outside = tmp_path / "host-controlled-state"
     for name in ("XDG_STATE_HOME", "XDG_DATA_HOME"):
         with pytest.raises(FleetPlanInvalid, match="runtime-owned environment"):
-            strict_plan_environment((_binding(name, str(outside)),), home=private_home, host_environment={})
+            strict_plan_environment(
+                (_binding(name, str(outside)),), home=private_home, host_environment={}
+            )
 
     environment = strict_plan_environment((), home=private_home, host_environment={})
     assert Path(environment["XDG_STATE_HOME"]).is_relative_to(private_home)

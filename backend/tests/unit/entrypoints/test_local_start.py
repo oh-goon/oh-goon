@@ -1,5 +1,5 @@
-from pathlib import Path
 import types
+from pathlib import Path
 
 from oh_goon.cli import main
 
@@ -29,7 +29,10 @@ def test_start_serves_one_loopback_app_and_reports_saved_league(
 
     LeagueFolderStore().replace((league_root,))
     monkeypatch.setattr("oh_goon.cli_start.built_ui_available", lambda: True)
-    monkeypatch.setattr("oh_goon.cli_start.start_inprocess_readiness_monitor", lambda **kwargs: (kwargs["on_ready"](), types.SimpleNamespace(cancel=lambda: None))[1])
+    monkeypatch.setattr(
+        "oh_goon.cli_start.start_inprocess_readiness_monitor",
+        lambda **kwargs: (kwargs["on_ready"](), types.SimpleNamespace(cancel=lambda: None))[1],
+    )
     observed: dict[str, object] = {}
 
     class FakeConfig:

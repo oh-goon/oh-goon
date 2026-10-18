@@ -35,9 +35,7 @@ def check_backend_boundaries() -> list[Violation]:
         for path in (BACKEND_PACKAGE_ROOT / layer).rglob("*.py"):
             for module in _imported_modules(path):
                 if module.startswith(prefixes):
-                    violations.append(
-                        Violation(path, f"{layer} layer must not import {module}")
-                    )
+                    violations.append(Violation(path, f"{layer} layer must not import {module}"))
     workflow_path = BACKEND_PACKAGE_ROOT / "workflow.py"
     cli_self_path = BACKEND_PACKAGE_ROOT / "cli_self.py"
     allowed_repository_tooling: dict[Path, set[str]] = {
@@ -50,7 +48,9 @@ def check_backend_boundaries() -> list[Violation]:
             continue
         for module in _imported_modules(path):
             if module == "scripts":
-                violations.append(Violation(path, "installed product code must not import repository tooling"))
+                violations.append(
+                    Violation(path, "installed product code must not import repository tooling")
+                )
                 continue
             if module.startswith("oh_goon.repository_tooling."):
                 if module in allowed_repository_tooling.get(path, set()):

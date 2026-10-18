@@ -3,6 +3,7 @@
 The HTTP adapter and direct SharedPlanService caller share the original lifecycle
 membership fence. This is not final issuer authorization and never creates a lease.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -44,12 +45,13 @@ def service(*, provisioned: FleetPreworkProvisioner | None, authenticated=True, 
     control = object.__new__(FleetRunControlPlane)
     control._lifecycle = owner
     plans = FleetPlanService(object(), control, object(), object(), object())
-    plans.run_reviewed = Mock(
-        side_effect=AssertionError("no execution before source is reviewed")
-    )
+    plans.run_reviewed = Mock(side_effect=AssertionError("no execution before source is reviewed"))
     return SharedPlanService(
         store if store is not None else NoSourceStore(),
-        object(), plans, object(), object(),
+        object(),
+        plans,
+        object(),
+        object(),
     ), plans
 
 
@@ -108,6 +110,8 @@ def test_http_preflight_does_not_observe_signers_or_reserve(monkeypatch):
     ):
         shared.run(**run_kwargs("known"))
     plans.run_reviewed.assert_not_called()
+
+
 def test_http_exact_enrollment_preserves_reviewed_plan_and_instance_forwarding():
     document = SimpleNamespace(plan_key="release-plan", sha256="b" * 64)
     store = SimpleNamespace(

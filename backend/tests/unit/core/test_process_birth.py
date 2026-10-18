@@ -10,7 +10,15 @@ from oh_goon.core.process_birth import (
 )
 
 
-def _proc_tree(tmp_path: Path, *, pid: int, boot_id: str, start_ticks: int, comm: str = "python worker", state: str = "S") -> Path:
+def _proc_tree(
+    tmp_path: Path,
+    *,
+    pid: int,
+    boot_id: str,
+    start_ticks: int,
+    comm: str = "python worker",
+    state: str = "S",
+) -> Path:
     proc = tmp_path / "proc"
     (proc / "sys/kernel/random").mkdir(parents=True, exist_ok=True)
     (proc / "sys/kernel/random/boot_id").write_text(boot_id + "\n", encoding="utf-8")
@@ -25,7 +33,9 @@ def _proc_tree(tmp_path: Path, *, pid: int, boot_id: str, start_ticks: int, comm
 
 
 def test_linux_proc_birth_identity_uses_boot_and_start_ticks_not_pid_alone(tmp_path: Path) -> None:
-    proc = _proc_tree(tmp_path, pid=77, boot_id="boot-a", start_ticks=123456, comm="name ) with spaces")
+    proc = _proc_tree(
+        tmp_path, pid=77, boot_id="boot-a", start_ticks=123456, comm="name ) with spaces"
+    )
     identity = observe_process_birth(77, proc_root=proc)
     assert identity == ProcessBirthIdentity(pid=77, boot_id="boot-a", start_ticks=123456)
     assert process_birth_matches(identity, proc_root=proc)  # type: ignore[arg-type]

@@ -1,4 +1,5 @@
 """Real failure cuts for the original workspace owner (no new executor)."""
+
 from __future__ import annotations
 
 import os
@@ -16,12 +17,16 @@ from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
 
 def _manager(root: Path) -> RepositoryWorkspaceAuthority:
-    return RepositoryWorkspaceAuthority(LocalDatabase(root / "state" / "oh-goon.db", journal_mode="DELETE"))
+    return RepositoryWorkspaceAuthority(
+        LocalDatabase(root / "state" / "oh-goon.db", journal_mode="DELETE")
+    )
 
 
 def _allocated(root: Path):
     manager = _manager(root)
-    workspace = manager.request(repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.WORKTREE)
+    workspace = manager.request(
+        repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.WORKTREE
+    )
     state = manager.allocate(workspace.workspace_id, expected_state_version=0)
     path = manager.physical_path(workspace)
     (path / "data.txt").write_text("durable candidate", encoding="utf-8")
@@ -78,10 +83,14 @@ def test_crash_after_commit_reclaims_quarantine_without_restoring(tmp_path: Path
     assert not path.with_name(f".release-{path.name}").exists()
 
 
-def test_release_rollback_restores_original_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_release_rollback_restores_original_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     manager, workspace, allocated, path = _allocated(tmp_path)
+
     def fail_write(*args, **kwargs):
         raise RuntimeError("injected precommit failure")
+
     monkeypatch.setattr(manager, "_write_state", fail_write)
     with pytest.raises(RuntimeError, match="precommit"):
         manager.release(workspace.workspace_id, expected_state_version=1)
@@ -92,12 +101,18 @@ def test_release_rollback_restores_original_bytes(tmp_path: Path, monkeypatch: p
 def test_release_refuses_active_lease_and_unregistered_git(tmp_path: Path) -> None:
     manager, workspace, allocated, path = _allocated(tmp_path)
     with manager._database.transaction(write=True) as conn:
-        conn.execute("UPDATE workspace_state SET current_lease_id='live' WHERE workspace_id=?", (workspace.workspace_id,))
+        conn.execute(
+            "UPDATE workspace_state SET current_lease_id='live' WHERE workspace_id=?",
+            (workspace.workspace_id,),
+        )
     with pytest.raises(WorkspaceStateStale, match="settled lease"):
         manager.release(workspace.workspace_id, expected_state_version=1)
     assert (path / "data.txt").exists()
     with manager._database.transaction(write=True) as conn:
-        conn.execute("UPDATE workspace_state SET current_lease_id=NULL WHERE workspace_id=?", (workspace.workspace_id,))
+        conn.execute(
+            "UPDATE workspace_state SET current_lease_id=NULL WHERE workspace_id=?",
+            (workspace.workspace_id,),
+        )
     (path / ".git").write_text("gitdir: /other/worktrees/test\n", encoding="utf-8")
     with pytest.raises(WorkspaceStateStale, match="native deregistration"):
         manager.release(workspace.workspace_id, expected_state_version=1)
@@ -134,7 +149,9 @@ def test_read_snapshot_postcommit_verification_failure_preserves_ready_bytes(
     import oh_goon.runtime.workspaces as module
 
     manager = _manager(tmp_path)
-    workspace = manager.request(repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT)
+    workspace = manager.request(
+        repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT
+    )
     allocated = manager.allocate(workspace.workspace_id, expected_state_version=0)
     source = tmp_path / "source"
     source.mkdir()
@@ -151,7 +168,9 @@ def test_read_snapshot_postcommit_verification_failure_preserves_ready_bytes(
     monkeypatch.setattr(module, "snapshot_source_directory", snapshot)
     monkeypatch.setattr(module, "verify_clean_source_snapshot", verify)
     with pytest.raises(RuntimeError, match="postcommit"):
-        manager.materialize_read_snapshot(workspace, source, expected_state_version=allocated.state_version)
+        manager.materialize_read_snapshot(
+            workspace, source, expected_state_version=allocated.state_version
+        )
     assert manager.state(workspace.workspace_id).lifecycle_state is WorkspaceLifecycleState.READY
     assert (manager.physical_path(workspace) / "file.txt").read_text() == "committed data"
 
@@ -168,8 +187,10 @@ def test_allocation_crash_reconciles_only_original_receipt(
     tmp_path: Path, cut: str, exit_code: int, expected_lifecycle: WorkspaceLifecycleState
 ) -> None:
     manager = _manager(tmp_path)
-    workspace = manager.request(repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT)
-    script = '''
+    workspace = manager.request(
+        repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT
+    )
+    script = """
 import os, sys
 from pathlib import Path
 from oh_goon.runtime.database import LocalDatabase
@@ -181,11 +202,14 @@ if cut == "before_commit":
 else:
     owner.reconcile_allocation = lambda *a, **kw: os._exit(72)
 owner.allocate(workspace_id, expected_state_version=0)
-'''
+"""
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path), workspace.workspace_id, cut],
         env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3] / "src")},
-        capture_output=True, text=True, check=False, timeout=20,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
     )
     assert not result.stderr, result.stderr
     assert result.returncode == exit_code
@@ -194,20 +218,30 @@ owner.allocate(workspace_id, expected_state_version=0)
     marker = path.with_name(f".allocate-{path.name}")
     assert marker.is_file()
     assert manager.state(workspace.workspace_id).lifecycle_state is expected_lifecycle
-    assert manager.reconcile_allocation(workspace.workspace_id).lifecycle_state is expected_lifecycle
+    assert (
+        manager.reconcile_allocation(workspace.workspace_id).lifecycle_state is expected_lifecycle
+    )
     assert not marker.exists()
     assert path.is_dir() is (cut == "after_commit")
 
 
-def test_allocation_failure_rolls_back_owned_empty_container(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_allocation_failure_rolls_back_owned_empty_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     manager = _manager(tmp_path)
-    workspace = manager.request(repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT)
+    workspace = manager.request(
+        repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT
+    )
+
     def fail_write(*args, **kwargs):
         raise RuntimeError("injected allocation failure")
+
     monkeypatch.setattr(manager, "_write_state", fail_write)
     with pytest.raises(RuntimeError, match="allocation failure"):
         manager.allocate(workspace.workspace_id, expected_state_version=0)
-    assert manager.state(workspace.workspace_id).lifecycle_state is WorkspaceLifecycleState.REQUESTED
+    assert (
+        manager.state(workspace.workspace_id).lifecycle_state is WorkspaceLifecycleState.REQUESTED
+    )
     path = manager.physical_path(workspace)
     assert not path.exists()
     assert not path.with_name(f".allocate-{path.name}").exists()
@@ -215,7 +249,9 @@ def test_allocation_failure_rolls_back_owned_empty_container(tmp_path: Path, mon
 
 def test_allocation_receipt_does_not_authorize_nonempty_foreign_tree(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
-    workspace = manager.request(repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT)
+    workspace = manager.request(
+        repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT
+    )
     state = manager.state(workspace.workspace_id)
     marker = manager._allocation_marker_for_id(workspace.workspace_id)
     manager._prepare_allocation_marker(marker, state)
@@ -234,7 +270,9 @@ def test_precommit_published_snapshot_reconciles_using_original_owner(
     import oh_goon.runtime.workspaces as module
 
     manager = _manager(tmp_path)
-    workspace = manager.request(repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT)
+    workspace = manager.request(
+        repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT
+    )
     allocated = manager.allocate(workspace.workspace_id, expected_state_version=0)
     source = tmp_path / "source"
     source.mkdir()
@@ -251,11 +289,15 @@ def test_precommit_published_snapshot_reconciles_using_original_owner(
     monkeypatch.setattr(module, "snapshot_source_directory", snapshot)
     monkeypatch.setattr(module, "verify_clean_source_snapshot", verify)
     original_write = manager._write_state
+
     def fail_write(*args, **kwargs):
         raise RuntimeError("injected crash before READY commit")
+
     monkeypatch.setattr(manager, "_write_state", fail_write)
     with pytest.raises(RuntimeError, match="before READY"):
-        manager.materialize_read_snapshot(workspace, source, expected_state_version=allocated.state_version)
+        manager.materialize_read_snapshot(
+            workspace, source, expected_state_version=allocated.state_version
+        )
     assert manager.state(workspace.workspace_id) == allocated
     path = manager.physical_path(workspace)
     assert (path / "file.txt").read_text() == "exact"
@@ -273,24 +315,33 @@ def test_reconcile_read_publication_tamper_is_fail_closed(
     import oh_goon.runtime.workspaces as module
 
     manager = _manager(tmp_path)
-    workspace = manager.request(repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT)
+    workspace = manager.request(
+        repository_id="repo", base_revision="a" * 40, kind=WorkspaceKind.READ_SNAPSHOT
+    )
     allocated = manager.allocate(workspace.workspace_id, expected_state_version=0)
     source = tmp_path / "source"
     source.mkdir()
+
     def snapshot(_source, destination, *, label):
         destination.mkdir()
         (destination / "file.txt").write_text("actual")
         return SnapshotIdentity(sha256="c" * 64, byte_count=6, entry_count=1)
+
     def verify(binding, *, label):
         if (binding.snapshot_path / "file.txt").read_text() != "actual":
             raise RuntimeError("source differs")
+
     monkeypatch.setattr(module, "snapshot_source_directory", snapshot)
     monkeypatch.setattr(module, "verify_clean_source_snapshot", verify)
+
     def fail_write(*args, **kwargs):
         raise RuntimeError("precommit")
+
     monkeypatch.setattr(manager, "_write_state", fail_write)
     with pytest.raises(RuntimeError, match="precommit"):
-        manager.materialize_read_snapshot(workspace, source, expected_state_version=allocated.state_version)
+        manager.materialize_read_snapshot(
+            workspace, source, expected_state_version=allocated.state_version
+        )
     marker = manager._read_publication_marker_for_id(workspace.workspace_id)
     marker.write_text('{"owner":"wrong"}', encoding="utf-8")
     with pytest.raises(WorkspaceStateStale, match="generation or identity"):
@@ -306,9 +357,11 @@ def test_after_commit_cleanup_error_replays_only_missing_owner_receipt(
 
     manager, workspace, allocated_state, path = _allocated(tmp_path)
     original_rmtree = module.shutil.rmtree
+
     def after_unlink(directory, *args, **kwargs):
         original_rmtree(directory, *args, **kwargs)
         raise OSError("injected lost fs cleanup acknowledgment")
+
     monkeypatch.setattr(module.shutil, "rmtree", after_unlink)
     with pytest.raises(OSError, match="acknowledgment"):
         manager.release(workspace.workspace_id, expected_state_version=1)

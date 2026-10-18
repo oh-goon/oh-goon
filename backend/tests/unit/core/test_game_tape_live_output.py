@@ -110,9 +110,7 @@ def test_run_activity_is_bounded_and_separate_from_step_output() -> None:
         (2, "Execution inputs ready"),
     )
     assert store.snapshot("run-1").chunks == ()
-    assert store.activity_snapshot("run-1", after=1)[1] == (
-        (2, "Execution inputs ready"),
-    )
+    assert store.activity_snapshot("run-1", after=1)[1] == ((2, "Execution inputs ready"),)
 
 
 def test_duplicate_open_does_not_erase_active_or_terminal_output() -> None:

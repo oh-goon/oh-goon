@@ -1,5 +1,7 @@
 """Fail closed when make verify blurs deterministic and native qualification ownership."""
+
 from __future__ import annotations
+
 import json
 import re
 from pathlib import Path
@@ -16,14 +18,16 @@ def main() -> int:
     data = json.loads(REGISTRY.read_text(encoding="utf-8"))
     verify_text = VERIFY.read_text(encoding="utf-8")
     make_text = MAKEFILE.read_text(encoding="utf-8")
-    rows = ROW_RE.findall(verify_text.split("if [[ \"${1:-}\" == \"--list\" ]]", 1)[0])
+    rows = ROW_RE.findall(verify_text.split('if [[ "${1:-}" == "--list" ]]', 1)[0])
     native = set(data["native_boundary_targets"])
     portable = set(data["portable_exhaustive_targets"])
     expected = native | portable
     actual = set(rows)
     issues: list[str] = []
     if actual != expected:
-        issues.append(f"verify target classification mismatch: missing={sorted(actual-expected)} stale={sorted(expected-actual)}")
+        issues.append(
+            f"verify target classification mismatch: missing={sorted(actual - expected)} stale={sorted(expected - actual)}"
+        )
     if native & portable:
         issues.append(f"targets have dual authority: {sorted(native & portable)}")
     preflight_block = make_text.split("candidate-convergence-preflight:", 1)[1].split("\n\n", 1)[0]
@@ -46,8 +50,11 @@ def main() -> int:
         for issue in issues:
             print(f"- {issue}")
         return 1
-    print(f"NATIVE QUALIFICATION BOUNDARY: PASS ({len(native)} native, {len(portable)} portable, {len(required_commands)} deterministic preflight owners)")
+    print(
+        f"NATIVE QUALIFICATION BOUNDARY: PASS ({len(native)} native, {len(portable)} portable, {len(required_commands)} deterministic preflight owners)"
+    )
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

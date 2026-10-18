@@ -1,4 +1,5 @@
 """SKILL-3A harness-neutral data protocol; never opens a process or network."""
+
 from __future__ import annotations
 
 import json
@@ -8,10 +9,11 @@ import pytest
 
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.services.agent_harness_contract import (
-    decode_agent_harness_submission, prepare_agent_harness_input,
-)
 from oh_goon.runtime.goon_templates import GoonTemplateStore
+from oh_goon.services.agent_harness_contract import (
+    decode_agent_harness_submission,
+    prepare_agent_harness_input,
+)
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 
@@ -41,32 +43,46 @@ steps:
     handoff = resolver.prepare_agent_step_handoff(
         tmp_path / "plan.yml",
         inputs={"repo": "local:team/project", "skill": "local:team/audit", "acceptance": "review"},
-        repository_root=tmp_path / "repos", skill_root=tmp_path / "skills",
-        allowed_acceptance=("review",), expected_source_sha256=sha,
+        repository_root=tmp_path / "repos",
+        skill_root=tmp_path / "skills",
+        allowed_acceptance=("review",),
+        expected_source_sha256=sha,
     )
     return handoff, skill, repository
 
 
 def _report(identity: str, *, verdict: str = "CLEAN", findings=None, summary="Review finished"):
-    return canonical_bytes({
-        "schema": "oh-goon.agent-harness-submission/v1",
-        "handoff_identity": identity, "verdict": verdict,
-        "findings": [] if findings is None else findings, "summary": summary,
-    })
+    return canonical_bytes(
+        {
+            "schema": "oh-goon.agent-harness-submission/v1",
+            "handoff_identity": identity,
+            "verdict": verdict,
+            "findings": [] if findings is None else findings,
+            "summary": summary,
+        }
+    )
 
 
-def test_original_frozen_packet_projects_actual_task_and_full_skill_resources_without_disk_reads(tmp_path, monkeypatch):
+def test_original_frozen_packet_projects_actual_task_and_full_skill_resources_without_disk_reads(
+    tmp_path, monkeypatch
+):
     handoff, skill, repository = _handoff(tmp_path)
     packet = handoff.encode_prework_delivery()
     (skill / "SKILL.md").unlink()
     (repository / "main.py").unlink()
     import os
+
     monkeypatch.setattr(os, "open", lambda *a, **kw: pytest.fail("SKILL-3A reopened source"))
-    projected = prepare_agent_harness_input(packet, expected_handoff_identity=handoff.handoff_identity)
+    projected = prepare_agent_harness_input(
+        packet, expected_handoff_identity=handoff.handoff_identity
+    )
     assert projected.harness == "opencode"
     assert projected.task == "inspect source"
     assert projected.skill_instructions == "# Review\nReport accurate findings.\n"
-    assert {member.path for member in projected.skill_resources} == {"SKILL.md", "scripts/inspect.sh"}
+    assert {member.path for member in projected.skill_resources} == {
+        "SKILL.md",
+        "scripts/inspect.sh",
+    }
     assert projected.repository_resources[0].data == b"print('hello')\n"
     assert projected.source_identity == handoff.source.capture_identity
     assert projected.handoff.authority == "PREWORK_NOT_ADMITTED"
@@ -77,17 +93,22 @@ def test_frozen_harness_input_rejects_tampered_original_packet_and_wrong_step(tm
     handoff, _, _ = _handoff(tmp_path)
     packet = handoff.encode_prework_delivery()
     with pytest.raises(FleetPlanInvalid):
-        prepare_agent_harness_input(packet, expected_handoff_identity="agent-step-prework-handoff-v1-"+"0"*64)
+        prepare_agent_harness_input(
+            packet, expected_handoff_identity="agent-step-prework-handoff-v1-" + "0" * 64
+        )
     modified = json.loads(packet)
     modified["step"]["task"] = "do something else"
     with pytest.raises(FleetPlanInvalid):
-        prepare_agent_harness_input(canonical_bytes(modified), expected_handoff_identity=handoff.handoff_identity)
+        prepare_agent_harness_input(
+            canonical_bytes(modified), expected_handoff_identity=handoff.handoff_identity
+        )
 
 
 def test_harness_clean_is_untrusted_claim_not_execution_or_verification(tmp_path):
     handoff, _, _ = _handoff(tmp_path)
-    result = decode_agent_harness_submission(_report(handoff.handoff_identity),
-                                              expected_handoff_identity=handoff.handoff_identity)
+    result = decode_agent_harness_submission(
+        _report(handoff.handoff_identity), expected_handoff_identity=handoff.handoff_identity
+    )
     assert result.verdict == "CLEAN"
     assert result.authority == "UNTRUSTED_HARNESS_CLAIM"
     assert result.submission_identity.startswith("agent-harness-submission-v1-")
@@ -99,36 +120,53 @@ def test_harness_findings_and_inconclusive_have_distinct_identities(tmp_path):
     handoff, _, _ = _handoff(tmp_path)
     ident = handoff.handoff_identity
     f = [{"location": "main.py:1", "explanation": "Sample issue"}]
-    result = decode_agent_harness_submission(_report(ident, verdict="FINDINGS", findings=f),
-                                              expected_handoff_identity=ident)
+    result = decode_agent_harness_submission(
+        _report(ident, verdict="FINDINGS", findings=f), expected_handoff_identity=ident
+    )
     assert result.findings[0].location == "main.py:1"
-    other = decode_agent_harness_submission(_report(ident, verdict="INCONCLUSIVE"),
-                                             expected_handoff_identity=ident)
+    other = decode_agent_harness_submission(
+        _report(ident, verdict="INCONCLUSIVE"), expected_handoff_identity=ident
+    )
     assert result.submission_identity != other.submission_identity
     assert other.authority == "UNTRUSTED_HARNESS_CLAIM"
 
 
-@pytest.mark.parametrize("change", [
-    "wrong-identity", "extra-authority", "extra-tool", "duplicate", "non-canonical",
-    "clean-findings", "empty-findings", "no-summary", "long-summary", "too-many",
-    "invalid-finding", "wrong-verdict", "invalid-json", "non-finite", "not-bytes",
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        "wrong-identity",
+        "extra-authority",
+        "extra-tool",
+        "duplicate",
+        "non-canonical",
+        "clean-findings",
+        "empty-findings",
+        "no-summary",
+        "long-summary",
+        "too-many",
+        "invalid-finding",
+        "wrong-verdict",
+        "invalid-json",
+        "non-finite",
+        "not-bytes",
+    ],
+)
 def test_harness_result_fails_closed_on_forgery_broken_contract_or_overbudget(tmp_path, change):
     handoff, _, _ = _handoff(tmp_path)
     expected = handoff.handoff_identity
     obj = json.loads(_report(expected))
     if change == "wrong-identity":
-        obj["handoff_identity"] = "agent-step-prework-handoff-v1-" + "a"*64
+        obj["handoff_identity"] = "agent-step-prework-handoff-v1-" + "a" * 64
     elif change == "extra-authority":
         obj["effect_permission"] = "EXECUTE"
     elif change == "extra-tool":
-        obj["tool_calls"] = [{"name":"shell","argv":["id"]}]
+        obj["tool_calls"] = [{"name": "shell", "argv": ["id"]}]
     elif change == "duplicate":
         payload = _report(expected)[:-1] + b',"summary":"override"}'
     elif change == "non-canonical":
         payload = json.dumps(obj, indent=2).encode()
     elif change == "clean-findings":
-        obj["findings"] = [{"location":"x", "explanation":"y"}]
+        obj["findings"] = [{"location": "x", "explanation": "y"}]
     elif change == "empty-findings":
         obj["verdict"] = "FINDINGS"
     elif change == "no-summary":
@@ -136,9 +174,9 @@ def test_harness_result_fails_closed_on_forgery_broken_contract_or_overbudget(tm
     elif change == "long-summary":
         obj["summary"] = "X" * 4001
     elif change == "too-many":
-        obj["findings"] = [{"location":"x", "explanation":"y"}] * 129
+        obj["findings"] = [{"location": "x", "explanation": "y"}] * 129
     elif change == "invalid-finding":
-        obj["findings"] = [{"location":"", "explanation":"y"}]
+        obj["findings"] = [{"location": "", "explanation": "y"}]
     elif change == "wrong-verdict":
         obj["verdict"] = "SUCCESS"
     elif change == "invalid-json":

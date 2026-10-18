@@ -6,13 +6,13 @@ from pathlib import Path
 import pytest
 
 from oh_goon.core.errors import RuntimeSafetyStale
-from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import (
     DirectFleetExecutionAdmission,
     FleetRunAdmissionIntent,
     fleet_repository_scope,
 )
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.schedule_transitions import begin_schedule_run
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
@@ -293,6 +293,7 @@ def test_invariant_auditor_flags_unowned_attempt_and_direct_lease_without_attemp
     )
     execution.activate(ticket).finish(lambda _connection: None)
 
+
 def test_invariant_auditor_accepts_parallel_owned_fleet_attempts(tmp_path: Path) -> None:
     from tests.factories.repository_state import baseline_for
 
@@ -404,12 +405,9 @@ def test_invariant_auditor_rejects_corrupt_fleet_attempt_structure(tmp_path: Pat
     cut = auditor.read_cut()
 
     noncanonical = attempt.model_copy(update={"operation_id": "op-corrupt"})
-    noncanonical_audit = auditor.audit(
-        replace(cut, effect_attempts=(noncanonical,))
-    )
+    noncanonical_audit = auditor.audit(replace(cut, effect_attempts=(noncanonical,)))
     assert any(
-        item.code == "FLEET_EFFECT_ATTEMPT_NONCANONICAL_ID"
-        for item in noncanonical_audit.findings
+        item.code == "FLEET_EFFECT_ATTEMPT_NONCANONICAL_ID" for item in noncanonical_audit.findings
     )
 
     outside_repository = RepositoryIdentity(name="outside", path=tmp_path / "outside")
@@ -420,15 +418,11 @@ def test_invariant_auditor_rejects_corrupt_fleet_attempt_structure(tmp_path: Pat
     )
 
     duplicate = attempt.model_copy(update={"operation_id": "op-duplicate-corrupt"})
-    duplicate_audit = auditor.audit(
-        replace(cut, effect_attempts=(attempt, duplicate))
-    )
+    duplicate_audit = auditor.audit(replace(cut, effect_attempts=(attempt, duplicate)))
     assert any(
-        item.code == "MULTIPLE_LIVE_FLEET_REPOSITORY_ATTEMPTS"
-        for item in duplicate_audit.findings
+        item.code == "MULTIPLE_LIVE_FLEET_REPOSITORY_ATTEMPTS" for item in duplicate_audit.findings
     )
 
     session.finish(
         lambda connection: attempts.retire_unstarted_in(connection, attempt.operation_id)
     )
-

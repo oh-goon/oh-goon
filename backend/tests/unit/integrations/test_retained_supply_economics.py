@@ -35,20 +35,22 @@ def test_verified_tree_economics_distinguish_cold_copy_from_warm_reuse(tmp_path:
     metadata = snapshot_metadata_fingerprint(source)
     proof = strong_tree_proof(source, expected, metadata_before=metadata, metadata_after=metadata)
     warm = []
-    second = store.put_verified_tree(
-        _owned(source), proof, economics=warm.append
-    )
+    second = store.put_verified_tree(_owned(source), proof, economics=warm.append)
 
     assert len(cold) == len(warm) == 1
     cold_receipt, warm_receipt = cold[0], warm[0]
     assert (cold_receipt.outcome, cold_receipt.bytes_copied, cold_receipt.bytes_hashed) == (
-        "PERFORMED", expected.byte_count, expected.byte_count
+        "PERFORMED",
+        expected.byte_count,
+        expected.byte_count,
     )
     assert cold_receipt.bytes_read == expected.byte_count * 2
     assert cold_receipt.bytes_written == expected.byte_count
     assert cold_receipt.reused_bytes == 0
     assert (warm_receipt.outcome, warm_receipt.bytes_copied, warm_receipt.bytes_written) == (
-        "REUSED", 0, 0
+        "REUSED",
+        0,
+        0,
     )
     assert warm_receipt.bytes_hashed == expected.byte_count
     assert warm_receipt.bytes_read == expected.byte_count

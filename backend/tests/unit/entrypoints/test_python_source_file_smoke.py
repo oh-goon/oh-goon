@@ -14,9 +14,7 @@ from pathlib import Path
 
 import pytest
 
-import oh_goon
 from oh_goon.repository_tooling.release.package_slim import canonical_source_files
-
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _PROJECT_ROOT = _BACKEND_ROOT.parent
@@ -168,7 +166,7 @@ def _class_functions(cls: type[object]) -> Iterator[tuple[str, object]]:
 
 
 def _module_functions(module: object) -> Iterator[tuple[str, object]]:
-    module_name = getattr(module, "__name__")
+    module_name = module.__name__
     for name, value in vars(module).items():
         if inspect.isfunction(value) and value.__module__ == module_name:
             yield name, value

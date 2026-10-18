@@ -27,7 +27,7 @@ def _plan(tmp_path: Path, goons: str, *, inputs: str = "") -> Path:
     return path
 
 
-def _atomic(name: str, *, run: str = 'true', requirements: str = "") -> str:
+def _atomic(name: str, *, run: str = "true", requirements: str = "") -> str:
     requirement_block = f"requirements:\n{requirements}\n" if requirements else ""
     return f"""version: 1\n{requirement_block}steps:\n  - id: check\n    run: "{run}"\n"""
 
@@ -262,9 +262,7 @@ def test_requirement_provenance_survives_nested_composition(tmp_path: Path) -> N
     _package(
         store_root,
         "general/leaf",
-        _atomic(
-            "leaf", requirements="- kind: file_exists\n  path: leaf.marker"
-        ),
+        _atomic("leaf", requirements="- kind: file_exists\n  path: leaf.marker"),
     )
     _package(
         store_root,
@@ -290,7 +288,9 @@ def test_requirement_provenance_survives_nested_composition(tmp_path: Path) -> N
     assert preview.repository_execution_mode == "serial"
     assert leaf_preview.applicability == "NOT_APPLICABLE"
     assert "leaf.marker" in leaf_preview.reason
-    step = next(item for item in preview.steps if item.step_id == "general-bundle.general-leaf.check")
+    step = next(
+        item for item in preview.steps if item.step_id == "general-bundle.general-leaf.check"
+    )
     assert step.disposition.value == "SKIPPED"
     assert step.workspace_source == "repository"
     assert step.cache_source == "empty"
@@ -321,7 +321,7 @@ def test_plan_projected_input_must_have_one_direct_owner(tmp_path: Path) -> None
         _package(
             store_root,
             key,
-            f"""version: 1\ninputs:\n  severity:\n    default: low\nsteps:\n  - run: echo ${{{{ inputs.severity }}}}\n""",
+            """version: 1\ninputs:\n  severity:\n    default: low\nsteps:\n  - run: echo ${{ inputs.severity }}\n""",
         )
     root = tmp_path / "plan.yml"
     root.write_text(
@@ -410,9 +410,7 @@ steps:
         (["bash", "bash"], "must be unique"),
     ],
 )
-def test_goon_tools_allow_is_canonical_positive_admission(
-    allow: list[str], message: str
-) -> None:
+def test_goon_tools_allow_is_canonical_positive_admission(allow: list[str], message: str) -> None:
     from oh_goon.integrations.fleet_plan_compilation import parse_goon_template
 
     rendered = "\n".join(f"  - {item}" for item in allow)
@@ -453,7 +451,9 @@ steps:
 def test_goon_top_level_tools_do_not_broaden_multiple_steps() -> None:
     from oh_goon.integrations.fleet_plan_compilation import parse_goon_template
 
-    with pytest.raises(FleetPlanInvalid, match="top-level tools.allow is intentionally single-Step"):
+    with pytest.raises(
+        FleetPlanInvalid, match="top-level tools.allow is intentionally single-Step"
+    ):
         parse_goon_template(
             """version: 1
 name: multi-step

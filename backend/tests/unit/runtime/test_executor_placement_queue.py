@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.core.errors import ExecutorAdmissionCancelled, ExecutorCapacityBusy, FleetPlanInvalid
+from oh_goon.core.errors import (
+    ExecutorAdmissionCancelled,
+    ExecutorCapacityBusy,
+    FleetPlanInvalid,
+    StateConflict,
+)
+from oh_goon.core.models.scheduling import PriorityScope, SchedulingPriority
 from oh_goon.runtime._executor_placement_queue import ExecutorPlacementQueue
 from oh_goon.runtime.database import LocalDatabase
 
@@ -64,6 +70,7 @@ def test_placement_queue_reclaims_dead_owner_before_applying_limit(tmp_path: Pat
 
     assert queue.is_turn(live) is True
     queue.leave(live)
+
 
 def test_placement_queue_reclaims_dead_owner_ticket(tmp_path: Path) -> None:
     database, queue = _queue(tmp_path)
@@ -194,17 +201,12 @@ def test_queue_snapshot_is_read_only_and_does_not_reclaim_dead_ticket(tmp_path: 
         )
     queue.leave(ticket)
 
-from oh_goon.core.models.scheduling import PriorityScope, SchedulingPriority
-from oh_goon.core.errors import StateConflict
-
 
 def test_placement_queue_prefers_priority_then_preserves_fifo(tmp_path: Path) -> None:
     _, queue = _queue(tmp_path)
     normal_a = queue.enter("normal-a", max_entries=64)
     normal_b = queue.enter("normal-b", max_entries=64)
-    high = queue.enter(
-        "high", max_entries=64, requested_priority=SchedulingPriority.HIGH
-    )
+    high = queue.enter("high", max_entries=64, requested_priority=SchedulingPriority.HIGH)
 
     assert queue.is_turn(high) is True
     assert queue.is_turn(normal_a) is False

@@ -8,9 +8,9 @@ import pytest
 from oh_goon.core.errors import LeagueLineupStale
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.league_lineups import LeagueLineupFileStore
-from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.league import LeagueService
 from oh_goon.services.league_lineups import LeagueLineupService
+from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from tests.factories.local_state import local_state
 
 

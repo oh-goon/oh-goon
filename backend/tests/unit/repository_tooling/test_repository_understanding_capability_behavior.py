@@ -121,9 +121,19 @@ def test_identity_digest_and_issue_time_validation_fail_closed() -> None:
             capability._issued_at(value)
 
 
-def test_json_integrity_and_adversarial_loaders_reject_inconsistent_evidence(tmp_path: Path) -> None:
-    assert capability._load_integrity(_write(tmp_path / "integrity.json", _integrity()))["comparable"] is True
-    assert capability._load_adversarial(_write(tmp_path / "adversarial.json", _adversarial()))["qualified"] is True
+def test_json_integrity_and_adversarial_loaders_reject_inconsistent_evidence(
+    tmp_path: Path,
+) -> None:
+    assert (
+        capability._load_integrity(_write(tmp_path / "integrity.json", _integrity()))["comparable"]
+        is True
+    )
+    assert (
+        capability._load_adversarial(_write(tmp_path / "adversarial.json", _adversarial()))[
+            "qualified"
+        ]
+        is True
+    )
     with pytest.raises(ValueError, match="must be a JSON object"):
         capability._load_json(_write(tmp_path / "list.json", []), label="input")
 
@@ -172,7 +182,12 @@ def test_concept_inventory_uses_only_included_questions_and_marks_critical_claim
                     "severity": "normal",
                     "claims": [{"critical": True}],
                 },
-                {"included": True, "concept_family": "release", "severity": "critical", "claims": []},
+                {
+                    "included": True,
+                    "concept_family": "release",
+                    "severity": "critical",
+                    "claims": [],
+                },
             ]
         }
     )
@@ -205,7 +220,11 @@ def test_validate_capability_certificate_accepts_authorized_and_denied_states() 
         ("stability_policy_version", "wrong", "stability policy mismatch"),
         ("benchmark_integrity_policy_version", "wrong", "benchmark-integrity policy mismatch"),
         ("adversarial_policy_version", "wrong", "adversarial policy mismatch"),
-        ("candidate_run_identities", ["run-1", "run-1", "run-3"], "three distinct candidate run identities"),
+        (
+            "candidate_run_identities",
+            ["run-1", "run-1", "run-3"],
+            "three distinct candidate run identities",
+        ),
         ("granted_tier", "PLAN", "inconsistent grant state"),
         ("passes", 2, "3/3 stability passes"),
         ("comparable_runs", 2, "3/3 comparable runs"),
@@ -236,7 +255,9 @@ def test_validate_capability_certificate_rejects_self_identity_tamper() -> None:
         capability.validate_capability_certificate(payload)
 
 
-def test_capability_check_requires_known_action_and_binds_repository_and_candidate(tmp_path: Path) -> None:
+def test_capability_check_requires_known_action_and_binds_repository_and_candidate(
+    tmp_path: Path,
+) -> None:
     certificate = _certificate()
     path = _write(tmp_path / "certificate.json", certificate)
     accepted = capability.capability_check(
@@ -269,7 +290,9 @@ def test_capability_check_requires_known_action_and_binds_repository_and_candida
         )
 
 
-def _certificate_stability(runs: list[str], repository_identity: str, snapshot_digest: str, configuration_identity: str):
+def _certificate_stability(
+    runs: list[str], repository_identity: str, snapshot_digest: str, configuration_identity: str
+):
     return {
         "qualification_profile": "release-author.v1",
         "source_version": "1267.0.883",
@@ -299,13 +322,24 @@ def _certificate_stability(runs: list[str], repository_identity: str, snapshot_d
 
 def _certificate_results(runs: list[str]):
     question_rows = [
-        {"included": True, "concept_family": "authority", "severity": "critical", "claims": [{"critical": True}]},
+        {
+            "included": True,
+            "concept_family": "authority",
+            "severity": "critical",
+            "claims": [{"critical": True}],
+        },
         {"included": True, "concept_family": "routing", "severity": "normal", "claims": []},
     ]
     return [{"questions": [dict(row) for row in question_rows]} for _run in runs]
 
 
-def _certificate_integrity(runs: list[str], stability, repository_identity: str, snapshot_digest: str, configuration_identity: str):
+def _certificate_integrity(
+    runs: list[str],
+    stability,
+    repository_identity: str,
+    snapshot_digest: str,
+    configuration_identity: str,
+):
     return [
         {
             "source_version": stability["source_version"],
@@ -327,9 +361,13 @@ def _certificate_inputs():
     repository_identity = _sha("d")
     configuration_identity = _sha("f")
     snapshot_digest = "e" * 64
-    stability = _certificate_stability(runs, repository_identity, snapshot_digest, configuration_identity)
+    stability = _certificate_stability(
+        runs, repository_identity, snapshot_digest, configuration_identity
+    )
     results = _certificate_results(runs)
-    integrity = _certificate_integrity(runs, stability, repository_identity, snapshot_digest, configuration_identity)
+    integrity = _certificate_integrity(
+        runs, stability, repository_identity, snapshot_digest, configuration_identity
+    )
     adversarial = [
         {
             "source_version": stability["source_version"],
@@ -362,7 +400,9 @@ def _issue_with_evidence(monkeypatch: pytest.MonkeyPatch, evidence):
     )
 
 
-def test_capability_certificate_issues_identity_bound_authorized_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_capability_certificate_issues_identity_bound_authorized_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     payload = _issue_with_evidence(monkeypatch, _certificate_inputs())
     assert payload["certificate_status"] == "AUTHORIZED"
     assert payload["granted_tier"] == "CRITICAL"
@@ -402,21 +442,69 @@ def test_capability_certificate_denies_when_stability_or_hidden_challenge_gate_f
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
-        (lambda s, r, i, a: s.update({"qualification_profile": "unknown"}), "no capability mapping"),
+        (
+            lambda s, r, i, a: s.update({"qualification_profile": "unknown"}),
+            "no capability mapping",
+        ),
         (lambda s, r, i, a: s.pop("source_version"), "missing source_version"),
-        (lambda s, r, i, a: i[0].update({"repository_identity": _sha("1")}), "repository_identity does not match"),
-        (lambda s, r, i, a: a[0].update({"exam_snapshot_sha256": "1" * 64}), "exam_snapshot_sha256 does not match"),
-        (lambda s, r, i, a: s.pop("candidate_configuration_identity"), "missing candidate_configuration_identity"),
-        (lambda s, r, i, a: i[0].update({"candidate_configuration_identity": _sha("1")}), "candidate_configuration_identity does not match"),
-        (lambda s, r, i, a: s.update({"candidate_run_identities": ["run-1", "run-1", "run-3"]}), "three distinct candidate run identities"),
-        (lambda s, r, i, a: i[1].update({"candidate_run_identity": "run-1"}), "one unique integrity result per candidate run"),
-        (lambda s, r, i, a: i[2].update({"candidate_run_identity": "run-extra"}), "run identities do not exactly match"),
-        (lambda s, r, i, a: i[1].update({"integrity_result_identity": i[0]["integrity_result_identity"]}), "distinct benchmark integrity result identities"),
-        (lambda s, r, i, a: i[0].update({"challenge_instance_identity": None}), "one hidden challenge instance"),
-        (lambda s, r, i, a: i[1].update({"challenge_instance_identity": i[0]["challenge_instance_identity"]}), "distinct hidden challenge instances"),
-        (lambda s, r, i, a: a[1].update({"challenge_instance_identity": a[0]["challenge_instance_identity"]}), "one unique adversarial result per challenge instance"),
-        (lambda s, r, i, a: a[2].update({"challenge_instance_identity": _sha("9")}), "challenge identities do not exactly match"),
-        (lambda s, r, i, a: a[0].update({"benchmark_registry_identity": _sha("1")}), "one exact benchmark registry identity"),
+        (
+            lambda s, r, i, a: i[0].update({"repository_identity": _sha("1")}),
+            "repository_identity does not match",
+        ),
+        (
+            lambda s, r, i, a: a[0].update({"exam_snapshot_sha256": "1" * 64}),
+            "exam_snapshot_sha256 does not match",
+        ),
+        (
+            lambda s, r, i, a: s.pop("candidate_configuration_identity"),
+            "missing candidate_configuration_identity",
+        ),
+        (
+            lambda s, r, i, a: i[0].update({"candidate_configuration_identity": _sha("1")}),
+            "candidate_configuration_identity does not match",
+        ),
+        (
+            lambda s, r, i, a: s.update({"candidate_run_identities": ["run-1", "run-1", "run-3"]}),
+            "three distinct candidate run identities",
+        ),
+        (
+            lambda s, r, i, a: i[1].update({"candidate_run_identity": "run-1"}),
+            "one unique integrity result per candidate run",
+        ),
+        (
+            lambda s, r, i, a: i[2].update({"candidate_run_identity": "run-extra"}),
+            "run identities do not exactly match",
+        ),
+        (
+            lambda s, r, i, a: i[1].update(
+                {"integrity_result_identity": i[0]["integrity_result_identity"]}
+            ),
+            "distinct benchmark integrity result identities",
+        ),
+        (
+            lambda s, r, i, a: i[0].update({"challenge_instance_identity": None}),
+            "one hidden challenge instance",
+        ),
+        (
+            lambda s, r, i, a: i[1].update(
+                {"challenge_instance_identity": i[0]["challenge_instance_identity"]}
+            ),
+            "distinct hidden challenge instances",
+        ),
+        (
+            lambda s, r, i, a: a[1].update(
+                {"challenge_instance_identity": a[0]["challenge_instance_identity"]}
+            ),
+            "one unique adversarial result per challenge instance",
+        ),
+        (
+            lambda s, r, i, a: a[2].update({"challenge_instance_identity": _sha("9")}),
+            "challenge identities do not exactly match",
+        ),
+        (
+            lambda s, r, i, a: a[0].update({"benchmark_registry_identity": _sha("1")}),
+            "one exact benchmark registry identity",
+        ),
     ],
 )
 def test_capability_certificate_rejects_cross_run_evidence_drift(
@@ -430,7 +518,9 @@ def test_capability_certificate_rejects_cross_run_evidence_drift(
         _issue_with_evidence(monkeypatch, evidence)
 
 
-def test_capability_certificate_requires_exact_three_input_sets(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_capability_certificate_requires_exact_three_input_sets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     paths = [Path("one.json"), Path("two.json"), Path("three.json")]
     with pytest.raises(ValueError, match="exactly 3 scored runs"):
         capability.capability_certificate(paths[:2], integrity_paths=paths, adversarial_paths=paths)

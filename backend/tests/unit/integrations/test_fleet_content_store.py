@@ -8,10 +8,13 @@ import pytest
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.path_authority import RepositoryScopedPath
 from oh_goon.core.path_layouts import ContentStorePathLayout
+from oh_goon.integrations.content_snapshot import snapshot_identity
+from oh_goon.integrations.content_snapshot_proof import (
+    snapshot_metadata_fingerprint,
+    strong_tree_proof,
+)
 from oh_goon.integrations.exact_file_write import ExactPublicationDurabilityError
 from oh_goon.integrations.fleet_content_store import FleetContentStore
-from oh_goon.integrations.content_snapshot import snapshot_identity
-from oh_goon.integrations.content_snapshot_proof import snapshot_metadata_fingerprint, strong_tree_proof
 
 OWNER = "repo-aaaaaaaaaaaaaaaaaaaa"
 OTHER = "repo-bbbbbbbbbbbbbbbbbbbb"
@@ -26,7 +29,10 @@ def _owned(path: Path, owner: str) -> RepositoryScopedPath:
 
 def _proof(path: Path):
     metadata = snapshot_metadata_fingerprint(path)
-    return strong_tree_proof(path, snapshot_identity(path), metadata_before=metadata, metadata_after=metadata)
+    return strong_tree_proof(
+        path, snapshot_identity(path), metadata_before=metadata, metadata_after=metadata
+    )
+
 
 def _destination(path: Path, owner: str) -> RepositoryScopedPath:
     return RepositoryScopedPath.create(
@@ -95,9 +101,7 @@ def test_content_store_materialization_hashes_only_exact_destination(
         return real_snapshot_identity(path, **kwargs)
 
     monkeypatch.setattr(content_snapshot, "snapshot_identity", count_identity)
-    materialized = store.materialize_tree(
-        retained.reference_id, _destination(destination, OWNER)
-    )
+    materialized = store.materialize_tree(retained.reference_id, _destination(destination, OWNER))
 
     assert materialized == retained.identity
     assert observed == [destination.resolve()]
@@ -634,5 +638,3 @@ def test_content_stage_cleanup_refuses_unowned_stage(tmp_path: Path) -> None:
     assert result.removed == ()
     assert result.refused == ("tree-unowned",)
     assert legacy.exists()
-
-

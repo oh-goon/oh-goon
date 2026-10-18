@@ -30,7 +30,12 @@ def test_pass_formats_normalize_to_exact_existing_input_binding(forward: str) ->
 def test_pass_order_and_with_are_deterministic_independent_of_yaml_key_order() -> None:
     first = "  pass: [y, x]\n  with:\n    a: fixed\n    b: ${{ inputs.x }}\n"
     second = "  with:\n    a: fixed\n    b: ${{ inputs.x }}\n  pass: [y, x]\n"
-    expected = [("y", "${{ inputs.y }}"), ("x", "${{ inputs.x }}"), ("a", "fixed"), ("b", "${{ inputs.x }}")]
+    expected = [
+        ("y", "${{ inputs.y }}"),
+        ("x", "${{ inputs.x }}"),
+        ("a", "fixed"),
+        ("b", "${{ inputs.x }}"),
+    ]
     assert _bindings(first) == _bindings(second) == expected
 
 
@@ -40,7 +45,24 @@ def test_legacy_with_and_bare_imports_remain_unchanged() -> None:
     assert compiled.steps[0].inputs == ()
 
 
-@pytest.mark.parametrize("value", ["[]", "null", "x", "{x: 5}", "[all]", "[inputs]", "['*']", "[true]", "[42]", "[[x]]", "[' x']", "['x!']", "[x, x]"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "[]",
+        "null",
+        "x",
+        "{x: 5}",
+        "[all]",
+        "[inputs]",
+        "['*']",
+        "[true]",
+        "[42]",
+        "[[x]]",
+        "[' x']",
+        "['x!']",
+        "[x, x]",
+    ],
+)
 def test_bad_pass_forms_fail_at_compilation(value: str) -> None:
     with pytest.raises(FleetPlanInvalid, match=r"pass|input name"):
         parse_goon_template(_composite(f"  pass: {value}\n"))
@@ -63,7 +85,9 @@ def test_pass_parent_must_declare_name() -> None:
 
 def test_pass_is_composite_only_and_not_plan_projection() -> None:
     with pytest.raises(FleetPlanInvalid, match="Composite Goon imports"):
-        parse_plan_template("version: 1\ninputs: [x]\ngoons:\n- import: general/leaf\n  pass: [x]\n")
+        parse_plan_template(
+            "version: 1\ninputs: [x]\ngoons:\n- import: general/leaf\n  pass: [x]\n"
+        )
     with pytest.raises(FleetPlanInvalid, match="unsupported"):
         parse_goon_template("version: 1\npass: [x]\ngoons: [general/leaf]\n")
     with pytest.raises(FleetPlanInvalid):
@@ -153,13 +177,17 @@ def test_no_ambient_forwarding_to_matching_sibling(tmp_path: Path) -> None:
     root = tmp_path / "goons"
     _package(root, "general/leaf", _leaf())
     _package(root, "general/second", _leaf())
-    _package(root, "general/bundle", """version: 1
+    _package(
+        root,
+        "general/bundle",
+        """version: 1
 inputs: [x]
 goons:
 - import: general/leaf
   pass: [x]
 - import: general/second
-""")
+""",
+    )
     plan = tmp_path / "plan.yml"
     plan.write_text("version: 1\ninputs: [x]\ngoons: [general/bundle]\n", encoding="utf-8")
     # A missing edge is never silently synthesized; default on the second child
@@ -173,14 +201,18 @@ def test_both_recipients_have_separate_edges(tmp_path: Path) -> None:
     root = tmp_path / "goons"
     for key in ("general/leaf", "general/second"):
         _package(root, key, _leaf())
-    _package(root, "general/bundle", """version: 1
+    _package(
+        root,
+        "general/bundle",
+        """version: 1
 inputs: [x]
 goons:
 - import: general/leaf
   pass: [x]
 - import: general/second
   pass: [x]
-""")
+""",
+    )
     plan = tmp_path / "plan.yml"
     plan.write_text("version: 1\ninputs: [x]\ngoons: [general/bundle]\n", encoding="utf-8")
     resolved = FleetPlanResolver(goon_templates=GoonTemplateStore(root)).resolve(plan)
@@ -214,7 +246,10 @@ def test_inspection_uses_exact_existing_owner_paths() -> None:
 def test_incompatible_multi_recipient_pass_contracts_fail_before_work(tmp_path: Path) -> None:
     root = tmp_path / "goons"
     _package(root, "general/leaf", _leaf())
-    _package(root, "general/second", """version: 1
+    _package(
+        root,
+        "general/second",
+        """version: 1
 inputs:
   x:
     type: choice
@@ -222,15 +257,20 @@ inputs:
     default: small
 steps:
 - run: echo ${{ inputs.x }}
-""")
-    _package(root, "general/bundle", """version: 1
+""",
+    )
+    _package(
+        root,
+        "general/bundle",
+        """version: 1
 inputs: [x]
 goons:
 - import: general/leaf
   pass: [x]
 - import: general/second
   pass: [x]
-""")
+""",
+    )
     path = tmp_path / "plan.yml"
     path.write_text("version: 1\ninputs: [x]\ngoons: [general/bundle]\n")
     with pytest.raises(FleetPlanInvalid, match="incompatible|same|contract|conflict"):
@@ -240,12 +280,16 @@ goons:
 def test_nested_composites_require_each_explicit_recipient_edge(tmp_path: Path) -> None:
     root = tmp_path / "goons"
     _package(root, "general/leaf", _leaf())
-    _package(root, "general/middle", """version: 1
+    _package(
+        root,
+        "general/middle",
+        """version: 1
 inputs: [x]
 goons:
 - import: general/leaf
   pass: [x]
-""")
+""",
+    )
     outer = """version: 1
 inputs: [x]
 goons:
@@ -275,7 +319,9 @@ goons:
     with pytest.raises(FleetPlanInvalid, match="Composite inputs does not declare"):
         _resolve(
             tmp_path,
-            parent=parent.replace("  with:\n    child_name: ${{ inputs.x }}", "  pass: [child_name]"),
+            parent=parent.replace(
+                "  with:\n    child_name: ${{ inputs.x }}", "  pass: [child_name]"
+            ),
             child=_leaf(child_input="child_name"),
         )
 

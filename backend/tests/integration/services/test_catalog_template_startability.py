@@ -195,9 +195,7 @@ def _managed_uv_requirements(
             raise FleetPlanInvalid(
                 f"managed uv step {step.step_id} does not use the canonical resolved uv argv"
             )
-        requirements.setdefault((step.uv.project, step.uv.group), set()).add(
-            step.argv[len(prefix)]
-        )
+        requirements.setdefault((step.uv.project, step.uv.group), set()).add(step.argv[len(prefix)])
     return requirements
 
 
@@ -402,12 +400,8 @@ def _prove_fixture_contract(
     _materialize_direct_package_executables(
         plan, repository=repository, uv=uv, python=python, scratch=scratch
     )
-    _prove_direct_uv_projects(
-        plan, repository=repository, uv=uv, python=python, scratch=scratch
-    )
-    _prove_managed_uv_projects(
-        plan, repository=repository, uv=uv, python=python, scratch=scratch
-    )
+    _prove_direct_uv_projects(plan, repository=repository, uv=uv, python=python, scratch=scratch)
+    _prove_managed_uv_projects(plan, repository=repository, uv=uv, python=python, scratch=scratch)
     _prove_repository_paths(plan, repository)
 
 

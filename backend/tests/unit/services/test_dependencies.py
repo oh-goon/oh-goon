@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from oh_goon.core.models.dependency_fleet import DependencyTargetFilter, DependencyTargetMaterializeRequest
+from oh_goon.core.models.dependency_fleet import (
+    DependencyTargetFilter,
+    DependencyTargetMaterializeRequest,
+)
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.vocabulary import FleetScope
 from oh_goon.runtime.database import LocalDatabase
@@ -88,26 +91,41 @@ def test_materialized_selection_is_explicit_sorted_and_immutable(tmp_path: Path)
 
     query = DependencyTargetFilter(package_name="mlflow", evidence="current")
     population = service.repositories("mlflow", evidence="current")
-    selection = service.materialize(DependencyTargetMaterializeRequest(filter=query, expected_population_id=population.population_id))
+    selection = service.materialize(
+        DependencyTargetMaterializeRequest(
+            filter=query, expected_population_id=population.population_id
+        )
+    )
     assert selection.repo_ids == tuple(sorted((first.repository_id, second.repository_id)))
     assert service.target_selection(selection.query_id) == selection
 
     _index(store, first, (("requests", "2.32.1"),), "c" * 40)
     new_population = service.repositories("mlflow", evidence="current")
-    new_selection = service.materialize(DependencyTargetMaterializeRequest(filter=query, expected_population_id=new_population.population_id))
+    new_selection = service.materialize(
+        DependencyTargetMaterializeRequest(
+            filter=query, expected_population_id=new_population.population_id
+        )
+    )
 
     assert service.target_selection(selection.query_id).repo_ids == selection.repo_ids
     assert new_selection.repo_ids == (second.repository_id,)
     assert new_selection.query_id != selection.query_id
 
     import pytest
+
     from oh_goon.core.errors import StateConflict
+
     with pytest.raises(StateConflict, match="population changed"):
-        service.materialize(DependencyTargetMaterializeRequest(filter=query, expected_population_id=population.population_id))
+        service.materialize(
+            DependencyTargetMaterializeRequest(
+                filter=query, expected_population_id=population.population_id
+            )
+        )
 
 
-
-def test_materialized_population_changes_when_same_repository_id_gets_new_instance(tmp_path: Path) -> None:
+def test_materialized_population_changes_when_same_repository_id_gets_new_instance(
+    tmp_path: Path,
+) -> None:
     import shutil
 
     repository = RepositoryIdentity(path=tmp_path / "repository")
@@ -137,6 +155,7 @@ def test_materialized_population_changes_when_same_repository_id_gets_new_instan
     assert second_selection.repository_instance_ids[repository.repository_id] != first_instance_id
     assert service.target_selection(first_selection.query_id) == first_selection
 
+
 def test_coverage_populations_are_reviewable_and_materialize_exact_ids(tmp_path: Path) -> None:
     matching = RepositoryIdentity(path=tmp_path / "matching")
     non_matching = RepositoryIdentity(path=tmp_path / "non-matching")
@@ -155,14 +174,18 @@ def test_coverage_populations_are_reviewable_and_materialize_exact_ids(tmp_path:
     assert missing.items[0].evidence_state == "missing"
     assert missing.items[0].fleet_run_id is None
 
-    proven_selection = service.materialize(DependencyTargetMaterializeRequest(
-        filter=DependencyTargetFilter(package_name="mlflow", coverage="proven_no_match"),
-        expected_population_id=proven.population_id,
-    ))
-    missing_selection = service.materialize(DependencyTargetMaterializeRequest(
-        filter=DependencyTargetFilter(package_name="mlflow", coverage="no_current_evidence"),
-        expected_population_id=missing.population_id,
-    ))
+    proven_selection = service.materialize(
+        DependencyTargetMaterializeRequest(
+            filter=DependencyTargetFilter(package_name="mlflow", coverage="proven_no_match"),
+            expected_population_id=proven.population_id,
+        )
+    )
+    missing_selection = service.materialize(
+        DependencyTargetMaterializeRequest(
+            filter=DependencyTargetFilter(package_name="mlflow", coverage="no_current_evidence"),
+            expected_population_id=missing.population_id,
+        )
+    )
     assert proven_selection.repo_ids == (non_matching.repository_id,)
     assert missing_selection.repo_ids == (unknown.repository_id,)
 
@@ -207,12 +230,18 @@ def test_advisory_range_keeps_uncomparable_versions_out_of_safe_count(tmp_path: 
         advisory_id="CVE-2026-TEST",
         evidence="current",
     )
-    selected = service.materialize(DependencyTargetMaterializeRequest(filter=query, expected_population_id=population.population_id))
+    selected = service.materialize(
+        DependencyTargetMaterializeRequest(
+            filter=query, expected_population_id=population.population_id
+        )
+    )
     assert selected.repo_ids == (affected.repository_id,)
     assert selected.filter.advisory_id == "CVE-2026-TEST"
 
 
-def test_dependency_search_total_and_offset_describe_full_matching_population(tmp_path: Path) -> None:
+def test_dependency_search_total_and_offset_describe_full_matching_population(
+    tmp_path: Path,
+) -> None:
     repository = RepositoryIdentity(path=tmp_path / "many-packages")
     service, store = _service(tmp_path, [repository])
     packages = tuple((f"package-{index:03d}", f"1.{index}.0") for index in range(35))

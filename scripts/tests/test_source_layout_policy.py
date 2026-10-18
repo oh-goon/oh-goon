@@ -21,12 +21,16 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _minimal_source(root: Path) -> None:
     (root / "backend").mkdir(parents=True)
-    (root / "backend/uv.lock").write_text("version = 1\npackage = []\n", encoding="utf-8")
+    (root / "backend/uv.lock").write_text(
+        "version = 1\npackage = []\n", encoding="utf-8"
+    )
     (root / "frontend").mkdir()
-    (root / "frontend/package-lock.json").write_text('{}\n', encoding="utf-8")
+    (root / "frontend/package-lock.json").write_text("{}\n", encoding="utf-8")
 
 
-def test_live_canonical_venv_is_allowed_but_prepared_source_rejects_it(tmp_path: Path) -> None:
+def test_live_canonical_venv_is_allowed_but_prepared_source_rejects_it(
+    tmp_path: Path,
+) -> None:
     _minimal_source(tmp_path)
     venv = tmp_path / Path(CANONICAL_BACKEND_VENV)
     venv.mkdir()
@@ -34,8 +38,6 @@ def test_live_canonical_venv_is_allowed_but_prepared_source_rejects_it(tmp_path:
     assert canonical_source_layout_issues(tmp_path, check_tracked_generated=False) == ()
     issues = prepared_source_tree_issues(tmp_path)
     assert any(issue.path == venv for issue in issues)
-
-
 
 
 def test_vite_runtime_cache_is_transient_source_state(tmp_path: Path) -> None:
@@ -47,22 +49,28 @@ def test_vite_runtime_cache_is_transient_source_state(tmp_path: Path) -> None:
     issues = prepared_source_tree_issues(tmp_path)
     assert any(issue.path == cache for issue in issues)
 
-def test_committed_backend_lock_must_be_a_regular_non_symlink_file(tmp_path: Path) -> None:
+
+def test_committed_backend_lock_must_be_a_regular_non_symlink_file(
+    tmp_path: Path,
+) -> None:
     _minimal_source(tmp_path)
     canonical = tmp_path / Path(CANONICAL_BACKEND_LOCK)
     outside = tmp_path / "actual.lock"
-    outside.write_text('version = 1\npackage = []\n', encoding="utf-8")
+    outside.write_text("version = 1\npackage = []\n", encoding="utf-8")
     canonical.unlink()
     canonical.symlink_to(outside)
     issues = canonical_source_layout_issues(tmp_path, check_tracked_generated=False)
-    assert any(issue.path == canonical and "regular non-symlink" in issue.reason for issue in issues)
+    assert any(
+        issue.path == canonical and "regular non-symlink" in issue.reason
+        for issue in issues
+    )
 
 
 def test_second_source_uv_lock_is_rejected(tmp_path: Path) -> None:
     _minimal_source(tmp_path)
     extra = tmp_path / "tools/uv.lock"
     extra.parent.mkdir()
-    extra.write_text('version = 1\npackage = []\n', encoding="utf-8")
+    extra.write_text("version = 1\npackage = []\n", encoding="utf-8")
     issues = canonical_source_layout_issues(tmp_path, check_tracked_generated=False)
     assert any(
         issue.path == extra and "dependency authority belongs at" in issue.reason
@@ -70,25 +78,28 @@ def test_second_source_uv_lock_is_rejected(tmp_path: Path) -> None:
     )
 
 
-
-def test_certification_fixture_uv_lock_is_a_scoped_source_authority(tmp_path: Path) -> None:
+def test_certification_fixture_uv_lock_is_a_scoped_source_authority(
+    tmp_path: Path,
+) -> None:
     _minimal_source(tmp_path)
     fixture = tmp_path / Path(CANONICAL_CERTIFICATION_FIXTURE_ROOT) / "ml/iris"
     fixture.mkdir(parents=True)
     (fixture / "pyproject.toml").write_text(
         '[project]\nname = "fixture"\nversion = "0.0.0"\n', encoding="utf-8"
     )
-    (fixture / "uv.lock").write_text('version = 1\npackage = []\n', encoding="utf-8")
+    (fixture / "uv.lock").write_text("version = 1\npackage = []\n", encoding="utf-8")
 
     assert canonical_source_layout_issues(tmp_path, check_tracked_generated=False) == ()
 
 
-def test_certification_fixture_uv_lock_requires_its_own_pyproject(tmp_path: Path) -> None:
+def test_certification_fixture_uv_lock_requires_its_own_pyproject(
+    tmp_path: Path,
+) -> None:
     _minimal_source(tmp_path)
     fixture = tmp_path / Path(CANONICAL_CERTIFICATION_FIXTURE_ROOT) / "ml/iris"
     fixture.mkdir(parents=True)
     lock = fixture / "uv.lock"
-    lock.write_text('version = 1\npackage = []\n', encoding="utf-8")
+    lock.write_text("version = 1\npackage = []\n", encoding="utf-8")
 
     issues = canonical_source_layout_issues(tmp_path, check_tracked_generated=False)
 
@@ -97,6 +108,7 @@ def test_certification_fixture_uv_lock_requires_its_own_pyproject(tmp_path: Path
         and "requires a sibling regular non-symlink pyproject.toml" in issue.reason
         for issue in issues
     )
+
 
 def test_renamed_nested_venv_is_still_excluded_by_name(tmp_path: Path) -> None:
     _minimal_source(tmp_path)
@@ -133,7 +145,9 @@ def test_venv_clean_refuses_symlink_cleanup_target(tmp_path: Path) -> None:
         raise AssertionError("symlink venv cleanup target must fail closed")
 
 
-def test_transport_clean_removes_zone_sidecars_and_patch_transport_files(tmp_path: Path) -> None:
+def test_transport_clean_removes_zone_sidecars_and_patch_transport_files(
+    tmp_path: Path,
+) -> None:
     _minimal_source(tmp_path)
     zone = tmp_path / "templates/goons/python/quality/README.md:Zone.Identifier"
     zone.parent.mkdir(parents=True)
@@ -163,9 +177,9 @@ def test_transport_clean_removes_zone_sidecars_and_patch_transport_files(tmp_pat
     assert venv_zone.is_file()
 
 
-
-
-def test_source_layout_rejects_transport_artifacts_until_cleaned(tmp_path: Path) -> None:
+def test_source_layout_rejects_transport_artifacts_until_cleaned(
+    tmp_path: Path,
+) -> None:
     _minimal_source(tmp_path)
     sidecar = tmp_path / "templates/goons/python/quality/README.md:Zone.Identifier"
     sidecar.parent.mkdir(parents=True)
@@ -187,7 +201,9 @@ def test_source_layout_rejects_transport_artifacts_until_cleaned(tmp_path: Path)
     assert authored.is_file()
 
 
-def test_git_import_keeps_product_source_and_excludes_local_history(tmp_path: Path) -> None:
+def test_git_import_keeps_product_source_and_excludes_local_history(
+    tmp_path: Path,
+) -> None:
     """Git, including directory anchoring, decides the initial import membership."""
     source = {
         ".gitignore",
@@ -268,12 +284,21 @@ def test_git_import_keeps_product_source_and_excludes_local_history(tmp_path: Pa
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"fixture\n")
     (tmp_path / ".gitignore").write_bytes((ROOT / ".gitignore").read_bytes())
-    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "init", "--quiet", str(tmp_path)], check=True, capture_output=True
+    )
 
     completed = subprocess.run(
         [
-            "git", "-c", f"core.excludesFile={os.devnull}", "-C", str(tmp_path),
-            "ls-files", "--others", "--exclude-standard", "-z",
+            "git",
+            "-c",
+            f"core.excludesFile={os.devnull}",
+            "-C",
+            str(tmp_path),
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
         ],
         check=True,
         capture_output=True,
@@ -283,15 +308,16 @@ def test_git_import_keeps_product_source_and_excludes_local_history(tmp_path: Pa
     assert set(completed.stdout.split("\0")) - {""} == source
     assert all((tmp_path / relative).read_bytes() == b"fixture\n" for relative in local)
 
+
 def test_init_does_not_mutate_source_transport_state() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     init = makefile.split("init:", 1)[1].split("\n\n", 1)[0]
     assert "transport-clean" not in init
     assert "source-layout" not in init
-    source = (ROOT / "backend/src/oh_goon/repository_tooling/source_layout.py").read_text(encoding="utf-8")
+    source = (
+        ROOT / "backend/src/oh_goon/repository_tooling/source_layout.py"
+    ).read_text(encoding="utf-8")
     assert 'choices=("check", "identity", "venv-clean", "transport-clean")' in source
-
-
 
 
 def _write_transport_artifacts(root: Path, count: int = 3) -> tuple[Path, ...]:
@@ -302,7 +328,10 @@ def _write_transport_artifacts(root: Path, count: int = 3) -> tuple[Path, ...]:
             if index % 2 == 0
             else root / f"transport-{index}.patch"
         )
-        path.write_text("[ZoneTransfer]\n" if path.suffix != ".patch" else "patch\n", encoding="utf-8")
+        path.write_text(
+            "[ZoneTransfer]\n" if path.suffix != ".patch" else "patch\n",
+            encoding="utf-8",
+        )
         paths.append(path)
     return tuple(paths)
 
@@ -316,7 +345,9 @@ def test_transport_clean_output_is_bounded_by_default_and_exact_in_debug(
 
     assert source_layout.main(["transport-clean"]) == 0
     normal = capsys.readouterr()
-    assert normal.out.splitlines() == ["Removed 3 disposable source transport artifacts"]
+    assert normal.out.splitlines() == [
+        "Removed 3 disposable source transport artifacts"
+    ]
     assert "Zone.Identifier" not in normal.out
     assert ".patch" not in normal.out
     assert all(not path.exists() for path in paths)
@@ -326,7 +357,10 @@ def test_transport_clean_output_is_bounded_by_default_and_exact_in_debug(
     debug = capsys.readouterr()
     assert debug.out.splitlines() == [
         "Removed 3 disposable source transport artifacts",
-        *(path.relative_to(tmp_path).as_posix() for path in sorted(paths, key=lambda item: item.as_posix())),
+        *(
+            path.relative_to(tmp_path).as_posix()
+            for path in sorted(paths, key=lambda item: item.as_posix())
+        ),
     ]
 
 
@@ -371,7 +405,9 @@ def test_transport_cleanup_refusal_hides_exact_sidecar_path_until_debug(
     assert sidecar.relative_to(tmp_path).as_posix() in debug.err
 
 
-def test_source_layout_assertion_aggregates_transport_paths_until_debug(tmp_path: Path) -> None:
+def test_source_layout_assertion_aggregates_transport_paths_until_debug(
+    tmp_path: Path,
+) -> None:
     _minimal_source(tmp_path)
     paths = _write_transport_artifacts(tmp_path)
 

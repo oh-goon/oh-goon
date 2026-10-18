@@ -4,8 +4,7 @@ import ipaddress
 import json
 import os
 import re
-from pathlib import Path, PureWindowsPath
-import tomllib
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from oh_goon.repository_tooling._dependency_lock_portability import backend_lock_portability_issues
@@ -54,7 +53,9 @@ def _configured_private_hosts(environment: dict[str, str] | None = None) -> set[
     return hosts
 
 
-def _url_issue(url: str, *, allow_public_npm: bool = False, configured: set[str] | None = None) -> str | None:
+def _url_issue(
+    url: str, *, allow_public_npm: bool = False, configured: set[str] | None = None
+) -> str | None:
     parsed = urlsplit(url)
     host = (parsed.hostname or "").lower().rstrip(".")
     if parsed.scheme.lower() == "file":
@@ -68,7 +69,9 @@ def _url_issue(url: str, *, allow_public_npm: bool = False, configured: set[str]
     return None
 
 
-def frontend_package_lock_privacy_issues(root: Path = ROOT, *, environment: dict[str, str] | None = None) -> tuple[str, ...]:
+def frontend_package_lock_privacy_issues(
+    root: Path = ROOT, *, environment: dict[str, str] | None = None
+) -> tuple[str, ...]:
     lock = root / "frontend/package-lock.json"
     if not lock.exists():
         return ()
@@ -93,7 +96,6 @@ def frontend_package_lock_privacy_issues(root: Path = ROOT, *, environment: dict
     return tuple(issues)
 
 
-
 def backend_uv_lock_privacy_issues(
     root: Path = ROOT, *, environment: dict[str, str] | None = None
 ) -> tuple[str, ...]:
@@ -101,7 +103,9 @@ def backend_uv_lock_privacy_issues(
     return backend_lock_portability_issues(root / "backend/uv.lock")
 
 
-def public_source_privacy_issues(root: Path = ROOT, *, environment: dict[str, str] | None = None) -> tuple[str, ...]:
+def public_source_privacy_issues(
+    root: Path = ROOT, *, environment: dict[str, str] | None = None
+) -> tuple[str, ...]:
     configured = _configured_private_hosts(environment)
     issues = list(frontend_package_lock_privacy_issues(root, environment=environment))
     issues.extend(backend_uv_lock_privacy_issues(root, environment=environment))
@@ -120,7 +124,9 @@ def public_source_privacy_issues(root: Path = ROOT, *, environment: dict[str, st
                 issues.append(f"{path.relative_to(root).as_posix()}: {issue}")
         lowered = text.lower()
         if any(host and host in lowered for host in configured):
-            issues.append(f"{path.relative_to(root).as_posix()}: contains configured private infrastructure hostname")
+            issues.append(
+                f"{path.relative_to(root).as_posix()}: contains configured private infrastructure hostname"
+            )
     return tuple(dict.fromkeys(issues))
 
 

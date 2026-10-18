@@ -7,7 +7,6 @@ import yaml
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_tool_requirements import step_execution_tool
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.enforcer_receipt import (
     EnforcerAttemptFact,
     EnforcerEgressFact,
@@ -37,6 +36,7 @@ from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import StrictFleetExecutionAdmission
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.product_identity import stable_id
 from oh_goon.integrations.fleet_plan_containerfile_policy import oci_build_repository_policy_id
 
 

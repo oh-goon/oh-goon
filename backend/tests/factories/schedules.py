@@ -120,8 +120,8 @@ def schedule_run_record(
     definition = definition or schedule_definition(now=started_at or utc_now())
     intent = intent or scheduled_fleet_run_intent(definition)
     started_at = started_at or utc_now()
-    from oh_goon.core.product_identity import schedule_repository_fleet_run_id
     from oh_goon.core.models.schedule import ScheduleOccurrenceRepositoryRun
+    from oh_goon.core.product_identity import schedule_repository_fleet_run_id
 
     row_status = {
         ScheduleExecutionStatus.RUNNING: ScheduleRepositoryRunStatus.PENDING,

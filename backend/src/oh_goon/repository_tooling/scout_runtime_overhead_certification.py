@@ -86,29 +86,19 @@ def run_runtime_overhead_certification(
         try:
             _wait_json(f"{base}/api/health", process=server)
             routes = _representative_routes(base)
-            _measure_routes(
-                routes
-            )  # Warm each representative analytical path before sampling.
+            _measure_routes(routes)  # Warm each representative analytical path before sampling.
             before = read_linux_process_sample(server.pid)
             wave_total, latencies = _concurrent_routes(routes, concurrent_users)
             after = read_linux_process_sample(server.pid)
             health = _get_json(routes["health"])
         finally:
             _stop_server(server)
-        stderr = (
-            server.stderr.read().decode("utf-8", errors="replace")
-            if server.stderr
-            else ""
-        )
+        stderr = server.stderr.read().decode("utf-8", errors="replace") if server.stderr else ""
         attempts = blocked_network_attempts(guard_log)
         if attempts:
-            raise RuntimeError(
-                f"Scout overhead probe attempted outbound network: {attempts[:5]!r}"
-            )
+            raise RuntimeError(f"Scout overhead probe attempted outbound network: {attempts[:5]!r}")
         if server.returncode not in (0, -15) and stderr.strip():
-            raise RuntimeError(
-                f"guarded Uvicorn failed during overhead probe:\n{stderr[-8000:]}"
-            )
+            raise RuntimeError(f"guarded Uvicorn failed during overhead probe:\n{stderr[-8000:]}")
     return ScoutRuntimeOverheadResult(
         repositories=repositories,
         observations=observations,
@@ -135,11 +125,7 @@ def run_runtime_overhead_certification(
 
 
 def main() -> int:
-    print(
-        json.dumps(
-            asdict(run_runtime_overhead_certification()), indent=2, sort_keys=True
-        )
-    )
+    print(json.dumps(asdict(run_runtime_overhead_certification()), indent=2, sort_keys=True))
     return 0
 
 

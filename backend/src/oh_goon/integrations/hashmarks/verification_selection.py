@@ -5,8 +5,10 @@ from pathlib import Path
 
 from oh_goon.integrations.hashmarks.verification_selection_primitives import (
     HashmarksVerificationMember,
-    HashmarksVerificationSelectionInputError,
     validate_native_selection,
+)
+from oh_goon.integrations.hashmarks.verification_selection_primitives import (
+    HashmarksVerificationSelectionInputError as HashmarksVerificationSelectionInputError,
 )
 
 

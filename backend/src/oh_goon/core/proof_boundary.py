@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from oh_goon.core.models.canonical_result_semantics import CanonicalAcceptedResult, CanonicalResultStatus
+from oh_goon.core.models.canonical_result_semantics import (
+    CanonicalAcceptedResult,
+    CanonicalResultStatus,
+)
 from oh_goon.core.models.proof_boundary import ExactCheckpointProof, ProtectedEffectGrant
 from oh_goon.core.models.workspace import CandidateCheckpoint
 from oh_goon.core.time import utc_now

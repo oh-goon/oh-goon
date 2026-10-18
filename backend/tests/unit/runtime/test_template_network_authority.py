@@ -13,7 +13,9 @@ from tests.factories.shipped_templates import GOON_TEMPLATES, PLAN_TEMPLATES
 
 
 @pytest.mark.parametrize("key", ["python/uv-audit", "security/trivy-audit", "python/secure"])
-def test_m137_shipped_audits_have_exact_resolved_network_authority(key: str, tmp_path: Path) -> None:
+def test_m137_shipped_audits_have_exact_resolved_network_authority(
+    key: str, tmp_path: Path
+) -> None:
     plan = FleetPlanResolver(goon_templates=GOON_TEMPLATES).resolve(PLAN_TEMPLATES.source(key).path)
     online = [step for step in plan.steps if step.capabilities.egress.mode != "none"]
     if key == "python/secure":

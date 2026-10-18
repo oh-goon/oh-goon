@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from oh_goon.integrations.content_snapshot import snapshot_identity

@@ -182,6 +182,7 @@ def test_scoped_transaction_reproof_error_does_not_destroy_connection_scope(
     original_prove = database._prove_admitted_sqlite_identity
 
     with database.execution_connection_scope():
+
         def fail_proof(_connection: sqlite3.Connection, *, context: str) -> None:
             assert context == "scoped runtime transaction"
             raise sqlite3.DatabaseError("synthetic scoped proof failure")
@@ -289,4 +290,3 @@ def test_sqlite_access_diagnostics_ignore_non_reproof_and_unknown_outcomes() -> 
     )
 
     assert diagnostics.snapshot() == ()
-

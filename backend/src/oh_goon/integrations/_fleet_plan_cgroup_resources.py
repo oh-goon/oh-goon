@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Protocol
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.path_authority import ensure_private_directory
 from oh_goon.core.models.fleet_plan_evidence import PlanResourceEvidence
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
+from oh_goon.core.path_authority import ensure_private_directory
 from oh_goon.integrations._fleet_plan_resource_evidence import write_attempt_resource_evidence
 from oh_goon.integrations.exact_file_write import publish_text_file, remove_file_durably
 
@@ -90,10 +90,12 @@ def delegated_process_subgroup(
         return environment.get(outer_subgroup_env, "").strip()
     return None
 
+
 class CgroupResourceHost(Protocol):
     cgroup_root: Path | None
     cgroup_lock: Path
     cgroup_state_dir: Path
+
 
 @dataclass(slots=True)
 class CgroupV2AttemptLease:
@@ -147,9 +149,7 @@ class CgroupV2AttemptLease:
             nested_delegation=(
                 cgroup / _NESTED_DELEGATION_SUBTREE if nested_strict_execution else None
             ),
-            nested_monitor=(
-                cgroup / _NESTED_MONITOR_SUBTREE if nested_strict_execution else None
-            ),
+            nested_monitor=(cgroup / _NESTED_MONITOR_SUBTREE if nested_strict_execution else None),
         )
 
     def open(self) -> None:
@@ -177,7 +177,9 @@ class CgroupV2AttemptLease:
                 # recovery owner can rediscover exactly the allocated inode.
                 _write_resource_lease(self)
                 _apply_resource_limits(
-                    self.cgroup, self.policy, expected_identity=self.cgroup_identity,
+                    self.cgroup,
+                    self.policy,
+                    expected_identity=self.cgroup_identity,
                 )
                 _open_nested_delegation(self)
             except BaseException as original_error:
@@ -191,7 +193,8 @@ class CgroupV2AttemptLease:
                     _require_original_cgroup(self.cgroup, self.cgroup_identity)
                     _kill_cgroup(self.cgroup, expected_identity=self.cgroup_identity)
                     _wait_for_cgroup_empty(
-                        self.cgroup, expected_identity=self.cgroup_identity,
+                        self.cgroup,
+                        expected_identity=self.cgroup_identity,
                     )
                     _remove_cgroup(self.cgroup, expected_identity=self.cgroup_identity)
                 except BaseException as rollback_error:
@@ -207,11 +210,18 @@ class CgroupV2AttemptLease:
         # Constructing a launch command is a work-admission cut. A directly
         # constructed lease must not bypass the canonical native LACE owner.
         _refuse_unprovisioned_kernel_effect(
-            self.cgroup, operation="native cgroup process launch",
+            self.cgroup,
+            operation="native cgroup process launch",
         )
         if self.nested_delegation is not None:
-            if self.nested_monitor is None or self.nested_identity is None or self.monitor_identity is None:
-                raise FleetPlanInvalid("Fleet nested process launch lacks original cgroup identities")
+            if (
+                self.nested_monitor is None
+                or self.nested_identity is None
+                or self.monitor_identity is None
+            ):
+                raise FleetPlanInvalid(
+                    "Fleet nested process launch lacks original cgroup identities"
+                )
             return (
                 sys.executable,
                 "-m",
@@ -224,8 +234,13 @@ class CgroupV2AttemptLease:
         if self.cgroup_identity is None:
             raise FleetPlanInvalid("Fleet direct process launch lacks original cgroup identity")
         return (
-            sys.executable, "-S", "-c", _CGROUP_EXEC, str(self.cgroup),
-            str(self.cgroup_identity[0]), str(self.cgroup_identity[1]),
+            sys.executable,
+            "-S",
+            "-c",
+            _CGROUP_EXEC,
+            str(self.cgroup),
+            str(self.cgroup_identity[0]),
+            str(self.cgroup_identity[1]),
         )
 
     def close(self) -> PlanResourceEvidence:
@@ -245,8 +260,12 @@ class CgroupV2AttemptLease:
             remove_file_durably(self.state_file)
         return evidence
 
+
 def _apply_resource_limits(
-    cgroup: Path, policy: CicdResourcePolicy, *, expected_identity: tuple[int, int],
+    cgroup: Path,
+    policy: CicdResourcePolicy,
+    *,
+    expected_identity: tuple[int, int],
 ) -> None:
     """Apply all controller limits through the same original cgroup handle.
 
@@ -256,17 +275,17 @@ def _apply_resource_limits(
     """
     _refuse_unprovisioned_kernel_effect(cgroup, operation="native cgroup limit write")
     with _bound_cgroup_directory(cgroup, expected_identity) as directory:
+
         def write(name: str, value: str) -> None:
             _require_original_cgroup(cgroup, expected_identity)
             try:
                 control = os.open(
-                    name, os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    name,
+                    os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
                     dir_fd=directory,
                 )
             except OSError as exc:
-                raise FleetPlanInvalid(
-                    f"Fleet original cgroup limit {name} unavailable"
-                ) from exc
+                raise FleetPlanInvalid(f"Fleet original cgroup limit {name} unavailable") from exc
             try:
                 metadata = os.fstat(control)
                 if not stat.S_ISREG(metadata.st_mode):
@@ -276,13 +295,9 @@ def _apply_resource_limits(
                 _require_original_cgroup(cgroup, expected_identity)
                 encoded = value.encode("ascii")
                 if os.write(control, encoded) != len(encoded):
-                    raise FleetPlanInvalid(
-                        f"Fleet original cgroup limit {name} write incomplete"
-                    )
+                    raise FleetPlanInvalid(f"Fleet original cgroup limit {name} write incomplete")
             except OSError as exc:
-                raise FleetPlanInvalid(
-                    f"Fleet original cgroup limit {name} write failed"
-                ) from exc
+                raise FleetPlanInvalid(f"Fleet original cgroup limit {name} write failed") from exc
             finally:
                 os.close(control)
 
@@ -302,6 +317,7 @@ def _apply_resource_limits(
             write("pids.max", str(policy.max_processes))
         _require_original_cgroup(cgroup, expected_identity)
 
+
 def _open_nested_delegation(lease: CgroupV2AttemptLease) -> None:
     if lease.nested_delegation is None:
         return
@@ -309,22 +325,36 @@ def _open_nested_delegation(lease: CgroupV2AttemptLease) -> None:
         raise FleetPlanInvalid("Fleet nested cgroup original identity unavailable")
     enable_delegated_cgroup_v2_controllers(
         lease.cgroup,
-        required_controllers=_required_resource_controllers(lease.policy) | _NESTED_STRICT_CONTROLLERS,
+        required_controllers=_required_resource_controllers(lease.policy)
+        | _NESTED_STRICT_CONTROLLERS,
         expected_identity=lease.cgroup_identity,
     )
     assert lease.nested_monitor is not None
     lease.nested_identity = _mkdir_bound_cgroup_child(
-        lease.cgroup, lease.cgroup_identity, _NESTED_DELEGATION_SUBTREE,
+        lease.cgroup,
+        lease.cgroup_identity,
+        _NESTED_DELEGATION_SUBTREE,
     )
     lease.monitor_identity = _mkdir_bound_cgroup_child(
-        lease.cgroup, lease.cgroup_identity, _NESTED_MONITOR_SUBTREE,
+        lease.cgroup,
+        lease.cgroup_identity,
+        _NESTED_MONITOR_SUBTREE,
     )
 
+
 def _mkdir_bound_cgroup_child(
-    parent: Path, parent_identity: tuple[int, int], name: str,
+    parent: Path,
+    parent_identity: tuple[int, int],
+    name: str,
 ) -> tuple[int, int]:
     """Create a nested cgroup only below the original allocated parent inode."""
-    if not name or name in (".", "..") or "/" in name or "\x00" in name or name.startswith("cgroup."):
+    if (
+        not name
+        or name in (".", "..")
+        or "/" in name
+        or "\x00" in name
+        or name.startswith("cgroup.")
+    ):
         raise FleetPlanInvalid("Fleet invalid original delegated child name")
     _refuse_unprovisioned_kernel_effect(parent, operation="native delegated child creation")
     with _bound_cgroup_directory(parent, parent_identity) as descriptor:
@@ -344,7 +374,10 @@ def _mkdir_bound_cgroup_child(
 
 
 def _write_bound_cgroup_control(
-    cgroup: Path, identity: tuple[int, int], name: str, payload: bytes,
+    cgroup: Path,
+    identity: tuple[int, int],
+    name: str,
+    payload: bytes,
 ) -> None:
     """Single native write boundary for delegated controllers and membership."""
     if name not in ("cgroup.subtree_control", "cgroup.procs"):
@@ -354,7 +387,8 @@ def _write_bound_cgroup_control(
         _require_original_cgroup(cgroup, identity)
         try:
             control = os.open(
-                name, os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                name,
+                os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
                 dir_fd=descriptor,
             )
         except OSError as exc:
@@ -399,9 +433,7 @@ def _inspect_delegated_cgroup_v2_root(
         "pids": "pids.max",
     }
     required_files.extend(
-        controller_files[name]
-        for name in sorted(required_controllers)
-        if name in controller_files
+        controller_files[name] for name in sorted(required_controllers) if name in controller_files
     )
     missing = [name for name in required_files if not (root / name).exists()]
     if missing:
@@ -437,8 +469,12 @@ def _inspect_delegated_cgroup_v2_root(
         raise FleetPlanInvalid(f"Fleet delegated cgroup-v2 root is not writable: {root}")
     return root, enabled
 
+
 def _write_subtree_controllers(
-    root: Path, controllers: set[str], *, expected_identity: tuple[int, int] | None = None,
+    root: Path,
+    controllers: set[str],
+    *,
+    expected_identity: tuple[int, int] | None = None,
 ) -> None:
     if not controllers:
         return
@@ -450,12 +486,18 @@ def _write_subtree_controllers(
 
 
 def _write_process_to_cgroup(
-    cgroup: Path, pid: int, *, expected_identity: tuple[int, int],
+    cgroup: Path,
+    pid: int,
+    *,
+    expected_identity: tuple[int, int],
 ) -> None:
     if pid <= 0:
         raise FleetPlanInvalid("Fleet cannot attach nonpositive process id")
     _write_bound_cgroup_control(
-        cgroup, expected_identity, "cgroup.procs", f"{pid}\n".encode("ascii"),
+        cgroup,
+        expected_identity,
+        "cgroup.procs",
+        f"{pid}\n".encode("ascii"),
     )
 
 
@@ -483,7 +525,9 @@ def place_current_process_in_delegated_cgroup_v2_subgroup(
     child = root / subgroup
     try:
         _write_process_to_cgroup(
-            child, os.getpid(), expected_identity=child_identity,
+            child,
+            os.getpid(),
+            expected_identity=child_identity,
         )
     except FleetPlanInvalid:
         # Failure before an authenticated attachment must not delete a foreign
@@ -497,6 +541,7 @@ def place_current_process_in_delegated_cgroup_v2_subgroup(
         raise
     _require_original_cgroup(child, child_identity)
     return child
+
 
 def enable_delegated_cgroup_v2_controllers(
     root: Path,
@@ -516,14 +561,15 @@ def enable_delegated_cgroup_v2_controllers(
     if expected_identity is not None:
         _require_original_cgroup(root, expected_identity)
         _write_subtree_controllers(
-            root, required_controllers - enabled, expected_identity=expected_identity,
+            root,
+            required_controllers - enabled,
+            expected_identity=expected_identity,
         )
         _require_original_cgroup(root, expected_identity)
     else:
         _write_subtree_controllers(root, required_controllers - enabled)
-    return require_delegated_cgroup_v2_root(
-        root, required_controllers=required_controllers
-    )
+    return require_delegated_cgroup_v2_root(root, required_controllers=required_controllers)
+
 
 def require_delegated_cgroup_v2_root(
     root: Path,
@@ -548,6 +594,7 @@ def require_delegated_cgroup_v2_root(
         )
     return root
 
+
 def require_cgroup_v2_host(
     backend: CgroupResourceHost,
     policy: CicdResourcePolicy,
@@ -567,6 +614,7 @@ def require_cgroup_v2_host(
     )
     require_delegated_cgroup_v2_root(root, required_controllers=required)
 
+
 def _required_resource_controllers(policy: CicdResourcePolicy) -> set[str]:
     required_controllers: set[str] = set()
     if policy.cpu_millis is not None:
@@ -576,6 +624,7 @@ def _required_resource_controllers(policy: CicdResourcePolicy) -> set[str]:
     if policy.max_processes is not None:
         required_controllers.add("pids")
     return required_controllers
+
 
 def _is_cgroup2_path(path: Path) -> bool:
     """Prove that ``path`` is covered by a cgroup2 mount in this mount namespace."""
@@ -605,6 +654,7 @@ def _is_cgroup2_path(path: Path) -> bool:
             best_match = (rank, filesystem_fields[0])
     return best_match is not None and best_match[1] == "cgroup2"
 
+
 def _decode_mountinfo_path(value: str) -> str:
     for escaped, replacement in (
         ("\\040", " "),
@@ -614,6 +664,7 @@ def _decode_mountinfo_path(value: str) -> str:
     ):
         value = value.replace(escaped, replacement)
     return value
+
 
 def cgroup_configuration_identity(backend: CgroupResourceHost) -> dict[str, object]:
     root = backend.cgroup_root
@@ -633,6 +684,7 @@ def cgroup_configuration_identity(backend: CgroupResourceHost) -> dict[str, obje
         "subtree_control": subtree_control.split(),
     }
 
+
 def _read_resource_evidence(
     cgroup: Path,
     policy: CicdResourcePolicy,
@@ -651,6 +703,7 @@ def _read_resource_evidence(
         oom_kill_count=oom_kill,
     )
 
+
 def _write_limit(path: Path, value: str) -> None:
     # Retained only for old fixture callers; never a second live control writer.
     _refuse_unprovisioned_kernel_effect(path.parent, operation="native cgroup direct limit write")
@@ -661,12 +714,14 @@ def _write_limit(path: Path, value: str) -> None:
             f"Fleet cannot enforce cgroup-v2 resource limit {path.name}: {exc}"
         ) from exc
 
+
 def _plain_int(path: Path) -> int | None:
     try:
         value = path.read_text(encoding="ascii").strip()
     except OSError:
         return None
     return int(value) if value.isdigit() else None
+
 
 def _keyed_int(path: Path, key: str) -> int | None:
     try:
@@ -679,6 +734,7 @@ def _keyed_int(path: Path, key: str) -> int | None:
             return int(value)
     return None
 
+
 def _write_pending_resource_lease(lease: CgroupV2AttemptLease) -> None:
     """Durably record unresolved authority *before* the native mkdir effect.
 
@@ -688,7 +744,9 @@ def _write_pending_resource_lease(lease: CgroupV2AttemptLease) -> None:
     """
     ensure_private_directory(lease.state_file.parent)
     if lease.state_file.exists() or lease.state_file.is_symlink():
-        raise FleetPlanInvalid("Fleet allocation recovery record already exists; refusing overwrite")
+        raise FleetPlanInvalid(
+            "Fleet allocation recovery record already exists; refusing overwrite"
+        )
     identity = _process_identity(os.getpid())
     if identity is None:
         raise FleetPlanInvalid("Fleet cannot identify its own process before cgroup allocation")
@@ -723,6 +781,7 @@ def _write_resource_lease(lease: CgroupV2AttemptLease) -> None:
         payload["lace_intent"] = lease.lace_intent
     publish_text_file(lease.state_file, json.dumps(payload, sort_keys=True))
 
+
 def _reconcile_stale_cgroups(root: Path, state_dir: Path) -> None:
     if not state_dir.exists():
         return
@@ -736,8 +795,11 @@ def _reconcile_stale_cgroups(root: Path, state_dir: Path) -> None:
             raise FleetPlanInvalid(
                 f"Fleet cgroup recovery metadata is unreadable; refusing destructive reconciliation: {path}"
             ) from exc
-        if (not name.startswith("attempt-") or len(name) != len("attempt-") + 16
-                or any(character not in "0123456789abcdef" for character in name[8:])):
+        if (
+            not name.startswith("attempt-")
+            or len(name) != len("attempt-") + 16
+            or any(character not in "0123456789abcdef" for character in name[8:])
+        ):
             raise FleetPlanInvalid(
                 f"Fleet cgroup recovery metadata has invalid cgroup name: {path}"
             )
@@ -766,8 +828,7 @@ def _reconcile_stale_cgroups(root: Path, state_dir: Path) -> None:
         # kernel identity must be quarantined rather than guessed at.
         device = payload.get("cgroup_dev")
         inode = payload.get("cgroup_ino")
-        if (type(device) is not int or type(inode) is not int
-                or device < 1 or inode < 1):
+        if type(device) is not int or type(inode) is not int or device < 1 or inode < 1:
             raise FleetPlanInvalid(
                 "Fleet orphan cgroup lacks durable original kernel identity; refusing cleanup"
             )
@@ -786,8 +847,11 @@ def _reconcile_stale_cgroups(root: Path, state_dir: Path) -> None:
             "Fleet legacy orphan lacks independent physical custody; refusing destructive PID scavenging"
         )
 
+
 def _kill_cgroup(
-    cgroup: Path, *, expected_identity: tuple[int, int] | None = None,
+    cgroup: Path,
+    *,
+    expected_identity: tuple[int, int] | None = None,
 ) -> None:
     """Use the original kernel cgroup directory for a bound destructive write.
 
@@ -806,9 +870,10 @@ def _kill_cgroup(
             raise FleetPlanInvalid("Fleet original cgroup handle unavailable") from exc
         try:
             directory_stat = os.fstat(descriptor)
-            if not stat.S_ISDIR(directory_stat.st_mode) or (
-                directory_stat.st_dev, directory_stat.st_ino
-            ) != expected_identity:
+            if (
+                not stat.S_ISDIR(directory_stat.st_mode)
+                or (directory_stat.st_dev, directory_stat.st_ino) != expected_identity
+            ):
                 raise FleetPlanInvalid("Fleet original cgroup handle identity replaced")
             # An old directory may remain reachable through a held handle after
             # pathname replacement. The physical write is still to that pinned
@@ -816,15 +881,20 @@ def _kill_cgroup(
             _require_original_cgroup(cgroup, expected_identity)
             try:
                 control = os.open(
-                    "cgroup.kill", os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    "cgroup.kill",
+                    os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
                     dir_fd=descriptor,
                 )
             except OSError as exc:
-                raise FleetPlanInvalid("Fleet original cgroup.kill unavailable; refusing PID fallback") from exc
+                raise FleetPlanInvalid(
+                    "Fleet original cgroup.kill unavailable; refusing PID fallback"
+                ) from exc
             try:
                 control_stat = os.fstat(control)
                 if not stat.S_ISREG(control_stat.st_mode):
-                    raise FleetPlanInvalid("Fleet original cgroup.kill is not a kernel control file")
+                    raise FleetPlanInvalid(
+                        "Fleet original cgroup.kill is not a kernel control file"
+                    )
                 _require_original_cgroup(cgroup, expected_identity)
                 written = os.write(control, b"1")
                 if written != 1:
@@ -861,6 +931,7 @@ def _kill_cgroup(
         except PermissionError:
             pass
 
+
 def _exact_cgroup_identity(cgroup: Path) -> tuple[int, int]:
     """Pin the ORIGINAL cgroup directory; absence/substitution is uncertainty.
 
@@ -891,15 +962,17 @@ def _bound_cgroup_directory(cgroup: Path, expected_identity: tuple[int, int]) ->
     """
     try:
         descriptor = os.open(
-            cgroup, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            cgroup,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
         )
     except OSError as exc:
         raise FleetPlanInvalid("Fleet original cgroup directory handle unavailable") from exc
     try:
         observed = os.fstat(descriptor)
-        if not stat.S_ISDIR(observed.st_mode) or (
-            observed.st_dev, observed.st_ino
-        ) != expected_identity:
+        if (
+            not stat.S_ISDIR(observed.st_mode)
+            or (observed.st_dev, observed.st_ino) != expected_identity
+        ):
             raise FleetPlanInvalid("Fleet original cgroup handle identity replaced")
         _require_original_cgroup(cgroup, expected_identity)
         yield descriptor
@@ -931,7 +1004,9 @@ def _read_bound_cgroup_control(descriptor: int, name: str, limit: int) -> str:
 
 
 def _wait_for_cgroup_empty(
-    cgroup: Path, *, timeout_seconds: float = 1.0,
+    cgroup: Path,
+    *,
+    timeout_seconds: float = 1.0,
     expected_identity: tuple[int, int] | None = None,
 ) -> None:
     """Require both original kernel views from an identity-bound directory FD.
@@ -968,7 +1043,9 @@ def _wait_for_cgroup_empty(
 
 
 def _require_original_cgroup_parent(
-    parent: Path, descriptor: int, expected_identity: tuple[int, int],
+    parent: Path,
+    descriptor: int,
+    expected_identity: tuple[int, int],
 ) -> None:
     """Reject displaced parent lineage without claiming exclusive mutation custody.
 
@@ -981,14 +1058,19 @@ def _require_original_cgroup_parent(
         current = os.stat(parent, follow_symlinks=False)
     except OSError as exc:
         raise FleetPlanInvalid("Fleet original cgroup parent lineage unobservable") from exc
-    if (not stat.S_ISDIR(pinned.st_mode) or not stat.S_ISDIR(current.st_mode)
-            or (pinned.st_dev, pinned.st_ino) != expected_identity
-            or (current.st_dev, current.st_ino) != expected_identity):
+    if (
+        not stat.S_ISDIR(pinned.st_mode)
+        or not stat.S_ISDIR(current.st_mode)
+        or (pinned.st_dev, pinned.st_ino) != expected_identity
+        or (current.st_dev, current.st_ino) != expected_identity
+    ):
         raise FleetPlanInvalid("Fleet original cgroup parent lineage replaced")
 
 
 def _remove_cgroup(
-    cgroup: Path, *, expected_identity: tuple[int, int] | None = None,
+    cgroup: Path,
+    *,
+    expected_identity: tuple[int, int] | None = None,
 ) -> None:
     """Remove only a locally verified cgroup subtree through pinned parent handles.
 
@@ -1007,7 +1089,8 @@ def _remove_cgroup(
     _require_original_cgroup(cgroup, expected_identity)
     try:
         parent_fd = os.open(
-            cgroup.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            cgroup.parent,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
         )
     except OSError as exc:
         raise FleetPlanInvalid("Fleet cgroup cleanup parent handle unavailable") from exc
@@ -1032,20 +1115,25 @@ def _remove_cgroup(
                     native = os.stat(child.name, dir_fd=descriptor, follow_symlinks=False)
                     if not stat.S_ISDIR(native.st_mode) or native.st_ino != child.inode():
                         raise FleetPlanInvalid("Fleet original cgroup child inventory was replaced")
-                    _remove_cgroup(cgroup / child.name, expected_identity=(native.st_dev, native.st_ino))
+                    _remove_cgroup(
+                        cgroup / child.name, expected_identity=(native.st_dev, native.st_ino)
+                    )
             # Keep the parent handle fixed across identity verification and the
             # native rmdir. Never claim this proves adversarial atomic deletion.
             native = os.stat(cgroup.name, dir_fd=parent_fd, follow_symlinks=False)
-            if not stat.S_ISDIR(native.st_mode) or (
-                native.st_dev, native.st_ino
-            ) != expected_identity:
+            if (
+                not stat.S_ISDIR(native.st_mode)
+                or (native.st_dev, native.st_ino) != expected_identity
+            ):
                 raise FleetPlanInvalid("Fleet original cgroup removal target replaced")
             _require_original_cgroup(cgroup, expected_identity)
             _require_original_cgroup_parent(cgroup.parent, parent_fd, original_parent)
             try:
                 os.rmdir(cgroup.name, dir_fd=parent_fd)
             except OSError as exc:
-                raise FleetPlanInvalid(f"Fleet could not remove original cgroup {cgroup}: {exc}") from exc
+                raise FleetPlanInvalid(
+                    f"Fleet could not remove original cgroup {cgroup}: {exc}"
+                ) from exc
             # The old NAME disappearing does not prove the ORIGINAL inode was
             # removed. An attacker can rename that directory after our last
             # identity check and put an empty foreign directory in its place.
@@ -1083,6 +1171,7 @@ def _remove_cgroup(
     finally:
         os.close(parent_fd)
 
+
 def _process_identity(pid: int) -> str | None:
     try:
         stat_text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
@@ -1091,6 +1180,7 @@ def _process_identity(pid: int) -> str | None:
     except (OSError, IndexError):
         return None
     return f"{boot_id}:{start_ticks}"
+
 
 @contextmanager
 def _resource_lock(path: Path) -> Iterator[None]:

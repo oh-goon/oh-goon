@@ -5,6 +5,7 @@ Repository Understanding evidence into one identity-bound capability certificate
 execution/admission owner may verify. Capability is derived from the selected authority/risk
 profile; candidates cannot request a weaker threshold for a stronger capability.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -94,8 +95,6 @@ def _identity(value: Any, *, label: str) -> str:
     return value
 
 
-
-
 def _digest(value: Any, *, label: str) -> str:
     if not isinstance(value, str) or len(value) != 64:
         raise ValueError(f"{label} must be a 64-character sha256 digest")
@@ -104,6 +103,7 @@ def _digest(value: Any, *, label: str) -> str:
     except ValueError as exc:
         raise ValueError(f"{label} must be a 64-character sha256 digest") from exc
     return value
+
 
 def _issued_at(value: str | None) -> str:
     if value is None:
@@ -148,7 +148,9 @@ def _load_integrity(path: Path) -> dict[str, Any]:
         raise ValueError("benchmark integrity result schema mismatch")
     if payload.get("policy_version") != BENCHMARK_INTEGRITY_POLICY_VERSION:
         raise ValueError("benchmark integrity result policy mismatch")
-    _assert_self_identity(payload, field="integrity_result_identity", label="benchmark integrity result")
+    _assert_self_identity(
+        payload, field="integrity_result_identity", label="benchmark integrity result"
+    )
     if payload.get("required_controls") != BENCHMARK_CONTROL_REQUIREMENTS:
         raise ValueError("benchmark integrity result required controls drifted from current policy")
     observed = payload.get("observed_controls")
@@ -212,7 +214,8 @@ def _concept_inventory(result: dict[str, Any]) -> tuple[list[str], list[str]]:
         concepts.add(concept)
         claims = question.get("claims")
         if question.get("severity") == "critical" or (
-            isinstance(claims, list) and any(bool(claim.get("critical")) for claim in claims if isinstance(claim, dict))
+            isinstance(claims, list)
+            and any(bool(claim.get("critical")) for claim in claims if isinstance(claim, dict))
         ):
             critical.add(concept)
     return sorted(concepts), sorted(critical)
@@ -231,11 +234,17 @@ def capability_certificate(
     integrity_paths = [Path(path) for path in integrity_paths]
     adversarial_paths = [Path(path) for path in adversarial_paths]
     if len(result_paths) != STABILITY_RUNS_REQUIRED:
-        raise ValueError(f"capability certification requires exactly {STABILITY_RUNS_REQUIRED} scored runs")
+        raise ValueError(
+            f"capability certification requires exactly {STABILITY_RUNS_REQUIRED} scored runs"
+        )
     if len(integrity_paths) != STABILITY_RUNS_REQUIRED:
-        raise ValueError(f"capability certification requires exactly {STABILITY_RUNS_REQUIRED} benchmark integrity results")
+        raise ValueError(
+            f"capability certification requires exactly {STABILITY_RUNS_REQUIRED} benchmark integrity results"
+        )
     if len(adversarial_paths) != STABILITY_RUNS_REQUIRED:
-        raise ValueError(f"capability certification requires exactly {STABILITY_RUNS_REQUIRED} adversarial results")
+        raise ValueError(
+            f"capability certification requires exactly {STABILITY_RUNS_REQUIRED} adversarial results"
+        )
 
     stability = stability_report(result_paths)
     results = _result_payloads(result_paths)
@@ -246,7 +255,10 @@ def capability_certificate(
     tier_policy = CAPABILITY_TIERS.get(str(profile_id))
     if tier_policy is None or profile_id not in QUALIFICATION_PROFILES:
         raise ValueError("stability qualification profile has no capability mapping")
-    if QUALIFICATION_PROFILES[str(profile_id)].get("authority_class") != tier_policy["authority_class"]:
+    if (
+        QUALIFICATION_PROFILES[str(profile_id)].get("authority_class")
+        != tier_policy["authority_class"]
+    ):
         raise ValueError("capability profile authority class drifted from qualification policy")
 
     shared_fields = ("source_version", "repository_identity", "exam_snapshot_sha256")
@@ -256,7 +268,9 @@ def capability_certificate(
             raise ValueError(f"stability evidence is missing {field}")
         for row in integrity:
             if row.get(field) != expected:
-                raise ValueError(f"benchmark integrity result {field} does not match stability evidence")
+                raise ValueError(
+                    f"benchmark integrity result {field} does not match stability evidence"
+                )
         for row in adversarial:
             if row.get(field) != expected:
                 raise ValueError(f"adversarial result {field} does not match stability evidence")
@@ -270,36 +284,60 @@ def capability_certificate(
             )
 
     expected_run_ids = list(stability.get("candidate_run_identities") or [])
-    if len(expected_run_ids) != STABILITY_RUNS_REQUIRED or len(set(expected_run_ids)) != len(expected_run_ids):
-        raise ValueError("stability evidence does not contain three distinct candidate run identities")
+    if len(expected_run_ids) != STABILITY_RUNS_REQUIRED or len(set(expected_run_ids)) != len(
+        expected_run_ids
+    ):
+        raise ValueError(
+            "stability evidence does not contain three distinct candidate run identities"
+        )
     integrity_by_run: dict[str, dict[str, Any]] = {}
     for row in integrity:
         run_id = row.get("candidate_run_identity")
         if not isinstance(run_id, str) or run_id in integrity_by_run:
-            raise ValueError("capability certification requires one unique integrity result per candidate run")
+            raise ValueError(
+                "capability certification requires one unique integrity result per candidate run"
+            )
         integrity_by_run[run_id] = row
     if set(integrity_by_run) != set(expected_run_ids):
         raise ValueError("benchmark integrity run identities do not exactly match stability runs")
 
-    integrity_ids = [str(integrity_by_run[run]["integrity_result_identity"]) for run in expected_run_ids]
+    integrity_ids = [
+        str(integrity_by_run[run]["integrity_result_identity"]) for run in expected_run_ids
+    ]
     if len(set(integrity_ids)) != len(integrity_ids):
-        raise ValueError("capability certification requires distinct benchmark integrity result identities")
-    challenge_ids = [integrity_by_run[run].get("challenge_instance_identity") for run in expected_run_ids]
-    if any(not isinstance(value, str) or not value.startswith("sha256:") for value in challenge_ids):
-        raise ValueError("capability certification requires one hidden challenge instance per qualifying run")
+        raise ValueError(
+            "capability certification requires distinct benchmark integrity result identities"
+        )
+    challenge_ids = [
+        integrity_by_run[run].get("challenge_instance_identity") for run in expected_run_ids
+    ]
+    if any(
+        not isinstance(value, str) or not value.startswith("sha256:") for value in challenge_ids
+    ):
+        raise ValueError(
+            "capability certification requires one hidden challenge instance per qualifying run"
+        )
     if len(set(challenge_ids)) != len(challenge_ids):
-        raise ValueError("capability certification requires distinct hidden challenge instances across runs")
+        raise ValueError(
+            "capability certification requires distinct hidden challenge instances across runs"
+        )
 
     adversarial_by_challenge: dict[str, dict[str, Any]] = {}
     for row in adversarial:
         challenge_id = row.get("challenge_instance_identity")
         if not isinstance(challenge_id, str) or challenge_id in adversarial_by_challenge:
-            raise ValueError("capability certification requires one unique adversarial result per challenge instance")
+            raise ValueError(
+                "capability certification requires one unique adversarial result per challenge instance"
+            )
         adversarial_by_challenge[challenge_id] = row
     if set(adversarial_by_challenge) != set(challenge_ids):
-        raise ValueError("adversarial challenge identities do not exactly match benchmark integrity runs")
+        raise ValueError(
+            "adversarial challenge identities do not exactly match benchmark integrity runs"
+        )
 
-    benchmark_registry_ids = {row.get("benchmark_registry_identity") for row in integrity + adversarial}
+    benchmark_registry_ids = {
+        row.get("benchmark_registry_identity") for row in integrity + adversarial
+    }
     if len(benchmark_registry_ids) != 1 or None in benchmark_registry_ids:
         raise ValueError("capability certification requires one exact benchmark registry identity")
     benchmark_registry_identity = str(next(iter(benchmark_registry_ids)))
@@ -318,9 +356,11 @@ def capability_certificate(
             gate_failures.append(f"critical_adversarial_failure:{run_id}")
 
     authorized = not gate_failures
-    authorization = dict(tier_policy["authorization"]) if authorized else {
-        action: False for action in CAPABILITY_ACTIONS
-    }
+    authorization = (
+        dict(tier_policy["authorization"])
+        if authorized
+        else {action: False for action in CAPABILITY_ACTIONS}
+    )
     concepts, critical_concepts = _concept_inventory(results[0])
     issued = _issued_at(issued_at_utc)
     base = {
@@ -360,7 +400,9 @@ def capability_certificate(
         "benchmark_registry_identity": benchmark_registry_identity,
         "benchmark_integrity_result_identities": integrity_ids,
         "challenge_instance_identities": challenge_ids,
-        "comparable_runs": sum(bool(integrity_by_run[run]["comparable"]) for run in expected_run_ids),
+        "comparable_runs": sum(
+            bool(integrity_by_run[run]["comparable"]) for run in expected_run_ids
+        ),
         "adversarial_policy_version": ADVERSARIAL_POLICY_VERSION,
         "adversarial_result_identities": [
             adversarial_by_challenge[str(challenge)]["adversarial_result_identity"]
@@ -398,12 +440,17 @@ def validate_capability_certificate(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("capability certificate schema mismatch")
     if payload.get("capability_policy_version") != CAPABILITY_POLICY_VERSION:
         raise ValueError("capability certificate policy mismatch")
-    _assert_self_identity(payload, field="capability_certificate_identity", label="capability certificate")
+    _assert_self_identity(
+        payload, field="capability_certificate_identity", label="capability certificate"
+    )
     profile = payload.get("qualification_profile")
     policy = CAPABILITY_TIERS.get(str(profile))
     if policy is None:
         raise ValueError("capability certificate qualification profile has no current mapping")
-    if payload.get("target_tier") != policy["tier"] or payload.get("authority_class") != policy["authority_class"]:
+    if (
+        payload.get("target_tier") != policy["tier"]
+        or payload.get("authority_class") != policy["authority_class"]
+    ):
         raise ValueError("capability certificate tier/profile mapping is inconsistent")
     status = payload.get("certificate_status")
     if status not in {"AUTHORIZED", "DENIED"}:
@@ -415,7 +462,10 @@ def validate_capability_certificate(payload: dict[str, Any]) -> dict[str, Any]:
     )
     if payload.get("authorization") != expected_authorization:
         raise ValueError("capability certificate authorization map is inconsistent")
-    if payload.get("runs_required") != STABILITY_RUNS_REQUIRED or payload.get("passes_required") != STABILITY_PASSES_REQUIRED:
+    if (
+        payload.get("runs_required") != STABILITY_RUNS_REQUIRED
+        or payload.get("passes_required") != STABILITY_PASSES_REQUIRED
+    ):
         raise ValueError("capability certificate stability requirement is inconsistent")
     if payload.get("stability_policy_version") != STABILITY_POLICY_VERSION:
         raise ValueError("capability certificate stability policy mismatch")
@@ -435,7 +485,11 @@ def validate_capability_certificate(payload: dict[str, Any]) -> dict[str, Any]:
         (challenge_ids, "challenge instance"),
         (adversarial_ids, "adversarial result"),
     ):
-        if not isinstance(rows, list) or len(rows) != STABILITY_RUNS_REQUIRED or len(set(rows)) != STABILITY_RUNS_REQUIRED:
+        if (
+            not isinstance(rows, list)
+            or len(rows) != STABILITY_RUNS_REQUIRED
+            or len(set(rows)) != STABILITY_RUNS_REQUIRED
+        ):
             raise ValueError(f"capability certificate requires three distinct {label} identities")
     if status == "AUTHORIZED":
         if payload.get("granted_tier") != policy["tier"] or payload.get("gate_failures") != []:
@@ -445,15 +499,22 @@ def validate_capability_certificate(payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("comparable_runs") != STABILITY_RUNS_REQUIRED:
             raise ValueError("authorized capability certificate must contain 3/3 comparable runs")
         if payload.get("adversarial_qualified_runs") != STABILITY_RUNS_REQUIRED:
-            raise ValueError("authorized capability certificate must contain 3/3 adversarial-qualified runs")
-        if payload.get("stability_gate_failures") != [] or payload.get("critical_concept_oscillations") != []:
+            raise ValueError(
+                "authorized capability certificate must contain 3/3 adversarial-qualified runs"
+            )
+        if (
+            payload.get("stability_gate_failures") != []
+            or payload.get("critical_concept_oscillations") != []
+        ):
             raise ValueError("authorized capability certificate contains unstable concept evidence")
     else:
         if payload.get("granted_tier") is not None or not payload.get("gate_failures"):
             raise ValueError("denied capability certificate contains inconsistent grant state")
     _identity(payload.get("repository_identity"), label="repository_identity")
     _digest(payload.get("exam_snapshot_sha256"), label="exam_snapshot_sha256")
-    _identity(payload.get("candidate_configuration_identity"), label="candidate_configuration_identity")
+    _identity(
+        payload.get("candidate_configuration_identity"), label="candidate_configuration_identity"
+    )
     _identity(payload.get("benchmark_registry_identity"), label="benchmark_registry_identity")
     issued = payload.get("issued_at_utc")
     if not isinstance(issued, str):
@@ -470,7 +531,10 @@ def validate_capability_certificate(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("capability certificate freshness contract is inconsistent")
     if payload.get("scope_model") != "repository-wide-action-scopes.v1":
         raise ValueError("capability certificate scope model mismatch")
-    if payload.get("baseline_without_certificate") != "READ_ONLY" or payload.get("enforcement_status") != "EVIDENCE_ONLY":
+    if (
+        payload.get("baseline_without_certificate") != "READ_ONLY"
+        or payload.get("enforcement_status") != "EVIDENCE_ONLY"
+    ):
         raise ValueError("capability certificate enforcement boundary is inconsistent")
     return payload
 

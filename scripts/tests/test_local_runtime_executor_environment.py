@@ -7,7 +7,9 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.strict_executor_authority import STRICT_EXECUTOR_AUTHORITY_ENVIRONMENT
 
 
-def test_local_executor_preserves_operator_inventory(monkeypatch, tmp_path: Path) -> None:
+def test_local_executor_preserves_operator_inventory(
+    monkeypatch, tmp_path: Path
+) -> None:
     environment = {"OH_GOON_EXECUTORS_FILE": "/operator/executors.toml"}
     monkeypatch.setattr(
         local_executor,
@@ -27,6 +29,7 @@ def test_local_executor_materializes_real_inventory_when_operator_omits_one(
 ) -> None:
     inventory = tmp_path / "state/executors.toml"
     environment = {"PATH": "/bin"}
+
     def materialize(*, state, environment):
         assert state == tmp_path / "state"
         assert state.is_dir()
@@ -56,8 +59,10 @@ def test_runtime_environment_self_binds_serial_executor_but_keeps_parallel_opera
         return False, None
 
     monkeypatch.setattr(local_runtime, "configure_local_runtime_executor", configure)
-    environment, operator_configured, issue = local_runtime.prepare_local_runtime_environment(
-        temp=tmp_path, state=tmp_path / "state", config=tmp_path / "config"
+    environment, operator_configured, issue = (
+        local_runtime.prepare_local_runtime_environment(
+            temp=tmp_path, state=tmp_path / "state", config=tmp_path / "config"
+        )
     )
     assert issue is None
     assert operator_configured is False
@@ -78,41 +83,71 @@ def test_verification_runtime_environment_strips_all_strict_executor_authority(
         assert name not in environment
 
 
-
 def test_local_runtime_delegation_detects_unusable_current_cgroup(monkeypatch) -> None:
     from oh_goon.repository_tooling.acceptance import local_delegation
+
     monkeypatch.delenv(local_delegation.LOCAL_RUNTIME_DELEGATED_ENV, raising=False)
     monkeypatch.setattr(local_delegation.os, "name", "posix")
-    monkeypatch.setattr(local_delegation, "resolve_certification_cgroup_root", lambda _environment: (_ for _ in ()).throw(FleetPlanInvalid("not delegated")))
-    assert local_delegation.needs_systemd_delegation(dict(local_delegation.os.environ)) is True
+    monkeypatch.setattr(
+        local_delegation,
+        "resolve_certification_cgroup_root",
+        lambda _environment: (_ for _ in ()).throw(FleetPlanInvalid("not delegated")),
+    )
+    assert (
+        local_delegation.needs_systemd_delegation(dict(local_delegation.os.environ))
+        is True
+    )
 
 
 def test_local_runtime_delegation_stops_reentry_recursion(monkeypatch) -> None:
     from oh_goon.repository_tooling.acceptance import local_delegation
+
     monkeypatch.setattr(local_delegation.os, "name", "posix")
-    assert local_delegation.needs_systemd_delegation({local_delegation.LOCAL_RUNTIME_DELEGATED_ENV: "1"}) is False
+    assert (
+        local_delegation.needs_systemd_delegation(
+            {local_delegation.LOCAL_RUNTIME_DELEGATED_ENV: "1"}
+        )
+        is False
+    )
 
 
-def test_local_runtime_systemd_reentry_requests_delegate_yes(monkeypatch, tmp_path: Path) -> None:
+def test_local_runtime_systemd_reentry_requests_delegate_yes(
+    monkeypatch, tmp_path: Path
+) -> None:
     from types import SimpleNamespace
     from oh_goon.repository_tooling.acceptance import local_delegation
+
     observed = {}
-    monkeypatch.setattr(local_delegation.shutil, "which", lambda name, path=None: "/usr/bin/systemd-run")
+    monkeypatch.setattr(
+        local_delegation.shutil, "which", lambda name, path=None: "/usr/bin/systemd-run"
+    )
+
     def fake_run(command, **kwargs):
-        observed["command"] = command; observed["kwargs"] = kwargs
+        observed["command"] = command
+        observed["kwargs"] = kwargs
         return SimpleNamespace(returncode=17)
+
     monkeypatch.setattr(local_delegation.subprocess, "run", fake_run)
     assert local_delegation.run_under_systemd_delegation(tmp_path) == 17
     assert "--property=Delegate=yes" in observed["command"]
-    assert f"--setenv={local_delegation.LOCAL_RUNTIME_DELEGATED_ENV}=1" in observed["command"]
-    assert observed["command"][-2:] == ("-m", "oh_goon.repository_tooling.dev_runtime_acceptance")
+    assert (
+        f"--setenv={local_delegation.LOCAL_RUNTIME_DELEGATED_ENV}=1"
+        in observed["command"]
+    )
+    assert observed["command"][-2:] == (
+        "-m",
+        "oh_goon.repository_tooling.dev_runtime_acceptance",
+    )
     assert observed["kwargs"]["cwd"] == tmp_path
 
 
 def test_dev_runtime_main_reenters_before_running_acceptance(monkeypatch) -> None:
     from oh_goon.repository_tooling import dev_runtime_acceptance
+
     observed = {}
-    monkeypatch.setattr(dev_runtime_acceptance, "needs_systemd_delegation", lambda _environment: True)
+    monkeypatch.setattr(
+        dev_runtime_acceptance, "needs_systemd_delegation", lambda _environment: True
+    )
 
     def reenter(root, *, environment, timing):
         observed["root"] = root
@@ -121,31 +156,49 @@ def test_dev_runtime_main_reenters_before_running_acceptance(monkeypatch) -> Non
         return 23
 
     monkeypatch.setattr(dev_runtime_acceptance, "run_under_systemd_delegation", reenter)
-    monkeypatch.setattr(dev_runtime_acceptance, "accept_dev_runtime", lambda _root: (_ for _ in ()).throw(AssertionError("acceptance must run only inside delegated unit")))
+    monkeypatch.setattr(
+        dev_runtime_acceptance,
+        "accept_dev_runtime",
+        lambda _root: (_ for _ in ()).throw(
+            AssertionError("acceptance must run only inside delegated unit")
+        ),
+    )
     assert dev_runtime_acceptance.main(("strict",)) == 23
     assert observed["root"] == dev_runtime_acceptance.ROOT
     assert observed["environment"] == dict(dev_runtime_acceptance.os.environ)
-    assert observed["timing"] == dev_runtime_acceptance.RuntimeAcceptanceTiming.resolve(observed["environment"])
+    assert observed["timing"] == dev_runtime_acceptance.RuntimeAcceptanceTiming.resolve(
+        observed["environment"]
+    )
 
 
-def test_dev_runtime_verification_never_requests_systemd_or_strict_acceptance(monkeypatch) -> None:
+def test_dev_runtime_verification_never_requests_systemd_or_strict_acceptance(
+    monkeypatch,
+) -> None:
     from oh_goon.repository_tooling import dev_runtime_acceptance
 
     monkeypatch.setattr(
         dev_runtime_acceptance,
         "needs_systemd_delegation",
-        lambda _environment: (_ for _ in ()).throw(AssertionError("verification must not inspect delegation")),
+        lambda _environment: (_ for _ in ()).throw(
+            AssertionError("verification must not inspect delegation")
+        ),
     )
     monkeypatch.setattr(
         dev_runtime_acceptance,
         "accept_dev_runtime",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("strict acceptance must not run")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("strict acceptance must not run")
+        ),
     )
-    monkeypatch.setattr(dev_runtime_acceptance, "accept_local_runtime_verification", lambda _root: ())
+    monkeypatch.setattr(
+        dev_runtime_acceptance, "accept_local_runtime_verification", lambda _root: ()
+    )
     assert dev_runtime_acceptance.main(("verification",)) == 0
 
 
-def test_local_runtime_verification_owns_only_start_access_and_stop(monkeypatch, tmp_path: Path) -> None:
+def test_local_runtime_verification_owns_only_start_access_and_stop(
+    monkeypatch, tmp_path: Path
+) -> None:
     from types import SimpleNamespace
     from oh_goon.repository_tooling import dev_runtime_acceptance
 
@@ -181,18 +234,24 @@ def test_local_runtime_verification_owns_only_start_access_and_stop(monkeypatch,
         dev_runtime_acceptance,
         "prepare_runtime_acceptance_repositories",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("APP runtime verification must not prepare strict Fleet repositories")
+            AssertionError(
+                "APP runtime verification must not prepare strict Fleet repositories"
+            )
         ),
     )
     assert dev_runtime_acceptance.accept_local_runtime_verification(tmp_path) == ()
     assert observed == ["start", "access", "stop"]
 
 
-def test_operator_parallel_acceptance_rejects_inconsistent_resolved_environment(monkeypatch, tmp_path: Path) -> None:
+def test_operator_parallel_acceptance_rejects_inconsistent_resolved_environment(
+    monkeypatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         local_runtime,
         "exercise_parallel_shared_plan_cancellation",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must fail before deep helper")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("must fail before deep helper")
+        ),
     )
     try:
         local_runtime.exercise_operator_parallel_acceptance(
@@ -205,4 +264,6 @@ def test_operator_parallel_acceptance_rejects_inconsistent_resolved_environment(
     except RuntimeError as exc:
         assert "resolved operator executor authority is missing" in str(exc)
     else:
-        raise AssertionError("expected fail-closed resolved-authority consistency check")
+        raise AssertionError(
+            "expected fail-closed resolved-authority consistency check"
+        )

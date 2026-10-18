@@ -17,16 +17,23 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from oh_goon.core.enforcer_lace_trust import (
-    AdmittedRunContract, TrustProtocolError, canonical_bytes,
+    AdmittedRunContract,
+    TrustProtocolError,
+    canonical_bytes,
 )
 
 ISSUER_PROTOCOL = "oh-goon/admission-issuer-evidence/v2"
 SIGNATURE_DOMAIN = b"oh-goon/admission-issuer-ed25519/v2\x00"
-AUTHORITY_FIELDS = frozenset({
-    "repository_identity", "source_identity", "lock_identity",
-    "native_tool_identity", "execution_environment_identity",
-    "backend_capability_manifest_identity",
-})
+AUTHORITY_FIELDS = frozenset(
+    {
+        "repository_identity",
+        "source_identity",
+        "lock_identity",
+        "native_tool_identity",
+        "execution_environment_identity",
+        "backend_capability_manifest_identity",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,8 +57,12 @@ class TrustedIssuerVerifier:
             if not isinstance(root, tuple) or len(root) != 2:
                 raise TrustProtocolError("invalid issuer root")
             issuer_id, public_key = root
-            if (not isinstance(issuer_id, str) or not issuer_id.isascii()
-                    or not issuer_id or any(c in issuer_id for c in "\x00\n/")):
+            if (
+                not isinstance(issuer_id, str)
+                or not issuer_id.isascii()
+                or not issuer_id
+                or any(c in issuer_id for c in "\x00\n/")
+            ):
                 raise TrustProtocolError("invalid issuer identity")
             if type(public_key) is not bytes or len(public_key) != 32:
                 raise TrustProtocolError("explicit 256-bit Ed25519 public key required")
@@ -71,8 +82,12 @@ class TrustedIssuerVerifier:
         return dict(self._roots)
 
     def verify(
-        self, contract: AdmittedRunContract, *, evidence: Sequence[IssuerEvidence],
-        control_epoch: int, lease_identity: str,
+        self,
+        contract: AdmittedRunContract,
+        *,
+        evidence: Sequence[IssuerEvidence],
+        control_epoch: int,
+        lease_identity: str,
         lease_is_current: Callable[[str, int, str], bool],
     ) -> None:
         """Prove every admitted identity plus independently queried current lease.
@@ -103,8 +118,10 @@ class TrustedIssuerVerifier:
             except (ValueError, UnicodeDecodeError, TypeError) as exc:
                 raise TrustProtocolError("invalid issuer payload") from exc
             expected = {
-                "protocol": ISSUER_PROTOCOL, "field": proof.field,
-                "run_id": fields["run_id"], "contract_identity": contract.identity,
+                "protocol": ISSUER_PROTOCOL,
+                "field": proof.field,
+                "run_id": fields["run_id"],
+                "contract_identity": contract.identity,
                 "identity": fields[proof.field],
                 "executor_generation": fields["executor_generation"],
             }

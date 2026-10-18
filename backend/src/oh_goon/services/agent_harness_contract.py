@@ -5,6 +5,7 @@ client, source loader, or journal. The original Fleet Step owner must still
 supply Enforcer/LACE admission, physical custody and disclosure authorization
 before an external harness can consume an input or produce effects.
 """
+
 from __future__ import annotations
 
 import json
@@ -79,7 +80,9 @@ class AgentHarnessInput:
 
 
 def prepare_agent_harness_input(
-    packet: bytes, *, expected_handoff_identity: str,
+    packet: bytes,
+    *,
+    expected_handoff_identity: str,
 ) -> AgentHarnessInput:
     """Verify the original wire packet once; never reacquire live source paths.
 
@@ -88,7 +91,8 @@ def prepare_agent_harness_input(
     original Enforcer/LACE/disclosure authority.
     """
     handoff = FrozenAgentStepHandoff.decode_prework_delivery(
-        packet, expected_handoff_identity=expected_handoff_identity,
+        packet,
+        expected_handoff_identity=expected_handoff_identity,
     )
     result = AgentHarnessInput(handoff=handoff)
     _ = result.skill_instructions
@@ -119,18 +123,23 @@ class AgentHarnessSubmission:
 
     @property
     def submission_identity(self) -> str:
-        return stable_id("agent-harness-submission-v1", {
-            "handoff_identity": self.handoff_identity,
-            "verdict": self.verdict,
-            "findings": [
-                {"location": f.location, "explanation": f.explanation} for f in self.findings
-            ],
-            "summary": self.summary,
-        })
+        return stable_id(
+            "agent-harness-submission-v1",
+            {
+                "handoff_identity": self.handoff_identity,
+                "verdict": self.verdict,
+                "findings": [
+                    {"location": f.location, "explanation": f.explanation} for f in self.findings
+                ],
+                "summary": self.summary,
+            },
+        )
 
 
 def decode_agent_harness_submission(
-    payload: bytes, *, expected_handoff_identity: str,
+    payload: bytes,
+    *,
+    expected_handoff_identity: str,
 ) -> AgentHarnessSubmission:
     """Parse a bounded harness report, tied to the original frozen Step.
 
@@ -151,36 +160,46 @@ def decode_agent_harness_submission(
 
     try:
         value = json.loads(
-            payload.decode("utf-8", "strict"), object_pairs_hook=unique_pairs,
+            payload.decode("utf-8", "strict"),
+            object_pairs_hook=unique_pairs,
             parse_constant=lambda _: (_ for _ in ()).throw(
                 FleetPlanInvalid("SKILL-3A invalid nonfinite result value")
             ),
         )
     except (UnicodeError, ValueError, TypeError) as exc:
         raise FleetPlanInvalid("SKILL-3A invalid harness result encoding") from exc
-    if (type(value) is not dict or set(value) != {
-        "schema", "handoff_identity", "verdict", "findings", "summary"
-    } or value["schema"] != _RESULT_SCHEMA or canonical_bytes(value) != payload):
+    if (
+        type(value) is not dict
+        or set(value) != {"schema", "handoff_identity", "verdict", "findings", "summary"}
+        or value["schema"] != _RESULT_SCHEMA
+        or canonical_bytes(value) != payload
+    ):
         raise FleetPlanInvalid("SKILL-3A invalid harness result schema or canonical encoding")
-    if (type(expected_handoff_identity) is not str
-            or not expected_handoff_identity.startswith("agent-step-prework-handoff-v1-")
-            or len(expected_handoff_identity) != len("agent-step-prework-handoff-v1-") + 64
-            or value["handoff_identity"] != expected_handoff_identity):
+    if (
+        type(expected_handoff_identity) is not str
+        or not expected_handoff_identity.startswith("agent-step-prework-handoff-v1-")
+        or len(expected_handoff_identity) != len("agent-step-prework-handoff-v1-") + 64
+        or value["handoff_identity"] != expected_handoff_identity
+    ):
         raise FleetPlanInvalid("SKILL-3A harness submission changed its Step identity")
-    if (value["verdict"] not in ("CLEAN", "FINDINGS", "INCONCLUSIVE")
-            or type(value["verdict"]) is not str
-            or type(value["summary"]) is not str
-            or not value["summary"].strip()
-            or len(value["summary"]) > _MAX_FINDING_CHARS
-            or type(value["findings"]) is not list
-            or len(value["findings"]) > _MAX_FINDINGS):
+    if (
+        value["verdict"] not in ("CLEAN", "FINDINGS", "INCONCLUSIVE")
+        or type(value["verdict"]) is not str
+        or type(value["summary"]) is not str
+        or not value["summary"].strip()
+        or len(value["summary"]) > _MAX_FINDING_CHARS
+        or type(value["findings"]) is not list
+        or len(value["findings"]) > _MAX_FINDINGS
+    ):
         raise FleetPlanInvalid("SKILL-3A invalid harness verdict or report bounds")
     findings = []
     for raw in value["findings"]:
         if type(raw) is not dict or set(raw) != {"location", "explanation"}:
             raise FleetPlanInvalid("SKILL-3A invalid finding schema")
-        if any(type(raw[k]) is not str or not raw[k].strip()
-               or len(raw[k]) > _MAX_FINDING_CHARS for k in ("location", "explanation")):
+        if any(
+            type(raw[k]) is not str or not raw[k].strip() or len(raw[k]) > _MAX_FINDING_CHARS
+            for k in ("location", "explanation")
+        ):
             raise FleetPlanInvalid("SKILL-3A invalid finding fields")
         findings.append(AgentHarnessFinding(raw["location"], raw["explanation"]))
     if value["verdict"] == "CLEAN" and findings:
@@ -188,6 +207,8 @@ def decode_agent_harness_submission(
     if value["verdict"] == "FINDINGS" and not findings:
         raise FleetPlanInvalid("SKILL-3A FINDINGS requires a finding")
     return AgentHarnessSubmission(
-        handoff_identity=expected_handoff_identity, verdict=value["verdict"],
-        findings=tuple(findings), summary=value["summary"],
+        handoff_identity=expected_handoff_identity,
+        verdict=value["verdict"],
+        findings=tuple(findings),
+        summary=value["summary"],
     )

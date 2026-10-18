@@ -20,7 +20,8 @@ def test_loaders_wrap_io_and_catalog_validation_errors(tmp_path: Path) -> None:
         c.load_plan_template(tmp_path / "missing.yml")
     with pytest.raises(FleetPlanInvalid, match="Cannot read YAML"):
         c.load_yaml_mapping(tmp_path / "missing.yml")
-    bad = tmp_path / "fleet.toml"; bad.write_text("[", encoding="utf-8")
+    bad = tmp_path / "fleet.toml"
+    bad.write_text("[", encoding="utf-8")
     with pytest.raises(FleetExtensionInvalid, match="Cannot read"):
         c.load_extension_catalog(bad)
     bad.write_text("version=1\n", encoding="utf-8")
@@ -78,20 +79,32 @@ def test_goon_import_compiler_validates_shapes_fields_bindings_and_duplicate_occ
         c._compile_goon_imports([{"import": "python/ruff", "with": []}], source="x", owner="Plan")
     with pytest.raises(FleetPlanInvalid):
         c._compile_goon_imports(["bad"], source="x", owner="Plan")
-    rows = c._compile_goon_imports(["python/ruff", {"import": "python/ruff", "failure_impact": "continue", "with": {"x": 1}}], source="x", owner="Plan")
+    rows = c._compile_goon_imports(
+        ["python/ruff", {"import": "python/ruff", "failure_impact": "continue", "with": {"x": 1}}],
+        source="x",
+        owner="Plan",
+    )
     assert rows[0]["step_id"] != rows[1]["step_id"]
     assert rows[1]["failure_impact"] == "continue" and rows[1]["inputs"][0]["value"] == 1
 
 
 def test_input_definition_binding_source_env_and_output_helpers_fail_closed() -> None:
     assert c._published_output_payload("dist/a.whl") == {"path": "dist/a.whl"}
-    assert c._published_output_payload({"path": "x", "retention": "evidence"})["retention"] == "evidence"
+    assert (
+        c._published_output_payload({"path": "x", "retention": "evidence"})["retention"]
+        == "evidence"
+    )
     with pytest.raises(FleetPlanInvalid):
         c._published_output_payload(1)
     assert c._input_definition_payload(None) == {"required": True}
     assert c._input_definition_payload("x") == {"default": "x"}
     assert c._input_definition_payload({"optional": True}) == {"required": False}
-    assert c._input_definition_payload({"type": "integer", "min": 1, "max": 2}) == {"input_type": "integer", "minimum": 1, "maximum": 2, "required": True}
+    assert c._input_definition_payload({"type": "integer", "min": 1, "max": 2}) == {
+        "input_type": "integer",
+        "minimum": 1,
+        "maximum": 2,
+        "required": True,
+    }
     for value in ({"required": True}, {"optional": "yes"}, {"optional": True, "default": 1}, []):
         with pytest.raises(FleetPlanInvalid):
             c._input_definition_payload(value)
@@ -107,10 +120,23 @@ def test_input_definition_binding_source_env_and_output_helpers_fail_closed() ->
         "text": {"kind": "text", "path": "x.txt"},
         "git": {"kind": "git", "field": "commit"},
     }
-    specs = {"env": "TOKEN", "yaml": {"path": "x.yml", "key": "a.b"}, "toml": {"path": "x.toml", "key": "a.b"}, "text": {"path": "x.txt"}, "git": "commit"}
+    specs = {
+        "env": "TOKEN",
+        "yaml": {"path": "x.yml", "key": "a.b"},
+        "toml": {"path": "x.toml", "key": "a.b"},
+        "text": {"path": "x.txt"},
+        "git": "commit",
+    }
     for key, spec in specs.items():
         assert c._input_source_payload({key: spec}, name="x") == expected[key]
-    for value in ({}, {"env": ""}, {"yaml": {"path": "x"}}, {"toml": []}, {"text": {"path": "x", "extra": 1}}, {"bad": 1}):
+    for value in (
+        {},
+        {"env": ""},
+        {"yaml": {"path": "x"}},
+        {"toml": []},
+        {"text": {"path": "x", "extra": 1}},
+        {"bad": 1},
+    ):
         with pytest.raises(FleetPlanInvalid):
             c._input_source_payload(value, name="x")
     assert c._env_source_payload({"from": "host"}) == {"kind": "host"}
@@ -138,29 +164,51 @@ def test_authored_step_validation_rejects_internal_unknown_native_git_and_timeou
     c._validate_authored_steps(["x", {"uses": "git", "args": ["status"]}], source="x")
 
 
-def test_run_parser_rejects_shell_programs_punctuation_substitution_multiline_and_bad_quotes() -> None:
-    for value in (None, "", "echo\nhi", "echo $(id)", "echo `id`", "echo x | cat", "echo x && true", "python -c 'print(1)'", "uv run python -c 'print(1)'", "'unterminated"):
+def test_run_parser_rejects_shell_programs_punctuation_substitution_multiline_and_bad_quotes() -> (
+    None
+):
+    for value in (
+        None,
+        "",
+        "echo\nhi",
+        "echo $(id)",
+        "echo `id`",
+        "echo x | cat",
+        "echo x && true",
+        "python -c 'print(1)'",
+        "uv run python -c 'print(1)'",
+        "'unterminated",
+    ):
         with pytest.raises(FleetPlanInvalid):
             c._parse_run_argv(value)
-    assert c._parse_run_argv("uv run ruff check '${{ inputs.path }}'") == ["uv", "run", "ruff", "check", "${{ inputs.path }}"]
+    assert c._parse_run_argv("uv run ruff check '${{ inputs.path }}'") == [
+        "uv",
+        "run",
+        "ruff",
+        "check",
+        "${{ inputs.path }}",
+    ]
     assert c._parse_run_argv('echo "python -c"') == ["echo", "python -c"]
 
 
 def test_uv_authoring_injects_locked_group_and_rejects_ambiguous_environment() -> None:
     normalized = {
         "uv": {"group": "dev"},
-        "steps": [
-            {"kind": "command", "argv": ["uv", "run", "ruff", "check", "."]}
-        ],
+        "steps": [{"kind": "command", "argv": ["uv", "run", "ruff", "check", "."]}],
         "requirements": [],
     }
     c._apply_uv_environment(normalized)
     assert normalized["steps"][0]["argv"][:8] == [
-        "uv", "run", "--frozen", "--no-default-groups", "--project", ".", "--group", "dev"
+        "uv",
+        "run",
+        "--frozen",
+        "--no-default-groups",
+        "--project",
+        ".",
+        "--group",
+        "dev",
     ]
-    assert normalized["requirements"][-1] == {
-        "kind": "uv_project", "project": ".", "group": "dev"
-    }
+    assert normalized["requirements"][-1] == {"kind": "uv_project", "project": ".", "group": "dev"}
     application_flags = {
         "uv": {"group": "dev"},
         "steps": [
@@ -226,7 +274,14 @@ def test_step_normalization_handles_ids_run_uses_outputs_workspace_and_git() -> 
         c._normalize_step_mapping({"run": "echo hi", "kind": "command"})
     with pytest.raises(FleetPlanInvalid, match="disagree"):
         c._normalize_step_mapping({"uses": "git", "kind": "command"})
-    out = c._normalize_step_mapping({"uses": "git", "args": ["status"], "outputs": {"x": "x.txt"}, "workspace": {"from": "repository"}})
+    out = c._normalize_step_mapping(
+        {
+            "uses": "git",
+            "args": ["status"],
+            "outputs": {"x": "x.txt"},
+            "workspace": {"from": "repository"},
+        }
+    )
     assert out["action"]["operation"] == "native" and out["outputs"][0]["name"] == "x"
     assert out["workspace"]["source"] == {"kind": "repository"}
     step = c._normalize_step_mapping({"run": "echo hi", "workspace": {"from": "step", "step": "a"}})
@@ -244,11 +299,13 @@ def test_step_normalization_handles_ids_run_uses_outputs_workspace_and_git() -> 
 
 
 def test_generated_step_ids_deduplicate_bound_and_include_when_requires_mapping() -> None:
-    steps, inclusions = c._normalize_steps([
-        {"run": "/usr/bin/ruff check ."},
-        {"run": "/usr/bin/ruff format .", "include_when": {"input": "x", "equals": True}},
-        {"run": "uv run pytest"},
-    ])
+    steps, inclusions = c._normalize_steps(
+        [
+            {"run": "/usr/bin/ruff check ."},
+            {"run": "/usr/bin/ruff format .", "include_when": {"input": "x", "equals": True}},
+            {"run": "uv run pytest"},
+        ]
+    )
     assert steps[0]["step_id"] == "ruff" and steps[1]["step_id"] == "ruff-2"
     assert steps[2]["step_id"] == "pytest" and inclusions[0]["step_id"] == "ruff-2"
     with pytest.raises(FleetPlanInvalid, match="include_when must be"):

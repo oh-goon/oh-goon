@@ -7,7 +7,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = (ROOT / "Makefile").read_text(encoding="utf-8")
 SURFACE = yaml.safe_load(
-    (ROOT / "docs" / "development" / "MAKE_TARGET_SURFACE.yml").read_text(encoding="utf-8")
+    (ROOT / "docs" / "development" / "MAKE_TARGET_SURFACE.yml").read_text(
+        encoding="utf-8"
+    )
 )
 
 
@@ -21,7 +23,9 @@ def _target_body(name: str) -> str:
 
 
 def test_journal_coverage_target_is_frozen_owner_local_validation() -> None:
-    owner_targets = SURFACE["noncanonical_make_target_classes"]["owner-local-validation"]
+    owner_targets = SURFACE["noncanonical_make_target_classes"][
+        "owner-local-validation"
+    ]
     assert "test-journal-coverage" in owner_targets
 
 
@@ -38,4 +42,4 @@ def test_journal_coverage_targets_durable_fact_authority_not_read_projection() -
     assert "--cov=oh_goon.runtime.journal_facts" in body
     assert "--cov=oh_goon.runtime.journal_view" not in body
     assert "--cov-branch --cov-fail-under=93" in body
-    assert '$(STATE_HOME)/oh-goon/coverage/journal-durability.json' in body
+    assert "$(STATE_HOME)/oh-goon/coverage/journal-durability.json" in body

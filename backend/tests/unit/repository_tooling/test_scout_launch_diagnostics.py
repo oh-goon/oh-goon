@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -64,10 +63,13 @@ def test_wait_json_preserves_healthy_readiness_behavior(
     expected = {"status": "ok"}
     monkeypatch.setattr(scout_http_load_probe, "_get_json", lambda _url: expected)
 
-    assert scout_http_load_probe._wait_json(  # type: ignore[arg-type]
-        "http://127.0.0.1:43124/api/health",
-        process=_LiveProcess(),
-    ) == expected
+    assert (
+        scout_http_load_probe._wait_json(  # type: ignore[arg-type]
+            "http://127.0.0.1:43124/api/health",
+            process=_LiveProcess(),
+        )
+        == expected
+    )
 
 
 def test_wait_json_bounds_reported_stderr() -> None:
@@ -116,9 +118,7 @@ def test_all_scout_readiness_waits_bind_a_process() -> None:
 
 def test_reverse_proxy_readiness_binds_backend_and_proxy_processes() -> None:
     tooling = Path(scout_http_load_probe.__file__).resolve().parent
-    source = (tooling / "scout_reverse_proxy_certification.py").read_text(
-        encoding="utf-8"
-    )
+    source = (tooling / "scout_reverse_proxy_certification.py").read_text(encoding="utf-8")
 
     assert source.count("process=backend") == 2
     assert source.count("process=proxy") == 2

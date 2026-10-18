@@ -3,6 +3,7 @@
 This cannot qualify a foreign PID namespace, missing tasks, detached mounts or
 independently controlled observer.  No cgroup or mount mutations occur.
 """
+
 from __future__ import annotations
 
 import os
@@ -24,20 +25,37 @@ def test_detached_session_inherited_namespace_fd_remains_visible_but_not_proof(t
     start = linux._birth(Path(f"/proc/{pid}/stat").read_text())
     cg = tmp_path / "witness-only"
     cg.mkdir()
-    scope = parse_scope({
-        "run_id": "co-r3r-native", "subject_identity": "sha256:" + "e" * 64,
-        "cgroup_path": str(cg), "cgroup_device": cg.stat().st_dev,
-        "cgroup_inode": cg.stat().st_ino, "tracked_pid": pid,
-        "tracked_birth": f"{boot}:{start}", "mount_targets": ["/not-an-original-real-mount"],
-        "network_namespace": None, "host_veth": None, "nft_table": None,
-    })
+    scope = parse_scope(
+        {
+            "run_id": "co-r3r-native",
+            "subject_identity": "sha256:" + "e" * 64,
+            "cgroup_path": str(cg),
+            "cgroup_device": cg.stat().st_dev,
+            "cgroup_inode": cg.stat().st_ino,
+            "tracked_pid": pid,
+            "tracked_birth": f"{boot}:{start}",
+            "mount_targets": ["/not-an-original-real-mount"],
+            "network_namespace": None,
+            "host_veth": None,
+            "nft_table": None,
+        }
+    )
     fd = os.open("/proc/self/ns/mnt", os.O_RDONLY | os.O_CLOEXEC)
     child = None
     try:
         child = subprocess.Popen(
-            [sys.executable, "-c", "import os,sys,time; os.fstat(int(sys.argv[1])); print('READY',flush=True); time.sleep(8)", str(fd)],
-            pass_fds=(fd,), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL, start_new_session=True, text=True,
+            [
+                sys.executable,
+                "-c",
+                "import os,sys,time; os.fstat(int(sys.argv[1])); print('READY',flush=True); time.sleep(8)",
+                str(fd),
+            ],
+            pass_fds=(fd,),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            text=True,
         )
         assert child.stdout is not None
         assert child.stdout.readline().strip() == "READY"

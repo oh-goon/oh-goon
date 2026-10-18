@@ -52,8 +52,9 @@ def test_m136_default_evidence_reports_identity_without_retaining_bytes(tmp_path
 
 def test_m136_missing_file_is_missing_evidence_not_retained_content(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
-    result, = collect_strict_artifacts(
-        repository, (PlanArtifactDeclaration(path="missing.zip", retention="content_store"),),
+    (result,) = collect_strict_artifacts(
+        repository,
+        (PlanArtifactDeclaration(path="missing.zip", retention="content_store"),),
         _prepared(None),
     )
     assert isinstance(result, MissingPlanArtifact)
@@ -123,7 +124,8 @@ def test_m136_strict_mode_refuses_missing_store_before_claiming_retention(tmp_pa
     (repository / "release.zip").write_bytes(b"bytes")
     with pytest.raises(FleetPlanInvalid, match="without a strict run store"):
         collect_strict_artifacts(
-            repository, (PlanArtifactDeclaration(path="release.zip", retention="content_store"),),
+            repository,
+            (PlanArtifactDeclaration(path="release.zip", retention="content_store"),),
             _prepared(None),
         )
 

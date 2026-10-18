@@ -14,8 +14,12 @@ def _target_body(name: str) -> str:
     return makefile[start : len(makefile) if next_target < 0 else next_target]
 
 
-def test_backend_coverage_measures_real_tooling_subprocesses_and_both_test_surfaces() -> None:
-    pyproject = tomllib.loads((ROOT / "backend/pyproject.toml").read_text(encoding="utf-8"))
+def test_backend_coverage_measures_real_tooling_subprocesses_and_both_test_surfaces() -> (
+    None
+):
+    pyproject = tomllib.loads(
+        (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
+    )
     run = pyproject["tool"]["coverage"]["run"]
     report = pyproject["tool"]["coverage"]["report"]
 
@@ -60,7 +64,9 @@ def test_backend_coverage_pytest_roots_have_unique_test_module_basenames() -> No
     )
 
 
-def test_normal_coverage_paths_collect_json_without_printing_the_per_file_table() -> None:
+def test_normal_coverage_paths_collect_json_without_printing_the_per_file_table() -> (
+    None
+):
     coverage = _target_body("coverage-python")
     backend = _target_body("check-backend")
     for target in (coverage, backend):

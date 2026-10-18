@@ -7,9 +7,16 @@ from dataclasses import dataclass
 from threading import Thread
 
 from oh_goon.core.models.runtime_supervision import WatchdogDecision
-from oh_goon.engine.command_process_tree import _finish_process_output, _process_group_exists, terminate_owned_process_tree
+from oh_goon.engine.command_process_tree import (
+    _finish_process_output,
+    _process_group_exists,
+    terminate_owned_process_tree,
+)
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision, CommandWatchdog
-from oh_goon.runtime.termination import ProcessTreeTerminationReceipt, termination_request_from_watchdog
+from oh_goon.runtime.termination import (
+    ProcessTreeTerminationReceipt,
+    termination_request_from_watchdog,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,5 +52,6 @@ def evaluate_owned_process_watchdog(
         decision=decision,
         receipt=receipt,
         forced_termination=forced,
-        final_quiescent=receipt.quiescent and (os.name == "nt" or not _process_group_exists(process.pid)),
+        final_quiescent=receipt.quiescent
+        and (os.name == "nt" or not _process_group_exists(process.pid)),
     )

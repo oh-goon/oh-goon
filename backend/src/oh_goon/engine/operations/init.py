@@ -5,8 +5,8 @@ from oh_goon.core.models.operation import (
     BlockedOperationOutcome,
     MissingToolVersion,
     OperationReport,
-    ReadyUvTool,
     ReadinessOperationEvidence,
+    ReadyUvTool,
     SuccessfulOperationOutcome,
 )
 from oh_goon.core.time import utc_now

@@ -17,10 +17,7 @@ def _literal_owners(value: str) -> set[Path]:
     owners: set[Path] = set()
     for path in source_root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        if any(
-            isinstance(node, ast.Constant) and node.value == value
-            for node in ast.walk(tree)
-        ):
+        if any(isinstance(node, ast.Constant) and node.value == value for node in ast.walk(tree)):
             owners.add(path.resolve())
     return owners
 

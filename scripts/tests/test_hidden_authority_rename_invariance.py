@@ -8,14 +8,19 @@ from oh_goon.repository_tooling.architecture._structural_project_dependency_cont
 )
 
 
-def test_release_architecture_ignores_private_rollback_helper_name(tmp_path: Path) -> None:
-    stamp = tmp_path / "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py"
+def test_release_architecture_ignores_private_rollback_helper_name(
+    tmp_path: Path,
+) -> None:
+    stamp = (
+        tmp_path
+        / "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py"
+    )
     stamp.parent.mkdir(parents=True)
     stamp.write_text(
         'COMMANDS = (("uv", "version"), ("npm", "version"))\n'
-        'assert_canonical_source_layout(ROOT)\n'
-        '_regenerate_generated_authority()\n'
-        '_rollback_authoring_state(snapshot)\n',
+        "assert_canonical_source_layout(ROOT)\n"
+        "_regenerate_generated_authority()\n"
+        "_rollback_authoring_state(snapshot)\n",
         encoding="utf-8",
     )
     assert not any(
@@ -85,7 +90,9 @@ def test_architecture_does_not_certify_known_private_freshness_spellings() -> No
         assert token not in release
 
 
-def test_typescript_fence_parameter_names_are_not_architecture_authority(tmp_path: Path) -> None:
+def test_typescript_fence_parameter_names_are_not_architecture_authority(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.architecture._structural_authority_frontend import (
         _check_mutable_resource_fences,
     )
@@ -108,7 +115,9 @@ def test_typescript_fence_parameter_names_are_not_architecture_authority(tmp_pat
     assert _check_mutable_resource_fences(tmp_path) == []
 
 
-def test_native_environment_local_name_is_not_architecture_authority(tmp_path: Path) -> None:
+def test_native_environment_local_name_is_not_architecture_authority(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.architecture._structural_project_dependency_contract import (
         _check_native_command_policy,
     )
@@ -126,7 +135,9 @@ def test_native_environment_local_name_is_not_architecture_authority(tmp_path: P
     assert _check_native_command_policy(tmp_path) == []
 
 
-def test_sandbox_environment_local_name_is_not_architecture_authority(tmp_path: Path) -> None:
+def test_sandbox_environment_local_name_is_not_architecture_authority(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.architecture.sandbox_provider_boundary_contract import (
         _assigns_environment_key,
     )
@@ -169,8 +180,7 @@ def test_project_runtime_compatibility_authority_ignores_dict_quote_style(
     )
     capability.parent.mkdir(parents=True)
     capability.write_text(
-        "def build():\n"
-        "    return {'compatibility_decision': 'native-uv-only'}\n",
+        "def build():\n    return {'compatibility_decision': 'native-uv-only'}\n",
         encoding="utf-8",
     )
     assert _check_native_authority_deduplication(tmp_path) == []
@@ -189,8 +199,7 @@ def test_project_runtime_compatibility_authority_rejects_wrong_semantic_value(
     )
     capability.parent.mkdir(parents=True)
     capability.write_text(
-        "def build():\n"
-        "    return {'compatibility_decision': 'oh-goon-redecides'}\n",
+        "def build():\n    return {'compatibility_decision': 'oh-goon-redecides'}\n",
         encoding="utf-8",
     )
     violations = _check_native_authority_deduplication(tmp_path)
@@ -200,14 +209,15 @@ def test_project_runtime_compatibility_authority_rejects_wrong_semantic_value(
     )
 
 
-def test_container_compose_version_probe_is_representation_invariant(tmp_path: Path) -> None:
+def test_container_compose_version_probe_is_representation_invariant(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.architecture._structural_project_dependency_contract import (
         _check_native_authority_deduplication,
     )
 
     accept = (
-        tmp_path
-        / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
+        tmp_path / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
     )
     accept.parent.mkdir(parents=True)
     for command in (
@@ -235,8 +245,7 @@ def test_container_compose_version_probe_through_literal_binding_is_rejected(
     )
 
     accept = (
-        tmp_path
-        / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
+        tmp_path / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
     )
     accept.parent.mkdir(parents=True)
     accept.write_text(
@@ -259,8 +268,7 @@ def test_container_compose_build_remains_allowed(tmp_path: Path) -> None:
     )
 
     accept = (
-        tmp_path
-        / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
+        tmp_path / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
     )
     accept.parent.mkdir(parents=True)
     accept.write_text(
@@ -272,8 +280,13 @@ def test_container_compose_build_remains_allowed(tmp_path: Path) -> None:
     assert _check_native_authority_deduplication(tmp_path) == []
 
 
-def test_release_stamp_native_commands_are_representation_invariant(tmp_path: Path) -> None:
-    stamp = tmp_path / "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py"
+def test_release_stamp_native_commands_are_representation_invariant(
+    tmp_path: Path,
+) -> None:
+    stamp = (
+        tmp_path
+        / "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py"
+    )
     stamp.parent.mkdir(parents=True)
     stamp.write_text(
         "import subprocess\n"
@@ -291,7 +304,10 @@ def test_release_stamp_native_commands_are_representation_invariant(tmp_path: Pa
 def test_unrelated_uv_version_probe_cannot_satisfy_release_stamp_authority(
     tmp_path: Path,
 ) -> None:
-    stamp = tmp_path / "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py"
+    stamp = (
+        tmp_path
+        / "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py"
+    )
     stamp.parent.mkdir(parents=True)
     stamp.write_text(
         "import subprocess\n"
@@ -310,7 +326,9 @@ def test_unrelated_uv_version_probe_cannot_satisfy_release_stamp_authority(
     )
 
 
-def test_browser_native_argv_spelling_is_not_architecture_authority(tmp_path: Path) -> None:
+def test_browser_native_argv_spelling_is_not_architecture_authority(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.architecture._structural_project_dependency_contract import (
         check_project_dependency_contract,
     )
@@ -337,7 +355,9 @@ def test_browser_native_argv_spelling_is_not_architecture_authority(tmp_path: Pa
         ] == []
 
 
-def test_browser_architecture_rejects_parallel_package_lock_parser(tmp_path: Path) -> None:
+def test_browser_architecture_rejects_parallel_package_lock_parser(
+    tmp_path: Path,
+) -> None:
     from oh_goon.repository_tooling.architecture._structural_project_dependency_contract import (
         check_project_dependency_contract,
     )
@@ -348,10 +368,10 @@ def test_browser_architecture_rejects_parallel_package_lock_parser(tmp_path: Pat
     )
     browser.parent.mkdir(parents=True)
     browser.write_text(
-        'import json\n'
-        'from pathlib import Path\n'
+        "import json\n"
+        "from pathlib import Path\n"
         'lock_path = Path("frontend/package-lock.json")\n'
-        'payload = json.loads(lock_path.read_text())\n'
+        "payload = json.loads(lock_path.read_text())\n"
         'packages = payload.get("packages")\n',
         encoding="utf-8",
     )
@@ -360,7 +380,11 @@ def test_browser_architecture_rejects_parallel_package_lock_parser(tmp_path: Pat
         for violation in check_project_dependency_contract(tmp_path)
         if violation.path == browser
     ]
-    assert any("must not parse package-lock semantics in parallel with npm" in item.message for item in violations)
+    assert any(
+        "must not parse package-lock semantics in parallel with npm" in item.message
+        for item in violations
+    )
+
 
 def test_pytest_testpaths_toml_representation_is_semantic(tmp_path: Path) -> None:
     from oh_goon.repository_tooling.architecture._structural_authority_execution import (
@@ -372,7 +396,7 @@ def test_pytest_testpaths_toml_representation_is_semantic(tmp_path: Path) -> Non
     equivalent_forms = (
         "[tool.pytest.ini_options]\ntestpaths = ['tests/unit', 'tests/dependency_complete', 'tests/integration']\n",
         "[tool.pytest.ini_options]\ntestpaths=['tests/unit','tests/dependency_complete','tests/integration']\n",
-        "[tool.pytest.ini_options]\ntestpaths = [\n  \"tests/unit\",\n  \"tests/dependency_complete\",\n  \"tests/integration\",\n]\n",
+        '[tool.pytest.ini_options]\ntestpaths = [\n  "tests/unit",\n  "tests/dependency_complete",\n  "tests/integration",\n]\n',
     )
     for text in equivalent_forms:
         pyproject.write_text(text, encoding="utf-8")
@@ -392,10 +416,10 @@ def test_pytest_testpaths_semantic_removal_is_rejected(tmp_path: Path) -> None:
     )
     violations = _check_pytest_testpaths(pyproject)
     assert any(
-        "pytest testpaths must retain dependency-complete unit ownership" in item.message
+        "pytest testpaths must retain dependency-complete unit ownership"
+        in item.message
         for item in violations
     )
-
 
 
 def test_wheel_force_include_toml_representation_is_semantic(tmp_path: Path) -> None:

@@ -78,7 +78,9 @@ def test_budget_prune_never_removes_referenced_or_live_leased_objects(tmp_path: 
     assert result.budget_satisfied is False
 
 
-def test_minimum_idle_age_prevents_ttl_first_eviction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_minimum_idle_age_prevents_ttl_first_eviction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(lifecycle.time, "time_ns", lambda: 100)
     store = FleetContentStore(tmp_path / "idle-store")
     retained = _put_file(store, tmp_path, "recent", "recent")

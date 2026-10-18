@@ -6,9 +6,9 @@ import pytest
 
 from oh_goon.cli import main as cli_main
 from oh_goon.core.errors import ErrorKind, ExecutionBusy
-from oh_goon.core.product_identity import canonical_repository_path, repository_id
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunFailure
+from oh_goon.core.product_identity import canonical_repository_path, repository_id
 from oh_goon.core.vocabulary import FleetRunFailureStage, FleetRunTerminalIntent, OperationAction
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution import ExecutionCoordinator

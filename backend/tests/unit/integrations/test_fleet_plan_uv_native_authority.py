@@ -75,14 +75,15 @@ def _repository(tmp_path: Path) -> RepositoryIdentity:
     repository = tmp_path / "repo"
     backend = repository / "backend"
     backend.mkdir(parents=True)
-    (backend / "pyproject.toml").write_text("[project]\nname='demo'\nversion='1'\n", encoding="utf-8")
+    (backend / "pyproject.toml").write_text(
+        "[project]\nname='demo'\nversion='1'\n", encoding="utf-8"
+    )
     (backend / "uv.lock").write_text("version = 1\n", encoding="utf-8")
     return RepositoryIdentity(path=repository)
 
 
 def _ok(*argv: str, **_kwargs: object) -> CommandResult:
     return CommandResult(returncode=0, stdout="", stderr="", argv=tuple(argv))
-
 
 
 def test_uv_admission_has_no_disposable_native_resolution_owner() -> None:
@@ -238,7 +239,6 @@ def test_uv_preparation_preserves_native_tls_and_proxy_transport(
     assert env["UV_CACHE_DIR"] == str(run_root / ".preparation" / "cache" / "uv")
     assert env["UV_PYTHON"] == "/usr/bin/python3"
     assert "UNRELATED_SECRET" not in env
-
 
 
 def test_uv_preparation_preserves_native_uv_configuration_and_credentials_opaquely(
@@ -419,9 +419,9 @@ def test_strict_uv_attempt_materializes_offline_then_runs_no_sync(
     from oh_goon.integrations.fleet_plan_managed_runtime import UvProjectManagedRuntime
     from oh_goon.integrations.fleet_plan_step_execution import (
         StepRuntime,
-        _StepProcess,
         _execute_command_step,
         _prepare_strict_uv_attempt,
+        _StepProcess,
     )
 
     repository = tmp_path / "workspace"
@@ -517,8 +517,8 @@ def test_strict_uv_materialization_failure_prevents_application_command(
     from oh_goon.integrations.fleet_plan_managed_runtime import UvProjectManagedRuntime
     from oh_goon.integrations.fleet_plan_step_execution import (
         StepRuntime,
-        _StepProcess,
         _prepare_strict_uv_attempt,
+        _StepProcess,
     )
 
     repository = tmp_path / "workspace"
@@ -551,9 +551,7 @@ def test_strict_uv_materialization_failure_prevents_application_command(
             python=Path("/usr/bin/python3"),
         ),
     )
-    runtime = StepRuntime(
-        git=GitService(), extensions=None, tools=None, cancel_requested=None
-    )
+    runtime = StepRuntime(git=GitService(), extensions=None, tools=None, cancel_requested=None)
 
     _prepared, failure = _prepare_strict_uv_attempt(repository, step, process, runtime)
     assert failure is not None
@@ -602,9 +600,7 @@ def test_uv_prepared_cache_seed_has_identity_owner(
     )
     attempt_cache = tmp_path / "attempt-cache"
 
-    def copy_frozen(
-        source: Path, destination: Path, **_kwargs: object
-    ) -> SnapshotIdentity:
+    def copy_frozen(source: Path, destination: Path, **_kwargs: object) -> SnapshotIdentity:
         assert source == frozen_cache
         destination.mkdir(parents=True)
         (destination / "wheel.bin").write_bytes(b"locked-wheel")
@@ -746,8 +742,8 @@ def test_strict_uv_attempt_copy_link_mode_prevents_hard_linked_cache_output(
     from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
     from oh_goon.integrations.fleet_plan_step_execution import (
         StepRuntime,
-        _StepProcess,
         _prepare_strict_uv_attempt,
+        _StepProcess,
     )
 
     paths = AttemptPathLayout.from_root(tmp_path / "attempt")
@@ -797,9 +793,7 @@ def test_strict_uv_attempt_copy_link_mode_prevents_hard_linked_cache_output(
             python=Path("/usr/bin/python3"),
         ),
     )
-    runtime = StepRuntime(
-        git=GitService(), extensions=None, tools=None, cancel_requested=None
-    )
+    runtime = StepRuntime(git=GitService(), extensions=None, tools=None, cancel_requested=None)
 
     prepared, failure = _prepare_strict_uv_attempt(paths.workspace, _step(), process, runtime)
 

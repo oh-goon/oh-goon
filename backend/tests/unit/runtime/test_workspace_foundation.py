@@ -17,7 +17,9 @@ def _database(tmp_path: Path) -> LocalDatabase:
     return LocalDatabase(tmp_path / "state" / "oh-goon.db", journal_mode="DELETE")
 
 
-def _requested(manager: RepositoryWorkspaceAuthority, *, kind: WorkspaceKind = WorkspaceKind.WORKTREE) -> WorkspaceRef:
+def _requested(
+    manager: RepositoryWorkspaceAuthority, *, kind: WorkspaceKind = WorkspaceKind.WORKTREE
+) -> WorkspaceRef:
     return manager.request(
         repository_id="repo-example",
         base_revision="0123456789abcdef",
@@ -86,7 +88,9 @@ def test_workspace_state_transition_increments_version_once_and_rejects_stale_ca
     assert manager.state(reference.workspace_id) == ready
 
 
-def test_invalid_workspace_lifecycle_transition_is_rejected_without_mutation(tmp_path: Path) -> None:
+def test_invalid_workspace_lifecycle_transition_is_rejected_without_mutation(
+    tmp_path: Path,
+) -> None:
     manager = RepositoryWorkspaceAuthority(_database(tmp_path))
     reference = _requested(manager)
 

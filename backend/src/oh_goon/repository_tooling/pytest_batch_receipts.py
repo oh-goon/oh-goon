@@ -6,6 +6,7 @@ granularity. A member receipt is written only after every collected pytest item 
 that member completed without a failing setup/call/teardown report. Therefore a host
 kill can lose only the currently incomplete member, not earlier siblings in the batch.
 """
+
 from __future__ import annotations
 
 import json
@@ -108,11 +109,7 @@ def pytest_collection_finish(session: Any) -> None:
 
 def pytest_runtest_logstart(nodeid: str, location: Any) -> None:
     del location
-    if (
-        _EXECUTION_STORE is None
-        or _ATTEMPT_IDENTITY is None
-        or _BATCH_IDENTITY is None
-    ):
+    if _EXECUTION_STORE is None or _ATTEMPT_IDENTITY is None or _BATCH_IDENTITY is None:
         return
     member = _NODE_TO_MEMBER.get(nodeid)
     if member is None:

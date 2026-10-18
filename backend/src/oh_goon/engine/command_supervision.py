@@ -47,8 +47,12 @@ class CommandWatchdog:
     started_at: datetime
     last_progress: SemanticProgress | None = None
 
-    def evaluate(self, *, process_alive: bool, completed_at: datetime | None = None) -> WatchdogDecision:
-        candidate = self.supervision.semantic_progress(self.execution_id, self.supervision.generation)
+    def evaluate(
+        self, *, process_alive: bool, completed_at: datetime | None = None
+    ) -> WatchdogDecision:
+        candidate = self.supervision.semantic_progress(
+            self.execution_id, self.supervision.generation
+        )
         if candidate is not None:
             self.last_progress = accept_semantic_progress(
                 self.last_progress,
@@ -58,7 +62,11 @@ class CommandWatchdog:
             )
         heartbeat = self.supervision.heartbeat(self.execution_id, self.supervision.generation)
         lease_valid = self.supervision.lease_valid(self.execution_id, self.supervision.generation)
-        yield_requested_at = None if self.supervision.yield_requested_at is None else self.supervision.yield_requested_at(self.execution_id, self.supervision.generation)
+        yield_requested_at = (
+            None
+            if self.supervision.yield_requested_at is None
+            else self.supervision.yield_requested_at(self.execution_id, self.supervision.generation)
+        )
         observed_at = datetime.now(timezone.utc)
         observation = RuntimeObservation(
             execution_id=self.execution_id,

@@ -1,4 +1,5 @@
 """Aggregate bounded pytest reports into non-authoritative hosted diagnostic evidence."""
+
 from __future__ import annotations
 
 import argparse
@@ -12,7 +13,6 @@ from typing import Any
 
 from . import hosted_dependency_capability as hosted_capability_contract
 from . import pytest_execution_report as pytest_execution_report_contract
-
 
 SCHEMA = "oh-goon.hosted-development-diagnostic/v2"
 BASE_MARKER = (
@@ -47,12 +47,17 @@ def _canonical_identity(payload: dict[str, Any]) -> str:
 def _validate_host_capability_header(payload: dict[str, Any]) -> None:
     if payload.get("schema") != hosted_capability_contract.SCHEMA:
         raise RuntimeError("unsupported hosted dependency capability schema")
-    if payload.get("authority") != "diagnostic-only" or payload.get("native_authority") is not False:
+    if (
+        payload.get("authority") != "diagnostic-only"
+        or payload.get("native_authority") is not False
+    ):
         raise RuntimeError("hosted dependency capability attempted to claim native authority")
     if payload.get("dependency_complete_authority") is not False:
         raise RuntimeError("hosted dependency capability attempted dependency-complete authority")
     if payload.get("uv_artifact_cache_evaluated") is not False:
-        raise RuntimeError("hosted dependency capability must not claim uv artifact-cache evaluation")
+        raise RuntimeError(
+            "hosted dependency capability must not claim uv artifact-cache evaluation"
+        )
     if payload.get("result") != "HOST-CAPABILITY-READY":
         raise RuntimeError("hosted dependency capability is not ready")
     _validate_host_capability_identity(payload)
@@ -73,7 +78,9 @@ def _validate_host_capability_runtime(payload: dict[str, Any]) -> None:
     if interpreter != str(Path(sys.executable).resolve()):
         raise RuntimeError("hosted dependency capability interpreter does not match receipt writer")
     if payload.get("python_status") != "compatible":
-        raise RuntimeError("hosted dependency capability interpreter is outside project requires-python")
+        raise RuntimeError(
+            "hosted dependency capability interpreter is outside project requires-python"
+        )
     if not isinstance(payload.get("requires_python"), str):
         raise RuntimeError("hosted dependency capability lacks project requires-python")
     if not isinstance(payload.get("python_version"), str):
@@ -115,10 +122,7 @@ def _validate_host_capability_packages(payload: dict[str, Any]) -> None:
         )
     for distribution in hosted_capability_contract.REQUIRED_HOST_CAPABILITIES:
         required_package = by_name.get(distribution)
-        if (
-            not isinstance(required_package, dict)
-            or required_package.get("status") != "compatible"
-        ):
+        if not isinstance(required_package, dict) or required_package.get("status") != "compatible":
             raise RuntimeError(
                 "hosted dependency capability has no compatible required capability proof for "
                 f"{distribution}"
@@ -179,7 +183,9 @@ def _load_batch_report(surface: str, batch: int, path: Path) -> dict[str, Any]:
     if not isinstance(membership, dict):
         raise RuntimeError(f"missing membership receipt for {surface} batch {batch}")
     if payload.get("status") != "PASS" or membership.get("terminal_success") is not True:
-        raise RuntimeError(f"non-passing batch cannot produce hosted success receipt: {surface} batch {batch}")
+        raise RuntimeError(
+            f"non-passing batch cannot produce hosted success receipt: {surface} batch {batch}"
+        )
 
     def count(name: str) -> int:
         value = membership.get(name)
@@ -249,7 +255,9 @@ def _validate_batch_coherence(batches: list[dict[str, Any]]) -> None:
     for surface in {batch["surface"] for batch in batches}:
         plans = {batch["test_plan_identity"] for batch in batches if batch["surface"] == surface}
         if len(plans) != 1:
-            raise RuntimeError(f"hosted diagnostic {surface} batches do not share one test-plan identity")
+            raise RuntimeError(
+                f"hosted diagnostic {surface} batches do not share one test-plan identity"
+            )
     for identity_field in ("selected_membership_identity", "execution_plan_identity"):
         identities = [batch[identity_field] for batch in batches]
         if len(identities) != len(set(identities)):
@@ -258,17 +266,29 @@ def _validate_batch_coherence(batches: list[dict[str, Any]]) -> None:
 
 def _aggregate_totals(batches: list[dict[str, Any]]) -> dict[str, int]:
     fields = (
-        "selected", "attempted", "completed", "passed", "failed",
-        "non_passed", "resumed", "missing", "duplicates", "extras",
+        "selected",
+        "attempted",
+        "completed",
+        "passed",
+        "failed",
+        "non_passed",
+        "resumed",
+        "missing",
+        "duplicates",
+        "extras",
     )
     totals = {name: sum(int(batch[name]) for batch in batches) for name in fields}
     if totals["selected"] <= 0:
-        raise RuntimeError("hosted diagnostic success receipt requires non-empty selected membership")
+        raise RuntimeError(
+            "hosted diagnostic success receipt requires non-empty selected membership"
+        )
     dirty = ("failed", "non_passed", "missing", "duplicates", "extras")
     if any(totals[name] for name in dirty):
         raise RuntimeError("hosted diagnostic success receipt requires terminally clean membership")
     if totals["selected"] != totals["completed"] or totals["completed"] != totals["passed"]:
-        raise RuntimeError("hosted diagnostic success receipt requires selected == completed == passed")
+        raise RuntimeError(
+            "hosted diagnostic success receipt requires selected == completed == passed"
+        )
     return totals
 
 

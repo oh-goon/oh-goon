@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 
 from oh_goon.core.errors import StateConflict
-from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.models.repository import (
     IncludedRepositoryCatalogEntry,
     RepositoryCatalogEntry,
     RepositoryIdentity,
 )
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary.fleet import FleetScope
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.exclusions import write_exclusion
@@ -50,7 +50,9 @@ def test_exclude_response_uses_admitted_repository_identity_without_rediscovery(
 ) -> None:
     service, discovery, _state, repository = _service(tmp_path)
 
-    result = service.exclude(str(repository), "maintenance", repository_subject_instance_id(repository))
+    result = service.exclude(
+        str(repository), "maintenance", repository_subject_instance_id(repository)
+    )
 
     assert discovery.calls == 1
     assert result.repository.path == repository.resolve()
@@ -101,7 +103,9 @@ def test_exclude_replays_exact_record_after_ambiguous_commit_response(tmp_path: 
         state.database, "exclude commit response lost after commit"
     )  # type: ignore[method-assign]
 
-    result = service.exclude(str(repository), "maintenance", repository_subject_instance_id(repository))
+    result = service.exclude(
+        str(repository), "maintenance", repository_subject_instance_id(repository)
+    )
 
     assert result.exclusion_reason == "maintenance"
     assert state.exclusions() == [

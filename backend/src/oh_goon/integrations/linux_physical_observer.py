@@ -4,6 +4,7 @@ No original Run admission, resource effects, journal publication, physical
 absence classification, or operator scope parsing here. Only kernel facts.
 A visible negative observation is NOT a containment proof.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -13,14 +14,17 @@ import re
 import stat
 import subprocess
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 
 from oh_goon.core.ports.physical_observation import (
-    PhysicalObservationScope as Scope,
+    ORIGINAL_KERNEL_COMPONENTS,
     PhysicalKernelFact,
     PhysicalKernelSnapshot,
-    ORIGINAL_KERNEL_COMPONENTS,
 )
+from oh_goon.core.ports.physical_observation import (
+    PhysicalObservationScope as Scope,
+)
+
 
 def _read_regular(path: Path, limit: int) -> str:
     """Read bounded proc data, rejecting symlinks and short-lived substitution."""
@@ -43,15 +47,21 @@ def _birth(stat_content: str) -> str:
     tail = stat_content.rfind(") ")
     if tail < 0:
         raise ValueError("malformed process stat")
-    fields = stat_content[tail + 2:].split()
+    fields = stat_content[tail + 2 :].split()
     if len(fields) < 20 or not fields[19].isdigit():
         raise ValueError("malformed process birth")
     return fields[19]  # Linux stat field 22: starttime
 
 
 def _command(argv: list[str]) -> Any:
-    result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            timeout=5.0, check=False, env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"})
+    result = subprocess.run(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        timeout=5.0,
+        check=False,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"},
+    )
     if result.returncode != 0 or len(result.stdout) > 1_048_576:
         raise OSError("native read-only inventory unavailable")
     return json.loads(result.stdout)
@@ -68,8 +78,9 @@ def _read_observed_cgroup_control(directory_fd: int, name: str, limit: int) -> s
     """
     if name not in ("cgroup.events", "cgroup.procs"):
         raise ValueError("unexpected original cgroup control")
-    control_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
-                         dir_fd=directory_fd)
+    control_fd = os.open(
+        name, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0), dir_fd=directory_fd
+    )
     try:
         before = os.fstat(control_fd)
         if not stat.S_ISREG(before.st_mode):
@@ -100,21 +111,26 @@ def _cgroup(scope: Scope) -> dict[str, str]:
         # CO-R3S: opening both controls by absolute pathname after the first
         # identity check can inspect a foreign replacement. Pin one directory
         # FD and observe both controls relative to that SAME original inode.
-        directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW |
-                               getattr(os, "O_CLOEXEC", 0))
+        directory_fd = os.open(
+            path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        )
         try:
             opened = os.fstat(directory_fd)
             if not stat.S_ISDIR(opened.st_mode) or (opened.st_dev, opened.st_ino) != expected:
-                return _component("UNKNOWN", "original cgroup directory replaced before observation")
+                return _component(
+                    "UNKNOWN", "original cgroup directory replaced before observation"
+                )
             events = _read_observed_cgroup_control(directory_fd, "cgroup.events", 4096).splitlines()
             procs = _read_observed_cgroup_control(directory_fd, "cgroup.procs", 65536).split()
             # A vanished or substituted pathname after the reads cannot be
             # presented as stable original-cgroup observation. The handle
             # still describes its inode, but not exclusive namespace custody.
             final = path.stat(follow_symlinks=False)
-            if (not stat.S_ISDIR(final.st_mode) or
-                    (final.st_dev, final.st_ino) != expected or
-                    (os.fstat(directory_fd).st_dev, os.fstat(directory_fd).st_ino) != expected):
+            if (
+                not stat.S_ISDIR(final.st_mode)
+                or (final.st_dev, final.st_ino) != expected
+                or (os.fstat(directory_fd).st_dev, os.fstat(directory_fd).st_ino) != expected
+            ):
                 return _component("UNKNOWN", "original cgroup path replaced during observation")
         finally:
             os.close(directory_fd)
@@ -142,9 +158,13 @@ def _cgroup_subtree(scope: Scope, proc_root: Path = Path("/proc")) -> dict[str, 
         try:
             initial = root.stat(follow_symlinks=False)
         except FileNotFoundError:
-            return _component("NOT_OBSERVED", "pinned cgroup root not visible; detached resources unknown")
-        if (not stat.S_ISDIR(initial.st_mode) or
-                (initial.st_dev, initial.st_ino) != (scope.cgroup_device, scope.cgroup_inode)):
+            return _component(
+                "NOT_OBSERVED", "pinned cgroup root not visible; detached resources unknown"
+            )
+        if not stat.S_ISDIR(initial.st_mode) or (initial.st_dev, initial.st_ino) != (
+            scope.cgroup_device,
+            scope.cgroup_inode,
+        ):
             return _component("UNKNOWN", "original cgroup root identity changed")
         pending: list[tuple[Path, int]] = [(root, 0)]
         seen = 0
@@ -175,7 +195,9 @@ def _cgroup_subtree(scope: Scope, proc_root: Path = Path("/proc")) -> dict[str, 
             if procs:
                 boot_id = _read_regular(proc_root / "sys/kernel/random/boot_id", 128).strip()
                 if boot_id != scope.tracked_birth.rpartition(":")[0]:
-                    return _component("UNKNOWN", "subtree process boot identity differs from original")
+                    return _component(
+                        "UNKNOWN", "subtree process boot identity differs from original"
+                    )
             for value in sorted(procs, key=int):
                 pid = int(value)
                 identity = _birth(_read_regular(proc_root / str(pid) / "stat", 8192))
@@ -191,17 +213,30 @@ def _cgroup_subtree(scope: Scope, proc_root: Path = Path("/proc")) -> dict[str, 
             after = current.stat(follow_symlinks=False)
             if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
                 return _component("UNKNOWN", "cgroup subtree node replaced during scan")
-            digest.update(json.dumps([str(current.relative_to(root)), before.st_dev, before.st_ino,
-                                      is_populated, member_identities,
-                                      [x.name for x in children]], separators=(",", ":")).encode())
+            digest.update(
+                json.dumps(
+                    [
+                        str(current.relative_to(root)),
+                        before.st_dev,
+                        before.st_ino,
+                        is_populated,
+                        member_identities,
+                        [x.name for x in children],
+                    ],
+                    separators=(",", ":"),
+                ).encode()
+            )
             populated += int(is_populated)
             members += len(procs)
             pending.extend((child, depth + 1) for child in reversed(children))
         final = root.stat(follow_symlinks=False)
         if (initial.st_dev, initial.st_ino) != (final.st_dev, final.st_ino):
             return _component("UNKNOWN", "original cgroup root replaced during inventory")
-        return _component("PRESENT", f"subtree exists; nodes={seen}; populated_nodes={populated}; "
-                          f"observed_members={members}; inventory_sha256={digest.hexdigest()}")
+        return _component(
+            "PRESENT",
+            f"subtree exists; nodes={seen}; populated_nodes={populated}; "
+            f"observed_members={members}; inventory_sha256={digest.hexdigest()}",
+        )
     except (OSError, UnicodeError, ValueError, OverflowError):
         return _component("UNKNOWN", "subtree observation incomplete, permission denied, or raced")
 
@@ -215,9 +250,13 @@ def _process(scope: Scope, proc_root: Path) -> dict[str, str]:
             return _component("UNKNOWN", "tracked PID was reused or birth changed")
         return _component("PRESENT", "original tracked process identity still alive")
     except FileNotFoundError:
-        return (_component("NOT_OBSERVED", "tracked PID missing; other descendants remain unproven")
-                if not (proc_root / str(scope.tracked_pid)).exists() else
-                _component("UNKNOWN", "tracked PID directory exists without readable stat/boot identity"))
+        return (
+            _component("NOT_OBSERVED", "tracked PID missing; other descendants remain unproven")
+            if not (proc_root / str(scope.tracked_pid)).exists()
+            else _component(
+                "UNKNOWN", "tracked PID directory exists without readable stat/boot identity"
+            )
+        )
     except (OSError, UnicodeError, ValueError):
         return _component("UNKNOWN", "original process birth not observable")
 
@@ -240,30 +279,55 @@ def _mounts(scope: Scope, proc_root: Path) -> dict[str, str]:
         return _component("UNKNOWN", "mount enumeration unavailable")
 
 
-def _network(scope: Scope, *, command: Callable[[list[str]], object] | None = None) -> dict[str, str]:
+def _network(
+    scope: Scope, *, command: Callable[[list[str]], object] | None = None
+) -> dict[str, str]:
     if scope.network_namespace is None:
-        return _component("UNKNOWN", "no original network lease; containment scope still unverified")
+        return _component(
+            "UNKNOWN", "no original network lease; containment scope still unverified"
+        )
     if command is None:
         command = _command
     try:
         namespaces = command(["ip", "-j", "netns", "list"])
         links = command(["ip", "-j", "link", "show"])
         tables = command(["nft", "-j", "list", "tables"])
-        if (type(namespaces) is not list or type(links) is not list or
-                type(tables) is not dict or type(tables.get("nftables")) is not list):
+        if (
+            type(namespaces) is not list
+            or type(links) is not list
+            or type(tables) is not dict
+            or type(tables.get("nftables")) is not list
+        ):
             return _component("UNKNOWN", "network inventory has invalid schema")
-        match = (any(type(x) is dict and x.get("name") == scope.network_namespace for x in namespaces)
-                 or any(type(x) is dict and (x.get("ifname") == scope.host_veth or
-                         (type(x.get("ifname")) is str and x["ifname"].startswith(scope.host_veth + "@"))) for x in links)
-                 or any(type(x) is dict and type(x.get("table")) is dict and
-                        x["table"].get("family") == "inet" and x["table"].get("name") == scope.nft_table
-                        for x in tables["nftables"]))
-        return _component("PRESENT" if match else "NOT_OBSERVED",
-                          "original network resource visible" if match else
-                          "named network resources not listed; detached namespaces unknown")
+        match = (
+            any(type(x) is dict and x.get("name") == scope.network_namespace for x in namespaces)
+            or any(
+                type(x) is dict
+                and (
+                    x.get("ifname") == scope.host_veth
+                    or (
+                        type(x.get("ifname")) is str
+                        and x["ifname"].startswith(scope.host_veth + "@")
+                    )
+                )
+                for x in links
+            )
+            or any(
+                type(x) is dict
+                and type(x.get("table")) is dict
+                and x["table"].get("family") == "inet"
+                and x["table"].get("name") == scope.nft_table
+                for x in tables["nftables"]
+            )
+        )
+        return _component(
+            "PRESENT" if match else "NOT_OBSERVED",
+            "original network resource visible"
+            if match
+            else "named network resources not listed; detached namespaces unknown",
+        )
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return _component("UNKNOWN", "network observation unavailable")
-
 
 
 def _mount_field(raw: str) -> str:
@@ -284,6 +348,7 @@ def _tracked_namespace_inventory(scope: Scope, proc_root: Path) -> dict[str, dic
     identity drift or incomplete proc reads invalidate both components.
     """
     names = ("tracked_mount_namespace", "tracked_network_namespace")
+
     def both(state: str, detail: str) -> dict[str, dict[str, str]]:
         return {name: _component(state, detail) for name in names}
 
@@ -311,7 +376,9 @@ def _tracked_namespace_inventory(scope: Scope, proc_root: Path) -> dict[str, dic
             return both("UNKNOWN", "tracked PID birth or boot differs from original")
         mnt_handle = os.readlink(pid_dir / "ns/mnt")
         net_handle = os.readlink(pid_dir / "ns/net")
-        if not re.fullmatch(r"mnt:\[[1-9][0-9]*\]", mnt_handle) or not re.fullmatch(r"net:\[[1-9][0-9]*\]", net_handle):
+        if not re.fullmatch(r"mnt:\[[1-9][0-9]*\]", mnt_handle) or not re.fullmatch(
+            r"net:\[[1-9][0-9]*\]", net_handle
+        ):
             return both("UNKNOWN", "invalid proc namespace handle identity")
         raw = _read_regular(pid_dir / "mountinfo", 1_048_576)
         records: list[tuple[int, int, str, str, str]] = []
@@ -320,9 +387,14 @@ def _tracked_namespace_inventory(scope: Scope, proc_root: Path) -> dict[str, dic
         matched_targets: dict[str, list[tuple[int, str, str]]] = {}
         for line in raw.splitlines():
             fields = line.split()
-            if (len(fields) < 10 or fields.count("-") != 1 or
-                    fields.index("-") < 6 or fields.index("-") + 3 > len(fields) or
-                    not fields[0].isdecimal() or not fields[1].isdecimal()):
+            if (
+                len(fields) < 10
+                or fields.count("-") != 1
+                or fields.index("-") < 6
+                or fields.index("-") + 3 > len(fields)
+                or not fields[0].isdecimal()
+                or not fields[1].isdecimal()
+            ):
                 raise ValueError("invalid mountinfo record")
             mount_id, parent_id = int(fields[0]), int(fields[1])
             if mount_id < 1 or parent_id < 1 or mount_id in mount_ids:
@@ -339,10 +411,15 @@ def _tracked_namespace_inventory(scope: Scope, proc_root: Path) -> dict[str, dic
         if not records:
             raise ValueError("empty mount namespace inventory")
         after = pinned_starttime()
-        if after != before or os.readlink(pid_dir / "ns/mnt") != mnt_handle or os.readlink(pid_dir / "ns/net") != net_handle:
+        if (
+            after != before
+            or os.readlink(pid_dir / "ns/mnt") != mnt_handle
+            or os.readlink(pid_dir / "ns/net") != net_handle
+        ):
             return both("UNKNOWN", "process or namespace identity changed during scan")
-        fingerprint = hashlib.sha256(json.dumps(
-            [mnt_handle, sorted(records)], separators=(",", ":")).encode()).hexdigest()
+        fingerprint = hashlib.sha256(
+            json.dumps([mnt_handle, sorted(records)], separators=(",", ":")).encode()
+        ).hexdigest()
         matched = sorted(record[0] for record in records if record[4] in targets)
         # B27B2B3A: one shared Linux parser, no second LACE observation path.
         # Partial visibility or stacked mounts MUST NOT look like complete
@@ -351,11 +428,23 @@ def _tracked_namespace_inventory(scope: Scope, proc_root: Path) -> dict[str, dic
         # consumption, hidden tasks, teardown or independent custody.
         ambiguous = any(len(entries) != 1 for entries in matched_targets.values())
         missing = targets - matched_targets.keys()
-        coverage = ("UNKNOWN" if ambiguous or (matched and missing) else
-                    "PRESENT" if matched else "NOT_OBSERVED")
-        target_fingerprint = hashlib.sha256(json.dumps(
-            [(target, matched_targets[target][0]) for target in sorted(matched_targets)
-             if len(matched_targets[target]) == 1], separators=(",", ":")).encode()).hexdigest()
+        coverage = (
+            "UNKNOWN"
+            if ambiguous or (matched and missing)
+            else "PRESENT"
+            if matched
+            else "NOT_OBSERVED"
+        )
+        target_fingerprint = hashlib.sha256(
+            json.dumps(
+                [
+                    (target, matched_targets[target][0])
+                    for target in sorted(matched_targets)
+                    if len(matched_targets[target]) == 1
+                ],
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         mounts = _component(
             coverage,
             f"tracked process mount namespace={mnt_handle}; inventory_sha256={fingerprint}; "
@@ -363,14 +452,20 @@ def _tracked_namespace_inventory(scope: Scope, proc_root: Path) -> dict[str, dic
             f"ambiguous_target_mounts={ambiguous}; target_kernel_sha256={target_fingerprint}; "
             "foreign/detached mounts unverified",
         )
-        network = (_component("PRESENT", f"tracked process network handle={net_handle}; "
-                              "original named network lease association and detached handles unverified")
-                   if scope.network_namespace is not None else
-                   _component("UNKNOWN", "no original named network lease; tracked net handle has no Run binding"))
+        network = (
+            _component(
+                "PRESENT",
+                f"tracked process network handle={net_handle}; "
+                "original named network lease association and detached handles unverified",
+            )
+            if scope.network_namespace is not None
+            else _component(
+                "UNKNOWN", "no original named network lease; tracked net handle has no Run binding"
+            )
+        )
         return {"tracked_mount_namespace": mounts, "tracked_network_namespace": network}
     except (OSError, UnicodeError, ValueError, OverflowError):
         return both("UNKNOWN", "tracked namespace observation incomplete or raced")
-
 
 
 def _namespace_fd_holders(scope: Scope, proc_root: Path) -> dict[str, str]:
@@ -396,14 +491,22 @@ def _namespace_fd_holders(scope: Scope, proc_root: Path) -> dict[str, str]:
             if f"{boot}:{_birth(stat_record)}" != scope.tracked_birth:
                 raise ValueError("tracked birth identity changed")
             mnt, net = (os.readlink(tracked / "ns" / name) for name in ("mnt", "net"))
-            if not re.fullmatch(r"mnt:\[[1-9][0-9]*\]", mnt) or not re.fullmatch(r"net:\[[1-9][0-9]*\]", net):
+            if not re.fullmatch(r"mnt:\[[1-9][0-9]*\]", mnt) or not re.fullmatch(
+                r"net:\[[1-9][0-9]*\]", net
+            ):
                 raise ValueError("invalid original namespace identities")
             return mnt, net
 
         original_mnt, original_net = original_identity()
         with os.scandir(proc_root) as iterator:
-            candidates = sorted((entry.name for entry in iterator if entry.name.isascii()
-                                 and entry.name.isdecimal()), key=int)
+            candidates = sorted(
+                (
+                    entry.name
+                    for entry in iterator
+                    if entry.name.isascii() and entry.name.isdecimal()
+                ),
+                key=int,
+            )
         if len(candidates) > 512:
             raise ValueError("proc census exceeds 512-PID budget")
         digest = hashlib.sha256()
@@ -422,8 +525,14 @@ def _namespace_fd_holders(scope: Scope, proc_root: Path) -> dict[str, str]:
             if fd_dir.is_symlink():
                 raise OSError("FD directory substituted")
             with os.scandir(fd_dir) as iterator:
-                fds = sorted((entry.name for entry in iterator if entry.name.isascii()
-                              and entry.name.isdecimal()), key=int)
+                fds = sorted(
+                    (
+                        entry.name
+                        for entry in iterator
+                        if entry.name.isascii() and entry.name.isdecimal()
+                    ),
+                    key=int,
+                )
             if len(fds) > 256:
                 raise ValueError("per-process FD budget exceeded")
             holder_fd: list[str] = []
@@ -448,30 +557,51 @@ def _namespace_fd_holders(scope: Scope, proc_root: Path) -> dict[str, str]:
             # or namespace. Recheck BOTH names and targets before claiming any
             # visible holder, including scoped non-detection.
             with os.scandir(fd_dir) as iterator:
-                final_fds = sorted((entry.name for entry in iterator if entry.name.isascii()
-                                    and entry.name.isdecimal()), key=int)
+                final_fds = sorted(
+                    (
+                        entry.name
+                        for entry in iterator
+                        if entry.name.isascii() and entry.name.isdecimal()
+                    ),
+                    key=int,
+                )
             if final_fds != fds or any(os.readlink(fd_dir / fd) != fd_links[fd] for fd in fds):
                 raise ValueError("namespace FD roster/target changed during census")
             end = _read_regular(pid_dir / "stat", 8192)
-            if (end.split(" (", 1)[0] != name or _birth(end) != birth or
-                    os.readlink(pid_dir / "ns/mnt") != pid_mnt or
-                    os.readlink(pid_dir / "ns/net") != pid_net):
+            if (
+                end.split(" (", 1)[0] != name
+                or _birth(end) != birth
+                or os.readlink(pid_dir / "ns/mnt") != pid_mnt
+                or os.readlink(pid_dir / "ns/net") != pid_net
+            ):
                 raise ValueError("PID or namespace changed during FD scan")
-            digest.update(json.dumps([name, birth, pid_mnt, pid_net, holder_fd], separators=(",", ":")).encode())
+            digest.update(
+                json.dumps(
+                    [name, birth, pid_mnt, pid_net, holder_fd], separators=(",", ":")
+                ).encode()
+            )
             matches.extend(f"{name}:{birth}:{holder}" for holder in holder_fd)
             scanned += 1
         with os.scandir(proc_root) as iterator:
-            final_candidates = sorted((entry.name for entry in iterator if entry.name.isascii()
-                                       and entry.name.isdecimal()), key=int)
+            final_candidates = sorted(
+                (
+                    entry.name
+                    for entry in iterator
+                    if entry.name.isascii() and entry.name.isdecimal()
+                ),
+                key=int,
+            )
         if final_candidates != candidates:
             raise ValueError("visible namespace process roster changed during census")
         if original_identity() != (original_mnt, original_net):
             raise ValueError("original namespace changed during census")
-        return _component("PRESENT" if (matches or process_holders) else "NOT_OBSERVED",
-                          f"local_proc_pids={scanned}; matching_namespace_processes={len(process_holders)}; "
-                          f"matching_namespace_fds={len(matches)}; "
-                          f"inventory_sha256={digest.hexdigest()}; "
-                          "foreign PID namespaces, kernel references and hidden FD holders unverified")
+        return _component(
+            "PRESENT" if (matches or process_holders) else "NOT_OBSERVED",
+            f"local_proc_pids={scanned}; matching_namespace_processes={len(process_holders)}; "
+            f"matching_namespace_fds={len(matches)}; "
+            f"inventory_sha256={digest.hexdigest()}; "
+            "foreign PID namespaces, kernel references and hidden FD holders unverified",
+        )
     except (OSError, ValueError, OverflowError, UnicodeError):
         return _component("UNKNOWN", "namespace holder census incomplete, raced, or over budget")
 
@@ -504,8 +634,14 @@ def _visible_foreign_mount_targets(scope: Scope, proc_root: Path) -> dict[str, s
 
         original_mnt = tracked_identity()
         with os.scandir(proc_root) as entries:
-            pids = sorted((entry.name for entry in entries if entry.name.isascii()
-                           and entry.name.isdecimal()), key=int)
+            pids = sorted(
+                (
+                    entry.name
+                    for entry in entries
+                    if entry.name.isascii() and entry.name.isdecimal()
+                ),
+                key=int,
+            )
         if len(pids) > 512:
             raise ValueError("visible process census exceeds budget")
         namespace_fingerprints: dict[str, str] = {}
@@ -534,9 +670,14 @@ def _visible_foreign_mount_targets(scope: Scope, proc_root: Path) -> dict[str, s
                 mount_ids: set[int] = set()
                 for line in lines:
                     fields = line.split()
-                    if (len(fields) < 10 or fields.count("-") != 1 or
-                            fields.index("-") < 6 or fields.index("-") + 3 > len(fields) or
-                            not fields[0].isdecimal() or not fields[1].isdecimal()):
+                    if (
+                        len(fields) < 10
+                        or fields.count("-") != 1
+                        or fields.index("-") < 6
+                        or fields.index("-") + 3 > len(fields)
+                        or not fields[0].isdecimal()
+                        or not fields[1].isdecimal()
+                    ):
                         raise ValueError("invalid foreign mountinfo record")
                     mount_id = int(fields[0])
                     if mount_id < 1 or mount_id in mount_ids:
@@ -544,35 +685,55 @@ def _visible_foreign_mount_targets(scope: Scope, proc_root: Path) -> dict[str, s
                     mount_ids.add(mount_id)
                     records.append((mount_id, int(fields[1]), _mount_field(fields[4])))
                 total_mounts += len(records)
-                inventory = hashlib.sha256(json.dumps(sorted(records),
-                    separators=(",", ":")).encode()).hexdigest()
-                if namespace in namespace_fingerprints and namespace_fingerprints[namespace] != inventory:
+                inventory = hashlib.sha256(
+                    json.dumps(sorted(records), separators=(",", ":")).encode()
+                ).hexdigest()
+                if (
+                    namespace in namespace_fingerprints
+                    and namespace_fingerprints[namespace] != inventory
+                ):
                     raise ValueError("shared namespace mount inventory inconsistent")
                 namespace_fingerprints[namespace] = inventory
-                matched.extend((name, int(birth), mid) for mid, _parent, target in records if target in targets)
-                digest.update(json.dumps([name, birth, namespace, inventory], separators=(",", ":")).encode())
+                matched.extend(
+                    (name, int(birth), mid) for mid, _parent, target in records if target in targets
+                )
+                digest.update(
+                    json.dumps([name, birth, namespace, inventory], separators=(",", ":")).encode()
+                )
             stat_after = _read_regular(directory / "stat", 8192)
-            if (stat_after.split(" (", 1)[0] != name or _birth(stat_after) != birth or
-                    os.readlink(directory / "ns/mnt") != namespace):
+            if (
+                stat_after.split(" (", 1)[0] != name
+                or _birth(stat_after) != birth
+                or os.readlink(directory / "ns/mnt") != namespace
+            ):
                 raise ValueError("PID/birth or namespace changed during mount scan")
         # CO-R3R: a foreign task may appear, vanish, or escape while we scan.
         # The final PID roster is part of the same scoped observation, not a
         # complete task census or an independent physical absence proof.
         with os.scandir(proc_root) as entries:
-            final_pids = sorted((entry.name for entry in entries if entry.name.isascii()
-                                 and entry.name.isdecimal()), key=int)
+            final_pids = sorted(
+                (
+                    entry.name
+                    for entry in entries
+                    if entry.name.isascii() and entry.name.isdecimal()
+                ),
+                key=int,
+            )
         if final_pids != pids:
             raise ValueError("visible foreign mount process roster changed during census")
         if tracked_identity() != original_mnt:
             raise ValueError("original namespace changed during inventory")
-        return _component("PRESENT" if matched else "NOT_OBSERVED",
-                          f"visible_pids={len(pids)}; foreign_namespaces={len(namespace_fingerprints)}; "
-                          f"foreign_mount_records={total_mounts}; matched_mount_targets={len(matched)}; "
-                          f"inventory_sha256={digest.hexdigest()}; "
-                          "hidden PID namespaces, detached mounts, and kernel-held references unverified")
+        return _component(
+            "PRESENT" if matched else "NOT_OBSERVED",
+            f"visible_pids={len(pids)}; foreign_namespaces={len(namespace_fingerprints)}; "
+            f"foreign_mount_records={total_mounts}; matched_mount_targets={len(matched)}; "
+            f"inventory_sha256={digest.hexdigest()}; "
+            "hidden PID namespaces, detached mounts, and kernel-held references unverified",
+        )
     except (OSError, ValueError, UnicodeError, OverflowError):
-        return _component("UNKNOWN", "visible foreign mount inventory incomplete, raced, or over budget")
-
+        return _component(
+            "UNKNOWN", "visible foreign mount inventory incomplete, raced, or over budget"
+        )
 
 
 def _visible_mount_fd_holders(scope: Scope, proc_root: Path) -> dict[str, str]:
@@ -595,8 +756,10 @@ def _visible_mount_fd_holders(scope: Scope, proc_root: Path) -> dict[str, str]:
 
         def original_identity() -> str:
             entry = _read_regular(original / "stat", 8192)
-            if (entry.split(" (", 1)[0] != str(scope.tracked_pid) or
-                    f"{boot}:{_birth(entry)}" != scope.tracked_birth):
+            if (
+                entry.split(" (", 1)[0] != str(scope.tracked_pid)
+                or f"{boot}:{_birth(entry)}" != scope.tracked_birth
+            ):
                 raise ValueError("original PID birth changed")
             handle = os.readlink(original / "ns/mnt")
             if not re.fullmatch(r"mnt:\[[1-9][0-9]*\]", handle):
@@ -616,9 +779,14 @@ def _visible_mount_fd_holders(scope: Scope, proc_root: Path) -> dict[str, str]:
         matched_targets: dict[str, list[tuple[int, str, str]]] = {}
         for line in raw:
             fields = line.split()
-            if (len(fields) < 10 or fields.count("-") != 1 or
-                    fields.index("-") < 6 or fields.index("-") + 3 > len(fields) or
-                    not fields[0].isdecimal() or not fields[1].isdecimal()):
+            if (
+                len(fields) < 10
+                or fields.count("-") != 1
+                or fields.index("-") < 6
+                or fields.index("-") + 3 > len(fields)
+                or not fields[0].isdecimal()
+                or not fields[1].isdecimal()
+            ):
                 raise ValueError("malformed original mountinfo")
             mount_id = int(fields[0])
             if mount_id < 1 or mount_id in seen_ids:
@@ -632,18 +800,24 @@ def _visible_mount_fd_holders(scope: Scope, proc_root: Path) -> dict[str, str]:
                     (mount_id, fields[2], _mount_field(fields[3]))
                 )
                 target_ids.add(mount_id)
-        if (set(matched_targets) != targets or
-                any(len(entries) != 1 for entries in matched_targets.values())):
+        if set(matched_targets) != targets or any(
+            len(entries) != 1 for entries in matched_targets.values()
+        ):
             return _component("UNKNOWN", "incomplete or stacked original target mount identities")
-        target_fingerprint = hashlib.sha256(json.dumps(
-            [(target, matched_targets[target][0]) for target in sorted(targets)],
-            separators=(",", ":")).encode()).hexdigest()
+        target_fingerprint = hashlib.sha256(
+            json.dumps(
+                [(target, matched_targets[target][0]) for target in sorted(targets)],
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         if original_identity() != namespace:
             raise ValueError("original process/namespace changed")
 
         with os.scandir(proc_root) as iterator:
-            pids = sorted((item.name for item in iterator if item.name.isascii()
-                           and item.name.isdecimal()), key=int)
+            pids = sorted(
+                (item.name for item in iterator if item.name.isascii() and item.name.isdecimal()),
+                key=int,
+            )
         if len(pids) > 512:
             raise ValueError("visible process budget exceeded")
         digest = hashlib.sha256()
@@ -666,16 +840,24 @@ def _visible_mount_fd_holders(scope: Scope, proc_root: Path) -> dict[str, str]:
                 if fd_root.is_symlink() or info_root.is_symlink():
                     raise OSError("FD directories substituted")
                 with os.scandir(fd_root) as handles:
-                    names = sorted((entry.name for entry in handles), key=lambda n: (not n.isdecimal(), n))
-                if len(names) > 256 or any(not name.isascii() or not name.isdecimal() for name in names):
+                    names = sorted(
+                        (entry.name for entry in handles), key=lambda n: (not n.isdecimal(), n)
+                    )
+                if len(names) > 256 or any(
+                    not name.isascii() or not name.isdecimal() for name in names
+                ):
                     raise ValueError("invalid or over-budget FD census")
+
                 # A closed/reused FD number can keep the same name while
                 # changing mnt_id. Compare kernel mount identities twice,
                 # never unstable offsets or fdinfo flags.
-                def read_mount_id(fd: str) -> int:
+                def read_mount_id(fd: str, info_root: Path = info_root) -> int:
                     record = _read_regular(info_root / fd, 8192)
-                    values = [line.split(":", 1)[1].strip() for line in record.splitlines()
-                              if line.startswith("mnt_id:")]
+                    values = [
+                        line.split(":", 1)[1].strip()
+                        for line in record.splitlines()
+                        if line.startswith("mnt_id:")
+                    ]
                     if len(values) != 1 or not values[0].isdecimal() or int(values[0]) < 1:
                         raise ValueError("fdinfo missing or malformed mnt_id")
                     return int(values[0])
@@ -684,36 +866,45 @@ def _visible_mount_fd_holders(scope: Scope, proc_root: Path) -> dict[str, str]:
                 for fd, mount_id in mount_ids.items():
                     found += mount_id in target_ids
                     inspected_fds += 1
-                    digest.update(json.dumps([pid, birth, fd, mount_id], separators=(",", ":")).encode())
+                    digest.update(
+                        json.dumps([pid, birth, fd, mount_id], separators=(",", ":")).encode()
+                    )
                 # A vanished or newly published descriptor during the census
                 # must invalidate the sample, including apparent zero holders.
                 with os.scandir(fd_root) as handles:
-                    after_names = sorted((entry.name for entry in handles),
-                                         key=lambda n: (not n.isdecimal(), n))
+                    after_names = sorted(
+                        (entry.name for entry in handles), key=lambda n: (not n.isdecimal(), n)
+                    )
                 if after_names != names or any(read_mount_id(fd) != mount_ids[fd] for fd in names):
                     raise ValueError("FD roster or mount ID changed during census")
             after = _read_regular(directory / "stat", 8192)
-            if (after.split(" (", 1)[0] != pid or _birth(after) != birth or
-                    os.readlink(directory / "ns/mnt") != observed_ns):
+            if (
+                after.split(" (", 1)[0] != pid
+                or _birth(after) != birth
+                or os.readlink(directory / "ns/mnt") != observed_ns
+            ):
                 raise ValueError("visible PID or namespace changed")
         with os.scandir(proc_root) as iterator:
-            final_pids = sorted((item.name for item in iterator if item.name.isascii()
-                                 and item.name.isdecimal()), key=int)
+            final_pids = sorted(
+                (item.name for item in iterator if item.name.isascii() and item.name.isdecimal()),
+                key=int,
+            )
         if final_pids != pids:
             raise ValueError("visible mount FD process roster changed during census")
         if original_identity() != namespace:
             raise ValueError("original PID or namespace changed after census")
         if _read_regular(original / "mountinfo", 1_048_576).splitlines() != raw:
             raise ValueError("original mount identity changed during FD census")
-        return _component("PRESENT" if found else "NOT_OBSERVED",
-                          f"visible_pids={len(pids)}; original_namespace={namespace}; "
-                          f"target_mount_ids={len(target_ids)}; "
-                          f"target_kernel_sha256={target_fingerprint}; inspected_fds={inspected_fds}; "
-                          f"matching_mount_fds={found}; inventory_sha256={digest.hexdigest()}; "
-                          "hidden tasks, detached mounts, and kernel-held references unverified")
+        return _component(
+            "PRESENT" if found else "NOT_OBSERVED",
+            f"visible_pids={len(pids)}; original_namespace={namespace}; "
+            f"target_mount_ids={len(target_ids)}; "
+            f"target_kernel_sha256={target_fingerprint}; inspected_fds={inspected_fds}; "
+            f"matching_mount_fds={found}; inventory_sha256={digest.hexdigest()}; "
+            "hidden tasks, detached mounts, and kernel-held references unverified",
+        )
     except (OSError, ValueError, UnicodeError, OverflowError):
         return _component("UNKNOWN", "visible mount FD census incomplete, raced, or over budget")
-
 
 
 def _correlate_original_mount_fd_snapshot(
@@ -728,14 +919,17 @@ def _correlate_original_mount_fd_snapshot(
     """
     tracked = facts["tracked_mount_namespace"]
     holders = facts["visible_mount_fd_holders"]
-    if not ("target_kernel_sha256=" in tracked["detail"] or
-            "target_kernel_sha256=" in holders["detail"]):
+    if not (
+        "target_kernel_sha256=" in tracked["detail"] or "target_kernel_sha256=" in holders["detail"]
+    ):
         return facts  # No usable kernel correlation on unavailable proc reads.
     if tracked["state"] == "UNKNOWN" or holders["state"] == "UNKNOWN":
         return facts  # Preserve separately scoped facts; no correspondence asserted.
 
     def identity(detail: str, *, namespace_field: str) -> tuple[str, str] | None:
-        namespace = re.search(r"(?:^|; )" + namespace_field + r"=(mnt:\[[1-9][0-9]*\])(?:;|$)", detail)
+        namespace = re.search(
+            r"(?:^|; )" + namespace_field + r"=(mnt:\[[1-9][0-9]*\])(?:;|$)", detail
+        )
         fingerprint = re.search(r"(?:^|; )target_kernel_sha256=([0-9a-f]{64})(?:;|$)", detail)
         if namespace is None or fingerprint is None:
             return None
@@ -745,25 +939,41 @@ def _correlate_original_mount_fd_snapshot(
     fd_id = identity(holders["detail"], namespace_field="original_namespace")
     # The source of mount truth for FD mnt_id must be the same complete target
     # roster and namespace as the tracked process, not another PID's mount IDs.
-    if (tracked["state"] != "PRESENT" or
-            holders["state"] not in ("PRESENT", "NOT_OBSERVED") or
-            tracked_id is None or fd_id is None or tracked_id != fd_id):
+    if (
+        tracked["state"] != "PRESENT"
+        or holders["state"] not in ("PRESENT", "NOT_OBSERVED")
+        or tracked_id is None
+        or fd_id is None
+        or tracked_id != fd_id
+    ):
         facts["tracked_mount_namespace"] = _component(
-            "UNKNOWN", "original mount and FD probes do not agree on complete kernel target identity")
+            "UNKNOWN",
+            "original mount and FD probes do not agree on complete kernel target identity",
+        )
         facts["visible_mount_fd_holders"] = _component(
-            "UNKNOWN", "original mount and FD probes do not agree on complete kernel target identity")
+            "UNKNOWN",
+            "original mount and FD probes do not agree on complete kernel target identity",
+        )
     return facts
 
 
 PROBES = (
-    "_cgroup", "_cgroup_subtree", "_process", "_mounts", "_network",
-    "_tracked_namespace_inventory", "_namespace_fd_holders",
-    "_visible_foreign_mount_targets", "_visible_mount_fd_holders",
+    "_cgroup",
+    "_cgroup_subtree",
+    "_process",
+    "_mounts",
+    "_network",
+    "_tracked_namespace_inventory",
+    "_namespace_fd_holders",
+    "_visible_foreign_mount_targets",
+    "_visible_mount_fd_holders",
 )
 
 
 def observe_kernel(
-    scope: Scope, *, proc_root: Path = Path("/proc"),
+    scope: Scope,
+    *,
+    proc_root: Path = Path("/proc"),
     diagnostic_probes: Mapping[str, Callable[..., object]] | None = None,
 ) -> PhysicalKernelSnapshot:
     """Double-scan the same kernel mechanism; never publish a verdict.
@@ -787,7 +997,9 @@ def observe_kernel(
             "network": methods["_network"](scope),
             **methods["_tracked_namespace_inventory"](scope, proc_root),
             "visible_namespace_fd_holders": methods["_namespace_fd_holders"](scope, proc_root),
-            "visible_foreign_mount_targets": methods["_visible_foreign_mount_targets"](scope, proc_root),
+            "visible_foreign_mount_targets": methods["_visible_foreign_mount_targets"](
+                scope, proc_root
+            ),
             "visible_mount_fd_holders": methods["_visible_mount_fd_holders"](scope, proc_root),
         }
 
@@ -795,8 +1007,11 @@ def observe_kernel(
     if first.keys() != second.keys():
         raise ValueError("physical component set changed during observation")
     combined = {
-        name: (second[name] if first[name] == second[name] else
-               _component("UNKNOWN", "observation changed during read"))
+        name: (
+            second[name]
+            if first[name] == second[name]
+            else _component("UNKNOWN", "observation changed during read")
+        )
         for name in first
     }
     # The port owns the exact diagnostic component roster; reject additions,
@@ -810,9 +1025,12 @@ def observe_kernel(
     facts = []
     for name in first:
         value = combined[name]
-        if (type(value) is not dict or set(value) != {"state", "detail"} or
-                value["state"] not in ("PRESENT", "NOT_OBSERVED", "UNKNOWN") or
-                type(value["detail"]) is not str):
+        if (
+            type(value) is not dict
+            or set(value) != {"state", "detail"}
+            or value["state"] not in ("PRESENT", "NOT_OBSERVED", "UNKNOWN")
+            or type(value["detail"]) is not str
+        ):
             raise ValueError("invalid physical kernel fact")
         facts.append((name, PhysicalKernelFact(value["state"], value["detail"])))
     return PhysicalKernelSnapshot(tuple(facts))

@@ -7,7 +7,6 @@ from oh_goon.core.effect_attempts import (
     require_effect_attempt_transition,
     unresolved_status_for_reconciliation,
 )
-from oh_goon.core.product_identity import new_operation_id
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.effect_attempt import (
     ClaimedRepositoryEffectAttempt,
@@ -26,6 +25,7 @@ from oh_goon.core.models.reconciliation import (
 )
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.product_identity import new_operation_id
 from oh_goon.core.vocabulary import EffectAttemptStatus, EffectBoundaryKind
 
 

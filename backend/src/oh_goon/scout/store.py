@@ -9,14 +9,14 @@ from threading import Lock
 from time import perf_counter
 
 from oh_goon.core.execution_observability import RepositoryRunObservation
+from oh_goon.core.vocabulary import GameTapeStatus
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.scout.database import ScoutAnalyticalDatabase
 from oh_goon.scout.evidence import (
     ScoutEvidenceSnapshot,
     ScoutStepObservation,
 )
 from oh_goon.scout.policy import SCOUT_MEASUREMENT_SCHEMA_VERSION
-from oh_goon.core.vocabulary import GameTapeStatus
-from oh_goon.runtime.database import LocalDatabase
-from oh_goon.scout.database import ScoutAnalyticalDatabase
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS scout_metadata (

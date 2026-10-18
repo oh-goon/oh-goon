@@ -33,12 +33,16 @@ def _authored_bindings(import_item: dict) -> dict[str, object]:
     return forwarded
 
 
-def _registry_route_errors(image: dict, publish: dict, composite: dict) -> tuple[str, ...]:
+def _registry_route_errors(
+    image: dict, publish: dict, composite: dict
+) -> tuple[str, ...]:
     """Static contract review only; production resolution is tested separately."""
     problems = []
     image_step = image["steps"][0]
     publish_step = publish["steps"][0]
-    forwarded = {item["import"]: _authored_bindings(item) for item in composite["goons"]}
+    forwarded = {
+        item["import"]: _authored_bindings(item) for item in composite["goons"]
+    }
     if image_step["registries"] != [
         {"hostname": "${{ inputs.base_registry_hostname }}"}
     ]:
@@ -82,10 +86,17 @@ def test_m135_shipped_registry_and_workspace_routes_have_one_authority() -> None
 
 @pytest.mark.parametrize(
     ("which", "field"),
-    ((0, "registry"), (1, "registry"), (2, "forward-base"), (2, "forward-publish"),
-     (2, "workspace")),
+    (
+        (0, "registry"),
+        (1, "registry"),
+        (2, "forward-base"),
+        (2, "forward-publish"),
+        (2, "workspace"),
+    ),
 )
-def test_m135_mutated_registry_or_workspace_wiring_is_detected(which: int, field: str) -> None:
+def test_m135_mutated_registry_or_workspace_wiring_is_detected(
+    which: int, field: str
+) -> None:
     inputs = [copy.deepcopy(value) for value in _contracts()]
     if field == "registry" and which == 0:
         inputs[0]["steps"][0]["registries"][0]["hostname"] = (
@@ -112,8 +123,11 @@ def test_m135_mutated_registry_or_workspace_wiring_is_detected(which: int, field
 
 
 def test_pass_and_with_cannot_silently_override_one_recipient() -> None:
-    import_item = {"import": "oci/image", "pass": ["base_registry_hostname"],
-                   "with": {"base_registry_hostname": "unexpected"}}
+    import_item = {
+        "import": "oci/image",
+        "pass": ["base_registry_hostname"],
+        "with": {"base_registry_hostname": "unexpected"},
+    }
     with pytest.raises(ValueError, match="both provide the same recipient"):
         _authored_bindings(import_item)
 
@@ -130,18 +144,22 @@ def test_authored_bindings_preserve_workspace_edge_and_exact_recipient() -> None
 def test_m135_docs_cover_exact_shipped_caller_inputs_without_a_maximum() -> None:
     document = GUIDE.read_text(encoding="utf-8")
     plan = _load("templates/plans/oci/release-deploy/plan.yml")
-    assert all(re.search(rf"^\| `{re.escape(name)}` \| A:", document, re.M)
-               for name in plan["inputs"])
+    assert all(
+        re.search(rf"^\| `{re.escape(name)}` \| A:", document, re.M)
+        for name in plan["inputs"]
+    )
     assert "no arbitrary maximum input count" in document
     assert "No B/C/D input" in document
-    assert "${{ goons.oci-publish-image.outputs.OCI_REFERENCE }}" == (
-        plan["goons"][-1]["with"]["image"]
+    assert (
+        "${{ goons.oci-publish-image.outputs.OCI_REFERENCE }}"
+        == (plan["goons"][-1]["with"]["image"])
     )
     assert "image" not in plan["inputs"]
     assert "source_workspace" not in plan["inputs"]
-    assert "source_workspace" not in _load(
-        "templates/plans/oci/publish-image/plan.yml"
-    )["inputs"]
+    assert (
+        "source_workspace"
+        not in _load("templates/plans/oci/publish-image/plan.yml")["inputs"]
+    )
     for name in ("oci/release", "oci/publish-image", "oci/release-deploy"):
         selected = _load(f"templates/plans/{name}/plan.yml")
         assert "base_registry_hostname" in selected["inputs"]

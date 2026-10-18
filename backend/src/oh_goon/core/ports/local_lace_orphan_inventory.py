@@ -3,6 +3,7 @@
 This is NOT a cleanup capability, an absence witness or an isolation receipt.
 The original Fleet session revalidates the subject before appending observations.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

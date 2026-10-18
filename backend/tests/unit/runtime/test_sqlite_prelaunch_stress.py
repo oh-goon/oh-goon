@@ -160,8 +160,13 @@ def test_cross_process_observer_pressure_preserves_admitted_sqlite_owner(
         # Alternate exact owner reads with BEGIN IMMEDIATE owner transactions while the
         # independent observer repeatedly opens and reads the same SQLite file.
         for _ in range(60):
-            assert session.observe(lambda connection: connection.execute("SELECT 1").fetchone()[0]) == 1
-            assert session.mutate(lambda connection: connection.execute("SELECT 1").fetchone()[0]) == 1
+            assert (
+                session.observe(lambda connection: connection.execute("SELECT 1").fetchone()[0])
+                == 1
+            )
+            assert (
+                session.mutate(lambda connection: connection.execute("SELECT 1").fetchone()[0]) == 1
+            )
         process.join(timeout=30)
         assert process.exitcode == 0
         try:

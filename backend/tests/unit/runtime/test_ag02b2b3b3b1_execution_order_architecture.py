@@ -4,6 +4,7 @@ These source-mutation tests fail when a future change quietly shifts authority,
 adds a second writer, makes the predecessor check conditional, or moves it
 past a physical-effect reservation. They do not certify native containment.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -38,8 +39,12 @@ def test_agent_admitted_step_is_blocked_even_before_prework_exists(tmp_path: Pat
     try:
         with pytest.raises(CausalJournalError, match="no qualified signed RESOURCE_INTENT"):
             journal.publish_local_resource_intent_in(
-                "run-one", epoch=1, lease_identity="lease-one", auth=args["auth"],
-                step_id=args["step_id"], attempt_identity=args["attempt_identity"],
+                "run-one",
+                epoch=1,
+                lease_identity="lease-one",
+                auth=args["auth"],
+                step_id=args["step_id"],
+                attempt_identity=args["attempt_identity"],
                 execution_environment_identity="sha256:" + "a" * 64,
                 backend_capability_manifest_identity="sha256:" + "b" * 64,
                 resources=_resources(),
@@ -50,14 +55,26 @@ def test_agent_admitted_step_is_blocked_even_before_prework_exists(tmp_path: Pat
     conn.close()
 
 
-@pytest.mark.parametrize("old,new", [
-    ("            _require_original_resource_intent_step_order(\n", "            # _require_original_resource_intent_step_order(\n"),
-    ("            _require_original_resource_intent_step_order(\n", "            if False:\n                _require_original_resource_intent_step_order(\n"),
-    ("original_events=original_events,", "original_events=[],"),
-    ('step_envelope=fields["step_envelopes"][step_id],', "step_envelope={},"),
-    ('"AGENT_SOURCE_PREWORK_STAGED"', '"NOT_THE_STAGE"'),
-    ('step_envelope.get("workload_kind") == "agent"', 'step_envelope.get("workload_kind") == "command"'),
-])
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        (
+            "            _require_original_resource_intent_step_order(\n",
+            "            # _require_original_resource_intent_step_order(\n",
+        ),
+        (
+            "            _require_original_resource_intent_step_order(\n",
+            "            if False:\n                _require_original_resource_intent_step_order(\n",
+        ),
+        ("original_events=original_events,", "original_events=[],"),
+        ('step_envelope=fields["step_envelopes"][step_id],', "step_envelope={},"),
+        ('"AGENT_SOURCE_PREWORK_STAGED"', '"NOT_THE_STAGE"'),
+        (
+            'step_envelope.get("workload_kind") == "agent"',
+            'step_envelope.get("workload_kind") == "command"',
+        ),
+    ],
+)
 def test_mutating_canonical_predecessor_gate_fails_x0(candidate: Path, old: str, new: str) -> None:
     src = candidate.read_text()
     assert old in src
@@ -73,15 +90,15 @@ def test_reordering_predecessor_below_append_fails_x0(candidate: Path) -> None:
     src = src[:beg] + src[end:]
     anchor = '            seq = self._append_locked(run_id, "RESOURCE_INTENT", payload)\n'
     assert anchor in src
-    candidate.write_text(src.replace(anchor, anchor + guard + '\n', 1))
+    candidate.write_text(src.replace(anchor, anchor + guard + "\n", 1))
     assert _check_original_resource_intent_sequence(candidate.parents[1])
 
 
 def test_parallel_resource_intent_writer_fails_x0(candidate: Path) -> None:
     src = candidate.read_text()
     # Duplicate original named publisher in the original class: disallowed.
-    first = src.index('    def publish_local_resource_intent_in(')
-    second = src.index('    def publish_local_resource_intent(', first)
+    first = src.index("    def publish_local_resource_intent_in(")
+    second = src.index("    def publish_local_resource_intent(", first)
     duplicate = src[first:second]
     candidate.write_text(src[:second] + duplicate + src[second:])
     assert _check_original_resource_intent_sequence(candidate.parents[1])
@@ -89,9 +106,12 @@ def test_parallel_resource_intent_writer_fails_x0(candidate: Path) -> None:
 
 def test_second_module_cannot_publish_original_resource_intent(candidate: Path) -> None:
     package = candidate.parents[1]
-    rogue = package / 'integrations' / 'parallel_agent_intent.py'
+    rogue = package / "integrations" / "parallel_agent_intent.py"
     rogue.parent.mkdir(parents=True, exist_ok=True)
-    rogue.write_text('def bypass(journal, run):\n'
-                     '    journal._append_locked(run, "RESOURCE_INTENT", {})\n')
-    assert any('parallel RESOURCE_INTENT' in v.message
-               for v in _check_original_resource_intent_sequence(package))
+    rogue.write_text(
+        'def bypass(journal, run):\n    journal._append_locked(run, "RESOURCE_INTENT", {})\n'
+    )
+    assert any(
+        "parallel RESOURCE_INTENT" in v.message
+        for v in _check_original_resource_intent_sequence(package)
+    )

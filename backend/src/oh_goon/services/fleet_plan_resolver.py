@@ -129,25 +129,41 @@ class FleetPlanResolver:
             raise FleetPlanInvalid("standard-local Agent requires exactly one original Agent Step")
         owner, raw_id = matches[0]
         authored = next(
-            (item for item in graph.node(owner).compiled.steps
-             if isinstance(item, AgentPlanStep) and item.step_id == raw_id), None
+            (
+                item
+                for item in graph.node(owner).compiled.steps
+                if isinstance(item, AgentPlanStep) and item.step_id == raw_id
+            ),
+            None,
         )
         if authored is None:
             raise FleetPlanInvalid("original Agent Step source owner is missing")
         source = self._capture_agent_source_graph(
-            graph, inputs=inputs, repository_root=repository_root,
-            skill_root=skill_root, allowed_acceptance=allowed_acceptance,
-            expected_source_sha256=graph.root.source_sha256, skill_aliases=None,
+            graph,
+            inputs=inputs,
+            repository_root=repository_root,
+            skill_root=skill_root,
+            allowed_acceptance=allowed_acceptance,
+            expected_source_sha256=graph.root.source_sha256,
+            skill_aliases=None,
         )
         handoff = FrozenAgentStepHandoff(
-            source=source, owner_source_sha256=graph.node(owner).source_sha256 or "",
-            step_id=raw_id, harness=authored.harness, task=authored.task,
-            timeout_seconds=authored.timeout_seconds, requested_effects=authored.requested_effects,
+            source=source,
+            owner_source_sha256=graph.node(owner).source_sha256 or "",
+            step_id=raw_id,
+            harness=authored.harness,
+            task=authored.task,
+            timeout_seconds=authored.timeout_seconds,
+            requested_effects=authored.requested_effects,
         )
         handoff.verify()
         plan, _, _ = self._resolve_graph(
-            graph, extensions_path=extensions_path, inputs=inputs, trace=None,
-            agent_handoff=handoff, agent_owner_path=owner,
+            graph,
+            extensions_path=extensions_path,
+            inputs=inputs,
+            trace=None,
+            agent_handoff=handoff,
+            agent_owner_path=owner,
         )
         resolved = [item for item in plan.steps if isinstance(item, ResolvedLocalSearchAgentStep)]
         if len(resolved) != 1:
@@ -319,9 +335,11 @@ class FleetPlanResolver:
         try:
             self.resolve(root, extensions_path=extensions_path, inputs=inputs)
         except (FleetDomainError, ValueError) as exc:
-            return report.model_copy(update={
-                "issues": (*report.issues, PlanCheckIssue(path=root.name, message=str(exc)))
-            })
+            return report.model_copy(
+                update={
+                    "issues": (*report.issues, PlanCheckIssue(path=root.name, message=str(exc)))
+                }
+            )
         return report
 
     def diff(
@@ -412,12 +430,19 @@ class FleetPlanResolver:
         graph = self.analyze_source(plan_path, containment_root=containment_root)
         values: list[PlanValueResolutionEntry] = []
         plan, _, _ = self._resolve_graph(
-            graph, extensions_path=extensions_path, inputs=inputs,
-            trace=None, value_trace=values, repository=repository,
+            graph,
+            extensions_path=extensions_path,
+            inputs=inputs,
+            trace=None,
+            value_trace=values,
+            repository=repository,
             environment=environment,
         )
         return project_input_routing(
-            graph, plan, tuple(values), caller_file=caller_file,
+            graph,
+            plan,
+            tuple(values),
+            caller_file=caller_file,
         )
 
     def explain_agent_sources(
@@ -477,9 +502,13 @@ class FleetPlanResolver:
         """
         source_graph = self.analyze_source(plan_path)
         return self._capture_agent_source_graph(
-            source_graph, inputs=inputs, repository_root=repository_root,
-            skill_root=skill_root, allowed_acceptance=allowed_acceptance,
-            expected_source_sha256=expected_source_sha256, skill_aliases=skill_aliases,
+            source_graph,
+            inputs=inputs,
+            repository_root=repository_root,
+            skill_root=skill_root,
+            allowed_acceptance=allowed_acceptance,
+            expected_source_sha256=expected_source_sha256,
+            skill_aliases=skill_aliases,
         )
 
     def _capture_agent_source_graph(
@@ -506,8 +535,10 @@ class FleetPlanResolver:
         )
         values = bind_inputs(compiled, inputs, context=str(source_graph.root.path))
         return capture_agent_sources(
-            compiled.inputs, values,
-            repository_root=repository_root, skill_root=skill_root,
+            compiled.inputs,
+            values,
+            repository_root=repository_root,
+            skill_root=skill_root,
             allowed_acceptance=allowed_acceptance,
             plan_source_sha256=expected_source_sha256,
             plan_graph_identity=source_graph.immutable_source_closure_identity(),
@@ -540,18 +571,27 @@ class FleetPlanResolver:
             raise FleetPlanInvalid("AG-02B handoff requires exactly one typed agent Step")
         owner, step_id = agents[0]
         step = next(
-            step for step in source_graph.node(owner).compiled.steps
+            step
+            for step in source_graph.node(owner).compiled.steps
             if isinstance(step, AgentPlanStep) and step.step_id == step_id
         )
         captured = self._capture_agent_source_graph(
-            source_graph, inputs=inputs, repository_root=repository_root,
-            skill_root=skill_root, allowed_acceptance=allowed_acceptance,
-            expected_source_sha256=expected_source_sha256, skill_aliases=skill_aliases,
+            source_graph,
+            inputs=inputs,
+            repository_root=repository_root,
+            skill_root=skill_root,
+            allowed_acceptance=allowed_acceptance,
+            expected_source_sha256=expected_source_sha256,
+            skill_aliases=skill_aliases,
         )
         handoff = FrozenAgentStepHandoff(
-            source=captured, owner_source_sha256=source_graph.node(owner).source_sha256 or "",
-            step_id=step.step_id, harness=step.harness, task=step.task,
-            timeout_seconds=step.timeout_seconds, requested_effects=step.requested_effects,
+            source=captured,
+            owner_source_sha256=source_graph.node(owner).source_sha256 or "",
+            step_id=step.step_id,
+            harness=step.harness,
+            task=step.task,
+            timeout_seconds=step.timeout_seconds,
+            requested_effects=step.requested_effects,
         )
         handoff.verify()
         return handoff
@@ -662,8 +702,6 @@ def _validate_backend_uv_cache_authority(
                 f"Fleet UV step {step.step_id} cannot author cache lineage; it is backend-owned"
             )
     return steps
-
-
 
 
 def _containment_root(plan_path: Path, containment_root: Path | None) -> Path:

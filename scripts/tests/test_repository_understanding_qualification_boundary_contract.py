@@ -1,13 +1,19 @@
 from pathlib import Path
 
-from oh_goon.repository_tooling.architecture import repository_understanding_qualification_boundary_contract as contract
+from oh_goon.repository_tooling.architecture import (
+    repository_understanding_qualification_boundary_contract as contract,
+)
 
 
 def test_repository_understanding_qualification_boundary_current_tree() -> None:
-    assert contract.check_repository_understanding_qualification_boundary_contract() == []
+    assert (
+        contract.check_repository_understanding_qualification_boundary_contract() == []
+    )
 
 
-def test_hashmarks_adapter_cannot_import_ru_grading_authority(tmp_path: Path, monkeypatch) -> None:
+def test_hashmarks_adapter_cannot_import_ru_grading_authority(
+    tmp_path: Path, monkeypatch
+) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
     integrations.mkdir(parents=True)
@@ -22,12 +28,20 @@ def test_hashmarks_adapter_cannot_import_ru_grading_authority(tmp_path: Path, mo
     monkeypatch.setattr(contract, "HASHMARKS_INTEGRATION_ROOT", integrations)
     monkeypatch.setattr(contract, "REPOSITORY_TOOLING_ROOT", repository_tooling)
 
-    violations = contract.check_repository_understanding_qualification_boundary_contract()
+    violations = (
+        contract.check_repository_understanding_qualification_boundary_contract()
+    )
 
-    assert any(item.path == adapter and "must not import Repository Understanding" in item.message for item in violations)
+    assert any(
+        item.path == adapter
+        and "must not import Repository Understanding" in item.message
+        for item in violations
+    )
 
 
-def test_hashmarks_adapter_cannot_address_secret_answer_tree(tmp_path: Path, monkeypatch) -> None:
+def test_hashmarks_adapter_cannot_address_secret_answer_tree(
+    tmp_path: Path, monkeypatch
+) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
     integrations.mkdir(parents=True)
@@ -39,12 +53,19 @@ def test_hashmarks_adapter_cannot_address_secret_answer_tree(tmp_path: Path, mon
     monkeypatch.setattr(contract, "HASHMARKS_INTEGRATION_ROOT", integrations)
     monkeypatch.setattr(contract, "REPOSITORY_TOOLING_ROOT", repository_tooling)
 
-    violations = contract.check_repository_understanding_qualification_boundary_contract()
+    violations = (
+        contract.check_repository_understanding_qualification_boundary_contract()
+    )
 
-    assert any(item.path == adapter and "SECRET answer truth" in item.message for item in violations)
+    assert any(
+        item.path == adapter and "SECRET answer truth" in item.message
+        for item in violations
+    )
 
 
-def test_hashmarks_package_boundary_is_recursive_and_filename_independent(tmp_path: Path, monkeypatch) -> None:
+def test_hashmarks_package_boundary_is_recursive_and_filename_independent(
+    tmp_path: Path, monkeypatch
+) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
     nested = integrations / "nested"
@@ -60,12 +81,20 @@ def test_hashmarks_package_boundary_is_recursive_and_filename_independent(tmp_pa
     monkeypatch.setattr(contract, "HASHMARKS_INTEGRATION_ROOT", integrations)
     monkeypatch.setattr(contract, "REPOSITORY_TOOLING_ROOT", repository_tooling)
 
-    violations = contract.check_repository_understanding_qualification_boundary_contract()
+    violations = (
+        contract.check_repository_understanding_qualification_boundary_contract()
+    )
 
-    assert any(item.path == adapter and "must not import Repository Understanding" in item.message for item in violations)
+    assert any(
+        item.path == adapter
+        and "must not import Repository Understanding" in item.message
+        for item in violations
+    )
 
 
-def test_hashmarks_package_secret_rule_is_filename_independent(tmp_path: Path, monkeypatch) -> None:
+def test_hashmarks_package_secret_rule_is_filename_independent(
+    tmp_path: Path, monkeypatch
+) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
     integrations.mkdir(parents=True)
@@ -77,12 +106,19 @@ def test_hashmarks_package_secret_rule_is_filename_independent(tmp_path: Path, m
     monkeypatch.setattr(contract, "HASHMARKS_INTEGRATION_ROOT", integrations)
     monkeypatch.setattr(contract, "REPOSITORY_TOOLING_ROOT", repository_tooling)
 
-    violations = contract.check_repository_understanding_qualification_boundary_contract()
+    violations = (
+        contract.check_repository_understanding_qualification_boundary_contract()
+    )
 
-    assert any(item.path == adapter and "SECRET answer truth" in item.message for item in violations)
+    assert any(
+        item.path == adapter and "SECRET answer truth" in item.message
+        for item in violations
+    )
 
 
-def test_ru_qualification_owner_cannot_import_hashmarks_semantics(tmp_path: Path, monkeypatch) -> None:
+def test_ru_qualification_owner_cannot_import_hashmarks_semantics(
+    tmp_path: Path, monkeypatch
+) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
     integrations.mkdir(parents=True)
@@ -94,16 +130,25 @@ def test_ru_qualification_owner_cannot_import_hashmarks_semantics(tmp_path: Path
     monkeypatch.setattr(contract, "HASHMARKS_INTEGRATION_ROOT", integrations)
     monkeypatch.setattr(contract, "REPOSITORY_TOOLING_ROOT", repository_tooling)
 
-    violations = contract.check_repository_understanding_qualification_boundary_contract()
+    violations = (
+        contract.check_repository_understanding_qualification_boundary_contract()
+    )
 
-    assert any(item.path == owner and "must not import Hashmarks" in item.message for item in violations)
+    assert any(
+        item.path == owner and "must not import Hashmarks" in item.message
+        for item in violations
+    )
 
 
-def test_architecture_boundary_does_not_revalidate_repository_understanding_source_ranges(monkeypatch) -> None:
+def test_architecture_boundary_does_not_revalidate_repository_understanding_source_ranges(
+    monkeypatch,
+) -> None:
     def stale_exam():
         raise ValueError("stale Repository Understanding source range")
 
     import oh_goon.repository_tooling.repository_understanding_material as material
 
     monkeypatch.setattr(material, "load_exam", stale_exam)
-    assert contract.check_repository_understanding_qualification_boundary_contract() == []
+    assert (
+        contract.check_repository_understanding_qualification_boundary_contract() == []
+    )

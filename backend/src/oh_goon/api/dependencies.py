@@ -2,10 +2,12 @@ from functools import lru_cache
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.runtime.executor_pool import FleetExecutorPool
+from oh_goon.scout.service import ScoutService
 from oh_goon.services.command_center import CommandCenterService
 from oh_goon.services.dependencies import DependencyFleetService
 from oh_goon.services.filesystem import FilesystemService
 from oh_goon.services.fleet import FleetService
+from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.goon import GoonService
 from oh_goon.services.league import LeagueService
 from oh_goon.services.league_lineups import LeagueLineupService
@@ -13,9 +15,7 @@ from oh_goon.services.locations import LocationService
 from oh_goon.services.migration import MigrationService
 from oh_goon.services.recovery import RecoveryService
 from oh_goon.services.repositories import RepositoryService
-from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.schedules import ScheduleService
-from oh_goon.scout.service import ScoutService
 from oh_goon.services.security import SecurityService
 from oh_goon.services.shared_plan_schedules import SharedPlanScheduleService
 from oh_goon.services.shared_plans import SharedPlanService

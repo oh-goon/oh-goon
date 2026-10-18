@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def human_report(result: dict[str, Any]) -> str:
     """Render the canonical concise human summary from a scored result artifact."""
 
@@ -63,9 +64,9 @@ def human_report(result: dict[str, Any]) -> str:
         value = dimensions.get(key)
         if value is not None:
             lines.append(f"  {label:<22}{value:>6.1f}")
-    candidate_epistemic = (
-        (result.get("confidence_calibration") or {}).get("candidate_epistemic") or {}
-    )
+    candidate_epistemic = (result.get("confidence_calibration") or {}).get(
+        "candidate_epistemic"
+    ) or {}
     lines.extend(
         [
             "",

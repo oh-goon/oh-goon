@@ -3,6 +3,7 @@
 Keep the one Journal lineage validator and original Fleet native issuer boundary;
 never derive parent identity from an opaque deployment-owned policy map.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -25,8 +26,12 @@ def test_exact_parent_child_candidate_is_read_only_and_not_native_replay(tmp_pat
         assert connection.total_changes == before
         with pytest.raises(TrustProtocolError, match="authenticated replay.*native"):
             FleetAdmissionPlanner.prepare_fleet_prework_capture_in(
-                journal=journal, connection=connection, run_id="child",
-                intent=child, repository_scope=scope, targets=list(repositories),
+                journal=journal,
+                connection=connection,
+                run_id="child",
+                intent=child,
+                repository_scope=scope,
+                targets=list(repositories),
             )
         assert connection.total_changes == before
     assert journal.read_view().run_detail("child") is None
@@ -63,8 +68,12 @@ def test_native_owner_rejects_forged_parent_before_even_consulting_journal(tmp_p
         before = connection.total_changes
         with pytest.raises(TrustProtocolError, match="authenticated replay.*native"):
             FleetAdmissionPlanner.prepare_fleet_prework_capture_in(
-                journal=journal, connection=connection, run_id="child",
-                intent=forged_child, repository_scope=scope, targets=list(repositories),
+                journal=journal,
+                connection=connection,
+                run_id="child",
+                intent=forged_child,
+                repository_scope=scope,
+                targets=list(repositories),
             )
         assert connection.total_changes == before
     assert not calls

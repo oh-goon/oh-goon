@@ -23,7 +23,11 @@ def test_exact_configuration_backend(backend: str) -> None:
 @pytest.mark.parametrize(
     "configuration",
     [
-        None, {}, [], "bubblewrap", {"environment": {}},
+        None,
+        {},
+        [],
+        "bubblewrap",
+        {"environment": {}},
         {"environment": ["bubblewrap"]},
         {"environment": {"backend": ["bubblewrap", "opensandbox"]}},
         {"environment": {"backend": "auto"}},
@@ -41,8 +45,11 @@ def test_missing_alias_ordered_and_fallback_selection_fail_closed(configuration:
 
 
 def _resolved(
-    *, backend: str = "bubblewrap", generation: int = 7,
-    configuration_id: str = "process-isolation-backend-sha256", capability: bool = True,
+    *,
+    backend: str = "bubblewrap",
+    generation: int = 7,
+    configuration_id: str = "process-isolation-backend-sha256",
+    capability: bool = True,
     cpu: int = 2000,
 ) -> ResolvedExecutionEnvironment:
     return ResolvedExecutionEnvironment.from_authorities(
@@ -74,8 +81,11 @@ def test_resolved_identity_is_stable_and_includes_exact_authorities() -> None:
 @pytest.mark.parametrize(
     "changed",
     [
-        {"backend": "opensandbox"}, {"generation": 8},
-        {"configuration_id": "changed"}, {"capability": False}, {"cpu": 3000},
+        {"backend": "opensandbox"},
+        {"generation": 8},
+        {"configuration_id": "changed"},
+        {"capability": False},
+        {"cpu": 3000},
     ],
 )
 def test_security_relevant_drift_requires_new_admission(changed: dict[str, object]) -> None:
@@ -89,8 +99,11 @@ def test_security_relevant_drift_requires_new_admission(changed: dict[str, objec
 def test_mismatched_capabilities_do_not_create_identity() -> None:
     with pytest.raises(FleetPlanInvalid, match="mismatch"):
         ResolvedExecutionEnvironment.from_authorities(
-            backend="bubblewrap", executor_id="a", executor_generation=1,
-            backend_configuration_identity="b", capability_statement={"backend_id": "opensandbox"},
+            backend="bubblewrap",
+            executor_id="a",
+            executor_generation=1,
+            backend_configuration_identity="b",
+            capability_statement={"backend_id": "opensandbox"},
             deployment_authority={},
         )
 
@@ -103,7 +116,8 @@ def test_revalidation_fails_for_modified_identity_fields() -> None:
 
 
 def test_remote_backend_credential_handle_is_identity_not_secret(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from oh_goon.integrations.fleet_plan_opensandbox_isolation import (
         OpenSandboxProcessIsolation,
@@ -115,10 +129,14 @@ def test_remote_backend_credential_handle_is_identity_not_secret(
     for path in (cli, attestation, key):
         path.write_bytes(b"identity-only fixture")
     common = dict(
-        domain="osb.example", image="registry.example/a@sha256:" + "a" * 64,
-        cli_executable=str(cli), runtime_attestation_file=str(attestation),
-        runtime_attestation_public_key_file=str(key), runtime="kata",
-        protocol="https", api_key="secret-a",
+        domain="osb.example",
+        image="registry.example/a@sha256:" + "a" * 64,
+        cli_executable=str(cli),
+        runtime_attestation_file=str(attestation),
+        runtime_attestation_public_key_file=str(key),
+        runtime="kata",
+        protocol="https",
+        api_key="secret-a",
     )
     # A runtime instance would demand real attestation; stub that *only* for this
     # pure identity test to keep provider/network/physical claims absent.

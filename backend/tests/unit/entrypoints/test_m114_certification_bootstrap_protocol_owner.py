@@ -15,7 +15,6 @@ from oh_goon.services.certification_bootstrap import (
     CertificationSourceError,
 )
 
-
 ROOT = Path(__file__).resolve().parents[4]
 SOURCE_ROOT = ROOT / "backend/src/oh_goon"
 OWNER_PATH = SOURCE_ROOT / "repository_tooling/certification_bootstrap_protocol.py"
@@ -141,13 +140,9 @@ def test_protocol_identifier_mutation_flows_producer_to_parser(
         ("no bootstrap error record\n", 2, "invalid error response"),
         ("OH_GOON_CERTIFICATION_BOOTSTRAP_ERROR={not-json}\n", 2, "invalid error response"),
         (
-            protocol.render_error_record(
-                {"classification": "application", "message": "first"}
-            )
+            protocol.render_error_record({"classification": "application", "message": "first"})
             + "\n"
-            + protocol.render_error_record(
-                {"classification": "application", "message": "second"}
-            )
+            + protocol.render_error_record({"classification": "application", "message": "second"})
             + "\n",
             2,
             "invalid error response",

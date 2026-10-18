@@ -6,7 +6,6 @@ import stat
 from pathlib import Path
 
 from oh_goon.core.errors import LeagueTeamNotManaged, TeamPipelineNotConfigured
-from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.models.league import (
     ConfiguredTeamPipeline,
     InvalidTeamPipeline,
@@ -17,6 +16,7 @@ from oh_goon.core.models.league import (
     TeamPipeline,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.team_pipeline import TEAM_PIPELINE_FILENAME, team_pipeline_path
 from oh_goon.runtime.state import LocalState, LocalStateReadView
 from oh_goon.services.repository_discovery import RepositoryDiscoveryService

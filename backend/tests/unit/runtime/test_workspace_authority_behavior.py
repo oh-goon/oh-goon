@@ -127,10 +127,14 @@ def test_allocate_rejects_preexisting_directory_without_state_change(tmp_path: P
 
     with pytest.raises(WorkspaceStateStale, match="already exists before allocation"):
         manager.allocate(workspace.workspace_id, expected_state_version=0)
-    assert manager.state(workspace.workspace_id).lifecycle_state is WorkspaceLifecycleState.REQUESTED
+    assert (
+        manager.state(workspace.workspace_id).lifecycle_state is WorkspaceLifecycleState.REQUESTED
+    )
 
 
-def test_read_snapshot_rejects_wrong_identity_kind_state_and_nonempty_container(tmp_path: Path) -> None:
+def test_read_snapshot_rejects_wrong_identity_kind_state_and_nonempty_container(
+    tmp_path: Path,
+) -> None:
     manager, _database = _authority(tmp_path)
     source = tmp_path / "source"
     source.mkdir()
@@ -145,14 +149,18 @@ def test_read_snapshot_rejects_wrong_identity_kind_state_and_nonempty_container(
     allocated = manager.allocate(read.workspace_id, expected_state_version=0)
     forged = read.model_copy(update={"repository_id": "repo-other"})
     with pytest.raises(WorkspaceStateStale, match="does not match durable identity"):
-        manager.materialize_read_snapshot(forged, source, expected_state_version=allocated.state_version)
+        manager.materialize_read_snapshot(
+            forged, source, expected_state_version=allocated.state_version
+        )
     with pytest.raises(WorkspaceStateStale, match="expected version 0, observed 1"):
         manager.materialize_read_snapshot(read, source, expected_state_version=0)
 
     path = manager.physical_path(read)
     (path / "unexpected").write_text("occupied", encoding="utf-8")
     with pytest.raises(WorkspaceStateStale, match="not an empty owned directory"):
-        manager.materialize_read_snapshot(read, source, expected_state_version=allocated.state_version)
+        manager.materialize_read_snapshot(
+            read, source, expected_state_version=allocated.state_version
+        )
 
     path.joinpath("unexpected").unlink()
     manager.transition(
@@ -161,7 +169,9 @@ def test_read_snapshot_rejects_wrong_identity_kind_state_and_nonempty_container(
         next_state=WorkspaceLifecycleState.FAILED,
     )
     with pytest.raises(WorkspaceStateStale, match="expected version 1, observed 2"):
-        manager.materialize_read_snapshot(read, source, expected_state_version=allocated.state_version)
+        manager.materialize_read_snapshot(
+            read, source, expected_state_version=allocated.state_version
+        )
 
 
 def test_read_snapshot_concurrent_state_change_never_publishes_staging(
@@ -197,7 +207,9 @@ def test_read_snapshot_concurrent_state_change_never_publishes_staging(
     assert manager.state(read.workspace_id).lifecycle_state is WorkspaceLifecycleState.FAILED
 
 
-def test_read_snapshot_binding_rejects_wrong_kind_state_missing_identity_and_tamper(tmp_path: Path) -> None:
+def test_read_snapshot_binding_rejects_wrong_kind_state_missing_identity_and_tamper(
+    tmp_path: Path,
+) -> None:
     manager, database = _authority(tmp_path)
     source = tmp_path / "source"
     source.mkdir()
@@ -233,7 +245,9 @@ def test_read_snapshot_binding_rejects_wrong_kind_state_missing_identity_and_tam
         manager.read_snapshot_binding(read)
 
 
-def test_worktree_materialization_rejects_wrong_contracts_before_registration(tmp_path: Path) -> None:
+def test_worktree_materialization_rejects_wrong_contracts_before_registration(
+    tmp_path: Path,
+) -> None:
     repository, revision = _repository(tmp_path)
     manager, _database = _authority(tmp_path)
     _read, binding = _ready_snapshot(manager, repository, revision=revision)
@@ -277,7 +291,9 @@ def test_worktree_registration_failure_restores_empty_owned_container(
     def failing_run(self, *args, **kwargs):
         if "worktree" in args and "add" in args:
             result = original_run(self, "status", "--porcelain", cwd=repository)
-            return result.__class__(returncode=1, stdout="", stderr="synthetic registration failure")
+            return result.__class__(
+                returncode=1, stdout="", stderr="synthetic registration failure"
+            )
         return original_run(self, *args, **kwargs)
 
     monkeypatch.setattr(GitService, "run", failing_run)
@@ -331,7 +347,9 @@ def test_checkpoint_lookup_reproof_and_create_contract_failures(tmp_path: Path) 
         manager.current_candidate_checkpoint(workspace)
 
 
-def test_current_checkpoint_rejects_workspace_without_checkpoint_and_wrong_identity(tmp_path: Path) -> None:
+def test_current_checkpoint_rejects_workspace_without_checkpoint_and_wrong_identity(
+    tmp_path: Path,
+) -> None:
     manager, _database = _authority(tmp_path)
     worktree = _request(manager, kind=WorkspaceKind.WORKTREE)
     manager.allocate(worktree.workspace_id, expected_state_version=0)
@@ -373,8 +391,13 @@ def test_release_is_idempotent_and_rejects_replaced_owned_path(tmp_path: Path) -
     manager, _database = _authority(tmp_path)
     workspace = _request(manager, kind=WorkspaceKind.WORKTREE)
     allocated = manager.allocate(workspace.workspace_id, expected_state_version=0)
-    released = manager.release(workspace.workspace_id, expected_state_version=allocated.state_version)
-    assert manager.release(workspace.workspace_id, expected_state_version=released.state_version) == released
+    released = manager.release(
+        workspace.workspace_id, expected_state_version=allocated.state_version
+    )
+    assert (
+        manager.release(workspace.workspace_id, expected_state_version=released.state_version)
+        == released
+    )
 
     second = _request(manager, kind=WorkspaceKind.WORKTREE)
     allocated_second = manager.allocate(second.workspace_id, expected_state_version=0)

@@ -5,7 +5,6 @@ from collections import Counter
 
 from oh_goon.core.effect_attempts import LIVE_OWNED_EFFECT_STATUSES
 from oh_goon.core.errors import JournalCorruption
-from oh_goon.core.product_identity import validate_repository_attempt_operation_id
 from oh_goon.core.models.effect_attempt import (
     RepositoryEffectAttempt,
 )
@@ -26,6 +25,7 @@ from oh_goon.core.models.recovery import (
     RestartRecoveryAction,
     RestartRecoveryFinding,
 )
+from oh_goon.core.product_identity import validate_repository_attempt_operation_id
 from oh_goon.core.vocabulary import EffectAttemptOwner
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.durable_revision import read_durable_revision

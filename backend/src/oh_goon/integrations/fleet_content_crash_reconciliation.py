@@ -50,7 +50,11 @@ def deletion_intent_exists(root: Path, object_id: str) -> bool:
     if not path.exists():
         return False
     payload = read_json_record(path)
-    if payload is None or payload.get("schema") != DELETION_INTENT_SCHEMA or payload.get("object_id") != object_id:
+    if (
+        payload is None
+        or payload.get("schema") != DELETION_INTENT_SCHEMA
+        or payload.get("object_id") != object_id
+    ):
         raise FleetPlanInvalid(f"Fleet content deletion intent is invalid: {object_id}")
     return True
 
@@ -101,9 +105,7 @@ def reconcile_interrupted_maintenance(
         )
 
 
-def _deletion_intents(
-    root: Path, layout: ContentStorePathLayout
-) -> tuple[tuple[str, Path], ...]:
+def _deletion_intents(root: Path, layout: ContentStorePathLayout) -> tuple[tuple[str, Path], ...]:
     found: list[tuple[str, Path]] = []
     for kind in ("tree", "file"):
         directory = root / "deletion-intents" / kind
@@ -128,7 +130,9 @@ def _lifecycle_ids(root: Path) -> tuple[str, ...]:
             object_id = f"{kind}-sha256-{record.stem}"
             lifecycle = read_object_lifecycle(root, object_id)
             if lifecycle is None or lifecycle.object_id != object_id:
-                raise FleetPlanInvalid(f"Fleet content lifecycle metadata is invalid: {record.name}")
+                raise FleetPlanInvalid(
+                    f"Fleet content lifecycle metadata is invalid: {record.name}"
+                )
             found.append(object_id)
     return tuple(found)
 
@@ -140,7 +144,9 @@ def _remove_abandoned_metadata_temps(root: Path) -> list[str]:
             continue
         for path in sorted(base.rglob(".*.tmp")):
             if path.is_symlink() or not path.is_file():
-                raise FleetPlanInvalid(f"Fleet content maintenance temp entry is invalid: {path.name}")
+                raise FleetPlanInvalid(
+                    f"Fleet content maintenance temp entry is invalid: {path.name}"
+                )
             remove_file_durably(path)
             removed.append(str(path.relative_to(root)))
     return removed

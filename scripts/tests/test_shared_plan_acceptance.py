@@ -31,10 +31,11 @@ PREVIEW_PAYLOAD = {
 }
 
 
-def test_baseline_shared_plan_preview_to_run_carries_exact_authority(monkeypatch) -> None:
+def test_baseline_shared_plan_preview_to_run_carries_exact_authority(
+    monkeypatch,
+) -> None:
     calls: list[tuple[str, str, dict[str, object] | None]] = []
     preview_payload = PREVIEW_PAYLOAD
-
 
     def request(method, url, *, access_token, payload=None):
         calls.append((method, url, payload))
@@ -55,8 +56,16 @@ def test_baseline_shared_plan_preview_to_run_carries_exact_authority(monkeypatch
             "outcome": "SUCCESS",
             "game_tape": {
                 "repositories": [
-                    {"repository": {"repository_id": "repo-left"}, "status": "PASSED", "steps": [{"status": "PASSED"}]},
-                    {"repository": {"repository_id": "repo-right"}, "status": "PASSED", "steps": [{"status": "PASSED"}]},
+                    {
+                        "repository": {"repository_id": "repo-left"},
+                        "status": "PASSED",
+                        "steps": [{"status": "PASSED"}],
+                    },
+                    {
+                        "repository": {"repository_id": "repo-right"},
+                        "status": "PASSED",
+                        "steps": [{"status": "PASSED"}],
+                    },
                 ]
             },
         },
@@ -99,7 +108,9 @@ def test_baseline_shared_plan_preview_to_run_carries_exact_authority(monkeypatch
     }
 
 
-def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(monkeypatch) -> None:
+def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(
+    monkeypatch,
+) -> None:
     calls: list[tuple[str, str]] = []
 
     def urlopen(request, timeout):
@@ -110,12 +121,18 @@ def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(monkeypat
                 "message": "Plans do not own input schemas",
             }
             raise urllib.error.HTTPError(
-                request.full_url, 400, "bad request", hdrs=None,
+                request.full_url,
+                400,
+                "bad request",
+                hdrs=None,
                 fp=BytesIO(json.dumps(body).encode()),
             )
         body = {"code": "FLEET_PLAN_SOURCE_NOT_FOUND", "message": "not found"}
         raise urllib.error.HTTPError(
-            request.full_url, 404, "not found", hdrs=None,
+            request.full_url,
+            404,
+            "not found",
+            hdrs=None,
             fp=BytesIO(json.dumps(body).encode()),
         )
 
@@ -128,7 +145,9 @@ def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(monkeypat
     assert [method for method, _url in calls] == ["PUT", "GET"]
 
 
-def test_ready_shared_plan_repository_can_run_release_metadata_offline(tmp_path: Path) -> None:
+def test_ready_shared_plan_repository_can_run_release_metadata_offline(
+    tmp_path: Path,
+) -> None:
     repository = tmp_path / "ready"
     shared_plan._repository(repository, version="1.2.3")
     environment = dict(os.environ)
@@ -156,4 +175,6 @@ def test_ready_shared_plan_repository_can_run_release_metadata_offline(tmp_path:
     )
     assert completed.returncode == 0, completed.stderr
     assert (repository / ".fleet/release/PROJECT_VERSION").read_text() == "1.2.3\n"
-    assert (repository / ".fleet/release/RELEASE_VERSION").read_text() == "1.2.3-beta.abcdef1\n"
+    assert (
+        repository / ".fleet/release/RELEASE_VERSION"
+    ).read_text() == "1.2.3-beta.abcdef1\n"

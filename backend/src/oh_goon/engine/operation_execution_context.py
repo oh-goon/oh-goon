@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Transient execution services bound to one admitted repository operation attempt."""
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass

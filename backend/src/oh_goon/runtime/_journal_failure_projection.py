@@ -3,20 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from oh_goon.core.errors import InvalidRequest
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.fleet_plan_projection import atomic_goon_by_step, fleet_plan_logical_slot
 from oh_goon.core.models.fleet_failures import FleetFailureGroup, FleetFailureRepositoryItem
 from oh_goon.core.models.game_tape import GameTapeRepositoryExecution
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary import GameTapeStatus
+
 
 @dataclass(frozen=True, slots=True)
 class CurrentFleetFailure:
     item: FleetFailureRepositoryItem
     source_kind: str
     signature_id: str | None
-
 
 
 @dataclass(slots=True)
@@ -38,14 +38,18 @@ class FailureGroupAccumulator:
     def project(self, group_id: str) -> FleetFailureGroup:
         item = self.first.item
         return FleetFailureGroup(
-            group_id=group_id, plan_id=item.plan_id, plan_name=item.plan_name,
-            source_kind=self.first.source_kind, goon_name=item.goon_name, step_id=item.step_id,
-            affected_repositories=len(self.repository_ids), signature_count=len(self.signature_ids),
+            group_id=group_id,
+            plan_id=item.plan_id,
+            plan_name=item.plan_name,
+            source_kind=self.first.source_kind,
+            goon_name=item.goon_name,
+            step_id=item.step_id,
+            affected_repositories=len(self.repository_ids),
+            signature_count=len(self.signature_ids),
         )
 
-def _failure_group_id(
-    target: FleetPlanTarget, goon_name: str | None, step_id: str | None
-) -> str:
+
+def _failure_group_id(target: FleetPlanTarget, goon_name: str | None, step_id: str | None) -> str:
     return stable_id(
         "fleet-failure-group",
         {
@@ -99,9 +103,7 @@ def current_failure(
     )
 
 
-def group_from_failures(
-    group_id: str, failures: list[CurrentFleetFailure]
-) -> FleetFailureGroup:
+def group_from_failures(group_id: str, failures: list[CurrentFleetFailure]) -> FleetFailureGroup:
     if not failures:
         raise InvalidRequest(f"Unknown current failure group: {group_id}")
     first = failures[0]
@@ -113,15 +115,8 @@ def group_from_failures(
         source_kind=first.source_kind,
         goon_name=item.goon_name,
         step_id=item.step_id,
-        affected_repositories=len(
-            {failure.item.repository.repository_id for failure in failures}
-        ),
+        affected_repositories=len({failure.item.repository.repository_id for failure in failures}),
         signature_count=len(
-            {
-                failure.signature_id
-                for failure in failures
-                if failure.signature_id is not None
-            }
+            {failure.signature_id for failure in failures if failure.signature_id is not None}
         ),
     )
-

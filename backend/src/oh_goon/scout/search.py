@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from oh_goon.scout.models import ScoutSearchResult
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.scout.database import ScoutAnalyticalDatabase
+from oh_goon.scout.models import ScoutSearchResult
 
 
 class ScoutSearchReader:

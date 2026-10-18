@@ -4,7 +4,9 @@ from pathlib import Path
 import shutil
 
 import pytest
-from oh_goon.repository_tooling.scout_reverse_proxy_certification import run_reverse_proxy_certification
+from oh_goon.repository_tooling.scout_reverse_proxy_certification import (
+    run_reverse_proxy_certification,
+)
 
 pytestmark = pytest.mark.certification
 

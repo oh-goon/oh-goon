@@ -20,7 +20,7 @@ def _resolve_assignment(line: str, known: dict[str, str]) -> tuple[str, str] | N
     if required is not None and required.group("source") in known:
         return name, known[required.group("source")]
     if "$" not in value and "`" not in value:
-        return name, value.strip('"\'')
+        return name, value.strip("\"'")
     return None
 
 
@@ -134,7 +134,9 @@ def _case_matches(pattern: str, value: str, already_matched: bool) -> bool:
     return any(fnmatchcase(value, item.strip()) for item in pattern.split("|") if item.strip())
 
 
-def commands_from_script_lines(lines: tuple[str, ...], environment: dict[str, str]) -> tuple[str, ...]:
+def commands_from_script_lines(
+    lines: tuple[str, ...], environment: dict[str, str]
+) -> tuple[str, ...]:
     flow = _Flow(known=dict(environment))
     for line in lines:
         flow.consume(line)

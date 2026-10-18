@@ -4,7 +4,6 @@ from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid, StateConflict
 from oh_goon.core.fleet_plan_output_refs import step_output_reference
-from oh_goon.core.product_identity import repository_subject_instance_id, stable_id
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
     ResolvedFleetPlan,
@@ -12,30 +11,31 @@ from oh_goon.core.models.fleet_plan import (
     StepStatusCondition,
     step_runtime_strings,
 )
-from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_evidence import (
     FleetPlanPreview,
     PlanImportPreview,
     PlanPreviewDisposition,
+    PlanSnapshotEvidence,
     PlanStepPreview,
 )
+from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
-from oh_goon.core.models.fleet_plan_evidence import PlanSnapshotEvidence
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.path_authority import navigation_path
+from oh_goon.core.product_identity import repository_subject_instance_id, stable_id
 from oh_goon.integrations._fleet_plan_step_dataflow import (
     condition_skip_reason,
     validate_step_declared_paths,
 )
 from oh_goon.integrations._fleet_plan_step_local_execution import step_working_directory
+from oh_goon.integrations.executable_materialization_authority import (
+    logical_step_execution_authority,
+)
 from oh_goon.integrations.fleet_plan_environment import require_environment
 from oh_goon.integrations.fleet_plan_repository_scope import (
     RepositoryScopeBinding,
     bind_repository_scope,
-)
-from oh_goon.integrations.executable_materialization_authority import (
-    logical_step_execution_authority,
 )
 from oh_goon.integrations.source_snapshot import source_snapshot_identity
 
@@ -122,9 +122,7 @@ def require_repository_plan_admission_current(
             "Fleet repository/Plan admission became stale after RUN_ADMITTED: " + str(exc)
         ) from exc
     if current != admitted:
-        raise StateConflict(
-            "Fleet repository/Plan admission became stale after RUN_ADMITTED"
-        )
+        raise StateConflict("Fleet repository/Plan admission became stale after RUN_ADMITTED")
 
 
 def _preview_step(repository: Path, step, imported_reason: str | None) -> PlanStepPreview:

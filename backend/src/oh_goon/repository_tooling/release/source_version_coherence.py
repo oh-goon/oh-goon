@@ -6,7 +6,6 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-
 _SOURCE_VERSION = re.compile(r"(?m)^source_version:[ \t]*([^\s#]+)[ \t]*$")
 
 
@@ -69,10 +68,8 @@ def source_version_issues(root: Path, expected: str) -> tuple[str, ...]:
             issues.append(f"{owner} version {observed!r} does not match VERSION {expected!r}")
     return tuple(issues)
 
+
 def require_source_version_coherence(root: Path, expected: str) -> None:
     issues = source_version_issues(root, expected)
     if issues:
-        raise ValueError(
-            "slim source archive refuses release identity drift: " + "; ".join(issues)
-        )
-
+        raise ValueError("slim source archive refuses release identity drift: " + "; ".join(issues))

@@ -17,7 +17,6 @@ from oh_goon.services.fleet_plan_input_routing import CallerFileRoutingOrigin
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plans import FleetPlanService
 
-
 _INSPECTION_SCHEMA = "oh-goon.plan-input-inspection/v1"
 
 
@@ -79,7 +78,13 @@ def _print_input_inspection(
         requirement = "required" if item["required"] else "optional"
         details = []
         for key in (
-            "default", "minimum", "maximum", "choices", "pattern", "starts_with", "non_empty"
+            "default",
+            "minimum",
+            "maximum",
+            "choices",
+            "pattern",
+            "starts_with",
+            "non_empty",
         ):
             if key in item:
                 details.append(f"{key}={item[key]!r}")
@@ -103,8 +108,12 @@ def _inputs_pre_runtime(args: argparse.Namespace) -> int:
     """CLI discovery is strictly read-only, requiring no runtime state or enrollment."""
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     if getattr(args, "source_closure", False):
-        if not all((args.expect_sha256, args.repository_root, args.skill_root, args.allow_acceptance)):
-            print("AG-01 source preview requires --expect-sha256, --repository-root, --skill-root and --allow-acceptance")
+        if not all(
+            (args.expect_sha256, args.repository_root, args.skill_root, args.allow_acceptance)
+        ):
+            print(
+                "AG-01 source preview requires --expect-sha256, --repository-root, --skill-root and --allow-acceptance"
+            )
             return 2
         try:
             aliases: dict[str, str] = {}
@@ -116,7 +125,8 @@ def _inputs_pre_runtime(args: argparse.Namespace) -> int:
                     raise ValueError("AG-01 duplicate or empty skill alias")
                 aliases[name] = source
             evidence = resolver.explain_agent_sources(
-                args.plan, inputs=plan_inputs(args),
+                args.plan,
+                inputs=plan_inputs(args),
                 repository_root=args.repository_root,
                 skill_root=args.skill_root,
                 allowed_acceptance=tuple(args.allow_acceptance),
@@ -128,10 +138,19 @@ def _inputs_pre_runtime(args: argparse.Namespace) -> int:
             return 2
         print(json.dumps(evidence, indent=2, sort_keys=True))
         return 0
-    if any((getattr(args, "plan_inputs", None), args.expect_sha256,
-            args.repository_root, args.skill_root, args.allow_acceptance,
-            args.skill_alias)):
-        print("AG-01 source parameters require --source-closure; ordinary inputs inspection is value-free")
+    if any(
+        (
+            getattr(args, "plan_inputs", None),
+            args.expect_sha256,
+            args.repository_root,
+            args.skill_root,
+            args.allow_acceptance,
+            args.skill_alias,
+        )
+    ):
+        print(
+            "AG-01 source parameters require --source-closure; ordinary inputs inspection is value-free"
+        )
         return 2
     return _print_input_inspection(args, resolver.inspect_inputs_with_source)
 
@@ -141,9 +160,7 @@ def _validate_with_resolver(
     resolve: Callable[..., ResolvedFleetPlan],
 ) -> int:
     try:
-        plan = resolve(
-            args.plan, extensions_path=args.extensions, inputs=plan_inputs(args)
-        )
+        plan = resolve(args.plan, extensions_path=args.extensions, inputs=plan_inputs(args))
     except (FleetDomainError, ValueError) as exc:
         if getattr(args, "diagnostics", False):
             print_safe_plan_diagnostic(exc, as_json=args.as_json)
@@ -179,7 +196,9 @@ def _validate_pre_runtime(args: argparse.Namespace) -> int:
     return _validate_with_resolver(args, resolver.resolve)
 
 
-def _explain_with_owner(args: argparse.Namespace, owner: FleetPlanResolver | FleetPlanService) -> int:
+def _explain_with_owner(
+    args: argparse.Namespace, owner: FleetPlanResolver | FleetPlanService
+) -> int:
     """Keep one presentation of the original resolver-owned explanation."""
     if getattr(args, "routes", False):
         try:
@@ -193,8 +212,10 @@ def _explain_with_owner(args: argparse.Namespace, owner: FleetPlanResolver | Fle
                     names=frozenset(name for name, _ in snapshot.entries),
                 )
             routing = owner.explain_routing(
-                args.plan, extensions_path=args.extensions,
-                inputs=selected, caller_file=origin,
+                args.plan,
+                extensions_path=args.extensions,
+                inputs=selected,
+                caller_file=origin,
             )
         except (FleetDomainError, ValueError, OSError) as exc:
             if getattr(args, "diagnostics", False):
@@ -215,13 +236,13 @@ def _explain_with_owner(args: argparse.Namespace, owner: FleetPlanResolver | Fle
                 print(f"    -> {recipient['import_instance_id']}: {recipient['input']}")
         for entry in routing["bindings"]:
             if entry["root_input"] is None:
-                print(f"  Other binding {entry['import_instance_id']}:{entry['input']} "
-                      f"origin={entry['origin']['kind']} (no raw value shown)")
+                print(
+                    f"  Other binding {entry['import_instance_id']}:{entry['input']} "
+                    f"origin={entry['origin']['kind']} (no raw value shown)"
+                )
         return 0
     try:
-        report = owner.explain(
-            args.plan, extensions_path=args.extensions, inputs=plan_inputs(args)
-        )
+        report = owner.explain(args.plan, extensions_path=args.extensions, inputs=plan_inputs(args))
     except (FleetDomainError, ValueError) as exc:
         if getattr(args, "diagnostics", False):
             print_safe_plan_diagnostic(exc, as_json=args.as_json)
@@ -260,16 +281,12 @@ def _explain(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 
 def _explain_pre_runtime(args: argparse.Namespace) -> int:
     """Read-only source and recipient diagnostics, no SQLite or Fleet startup."""
-    return _explain_with_owner(
-        args, FleetPlanResolver(goon_templates=GoonTemplateStore())
-    )
+    return _explain_with_owner(args, FleetPlanResolver(goon_templates=GoonTemplateStore()))
 
 
 def _check_with_owner(args: argparse.Namespace, owner: FleetPlanResolver | FleetPlanService) -> int:
     try:
-        report = owner.check(
-            args.root, extensions_path=args.extensions, inputs=plan_inputs(args)
-        )
+        report = owner.check(args.root, extensions_path=args.extensions, inputs=plan_inputs(args))
     except (FleetDomainError, ValueError) as exc:
         print(str(exc))
         return 2
@@ -290,9 +307,7 @@ def _check(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 
 
 def _check_pre_runtime(args: argparse.Namespace) -> int:
-    return _check_with_owner(
-        args, FleetPlanResolver(goon_templates=GoonTemplateStore())
-    )
+    return _check_with_owner(args, FleetPlanResolver(goon_templates=GoonTemplateStore()))
 
 
 def _diff_with_owner(args: argparse.Namespace, owner: FleetPlanResolver | FleetPlanService) -> int:
@@ -333,9 +348,7 @@ def _diff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 
 def _diff_pre_runtime(args: argparse.Namespace) -> int:
     """Compare fully resolved meaning without constructing application state."""
-    return _diff_with_owner(
-        args, FleetPlanResolver(goon_templates=GoonTemplateStore())
-    )
+    return _diff_with_owner(args, FleetPlanResolver(goon_templates=GoonTemplateStore()))
 
 
 def _prepare(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
@@ -387,6 +400,4 @@ def _preview(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 
 def _preview_pre_runtime(args: argparse.Namespace) -> int:
     """Authoring-time repository evaluation needs neither SQLite nor a Fleet Run."""
-    return _preview_with_owner(
-        args, FleetPlanResolver(goon_templates=GoonTemplateStore())
-    )
+    return _preview_with_owner(args, FleetPlanResolver(goon_templates=GoonTemplateStore()))

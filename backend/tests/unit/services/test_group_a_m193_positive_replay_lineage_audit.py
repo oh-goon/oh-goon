@@ -3,19 +3,21 @@
 Use the original Journal and original native admission owner. Historical positive
 lineage is deliberately not counted as positive issuer/signer/lease proof.
 """
+
 from __future__ import annotations
 
 import pytest
 
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
-from oh_goon.repository_tooling.enforcer_lace_prework_capture import PreworkRunCapture
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
 from tests.factories.journal import admit_run
+from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import facts, prepared, publish
 from tests.unit.services.test_group_a_m191_native_replay_capture_fence import _case
-from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import prepared, publish, facts
 
 
-def test_real_sqlite_accepts_historical_lineage_candidate_but_not_native_capture(tmp_path, monkeypatch):
+def test_real_sqlite_accepts_historical_lineage_candidate_but_not_native_capture(
+    tmp_path, monkeypatch
+):
     db, journal, scope, targets, child = _case(tmp_path, kind="readmission")
     calls = []
     prepare = journal.prepare_run_admission_in
@@ -29,7 +31,11 @@ def test_real_sqlite_accepts_historical_lineage_candidate_but_not_native_capture
         before = connection.total_changes
         # A real positive historic parent->child Journal projection exists.
         candidate = journal.prepare_run_admission_in(
-            connection, "child", child, scope, list(targets),
+            connection,
+            "child",
+            child,
+            scope,
+            list(targets),
         )
         assert candidate.fleet_run_id == "child"
         assert connection.total_changes == before
@@ -38,8 +44,12 @@ def test_real_sqlite_accepts_historical_lineage_candidate_but_not_native_capture
         # valid Journal candidate. This is the missing positive native bridge.
         with pytest.raises(TrustProtocolError, match="authenticated replay.*native"):
             FleetAdmissionPlanner.prepare_fleet_prework_capture_in(
-                journal=journal, connection=connection, run_id="child",
-                intent=child, repository_scope=scope, targets=list(targets),
+                journal=journal,
+                connection=connection,
+                run_id="child",
+                intent=child,
+                repository_scope=scope,
+                targets=list(targets),
             )
         assert calls == []
         assert connection.total_changes == before
@@ -61,7 +71,9 @@ def test_legacy_positive_child_is_not_an_authenticated_native_issuer(tmp_path):
 
 @pytest.mark.parametrize("kind", ["readmission", "rerun"])
 def test_valid_signer_and_reservation_do_not_license_historical_replay(
-    tmp_path, monkeypatch, kind,
+    tmp_path,
+    monkeypatch,
+    kind,
 ):
     # A valid ordinary Run contract, signer trust epoch and held native lease
     # are available. Replay still must be refused before new issuer work.

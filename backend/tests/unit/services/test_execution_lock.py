@@ -161,13 +161,11 @@ def test_presentation_only_change_does_not_invalidate_semantic_lock(tmp_path: Pa
     before = build_execution_lock(before_plan)
     before_source_sha = before_graph.root.source_sha256
     source.write_text(
-        "# comment\n"
-        + _atomic("a"),
+        "# comment\n" + _atomic("a"),
         encoding="utf-8",
     )
     plan_path.write_text(
-        "# plan comment\n"
-        + plan_path.read_text(encoding="utf-8"),
+        "# plan comment\n" + plan_path.read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     after_plan, after_graph = _resolve(plan_path, goons)
@@ -310,7 +308,9 @@ def test_explicit_lock_path_verifies_same_execution_without_source_adjacent_lock
     service.lock(plan_path, output=external_lock)
     assert external_lock.is_file()
     assert not (plan_path.parent / "goon.lock").exists()
-    service.run(plan_path, repository_ids={"repo-a"}, lock_path=external_lock, fleet_run_id="test-lock-run")
+    service.run(
+        plan_path, repository_ids={"repo-a"}, lock_path=external_lock, fleet_run_id="test-lock-run"
+    )
     assert runs.target is not None
 
 
@@ -322,13 +322,9 @@ def test_more_steps_change_digest_without_material_lock_growth(tmp_path: Path) -
     plan, graph = _resolve(plan_path, goons)
     small = render_execution_lock(build_execution_lock(plan))
 
-    steps = "".join(
-        f'''  - id: check-{index}\n    run: "echo {index}"\n'''
-        for index in range(30)
-    )
+    steps = "".join(f"""  - id: check-{index}\n    run: "echo {index}"\n""" for index in range(30))
     source.write_text(
-        "version: 1\nsteps:\n"
-        + steps,
+        "version: 1\nsteps:\n" + steps,
         encoding="utf-8",
     )
     many_plan, many_graph = _resolve(plan_path, goons)

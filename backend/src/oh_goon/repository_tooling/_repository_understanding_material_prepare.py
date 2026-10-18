@@ -1,4 +1,5 @@
 """Private prepared-checkout builder for Repository Understanding material."""
+
 from __future__ import annotations
 
 import json

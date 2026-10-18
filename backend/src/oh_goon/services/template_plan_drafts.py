@@ -2,6 +2,7 @@
 
 This module does not run Plans, save Plans, reread caller input files or admit work.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -15,7 +16,10 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_composition import coerce_input
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.template_identity import template_classification, template_reference_allowed
-from oh_goon.integrations.fleet_plan_compilation import parse_fleet_yaml_document, parse_plan_template
+from oh_goon.integrations.fleet_plan_compilation import (
+    parse_fleet_yaml_document,
+    parse_plan_template,
+)
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_input_inspection import inspect_projected_inputs
@@ -26,6 +30,7 @@ from oh_goon.services.template_plan_draft_comparison import compare_resolved_dra
 @dataclass(frozen=True, slots=True)
 class TemplatePlanDraft:
     """Proposed YAML and safe diagnostics, never authorized Run/source state."""
+
     plan_yaml: str
     values_yaml: str
     report: dict[str, Any]
@@ -71,7 +76,11 @@ def _edit(items: list[object], action: Mapping[str, Any]) -> None:
         else:
             items[at] = item
     elif op == "remove":
-        if set(action) != {"op", "at"} or type(action["at"]) is not int or not 0 <= action["at"] < len(items):
+        if (
+            set(action) != {"op", "at"}
+            or type(action["at"]) is not int
+            or not 0 <= action["at"] < len(items)
+        ):
             raise FleetPlanInvalid("UX-C invalid remove operation")
         items.pop(action["at"])
     elif op == "move":
@@ -102,12 +111,16 @@ def _values_yaml(values: Mapping[str, object], inspections: tuple) -> str:
     return result
 
 
-def propose_plan(*, key: str, expected_sha256: str,
-                 edits: Sequence[Mapping[str, Any]] = (),
-                 values: Mapping[str, object] | None = None,
-                 projected_inputs: Sequence[str] | None = None,
-                 plans: PlanTemplateStore | None = None,
-                 goons: GoonTemplateStore | None = None) -> TemplatePlanDraft:
+def propose_plan(
+    *,
+    key: str,
+    expected_sha256: str,
+    edits: Sequence[Mapping[str, Any]] = (),
+    values: Mapping[str, object] | None = None,
+    projected_inputs: Sequence[str] | None = None,
+    plans: PlanTemplateStore | None = None,
+    goons: GoonTemplateStore | None = None,
+) -> TemplatePlanDraft:
     """Edit a frozen shipped Plan *in memory*; validate with canonical Fleet owners."""
     plan_store = plans or PlanTemplateStore()
     goon_store = goons or GoonTemplateStore()
@@ -128,19 +141,25 @@ def propose_plan(*, key: str, expected_sha256: str,
         raise FleetPlanInvalid("UX-C Plan must retain a nonempty ordered Goon list")
     proposal["goons"] = proposed_items
     if projected_inputs is not None:
-        if type(projected_inputs) not in (list, tuple) or any(type(x) is not str for x in projected_inputs):
+        if type(projected_inputs) not in (list, tuple) or any(
+            type(x) is not str for x in projected_inputs
+        ):
             raise FleetPlanInvalid("UX-C projected inputs must be a list of names")
         if projected_inputs:
             proposal["inputs"] = list(projected_inputs)
         else:
             proposal.pop("inputs", None)
     plan_yaml = yaml.safe_dump(proposal, allow_unicode=True, sort_keys=False)
-    compiled = parse_plan_template(plan_yaml, source="UX-C draft", expected_name=source.path.parent.name)
+    compiled = parse_plan_template(
+        plan_yaml, source="UX-C draft", expected_name=source.path.parent.name
+    )
     owner_class = template_classification(key, kind="Plan")
     for step in compiled.steps:
         child_class = template_classification(step.goon, kind="Goon")
         if not template_reference_allowed(owner_class, child_class):
-            raise FleetPlanInvalid(f"UX-C {owner_class.value} Plan cannot import {child_class.value} Goon {step.goon!r}")
+            raise FleetPlanInvalid(
+                f"UX-C {owner_class.value} Plan cannot import {child_class.value} Goon {step.goon!r}"
+            )
     # One original source-graph builder, no new import/resolution semantics.
     resolver = FleetPlanResolver(goon_templates=_FrozenGoonSources(goon_store))
     graph = resolver.analyze_source(source.path, compiled_overrides={source.path: compiled})
@@ -158,15 +177,24 @@ def propose_plan(*, key: str, expected_sha256: str,
     # Canonical source graph + resolver do all semantic work. Comparison only
     # projects safe step identities/types and hashed capability contracts.
     resolved_comparison = compare_resolved_drafts(
-        original=original_graph, proposed=graph, resolver=resolver,
-        values={n: coerce_input(d, selected[n], context="UX-C comparison")
-                for n, d in definitions.items() if n in selected},
-        original_names=set(original_defs), proposed_names=set(definitions),
-        original_missing=original_missing, proposed_missing=bool(missing),
+        original=original_graph,
+        proposed=graph,
+        resolver=resolver,
+        values={
+            n: coerce_input(d, selected[n], context="UX-C comparison")
+            for n, d in definitions.items()
+            if n in selected
+        },
+        original_names=set(original_defs),
+        proposed_names=set(definitions),
+        original_missing=original_missing,
+        proposed_missing=bool(missing),
     )
     old = [(s.step_id, s.goon) for s in source.compiled.steps]
     new = [(s.step_id, s.goon) for s in compiled.steps]
-    imports = sorted({(s.goon, graph.goon(source.path, s.goon).source_sha256) for s in compiled.steps})
+    imports = sorted(
+        {(s.goon, graph.goon(source.path, s.goon).source_sha256) for s in compiled.steps}
+    )
     change_classes: list[str] = []
     if hashlib.sha256(plan_yaml.encode()).hexdigest() != source.sha256:
         change_classes.append("source_changed")
@@ -195,10 +223,17 @@ def propose_plan(*, key: str, expected_sha256: str,
         "ordering_changed": old != new,
         "change_classes": change_classes,
         "resolved_comparison": resolved_comparison,
-        "projected_inputs_changed": tuple(source.compiled.projected_inputs) != tuple(compiled.projected_inputs),
-        "recipients": [{"name": i.definition.name, "type": i.definition.input_type.value,
-                        "required": i.definition.required, "owners": [list(p) for p in i.owner_paths]}
-                       for i in inspected],
+        "projected_inputs_changed": tuple(source.compiled.projected_inputs)
+        != tuple(compiled.projected_inputs),
+        "recipients": [
+            {
+                "name": i.definition.name,
+                "type": i.definition.input_type.value,
+                "required": i.definition.required,
+                "owners": [list(p) for p in i.owner_paths],
+            }
+            for i in inspected
+        ],
         "missing_required_inputs": missing,
         "selected_value_names": sorted(selected),
         "preview_ready": not missing,

@@ -126,7 +126,6 @@ class PhysicalFleetPlanExecutorHarness(ProductionFleetPlanRunExecutor):
             **kwargs,
         )
 
-
     def prepare_strict_run(
         self,
         repository: RepositoryIdentity,

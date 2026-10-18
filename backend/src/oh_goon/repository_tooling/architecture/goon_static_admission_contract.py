@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from oh_goon.repository_tooling.architecture.common import Violation
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.goon_static_admission import (

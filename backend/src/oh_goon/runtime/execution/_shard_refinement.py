@@ -9,7 +9,9 @@ from oh_goon.runtime.execution.shard_models import ShardWork
 
 
 def _identity(payload: object) -> str:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
@@ -41,11 +43,17 @@ def refine_children(parent: ShardWork) -> tuple[ShardWork, ShardWork]:
     midpoint = len(parent.members) // 2
     member_groups = (parent.members[:midpoint], parent.members[midpoint:])
     pytest_groups = (
-        parent.pytest_members[:midpoint],
-        parent.pytest_members[midpoint:],
-    ) if parent.pytest_members else ((), ())
+        (
+            parent.pytest_members[:midpoint],
+            parent.pytest_members[midpoint:],
+        )
+        if parent.pytest_members
+        else ((), ())
+    )
     children: list[ShardWork] = []
-    for ordinal, (members, pytest_members) in enumerate(zip(member_groups, pytest_groups, strict=True)):
+    for ordinal, (members, pytest_members) in enumerate(
+        zip(member_groups, pytest_groups, strict=True)
+    ):
         argv = (
             project_pytest_argv(parent.command_prefix, pytest_members)
             if pytest_members
@@ -63,7 +71,9 @@ def refine_children(parent: ShardWork) -> tuple[ShardWork, ShardWork]:
                 parent_work_identity=parent.work_identity,
                 refinement_depth=parent.refinement_depth + 1,
                 pytest_members=pytest_members,
-                original_admitted_member_identities=tuple(member.member_id for member in pytest_members),
+                original_admitted_member_identities=tuple(
+                    member.member_id for member in pytest_members
+                ),
             )
         )
     return children[0], children[1]

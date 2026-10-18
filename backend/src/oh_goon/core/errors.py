@@ -238,7 +238,6 @@ class RepositoryEffectQuarantined(StateConflict):
     retryable = False
 
 
-
 class CandidateCheckpointNotFound(ResourceNotFound):
     """Candidate checkpoint identity does not exist."""
 
@@ -290,6 +289,7 @@ class WorkspaceLeaseExpired(WorkspaceLeaseLost):
 class WorkspaceFenceUnproven(StateConflict):
     """Old physical writer could not be proven quiescent before reuse."""
 
+
 class LeaseLost(StateConflict):
     code = "LEASE_LOST"
     retryable = True
@@ -324,9 +324,7 @@ class FleetPlanInputRejected(FleetPlanInvalid):
     and must never be serialized into the safe diagnostic projection.
     """
 
-    def __init__(
-        self, message: str, *, diagnostic_code: str, input_names: tuple[str, ...]
-    ) -> None:
+    def __init__(self, message: str, *, diagnostic_code: str, input_names: tuple[str, ...]) -> None:
         super().__init__(message)
         self.diagnostic_code = diagnostic_code
         self.input_names = input_names

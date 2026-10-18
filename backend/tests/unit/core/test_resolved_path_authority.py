@@ -6,8 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.path_authority import AttemptWorkspaceAuthority
-
 from oh_goon.core.models.fleet_plan import (
     PathExistsCondition,
     PlanArtifactDeclaration,
@@ -16,6 +14,7 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedFleetPlan,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
+from oh_goon.core.path_authority import AttemptWorkspaceAuthority
 
 
 def _plan(step: ResolvedCommandStep) -> ResolvedFleetPlan:
@@ -79,7 +78,9 @@ def test_resolved_execution_paths_accept_canonical_repository_relative_syntax() 
 def test_attempt_workspace_authority_requires_exact_private_children(tmp_path: Path) -> None:
     root = tmp_path / "attempt"
     root.mkdir()
-    children = {name: root / name for name in ("workspace", "home", "tmp", "cache", "config", "etc")}
+    children = {
+        name: root / name for name in ("workspace", "home", "tmp", "cache", "config", "etc")
+    }
     for path in children.values():
         path.mkdir()
     authority = AttemptWorkspaceAuthority.create(root=root, **children)
@@ -89,7 +90,9 @@ def test_attempt_workspace_authority_requires_exact_private_children(tmp_path: P
 def test_attempt_workspace_authority_rejects_alias_or_escape(tmp_path: Path) -> None:
     root = tmp_path / "attempt"
     root.mkdir()
-    children = {name: root / name for name in ("workspace", "home", "tmp", "cache", "config", "etc")}
+    children = {
+        name: root / name for name in ("workspace", "home", "tmp", "cache", "config", "etc")
+    }
     for path in children.values():
         path.mkdir()
     children["tmp"] = children["home"]

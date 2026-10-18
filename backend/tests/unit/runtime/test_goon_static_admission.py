@@ -73,12 +73,16 @@ def test_every_shipped_canonical_goon_passes_static_admission_without_execution(
     assert str(payload["execution_authority_identity"]).startswith("sha256:")
 
 
-def test_missing_independent_tool_permission_fails_before_workload_execution(tmp_path: Path) -> None:
+def test_missing_independent_tool_permission_fails_before_workload_execution(
+    tmp_path: Path,
+) -> None:
     root = _copy_static_inputs(tmp_path)
     registry_path = root / REQUIREMENTS_FILE
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     registry["workload_tool_permissions"]["make:test-python-complete"].remove("ldd")
-    registry_path.write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    registry_path.write_text(
+        json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     payload = compile_canonical_goons(root)
 
@@ -153,9 +157,7 @@ def test_backend_test_tool_authority_is_stable_after_uv_entrypoint_materializati
     from oh_goon.repository_tooling.goon_static_admission import canonical_step_required_tools
 
     root = _copy_static_inputs(tmp_path)
-    expected = canonical_step_required_tools(
-        root, goon="oh-goon/backend-tests", step_id="make"
-    )
+    expected = canonical_step_required_tools(root, goon="oh-goon/backend-tests", step_id="make")
     wrapper = root / "backend/.venv/bin/oh-goon-test-batches"
     wrapper.parent.mkdir(parents=True)
     wrapper.write_text(
@@ -167,9 +169,7 @@ def test_backend_test_tool_authority_is_stable_after_uv_entrypoint_materializati
     )
     wrapper.chmod(0o755)
 
-    observed = canonical_step_required_tools(
-        root, goon="oh-goon/backend-tests", step_id="make"
-    )
+    observed = canonical_step_required_tools(root, goon="oh-goon/backend-tests", step_id="make")
 
     assert observed == expected
     assert observed == ("git", "ldd", "node", "npm", "sh", "true", "uv")
@@ -179,37 +179,45 @@ def test_make_workload_owner_is_shared_by_every_canonical_consumer() -> None:
     from oh_goon.repository_tooling.goon_static_admission import canonical_step_required_tools
 
     expected = ("sh",)
-    assert canonical_step_required_tools(
-        _root(), goon="oh-goon/integration-contract", step_id="make"
-    ) == expected
-    assert canonical_step_required_tools(
-        _root(), goon="oh-goon/integration-tests", step_id="make"
-    ) == expected
+    assert (
+        canonical_step_required_tools(_root(), goon="oh-goon/integration-contract", step_id="make")
+        == expected
+    )
+    assert (
+        canonical_step_required_tools(_root(), goon="oh-goon/integration-tests", step_id="make")
+        == expected
+    )
 
 
 def test_certification_make_workloads_admit_transitive_shell_and_workspace_tools() -> None:
     from oh_goon.repository_tooling.goon_static_admission import canonical_step_required_tools
 
-    assert canonical_step_required_tools(
-        _root(), goon="oh-goon/tooling-tests", step_id="make"
-    ) == ("bash", "dd", "git", "node", "sh", "uv")
-    assert canonical_step_required_tools(
-        _root(), goon="oh-goon/backend-p0", step_id="make"
-    ) == ("git", "ldd", "sh", "uv")
-    assert canonical_step_required_tools(
-        _root(), goon="oh-goon/architecture", step_id="make"
-    ) == ()
+    assert canonical_step_required_tools(_root(), goon="oh-goon/tooling-tests", step_id="make") == (
+        "bash",
+        "dd",
+        "git",
+        "node",
+        "sh",
+        "uv",
+    )
+    assert canonical_step_required_tools(_root(), goon="oh-goon/backend-p0", step_id="make") == (
+        "git",
+        "ldd",
+        "sh",
+        "uv",
+    )
+    assert canonical_step_required_tools(_root(), goon="oh-goon/architecture", step_id="make") == ()
 
 
 def test_architecture_does_not_require_package_manager_tool_authority() -> None:
     from oh_goon.repository_tooling.goon_static_admission import canonical_step_required_tools
 
-    assert canonical_step_required_tools(
-        _root(), goon="oh-goon/architecture", step_id="make"
-    ) == ()
+    assert canonical_step_required_tools(_root(), goon="oh-goon/architecture", step_id="make") == ()
+
 
 def test_shell_runtime_support_contract_is_execution_authority_identity(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     import oh_goon.integrations.workload_execution_requirements as workload_requirements
 
@@ -235,7 +243,14 @@ def test_tooling_complete_opaque_runtime_authority_is_explicit_and_proven(tmp_pa
     requirements = load_workload_execution_requirements(root)
     owner = "make:test-tooling-complete"
 
-    assert required_tools_for_owner(requirements, owner) == ("bash", "dd", "git", "node", "sh", "uv")
+    assert required_tools_for_owner(requirements, owner) == (
+        "bash",
+        "dd",
+        "git",
+        "node",
+        "sh",
+        "uv",
+    )
     for tool in ("bash", "dd", "git", "node"):
         assert (
             tool,
@@ -256,22 +271,21 @@ def test_tooling_complete_opaque_runtime_authority_is_explicit_and_proven(tmp_pa
 
 
 @pytest.mark.parametrize("tool", ("dd", "git"))
-def test_tooling_runtime_need_must_fit_independent_permission(
-    tmp_path: Path, tool: str
-) -> None:
+def test_tooling_runtime_need_must_fit_independent_permission(tmp_path: Path, tool: str) -> None:
     root = _copy_static_inputs(tmp_path)
     registry_path = root / REQUIREMENTS_FILE
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     registry["workload_tool_permissions"]["make:test-tooling-complete"].remove(tool)
-    registry_path.write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    registry_path.write_text(
+        json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     payload = compile_canonical_goons(root)
 
     issue = next(
         item
         for item in payload["issues"]
-        if item["code"] == "TOOL_PERMISSION_MISSING"
-        and item.get("goon") == "oh-goon/tooling-tests"
+        if item["code"] == "TOOL_PERMISSION_MISSING" and item.get("goon") == "oh-goon/tooling-tests"
     )
     assert issue["missing_tools"] == [tool]
     assert issue["authority_paths"] == [
@@ -295,8 +309,7 @@ def test_candidate_added_executable_requirement_cannot_self_authorize(tmp_path: 
     issue = next(
         item
         for item in payload["issues"]
-        if item["code"] == "TOOL_PERMISSION_MISSING"
-        and item.get("goon") == "oh-goon/backend-p0"
+        if item["code"] == "TOOL_PERMISSION_MISSING" and item.get("goon") == "oh-goon/backend-p0"
     )
     assert issue["missing_tools"] == ["curl"]
     assert issue["authority_paths"] == ["verify-p0 -> <opaque-owned-boundary> -> curl"]
@@ -316,15 +329,16 @@ def test_generated_tool_transport_must_match_current_derived_need(tmp_path: Path
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     permitted = registry["workload_tool_permissions"]["make:verify-p0"]
     registry["workload_tool_permissions"]["make:verify-p0"] = sorted([*permitted, "curl"])
-    registry_path.write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    registry_path.write_text(
+        json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     payload = compile_canonical_goons(root)
 
     issue = next(
         item
         for item in payload["issues"]
-        if item["code"] == "TOOL_AUTHORITY_MISSING"
-        and item.get("goon") == "oh-goon/backend-p0"
+        if item["code"] == "TOOL_AUTHORITY_MISSING" and item.get("goon") == "oh-goon/backend-p0"
     )
     assert issue["missing_tools"] == ["curl"]
 
@@ -335,12 +349,19 @@ def test_make_recipe_shell_is_derived_without_handwritten_tool_allow() -> None:
     path = _root() / "templates/goons/oh-goon/tooling-tests/goon.yml"
     text = path.read_text(encoding="utf-8")
     assert "tools:" not in text
-    assert canonical_step_required_tools(
-        _root(), goon="oh-goon/tooling-tests", step_id="make"
-    ) == ("bash", "dd", "git", "node", "sh", "uv")
+    assert canonical_step_required_tools(_root(), goon="oh-goon/tooling-tests", step_id="make") == (
+        "bash",
+        "dd",
+        "git",
+        "node",
+        "sh",
+        "uv",
+    )
 
 
-def test_make_workload_requirement_change_invalidates_every_consumer_permission(tmp_path: Path) -> None:
+def test_make_workload_requirement_change_invalidates_every_consumer_permission(
+    tmp_path: Path,
+) -> None:
     root = _copy_static_inputs(tmp_path)
     makefile = root / "Makefile"
     text = makefile.read_text(encoding="utf-8")
@@ -392,7 +413,9 @@ def test_permission_ceiling_may_be_broader_without_broadening_runtime_step(tmp_p
     registry["workload_tool_permissions"]["make:test-python-complete"] = sorted(
         [*permitted, "curl"]
     )
-    registry_path.write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    registry_path.write_text(
+        json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     payload = compile_canonical_goons(root)
 
@@ -401,9 +424,7 @@ def test_permission_ceiling_may_be_broader_without_broadening_runtime_step(tmp_p
 
     compiled = GoonTemplateStore(root / "templates/goons").source("oh-goon/backend-tests").compiled
     assert "curl" not in compiled.steps[0].capabilities.tools
-    assert compiled.steps[0].capabilities.tools == (
-        "git", "ldd", "node", "npm", "sh", "true", "uv"
-    )
+    assert compiled.steps[0].capabilities.tools == ("git", "ldd", "node", "npm", "sh", "true", "uv")
 
 
 def test_new_direct_canonical_goon_needs_no_mirrored_execution_policy(tmp_path: Path) -> None:

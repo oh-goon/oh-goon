@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from oh_goon.core.capability_registry import recipe_capability_definitions
-from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.models.command_center import FleetCommandCenter, RecipeFleetStatus
 from oh_goon.core.models.run import fleet_run_outcome
 from oh_goon.core.models.target import UvRecipeTarget
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.recipes import recipe_spec
 from oh_goon.runtime.state import LocalState
 from oh_goon.services.repositories import RepositoryService
@@ -58,7 +58,9 @@ class CommandCenterService:
             journal_revision=state.journal.revision,
             repository_ids=tuple(sorted(entry.repository.repository_id for entry in included)),
             repository_instance_ids={
-                entry.repository.repository_id: repository_subject_instance_id(entry.repository.path)
+                entry.repository.repository_id: repository_subject_instance_id(
+                    entry.repository.path
+                )
                 for entry in included
             },
             recipes=rows,

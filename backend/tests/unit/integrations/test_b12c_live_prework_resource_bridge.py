@@ -1,4 +1,5 @@
 """B12C pre-effect bridge regression: no physical work without committed original intent."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,8 +11,8 @@ import pytest
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_local_lace_intent import local_resource_identities
-from oh_goon.runtime.enforcer_lace_local_resource_intent import LocalLaceJournalReservation
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
+from oh_goon.runtime.enforcer_lace_local_resource_intent import LocalLaceJournalReservation
 from tests.unit.core.test_enforcer_lace_trust import authenticator
 from tests.unit.runtime.test_b12_local_resource_intent import _store
 
@@ -19,21 +20,42 @@ from tests.unit.runtime.test_b12_local_resource_intent import _store
 def _request(tmp_path: Path):
     root = tmp_path / "attempt-one"
     attempt = SimpleNamespace(
-        paths=SimpleNamespace(root=root, workspace=root / "workspace", cache=root / "cache",
-                              etc=root / "etc", home=root / "home", tmp=root / "tmp",
-                              config=root / "config"),
+        paths=SimpleNamespace(
+            root=root,
+            workspace=root / "workspace",
+            cache=root / "cache",
+            etc=root / "etc",
+            home=root / "home",
+            tmp=root / "tmp",
+            config=root / "config",
+        ),
         attempt_number=1,
-        runtime_root=SimpleNamespace(root=root / "runtime", identity=SimpleNamespace(sha256="a" * 64), uv_system_python=None),
+        runtime_root=SimpleNamespace(
+            root=root / "runtime", identity=SimpleNamespace(sha256="a" * 64), uv_system_python=None
+        ),
         egress=SimpleNamespace(model_dump=lambda **_: {"mode": "none"}),
-        resources=SimpleNamespace(model_dump=lambda **_: {"cpu_millis": 400, "memory_mib": None, "max_processes": None}),
+        resources=SimpleNamespace(
+            model_dump=lambda **_: {"cpu_millis": 400, "memory_mib": None, "max_processes": None}
+        ),
         nested_strict_execution=False,
-        sandbox_bindings=(), host_tools=(),
+        sandbox_bindings=(),
+        host_tools=(),
     )
-    return SimpleNamespace(attempt=attempt, fleet_run_id="run-one", step_id="step-1", command_ordinal=1, cwd=root / "workspace", local_resource_intent=None, termination_requested=None, read_only_workspace=None)
+    return SimpleNamespace(
+        attempt=attempt,
+        fleet_run_id="run-one",
+        step_id="step-1",
+        command_ordinal=1,
+        cwd=root / "workspace",
+        local_resource_intent=None,
+        termination_requested=None,
+        read_only_workspace=None,
+    )
 
 
 def _backend(monkeypatch):
     import oh_goon.integrations.fleet_plan_bubblewrap_isolation as owner
+
     backend = BubblewrapProcessIsolation("/bin/true", require_local_resource_intent=True)
     monkeypatch.setattr(backend, "configuration_identity", lambda: "chosen-bwrap-configuration")
     monkeypatch.setattr(owner, "verify_selected_backend", lambda *a: None)
@@ -41,9 +63,11 @@ def _backend(monkeypatch):
     # and aborts at mocked CgroupV2AttemptLease.create. Dedicated B27B2B2A
     # tests exercise real source-FD pinning and unsupported-bwrap rejection.
     from contextlib import nullcontext
+
     monkeypatch.setattr(owner, "require_bubblewrap_fd_binding", lambda *a: None)
-    monkeypatch.setattr(owner.OriginalBindSourceLease, "pin_prepared",
-                        lambda *a: nullcontext(object()))
+    monkeypatch.setattr(
+        owner.OriginalBindSourceLease, "pin_prepared", lambda *a: nullcontext(object())
+    )
     touched = Mock(side_effect=RuntimeError("PHYSICAL_RESOURCE_CREATION_REACHED"))
     monkeypatch.setattr(owner.CgroupV2AttemptLease, "create", touched)
     return backend, touched
@@ -52,10 +76,15 @@ def _backend(monkeypatch):
 def _permit(tmp_path: Path, request, backend):
     conn, journal = _store(tmp_path / "journal.db")
     permit = LocalLaceJournalReservation(
-        journal=journal, authenticator=authenticator(), run_id="run-one",
-        step_id="step-1", attempt_number=1, command_ordinal=1,
+        journal=journal,
+        authenticator=authenticator(),
+        run_id="run-one",
+        step_id="step-1",
+        attempt_number=1,
+        command_ordinal=1,
         attempt_root=request.attempt.paths.root,
-        control_epoch=1, lease_identity="lease-one",
+        control_epoch=1,
+        lease_identity="lease-one",
         execution_environment_identity="sha256:" + "a" * 64,
         backend_capability_manifest_identity="sha256:" + "b" * 64,
         backend_configuration_identity=backend.configuration_identity(),
@@ -95,11 +124,24 @@ def test_authenticated_reservation_commits_before_first_native_effect(tmp_path, 
     conn.close()
 
 
-@pytest.mark.parametrize("mutation", [
-    "foreign-run", "foreign-step", "other-attempt", "other-command", "other-root", "changed-backend",
-    "stale-epoch", "stale-lease", "wrong-signing-key", "tampered-history",
-])
-def test_mismatched_or_stale_original_authority_fails_before_any_effect(tmp_path, monkeypatch, mutation):
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "foreign-run",
+        "foreign-step",
+        "other-attempt",
+        "other-command",
+        "other-root",
+        "changed-backend",
+        "stale-epoch",
+        "stale-lease",
+        "wrong-signing-key",
+        "tampered-history",
+    ],
+)
+def test_mismatched_or_stale_original_authority_fails_before_any_effect(
+    tmp_path, monkeypatch, mutation
+):
     from dataclasses import replace
 
     backend, touched = _backend(monkeypatch)
@@ -141,13 +183,20 @@ def test_resource_projection_tracks_actual_attempt_policy_and_mounts(tmp_path):
     assert before["cgroup"] != after["cgroup"]
     assert before["workspace"] == after["workspace"]
     request.attempt.sandbox_bindings = (
-        SimpleNamespace(snapshot_path=tmp_path / "source", sandbox_path=Path("/tools"), identity=SimpleNamespace(sha256="b" * 64)),
+        SimpleNamespace(
+            snapshot_path=tmp_path / "source",
+            sandbox_path=Path("/tools"),
+            identity=SimpleNamespace(sha256="b" * 64),
+        ),
     )
     assert local_resource_identities(request)["mounts"] != after["mounts"]
 
 
-def test_two_distinct_commands_same_step_attempt_have_distinct_durable_identity(tmp_path, monkeypatch):
+def test_two_distinct_commands_same_step_attempt_have_distinct_durable_identity(
+    tmp_path, monkeypatch
+):
     from dataclasses import replace
+
     backend, touched = _backend(monkeypatch)
     request = _request(tmp_path)
     conn, journal, permit = _permit(tmp_path, request, backend)
@@ -157,7 +206,11 @@ def test_two_distinct_commands_same_step_attempt_have_distinct_durable_identity(
         with pytest.raises(RuntimeError, match="PHYSICAL_RESOURCE_CREATION_REACHED"):
             _execute(backend, request)
     events = journal.verify("run-one", auth=authenticator())
-    assert [event["kind"] for event in events] == ["RUN_ADMITTED", "RESOURCE_INTENT", "RESOURCE_INTENT"]
+    assert [event["kind"] for event in events] == [
+        "RUN_ADMITTED",
+        "RESOURCE_INTENT",
+        "RESOURCE_INTENT",
+    ]
     assert events[1]["payload"]["attempt_identity"] != events[2]["payload"]["attempt_identity"]
     assert touched.call_count == 2
     conn.close()
@@ -166,6 +219,7 @@ def test_two_distinct_commands_same_step_attempt_have_distinct_durable_identity(
 def test_original_step_runner_transports_one_ordered_invocation_stream(tmp_path, monkeypatch):
     import oh_goon.integrations.fleet_plan_step_execution as owner
     from oh_goon.engine.command import CommandResult
+
     requests = []
     issued = []
     monkeypatch.setattr(owner, "verify_step_executable_materialization", lambda *args: "rechecked")
@@ -186,8 +240,12 @@ def test_original_step_runner_transports_one_ordered_invocation_stream(tmp_path,
         return object()
 
     runner = owner._isolated_command_runner(
-        attempt, step, RecordingBackend(), termination_requested=None,
-        fleet_run_id="run-one", local_resource_intent_for=owner_factory,
+        attempt,
+        step,
+        RecordingBackend(),
+        termination_requested=None,
+        fleet_run_id="run-one",
+        local_resource_intent_for=owner_factory,
     )
     for argv in (("git", "status"), ("true",)):
         runner(*argv, cwd=tmp_path / "workspace", env={"SECRETS": "never-in-journal"})
@@ -205,14 +263,18 @@ def test_mandatory_local_lace_policy_is_part_of_selected_backend_identity():
 
 def test_fake_commit_proof_does_not_enable_resource_creation(tmp_path, monkeypatch):
     from oh_goon.core.ports.local_lace_intent import LocalLaceIntentProof
+
     backend, touched = _backend(monkeypatch)
     request = _request(tmp_path)
 
     class FakeReservation:
         def reserve(self, request, backend):
             return LocalLaceIntentProof(
-                run_id="other-run", step_id="step-1", command_ordinal=1,
-                run_seq=2, attempt_identity="sha256:" + "a" * 64,
+                run_id="other-run",
+                step_id="step-1",
+                command_ordinal=1,
+                run_seq=2,
+                attempt_identity="sha256:" + "a" * 64,
             )
 
     request.local_resource_intent = FakeReservation()

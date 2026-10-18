@@ -3,6 +3,7 @@
 The SQLITE_FULL test uses SQLite's own max_page_count to force an actual pager
 failure and rollback. It is NOT an OS ENOSPC/fsync or native WSL fault receipt.
 """
+
 from __future__ import annotations
 
 import multiprocessing
@@ -25,7 +26,9 @@ def _write_contended(path: str, worker: int, count: int) -> None:
             )
 
 
-def test_reused_operational_handle_refuses_downgraded_synchronous_before_work(tmp_path: Path) -> None:
+def test_reused_operational_handle_refuses_downgraded_synchronous_before_work(
+    tmp_path: Path,
+) -> None:
     database = LocalDatabase(tmp_path / "durability.db", journal_mode="DELETE")
     with database.execution_connection_scope():
         scoped = database._connection_scope.connection
@@ -45,7 +48,9 @@ def test_reused_operational_handle_refuses_downgraded_synchronous_before_work(tm
     assert LocalDatabase(database.path, journal_mode="DELETE").durable_revision() == 1
 
 
-@pytest.mark.parametrize("misconfiguration", ["PRAGMA foreign_keys = OFF", "PRAGMA query_only = ON"])
+@pytest.mark.parametrize(
+    "misconfiguration", ["PRAGMA foreign_keys = OFF", "PRAGMA query_only = ON"]
+)
 def test_reused_handle_rejects_connection_policy_drift_before_work(
     tmp_path: Path, misconfiguration: str
 ) -> None:
@@ -101,19 +106,25 @@ def test_real_sqlite_full_rolls_back_entire_original_owner_cut(tmp_path: Path) -
     reopened = LocalDatabase(path, journal_mode="DELETE")
     with reopened.transaction() as reader:
         assert reader.execute("SELECT COUNT(*) FROM locations").fetchone()[0] == 0
-        assert reader.execute(
-            "SELECT durable_revision FROM state_metadata WHERE singleton=1"
-        ).fetchone()[0] == 0
+        assert (
+            reader.execute(
+                "SELECT durable_revision FROM state_metadata WHERE singleton=1"
+            ).fetchone()[0]
+            == 0
+        )
 
 
-def test_concurrent_independent_processes_preserve_single_serial_commit_history(tmp_path: Path) -> None:
+def test_concurrent_independent_processes_preserve_single_serial_commit_history(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "concurrent.db"
     LocalDatabase(path, journal_mode="DELETE")
     ctx = multiprocessing.get_context("spawn")
     worker_count = 3
     each = 9
-    processes = [ctx.Process(target=_write_contended, args=(str(path), w, each))
-                 for w in range(worker_count)]
+    processes = [
+        ctx.Process(target=_write_contended, args=(str(path), w, each)) for w in range(worker_count)
+    ]
     for process in processes:
         process.start()
     try:
@@ -129,4 +140,7 @@ def test_concurrent_independent_processes_preserve_single_serial_commit_history(
     assert after.durable_revision() == worker_count * each
     with after.transaction() as reader:
         assert reader.execute("SELECT COUNT(*) FROM locations").fetchone()[0] == worker_count * each
-        assert reader.execute("SELECT COUNT(DISTINCT path) FROM locations").fetchone()[0] == worker_count * each
+        assert (
+            reader.execute("SELECT COUNT(DISTINCT path) FROM locations").fetchone()[0]
+            == worker_count * each
+        )

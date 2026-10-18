@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import shutil
 import hashlib
+import shutil
 from pathlib import Path
 
 import pytest
@@ -28,7 +28,9 @@ def _binding_map(step):
 
 
 @pytest.mark.parametrize("key,fixture,edges", KEYS)
-def test_compiled_templates_have_exact_semantic_binding_parity(key: str, fixture: str, edges: int) -> None:
+def test_compiled_templates_have_exact_semantic_binding_parity(
+    key: str, fixture: str, edges: int
+) -> None:
     legacy = parse_goon_template(
         (FIXTURES / fixture).read_text(encoding="utf-8"),
         source=str(FIXTURES / fixture),
@@ -44,20 +46,28 @@ def test_compiled_templates_have_exact_semantic_binding_parity(key: str, fixture
     assert legacy.execution == authored.execution
     assert legacy.env == authored.env
     assert len(legacy.steps) == len(authored.steps)
-    for previous, now in zip(legacy.steps, authored.steps):
+    for previous, now in zip(legacy.steps, authored.steps, strict=False):
         assert (previous.goon, previous.step_id, previous.failure_impact) == (
-            now.goon, now.step_id, now.failure_impact
+            now.goon,
+            now.step_id,
+            now.failure_impact,
         )
         assert _binding_map(previous) == _binding_map(now)
-    assert sum(
-        binding.value.startswith("${{ inputs.")
-        for step in authored.steps
-        for binding in step.inputs
-        if isinstance(binding.value, str)
-    ) == edges
-    assert parse_goon_template(
-        (SHIPPED_GOONS / key / "goon.yml").read_text(), expected_name=key.split("/")[1]
-    ) == authored
+    assert (
+        sum(
+            binding.value.startswith("${{ inputs.")
+            for step in authored.steps
+            for binding in step.inputs
+            if isinstance(binding.value, str)
+        )
+        == edges
+    )
+    assert (
+        parse_goon_template(
+            (SHIPPED_GOONS / key / "goon.yml").read_text(), expected_name=key.split("/")[1]
+        )
+        == authored
+    )
 
 
 @pytest.mark.parametrize("key,fixture,_", KEYS)

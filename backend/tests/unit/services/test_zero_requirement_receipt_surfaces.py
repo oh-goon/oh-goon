@@ -40,8 +40,7 @@ def test_zero_requirement_strict_run_serializes_detail_and_enforcer_receipts(
     detail = _zero_requirement_detail(tmp_path)
     detail_payload = detail.model_dump(mode="json", exclude={"game_tape"})
     assert (
-        detail_payload["plan_trust_receipts"][0]["receipt"]["admission"]["requirement_count"]
-        == 0
+        detail_payload["plan_trust_receipts"][0]["receipt"]["admission"]["requirement_count"] == 0
     )
 
     class Manager:
@@ -52,9 +51,7 @@ def test_zero_requirement_strict_run_serializes_detail_and_enforcer_receipts(
     app = FastAPI()
     app.include_router(fleet_runs.router, prefix="/api")
     app.dependency_overrides[dependencies.fleet_run_control_plane] = lambda: Manager()
-    response = TestClient(app).get(
-        f"/api/fleet/runs/{detail.run.fleet_run_id}/enforcer.yml"
-    )
+    response = TestClient(app).get(f"/api/fleet/runs/{detail.run.fleet_run_id}/enforcer.yml")
 
     assert response.status_code == 200
     payload = yaml.safe_load(response.text)

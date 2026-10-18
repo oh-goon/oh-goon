@@ -14,7 +14,6 @@ from oh_goon.core.models.game_tape import (
     GameTapeRepositoryExecution,
     GameTapeRequirementFact,
     GameTapeRuntimeFact,
-    GameTapeStepExecution,
     GameTapeSummary,
     GameTapeToolFingerprint,
 )
@@ -108,9 +107,7 @@ def _runtime_facts(plan: ResolvedFleetPlan | None) -> tuple[GameTapeRuntimeFact,
         for step in plan.steps:
             if not isinstance(step, ResolvedPreCommitStep):
                 continue
-            candidates = (
-                ("pre-commit", step.runner_requirement.removeprefix("pre-commit==")),
-            )
+            candidates = (("pre-commit", step.runner_requirement.removeprefix("pre-commit==")),)
             for name, version in candidates:
                 key = (name, version)
                 if key not in seen:
@@ -160,10 +157,10 @@ def _requirement_description(requirement: RepositoryRequirement) -> str:
     return f"{kind.replace('_', ' ')} · {facts}"
 
 
-
 def _fleet_plan_result(report: OperationReport):
     evidence = report.evidence
     return evidence.plan if isinstance(evidence, FleetPlanOperationEvidence) else None
+
 
 def project_receipt(detail: FleetRunDetail) -> GameTapeReceipt:
     run = detail.run

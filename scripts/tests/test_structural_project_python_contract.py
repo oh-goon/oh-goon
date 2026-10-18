@@ -37,7 +37,7 @@ def _minimal_repo(tmp_path: Path) -> Path:
     _write(
         root,
         "backend/pyproject.toml",
-        "[project]\nname = \"oh-goon\"\nversion = \"0.0.0\"\n"
+        '[project]\nname = "oh-goon"\nversion = "0.0.0"\n'
         f"[project.scripts]\n{scripts}\n",
     )
     return root
@@ -61,13 +61,21 @@ def test_required_entrypoint_ownership_is_toml_representation_invariant(
     pyproject = root / "backend/pyproject.toml"
     pyproject.write_text(
         pyproject.read_text(encoding="utf-8")
-        .replace(' = "oh_goon.repository_tooling.placeholder:main"', "='oh_goon.repository_tooling.placeholder:main'")
-        .replace("oh-goon-workflow='oh_goon.repository_tooling.placeholder:main'", "oh-goon-workflow = 'oh_goon.repository_tooling.placeholder:main'"),
+        .replace(
+            ' = "oh_goon.repository_tooling.placeholder:main"',
+            "='oh_goon.repository_tooling.placeholder:main'",
+        )
+        .replace(
+            "oh-goon-workflow='oh_goon.repository_tooling.placeholder:main'",
+            "oh-goon-workflow = 'oh_goon.repository_tooling.placeholder:main'",
+        ),
         encoding="utf-8",
     )
 
     messages = _messages(root)
-    assert not any("missing canonical pyproject entrypoint" in message for message in messages)
+    assert not any(
+        "missing canonical pyproject entrypoint" in message for message in messages
+    )
 
 
 def test_project_python_contract_requires_every_canonical_entrypoint(
@@ -157,12 +165,14 @@ def test_project_python_contract_command_ownership_is_callable_name_invariant(
     )
 
     module.write_text(
-        'def whatever_private_name() -> int:\n    return 0\n\n'
+        "def whatever_private_name() -> int:\n    return 0\n\n"
         'if __name__ == "__main__":\n    raise SystemExit(whatever_private_name())\n',
         encoding="utf-8",
     )
     pyproject.write_text(
-        pyproject.read_text(encoding="utf-8").replace(":cli'", ":whatever_private_name'"),
+        pyproject.read_text(encoding="utf-8").replace(
+            ":cli'", ":whatever_private_name'"
+        ),
         encoding="utf-8",
     )
     assert not any(
@@ -197,20 +207,29 @@ def test_project_python_contract_requires_precommit_and_make_tool_ownership(
     )
     _write(root, "Makefile", "bad:\n\tnpx playwright test\n")
     messages = _messages(root)
-    assert any("pre-commit repository Python must use uv" in message for message in messages)
-    assert any("frontend repository commands must execute through npm scripts" in message for message in messages)
+    assert any(
+        "pre-commit repository Python must use uv" in message for message in messages
+    )
+    assert any(
+        "frontend repository commands must execute through npm scripts" in message
+        for message in messages
+    )
 
 
-def test_project_python_contract_matches_make_targets_by_exact_name(tmp_path: Path) -> None:
+def test_project_python_contract_matches_make_targets_by_exact_name(
+    tmp_path: Path,
+) -> None:
     root = _minimal_repo(tmp_path)
     _write(
         root,
         "Makefile",
-        "diagnostic-system-check:\n\t@true\n\n"
-        "certification-setup:\n\t@true\n",
+        "diagnostic-system-check:\n\t@true\n\ncertification-setup:\n\t@true\n",
     )
     messages = _messages(root)
-    assert not any("obsolete developer bootstrap target must not exist: setup" in message for message in messages)
+    assert not any(
+        "obsolete developer bootstrap target must not exist: setup" in message
+        for message in messages
+    )
 
 
 def test_project_python_contract_requires_direct_native_frontend_materialization(
@@ -220,7 +239,10 @@ def test_project_python_contract_requires_direct_native_frontend_materialization
     _write(root, "Makefile", "frontend-install:\n\tsh scripts/frontend_install.sh\n")
     _write(root, "scripts/frontend_install.sh", "#!/bin/sh\nnpm ci\n")
     messages = _messages(root)
-    assert any("frontend materialization must delegate directly to native npm ci" in message for message in messages)
+    assert any(
+        "frontend materialization must delegate directly to native npm ci" in message
+        for message in messages
+    )
 
 
 def test_project_python_contract_requires_path_safe_native_command_and_run_log_presentation(
@@ -230,20 +252,26 @@ def test_project_python_contract_requires_path_safe_native_command_and_run_log_p
     _write(
         root,
         "backend/src/oh_goon/repository_tooling/native_command.py",
-        'child_env = os.environ.copy()\n_native_uv_environment_evidence(child_env)\n'
+        "child_env = os.environ.copy()\n_native_uv_environment_evidence(child_env)\n"
         '"UV_DEFAULT_INDEX", "UV_INDEX"\n"UV_CONFIG_FILE"\n',
     )
     _write(root, "scripts/run_logged.sh", '#!/bin/sh\n"$@"\n')
     messages = _messages(root)
     assert any("--path-label privacy protocol" in message for message in messages)
-    assert any("observable privacy/progress protocol" in message for message in messages)
+    assert any(
+        "observable privacy/progress protocol" in message for message in messages
+    )
 
 
 def test_project_python_contract_requires_live_certification_progress_projection(
     tmp_path: Path,
 ) -> None:
     root = _minimal_repo(tmp_path)
-    _write(root, "backend/src/oh_goon/cli_runtime_plans.py", "game_tape_live_output = True\n")
+    _write(
+        root,
+        "backend/src/oh_goon/cli_runtime_plans.py",
+        "game_tape_live_output = True\n",
+    )
     assert any(
         "certification progress must remain live presentation" in message
         for message in _messages(root)
@@ -259,8 +287,7 @@ def _write_certification_progress_relationship(
     _write(
         root,
         "backend/src/oh_goon/application.py",
-        "class ApplicationRuntime:\n"
-        "    runs: FleetRunControlPlane\n",
+        "class ApplicationRuntime:\n    runs: FleetRunControlPlane\n",
     )
     _write(
         root,
@@ -314,8 +341,7 @@ def test_certification_progress_ownership_is_identifier_representation_invariant
     )
 
     assert not any(
-        "certification progress must" in message
-        for message in _messages(root)
+        "certification progress must" in message for message in _messages(root)
     )
 
 
@@ -366,16 +392,34 @@ def test_project_python_contract_requires_native_lock_authority_and_privacy(
     tmp_path: Path,
 ) -> None:
     root = _minimal_repo(tmp_path)
-    _write(root, "backend/src/oh_goon/repository_tooling/dependency_lock_authoring.py", "VALUE = 1\n")
-    _write(root, "backend/src/oh_goon/repository_tooling/dependency_locks.py", "import tomllib\n")
-    _write(root, "backend/src/oh_goon/repository_tooling/public_dependency_privacy.py", "VALUE = 1\n")
+    _write(
+        root,
+        "backend/src/oh_goon/repository_tooling/dependency_lock_authoring.py",
+        "VALUE = 1\n",
+    )
+    _write(
+        root,
+        "backend/src/oh_goon/repository_tooling/dependency_locks.py",
+        "import tomllib\n",
+    )
+    _write(
+        root,
+        "backend/src/oh_goon/repository_tooling/public_dependency_privacy.py",
+        "VALUE = 1\n",
+    )
     messages = _messages(root)
-    assert any("dependency lock authoring must be owned directly by uv/npm" in message for message in messages)
+    assert any(
+        "dependency lock authoring must be owned directly by uv/npm" in message
+        for message in messages
+    )
     assert any("native uv lock --check" in message for message in messages)
     assert any("native npm ci" in message for message in messages)
-    assert any("must not read or parse lock contents" in message for message in messages)
     assert any(
-        "dependency privacy" in message and ("must consume" in message or "consumer is missing" in message)
+        "must not read or parse lock contents" in message for message in messages
+    )
+    assert any(
+        "dependency privacy" in message
+        and ("must consume" in message or "consumer is missing" in message)
         for message in messages
     )
 
@@ -415,7 +459,10 @@ def test_project_python_contract_rejects_parallel_browser_lock_selection(
         "payload = json.loads(authority.read_text())\n",
     )
     messages = _messages(root)
-    assert any("must not parse package-lock semantics in parallel with npm" in message for message in messages)
+    assert any(
+        "must not parse package-lock semantics in parallel with npm" in message
+        for message in messages
+    )
 
 
 def test_project_python_contract_requires_operator_uv_native_command_boundary(
@@ -425,16 +472,21 @@ def test_project_python_contract_requires_operator_uv_native_command_boundary(
     _write(
         root,
         "backend/src/oh_goon/repository_tooling/native_command.py",
-        'DEFAULT_MAX_ATTEMPTS = 20\n'
-        'child_env = os.environ.copy()\n'
+        "DEFAULT_MAX_ATTEMPTS = 20\n"
+        "child_env = os.environ.copy()\n"
         'child_env.pop("UV_SYSTEM_CERTS", None)\n',
     )
     messages = _messages(root)
     assert any(
-        "native-tool observer must own exactly one non-repeating native execution attempt" in message
+        "native-tool observer must own exactly one non-repeating native execution attempt"
+        in message
         for message in messages
     )
-    assert any("certification must inherit operator/native environment instead of removing UV_SYSTEM_CERTS" in message for message in messages)
+    assert any(
+        "certification must inherit operator/native environment instead of removing UV_SYSTEM_CERTS"
+        in message
+        for message in messages
+    )
 
 
 def test_native_command_structural_contract_rejects_renamed_retry_loop_and_aliased_sleep(
@@ -466,7 +518,8 @@ def test_native_command_structural_contract_rejects_renamed_retry_loop_and_alias
     )
 
     assert any(
-        "native-tool observer must own exactly one non-repeating native execution attempt" in message
+        "native-tool observer must own exactly one non-repeating native execution attempt"
+        in message
         for message in _messages(root)
     )
 
@@ -496,7 +549,8 @@ def test_native_command_structural_contract_rejects_recursive_retry_under_rename
     )
 
     assert any(
-        "native-tool observer must own exactly one non-repeating native execution attempt" in message
+        "native-tool observer must own exactly one non-repeating native execution attempt"
+        in message
         for message in _messages(root)
     )
 
@@ -526,7 +580,8 @@ def test_native_command_structural_contract_accepts_one_attempt_without_retry_na
     )
 
     assert not any(
-        "native-tool observer must own exactly one non-repeating native execution attempt" in message
+        "native-tool observer must own exactly one non-repeating native execution attempt"
+        in message
         for message in _messages(root)
     )
 
@@ -545,8 +600,15 @@ def test_project_python_contract_requires_native_release_stamping(
         "tomllib.loads(backend_lock_text)\n",
     )
     messages = _messages(root)
-    assert any("release version stamping must delegate to native package-manager command" in message for message in messages)
-    assert any("must not manually reinterpret package-manager lock metadata" in message for message in messages)
+    assert any(
+        "release version stamping must delegate to native package-manager command"
+        in message
+        for message in messages
+    )
+    assert any(
+        "must not manually reinterpret package-manager lock metadata" in message
+        for message in messages
+    )
 
 
 def test_project_python_contract_rejects_network_capable_shipped_goons(

@@ -1,4 +1,5 @@
 """WF-02 is a review cut: it must not activate trusted-local execution."""
+
 from __future__ import annotations
 
 import pytest
@@ -7,10 +8,10 @@ from pydantic import ValidationError
 from oh_goon.core.models.fleet_plan_execution_policy import (
     CicdExecutionPolicy,
     InspectionExecutionPolicy,
+    LaceRequiredGuarantees,
     MaintenanceExecutionPolicy,
     MigrationExecutionPolicy,
     VerificationExecutionPolicy,
-    LaceRequiredGuarantees,
     compile_lace_required_guarantees,
 )
 from oh_goon.core.models.fleet_plan_isolation import (
@@ -20,14 +21,17 @@ from oh_goon.core.models.fleet_plan_isolation import (
 )
 
 
-@pytest.mark.parametrize("policy", [
-    CicdExecutionPolicy(trust_repository_code=True),
-    CicdExecutionPolicy(trust_repository_code=False),
-    InspectionExecutionPolicy(),
-    MaintenanceExecutionPolicy(),
-    MigrationExecutionPolicy(),
-    VerificationExecutionPolicy(),
-])
+@pytest.mark.parametrize(
+    "policy",
+    [
+        CicdExecutionPolicy(trust_repository_code=True),
+        CicdExecutionPolicy(trust_repository_code=False),
+        InspectionExecutionPolicy(),
+        MaintenanceExecutionPolicy(),
+        MigrationExecutionPolicy(),
+        VerificationExecutionPolicy(),
+    ],
+)
 def test_trusted_local_requires_separate_human_approval_for_every_purpose(policy):
     projection = compile_lace_required_guarantees(policy)
     assert projection.trusted_local_execution == "not_approved"
@@ -72,8 +76,12 @@ def test_untrusted_and_trusted_repo_cannot_be_conflated():
 
 
 def test_non_cicd_purposes_do_not_inherit_trusted_execution():
-    for policy in (MaintenanceExecutionPolicy(), MigrationExecutionPolicy(),
-                   VerificationExecutionPolicy(), InspectionExecutionPolicy()):
+    for policy in (
+        MaintenanceExecutionPolicy(),
+        MigrationExecutionPolicy(),
+        VerificationExecutionPolicy(),
+        InspectionExecutionPolicy(),
+    ):
         demand = compile_lace_required_guarantees(policy)
         assert demand.profile_status == "not_defined"
         with pytest.raises(ValueError, match="policy review"):

@@ -11,8 +11,8 @@ from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.runtime.database import DatabasePathIdentityLost
 from oh_goon.runtime.execution import ExecutionSession, ExecutionTicket
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
-from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.fleet_caller_file_freshness import require_target_caller_file_fresh
+from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
 
 
@@ -40,6 +40,7 @@ class FleetRunExecution:
         # is removed. Parallel target workers get their own thread-local scopes when needed.
         if ticket.recovery_only:
             from oh_goon.core.errors import OwnershipLost
+
             raise OwnershipLost("recovery-only custody forbids Run/Step execution")
         with self._lifecycle.execution_connection_scope():
             session = self._lifecycle.activate(ticket)
@@ -67,30 +68,41 @@ class FleetRunExecution:
             self._seal_live_output(fleet_run_id)
             return self._lifecycle.finish_detail(session, terminal, failure)
 
-    def resume_local_lace_takeover(self, ticket: ExecutionTicket, coordinator, *,
-                                   intent_run_seq: int) -> tuple[int, int]:
+    def resume_local_lace_takeover(
+        self, ticket: ExecutionTicket, coordinator, *, intent_run_seq: int
+    ) -> tuple[int, int]:
         """Explicit production-worker recovery; never scheduled from app startup.
 
         Activation is the same original Fleet lease cut used for ordinary work.
         This method neither starts a Run nor executes a Step or native deletion.
         An unqualified scan can only append a cleanup-forbidden receipt.
         """
-        from oh_goon.services.fleet_local_lace_takeover import OriginalLocalLaceTakeoverCoordinator
         from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
+        from oh_goon.services.fleet_local_lace_takeover import OriginalLocalLaceTakeoverCoordinator
 
-        if (type(ticket) is not ExecutionTicket
-                or type(coordinator) is not OriginalLocalLaceTakeoverCoordinator
-                or type(intent_run_seq) is not int or intent_run_seq < 2):
-            raise CausalJournalError("original Fleet recovery ticket, coordinator and intent required")
+        if (
+            type(ticket) is not ExecutionTicket
+            or type(coordinator) is not OriginalLocalLaceTakeoverCoordinator
+            or type(intent_run_seq) is not int
+            or intent_run_seq < 2
+        ):
+            raise CausalJournalError(
+                "original Fleet recovery ticket, coordinator and intent required"
+            )
         with self._lifecycle.execution_connection_scope():
-            session = (self._lifecycle.activate_recovery(ticket) if ticket.recovery_only
-                       else self._lifecycle.activate(ticket))
+            session = (
+                self._lifecycle.activate_recovery(ticket)
+                if ticket.recovery_only
+                else self._lifecycle.activate(ticket)
+            )
             expected = self._lifecycle.execution_authority(session)
             owner = self._lifecycle.local_lace_recovery_owner(session, expected)
             # The original executor inventory, not the caller, owns native binary
             # and resource paths. Refuse a forged coordinator before any scan.
             backend = self._lifecycle.original_local_lace_recovery_backend(expected)
-            return coordinator.resume(owner, intent_run_seq=intent_run_seq, original_backend=backend)
+            return coordinator.resume(
+                owner, intent_run_seq=intent_run_seq, original_backend=backend
+            )
 
     def _activity(self, fleet_run_id: str, message: str) -> None:
         self._observe_live_output(
@@ -107,9 +119,7 @@ class FleetRunExecution:
             operation="seal_run",
         )
 
-    def _observe_live_output(
-        self, observe, *, fleet_run_id: str, operation: str
-    ) -> None:
+    def _observe_live_output(self, observe, *, fleet_run_id: str, operation: str) -> None:
         """Game Tape availability must never control the Fleet execution lifecycle."""
         try:
             observe()
@@ -173,7 +183,8 @@ class FleetRunExecution:
                 # Non-Plan Fleet capabilities never receive Plan-only TL-1 context.
                 admitted_run=(
                     authority.admitted_run
-                    if isinstance(execution, StrictFleetExecutionAdmission) else None
+                    if isinstance(execution, StrictFleetExecutionAdmission)
+                    else None
                 ),
                 validate_authority_in=lambda connection: self._lifecycle.require_execution_authority_in(
                     connection, fleet_run_id, authority

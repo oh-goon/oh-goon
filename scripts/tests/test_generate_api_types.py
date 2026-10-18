@@ -485,7 +485,9 @@ def test_validator_generation_omits_noop_walks_and_unused_reference_stack() -> N
 
 def test_generated_typescript_is_sharded_below_the_repository_line_limit() -> None:
     from oh_goon.api.app import create_app
-    from oh_goon.repository_tooling.generation.generated_typescript import MAX_TYPESCRIPT_LINES
+    from oh_goon.repository_tooling.generation.generated_typescript import (
+        MAX_TYPESCRIPT_LINES,
+    )
 
     openapi = create_app().openapi()
     outputs = render_generated_files(openapi)

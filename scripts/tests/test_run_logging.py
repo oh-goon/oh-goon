@@ -21,13 +21,22 @@ def test_logged_runner_host_frontdoor_fixture_is_explicit_and_bounded() -> None:
     assert logging_host_tool_names() == ("ln", "mkdir", "mv", "rm")
 
 
-def test_logged_runner_streams_persists_latest_and_preserves_exit(tmp_path: Path) -> None:
+def test_logged_runner_streams_persists_latest_and_preserves_exit(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("run logging is POSIX shell tooling")
     env = logging_host_env(tmp_path)
     env["OH_GOON_RUN_LOG_DIR"] = str(tmp_path / "logs")
     result = subprocess.run(
-        ("bash", str(RUNNER), "test", "bash", "-c", "printf 'alpha\\n'; printf 'beta\\n' >&2; exit 7"),
+        (
+            "bash",
+            str(RUNNER),
+            "test",
+            "bash",
+            "-c",
+            "printf 'alpha\\n'; printf 'beta\\n' >&2; exit 7",
+        ),
         cwd=ROOT,
         env=env,
         capture_output=True,
@@ -43,7 +52,9 @@ def test_logged_runner_streams_persists_latest_and_preserves_exit(tmp_path: Path
     assert "Completed UTC:" in text
     assert "Duration seconds:" in text
     assert "OH-GOON RUN RESULT: FAIL (exit 7)" in text
-    retained = [path for path in latest.parent.glob("*.log") if path.name != "latest.log"]
+    retained = [
+        path for path in latest.parent.glob("*.log") if path.name != "latest.log"
+    ]
     assert len(retained) == 1
     assert retained[0].read_bytes() == latest.read_bytes()
 
@@ -92,7 +103,9 @@ def test_logged_runner_exposes_output_before_child_completion(tmp_path: Path) ->
         selector.close()
 
 
-def test_logged_runner_exposes_transient_progress_outside_durable_log(tmp_path: Path) -> None:
+def test_logged_runner_exposes_transient_progress_outside_durable_log(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("run logging is POSIX shell tooling")
     env = logging_host_env(tmp_path)
@@ -141,7 +154,9 @@ def _progress_probe_command() -> tuple[str, ...]:
     )
 
 
-def test_logged_runner_suppresses_spinner_frames_when_output_is_captured(tmp_path: Path) -> None:
+def test_logged_runner_suppresses_spinner_frames_when_output_is_captured(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("run logging is POSIX shell tooling")
     env = logging_host_env(tmp_path)
@@ -166,11 +181,15 @@ def test_logged_runner_suppresses_spinner_frames_when_output_is_captured(tmp_pat
         line.startswith(("[|] Certification working", "[/] Certification working"))
         for line in logged.splitlines()
     )
-    assert not any(line.startswith("Observed activity:") for line in logged.splitlines())
+    assert not any(
+        line.startswith("Observed activity:") for line in logged.splitlines()
+    )
     assert "durable-output" in logged
 
 
-def test_logged_runner_uses_one_live_spinner_line_on_a_real_terminal(tmp_path: Path) -> None:
+def test_logged_runner_uses_one_live_spinner_line_on_a_real_terminal(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("run logging is POSIX shell tooling")
     master_fd, slave_fd = os.openpty()
@@ -216,7 +235,9 @@ def test_logged_runner_uses_one_live_spinner_line_on_a_real_terminal(tmp_path: P
             line.startswith(("[|] Certification working", "[/] Certification working"))
             for line in logged.splitlines()
         )
-        assert not any(line.startswith("Observed activity:") for line in logged.splitlines())
+        assert not any(
+            line.startswith("Observed activity:") for line in logged.splitlines()
+        )
         assert "durable-output" in logged
     finally:
         if process is not None and process.poll() is None:
@@ -227,7 +248,9 @@ def test_logged_runner_uses_one_live_spinner_line_on_a_real_terminal(tmp_path: P
         os.close(master_fd)
 
 
-def test_logged_runner_retention_consumes_repository_python_without_ambient_python_authority() -> None:
+def test_logged_runner_retention_consumes_repository_python_without_ambient_python_authority() -> (
+    None
+):
     source = RUNNER.read_text(encoding="utf-8")
     assert 'retention_python="$ROOT/backend/.venv/bin/python"' in source
     assert '[[ -x "$retention_python" ]]' in source
@@ -235,7 +258,9 @@ def test_logged_runner_retention_consumes_repository_python_without_ambient_pyth
     assert "python3 -m oh_goon.runtime.run_log_retention" not in source
 
 
-def test_logged_runner_cannot_turn_log_directory_failure_into_a_test_blocker(tmp_path: Path) -> None:
+def test_logged_runner_cannot_turn_log_directory_failure_into_a_test_blocker(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("run logging is POSIX shell tooling")
     blocker = tmp_path / "not-a-directory"
@@ -254,12 +279,17 @@ def test_logged_runner_cannot_turn_log_directory_failure_into_a_test_blocker(tmp
     assert "Continuing without persistent command logging" in result.stderr
 
 
-def test_strict_executor_host_setup_is_explicit_wsl_host_mutation_not_certify_magic() -> None:
+def test_strict_executor_host_setup_is_explicit_wsl_host_mutation_not_certify_magic() -> (
+    None
+):
     setup = SETUP.read_text(encoding="utf-8")
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert "command -v sudo" not in setup
     assert 'sudo loginctl enable-linger "$user_now"' in setup
-    assert 'sudo systemctl start "user-runtime-dir@${uid_now}.service" "user@${uid_now}.service"' in setup
+    assert (
+        'sudo systemctl start "user-runtime-dir@${uid_now}.service" "user@${uid_now}.service"'
+        in setup
+    )
     assert "--property=Delegate=yes" in setup
     certify = makefile.split("certify:", 1)[1].split("\n\n", 1)[0]
     test = makefile.split("test:", 1)[1].split("\n\n", 1)[0]
@@ -316,6 +346,7 @@ def test_logged_runner_sanitizes_repo_state_tmp_and_home_paths_without_changing_
     assert "<tmp>/work" in text
     assert "<home>/.local/share/uv/python/cpython/bin/python" in text
 
+
 def test_logged_runner_midstream_persistence_failure_never_changes_child_result(
     tmp_path: Path,
 ) -> None:
@@ -332,7 +363,11 @@ def test_logged_runner_midstream_persistence_failure_never_changes_child_result(
     )
     result = subprocess.run(
         ("bash", str(RUNNER), "certify", sys.executable, "-c", child),
-        cwd=ROOT, env=env, capture_output=True, text=True, timeout=10,
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     assert result.returncode == 7
     assert "live-output" in result.stdout
@@ -402,7 +437,9 @@ def test_active_run_log_is_not_pruned_before_atomic_completion(tmp_path: Path) -
     assert f"Saved run log: <state>/run-logs/test/{completed.name}" in stdout
 
 
-def test_abandoned_inprogress_run_log_is_never_promoted_by_retention(tmp_path: Path) -> None:
+def test_abandoned_inprogress_run_log_is_never_promoted_by_retention(
+    tmp_path: Path,
+) -> None:
     from oh_goon.runtime.run_log_retention import prune_run_log_directory
 
     log_dir = tmp_path / "logs" / "test"
@@ -442,7 +479,9 @@ def test_logged_runner_bounds_completed_run_logs(tmp_path: Path) -> None:
 
 
 @pytest.mark.process
-def test_logged_runner_sigint_exits_130_and_leaves_no_owned_child(tmp_path: Path) -> None:
+def test_logged_runner_sigint_exits_130_and_leaves_no_owned_child(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("POSIX signal contract")
     env = logging_host_env(tmp_path)
@@ -455,7 +494,11 @@ def test_logged_runner_sigint_exits_130_and_leaves_no_owned_child(tmp_path: Path
     )
     process = subprocess.Popen(
         ("bash", str(RUNNER), "verify-p0", sys.executable, "-c", child),
-        cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
         start_new_session=True,
     )
     deadline = time.monotonic() + 3
@@ -485,7 +528,9 @@ def test_logged_runner_sigint_exits_130_and_leaves_no_owned_child(tmp_path: Path
 
 
 @pytest.mark.process
-def test_logged_runner_ctrl_c_reaps_nested_workflow_process_group(tmp_path: Path) -> None:
+def test_logged_runner_ctrl_c_reaps_nested_workflow_process_group(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("POSIX process-group contract")
     env = logging_host_env(tmp_path)
@@ -504,7 +549,11 @@ def test_logged_runner_ctrl_c_reaps_nested_workflow_process_group(tmp_path: Path
     )
     process = subprocess.Popen(
         ("bash", str(RUNNER), "verify-p0", sys.executable, "-c", workflow_probe),
-        cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
         start_new_session=True,
     )
     deadline = time.monotonic() + 4
@@ -535,7 +584,6 @@ def test_logged_runner_ctrl_c_reaps_nested_workflow_process_group(tmp_path: Path
             process.stdout.close()
 
 
-
 def _cleanup_runner_process(process: subprocess.Popen[str]) -> None:
     if process.poll() is None:
         try:
@@ -549,6 +597,7 @@ def _cleanup_runner_process(process: subprocess.Popen[str]) -> None:
             process.wait(timeout=2)
     if process.stdout is not None:
         process.stdout.close()
+
 
 def _wait_for_process_exit(pid: int, *, timeout: float = 2.0) -> None:
     deadline = time.monotonic() + timeout
@@ -564,7 +613,9 @@ def _wait_for_process_exit(pid: int, *, timeout: float = 2.0) -> None:
 
 
 @pytest.mark.process
-def test_logged_runner_ctrl_c_kills_direct_child_that_ignores_int_and_term(tmp_path: Path) -> None:
+def test_logged_runner_ctrl_c_kills_direct_child_that_ignores_int_and_term(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("POSIX process-group contract")
     env = logging_host_env(tmp_path)
@@ -579,7 +630,11 @@ def test_logged_runner_ctrl_c_kills_direct_child_that_ignores_int_and_term(tmp_p
     )
     process = subprocess.Popen(
         ("bash", str(RUNNER), "verify-p0", sys.executable, "-c", child),
-        cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
         start_new_session=True,
     )
     deadline = time.monotonic() + 3
@@ -601,7 +656,9 @@ def test_logged_runner_ctrl_c_kills_direct_child_that_ignores_int_and_term(tmp_p
 
 
 @pytest.mark.process
-def test_ctrl_c_releases_certification_state_for_immediate_reacquisition(tmp_path: Path) -> None:
+def test_ctrl_c_releases_certification_state_for_immediate_reacquisition(
+    tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("POSIX signal/lease contract")
     env = logging_host_env(tmp_path)

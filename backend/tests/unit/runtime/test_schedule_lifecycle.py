@@ -8,7 +8,6 @@ import pytest
 from pydantic import ValidationError
 
 from oh_goon.core.errors import ErrorKind
-from oh_goon.core.product_identity import schedule_repository_fleet_run_id
 from oh_goon.core.models.schedule import ScheduleFailure
 from oh_goon.core.models.schedule_execution import (
     AttentionRequiredScheduleRun,
@@ -16,6 +15,7 @@ from oh_goon.core.models.schedule_execution import (
     RunningScheduleRun,
     parse_schedule_run,
 )
+from oh_goon.core.product_identity import schedule_repository_fleet_run_id
 from oh_goon.core.schedule_transitions import begin_schedule_run, fail_schedule_run
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (

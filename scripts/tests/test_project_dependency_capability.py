@@ -44,7 +44,10 @@ def test_project_runtime_capability_requires_declared_runtime_imports(
         row["distribution"] == "hashmarks" and row["status"] == "missing"
         for row in payload["packages"]
     )
-    assert "hashmarks: missing from materialized project environment" in payload["blockers"]
+    assert (
+        "hashmarks: missing from materialized project environment"
+        in payload["blockers"]
+    )
 
 
 def test_project_runtime_capability_observes_without_redeciding_versions(

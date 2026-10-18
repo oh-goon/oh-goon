@@ -5,7 +5,6 @@ from pathlib import Path
 
 from oh_goon.core import strict_executor_authority
 
-
 SOURCE_ROOT = Path(strict_executor_authority.__file__).resolve().parents[1]
 OWNER = Path(strict_executor_authority.__file__).resolve()
 
@@ -34,7 +33,10 @@ def test_executor_inventory_environment_owner_is_the_named_string_assignment() -
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         value = node.value
-        if not isinstance(value, ast.Constant) or value.value != strict_executor_authority.EXECUTORS_FILE_ENV:
+        if (
+            not isinstance(value, ast.Constant)
+            or value.value != strict_executor_authority.EXECUTORS_FILE_ENV
+        ):
             continue
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         assignments.extend(target.id for target in targets if isinstance(target, ast.Name))

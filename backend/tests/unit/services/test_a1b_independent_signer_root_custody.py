@@ -14,10 +14,15 @@ from tests.unit.services.test_group_a_fleet_provisioning_authority import provis
 
 @pytest.mark.parametrize("case", ["same", "root-inside-signer", "signer-inside-root"])
 def test_aliased_public_and_signer_tree_rejects_before_native_observation(
-    tmp_path, monkeypatch, case,
+    tmp_path,
+    monkeypatch,
+    case,
 ):
-    args, _params, conn, calls, _lifecycle, binding, provisioner, _inventory, _roots, _admit = provisioned(tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, binding, provisioner, _inventory, _roots, _admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     try:
+
         def must_not_observe():
             pytest.fail("inventory observation began with aliased custody")
 

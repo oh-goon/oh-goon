@@ -7,9 +7,8 @@ import tomllib
 from pathlib import Path
 from uuid import uuid4
 
-from oh_goon.core.file_digest import sha256_file
 from oh_goon.core.errors import FleetExtensionInvalid
-from oh_goon.core.product_identity import stable_id
+from oh_goon.core.file_digest import sha256_file
 from oh_goon.core.models.fleet_plan import ExtensionCatalog, ExtensionDeclaration, ManagedExtension
 from oh_goon.core.path_authority import (
     RepositoryPathSpace,
@@ -18,6 +17,7 @@ from oh_goon.core.path_authority import (
     ensure_private_directory,
 )
 from oh_goon.core.path_layouts import ManagedPreparationPathLayout
+from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary import WorktreeState
 from oh_goon.engine.command import run_command
 from oh_goon.engine.git import GitService
@@ -78,7 +78,9 @@ class FleetExtensionStore:
         env_path = self.environment_path(extension_id)
         if destination.exists():
             managed = self._validate_checkout(destination, declaration, source, extension_id)
-            _ensure_environment(managed, env_path, self._path_authority, self._preparation, native_uv)
+            _ensure_environment(
+                managed, env_path, self._path_authority, self._preparation, native_uv
+            )
             return managed
 
         ensure_private_directory(self._root)
@@ -137,10 +139,14 @@ class FleetExtensionStore:
                     source,
                     extension_id,
                 )
-                _ensure_environment(managed, env_path, self._path_authority, self._preparation, native_uv)
+                _ensure_environment(
+                    managed, env_path, self._path_authority, self._preparation, native_uv
+                )
                 return managed
             managed = managed.model_copy(update={"project_path": destination})
-            _ensure_environment(managed, env_path, self._path_authority, self._preparation, native_uv)
+            _ensure_environment(
+                managed, env_path, self._path_authority, self._preparation, native_uv
+            )
             return managed
         except BaseException:
             shutil.rmtree(temporary, ignore_errors=True)
@@ -271,7 +277,12 @@ def _ensure_environment(
     with exact_file_write_lock(environment):
         if environment.is_dir():
             check = _check_environment(
-                managed.project_path, environment, path_authority, preparation, native_uv, timeout=120.0
+                managed.project_path,
+                environment,
+                path_authority,
+                preparation,
+                native_uv,
+                timeout=120.0,
             )
             if check.returncode == 0:
                 return
@@ -367,7 +378,6 @@ def _git_fleet_local_environment(preparation: ManagedPreparationPathLayout) -> d
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     return env
-
 
 
 def _canonical_source(source: str, catalog_root: Path) -> str:

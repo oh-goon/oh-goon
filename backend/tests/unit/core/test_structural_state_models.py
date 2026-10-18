@@ -43,4 +43,3 @@ def test_schedule_definition_shape_cannot_reintroduce_generic_trigger_objects() 
 
     with pytest.raises(ValidationError):
         type(request).model_validate({**payload, "interval_minutes": 0})
-

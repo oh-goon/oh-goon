@@ -7,7 +7,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _batch_invocations(target: str) -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
+def _batch_invocations(
+    target: str,
+) -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
     completed = subprocess.run(
         [
             "make",
@@ -68,11 +70,12 @@ def test_default_tooling_scheduling_is_suite_rooted_not_filename_driven() -> Non
 
 def test_distinct_backend_execution_class_is_declared_by_semantic_marker() -> None:
     complete = _batch_invocations("test-python-complete")
-    unit_profiles = [options for paths, options in complete if paths == ("backend/tests/unit",)]
+    unit_profiles = [
+        options for paths, options in complete if paths == ("backend/tests/unit",)
+    ]
 
     assert len(unit_profiles) == 2
     marker_values = {
-        options[options.index("--marker") + 1]
-        for options in unit_profiles
+        options[options.index("--marker") + 1] for options in unit_profiles
     }
     assert marker_values == {"not process", "process"}

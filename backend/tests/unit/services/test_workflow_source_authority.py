@@ -7,7 +7,9 @@ from oh_goon.repository_tooling import native_real_lifecycle_artifact as artifac
 
 
 def test_normal_certification_does_not_require_or_create_git(
-    tmp_path: Path, monkeypatch, capsys,
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
 ) -> None:
     monkeypatch.setattr(workflow, "ROOT", tmp_path)
     expected = ("repo-source", {"A": "B"}, tmp_path / "locks")
@@ -23,7 +25,9 @@ def test_normal_certification_does_not_require_or_create_git(
 
 
 def test_release_does_not_require_git_before_release_authority(
-    tmp_path: Path, monkeypatch, capsys,
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
 ) -> None:
     monkeypatch.setattr(workflow, "ROOT", tmp_path)
     expected = ("repo-source", {"A": "B"}, tmp_path / "locks")
@@ -48,6 +52,7 @@ def test_release_does_not_require_git_before_release_authority(
     }
     assert not (tmp_path / ".git").exists()
     assert capsys.readouterr().err == ""
+
 
 def test_source_zip_acceptance_does_not_manufacture_git_authority() -> None:
     source = Path(artifact_lifecycle.__file__).read_text(encoding="utf-8")

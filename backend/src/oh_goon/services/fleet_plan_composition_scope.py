@@ -140,11 +140,7 @@ def finalize_composition_scope(
     published_workspaces = tuple(step.step_id for step in steps if step.workspace.publish)
     if len(published_workspaces) > 1 and not allow_multiple_published_workspaces:
         raise FleetPlanInvalid("One Goon may publish at most one workspace")
-    workspace = (
-        published_workspaces[0]
-        if len(published_workspaces) == 1
-        else None
-    )
+    workspace = published_workspaces[0] if len(published_workspaces) == 1 else None
     declared = tuple(compiled.requirements)
     requirements = _unique_requirements(declared)
     return ResolvedCompositionScope(

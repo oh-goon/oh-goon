@@ -27,9 +27,7 @@ def test_fleet_preclaim_activity_localizes_identity_and_claim_boundaries(
     execution = ExecutionCoordinator(database)
     repository = tmp_path / "repo"
     repository.mkdir()
-    (repository / "pyproject.toml").write_text(
-        "[project]\nname='fixture'\n", encoding="utf-8"
-    )
+    (repository / "pyproject.toml").write_text("[project]\nname='fixture'\n", encoding="utf-8")
     identity = RepositoryIdentity(name=repository.name, path=repository)
     entry = IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=identity)
     admit_test_run(journal, "fleet-progress", OperationAction.UPDATE, [identity])

@@ -3,6 +3,7 @@
 The admission/worker owners must transport and revalidate this exact frozen
 record.  It never authorizes a backend by merely appearing in a Plan.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -42,9 +43,7 @@ class TrustedLocalRunConsent(ImmutableModel):
     @model_validator(mode="after")
     def require_tl1_policy(self) -> TrustedLocalRunConsent:
         if self.backend_id in {"bubblewrap", "opensandbox"}:
-            raise ValueError(
-                "TL-1 cannot relabel a strict isolation backend as trusted-local"
-            )
+            raise ValueError("TL-1 cannot relabel a strict isolation backend as trusted-local")
         return self
 
     def require_exact_authority(
@@ -75,12 +74,13 @@ class TrustedLocalRunConsent(ImmutableModel):
             or execution.resources.memory_mib is not None
             or execution.resources.max_processes is not None
         ):
-            raise FleetPlanInvalid("TL-1 requires trusted serial CI/CD without kernel resource-cap guarantees")
-        if (
-            unattended or source != "manual" or all_repositories
-            or repository_count != 1
-        ):
-            raise FleetPlanInvalid("TL-1 requires one interactive operator-selected repository and manual Run")
+            raise FleetPlanInvalid(
+                "TL-1 requires trusted serial CI/CD without kernel resource-cap guarantees"
+            )
+        if unattended or source != "manual" or all_repositories or repository_count != 1:
+            raise FleetPlanInvalid(
+                "TL-1 requires one interactive operator-selected repository and manual Run"
+            )
         if (
             self.fleet_run_id != fleet_run_id
             or self.execution_digest != execution_digest
@@ -89,7 +89,9 @@ class TrustedLocalRunConsent(ImmutableModel):
             or self.executor_id != executor_id
             or self.executor_generation != executor_generation
         ):
-            raise FleetPlanInvalid("TL-1 consent is stale or belongs to another Run, Plan or backend")
+            raise FleetPlanInvalid(
+                "TL-1 consent is stale or belongs to another Run, Plan or backend"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +101,7 @@ class TrustedLocalRunScope:
     These values must eventually be transported by the original Fleet journal
     and supplied by its owned worker. They cannot be inferred from a Plan.
     """
+
     fleet_run_id: str
     execution_digest: str
     executor_id: str
@@ -108,4 +111,3 @@ class TrustedLocalRunScope:
     repository_count: int
     unattended: bool
     execution: CicdExecutionPolicy
-

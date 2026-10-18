@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from dataclasses import dataclass
 from typing import Protocol
 
 from oh_goon.core.capability_model import CapabilityDefinition, CapabilityRunnerKind
 from oh_goon.core.models.effect_attempt import ClaimedRepositoryEffectAttempt
 from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
-from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
-from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.operation import OperationExecution
+from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.models.target import OperationTarget
-from oh_goon.core.vocabulary import EffectBoundaryKind
 from oh_goon.core.models.termination import TerminationSignal
+from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
+from oh_goon.core.vocabulary import EffectBoundaryKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,10 +46,14 @@ class CapabilityExecutionRequest:
             self.repository_admission is not None
             and self.repository_admission.repository_id != self.attempt.repository.repository_id
         ):
-            raise ValueError("Repository/Plan admission evidence must match the execution repository")
+            raise ValueError(
+                "Repository/Plan admission evidence must match the execution repository"
+            )
         if self.admitted_run is not None:
             if self.definition.runner_kind is not CapabilityRunnerKind.FLEET_PLAN:
-                raise ValueError("Admitted Fleet Run authority is valid only for Fleet Plan execution")
+                raise ValueError(
+                    "Admitted Fleet Run authority is valid only for Fleet Plan execution"
+                )
             if self.attempt.fleet_run_id != self.admitted_run.run.fleet_run_id:
                 raise ValueError("Fleet worker Run identity must match the admitted Run")
             if self.attempt.target != self.admitted_run.run.target:

@@ -104,9 +104,7 @@ class ExactFileStore(ABC):
                     self._require_target_revision(target, normalized, expected_revision)
                     replace_prepared_file(temporary, target)
             except OSError as exc:
-                raise FleetPlanInvalid(
-                    f"Cannot write {self._label} {normalized}: {exc}"
-                ) from exc
+                raise FleetPlanInvalid(f"Cannot write {self._label} {normalized}: {exc}") from exc
         return normalized, raw, hashlib.sha256(raw).hexdigest()
 
     def _require_target_revision(

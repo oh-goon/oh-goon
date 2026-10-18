@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import io
-import json
 from pathlib import Path
-from types import SimpleNamespace
 import urllib.error
 import zipfile
 
@@ -16,9 +14,13 @@ from oh_goon.repository_tooling.release import runtime_journey
 def _managed_tree(root: Path, version: str = "1.2.3") -> dict[str, bytes]:
     (root / "VERSION").write_text(version + "\n", encoding="utf-8")
     (root / "backend" / "src" / "oh_goon").mkdir(parents=True)
-    (root / "backend" / "src" / "oh_goon" / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "backend" / "src" / "oh_goon" / "__init__.py").write_text(
+        "VALUE = 1\n", encoding="utf-8"
+    )
     (root / "generated" / "release" / "static").mkdir(parents=True)
-    (root / "generated" / "release" / "static" / "index.html").write_text("ok", encoding="utf-8")
+    (root / "generated" / "release" / "static" / "index.html").write_text(
+        "ok", encoding="utf-8"
+    )
     for area, source in (("goons", "goon.yml"), ("plans", "plan.yml")):
         package = root / "templates" / area / "python" / "quality"
         package.mkdir(parents=True)
@@ -39,7 +41,9 @@ def _managed_tree(root: Path, version: str = "1.2.3") -> dict[str, bytes]:
     }
 
 
-def _wheel(root: Path, *, version: str = "1.2.3", mutate: dict[str, bytes] | None = None) -> Path:
+def _wheel(
+    root: Path, *, version: str = "1.2.3", mutate: dict[str, bytes] | None = None
+) -> Path:
     payload = _managed_tree(root, version)
     payload.update(mutate or {})
     dist = root / "generated" / "release" / "dist"
@@ -61,11 +65,15 @@ def test_release_artifact_accepts_exact_managed_wheel(tmp_path: Path) -> None:
 
 
 def test_release_artifact_rejects_version_and_dist_shape(tmp_path: Path) -> None:
-    assert artifact.release_artifact_issues(tmp_path) == ("VERSION must be a contained regular non-symlink file",)
+    assert artifact.release_artifact_issues(tmp_path) == (
+        "VERSION must be a contained regular non-symlink file",
+    )
     (tmp_path / "VERSION").write_text("not-semver\n", encoding="utf-8")
     assert "canonical x.y.z" in artifact.release_artifact_issues(tmp_path)[0]
     (tmp_path / "VERSION").write_text("1.2.3\n", encoding="utf-8")
-    assert artifact.release_artifact_issues(tmp_path) == ("release dist must be a contained regular non-symlink directory",)
+    assert artifact.release_artifact_issues(tmp_path) == (
+        "release dist must be a contained regular non-symlink directory",
+    )
     dist = tmp_path / "generated" / "release" / "dist"
     dist.mkdir(parents=True)
     assert "exactly one wheel" in artifact.release_artifact_issues(tmp_path)[0]
@@ -85,14 +93,21 @@ def test_release_artifact_rejects_wrong_filename_and_bad_zip(tmp_path: Path) -> 
     assert any("cannot be inspected" in item for item in issues)
 
 
-def test_archive_issues_detect_managed_payload_metadata_entries_and_stale_files(tmp_path: Path) -> None:
+def test_archive_issues_detect_managed_payload_metadata_entries_and_stale_files(
+    tmp_path: Path,
+) -> None:
     _managed_tree(tmp_path)
     raw = io.BytesIO()
     with zipfile.ZipFile(raw, "w") as archive:
         archive.writestr("oh_goon/__init__.py", b"wrong")
         archive.writestr("oh_goon/stale.py", b"stale")
-        archive.writestr("oh_goon-1.2.3.dist-info/METADATA", b"Name: wrong\nVersion: 9.9.9\n\n")
-        archive.writestr("oh_goon-1.2.3.dist-info/entry_points.txt", b"[console_scripts]\nother = x:y\n")
+        archive.writestr(
+            "oh_goon-1.2.3.dist-info/METADATA", b"Name: wrong\nVersion: 9.9.9\n\n"
+        )
+        archive.writestr(
+            "oh_goon-1.2.3.dist-info/entry_points.txt",
+            b"[console_scripts]\nother = x:y\n",
+        )
     raw.seek(0)
     with zipfile.ZipFile(raw) as archive:
         issues = artifact._archive_issues(archive, tmp_path, "1.2.3")
@@ -120,7 +135,9 @@ def test_expected_payload_rejects_symlinked_source_and_members(tmp_path: Path) -
     assert "managed release source contains symlink" in text
 
 
-def test_project_scripts_rejects_missing_project_and_bad_scripts(tmp_path: Path) -> None:
+def test_project_scripts_rejects_missing_project_and_bad_scripts(
+    tmp_path: Path,
+) -> None:
     backend = tmp_path / "backend"
     backend.mkdir()
     path = backend / "pyproject.toml"
@@ -143,25 +160,39 @@ def test_entry_point_issues_reports_invalid_metadata(tmp_path: Path) -> None:
     assert issues and "cannot be verified" in issues[0]
 
 
-def test_runtime_request_json_wraps_http_and_rejects_non_object(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runtime_request_json_wraps_http_and_rejects_non_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     error = urllib.error.HTTPError("http://x", 409, "conflict", {}, io.BytesIO(b"boom"))
-    monkeypatch.setattr(runtime_journey.urllib.request, "urlopen", lambda *_a, **_k: (_ for _ in ()).throw(error))
+    monkeypatch.setattr(
+        runtime_journey.urllib.request,
+        "urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(error),
+    )
     with pytest.raises(RuntimeError, match="HTTP 409"):
         runtime_journey._request_json("GET", "http://x", access_token="token")
+
     class Response:
         def read(self):
             return b"[]"
+
         def __enter__(self):
             return self
+
         def __exit__(self, *_args):
             return None
+
     response = Response()
-    monkeypatch.setattr(runtime_journey.urllib.request, "urlopen", lambda *_a, **_k: response)
+    monkeypatch.setattr(
+        runtime_journey.urllib.request, "urlopen", lambda *_a, **_k: response
+    )
     with pytest.raises(RuntimeError, match="expected JSON object"):
         runtime_journey._request_json("GET", "http://x", access_token="token")
 
 
-def _league_team(path: str, *, pipeline_sha256: str = "a" * 64, instance_id: str = "instance-a") -> dict[str, object]:
+def _league_team(
+    path: str, *, pipeline_sha256: str = "a" * 64, instance_id: str = "instance-a"
+) -> dict[str, object]:
     return {
         "repository": {"path": path},
         "repository_instance_id": instance_id,
@@ -169,12 +200,20 @@ def _league_team(path: str, *, pipeline_sha256: str = "a" * 64, instance_id: str
     }
 
 
-def test_team_run_authority_reads_displayed_pipeline_and_repository_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_team_run_authority_reads_displayed_pipeline_and_repository_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     expected_path = str(Path("/repos/a").resolve())
     monkeypatch.setattr(
         runtime_journey,
         "_request_json",
-        lambda *_a, **_k: {"teams": [_league_team(expected_path, pipeline_sha256="b" * 64, instance_id="repo-instance")]},
+        lambda *_a, **_k: {
+            "teams": [
+                _league_team(
+                    expected_path, pipeline_sha256="b" * 64, instance_id="repo-instance"
+                )
+            ]
+        },
     )
 
     assert runtime_journey.team_run_authority(
@@ -182,22 +221,43 @@ def test_team_run_authority_reads_displayed_pipeline_and_repository_instance(mon
     ) == ("b" * 64, "repo-instance")
 
 
-def test_team_run_authority_fails_closed_for_missing_or_invalid_freshness(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_team_run_authority_fails_closed_for_missing_or_invalid_freshness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     expected_path = str(Path("/repos/a").resolve())
     for payload, match in (
         ({"teams": []}, "was not present"),
-        ({"teams": [{**_league_team(expected_path), "pipeline": {"state": "MISSING"}}]}, "not CONFIGURED"),
-        ({"teams": [_league_team(expected_path, pipeline_sha256="not-a-sha")]}, "missing freshness authority"),
-        ({"teams": [_league_team(expected_path, instance_id="")]}, "missing freshness authority"),
+        (
+            {
+                "teams": [
+                    {**_league_team(expected_path), "pipeline": {"state": "MISSING"}}
+                ]
+            },
+            "not CONFIGURED",
+        ),
+        (
+            {"teams": [_league_team(expected_path, pipeline_sha256="not-a-sha")]},
+            "missing freshness authority",
+        ),
+        (
+            {"teams": [_league_team(expected_path, instance_id="")]},
+            "missing freshness authority",
+        ),
     ):
-        monkeypatch.setattr(runtime_journey, "_request_json", lambda *_a, _payload=payload, **_k: _payload)
+        monkeypatch.setattr(
+            runtime_journey,
+            "_request_json",
+            lambda *_a, _payload=payload, **_k: _payload,
+        )
         with pytest.raises(RuntimeError, match=match):
             runtime_journey.team_run_authority(
                 base_url="http://x", server_repository_path="/repos/a", access_token="t"
             )
 
 
-def test_start_acceptance_registers_parent_and_submits_displayed_freshness_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_acceptance_registers_parent_and_submits_displayed_freshness_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = []
     expected_path = str(Path("/repos/a").resolve())
 
@@ -206,7 +266,15 @@ def test_start_acceptance_registers_parent_and_submits_displayed_freshness_autho
         if url.endswith("/api/locations") and method == "GET":
             return {"locations": []}
         if url.endswith("/api/league") and method == "GET":
-            return {"teams": [_league_team(expected_path, pipeline_sha256="c" * 64, instance_id="instance-c")]}
+            return {
+                "teams": [
+                    _league_team(
+                        expected_path,
+                        pipeline_sha256="c" * 64,
+                        instance_id="instance-c",
+                    )
+                ]
+            }
         return {}
 
     monkeypatch.setattr(runtime_journey, "_request_json", request)
@@ -242,63 +310,161 @@ def _clock(values):
     return lambda: next(iterator)
 
 
-def test_wait_for_run_status_success_wrong_terminal_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runtime_journey, "_request_json", lambda *_a, **_k: {"run": {"status": "RUNNING"}})
+def test_wait_for_run_status_success_wrong_terminal_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime_journey,
+        "_request_json",
+        lambda *_a, **_k: {"run": {"status": "RUNNING"}},
+    )
     monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1, 2.0]))
     monkeypatch.setattr(runtime_journey.time, "sleep", lambda _x: None)
     with pytest.raises(RuntimeError, match="did not reach"):
-        runtime_journey.wait_for_acceptance_run_status(base_url="x", run_id="r", access_token="t", expected_status="COMPLETED", timeout_seconds=1.0)
-    monkeypatch.setattr(runtime_journey, "_request_json", lambda *_a, **_k: {"run": {"status": "FAILED"}})
+        runtime_journey.wait_for_acceptance_run_status(
+            base_url="x",
+            run_id="r",
+            access_token="t",
+            expected_status="COMPLETED",
+            timeout_seconds=1.0,
+        )
+    monkeypatch.setattr(
+        runtime_journey,
+        "_request_json",
+        lambda *_a, **_k: {"run": {"status": "FAILED"}},
+    )
     monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
     with pytest.raises(RuntimeError, match="reached 'FAILED'"):
-        runtime_journey.wait_for_acceptance_run_status(base_url="x", run_id="r", access_token="t", expected_status="COMPLETED")
-    monkeypatch.setattr(runtime_journey, "_request_json", lambda *_a, **_k: {"run": {"status": "COMPLETED"}, "outcome": "SUCCESS"})
+        runtime_journey.wait_for_acceptance_run_status(
+            base_url="x", run_id="r", access_token="t", expected_status="COMPLETED"
+        )
+    monkeypatch.setattr(
+        runtime_journey,
+        "_request_json",
+        lambda *_a, **_k: {"run": {"status": "COMPLETED"}, "outcome": "SUCCESS"},
+    )
     monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
-    assert runtime_journey.wait_for_acceptance_run_status(base_url="x", run_id="r", access_token="t", expected_status="COMPLETED")["outcome"] == "SUCCESS"
+    assert (
+        runtime_journey.wait_for_acceptance_run_status(
+            base_url="x", run_id="r", access_token="t", expected_status="COMPLETED"
+        )["outcome"]
+        == "SUCCESS"
+    )
 
 
-def test_wait_interruptible_step_success_terminal_and_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wait_interruptible_step_success_terminal_and_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     def started(_method, url, **_kwargs):
         if url.endswith("/events?after=0"):
             return {"events": [{"event_type": "PROCESS_STARTED", "pid": 123}]}
         return {"run": {"status": "RUNNING"}}
+
     monkeypatch.setattr(runtime_journey, "_request_json", started)
     monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
-    assert runtime_journey.wait_for_interruptible_step(base_url="x", run_id="r", repository=tmp_path, access_token="t") == 123
-    monkeypatch.setattr(runtime_journey, "_request_json", lambda *_a, **_k: {"run": {"status": "FAILED"}})
+    assert (
+        runtime_journey.wait_for_interruptible_step(
+            base_url="x", run_id="r", repository=tmp_path, access_token="t"
+        )
+        == 123
+    )
+    monkeypatch.setattr(
+        runtime_journey,
+        "_request_json",
+        lambda *_a, **_k: {"run": {"status": "FAILED"}},
+    )
     monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
     with pytest.raises(RuntimeError, match="terminalized before crash point"):
-        runtime_journey.wait_for_interruptible_step(base_url="x", run_id="r", repository=tmp_path, access_token="t")
-    monkeypatch.setattr(runtime_journey, "_request_json", lambda *_a, **_k: {"run": {"status": "RUNNING"}})
+        runtime_journey.wait_for_interruptible_step(
+            base_url="x", run_id="r", repository=tmp_path, access_token="t"
+        )
+    monkeypatch.setattr(
+        runtime_journey,
+        "_request_json",
+        lambda *_a, **_k: {"run": {"status": "RUNNING"}},
+    )
     monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1, 2.0]))
     monkeypatch.setattr(runtime_journey.time, "sleep", lambda _x: None)
-    with pytest.raises(RuntimeError, match="START_NOT_OBSERVED_WITHIN_ACCEPTANCE_BOUND") as exc_info:
-        runtime_journey.wait_for_interruptible_step(base_url="x", run_id="r", repository=tmp_path, access_token="t", timeout_seconds=1.0)
+    with pytest.raises(
+        RuntimeError, match="START_NOT_OBSERVED_WITHIN_ACCEPTANCE_BOUND"
+    ) as exc_info:
+        runtime_journey.wait_for_interruptible_step(
+            base_url="x",
+            run_id="r",
+            repository=tmp_path,
+            access_token="t",
+            timeout_seconds=1.0,
+        )
     assert "run_status': 'RUNNING" in str(exc_info.value)
-    assert "next_diagnostic=inspect canonical lifecycle predecessor/owner before PROCESS_STARTED" in str(exc_info.value)
+    assert (
+        "next_diagnostic=inspect canonical lifecycle predecessor/owner before PROCESS_STARTED"
+        in str(exc_info.value)
+    )
 
 
-def test_run_acceptance_goon_success_failure_missing_tape_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_acceptance_goon_success_failure_missing_tape_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(runtime_journey, "start_acceptance_goon", lambda **_k: "run")
     monkeypatch.setattr(runtime_journey.time, "sleep", lambda _x: None)
-    monkeypatch.setattr(runtime_journey, "_request_json", lambda *_a, **_k: {"run": {"status": "COMPLETED"}, "outcome": "SUCCESS", "game_tape": ["acceptance-step"]})
+    monkeypatch.setattr(
+        runtime_journey,
+        "_request_json",
+        lambda *_a, **_k: {
+            "run": {"status": "COMPLETED"},
+            "outcome": "SUCCESS",
+            "game_tape": ["acceptance-step"],
+        },
+    )
     monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
-    assert runtime_journey.run_acceptance_goon(base_url="x", server_repository_path="/r", access_token="t") == "run"
-    monkeypatch.setattr(runtime_journey, "_request_json", lambda *_a, **_k: {"run": {"status": "FAILED"}, "outcome": "FAIL"})
+    assert (
+        runtime_journey.run_acceptance_goon(
+            base_url="x", server_repository_path="/r", access_token="t"
+        )
+        == "run"
+    )
+    monkeypatch.setattr(
+        runtime_journey,
+        "_request_json",
+        lambda *_a, **_k: {"run": {"status": "FAILED"}, "outcome": "FAIL"},
+    )
     monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
     with pytest.raises(RuntimeError, match="did not pass"):
-        runtime_journey.run_acceptance_goon(base_url="x", server_repository_path="/r", access_token="t")
-    monkeypatch.setattr(runtime_journey, "_request_json", lambda *_a, **_k: {"run": {"status": "COMPLETED"}, "outcome": "SUCCESS", "game_tape": []})
+        runtime_journey.run_acceptance_goon(
+            base_url="x", server_repository_path="/r", access_token="t"
+        )
+    monkeypatch.setattr(
+        runtime_journey,
+        "_request_json",
+        lambda *_a, **_k: {
+            "run": {"status": "COMPLETED"},
+            "outcome": "SUCCESS",
+            "game_tape": [],
+        },
+    )
     monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
     with pytest.raises(RuntimeError, match="does not contain"):
-        runtime_journey.run_acceptance_goon(base_url="x", server_repository_path="/r", access_token="t")
-    monkeypatch.setattr(runtime_journey, "_request_json", lambda *_a, **_k: {"run": {"status": "RUNNING"}})
+        runtime_journey.run_acceptance_goon(
+            base_url="x", server_repository_path="/r", access_token="t"
+        )
+    monkeypatch.setattr(
+        runtime_journey,
+        "_request_json",
+        lambda *_a, **_k: {"run": {"status": "RUNNING"}},
+    )
     monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1, 2.0]))
     with pytest.raises(RuntimeError, match="did not finish"):
-        runtime_journey.run_acceptance_goon(base_url="x", server_repository_path="/r", access_token="t", timeout_seconds=1.0)
+        runtime_journey.run_acceptance_goon(
+            base_url="x",
+            server_repository_path="/r",
+            access_token="t",
+            timeout_seconds=1.0,
+        )
 
 
-def test_acceptance_repository_uses_uv_owned_python_instead_of_ambient_python(tmp_path: Path) -> None:
+def test_acceptance_repository_uses_uv_owned_python_instead_of_ambient_python(
+    tmp_path: Path,
+) -> None:
     runtime_journey.prepare_acceptance_repository(tmp_path)
     goon = (tmp_path / "goon.yml").read_text(encoding="utf-8")
     assert "run: uv run --no-project python acceptance_step.py" in goon

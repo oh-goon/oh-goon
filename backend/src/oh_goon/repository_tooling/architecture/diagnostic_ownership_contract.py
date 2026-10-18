@@ -6,7 +6,6 @@ from pathlib import Path
 from oh_goon.repository_tooling.architecture.common import Violation, python_ast
 from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT
 
-
 _CONTROL_PREFIXES = (
     "oh_goon.services.",
     "oh_goon.integrations.",

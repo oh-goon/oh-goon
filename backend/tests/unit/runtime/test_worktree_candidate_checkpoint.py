@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -11,8 +9,6 @@ from oh_goon.core.errors import CandidateCheckpointStale, WorkspaceStateStale
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority, _worktree_git_environment
-
-
 
 
 def test_worktree_git_metadata_environment_preserves_admitted_tool_path(monkeypatch) -> None:
@@ -47,7 +43,9 @@ def _repository(tmp_path: Path) -> tuple[Path, str]:
 
 
 def _manager(tmp_path: Path) -> RepositoryWorkspaceAuthority:
-    return RepositoryWorkspaceAuthority(LocalDatabase(tmp_path / "state" / "oh-goon.db", journal_mode="DELETE"))
+    return RepositoryWorkspaceAuthority(
+        LocalDatabase(tmp_path / "state" / "oh-goon.db", journal_mode="DELETE")
+    )
 
 
 def _read_snapshot(manager: RepositoryWorkspaceAuthority, repository: Path, revision: str):
@@ -79,7 +77,9 @@ def _worktree(manager: RepositoryWorkspaceAuthority, repository: Path, revision:
     return workspace, ready, checkpoint
 
 
-def test_worktree_materialization_is_clean_detached_and_baseline_checkpointed(tmp_path: Path) -> None:
+def test_worktree_materialization_is_clean_detached_and_baseline_checkpointed(
+    tmp_path: Path,
+) -> None:
     repository, revision = _repository(tmp_path)
     manager = _manager(tmp_path)
     read_binding = _read_snapshot(manager, repository, revision)
@@ -100,7 +100,9 @@ def test_worktree_materialization_is_clean_detached_and_baseline_checkpointed(tm
     assert (repository / "app.py").read_text(encoding="utf-8") == "VALUE = 1\n"
 
 
-def test_candidate_checkpoint_advances_atomically_and_records_cumulative_changed_paths(tmp_path: Path) -> None:
+def test_candidate_checkpoint_advances_atomically_and_records_cumulative_changed_paths(
+    tmp_path: Path,
+) -> None:
     repository, revision = _repository(tmp_path)
     manager = _manager(tmp_path)
     read_binding = _read_snapshot(manager, repository, revision)
@@ -127,7 +129,9 @@ def test_candidate_checkpoint_advances_atomically_and_records_cumulative_changed
     assert (repository / "app.py").read_text(encoding="utf-8") == "VALUE = 1\n"
 
 
-def test_current_checkpoint_reproof_rejects_uncheckpointed_candidate_mutation(tmp_path: Path) -> None:
+def test_current_checkpoint_reproof_rejects_uncheckpointed_candidate_mutation(
+    tmp_path: Path,
+) -> None:
     repository, revision = _repository(tmp_path)
     manager = _manager(tmp_path)
     read_binding = _read_snapshot(manager, repository, revision)
@@ -188,7 +192,9 @@ def test_worktree_materialization_rejects_dirty_base_source(tmp_path: Path) -> N
         )
 
 
-def test_worktree_materialization_does_not_run_repository_hooks_or_smudge_filters(tmp_path: Path) -> None:
+def test_worktree_materialization_does_not_run_repository_hooks_or_smudge_filters(
+    tmp_path: Path,
+) -> None:
     repository, revision = _repository(tmp_path)
     hook_marker = tmp_path / "hook-ran"
     filter_marker = tmp_path / "filter-ran"
@@ -197,7 +203,12 @@ def test_worktree_materialization_does_not_run_repository_hooks_or_smudge_filter
     post_checkout = hooks / "post-checkout"
     post_checkout.write_text(f"#!/bin/sh\necho hook > {hook_marker}\n", encoding="utf-8")
     post_checkout.chmod(0o755)
-    _git("config", "filter.evil.smudge", f"sh -c 'echo filter > {filter_marker}; cat'", cwd=repository)
+    _git(
+        "config",
+        "filter.evil.smudge",
+        f"sh -c 'echo filter > {filter_marker}; cat'",
+        cwd=repository,
+    )
     (repository / ".gitattributes").write_text("*.py filter=evil\n", encoding="utf-8")
     _git("add", ".gitattributes", cwd=repository)
     _git("commit", "-qm", "attributes", cwd=repository)
@@ -211,7 +222,9 @@ def test_worktree_materialization_does_not_run_repository_hooks_or_smudge_filter
     assert not filter_marker.exists()
 
 
-def test_checkpoint_reproof_rejects_git_marker_replacement_even_when_source_bytes_match(tmp_path: Path) -> None:
+def test_checkpoint_reproof_rejects_git_marker_replacement_even_when_source_bytes_match(
+    tmp_path: Path,
+) -> None:
     repository, revision = _repository(tmp_path)
     manager = _manager(tmp_path)
     read_binding = _read_snapshot(manager, repository, revision)

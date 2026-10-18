@@ -118,10 +118,12 @@ def verify_sealed_execution_descriptor(sealed: SealedExecutionBytes) -> None:
         raise _divergence("atomic runtime FD custody requires Linux memfd sealing")
     try:
         info = os.fstat(sealed.descriptor)
-        if (not stat.S_ISREG(info.st_mode)
-                or (info.st_dev, info.st_ino) != (sealed.kernel_device, sealed.kernel_inode)
-                or info.st_size != sealed.byte_count
-                or stat.S_IMODE(info.st_mode) != sealed.mode):
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or (info.st_dev, info.st_ino) != (sealed.kernel_device, sealed.kernel_inode)
+            or info.st_size != sealed.byte_count
+            or stat.S_IMODE(info.st_mode) != sealed.mode
+        ):
             raise _divergence("atomic runtime kernel FD identity changed before launch")
         _, get_seals, required_seals = _linux_seal_operations()
         assert fcntl is not None
@@ -130,7 +132,9 @@ def verify_sealed_execution_descriptor(sealed: SealedExecutionBytes) -> None:
         hasher = hashlib.sha256()
         offset = 0
         while offset < sealed.byte_count:
-            chunk = os.pread(sealed.descriptor, min(_COPY_CHUNK_BYTES, sealed.byte_count - offset), offset)
+            chunk = os.pread(
+                sealed.descriptor, min(_COPY_CHUNK_BYTES, sealed.byte_count - offset), offset
+            )
             if not chunk:
                 raise _divergence("atomic runtime kernel FD has truncated bytes")
             hasher.update(chunk)
@@ -139,7 +143,11 @@ def verify_sealed_execution_descriptor(sealed: SealedExecutionBytes) -> None:
             raise _divergence("atomic runtime kernel FD bytes differ from original authority")
         after = os.fstat(sealed.descriptor)
         if (after.st_dev, after.st_ino, after.st_size, stat.S_IMODE(after.st_mode)) != (
-                info.st_dev, info.st_ino, info.st_size, stat.S_IMODE(info.st_mode)):
+            info.st_dev,
+            info.st_ino,
+            info.st_size,
+            stat.S_IMODE(info.st_mode),
+        ):
             raise _divergence("atomic runtime kernel FD changed during custody verification")
     except OSError as exc:
         raise _divergence("atomic runtime kernel FD cannot be verified before launch") from exc
@@ -173,9 +181,7 @@ def execution_materialization_identity(
         "schema": "oh-goon.atomic-execution-materialization/v1",
         "mechanism": "linux-sealed-memfd",
         "executable": _sealed_identity_payload(executable),
-        "interpreter": (
-            _sealed_identity_payload(interpreter) if interpreter is not None else None
-        ),
+        "interpreter": (_sealed_identity_payload(interpreter) if interpreter is not None else None),
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(raw).hexdigest()

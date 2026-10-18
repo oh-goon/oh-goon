@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
-import sys
 from pathlib import Path
 
 import pytest
-
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -58,7 +56,6 @@ def _write(tmp_path: Path, text: str) -> Path:
     return path
 
 
-
 def _remote_assets(tmp_path: Path, domain: str, runtime: str = "kata") -> tuple[Path, Path, Path]:
     cli = tmp_path / f"osb-{domain.replace('.', '-')}"
     cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -83,7 +80,10 @@ def _remote_assets(tmp_path: Path, domain: str, runtime: str = "kata") -> tuple[
     attestation = tmp_path / f"attestation-{domain.replace('.', '-')}.json"
     attestation.write_text(
         json.dumps(
-            {"claims": claims, "signature": base64.b64encode(private_key.sign(canonical)).decode("ascii")},
+            {
+                "claims": claims,
+                "signature": base64.b64encode(private_key.sign(canonical)).decode("ascii"),
+            },
             sort_keys=True,
             separators=(",", ":"),
         ),
@@ -582,12 +582,15 @@ cgroup_root = "/sys/fs/cgroup/oh-goon"
     assert backend.egress_state_dir == control / "egress"
     assert backend.cgroup_lock == control / "cgroups.lock"
     assert backend.cgroup_state_dir == control / "cgroups"
-    assert not any(str(path).startswith("/run/") for path in (
-        backend.egress_lock,
-        backend.egress_state_dir,
-        backend.cgroup_lock,
-        backend.cgroup_state_dir,
-    ))
+    assert not any(
+        str(path).startswith("/run/")
+        for path in (
+            backend.egress_lock,
+            backend.egress_state_dir,
+            backend.cgroup_lock,
+            backend.cgroup_state_dir,
+        )
+    )
 
 
 def test_executor_inventory_stale_schema_is_rejected_without_upgrade_path(
@@ -609,7 +612,9 @@ def test_executor_inventory_future_schema_fails_closed_with_directional_message(
     path = _write(tmp_path, "version = 9\nexecutors = []\n")
     monkeypatch.setenv("OH_GOON_EXECUTORS_FILE", str(path))
 
-    with pytest.raises(FleetPlanInvalid, match=r"schema 9 is newer than this build supports.*version = 8"):
+    with pytest.raises(
+        FleetPlanInvalid, match=r"schema 9 is newer than this build supports.*version = 8"
+    ):
         configured_executor_pool()
 
 
@@ -641,14 +646,18 @@ def test_executor_policy_bounds_are_validated_before_host_path_authority(
         'execution = { environment = { backend = ["bubblewrap", "opensandbox"] } }',
         'execution = { environment = { backend = "bubblewrap", fallback = "opensandbox" } }',
         'execution = { backend = "bubblewrap" }',
-        '',
+        "",
     ],
 )
 def test_executor_v8_rejects_implicit_or_duplicate_backend_authority(
-    tmp_path: Path, bad_execution: str,
+    tmp_path: Path,
+    bad_execution: str,
 ) -> None:
     from oh_goon.runtime._executor_configuration import load_executor_pool
-    path = _write(tmp_path, f'''version = 8
+
+    path = _write(
+        tmp_path,
+        f"""version = 8
 placement_wait_seconds = 0
 placement_queue_limit = 1
 runtime_inspector = "/usr/bin/ldd"
@@ -663,14 +672,18 @@ memory_mib = 8192
 cgroup_root = "/sys/fs/cgroup/oh-goon"
 bwrap_executable = "/usr/bin/bwrap"
 {bad_execution}
-''')
+""",
+    )
     with pytest.raises(FleetPlanInvalid):
         load_executor_pool(path)
 
 
 def test_configured_executor_environment_projects_selected_backend(tmp_path: Path) -> None:
     from oh_goon.runtime._executor_configuration import load_executor_pool
-    path = _write(tmp_path, '''version = 8
+
+    path = _write(
+        tmp_path,
+        """version = 8
 placement_wait_seconds = 0
 placement_queue_limit = 1
 runtime_inspector = "/usr/bin/ldd"
@@ -685,7 +698,8 @@ memory_mib = 8192
 cgroup_root = "/sys/fs/cgroup/oh-goon"
 bwrap_executable = "/usr/bin/bwrap"
 execution = { environment = { backend = "bubblewrap" } }
-''')
+""",
+    )
     inventory = load_executor_pool(path)
     executor = inventory.executors[0]
     pinned = executor.resolve_environment(inventory.path_authority)

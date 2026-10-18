@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
+
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_content_store import FleetContentStore
 
@@ -24,9 +26,6 @@ DEFAULT_MAX_REMOVED_OBJECTS_PER_RUN = 8
 class FleetContentMaintenancePolicy:
     retention: FleetContentRetentionBudget
     limits: FleetContentRemovalLimits
-
-
-from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
 
 
 DEFAULT_FLEET_CONTENT_MAINTENANCE_POLICY = FleetContentMaintenancePolicy(
@@ -99,7 +98,10 @@ def refused_maintenance_receipt(
 
 
 def run_content_maintenance(
-    store: "FleetContentStore", policy: FleetContentMaintenancePolicy | None = None, *, now_ns: int | None = None
+    store: "FleetContentStore",
+    policy: FleetContentMaintenancePolicy | None = None,
+    *,
+    now_ns: int | None = None,
 ) -> FleetContentMaintenanceReceipt:
     selected = DEFAULT_FLEET_CONTENT_MAINTENANCE_POLICY if policy is None else policy
     try:

@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.core.models.fleet_plan import PlanPublishedOutput, ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan import (
+    PlanPublishedOutput,
+    ResolvedCommandStep,
+    ResolvedFleetPlan,
+)
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_isolation import (
     CicdResourcePolicy,
@@ -15,9 +19,9 @@ from oh_goon.core.models.fleet_plan_isolation import (
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
-from tests.factories.runtime_authority import authorized_command_result
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import PhysicalFleetPlanExecutorHarness
+from tests.factories.runtime_authority import authorized_command_result
 
 
 class _UnitProcessIsolation:
@@ -96,7 +100,6 @@ def _execute_output_case(
     return executor.execute(repository, plan, cancel_requested=None)
 
 
-
 def test_strict_output_without_physical_execution_identity_is_not_published(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -110,6 +113,7 @@ def test_strict_output_without_physical_execution_identity_is_not_published(
     assert result.steps[0].status == "FAILED"
     assert result.steps[0].outputs == ()
     assert "requires physical execution identity" in result.stderr
+
 
 def test_published_output_exact_max_bytes_is_accepted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

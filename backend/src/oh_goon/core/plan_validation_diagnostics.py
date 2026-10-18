@@ -2,9 +2,11 @@
 
 No source access, reclassification or execution is permitted here.
 """
+
 from __future__ import annotations
 
 import re
+
 from oh_goon.core.errors import FleetPlanInputRejected
 
 _SCHEMA = "oh-goon.plan-validation-diagnostic/v1"
@@ -41,5 +43,3 @@ def safe_plan_diagnostic(exc: Exception) -> dict[str, object]:
         "safe_next_action": action,
         "execution": "not_started_by_diagnostic",
     }
-
-

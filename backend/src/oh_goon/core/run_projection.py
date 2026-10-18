@@ -5,13 +5,12 @@ from dataclasses import dataclass, field
 
 from oh_goon.core.errors import InvalidRunTransition
 from oh_goon.core.execution_lifecycle_validation import validate_execution_lifecycle
-from oh_goon.core.product_identity import (
-    fleet_step_attempt_id,
-    repository_attempt_operation_id,
-    validate_repository_attempt_operation_id,
+from oh_goon.core.models.fleet_plan_evidence import (
+    CompletedPlanStepExecution,
+    FailedPlanStepExecution,
+    SkippedPlanStepExecution,
 )
 from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
-from oh_goon.core.models.fleet_plan_evidence import CompletedPlanStepExecution, FailedPlanStepExecution, SkippedPlanStepExecution
 from oh_goon.core.models.run import (
     CancelledFleetRun,
     CancellingFleetRun,
@@ -27,20 +26,28 @@ from oh_goon.core.models.run_admission import (
     FleetExecutionAdmission,
     PlanRepositoryAdmissionEvidence,
 )
-from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     FleetRunEvent,
-    ProcessExitedEvent,
-    OutputFinalizedEvent,
     OutputAbandonedEvent,
+    OutputFinalizedEvent,
     OutputQuarantinedEvent,
+    ProcessExitedEvent,
     ProcessStartedEvent,
-    TerminationRequestedEvent,
-    ProcessStateUnknownEvent,
     ProcessStartingEvent,
+    ProcessStateUnknownEvent,
+    ReconciliationCompletedEvent,
+    ReconciliationFailedEvent,
+    ReconciliationRequiredEvent,
+    ReconciliationStartedEvent,
     RepositoryCompletedEvent,
     RepositoryStartedEvent,
+    RunAdmittedEvent,
+    RunCancelledEvent,
+    RunCancelRequestedEvent,
+    RunCompletedEvent,
+    RunFailedEvent,
+    RunStartedEvent,
     StepAttemptCreatedEvent,
     StepCancelledEvent,
     StepFailedEvent,
@@ -48,20 +55,16 @@ from oh_goon.core.models.run_events import (
     StepSkippedEvent,
     StepStartedEvent,
     StepSucceededEvent,
-    ReconciliationCompletedEvent,
-    ReconciliationFailedEvent,
-    ReconciliationRequiredEvent,
-    ReconciliationStartedEvent,
-    RunAdmittedEvent,
-    RunCancelledEvent,
-    RunCancelRequestedEvent,
-    RunCompletedEvent,
-    RunFailedEvent,
-    RunStartedEvent,
     StorageMaintenanceRecordedEvent,
+    TerminationRequestedEvent,
+)
+from oh_goon.core.models.scheduling import SchedulingEnvelope
+from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceFact
+from oh_goon.core.product_identity import (
+    repository_attempt_operation_id,
+    validate_repository_attempt_operation_id,
 )
 from oh_goon.core.vocabulary import FleetRunStatus, Verdict
-from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceFact
 
 OperationResolver = Callable[[str], OperationReport | None]
 
@@ -132,15 +135,15 @@ class _RunFold:
                 StepAttemptCreatedEvent,
                 ProcessStartingEvent,
                 OutputFinalizedEvent,
-    OutputAbandonedEvent,
-    OutputQuarantinedEvent,
+                OutputAbandonedEvent,
+                OutputQuarantinedEvent,
                 ProcessStartedEvent,
-    TerminationRequestedEvent,
-    ProcessStateUnknownEvent,
+                TerminationRequestedEvent,
+                ProcessStateUnknownEvent,
                 ProcessExitedEvent,
-    OutputFinalizedEvent,
-    OutputAbandonedEvent,
-    OutputQuarantinedEvent,
+                OutputFinalizedEvent,
+                OutputAbandonedEvent,
+                OutputQuarantinedEvent,
                 DescendantsQuiescentEvent,
                 StepSucceededEvent,
                 StepFailedEvent,
@@ -198,12 +201,19 @@ class _RunFold:
                 f"{event.event_type.value} requires a terminal run disposition"
             )
 
-    def _validate_reconciliation_required(self, event: ReconciliationRequiredEvent, required: list[ReconciliationRequiredEvent]) -> None:
-        allowed = {repository_attempt_operation_id(self.state.fleet_run_id, target.repository_id) for target in self.state.targets}
+    def _validate_reconciliation_required(
+        self, event: ReconciliationRequiredEvent, required: list[ReconciliationRequiredEvent]
+    ) -> None:
+        allowed = {
+            repository_attempt_operation_id(self.state.fleet_run_id, target.repository_id)
+            for target in self.state.targets
+        }
         if len(set(event.operation_ids)) != len(event.operation_ids):
             raise InvalidRunTransition("Reconciliation operation identities must be unique")
         if not set(event.operation_ids).issubset(allowed):
-            raise InvalidRunTransition("Reconciliation operation identities must belong to the owning fleet run")
+            raise InvalidRunTransition(
+                "Reconciliation operation identities must belong to the owning fleet run"
+            )
         if required:
             raise InvalidRunTransition("Fleet run reconciliation can be required only once")
         if isinstance(self.state, _TERMINAL_STATES):
@@ -215,16 +225,24 @@ class _RunFold:
     def _apply_storage_maintenance(self, event: StorageMaintenanceRecordedEvent) -> None:
         if not isinstance(self.state, (RunningFleetRun, CancellingFleetRun)):
             self._invalid_from(event)
-        matching = [r for r in self.completed_reports if r.provenance.operation_id == event.operation_id]
+        matching = [
+            r for r in self.completed_reports if r.provenance.operation_id == event.operation_id
+        ]
         if not matching:
             raise InvalidRunTransition("Storage maintenance must follow its canonical operation")
         if matching[0].repository.repository_id != event.repository_id:
-            raise InvalidRunTransition("Storage maintenance repository does not match canonical operation")
+            raise InvalidRunTransition(
+                "Storage maintenance repository does not match canonical operation"
+            )
         if any(item.operation_id == event.operation_id for item in self.storage_maintenance):
             raise InvalidRunTransition("Storage maintenance is already recorded for operation")
-        self.storage_maintenance.append(FleetContentMaintenanceFact(
-            repository_id=event.repository_id, operation_id=event.operation_id, receipt=event.receipt
-        ))
+        self.storage_maintenance.append(
+            FleetContentMaintenanceFact(
+                repository_id=event.repository_id,
+                operation_id=event.operation_id,
+                receipt=event.receipt,
+            )
+        )
 
     def _apply_repository_completion(
         self,
@@ -275,18 +293,43 @@ class _RunFold:
             return self._failed_state(state, event)
         self._invalid_from(event)
 
-    def _completed_state(self, state: RunningFleetRun, event: RunCompletedEvent) -> CompletedFleetRun:
+    def _completed_state(
+        self, state: RunningFleetRun, event: RunCompletedEvent
+    ) -> CompletedFleetRun:
         if len(self.completed_reports) != len(state.targets):
-            raise InvalidRunTransition("Fleet run cannot complete before every captured target completes")
-        return CompletedFleetRun(**self._common(), status=FleetRunStatus.COMPLETED, started_at=state.started_at, finished_at=event.generated_at)
+            raise InvalidRunTransition(
+                "Fleet run cannot complete before every captured target completes"
+            )
+        return CompletedFleetRun(
+            **self._common(),
+            status=FleetRunStatus.COMPLETED,
+            started_at=state.started_at,
+            finished_at=event.generated_at,
+        )
 
     def _live_processes(self) -> list[ProcessStartedEvent]:
-        quiet = {e.physical_execution_id for e in self.lifecycle_events if isinstance(e, DescendantsQuiescentEvent)}
-        return [e for e in self.lifecycle_events if type(e) is ProcessStartedEvent and e.physical_execution_id not in quiet]
+        quiet = {
+            e.physical_execution_id
+            for e in self.lifecycle_events
+            if isinstance(e, DescendantsQuiescentEvent)
+        }
+        return [
+            e
+            for e in self.lifecycle_events
+            if type(e) is ProcessStartedEvent and e.physical_execution_id not in quiet
+        ]
 
     def _unresolved_processes(self) -> list[ProcessStartedEvent]:
-        settled = {e.physical_execution_id for e in self.lifecycle_events if isinstance(e, (DescendantsQuiescentEvent, ProcessStateUnknownEvent))}
-        return [e for e in self.lifecycle_events if type(e) is ProcessStartedEvent and e.physical_execution_id not in settled]
+        settled = {
+            e.physical_execution_id
+            for e in self.lifecycle_events
+            if isinstance(e, (DescendantsQuiescentEvent, ProcessStateUnknownEvent))
+        }
+        return [
+            e
+            for e in self.lifecycle_events
+            if type(e) is ProcessStartedEvent and e.physical_execution_id not in settled
+        ]
 
     def _cancelled_state(
         self,
@@ -367,7 +410,8 @@ class _RunFold:
         if not isinstance(report.evidence, FleetPlanOperationEvidence):
             return
         operation_events = [
-            event for event in self.lifecycle_events
+            event
+            for event in self.lifecycle_events
             if getattr(event, "operation_id", None) == report.provenance.operation_id
         ]
         terminal_types = (StepSucceededEvent, StepFailedEvent, StepSkippedEvent, StepCancelledEvent)
@@ -392,10 +436,18 @@ class _RunFold:
     @staticmethod
     def _step_settlement_matches(execution, terminal) -> bool:
         if isinstance(execution, CompletedPlanStepExecution):
-            return isinstance(terminal, StepSucceededEvent) and terminal.returncode == execution.returncode
+            return (
+                isinstance(terminal, StepSucceededEvent)
+                and terminal.returncode == execution.returncode
+            )
         if isinstance(execution, FailedPlanStepExecution):
-            return isinstance(terminal, StepFailedEvent) and terminal.returncode == execution.returncode
-        return isinstance(execution, SkippedPlanStepExecution) and isinstance(terminal, StepSkippedEvent)
+            return (
+                isinstance(terminal, StepFailedEvent)
+                and terminal.returncode == execution.returncode
+            )
+        return isinstance(execution, SkippedPlanStepExecution) and isinstance(
+            terminal, StepSkippedEvent
+        )
 
     def _validate_report(self, report: OperationReport) -> None:
         if report.provenance.fleet_run_id != self.state.fleet_run_id:

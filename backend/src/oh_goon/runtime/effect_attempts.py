@@ -17,7 +17,6 @@ from oh_goon.core.effect_attempts import (
     RECONCILABLE_EFFECT_STATUSES,
 )
 from oh_goon.core.errors import StateConflict
-from oh_goon.core.product_identity import repository_id, validate_repository_attempt_operation_id
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.effect_attempt import RepositoryEffectAttempt
 from oh_goon.core.models.effect_origin import (
@@ -28,6 +27,7 @@ from oh_goon.core.models.effect_origin import (
 from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.models.reconciliation import RepositoryReconciliation
 from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.product_identity import repository_id, validate_repository_attempt_operation_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import EffectAttemptOwner, EffectAttemptStatus, EffectBoundaryKind
 from oh_goon.runtime import _effect_attempt_storage as storage

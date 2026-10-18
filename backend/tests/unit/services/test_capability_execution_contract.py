@@ -43,7 +43,6 @@ def test_application_runtime_background_lifecycle_is_explicit(
     assert runtime._schedule_scheduler.snapshot().running is False
 
 
-
 def test_fleet_run_failure_preserves_domain_semantics() -> None:
     failure = FleetRunFailure.from_exception(
         ExecutionBusy("another execution owns the lease"),

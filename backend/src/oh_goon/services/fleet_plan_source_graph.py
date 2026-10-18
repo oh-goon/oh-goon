@@ -6,13 +6,13 @@ from pathlib import Path
 from types import MappingProxyType
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.fleet_plan import (
     CompiledExecutionTemplate,
     CompiledGoonImportStep,
     PreCommitPlanStep,
 )
 from oh_goon.core.path_authority import canonical_path, navigation_path
+from oh_goon.core.product_identity import stable_id
 from oh_goon.integrations.fleet_plan_compilation import GoonTemplateProvider
 from oh_goon.integrations.fleet_plan_source_snapshot import (
     FleetPlanStepPosition,
@@ -50,13 +50,17 @@ class FleetPlanSourceGraph:
         entries = []
         for path, node in sorted(self._nodes.items(), key=lambda pair: pair[0].as_posix()):
             if node.source_sha256 is None:
-                raise FleetPlanInvalid("Agent source closure requires immutable original Goon bytes")
-            entries.append({
-                "owner": path.as_posix(),
-                "sha256": node.source_sha256,
-                "kind": node.package_kind or "root",
-                "name": node.package_name or node.path.name,
-            })
+                raise FleetPlanInvalid(
+                    "Agent source closure requires immutable original Goon bytes"
+                )
+            entries.append(
+                {
+                    "owner": path.as_posix(),
+                    "sha256": node.source_sha256,
+                    "kind": node.package_kind or "root",
+                    "name": node.package_name or node.path.name,
+                }
+            )
         return stable_id("agent-original-plan-graph-closure-v1", {"sources": entries})
 
     def has_agent_source_contract(self) -> bool:
@@ -68,7 +72,8 @@ class FleetPlanSourceGraph:
         from oh_goon.core.models.fleet_plan_composition import PlanInputType
 
         return any(
-            definition.input_type in {
+            definition.input_type
+            in {
                 PlanInputType.REPOSITORY_REFERENCE,
                 PlanInputType.SKILL_REFERENCE,
                 PlanInputType.ACCEPTANCE_PROFILE,
@@ -215,7 +220,6 @@ def _record_runtime_requirement(step, build: _SourceGraphBuild) -> None:
         build.uses_pre_commit = True
 
 
-
 def _read_node(
     path: Path,
     overrides: Mapping[Path, CompiledExecutionTemplate],
@@ -225,7 +229,9 @@ def _read_node(
     override = overrides.get(canonical_path(path))
     if override is not None:
         return FleetPlanSourceNode(path=path, compiled=override)
-    source = read_fleet_plan_source(path, kind="goon" if path.name == "goon.yml" else "plan", expected_name=expected_name)
+    source = read_fleet_plan_source(
+        path, kind="goon" if path.name == "goon.yml" else "plan", expected_name=expected_name
+    )
     return FleetPlanSourceNode(
         path=path,
         compiled=source.compiled,

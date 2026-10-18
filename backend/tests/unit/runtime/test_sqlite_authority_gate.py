@@ -41,7 +41,9 @@ def test_independent_writer_blocks_observer_cut_without_losing_query_only(tmp_pa
 
     def write() -> None:
         with writer.transaction(write=True) as connection:
-            connection.execute("UPDATE state_metadata SET durable_revision = durable_revision WHERE singleton = 1")
+            connection.execute(
+                "UPDATE state_metadata SET durable_revision = durable_revision WHERE singleton = 1"
+            )
             entered.set()
             assert release.wait(2)
 
@@ -166,9 +168,7 @@ def test_inspection_and_reset_join_runtime_authority_gate(tmp_path: Path) -> Non
     deleted: list[tuple[Path, ...]] = []
 
     with sqlite_authority_gate(path, write=True):
-        inspection = Thread(
-            target=lambda: inspected.append(inspect_database_path(path).status)
-        )
+        inspection = Thread(target=lambda: inspected.append(inspect_database_path(path).status))
         inspection.start()
         time.sleep(0.05)
         assert inspected == []

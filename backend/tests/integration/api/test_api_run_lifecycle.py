@@ -4,8 +4,6 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api import dependencies
 from oh_goon.api.app import app as api_app
 from oh_goon.core.models.explanation import ReasonCode
@@ -16,6 +14,7 @@ from oh_goon.runtime.database import LocalDatabase
 from tests.factories.local_state import local_state
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.runtime_stack import fleet_stack
+from tests.integration.api.client import authenticated_api_client
 
 
 class ApiReadyRunner:
@@ -111,7 +110,6 @@ def test_async_run_api_returns_run_detail_from_session_journal(tmp_path: Path) -
         api_app.dependency_overrides.clear()
 
 
-
 def test_rerun_api_derives_authority_from_existing_run_identity(tmp_path: Path) -> None:
     root = tmp_path / "repos"
     repository = root / "api"
@@ -166,6 +164,7 @@ def test_rerun_api_derives_authority_from_existing_run_identity(tmp_path: Path) 
         client.close()
         manager.shutdown()
         api_app.dependency_overrides.clear()
+
 
 def test_cancel_api_moves_run_to_cancelled_terminal_state(tmp_path: Path) -> None:
     root = tmp_path / "repos"
@@ -300,6 +299,7 @@ def test_execution_observations_api_projects_existing_run_game_tape_facts(tmp_pa
         assert response.status_code == 400  # bounded historical query is enforced
 
         from datetime import datetime, timedelta
+
         when = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
         response = client.get(
             "/api/fleet/runs/observations",

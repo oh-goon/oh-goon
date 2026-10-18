@@ -8,7 +8,6 @@ import pytest
 from oh_goon.engine import atomic_execution_bytes as atomic
 from oh_goon.repository_tooling import opensandbox_attempt_runner as remote_runner
 
-
 _SEAL_NAMES = (
     "F_ADD_SEALS",
     "F_GET_SEALS",

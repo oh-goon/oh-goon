@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import (
     JournalConflict,
     RuntimeSafetyStale,
@@ -15,7 +13,6 @@ from oh_goon.core.errors import (
     ScheduleExecutionStale,
     StateConflict,
 )
-from oh_goon.core.product_identity import repository_attempt_operation_id, schedule_repository_fleet_run_id
 from oh_goon.core.models.repository import (
     IncludedRepositoryCatalogEntry,
     RepositoryCatalogEntry,
@@ -24,13 +21,15 @@ from oh_goon.core.models.repository import (
 from oh_goon.core.models.run_admission import (
     ExplicitRepositoryScope,
     FleetRepositoryScope,
-    fleet_repository_scope,
 )
 from oh_goon.core.models.schedule import ScheduleDeleteRequest, ScheduleFailure, ScheduleReplace
+from oh_goon.core.product_identity import (
+    repository_attempt_operation_id,
+    schedule_repository_fleet_run_id,
+)
 from oh_goon.core.vocabulary import (
     EffectBoundaryKind,
     FleetRunEventType,
-    FleetRunSource,
     FleetRunStatus,
     FleetRunTerminalIntent,
     FleetScope,
@@ -47,10 +46,10 @@ from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.services.fleet_admission import FleetAdmissionPlan
+from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
-from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.schedules import ScheduleService
 from tests.factories.capabilities import admit_test_run, capability_snapshot
 from tests.factories.fleet_plan_targets import structural_execution_identity
@@ -65,7 +64,9 @@ class _EmptyAdmission:
 
     def plan(self, *args: object, **kwargs: object) -> FleetAdmissionPlan:
         del args, kwargs
-        return FleetAdmissionPlan(durable_revision=self._database.durable_revision(), targets=(), repository_admissions=())
+        return FleetAdmissionPlan(
+            durable_revision=self._database.durable_revision(), targets=(), repository_admissions=()
+        )
 
 
 class _ScopeAdmission:
@@ -92,7 +93,9 @@ class _ScopeAdmission:
             )
         )
         return FleetAdmissionPlan(
-            durable_revision=self._database.durable_revision(), targets=selected, repository_admissions=()
+            durable_revision=self._database.durable_revision(),
+            targets=selected,
+            repository_admissions=(),
         )
 
 
@@ -650,5 +653,3 @@ def test_orphan_cancel_reclaims_dead_lease_and_terminalizes_in_one_commit(tmp_pa
         FleetRunEventType.RUN_CANCEL_REQUESTED,
         FleetRunEventType.RUN_CANCELLED,
     ]
-
-

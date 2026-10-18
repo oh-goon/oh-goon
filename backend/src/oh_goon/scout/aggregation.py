@@ -7,6 +7,12 @@ from datetime import timedelta
 from statistics import median
 
 from oh_goon.core.execution_observability import RepositoryRunObservation
+from oh_goon.core.vocabulary import GameTapeStatus
+from oh_goon.scout.evidence import (
+    ScoutEvidenceSnapshot,
+    ScoutStepObservation,
+    comparison_environment,
+)
 from oh_goon.scout.models import (
     ScoutCoverage,
     ScoutGoonVersionSummary,
@@ -18,17 +24,11 @@ from oh_goon.scout.models import (
     ScoutTrendPoint,
     ScoutWindow,
 )
-from oh_goon.scout.evidence import (
-    ScoutEvidenceSnapshot,
-    ScoutStepObservation,
-    comparison_environment,
-)
 from oh_goon.scout.policy import (
     SCOUT_MEMORY_COMPARISON_MIN_COVERAGE_PERCENT,
     SCOUT_PEER_MIN_EXECUTIONS,
     SCOUT_PEER_MIN_REPOSITORIES,
 )
-from oh_goon.core.vocabulary import GameTapeStatus
 
 _UNSUCCESSFUL_STATUSES = frozenset(
     {

@@ -17,11 +17,51 @@ SIMPLE_TOOL = re.compile(r"^[A-Za-z0-9_.+-]+$")
 LOCAL_PREFIXES = ("./", "../", "backend/", "frontend/", "scripts/", "generated/", "templates/")
 CONTROL_WORDS = frozenset(
     {
-        "!", ".", ":", "[", "[[", "{", "}", ";;", "break", "case", "cd",
-        "continue", "declare", "do", "done", "echo", "elif", "else", "esac", "exit",
-        "export", "false", "fi", "for", "if", "jobs", "local", "mapfile", "printf", "pwd",
-        "read", "readonly", "return", "set", "shift", "source", "test", "typeset", "then",
-        "true", "umask", "unset", "until", "wait", "while",
+        "!",
+        ".",
+        ":",
+        "[",
+        "[[",
+        "{",
+        "}",
+        ";;",
+        "break",
+        "case",
+        "cd",
+        "continue",
+        "declare",
+        "do",
+        "done",
+        "echo",
+        "elif",
+        "else",
+        "esac",
+        "exit",
+        "export",
+        "false",
+        "fi",
+        "for",
+        "if",
+        "jobs",
+        "local",
+        "mapfile",
+        "printf",
+        "pwd",
+        "read",
+        "readonly",
+        "return",
+        "set",
+        "shift",
+        "source",
+        "test",
+        "typeset",
+        "then",
+        "true",
+        "umask",
+        "unset",
+        "until",
+        "wait",
+        "while",
     }
 )
 SHELLS = frozenset({"sh", "bash"})
@@ -29,8 +69,20 @@ PUNCTUATION = frozenset({"&&", "||", ";", "|", "&"})
 _ESCAPED_FIND_TERMINATOR = "__OH_GOON_ESCAPED_FIND_TERMINATOR__"
 XARGS_OPTION_WITH_VALUE = frozenset(
     {
-        "-a", "--arg-file", "-E", "--eof", "-I", "--replace", "-L", "--max-lines",
-        "-n", "--max-args", "-P", "--max-procs", "-s", "--max-chars",
+        "-a",
+        "--arg-file",
+        "-E",
+        "--eof",
+        "-I",
+        "--replace",
+        "-L",
+        "--max-lines",
+        "-n",
+        "--max-args",
+        "-P",
+        "--max-procs",
+        "-s",
+        "--max-chars",
     }
 )
 _PROCESS_LAUNCHERS = frozenset({"timeout", "nice", "nohup", "stdbuf", "setsid"})
@@ -58,7 +110,9 @@ def logical_lines(text: str) -> tuple[str, ...]:
 
 
 def forward_position(lines: tuple[str, ...], script: str) -> int | None:
-    positions = [int(match.group("position")) for line in lines if (match := FORWARD.fullmatch(line))]
+    positions = [
+        int(match.group("position")) for line in lines if (match := FORWARD.fullmatch(line))
+    ]
     if len(positions) > 1:
         raise ValueError(f"{script}: OH_GOON_FORWARD_ARGV_FROM must be unique")
     return positions[0] if positions else None
@@ -222,7 +276,12 @@ def _protect_escaped_find_terminators(command: str) -> str:
             result.append(char)
             index += 1
             continue
-        if quote is None and char == "\\" and index + 1 < len(command) and command[index + 1] == ";":
+        if (
+            quote is None
+            and char == "\\"
+            and index + 1 < len(command)
+            and command[index + 1] == ";"
+        ):
             result.append(_ESCAPED_FIND_TERMINATOR)
             index += 2
             continue
@@ -233,7 +292,9 @@ def _protect_escaped_find_terminators(command: str) -> str:
 
 def shell_tokens(command: str) -> tuple[str, ...] | None:
     try:
-        lexer = shlex.shlex(_protect_escaped_find_terminators(command), posix=True, punctuation_chars=";&|")
+        lexer = shlex.shlex(
+            _protect_escaped_find_terminators(command), posix=True, punctuation_chars=";&|"
+        )
         lexer.whitespace_split = True
         lexer.commenters = "#"
         return tuple(lexer)
@@ -263,7 +324,15 @@ def command_index(words: tuple[str, ...]) -> int:
     index = 0
     while index < len(words) and ASSIGNMENT_NAME.match(words[index]):
         index += 1
-    while index < len(words) and words[index] in {"if", "elif", "then", "while", "until", "do", "!"}:
+    while index < len(words) and words[index] in {
+        "if",
+        "elif",
+        "then",
+        "while",
+        "until",
+        "do",
+        "!",
+    }:
         index += 1
     return index
 
@@ -275,7 +344,7 @@ def materialized_executable_identity(
 ) -> str | None:
     """Return the canonical repository identity for package-manager executable supply."""
 
-    value = token.strip('"\'').lstrip("({").rstrip(")}").replace("\\", "/")
+    value = token.strip("\"'").lstrip("({").rstrip(")}").replace("\\", "/")
     if not value or any(marker in value for marker in ("$", "`", "*", "?", "[")):
         return None
     raw = PurePosixPath(value)
@@ -307,7 +376,7 @@ def is_materialized_executable_path(token: str) -> bool:
 
 
 def project_path(root: Path, token: str) -> Path | None:
-    value = token.strip('"\'')
+    value = token.strip("\"'")
     if not value or "$" in value:
         return None
     candidate = Path(value)
@@ -328,7 +397,7 @@ def _contained_absolute(root: Path, candidate: Path) -> Path | None:
 
 
 def external_tool(root: Path, token: str) -> str | None:
-    value = token.strip('"\'').lstrip("({").rstrip(")}")
+    value = token.strip("\"'").lstrip("({").rstrip(")}")
     if _ignored_external_token(value) or project_path(root, value) is not None:
         return None
     if value.startswith("/"):
@@ -344,7 +413,12 @@ def external_tool(root: Path, token: str) -> str | None:
 
 
 def _ignored_external_token(value: str) -> bool:
-    return not value or value in {"-", "--", "__OH_GOON_MAKEVAR__"} or value in CONTROL_WORDS or value.isdigit()
+    return (
+        not value
+        or value in {"-", "--", "__OH_GOON_MAKEVAR__"}
+        or value in CONTROL_WORDS
+        or value.isdigit()
+    )
 
 
 def shebang_tools(path: Path) -> tuple[str, ...]:
@@ -364,7 +438,9 @@ def shebang_tools(path: Path) -> tuple[str, ...]:
     return ("env", words[1]) if executable == "env" and len(words) >= 2 else (executable,)
 
 
-def prefix_environment(words: tuple[str, ...], index: int, environment: dict[str, str]) -> dict[str, str]:
+def prefix_environment(
+    words: tuple[str, ...], index: int, environment: dict[str, str]
+) -> dict[str, str]:
     result = dict(environment)
     result.update(_literal_assignments(words[:index]))
     return result
@@ -377,7 +453,7 @@ def _literal_assignments(words: tuple[str, ...]) -> dict[str, str]:
             continue
         name, _sep, value = word.partition("=")
         if name and "$" not in value and "`" not in value:
-            result[name] = value.strip('"\'')
+            result[name] = value.strip("\"'")
     return result
 
 
@@ -531,7 +607,10 @@ def _process_launcher_child_index(words: tuple[str, ...], index: int) -> int | N
                     return None
                 cursor += 1
                 continue
-            if any(word.startswith(prefix) and len(word) > len(prefix) for prefix in _STDBUF_SHORT_WITH_VALUE):
+            if any(
+                word.startswith(prefix) and len(word) > len(prefix)
+                for prefix in _STDBUF_SHORT_WITH_VALUE
+            ):
                 cursor += 1
                 continue
             if word.startswith("-"):
@@ -636,10 +715,12 @@ def _materialized_from_shell_words(
             option = words[cursor]
             cursor += 1
             if option == "-c" and cursor < len(words):
-                return set(materialized_executables_in_shell(
-                    words[cursor],
-                    working_directory=working_directory,
-                )), working_directory
+                return set(
+                    materialized_executables_in_shell(
+                        words[cursor],
+                        working_directory=working_directory,
+                    )
+                ), working_directory
         return set(), working_directory
 
     identity = materialized_executable_identity(

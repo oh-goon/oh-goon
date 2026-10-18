@@ -6,14 +6,21 @@ import os
 from pathlib import Path
 
 from oh_goon.cli_logs import run_logs_command
-from oh_goon.runtime.local_launch_owner import BACKEND_GENERATION, BACKEND_SERVICE, LocalLaunchOwner, built_local_intent
+from oh_goon.runtime.local_launch_owner import (
+    BACKEND_GENERATION,
+    BACKEND_SERVICE,
+    LocalLaunchOwner,
+    built_local_intent,
+)
 
 
 def _args(*, as_json: bool) -> argparse.Namespace:
     return argparse.Namespace(command="logs", as_json=as_json)
 
 
-def test_logs_json_uses_exact_workspace_binding_and_safe_event_projection(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_logs_json_uses_exact_workspace_binding_and_safe_event_projection(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     workspace = tmp_path / "repo"
     workspace.mkdir()
     monkeypatch.chdir(workspace)
@@ -39,7 +46,9 @@ def test_logs_json_uses_exact_workspace_binding_and_safe_event_projection(tmp_pa
     assert "uvicorn" not in rendered
 
 
-def test_logs_without_binding_never_discovers_another_launch(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_logs_without_binding_never_discovers_another_launch(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     workspace = tmp_path / "repo"
     workspace.mkdir()
     monkeypatch.chdir(workspace)

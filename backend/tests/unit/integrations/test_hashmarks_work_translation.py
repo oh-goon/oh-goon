@@ -4,21 +4,23 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytest.importorskip("hashmarks")
-pytestmark = pytest.mark.dependency_complete
 
-from tests.hashmarks_test_support import (
-    TEST_HASHMARKS_ARTIFACT_IDENTITY,
-    TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY,
+from oh_goon.core.errors import ExecutionAssignmentStale
+from oh_goon.integrations.hashmarks.repository_intelligence import (
+    bind_hashmarks_repository_evidence,
 )
-from oh_goon.integrations.hashmarks.repository_intelligence import bind_hashmarks_repository_evidence
 from oh_goon.integrations.hashmarks.work_translation import (
     HashmarksWorkTranslationError,
     describe_hashmarks_work,
 )
-from oh_goon.core.errors import ExecutionAssignmentStale
 from oh_goon.runtime.execution_assignments import ExecutionAssignmentAuthority
+from tests.hashmarks_test_support import (
+    TEST_HASHMARKS_ARTIFACT_IDENTITY,
+    TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY,
+)
+
+pytestmark = pytest.mark.dependency_complete
 
 SOURCE = "sha256:" + "1" * 64
 ARTIFACT = TEST_HASHMARKS_ARTIFACT_IDENTITY
@@ -35,15 +37,17 @@ def _verified(payload: dict[str, object]):
 
 
 def test_verification_plan_translates_only_command_intent_and_exact_identity() -> None:
-    evidence = _verified({
-        "schema": "hashmarks.verification-plan.v1",
-        "available": True,
-        "argv": ["pytest", "backend/tests/unit"],
-        "network_authority": "declared",
-        "secret_grants": ["prod-token"],
-        "publish_authority": True,
-        "timeout_seconds": 99999,
-    })
+    evidence = _verified(
+        {
+            "schema": "hashmarks.verification-plan.v1",
+            "available": True,
+            "argv": ["pytest", "backend/tests/unit"],
+            "network_authority": "declared",
+            "secret_grants": ["prod-token"],
+            "publish_authority": True,
+            "timeout_seconds": 99999,
+        }
+    )
     work = describe_hashmarks_work(evidence)
     assert work.command_intent == ("pytest", "backend/tests/unit")
     assert work.ordered_members == ()
@@ -102,14 +106,18 @@ class _FakeAuthority(ExecutionAssignmentAuthority):
 
 
 def test_assignment_authority_is_explicit_and_hashmarks_cannot_smuggle_it() -> None:
-    work = describe_hashmarks_work(_verified({
-        "schema": "hashmarks.verification-plan.v1",
-        "available": True,
-        "argv": ["pytest", "x"],
-        "network_authority": "declared",
-        "secret_grants": ["smuggled"],
-        "publish_authority": True,
-    }))
+    work = describe_hashmarks_work(
+        _verified(
+            {
+                "schema": "hashmarks.verification-plan.v1",
+                "available": True,
+                "argv": ["pytest", "x"],
+                "network_authority": "declared",
+                "secret_grants": ["smuggled"],
+                "publish_authority": True,
+            }
+        )
+    )
     authority = _FakeAuthority(SimpleNamespace(checkpoint_id="cp-1", source_sha256="1" * 64))
     result = authority.issue_described_work_candidate_mutation(
         SimpleNamespace(workspace_id="ws-1"),  # type: ignore[arg-type]
@@ -130,29 +138,49 @@ def test_assignment_authority_is_explicit_and_hashmarks_cannot_smuggle_it() -> N
 
 
 def test_assignment_rejects_changed_checkpoint_or_repository_generation() -> None:
-    work = describe_hashmarks_work(_verified({"schema": "hashmarks.verification-plan.v1", "available": True, "argv": ["pytest"]}))
+    work = describe_hashmarks_work(
+        _verified(
+            {"schema": "hashmarks.verification-plan.v1", "available": True, "argv": ["pytest"]}
+        )
+    )
     with pytest.raises(ExecutionAssignmentStale, match="checkpoint changed"):
-        _FakeAuthority(SimpleNamespace(checkpoint_id="cp-2", source_sha256="1" * 64)).issue_described_work_candidate_mutation(
+        _FakeAuthority(
+            SimpleNamespace(checkpoint_id="cp-2", source_sha256="1" * 64)
+        ).issue_described_work_candidate_mutation(
             SimpleNamespace(workspace_id="ws"),  # type: ignore[arg-type]
-            work=work, attempt_id="a", expected_checkpoint_id="cp-1", wall_time_seconds=1,
+            work=work,
+            attempt_id="a",
+            expected_checkpoint_id="cp-1",
+            wall_time_seconds=1,
         )
     with pytest.raises(ExecutionAssignmentStale, match="repository generation"):
-        _FakeAuthority(SimpleNamespace(checkpoint_id="cp-1", source_sha256="9" * 64)).issue_described_work_candidate_mutation(
+        _FakeAuthority(
+            SimpleNamespace(checkpoint_id="cp-1", source_sha256="9" * 64)
+        ).issue_described_work_candidate_mutation(
             SimpleNamespace(workspace_id="ws"),  # type: ignore[arg-type]
-            work=work, attempt_id="a", expected_checkpoint_id="cp-1", wall_time_seconds=1,
+            work=work,
+            attempt_id="a",
+            expected_checkpoint_id="cp-1",
+            wall_time_seconds=1,
         )
 
 
 def test_hashmarks_described_work_for_generation_g_cannot_execute_generation_g_plus_1() -> None:
-    work = describe_hashmarks_work(_verified({
-        "schema": "hashmarks.verification-plan.v1",
-        "available": True,
-        "argv": ["pytest"],
-    }))
+    work = describe_hashmarks_work(
+        _verified(
+            {
+                "schema": "hashmarks.verification-plan.v1",
+                "available": True,
+                "argv": ["pytest"],
+            }
+        )
+    )
     changed = _FakeAuthority(SimpleNamespace(checkpoint_id="cp-1", source_sha256="9" * 64))
     with pytest.raises(ExecutionAssignmentStale, match="repository generation"):
         changed.issue_described_work_candidate_mutation(
             SimpleNamespace(workspace_id="ws"),  # type: ignore[arg-type]
-            work=work, attempt_id="attempt-g-plus-1", expected_checkpoint_id="cp-1", wall_time_seconds=1,
+            work=work,
+            attempt_id="attempt-g-plus-1",
+            expected_checkpoint_id="cp-1",
+            wall_time_seconds=1,
         )
-

@@ -11,7 +11,6 @@ from oh_goon.core.path_authority import (
 )
 from oh_goon.core.path_layouts import SANDBOX_PATHS
 from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
-from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,8 +10,8 @@ from oh_goon.core.models.repository import (
     RepositoryCatalogEntry,
     RepositoryIdentity,
 )
-from oh_goon.core.vocabulary import FleetScope
 from oh_goon.core.path_authority import navigation_path
+from oh_goon.core.vocabulary import FleetScope
 
 
 class RepositoryDiscoveryService:

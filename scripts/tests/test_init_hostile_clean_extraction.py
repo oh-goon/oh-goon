@@ -26,7 +26,9 @@ def _fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     shutil.copy2(ROOT / "backend/pyproject.toml", repo / "backend/pyproject.toml")
     (repo / "frontend").mkdir()
     shutil.copy2(ROOT / "frontend/package.json", repo / "frontend/package.json")
-    shutil.copy2(ROOT / "frontend/package-lock.json", repo / "frontend/package-lock.json")
+    shutil.copy2(
+        ROOT / "frontend/package-lock.json", repo / "frontend/package-lock.json"
+    )
 
     tools = tmp_path / "tools"
     tools.mkdir()
@@ -87,7 +89,9 @@ def _run_init(repo: Path, env: dict[str, str]) -> subprocess.CompletedProcess[st
     )
 
 
-def test_make_init_delegates_materialization_to_native_package_managers(tmp_path: Path) -> None:
+def test_make_init_delegates_materialization_to_native_package_managers(
+    tmp_path: Path,
+) -> None:
     repo, env = _fixture(tmp_path)
     before = (repo / "backend/uv.lock").read_bytes()
     result = _run_init(repo, env)
@@ -98,7 +102,9 @@ def test_make_init_delegates_materialization_to_native_package_managers(tmp_path
     assert not (repo / "generated/release/static").exists()
 
 
-def test_make_init_is_idempotent_without_oh_goon_cache_or_transport_state(tmp_path: Path) -> None:
+def test_make_init_is_idempotent_without_oh_goon_cache_or_transport_state(
+    tmp_path: Path,
+) -> None:
     repo, env = _fixture(tmp_path)
     assert _run_init(repo, env).returncode == 0
     assert _run_init(repo, env).returncode == 0
@@ -120,7 +126,9 @@ def test_make_init_retries_only_when_operator_reinvokes_failed_native_owner(
     assert recovered.returncode == 0, recovered.stdout + recovered.stderr
 
 
-def test_make_init_does_not_depend_on_release_static_or_source_cleanup(tmp_path: Path) -> None:
+def test_make_init_does_not_depend_on_release_static_or_source_cleanup(
+    tmp_path: Path,
+) -> None:
     repo, env = _fixture(tmp_path)
     makefile = (repo / "Makefile").read_text(encoding="utf-8")
     init_block = makefile.split("\ninit:\n", 1)[1].split("\ninit-doctor:", 1)[0]

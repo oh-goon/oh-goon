@@ -47,7 +47,9 @@ def run_under_systemd_delegation(
     timing: RuntimeAcceptanceTiming | None = None,
 ) -> int:
     source_environment = os.environ if environment is None else environment
-    resolved_timing = RuntimeAcceptanceTiming.resolve(source_environment) if timing is None else timing
+    resolved_timing = (
+        RuntimeAcceptanceTiming.resolve(source_environment) if timing is None else timing
+    )
     path = source_environment.get("PATH", "").strip()
     if not path:
         print("Local-access dev runtime acceptance failed:")
@@ -59,12 +61,20 @@ def run_under_systemd_delegation(
     systemd_run = shutil.which("systemd-run", path=path)
     if not systemd_run:
         print("Local-access dev runtime acceptance failed:")
-        print("  - local strict executor needs delegated cgroup-v2 authority and systemd-run is unavailable")
+        print(
+            "  - local strict executor needs delegated cgroup-v2 authority and systemd-run is unavailable"
+        )
         print(f"  - run `make strict-executor-setup` or configure {EXECUTORS_FILE_ENV}")
         return 1
     command = (
-        systemd_run, "--user", "--quiet", "--wait", "--pipe", "--collect",
-        "--property=Type=exec", "--property=Delegate=yes",
+        systemd_run,
+        "--user",
+        "--quiet",
+        "--wait",
+        "--pipe",
+        "--collect",
+        "--property=Type=exec",
+        "--property=Delegate=yes",
         f"--setenv={LOCAL_RUNTIME_DELEGATED_ENV}=1",
         f"--setenv={SYSTEMD_DELEGATED_ENV}=1",
         f"--setenv={SYSTEMD_SUBGROUP_ENV}={LOCAL_RUNTIME_PROCESS_SUBGROUP}",
@@ -75,6 +85,8 @@ def run_under_systemd_delegation(
             else ()
         ),
         f"--setenv={RESOLVED_TIMING_ENV}={resolved_timing.serialized()}",
-        sys.executable, "-m", "oh_goon.repository_tooling.dev_runtime_acceptance",
+        sys.executable,
+        "-m",
+        "oh_goon.repository_tooling.dev_runtime_acceptance",
     )
     return subprocess.run(command, cwd=root, check=False).returncode

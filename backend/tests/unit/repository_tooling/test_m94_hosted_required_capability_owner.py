@@ -10,7 +10,6 @@ import pytest
 from oh_goon.repository_tooling import hosted_dependency_capability as capability
 from oh_goon.repository_tooling import hosted_diagnostic_receipt as receipt
 
-
 ROOT = Path(__file__).resolve().parents[4]
 OWNER_PATH = ROOT / "backend/src/oh_goon/repository_tooling/hosted_dependency_capability.py"
 HOSTED_ORCHESTRATORS = (
@@ -83,13 +82,15 @@ def test_required_capability_semantics_have_one_authored_assignment() -> None:
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
                 if any(
-                    isinstance(target, ast.Name)
-                    and target.id == "REQUIRED_HOST_CAPABILITIES"
+                    isinstance(target, ast.Name) and target.id == "REQUIRED_HOST_CAPABILITIES"
                     for target in node.targets
                 ):
                     assignments.append(path)
             elif isinstance(node, ast.AnnAssign):
-                if isinstance(node.target, ast.Name) and node.target.id == "REQUIRED_HOST_CAPABILITIES":
+                if (
+                    isinstance(node.target, ast.Name)
+                    and node.target.id == "REQUIRED_HOST_CAPABILITIES"
+                ):
                     assignments.append(path)
             if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
                 values = {

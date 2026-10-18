@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
 import json
 import math
+from dataclasses import asdict, dataclass
 from typing import Mapping
 
 STEP_START_TIMEOUT_ENV = "OH_GOON_RUNTIME_ACCEPTANCE_STEP_START_TIMEOUT_SECONDS"
@@ -62,7 +62,9 @@ class RuntimeAcceptanceTiming:
             "interruptible_step_seconds": value["interruptible_step_seconds"],
         }
         if supplied_digest != _authority_digest(authority_payload):
-            raise RuntimeError(f"{RESOLVED_TIMING_ENV} authority digest does not match resolved timing")
+            raise RuntimeError(
+                f"{RESOLVED_TIMING_ENV} authority digest does not match resolved timing"
+            )
         timing = cls(
             step_start_timeout_seconds=float(value["step_start_timeout_seconds"]),
             interruptible_step_seconds=float(value["interruptible_step_seconds"]),
@@ -107,7 +109,9 @@ def _positive_seconds(raw: str | None, name: str, default: float) -> float:
     try:
         value = float(raw)
     except ValueError as exc:
-        raise RuntimeError(f"{name} must be a positive finite number of seconds, got {raw!r}") from exc
+        raise RuntimeError(
+            f"{name} must be a positive finite number of seconds, got {raw!r}"
+        ) from exc
     if not math.isfinite(value) or value <= 0:
         raise RuntimeError(f"{name} must be a positive finite number of seconds, got {raw!r}")
     return value

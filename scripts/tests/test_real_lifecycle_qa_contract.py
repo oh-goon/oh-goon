@@ -11,7 +11,11 @@ LEDGER = ROOT / "docs/development/REAL_LIFECYCLE_QA.yml"
 
 def _functions(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    return {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
 
 
 def test_real_lifecycle_ledger_is_complete_and_refs_real_pytest_nodes() -> None:
@@ -59,7 +63,10 @@ def test_critical_lifecycles_are_not_claimed_by_unit_only_proof() -> None:
 def test_high_risk_historical_regressions_have_mutation_proof() -> None:
     payload = yaml.safe_load(LEDGER.read_text(encoding="utf-8"))
     by_id = {row["id"]: row for row in payload["lifecycles"]}
-    for lifecycle_id in ("bootstrap-convergence", "sqlite-preparation-execution-lifetime"):
+    for lifecycle_id in (
+        "bootstrap-convergence",
+        "sqlite-preparation-execution-lifetime",
+    ):
         modes = {proof["mode"] for proof in by_id[lifecycle_id]["proofs"]}
         assert "mutation" in modes
 
@@ -69,11 +76,17 @@ def test_real_lifecycle_makefile_explicit_pytest_nodes_exist() -> None:
     target = makefile.split("\ntest-real-lifecycle:\n", 1)[1].split("\n\n", 1)[0]
     import re
 
-    selectors = re.findall(r"((?:backend|scripts)/[^\s\\]+\.py)::(test_[A-Za-z0-9_]+)", target)
-    assert selectors, "test-real-lifecycle must retain explicit production-shaped pytest nodes"
+    selectors = re.findall(
+        r"((?:backend|scripts)/[^\s\\]+\.py)::(test_[A-Za-z0-9_]+)", target
+    )
+    assert selectors, (
+        "test-real-lifecycle must retain explicit production-shaped pytest nodes"
+    )
     for path_text, test_name in selectors:
         path = ROOT / path_text
-        assert path.is_file(), f"test-real-lifecycle references missing file: {path_text}"
+        assert path.is_file(), (
+            f"test-real-lifecycle references missing file: {path_text}"
+        )
         assert test_name in _functions(path), (path_text, test_name)
 
 

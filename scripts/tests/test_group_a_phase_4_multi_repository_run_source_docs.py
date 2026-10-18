@@ -1,4 +1,5 @@
 """M157 docs and architecture regressions for one Run source authority."""
+
 from __future__ import annotations
 
 import ast
@@ -11,7 +12,9 @@ OWNER = ROOT / "backend/src/oh_goon/native_issuer/enforcer_lace_run_source_issue
 def test_run_issuer_uses_existing_per_repository_admission_owner():
     source = OWNER.read_text()
     tree = ast.parse(source)
-    functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    functions = {
+        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
     assert "admitted_run_repository_source_identity" in functions
     assert "issue_observed_run_repository_source_identity" in functions
     assert "PlanRepositoryAdmissionEvidence" in source

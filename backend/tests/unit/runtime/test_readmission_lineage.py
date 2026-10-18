@@ -6,7 +6,6 @@ import pytest
 
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import ExecutorPlacementLost, JournalConflict, StateConflict
-from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet_executor import (
@@ -33,6 +32,7 @@ from oh_goon.core.models.run_admission import (
     fleet_repository_scope,
 )
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import (
     FleetRunFailureStage,
     FleetRunSource,
@@ -43,7 +43,13 @@ from oh_goon.core.vocabulary import (
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.journal import Journal
 from tests.factories.fleet_plan_targets import structural_fleet_plan_target
-from tests.factories.journal import admit_run, commit_operation, start_repository, start_run, terminalize_run
+from tests.factories.journal import (
+    admit_run,
+    commit_operation,
+    start_repository,
+    start_run,
+    terminalize_run,
+)
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.run_admission import repository_admissions_for
 
@@ -145,7 +151,9 @@ def test_journal_allows_one_exact_child_for_placement_lost_parent(tmp_path: Path
 
     admit_run(journal, "parent", _intent("parent", repository), scope, [repository])
     terminalize_run(journal, "parent", FleetRunTerminalIntent.FAIL, _placement_lost_failure())
-    admit_run(journal, "child", _intent("child", repository, parent_id="parent"), scope, [repository])
+    admit_run(
+        journal, "child", _intent("child", repository, parent_id="parent"), scope, [repository]
+    )
 
     child = journal.read_view().readmission_child("parent")
     assert child is not None
@@ -161,11 +169,19 @@ def test_journal_rejects_second_readmission_child_even_after_first_child_finishe
 
     admit_run(journal, "parent", _intent("parent", repository), scope, [repository])
     terminalize_run(journal, "parent", FleetRunTerminalIntent.FAIL, _placement_lost_failure())
-    admit_run(journal, "child-a", _intent("child-a", repository, parent_id="parent"), scope, [repository])
+    admit_run(
+        journal, "child-a", _intent("child-a", repository, parent_id="parent"), scope, [repository]
+    )
     terminalize_run(journal, "child-a", FleetRunTerminalIntent.FAIL, _other_failure())
 
     with pytest.raises(JournalConflict, match="already has child child-a"):
-        admit_run(journal, "child-b", _intent("child-b", repository, parent_id="parent"), scope, [repository])
+        admit_run(
+            journal,
+            "child-b",
+            _intent("child-b", repository, parent_id="parent"),
+            scope,
+            [repository],
+        )
 
 
 def test_journal_rejects_readmission_from_non_placement_failure(tmp_path: Path) -> None:
@@ -177,8 +193,9 @@ def test_journal_rejects_readmission_from_non_placement_failure(tmp_path: Path) 
     terminalize_run(journal, "parent", FleetRunTerminalIntent.FAIL, _other_failure())
 
     with pytest.raises(JournalConflict, match="EXECUTOR_PLACEMENT_LOST"):
-        admit_run(journal, "child", _intent("child", repository, parent_id="parent"), scope, [repository])
-
+        admit_run(
+            journal, "child", _intent("child", repository, parent_id="parent"), scope, [repository]
+        )
 
 
 def test_journal_rejects_readmission_that_changes_execution_source(tmp_path: Path) -> None:
@@ -197,6 +214,7 @@ def test_journal_rejects_readmission_that_changes_execution_source(tmp_path: Pat
             scope,
             [repository],
         )
+
 
 def test_journal_rejects_readmission_that_changes_repository_scope(tmp_path: Path) -> None:
     journal = Journal(LocalDatabase(tmp_path / "readmission-scope.db"))
@@ -246,7 +264,9 @@ def test_journal_rejects_readmission_after_parent_completed_repository_effect(
     admit_run(journal, "parent", parent_intent, scope, [repository])
     start_run(journal, "parent")
     operation_id = start_repository(journal, "parent", repository)
-    lifecycle = journal.execution_lifecycle_observer("parent", repository.repository_id, operation_id)
+    lifecycle = journal.execution_lifecycle_observer(
+        "parent", repository.repository_id, operation_id
+    )
     lifecycle("noop", 1, "STEP_REACHED")
     lifecycle("noop", 1, "STEP_STARTED")
     lifecycle("noop", 1, "STEP_SUCCEEDED", returncode=0)
@@ -269,7 +289,9 @@ def test_journal_rejects_readmission_after_parent_completed_repository_effect(
     terminalize_run(journal, "parent", FleetRunTerminalIntent.FAIL, _placement_lost_failure())
 
     with pytest.raises(JournalConflict, match="durably completed repository effects"):
-        admit_run(journal, "child", _intent("child", repository, parent_id="parent"), scope, [repository])
+        admit_run(
+            journal, "child", _intent("child", repository, parent_id="parent"), scope, [repository]
+        )
 
 
 def test_journal_rejects_readmission_that_reuses_parent_run_identity(tmp_path: Path) -> None:
@@ -278,7 +300,9 @@ def test_journal_rejects_readmission_that_reuses_parent_run_identity(tmp_path: P
     scope = fleet_repository_scope({repository.repository_id})
 
     with pytest.raises(JournalConflict, match="cannot reuse its parent run identity"):
-        admit_run(journal, "same", _intent("same", repository, parent_id="same"), scope, [repository])
+        admit_run(
+            journal, "same", _intent("same", repository, parent_id="same"), scope, [repository]
+        )
 
 
 def test_journal_requires_readmission_parent_to_exist(tmp_path: Path) -> None:
@@ -287,4 +311,6 @@ def test_journal_requires_readmission_parent_to_exist(tmp_path: Path) -> None:
     scope = fleet_repository_scope({repository.repository_id})
 
     with pytest.raises(JournalConflict, match="parent does not exist"):
-        admit_run(journal, "child", _intent("child", repository, parent_id="missing"), scope, [repository])
+        admit_run(
+            journal, "child", _intent("child", repository, parent_id="missing"), scope, [repository]
+        )

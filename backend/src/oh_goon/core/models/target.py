@@ -6,8 +6,11 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator, model_validator
 
 from oh_goon.core.execution_lock_identity import build_execution_lock
-from oh_goon.core.models.caller_input_file import CallerInputFileIdentity, ScheduledCallerFileReceipt
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.models.caller_input_file import (
+    CallerInputFileIdentity,
+    ScheduledCallerFileReceipt,
+)
 from oh_goon.core.models.execution_identity import (
     ExecutionIdentity,
     ResolvedExecutionReference,
@@ -64,8 +67,12 @@ class FleetPlanTarget(ImmutableModel):
     source: FleetPlanSource
     identity: ExecutionIdentity
     agent_deliveries: tuple[AgentStepDeliveryReference, ...] = ()
-    caller_input_file: CallerInputFileIdentity | None = Field(default=None, exclude_if=lambda value: value is None)
-    scheduled_caller_file: ScheduledCallerFileReceipt | None = Field(default=None, exclude_if=lambda value: value is None)
+    caller_input_file: CallerInputFileIdentity | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    scheduled_caller_file: ScheduledCallerFileReceipt | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_execution_identity(self) -> FleetPlanTarget:
@@ -76,17 +83,26 @@ class FleetPlanTarget(ImmutableModel):
             )
         expected_agent = {
             step.step_id: (step.handoff_identity, step.delivery_sha256)
-            for step in self.plan.steps if isinstance(step, ResolvedLocalSearchAgentStep)
+            for step in self.plan.steps
+            if isinstance(step, ResolvedLocalSearchAgentStep)
         }
-        found = {item.step_id: (item.handoff_identity, item.delivery_sha256)
-                 for item in self.agent_deliveries}
+        found = {
+            item.step_id: (item.handoff_identity, item.delivery_sha256)
+            for item in self.agent_deliveries
+        }
         if len(found) != len(self.agent_deliveries) or found != expected_agent:
             raise ValueError("Fleet Agent source reference does not match original Plan Step")
         if self.caller_input_file is not None and self.scheduled_caller_file is not None:
-            raise ValueError("live caller source and scheduled snapshot custody are mutually exclusive")
-        if (self.scheduled_caller_file is not None
-                and self.scheduled_caller_file.execution_digest != self.identity.digest):
-            raise ValueError("scheduled caller source is not bound to this resolved execution target")
+            raise ValueError(
+                "live caller source and scheduled snapshot custody are mutually exclusive"
+            )
+        if (
+            self.scheduled_caller_file is not None
+            and self.scheduled_caller_file.execution_digest != self.identity.digest
+        ):
+            raise ValueError(
+                "scheduled caller source is not bound to this resolved execution target"
+            )
         return self
 
     @property

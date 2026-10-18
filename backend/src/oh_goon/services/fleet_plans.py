@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
+from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock, verify_execution_lock
-from oh_goon.core.models.caller_input_file import CallerInputFileIdentity, ScheduledCallerFileReceipt
-from oh_goon.services.fleet_caller_file_freshness import require_caller_file_fresh
+from oh_goon.core.models.caller_input_file import (
+    CallerInputFileIdentity,
+    ScheduledCallerFileReceipt,
+)
 from oh_goon.core.models.execution_identity import ExecutionIdentity
-from oh_goon.core.models.fleet_plan import ManagedExtension, ResolvedFleetPlan, ResolvedLocalSearchAgentStep
+from oh_goon.core.models.fleet_plan import (
+    ManagedExtension,
+    ResolvedFleetPlan,
+    ResolvedLocalSearchAgentStep,
+)
 from oh_goon.core.models.fleet_plan_composition import PlanInputDefinition, PlanInputValue
 from oh_goon.core.models.fleet_plan_diagnostics import (
     FleetPlanCheckReport,
@@ -30,8 +36,8 @@ from oh_goon.core.models.schedule import (
     ScheduleReplace,
 )
 from oh_goon.core.models.scheduling import SchedulingPriority
-from oh_goon.core.models.target import FleetPlanTarget, AgentStepDeliveryReference
-from oh_goon.core.vocabulary import FleetRunSource, OperationAction
+from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
+from oh_goon.core.vocabulary import FleetRunSource
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.integrations.fleet_plan_preview import preview_plan
@@ -40,8 +46,9 @@ from oh_goon.services.execution_lock_persistence import (
     load_execution_lock,
     write_execution_lock,
 )
-from oh_goon.services.fleet_plan_preparation import prepare_declared_plan_runtimes
+from oh_goon.services.fleet_caller_file_freshness import require_caller_file_fresh
 from oh_goon.services.fleet_plan_input_routing import CallerFileRoutingOrigin
+from oh_goon.services.fleet_plan_preparation import prepare_declared_plan_runtimes
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.schedules import ScheduleService
@@ -86,7 +93,10 @@ class FleetPlanService:
         root_expected_name: str | None = None,
     ) -> ResolvedFleetPlan:
         return self._resolver.resolve(
-            plan_path, extensions_path=extensions_path, inputs=inputs, root_expected_name=root_expected_name
+            plan_path,
+            extensions_path=extensions_path,
+            inputs=inputs,
+            root_expected_name=root_expected_name,
         )
 
     def resolve_with_source(
@@ -110,9 +120,7 @@ class FleetPlanService:
         *,
         root_expected_name: str | None = None,
     ) -> tuple[PlanInputDefinition, ...]:
-        return self._resolver.input_definitions(
-            plan_path, root_expected_name=root_expected_name
-        )
+        return self._resolver.input_definitions(plan_path, root_expected_name=root_expected_name)
 
     def input_definitions_with_source(
         self,
@@ -200,9 +208,14 @@ class FleetPlanService:
         root_expected_name: str | None = None,
     ) -> FleetPlanTarget:
         return prepare_reviewed_execution_target(
-            self._resolver, plan_path, expected_execution_digest=expected_execution_digest,
-            extensions_path=extensions_path, inputs=inputs, source=source,
-            expected_plan_id=expected_plan_id, root_expected_name=root_expected_name,
+            self._resolver,
+            plan_path,
+            expected_execution_digest=expected_execution_digest,
+            extensions_path=extensions_path,
+            inputs=inputs,
+            source=source,
+            expected_plan_id=expected_plan_id,
+            root_expected_name=root_expected_name,
         )
 
     def explain(
@@ -224,7 +237,9 @@ class FleetPlanService:
     ) -> dict[str, object]:
         """Thin adapter; the canonical resolver owns all values and source cuts."""
         return self._resolver.explain_routing(
-            plan_path, extensions_path=extensions_path, inputs=inputs,
+            plan_path,
+            extensions_path=extensions_path,
+            inputs=inputs,
             caller_file=caller_file,
         )
 
@@ -312,46 +327,75 @@ class FleetPlanService:
         self.require_plan_ingress_preparation(fleet_run_id)
         agent_selected = bool(agent_repository_root or agent_skill_root or allowed_agent_acceptance)
         if agent_selected:
-            if (not self._standard_local_fleet or self._content_store is None
-                    or agent_repository_root is None or agent_skill_root is None
-                    or not allowed_agent_acceptance or caller_input_file is not None
-                    or all_repositories or repository_ids is None or len(repository_ids) != 1
-                    or source is not None or root_expected_name is not None):
+            if (
+                not self._standard_local_fleet
+                or self._content_store is None
+                or agent_repository_root is None
+                or agent_skill_root is None
+                or not allowed_agent_acceptance
+                or caller_input_file is not None
+                or all_repositories
+                or repository_ids is None
+                or len(repository_ids) != 1
+                or source is not None
+                or root_expected_name is not None
+            ):
                 raise FleetPlanInvalid(
                     "standard-local Agent requires explicit single-repository scope, "
                     "repository/Skill roots and acceptance profile"
                 )
             plan, handoff, source_sha256 = self._resolver.resolve_frozen_local_search_agent(
-                plan_path, inputs=inputs or {}, repository_root=agent_repository_root,
-                skill_root=agent_skill_root, allowed_acceptance=allowed_agent_acceptance,
+                plan_path,
+                inputs=inputs or {},
+                repository_root=agent_repository_root,
+                skill_root=agent_skill_root,
+                allowed_acceptance=allowed_agent_acceptance,
                 extensions_path=extensions_path,
             )
             if expected_plan_id is not None and expected_plan_id != plan.plan_id:
                 raise FleetPlanInvalid("Agent Plan identity changed after review")
             from oh_goon.core.product_identity import repository_id
-            repo_path = agent_repository_root / handoff.source.repository_reference.removeprefix("local:")
+
+            repo_path = agent_repository_root / handoff.source.repository_reference.removeprefix(
+                "local:"
+            )
             owner = next(iter(repository_ids))
             if repository_id(repo_path) != owner:
-                raise FleetPlanInvalid("frozen Agent repository differs from selected Fleet repository")
+                raise FleetPlanInvalid(
+                    "frozen Agent repository differs from selected Fleet repository"
+                )
             from oh_goon.services.execution_lock_persistence import load_execution_lock
+
             lock = load_execution_lock(lock_path or (plan_path.parent / LOCK_FILE_NAME))
             verify_execution_lock(build_execution_lock(plan), lock)
             packet = handoff.encode_prework_delivery()
             stored = self._content_store.put_frozen_bytes(packet, owner_repository_id=owner)
-            agent_step = next(item for item in plan.steps if isinstance(item, ResolvedLocalSearchAgentStep))
+            agent_step = next(
+                item for item in plan.steps if isinstance(item, ResolvedLocalSearchAgentStep)
+            )
             target = FleetPlanTarget(
-                kind="fleet_plan", plan=plan, source=PlanFileSource(sha256=source_sha256),
+                kind="fleet_plan",
+                plan=plan,
+                source=PlanFileSource(sha256=source_sha256),
                 identity=ExecutionIdentity(digest=lock.digest),
-                agent_deliveries=(AgentStepDeliveryReference(
-                    step_id=agent_step.step_id, handoff_identity=agent_step.handoff_identity,
-                    delivery_sha256=agent_step.delivery_sha256, reference_id=stored.reference_id,
-                ),),
+                agent_deliveries=(
+                    AgentStepDeliveryReference(
+                        step_id=agent_step.step_id,
+                        handoff_identity=agent_step.handoff_identity,
+                        delivery_sha256=agent_step.delivery_sha256,
+                        reference_id=stored.reference_id,
+                    ),
+                ),
             )
         else:
             target = self.prepare_execution_target(
-                plan_path, extensions_path=extensions_path, inputs=inputs,
-                source=source, expected_plan_id=expected_plan_id,
-                root_expected_name=root_expected_name, lock_path=lock_path,
+                plan_path,
+                extensions_path=extensions_path,
+                inputs=inputs,
+                source=source,
+                expected_plan_id=expected_plan_id,
+                root_expected_name=root_expected_name,
+                lock_path=lock_path,
                 caller_input_file=caller_input_file,
             )
         invocation_source = target.source
@@ -389,13 +433,23 @@ class FleetPlanService:
         # resolution/digest work. Do not grant authority from the review hash.
         self.require_plan_ingress_preparation(fleet_run_id)
         target = self.prepare_reviewed_execution_target(
-            plan_path, expected_execution_digest=expected_execution_digest, inputs=inputs,
-            source=source, expected_plan_id=expected_plan_id, root_expected_name=root_expected_name,
+            plan_path,
+            expected_execution_digest=expected_execution_digest,
+            inputs=inputs,
+            source=source,
+            expected_plan_id=expected_plan_id,
+            root_expected_name=root_expected_name,
         )
         return self._runs.start_prepared_plan(
-            target, repository_ids=repository_ids, all_repositories=False, fleet_run_id=fleet_run_id,
-            requested_priority=requested_priority, expected_repository_instance_ids=expected_repository_instance_ids,
-            source=FleetRunSource.SHARED_RUN if isinstance(target.source, SharedPlanSource) else FleetRunSource.MANUAL,
+            target,
+            repository_ids=repository_ids,
+            all_repositories=False,
+            fleet_run_id=fleet_run_id,
+            requested_priority=requested_priority,
+            expected_repository_instance_ids=expected_repository_instance_ids,
+            source=FleetRunSource.SHARED_RUN
+            if isinstance(target.source, SharedPlanSource)
+            else FleetRunSource.MANUAL,
         )
 
     def repository_instance_ids_for_target(
@@ -407,7 +461,10 @@ class FleetPlanService:
         )
 
     def _prepare_scheduled_target(
-        self, plan_path: Path, *, extensions_path: Path | None,
+        self,
+        plan_path: Path,
+        *,
+        extensions_path: Path | None,
         inputs: dict[str, PlanInputValue] | None,
         caller_input_file: CallerInputFileIdentity | None,
     ) -> FleetPlanTarget:
@@ -419,7 +476,9 @@ class FleetPlanService:
         if caller_input_file is not None:
             require_caller_file_fresh(caller_input_file)
         target = self.prepare_execution_target(
-            plan_path, extensions_path=extensions_path, inputs=inputs,
+            plan_path,
+            extensions_path=extensions_path,
+            inputs=inputs,
             caller_input_file=caller_input_file,
         )
         if caller_input_file is None:
@@ -431,10 +490,12 @@ class FleetPlanService:
             sha256=caller_input_file.sha256,
             execution_digest=target.identity.digest,
         )
-        sealed = FleetPlanTarget.model_validate({
-            **target.model_dump(exclude={"caller_input_file", "scheduled_caller_file"}),
-            "scheduled_caller_file": frozen.model_dump(),
-        })
+        sealed = FleetPlanTarget.model_validate(
+            {
+                **target.model_dump(exclude={"caller_input_file", "scheduled_caller_file"}),
+                "scheduled_caller_file": frozen.model_dump(),
+            }
+        )
         require_caller_file_fresh(caller_input_file)
         return sealed
 
@@ -452,7 +513,9 @@ class FleetPlanService:
     ) -> ScheduleDefinition:
         """Resolve once, then persist one Schedule target set for the exact Plan."""
         target = self._prepare_scheduled_target(
-            plan_path, extensions_path=extensions_path, inputs=inputs,
+            plan_path,
+            extensions_path=extensions_path,
+            inputs=inputs,
             caller_input_file=caller_input_file,
         )
         repository_instance_ids = self.repository_instance_ids_for_target(
@@ -484,7 +547,9 @@ class FleetPlanService:
         """CAS an existing Schedule target set onto a newly resolved immutable Plan."""
         current = self._schedules.definition(schedule_id)
         target = self._prepare_scheduled_target(
-            plan_path, extensions_path=extensions_path, inputs=inputs,
+            plan_path,
+            extensions_path=extensions_path,
+            inputs=inputs,
             caller_input_file=caller_input_file,
         )
         repository_instance_ids = self.repository_instance_ids_for_target(
@@ -562,14 +627,23 @@ def prepare_reviewed_execution_target(
     plan = resolver.resolve_source_graph(graph, extensions_path=extensions_path, inputs=inputs)
     lock = build_execution_lock(plan)
     if lock.digest != expected_execution_digest:
-        raise FleetPlanInvalid("Fleet plan execution identity changed after preview; preview the exact plan again before execution")
+        raise FleetPlanInvalid(
+            "Fleet plan execution identity changed after preview; preview the exact plan again before execution"
+        )
     if graph.root.source_sha256 is None:
         raise FleetPlanInvalid("Fleet plan source fingerprint is unavailable")
     source_sha256 = graph.root.source_sha256
     if source is not None and source.sha256 != source_sha256:
-        raise FleetPlanInvalid("Fleet plan source identity does not match the exact bytes resolved for execution")
+        raise FleetPlanInvalid(
+            "Fleet plan source identity does not match the exact bytes resolved for execution"
+        )
     _require_expected_plan_identity(plan, expected_plan_id)
-    return FleetPlanTarget(kind="fleet_plan", plan=plan, source=source or PlanFileSource(sha256=source_sha256), identity=ExecutionIdentity(digest=lock.digest))
+    return FleetPlanTarget(
+        kind="fleet_plan",
+        plan=plan,
+        source=source or PlanFileSource(sha256=source_sha256),
+        identity=ExecutionIdentity(digest=lock.digest),
+    )
 
 
 def prepare_execution_target(

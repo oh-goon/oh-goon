@@ -15,10 +15,10 @@ from oh_goon.core.launch_manifest import (
     LaunchLifecycleState,
     LaunchManifest,
 )
+from oh_goon.core.process_birth import observe_process_birth
 from oh_goon.runtime.local_launch_binding import LocalLaunchBindingStore
 from oh_goon.runtime.local_launch_context import LocalLaunchRuntimeContext
 from oh_goon.runtime.local_launch_state import LocalLaunchEventStore
-from oh_goon.core.process_birth import observe_process_birth
 
 BACKEND_SERVICE = "backend"
 FRONTEND_SERVICE = "frontend"
@@ -265,6 +265,7 @@ def built_local_intent(*, host: str, port: int) -> LaunchIntent:
     from oh_goon.runtime.local_launch_plan import built_local_plan
 
     return built_local_plan(host=host, port=port).intent()
+
 
 def record_backend_startup_complete_from_environment() -> LaunchManifest | None:
     context = LocalLaunchRuntimeContext.from_environment()
