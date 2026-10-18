@@ -18,6 +18,7 @@ from tests.factories.admitted_execution import admitted_fleet_plan_execution
 from tests.factories.schedules import scheduled_plan
 
 RETRYING_PLAN = """version: 1
+execution: {purpose: cicd}
 steps:
   - id: check
     run: "true"

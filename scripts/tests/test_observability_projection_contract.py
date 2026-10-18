@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture import (
@@ -37,7 +38,7 @@ def _semantic_fixture(root: Path, *, handler_name: str = "anything_private") -> 
 
 
 def test_private_observability_handler_rename_does_not_change_architecture(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     package = _semantic_fixture(tmp_path, handler_name="execution_timeline_route")
     monkeypatch.setattr(contract, "BACKEND_PACKAGE_ROOT", package)
@@ -45,7 +46,7 @@ def test_private_observability_handler_rename_does_not_change_architecture(
 
 
 def test_public_observability_route_mutation_fails_architecture(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     package = _semantic_fixture(tmp_path)
     route = package / "api/routes/fleet_runs.py"
@@ -59,7 +60,7 @@ def test_public_observability_route_mutation_fails_architecture(
 
 
 def test_arbitrarily_named_duplicate_scout_run_model_fails_ownership(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     package = _semantic_fixture(tmp_path)
     duplicate = package / "scout/duplicate.py"

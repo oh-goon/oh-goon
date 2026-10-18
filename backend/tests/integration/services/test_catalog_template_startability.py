@@ -29,6 +29,7 @@ from oh_goon.integrations.executable_materialization_authority import (
 from oh_goon.integrations.fleet_plan_environment import step_host_environment_names
 from oh_goon.integrations.uv_python_runtime import find_uv_system_python
 from oh_goon.runtime.plan_templates import PlanTemplateStore
+from tests.factories.shipped_templates import AGENT_PLAN_TEMPLATES
 from tests.integration.services.test_shipped_template_startability import (
     _admission_stack,
     _install_source_identity_observer,
@@ -142,7 +143,9 @@ def _run_uv(
         raise FleetPlanInvalid(f"{failure_prefix}: {detail}")
 
 
-def _prove_fixture_locks(repository: Path, uv: Path, python: Path, scratch: Path) -> None:
+def _prove_fixture_locks(
+    repository: Path, uv: Path, python: Path, scratch: Path, cache: Path
+) -> None:
     native_uv = capture_native_uv_authority()
     for index, lock in enumerate(sorted(repository.rglob("uv.lock"))):
         if ".venv" in lock.parts:
@@ -153,7 +156,7 @@ def _prove_fixture_locks(repository: Path, uv: Path, python: Path, scratch: Path
         env = native_uv.environment(
             preparation,
             environment=scratch / f"lock-{index}" / "environment",
-            cache=preparation.cache / "uv",
+            cache=cache,
             uv_overrides={
                 "UV_NO_MANAGED_PYTHON": "1",
                 "UV_PYTHON_DOWNLOADS": "never",
@@ -237,6 +240,7 @@ def _prove_managed_uv_projects(
     uv: Path,
     python: Path,
     scratch: Path,
+    cache: Path,
 ) -> None:
     native_uv = capture_native_uv_authority()
     for index, ((project_name, group), executables) in enumerate(
@@ -244,7 +248,6 @@ def _prove_managed_uv_projects(
     ):
         project = repository.joinpath(*PurePosixPath(project_name).parts)
         environment = scratch / "managed" / f"{index:03d}"
-        cache = scratch / "managed-cache" / f"{index:03d}"
         preparation = ManagedPreparationPathLayout.from_root(scratch / f"managed-{index}")
         env = native_uv.environment(
             preparation,
@@ -287,6 +290,7 @@ def _prove_direct_uv_projects(
     uv: Path,
     python: Path,
     scratch: Path,
+    cache: Path,
 ) -> None:
     for index, (project_name, executables) in enumerate(
         sorted(_direct_uv_project_requirements(plan).items())
@@ -295,7 +299,7 @@ def _prove_direct_uv_projects(
         environment = scratch / "direct-uv" / f"{index:03d}"
         env = _native_uv_environment(
             environment,
-            scratch / "direct-uv-cache" / f"{index:03d}",
+            cache,
             python,
         )
         _run_uv(
@@ -326,6 +330,7 @@ def _materialize_direct_package_executables(
     uv: Path,
     python: Path,
     scratch: Path,
+    cache: Path,
 ) -> None:
     materialized = {
         relative
@@ -342,10 +347,10 @@ def _materialize_direct_package_executables(
         marker = parts.index(".venv")
         projects.add(repository.joinpath(*parts[:marker]))
 
-    for index, project in enumerate(sorted(projects, key=str)):
+    for project in sorted(projects, key=str):
         env = _native_uv_environment(
             project / ".venv",
-            scratch / "direct-cache" / f"{index:03d}",
+            cache,
             python,
         )
         _run_uv(
@@ -396,19 +401,32 @@ def _prove_fixture_contract(
     if python is None:
         raise FleetPlanInvalid("template certification could not select native uv system Python")
 
-    _prove_fixture_locks(repository, uv, python, scratch)
-    _materialize_direct_package_executables(
-        plan, repository=repository, uv=uv, python=python, scratch=scratch
+    # Native uv owns artifact caching. A new empty cache for every offline
+    # fixture cannot prove a locked environment whose third-party wheels need
+    # prior materialization. Resolve its selected cache once and share it while
+    # keeping each environment and workload scratch private.
+    selected_cache = subprocess.run(
+        (str(uv), "cache", "dir"), check=True, capture_output=True, text=True
     )
-    _prove_direct_uv_projects(plan, repository=repository, uv=uv, python=python, scratch=scratch)
-    _prove_managed_uv_projects(plan, repository=repository, uv=uv, python=python, scratch=scratch)
+    cache = Path(selected_cache.stdout.strip())
+    _prove_fixture_locks(repository, uv, python, scratch, cache)
+    _materialize_direct_package_executables(
+        plan, repository=repository, uv=uv, python=python, scratch=scratch, cache=cache
+    )
+    _prove_direct_uv_projects(
+        plan, repository=repository, uv=uv, python=python, scratch=scratch, cache=cache
+    )
+    _prove_managed_uv_projects(
+        plan, repository=repository, uv=uv, python=python, scratch=scratch, cache=cache
+    )
     _prove_repository_paths(plan, repository)
 
 
 def test_catalog_certification_scenarios_cover_exact_shipped_plan_catalog() -> None:
     plans = PlanTemplateStore(TEMPLATES / "plans")
     discovered = {item.template_key for item in plans.catalog().templates}
-    assert set(SCENARIOS) == discovered
+    assert not set(SCENARIOS).intersection(AGENT_PLAN_TEMPLATES)
+    assert set(SCENARIOS).union(AGENT_PLAN_TEMPLATES) == discovered
     for template_key, scenario in SCENARIOS.items():
         assert isinstance(scenario, dict), template_key
         fixture_key = scenario["fixture"]

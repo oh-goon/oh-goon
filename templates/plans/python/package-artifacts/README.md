@@ -1,5 +1,7 @@
 # python/package-artifacts
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Build through the project-owned packaging command and retain its distribution bundle for independent retrieval.
 
 ## Before you run

@@ -3,7 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_captured_run_issuer_has_no_new_live_executor_authority():
+def test_captured_run_issuer_has_no_new_live_executor_authority() -> None:
     code = (
         ROOT / "backend/src/oh_goon/native_issuer/enforcer_lace_captured_run_issuer.py"
     ).read_text()

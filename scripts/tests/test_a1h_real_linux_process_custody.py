@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.process
+pytestmark = [pytest.mark.process, pytest.mark.certification]
 
 # A fresh non-root OS principal must be available. UID 65534 is reserved for
 # this disposable Linux process; no real deployment issuer identities are used.
@@ -42,7 +42,7 @@ except TrustProtocolError:
 """
 
 
-def test_real_linux_distinct_uid_no_new_privs_zero_caps_and_six_roots():
+def test_real_linux_distinct_uid_no_new_privs_zero_caps_and_six_roots() -> None:
     if (
         not sys.platform.startswith("linux")
         or os.geteuid() != 0
@@ -155,7 +155,7 @@ finally:
 """
 
 
-def test_real_linux_nonprivileged_caller_rejects_privileged_sibling_thread():
+def test_real_linux_nonprivileged_caller_rejects_privileged_sibling_thread() -> None:
     """A1k: observable kernel test of process-wide isolation; NOT host attestation."""
     if (
         not sys.platform.startswith("linux")
@@ -254,7 +254,7 @@ finally:
 """
 
 
-def test_real_linux_caller_drops_root_but_sibling_retains_root():
+def test_real_linux_caller_drops_root_but_sibling_retains_root() -> None:
     """A1k: root sibling remains in the same process; caller-only checks fail."""
     if (
         not sys.platform.startswith("linux")

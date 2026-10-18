@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -159,14 +160,27 @@ def _published_outputs(
     # A model's validated proposal is data, not an effect grant. Publish it
     # through the SAME successful-attempt output owner as ordinary Step files,
     # with the original producer execution identity on strict attempts.
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.harness == "local-model-proposal":
+    if isinstance(step, ResolvedLocalSearchAgentStep) and step.harness in (
+        "local-model-proposal",
+        "provider-proposal",
+    ):
         try:
             from oh_goon.integrations.agent_patch_apply import proposal_from_step_stdout
 
-            proposal_text = proposal_from_step_stdout(
-                outcome.stdout,
-                handoff_identity=step.handoff_identity,
-            )
+            if step.harness == "provider-proposal":
+                from oh_goon.core.models.agent_review import decode_agent_record
+                from oh_goon.integrations.agent_patch_apply import parse_batch_proposal
+
+                context = decode_agent_record(step.review_context or "{}")
+                record = parse_batch_proposal(
+                    outcome.stdout, candidate_identity=context.get("candidate_identity")
+                )
+                proposal_text = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
+            else:
+                proposal_text = proposal_from_step_stdout(
+                    outcome.stdout,
+                    handoff_identity=step.handoff_identity,
+                )
         except FleetPlanInvalid as exc:
             return AttemptPublication(
                 outputs={},

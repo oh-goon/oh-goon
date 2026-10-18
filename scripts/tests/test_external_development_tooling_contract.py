@@ -72,6 +72,24 @@ def test_manifest_comment_is_not_dependency_leak(tmp_path: Path) -> None:
     assert contract.check_external_development_tooling_contract(root) == []
 
 
+def test_template_documentation_may_explain_optional_skills_without_runtime_dependency(
+    tmp_path: Path,
+) -> None:
+    root = _fixture_root(tmp_path)
+    package = root / "templates/goons/agents/review"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text(
+        "# agents/review\nSelect optional agentsCookbook Skills in the caller's registry.\n"
+    )
+    assert contract.check_external_development_tooling_contract(root) == []
+    runtime = package / "goon.yml"
+    runtime.write_text("steps:\n- run: agentsCookbook execute\n")
+    assert any(
+        item.path == runtime
+        for item in contract.check_external_development_tooling_contract(root)
+    )
+
+
 def test_rejects_runtime_import(tmp_path: Path) -> None:
     root = _fixture_root(tmp_path)
     runtime = root / "backend/src/oh_goon/runtime.py"

@@ -184,6 +184,13 @@ def _import_name(distribution: str) -> str:
 
 
 def _default_import_probe(distribution: str, import_name: str) -> None:
+    if distribution == "types-pyyaml":
+        # This PEP 561 distribution contains type data rather than an importable
+        # runtime module. Native package metadata owns its installed location.
+        stubs = importlib.metadata.distribution(distribution).locate_file("yaml-stubs/__init__.pyi")
+        if not stubs.is_file():
+            raise HostedCapabilityError("PyYAML type stubs are not materialized")
+        return
     module = importlib.import_module(import_name)
     origin = getattr(module, "__file__", None)
     if origin is not None:

@@ -1,5 +1,21 @@
 from __future__ import annotations
 
+from oh_goon.core.strict_executor_authority import (
+    SYSTEMD_DELEGATED_ENV,
+)
+from oh_goon.core.strict_executor_authority import (
+    SYSTEMD_SUBGROUP_ENV,
+)
+from oh_goon.runtime._database_policy import DATABASE_SCHEMA_VERSION
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime._database_policy import inspect_database_path
+from oh_goon.runtime.local_state_maintenance import (
+    LocalStateCompatibility,
+)
+from oh_goon.services.certification_workspace_retention import (
+    certification_state_root,
+)
+
 from pathlib import Path
 
 import pytest
@@ -16,7 +32,7 @@ def _source_with_lock(root: Path) -> Path:
 
 
 def test_bootstrap_rejects_invalid_source_before_creating_control_state(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     source = _source_with_lock(tmp_path / "repo")
     (source / "repair.patch").write_text("transport only\n", encoding="utf-8")
@@ -34,7 +50,7 @@ def test_bootstrap_rejects_invalid_source_before_creating_control_state(
 
 
 def test_existing_executor_inventory_is_validated_by_runtime_owner(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo")
     state_home = tmp_path / "state-home"
@@ -65,13 +81,11 @@ def test_existing_executor_inventory_is_validated_by_runtime_owner(
     assert context.lock_root == context.state_root / "locks"
     assert context.lock_root.is_dir()
     assert observed == [inventory.resolve()]
-    assert f"schema-{certification_bootstrap.DATABASE_SCHEMA_VERSION}" in str(
-        context.state_root
-    )
+    assert f"schema-{DATABASE_SCHEMA_VERSION}" in str(context.state_root)
 
 
 def test_app_bootstrap_does_not_discover_validate_or_materialize_strict_executor(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo")
     monkeypatch.setattr(
@@ -105,7 +119,9 @@ def test_app_bootstrap_does_not_discover_validate_or_materialize_strict_executor
     assert context.lock_root == context.state_root / "locks"
 
 
-def test_bootstrap_cli_parser_keeps_strict_executor_authority_opt_in(tmp_path) -> None:
+def test_bootstrap_cli_parser_keeps_strict_executor_authority_opt_in(
+    tmp_path: Path,
+) -> None:
     from oh_goon.cli_parser import build_parser
 
     state = str(tmp_path / "state")
@@ -127,7 +143,7 @@ def test_bootstrap_cli_parser_keeps_strict_executor_authority_opt_in(tmp_path) -
 
 
 def test_existing_state_must_be_actually_writable_before_certification_admission(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo")
     inventory = tmp_path / "operator-executors.toml"
@@ -139,7 +155,7 @@ def test_existing_state_must_be_actually_writable_before_certification_admission
         certification_bootstrap, "load_executor_pool", lambda _path: None
     )
 
-    def fail_probe(_path):
+    def fail_probe(_path: Path) -> None:
         raise OSError(30, "Read-only file system")
 
     monkeypatch.setattr(certification_bootstrap, "probe_writable_directory", fail_probe)
@@ -155,7 +171,7 @@ def test_existing_state_must_be_actually_writable_before_certification_admission
 
 
 def test_invalid_operator_inventory_is_environment_failure(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo")
     inventory = tmp_path / "bad.toml"
@@ -182,7 +198,7 @@ def test_invalid_operator_inventory_is_environment_failure(
 
 
 def test_local_inventory_is_materialized_then_reparsed_by_runtime_owner(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo")
     observed: list[Path] = []
@@ -213,7 +229,7 @@ def test_local_inventory_is_materialized_then_reparsed_by_runtime_owner(
 
 
 def test_systemd_reentry_validates_unit_root_through_canonical_cgroup_owner(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     current = Path(
         "/sys/fs/cgroup/user.slice/user-1000.slice/run-r123.service/oh-goon-workflow"
@@ -235,8 +251,8 @@ def test_systemd_reentry_validates_unit_root_through_canonical_cgroup_owner(
 
     root = certification_bootstrap.resolve_certification_cgroup_root(
         {
-            certification_bootstrap.SYSTEMD_DELEGATED_ENV: "1",
-            certification_bootstrap.SYSTEMD_SUBGROUP_ENV: "oh-goon-workflow",
+            SYSTEMD_DELEGATED_ENV: "1",
+            SYSTEMD_SUBGROUP_ENV: "oh-goon-workflow",
         }
     )
 
@@ -245,7 +261,7 @@ def test_systemd_reentry_validates_unit_root_through_canonical_cgroup_owner(
 
 
 def test_systemd_reentry_self_places_process_before_enabling_controllers(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     unit = Path("/sys/fs/cgroup/user.slice/user-1000.slice/run-r123.service")
     child = unit / "oh-goon-workflow"
@@ -279,8 +295,8 @@ def test_systemd_reentry_self_places_process_before_enabling_controllers(
 
     root = certification_bootstrap.resolve_certification_cgroup_root(
         {
-            certification_bootstrap.SYSTEMD_DELEGATED_ENV: "1",
-            certification_bootstrap.SYSTEMD_SUBGROUP_ENV: "oh-goon-workflow",
+            SYSTEMD_DELEGATED_ENV: "1",
+            SYSTEMD_SUBGROUP_ENV: "oh-goon-workflow",
         }
     )
 
@@ -291,7 +307,7 @@ def test_systemd_reentry_self_places_process_before_enabling_controllers(
 
 
 def test_nested_strict_reentry_self_places_process_before_enabling_controllers(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     delegated = Path("/sys/fs/cgroup/nested-execution")
     child = delegated / "oh-goon-nested-process"
@@ -349,7 +365,7 @@ def test_executor_unavailable_message_never_suggests_a_weaker_fallback() -> None
 
 
 def test_explicit_certification_cgroup_root_cannot_pull_workflow_across_delegation_boundary(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         certification_bootstrap,
@@ -368,7 +384,7 @@ def test_explicit_certification_cgroup_root_cannot_pull_workflow_across_delegati
     assert "operator-delegated" in message
 
 
-def test_missing_committed_backend_lock_is_source_failure(tmp_path) -> None:
+def test_missing_committed_backend_lock_is_source_failure(tmp_path: Path) -> None:
     source = tmp_path / "repo"
     source.mkdir()
 
@@ -382,7 +398,7 @@ def test_missing_committed_backend_lock_is_source_failure(tmp_path) -> None:
 
 
 def test_local_certification_reserves_attempt_plus_control_plane_memory(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state = tmp_path / "state"
     state.mkdir()
@@ -424,7 +440,7 @@ def test_local_certification_reserves_attempt_plus_control_plane_memory(
 
 
 def test_local_certification_inventory_advertises_four_gib_attempt_memory(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state = tmp_path / "state"
     state.mkdir()
@@ -465,14 +481,14 @@ def test_local_certification_inventory_advertises_four_gib_attempt_memory(
 
 
 def test_corrupt_certification_database_fails_before_executor_admission(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo")
     state_home = tmp_path / "state-home"
     monkeypatch.setattr(
         certification_bootstrap, "repository_id", lambda _root: "repo-corrupt"
     )
-    state = certification_bootstrap.certification_state_root(
+    state = certification_state_root(
         source_root=source,
         state_home=state_home,
     )
@@ -493,7 +509,7 @@ def test_corrupt_certification_database_fails_before_executor_admission(
     assert "Native dependency materialization is separate" in message
 
 
-def test_certification_state_lease_refuses_second_controller(tmp_path) -> None:
+def test_certification_state_lease_refuses_second_controller(tmp_path: Path) -> None:
     state = tmp_path / "state"
     with certification_bootstrap.certification_state_lease(state):
         with pytest.raises(certification_bootstrap.CertificationStateBusy):
@@ -504,14 +520,14 @@ def test_certification_state_lease_refuses_second_controller(tmp_path) -> None:
 
 
 def test_certification_state_reset_preserves_retained_dependency_supply(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo")
     state_home = tmp_path / "state-home"
     monkeypatch.setattr(
         certification_bootstrap, "repository_id", lambda _root: "repo-reset"
     )
-    state = certification_bootstrap.certification_state_root(
+    state = certification_state_root(
         source_root=source,
         state_home=state_home,
     )
@@ -538,7 +554,7 @@ def test_certification_state_reset_preserves_retained_dependency_supply(
 
 
 def test_unclassified_cache_bytes_are_not_certification_control_authority(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo")
     state_home = tmp_path / "state-home"
@@ -571,7 +587,7 @@ def test_unclassified_cache_bytes_are_not_certification_control_authority(
 
 
 def test_certification_database_preflight_initializes_reopens_and_quick_checks(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo-preflight")
     state_home = tmp_path / "state-home"
@@ -590,9 +606,10 @@ def test_certification_database_preflight_initializes_reopens_and_quick_checks(
         state_home=state_home,
     )
 
+    assert isinstance(payload["database"], str)
     database = Path(payload["database"])
     assert database.is_file()
-    assert payload["schema"] == certification_bootstrap.DATABASE_SCHEMA_VERSION
+    assert payload["schema"] == DATABASE_SCHEMA_VERSION
     assert payload["journal_mode"] == "DELETE"
     assert payload["quick_check"] == "ok"
     assert payload["integrity_check"] == "ok"
@@ -611,14 +628,14 @@ def test_certification_database_preflight_initializes_reopens_and_quick_checks(
         == "persistent-query-only-connection-per-preparation"
     )
     assert payload["runtime_observation_reproof_attempts"] == 3
-    inspection = certification_bootstrap.inspect_database_path(
+    inspection = inspect_database_path(
         database, integrity_check=True, foreign_key_check=True
     )
-    assert inspection.status is certification_bootstrap.LocalStateCompatibility.READY
+    assert inspection.status is LocalStateCompatibility.READY
 
 
 def test_certification_database_preflight_detects_same_inode_notadb_during_endurance(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo-preflight-corrupt")
     state_home = tmp_path / "state-home"
@@ -632,11 +649,11 @@ def test_certification_database_preflight_detects_same_inode_notadb_during_endur
         certification_bootstrap, "database_filesystem_is_local", lambda _path: True
     )
 
-    original = certification_bootstrap.LocalDatabase.durable_revision
+    original = LocalDatabase.durable_revision
     calls = 0
     corrupted_inode = None
 
-    def corrupt_same_inode_then_read(database_owner):
+    def corrupt_same_inode_then_read(database_owner: LocalDatabase) -> int:
         nonlocal calls, corrupted_inode
         calls += 1
         if calls == 8:
@@ -651,7 +668,7 @@ def test_certification_database_preflight_detects_same_inode_notadb_during_endur
         return original(database_owner)
 
     monkeypatch.setattr(
-        certification_bootstrap.LocalDatabase,
+        LocalDatabase,
         "durable_revision",
         corrupt_same_inode_then_read,
     )
@@ -671,7 +688,7 @@ def test_certification_database_preflight_detects_same_inode_notadb_during_endur
 
 
 def test_certification_database_preflight_rejects_nonlocal_storage_before_sqlite_work(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = _source_with_lock(tmp_path / "repo-preflight")
     state_home = tmp_path / "state-home"

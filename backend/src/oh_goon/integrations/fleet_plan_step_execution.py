@@ -364,6 +364,12 @@ def _execute_typed_step(
                 raise FleetPlanInvalid(
                     "Agent feedback was not bound by the original Fleet sequencer"
                 )
+            if step.harness.startswith("provider-"):
+                from oh_goon.integrations.agent_review_execution import execute_provider_agent
+
+                return execute_provider_agent(
+                    step, handoff, process, runtime, timeout=_command_timeout(step, runtime)
+                )
             selected_query = None
             if step.harness in (
                 "local-model-search",

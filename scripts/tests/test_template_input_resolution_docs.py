@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -37,8 +38,10 @@ def _issues_for_navigation(path: Path, markdown: str) -> list[str]:
     return problems
 
 
-def _catalog(path: str) -> dict:
-    return yaml.safe_load((ROOT / path).read_text(encoding="utf-8"))
+def _catalog(path: str) -> dict[str, Any]:
+    payload = yaml.safe_load((ROOT / path).read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
 
 
 def test_m133_navigation_has_no_missing_or_dangling_local_links() -> None:

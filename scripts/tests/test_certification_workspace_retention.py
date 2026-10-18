@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from oh_goon.services.certification_workspace_retention import (
+    certification_state_root,
+)
+
 from pathlib import Path
 
 from oh_goon.core.product_identity import repository_id
-from oh_goon.runtime.database import DATABASE_SCHEMA_VERSION, LocalDatabase
+from oh_goon.runtime._database_policy import DATABASE_SCHEMA_VERSION
+from oh_goon.runtime.database import LocalDatabase
 from oh_goon.services import certification_bootstrap
 
 
@@ -12,7 +17,7 @@ def _current_state(tmp_path: Path) -> tuple[Path, str, Path]:
     source = tmp_path / "repo"
     source.mkdir()
     repo_id = repository_id(source)
-    state = certification_bootstrap.certification_state_root(
+    state = certification_state_root(
         source_root=source,
         state_home=state_home,
     )

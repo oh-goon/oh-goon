@@ -7,7 +7,9 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator, model_validator
 
 from oh_goon.core.fleet_plan_validation import validate_resolved_plan
+from oh_goon.core.models.agent_providers import AgentConnection
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan_composition import (
     GoonOutputDefinition,
     PlanInputBinding,
@@ -324,6 +326,7 @@ class CompiledGoonImportStep(ImmutableModel):
     """One compiled ordered Goon edge; never an authored Atomic-Goon Step."""
 
     kind: Literal["goon"] = "goon"
+    phase: Literal["review", "adjudicate", "repair", "regression", "verification"] | None = None
     source_root: str | None = Field(default=None, min_length=1, max_length=240)
 
     @field_validator("source_root")
@@ -441,7 +444,7 @@ class ResolvedCommandStep(CommandPlanStep):
 
 
 class ResolvedLocalSearchAgentStep(ResolvedCommandStep):
-    """Original Step-shaped, non-model, read-only Agent tool intent.
+    """Resolved read-only Agent intent for a fixed tool or provider harness.
 
     The immutable AG-02 packet is transported *separately* by the original
     attempt. This identity-only plan value never embeds captured repository or
@@ -465,16 +468,25 @@ class ResolvedLocalSearchAgentStep(ResolvedCommandStep):
         "local-model-skill-resources",
         "local-model-skill-loop",
         "local-model-proposal",
+        "provider-review",
+        "provider-adjudicate",
+        "provider-proposal",
     ] = "local-search"
     model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
+    connection: AgentConnection | None = Field(default=None, exclude_if=lambda value: value is None)
+    review_context: str | None = Field(
+        default=None, max_length=65536, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_readonly_tool_shape(self) -> "ResolvedLocalSearchAgentStep":
+        if self.harness.startswith("provider-") != (self.connection is not None):
+            raise ValueError("provider Agent requires a frozen connection")
         if (
             self.argv != ("rg",)
             or self.uv is not None
             or self.working_directory != "."
-            or self.success_codes != (0, 1)
+            or self.success_codes != ((0,) if self.harness.startswith("provider-") else (0, 1))
             or self.capabilities.egress.mode != "none"
             or self.capabilities.nested_strict_execution
             or self.capabilities.tools
@@ -661,6 +673,9 @@ class ResolvedImport(ImmutableModel):
     import_id: str = Field(min_length=1, max_length=160)
     parent_import_id: str | None = Field(default=None, min_length=1, max_length=160)
     kind: Literal["goon"] = "goon"
+    phase: Literal["review", "adjudicate", "repair", "regression", "verification"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     name: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*$")
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     step_ids: tuple[str, ...] = Field(min_length=1, max_length=50)
@@ -681,6 +696,9 @@ class ResolvedFleetPlan(ImmutableModel):
     imports: tuple[ResolvedImport, ...] = Field(default_factory=tuple, max_length=100)
     steps: tuple[ResolvedPlanStep, ...] = Field(min_length=1, max_length=50)
     step_sources: tuple[ResolvedStepSource, ...] = Field(default_factory=tuple, max_length=50)
+    skill_sources: tuple[LockedSkillSource, ...] = Field(
+        default_factory=tuple, max_length=128, exclude_if=lambda value: not value
+    )
 
     @classmethod
     def create(
@@ -693,6 +711,7 @@ class ResolvedFleetPlan(ImmutableModel):
         requirements: tuple[RepositoryRequirement, ...] = (),
         imports: tuple[ResolvedImport, ...] = (),
         step_sources: tuple[ResolvedStepSource, ...] = (),
+        skill_sources: tuple[LockedSkillSource, ...] = (),
     ) -> ResolvedFleetPlan:
         payload = {
             "contract_version": FLEET_PLAN_CONTRACT_VERSION,
@@ -706,6 +725,11 @@ class ResolvedFleetPlan(ImmutableModel):
                 item.model_dump(mode="json", exclude_computed_fields=True) for item in imports
             ],
             "steps": [step.model_dump(mode="json", exclude_computed_fields=True) for step in steps],
+            **(
+                {"skill_sources": [item.model_dump(mode="json") for item in skill_sources]}
+                if skill_sources
+                else {}
+            ),
         }
         return cls(
             plan_id=stable_id("fleet-plan", payload),
@@ -716,6 +740,7 @@ class ResolvedFleetPlan(ImmutableModel):
             imports=imports,
             steps=steps,
             step_sources=step_sources,
+            skill_sources=skill_sources,
         )
 
     @model_validator(mode="after")

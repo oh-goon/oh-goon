@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.unit.repository_tooling.test_co_r01_lifecycle_architecture import _fixture
 
 from oh_goon.repository_tooling.architecture.co_r01_lifecycle_contract import (
@@ -52,13 +53,8 @@ def test_owner_bypass_is_rejected_before_native_qualification(tmp_path: Path, ol
     root = _fixture(tmp_path)
     path = root / _WORKSPACE
     body = path.read_text()
-    assert body.count(old) in (1, 2)
     # The registration lock has the same lexical sequence; mutate the
     # retirement occurrence, not the earlier canonical registration owner.
-    if body.count(old) == 2:
-        prefix, suffix = body.rsplit(old, 1)
-        mutated = prefix + new + suffix
-    else:
-        mutated = body.replace(old, new, 1)
+    mutated = replace_python_syntax(body, old, new, last=True)
     path.write_text(mutated)
     assert any(v.path == path for v in check_co_r01_lifecycle_edges(root))

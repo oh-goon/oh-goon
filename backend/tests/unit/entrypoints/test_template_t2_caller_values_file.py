@@ -395,6 +395,7 @@ def test_enrolled_manual_run_transports_exact_source_without_reselecting(
             str(tmp_path / "plan.yml"),
             "--fleet-run-id",
             "enrolled",
+            "--no-wait",
             "--inputs-file",
             str(source),
             "--repository-id",

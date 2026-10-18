@@ -4,10 +4,10 @@ from argparse import Namespace
 from types import SimpleNamespace
 
 import oh_goon.cli_runtime_plans as plans
+from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
-from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 
 
@@ -106,19 +106,8 @@ def test_plan_run_completed_attention_required_is_nonzero(monkeypatch, capsys):
         "_wait_for_terminal_with_progress",
         lambda runtime, fleet_run_id, *, admitted_run: detail,
     )
-    args = Namespace(
-        command="plan",
-        plan_command="run",
-        plan="plan.yml",
-        extensions=None,
-        repository_ids=None,
-        all_repositories=False,
-        fleet_run_id=None,
-        priority=SchedulingPriority.NORMAL,
-        plan_inputs=None,
-        lock_file=None,
-        wait=True,
-        repair_handoff=False,
+    args = build_parser().parse_args(
+        ["plan", "run", "plan.yml", "--repository-id", "selected-repository", "--wait"]
     )
 
     assert run_plan_command(runtime, args) == 1

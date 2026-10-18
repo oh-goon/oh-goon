@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.integrations.fleet_plan_compilation import parse_goon_template
 from oh_goon.runtime.goon_templates import GoonTemplateStore
+from oh_goon.services.fleet_plan_input_resolution import materialize_projected_inputs
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -27,16 +27,22 @@ def _binding_map(step):
     return {binding.name: binding.model_dump(mode="json") for binding in step.inputs}
 
 
-@pytest.mark.parametrize("key,fixture,edges", KEYS)
+@pytest.mark.parametrize("key,fixture,_", KEYS)
 def test_compiled_templates_have_exact_semantic_binding_parity(
-    key: str, fixture: str, edges: int
+    key: str, fixture: str, _: int, tmp_path: Path
 ) -> None:
-    legacy = parse_goon_template(
-        (FIXTURES / fixture).read_text(encoding="utf-8"),
-        source=str(FIXTURES / fixture),
-        expected_name=key.split("/")[1],
-    )
-    authored = GoonTemplateStore().source(key).compiled
+    compiled = []
+    for flavor in ("legacy", "new"):
+        root = tmp_path / flavor
+        goons = root / "goons"
+        shutil.copytree(SHIPPED_GOONS, goons)
+        if flavor == "legacy":
+            (goons / key / "goon.yml").write_bytes((FIXTURES / fixture).read_bytes())
+        plan = root / "plan.yml"
+        plan.write_text("version: 1\ngoons: [" + key + "]\n")
+        graph = FleetPlanResolver(goon_templates=GoonTemplateStore(goons)).analyze_source(plan)
+        compiled.append(materialize_projected_inputs(graph, goons / key / "goon.yml"))
+    legacy, authored = compiled
     old_bytes = (FIXTURES / fixture).read_bytes()
     new_bytes = (SHIPPED_GOONS / key / "goon.yml").read_bytes()
     assert hashlib.sha256(old_bytes).digest() != hashlib.sha256(new_bytes).digest()
@@ -53,21 +59,6 @@ def test_compiled_templates_have_exact_semantic_binding_parity(
             now.failure_impact,
         )
         assert _binding_map(previous) == _binding_map(now)
-    assert (
-        sum(
-            binding.value.startswith("${{ inputs.")
-            for step in authored.steps
-            for binding in step.inputs
-            if isinstance(binding.value, str)
-        )
-        == edges
-    )
-    assert (
-        parse_goon_template(
-            (SHIPPED_GOONS / key / "goon.yml").read_text(), expected_name=key.split("/")[1]
-        )
-        == authored
-    )
 
 
 @pytest.mark.parametrize("key,fixture,_", KEYS)

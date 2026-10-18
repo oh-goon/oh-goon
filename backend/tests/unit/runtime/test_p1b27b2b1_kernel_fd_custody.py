@@ -27,6 +27,7 @@ from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     _check_p1b27b2b1_kernel_fd_custody,
 )
+from tests.factories.x0_architecture import replace_python_syntax
 
 PACKAGE = ROOT / "backend/src/oh_goon"
 
@@ -193,40 +194,44 @@ def test_x0_rejects_kernel_fd_custody_drift(tmp_path, mutation):
         dest.parent.mkdir(parents=True, exist_ok=True)
         contents = source.read_text()
         if mutation == "remove-seals" and name.startswith("engine/"):
-            contents = contents.replace(
-                "fcntl.fcntl(sealed.descriptor, get_seals)", "required_seals"
+            contents = replace_python_syntax(
+                contents, "fcntl.fcntl(sealed.descriptor, get_seals)", "required_seals"
             )
         elif mutation == "remove-inode" and name.startswith("engine/"):
-            contents = contents.replace(
-                "(sealed.kernel_device, sealed.kernel_inode)", "(info.st_dev, info.st_ino)", 1
+            contents = replace_python_syntax(
+                contents,
+                "(sealed.kernel_device, sealed.kernel_inode)",
+                "(info.st_dev, info.st_ino)",
             )
         elif mutation == "remove-digest" and name.startswith("engine/"):
-            contents = contents.replace(
-                '"sha256:" + hasher.hexdigest() != sealed.identity', "False"
+            contents = replace_python_syntax(
+                contents, '"sha256:" + hasher.hexdigest() != sealed.identity', "False"
             )
         elif mutation == "remove-prelaunch" and name.endswith("fleet_plan_bubblewrap_isolation.py"):
             before = "                    inherited_fds = _require_original_native_fd_handoff("
-            assert before in contents
-            contents = contents.replace(before, "                    inherited_fds = tuple(", 1)
+            contents = replace_python_syntax(
+                contents, before, "                    inherited_fds = tuple("
+            )
         elif mutation == "remove-rewind-check" and name.endswith(
             "fleet_plan_atomic_runtime_authority.py"
         ):
-            contents = contents.replace(
+            contents = replace_python_syntax(
+                contents,
                 "        self.verify_kernel_custody()\n        for runtime_file",
                 "        for runtime_file",
             )
         elif mutation == "remove-preargv" and name.endswith("fleet_plan_bubblewrap_isolation.py"):
-            contents = contents.replace(
+            contents = replace_python_syntax(
+                contents,
                 "                    atomic_authority.verify_kernel_custody()\n                    argv, env",
                 "                argv, env",
             )
         elif mutation == "dead-branch" and name.endswith("fleet_plan_bubblewrap_isolation.py"):
             before = "                    inherited_fds = _require_original_native_fd_handoff(\n                        argv, atomic_authority, mount_source_lease,\n                    )"
-            assert before in contents
-            contents = contents.replace(
+            contents = replace_python_syntax(
+                contents,
                 before,
                 "                    if False:\n                        inherited_fds = _require_original_native_fd_handoff(\n                            argv, atomic_authority, mount_source_lease,\n                        )",
-                1,
             )
         dest.write_text(contents)
     assert _check_p1b27b2b1_kernel_fd_custody(tmp_path)

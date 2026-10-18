@@ -1,4 +1,6 @@
 version: 1
+execution:
+  purpose: cicd
 goons:
 - python/quality
 - oci/publish-image

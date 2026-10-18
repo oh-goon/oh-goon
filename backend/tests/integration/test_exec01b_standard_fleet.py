@@ -177,9 +177,9 @@ def test_repository_subject_identity_detects_replaced_git_marker(tmp_path: Path)
     assert repository_subject_instance_id(repo) != before
 
 
-def test_default_runtime_still_requires_authenticated_ingress(tmp_path: Path, monkeypatch):
+def test_explicit_strict_runtime_requires_authenticated_ingress(tmp_path: Path, monkeypatch):
     _repo(tmp_path, monkeypatch)
-    runtime = ApplicationRuntime.build()
+    runtime = ApplicationRuntime.build(standard_local=False)
     try:
         with pytest.raises(Exception, match="not provisioned"):
             runtime.plans.require_cli_plan_preparation(None)
@@ -237,14 +237,14 @@ def test_cli_explicit_standard_local_wait_runs_and_prints_terminal_tape(
         check.shutdown(wait_for_runs=True)
 
 
-def test_standard_local_cli_requires_explicit_wait_and_default_unchanged(
+def test_local_cli_rejects_background_invocation_before_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     from oh_goon.cli import main
 
     repo = _repo(tmp_path, monkeypatch)
     with pytest.raises(SystemExit) as failed:
-        main(["plan", "run", str(repo / "goon.yml"), "--all-repositories", "--standard-local"])
+        main(["plan", "run", str(repo / "goon.yml"), "--all-repositories", "--no-wait"])
     assert failed.value.code == 2
 
 

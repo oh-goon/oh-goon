@@ -11,14 +11,12 @@ import sys
 
 import pytest
 
+from oh_goon.repository_tooling import b12_transport_audit as module
+
 ROOT = Path(__file__).resolve().parents[2]
 AUDIT = ROOT / "backend/src/oh_goon/repository_tooling/b12_transport_audit.py"
 WITNESS = ROOT / "scripts/qualify_b12_development_wsl.sh"
 SUPERVISOR = ROOT / "backend/src/oh_goon/repository_tooling/b11_ring_supervisor.py"
-spec = importlib.util.spec_from_file_location("b12_audit", AUDIT)
-assert spec and spec.loader
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
 
 
 def _candidate(tmp_path: Path) -> Path:
@@ -28,7 +26,9 @@ def _candidate(tmp_path: Path) -> Path:
     return source
 
 
-def test_realistic_ads_sidecar_preserves_exact_authored_inventory(tmp_path):
+def test_realistic_ads_sidecar_preserves_exact_authored_inventory(
+    tmp_path: Path,
+) -> None:
     src = _candidate(tmp_path)
     without = module.scan(src)
     sidecar = src / "src.py:Zone.Identifier"
@@ -38,11 +38,15 @@ def test_realistic_ads_sidecar_preserves_exact_authored_inventory(tmp_path):
     assert result["source_members"] == 1
     assert result["sidecar_count"] == 1
     assert result["inventory"] == without["inventory"]
-    assert result["windows_sidecars"][0]["sha256"]
+    sidecars = result["windows_sidecars"]
+    assert isinstance(sidecars, list) and sidecars
+    assert isinstance(sidecars[0], dict) and sidecars[0]["sha256"]
     assert sidecar.exists(), "audit must never remove transport evidence"
 
 
-def test_windows_stream_data_suffix_is_known_only_with_original_file(tmp_path):
+def test_windows_stream_data_suffix_is_known_only_with_original_file(
+    tmp_path: Path,
+) -> None:
     src = _candidate(tmp_path)
     sidecar = src / "src.py:Zone.Identifier:$DATA"
     sidecar.write_text("[ZoneTransfer]\nZoneId=3\n")
@@ -62,8 +66,8 @@ def test_windows_stream_data_suffix_is_known_only_with_original_file(tmp_path):
     ],
 )
 def test_exact_ads_suffix_is_transport_even_with_opaque_windows_payload(
-    tmp_path, payload
-):
+    tmp_path: Path, payload: bytes
+) -> None:
     """The canonical suffix, not Windows-specific payload decoding, owns transport classification."""
     src = _candidate(tmp_path)
     original = module.scan(src)["inventory"]
@@ -73,17 +77,20 @@ def test_exact_ads_suffix_is_transport_even_with_opaque_windows_payload(
     assert not result["unsafe_entries"]
     assert result["source_members"] == 1 and result["sidecar_count"] == 1
     assert result["inventory"] == original
-    assert result["windows_sidecars"][0]["content_authority"] == "NONE"
+    sidecars = result["windows_sidecars"]
+    assert isinstance(sidecars, list) and sidecars
+    assert isinstance(sidecars[0], dict)
+    assert sidecars[0]["content_authority"] == "NONE"
 
 
-def test_orphaned_sidecar_remains_unsafe_even_with_exact_suffix(tmp_path):
+def test_orphaned_sidecar_remains_unsafe_even_with_exact_suffix(tmp_path: Path) -> None:
     src = _candidate(tmp_path)
     sidecar = src / "missing.py:Zone.Identifier"
     sidecar.write_bytes(b"MOTW")
     assert module.scan(src)["unsafe_entries"] == ["./missing.py:Zone.Identifier"]
 
 
-def test_directory_owner_sidecar_is_recognized(tmp_path):
+def test_directory_owner_sidecar_is_recognized(tmp_path: Path) -> None:
     src = _candidate(tmp_path)
     (src / "directory").mkdir()
     (src / "directory:Zone.Identifier").write_bytes(b"")
@@ -91,7 +98,7 @@ def test_directory_owner_sidecar_is_recognized(tmp_path):
     assert not result["unsafe_entries"] and result["sidecar_count"] == 1
 
 
-def test_symlink_and_hardlink_source_substitution_fail(tmp_path):
+def test_symlink_and_hardlink_source_substitution_fail(tmp_path: Path) -> None:
     src = _candidate(tmp_path)
     (src / "symlink.py").symlink_to(src / "src.py")
     assert module.scan(src)["unsafe_entries"]
@@ -100,7 +107,9 @@ def test_symlink_and_hardlink_source_substitution_fail(tmp_path):
     assert module.scan(src)["unsafe_entries"]
 
 
-def test_unrecognized_extra_is_not_hidden_as_known_windows_metadata(tmp_path):
+def test_unrecognized_extra_is_not_hidden_as_known_windows_metadata(
+    tmp_path: Path,
+) -> None:
     src = _candidate(tmp_path)
     original = module.scan(src)["inventory"]
     (src / "src.py:UnknownData").write_text("unknown\n")
@@ -109,17 +118,21 @@ def test_unrecognized_extra_is_not_hidden_as_known_windows_metadata(tmp_path):
     assert updated["inventory"] != original
 
 
-def test_source_audit_baseline_requires_full_membership_not_subset(tmp_path, capsys):
+def test_source_audit_baseline_requires_full_membership_not_subset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     src = _candidate(tmp_path)
     baseline = tmp_path / "authoritative.sha256"
-    baseline.write_text(module.scan(src)["inventory"])
+    inventory = module.scan(src)["inventory"]
+    assert isinstance(inventory, str)
+    baseline.write_text(inventory)
     assert module.main(["audit", "--root", str(src), "--baseline", str(baseline)]) == 0
     (src / "unexpected.py").write_text("surprise\n")
     assert module.main(["audit", "--root", str(src), "--baseline", str(baseline)]) == 3
     assert "MISMATCH" in capsys.readouterr().out
 
 
-def test_script_preserves_one_command_and_audits_both_ends():
+def test_script_preserves_one_command_and_audits_both_ends() -> None:
     script = WITNESS.read_text()
     assert "TRANSPORT_PRE.json" in script and "TRANSPORT_POST.json" in script
     assert "b12_transport_audit" in script
@@ -134,8 +147,8 @@ def test_script_preserves_one_command_and_audits_both_ends():
 
 
 def test_qualification_make_target_cleans_transport_before_witness_and_fails_closed(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Test the *real target recipe* with isolated fake shell scripts, not a mock order list.
 
     Neither a failed cleanup nor an early source audit may start test work. This
@@ -198,8 +211,8 @@ def test_qualification_make_target_cleans_transport_before_witness_and_fails_clo
 
 
 def test_transport_clean_accepts_extracted_windows_sidecars_and_preserves_source(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     """Reproduces B12 native WSL blocker: valid ADS names need not contain ZoneTransfer INI."""
     root = tmp_path / "checkout"
     (root / "backend").mkdir(parents=True)
@@ -248,7 +261,9 @@ def test_transport_clean_accepts_extracted_windows_sidecars_and_preserves_source
     assert again.returncode == 0 and "Removed 0" in again.stdout
 
 
-def test_transport_clean_rejects_orphans_and_symlinked_owners_atomically(tmp_path):
+def test_transport_clean_rejects_orphans_and_symlinked_owners_atomically(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "checkout"
     (root / "backend").mkdir(parents=True)
     (root / "scripts").mkdir()
@@ -288,8 +303,12 @@ def test_transport_clean_rejects_orphans_and_symlinked_owners_atomically(tmp_pat
     assert good.is_file() and linked.is_file()
 
 
-def test_supervisor_carries_birth_and_post_teardown_process_evidence(tmp_path):
-    spec2 = importlib.util.spec_from_file_location("b11_ring_supervisor", SUPERVISOR)
+def test_supervisor_carries_birth_and_post_teardown_process_evidence(
+    tmp_path: Path,
+) -> None:
+    spec2 = importlib.util.spec_from_file_location(
+        "_oh_goon_test_b11_ring_supervisor", SUPERVISOR
+    )
     assert spec2 and spec2.loader
     sup = importlib.util.module_from_spec(spec2)
     spec2.loader.exec_module(sup)
@@ -311,7 +330,7 @@ def test_supervisor_carries_birth_and_post_teardown_process_evidence(tmp_path):
     assert r["release_authority"] == "NONE"
 
 
-def test_witness_help_and_non_wsl_fail_before_work(tmp_path):
+def test_witness_help_and_non_wsl_fail_before_work(tmp_path: Path) -> None:
     root = tmp_path / "candidate"
     (root / "scripts").mkdir(parents=True)
     shutil.copy(WITNESS, root / "scripts/qualify_b12_development_wsl.sh")
@@ -337,10 +356,14 @@ def test_witness_help_and_non_wsl_fail_before_work(tmp_path):
         assert denied.returncode == 3 and not evidence.exists()
 
 
-def test_duplicate_junit_cases_rejected_despite_green_suite_totals(tmp_path):
-    spec2 = importlib.util.spec_from_file_location("b11_ring_supervisor", SUPERVISOR)
-    sup = importlib.util.module_from_spec(spec2)
+def test_duplicate_junit_cases_rejected_despite_green_suite_totals(
+    tmp_path: Path,
+) -> None:
+    spec2 = importlib.util.spec_from_file_location(
+        "_oh_goon_test_b11_ring_supervisor", SUPERVISOR
+    )
     assert spec2 and spec2.loader
+    sup = importlib.util.module_from_spec(spec2)
     spec2.loader.exec_module(sup)
     xml = (
         '<testsuites><testsuite tests="2" failures="0" errors="0" skipped="0">'
@@ -353,10 +376,12 @@ def test_duplicate_junit_cases_rejected_despite_green_suite_totals(tmp_path):
     assert not report["valid"] and report["reason"].startswith("INVALID_JUNIT")
 
 
-def test_linux_process_birth_identity_recorded_for_live_process():
-    spec2 = importlib.util.spec_from_file_location("b11_ring_supervisor", SUPERVISOR)
-    sup = importlib.util.module_from_spec(spec2)
+def test_linux_process_birth_identity_recorded_for_live_process() -> None:
+    spec2 = importlib.util.spec_from_file_location(
+        "_oh_goon_test_b11_ring_supervisor", SUPERVISOR
+    )
     assert spec2 and spec2.loader
+    sup = importlib.util.module_from_spec(spec2)
     spec2.loader.exec_module(sup)
     import os
 
@@ -365,7 +390,9 @@ def test_linux_process_birth_identity_recorded_for_live_process():
     assert report["birth_ticks"] > 0 and report["session_id"] >= 0
 
 
-def test_native_wsl_manifest_selector_uses_explicit_archive_fixture(tmp_path):
+def test_native_wsl_manifest_selector_uses_explicit_archive_fixture(
+    tmp_path: Path,
+) -> None:
     """Exercise archive precedence without requiring history in the Git checkout."""
     checkpoint = tmp_path / ".checkpoint"
     checkpoint.mkdir()
@@ -421,7 +448,9 @@ def _isolated_qualifier_fragment(script: str, section: str) -> str:
     return sample + body
 
 
-def test_wsl_qualifier_fails_fast_on_killed_launcher_with_host_receipts(tmp_path):
+def test_wsl_qualifier_fails_fast_on_killed_launcher_with_host_receipts(
+    tmp_path: Path,
+) -> None:
     """Reproduces six repeated SIGKILLs as one infra loss, not six false test failures."""
     import os
 
@@ -469,7 +498,9 @@ def test_wsl_qualifier_fails_fast_on_killed_launcher_with_host_receipts(tmp_path
     assert (env_dir / "CORE_AFTER_HOST.txt").exists()
 
 
-def test_wsl_qualifier_environment_bootstrap_failure_stops_before_tests(tmp_path):
+def test_wsl_qualifier_environment_bootstrap_failure_stops_before_tests(
+    tmp_path: Path,
+) -> None:
     """One failed locked sync must not produce repeated ring-side dependency resolution."""
     import os
 

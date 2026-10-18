@@ -12,13 +12,16 @@ class _CloseWhileReadIsBlocked:
         self.entered = Event()
         self.release = Event()
         self.closed = False
+        self.encoding = "utf-8"
+        self.errors = "strict"
+        self.buffer = self
 
-    def read(self, _size: int) -> str:
+    def read1(self, _size: int) -> bytes:
         self.entered.set()
         assert self.release.wait(timeout=1), "reader barrier was not released"
         if self.closed:
             raise ValueError("I/O operation on closed file")
-        return ""
+        return b""
 
     def close(self) -> None:
         self.closed = True

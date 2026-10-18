@@ -112,16 +112,7 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(data["metrics"], sort_keys=True))
-    return (
-        0
-        if (
-            data["metrics"].get("goon_packages"),
-            data["metrics"].get("plan_packages"),
-            data["metrics"].get("unresolved_readme_links"),
-        )
-        == (41, 24, 0)
-        else 2
-    )
+    return 0 if data["packages"] and data["metrics"].get("unresolved_readme_links") == 0 else 2
 
 
 if __name__ == "__main__":

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import pytest
+
 import os
 import subprocess
 from pathlib import Path
 
 import oh_goon.repository_tooling.source_layout as source_layout
+from oh_goon.core.source_layout_policy import canonical_source_layout_issues
 from oh_goon.core.source_tree_policy import CANONICAL_CERTIFICATION_FIXTURE_ROOT
 from oh_goon.repository_tooling.source_layout import (
     CANONICAL_BACKEND_LOCK,
     CANONICAL_BACKEND_VENV,
-    canonical_source_layout_issues,
     clean_generated_venvs,
     clean_source_transport_artifacts,
     prepared_source_tree_issues,
@@ -337,7 +339,7 @@ def _write_transport_artifacts(root: Path, count: int = 3) -> tuple[Path, ...]:
 
 
 def test_transport_clean_output_is_bounded_by_default_and_exact_in_debug(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _minimal_source(tmp_path)
     paths = _write_transport_artifacts(tmp_path)
@@ -365,7 +367,7 @@ def test_transport_clean_output_is_bounded_by_default_and_exact_in_debug(
 
 
 def test_source_layout_check_aggregates_transport_noise_until_debug(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _minimal_source(tmp_path)
     paths = _write_transport_artifacts(tmp_path)
@@ -385,7 +387,7 @@ def test_source_layout_check_aggregates_transport_noise_until_debug(
 
 
 def test_transport_cleanup_refusal_hides_exact_sidecar_path_until_debug(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _minimal_source(tmp_path)
     target = tmp_path / "outside.txt"

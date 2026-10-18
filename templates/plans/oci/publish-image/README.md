@@ -1,5 +1,7 @@
 # oci/publish-image
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Standalone production build-and-publish Plan. The image is built as a retained OCI archive and published only to its digest-qualified registry reference. OCI_REGISTRY_USERNAME and OCI_REGISTRY_PASSWORD are required host-backed credential sources; no mutable tag is created.
 
 ## Use this Plan

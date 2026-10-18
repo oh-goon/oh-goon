@@ -142,6 +142,13 @@ def _add_direct_repository_commands(
     lock.add_argument("--agent-repository-root", type=Path)
     lock.add_argument("--agent-skill-root", type=Path)
     lock.add_argument("--allow-agent-acceptance", action="append")
+    lock.add_argument("--agent-model-profile")
+    lock.add_argument("--agent-providers-file", type=Path)
+    lock.add_argument(
+        "--update-skills",
+        action="store_true",
+        help="Resolve declared Skill branches/tags again and replace their locked commits",
+    )
     lock.add_argument(
         "--output", type=Path, help="Output path; defaults to goon.lock beside the entrypoint"
     )

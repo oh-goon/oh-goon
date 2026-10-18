@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from oh_goon.core.errors import FleetPlanInvalid, InvalidRunTransition, RunNotFound, StateConflict
 from oh_goon.core.execution_lock_identity import build_execution_lock, verify_execution_lock
+from oh_goon.core.models.agent_providers import AgentConnection
 from oh_goon.core.models.agent_repair import (
     AgentRepairBudget,
     AgentRepairContext,
@@ -66,7 +67,15 @@ from oh_goon.services.fleet_caller_file_freshness import require_caller_file_fre
 from oh_goon.services.fleet_plan_input_inspection import InputInterfaceInspection
 from oh_goon.services.fleet_plan_input_routing import CallerFileRoutingOrigin
 from oh_goon.services.fleet_plan_preparation import prepare_declared_plan_runtimes
-from oh_goon.services.fleet_plan_repair import repair_attempt_decision, validate_agent_repair_plan
+from oh_goon.services.fleet_plan_repair import (
+    AgentReviewRepairCampaign,
+    repair_attempt_decision,
+    validate_agent_repair_plan,
+)
+from oh_goon.services.fleet_plan_resolution_context import (
+    AgentCaptureOptions,
+    AgentConnectionSelection,
+)
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.schedules import ScheduleService
@@ -352,6 +361,7 @@ class FleetPlanService:
         agent_skill_root: Path | None = None,
         allowed_agent_acceptance: tuple[str, ...] = (),
         agent_handoff: "FrozenAgentStepHandoff | None" = None,
+        agent_connection: AgentConnectionSelection | None = None,
     ) -> FleetRunState:
         # RUN-7: Python/service ingress must not bypass the same original
         # enrolled-Run pre-resolution cut as CLI/HTTP. This checks membership
@@ -381,30 +391,52 @@ class FleetPlanService:
                     "standard-local Agent requires explicit single-repository scope, "
                     "repository/Skill roots and acceptance profile"
                 )
-            plan, handoff, source_sha256 = self._resolver.resolve_frozen_local_search_agent(
-                plan_path,
+            lock = load_execution_lock(lock_path or (plan_path.parent / LOCK_FILE_NAME))
+            options = dict(
                 inputs=inputs or {},
                 repository_root=agent_repository_root,
                 skill_root=agent_skill_root,
                 allowed_acceptance=allowed_agent_acceptance,
                 extensions_path=extensions_path,
-                handoff=agent_handoff,
+                locked_skills=lock.skill_sources,
             )
+            if agent_handoff is None:
+                plan, handoff, source_sha256 = self._resolver.resolve_frozen_agents(
+                    plan_path, connection=agent_connection, **options
+                )
+            else:
+                plan, handoff, source_sha256 = self._resolver.resolve_frozen_local_search_agent(
+                    plan_path, handoff=agent_handoff, **options
+                )
+            from oh_goon.core.agent_review_plan import agent_review_phases
+
+            if agent_review_phases(plan):
+                raise FleetPlanInvalid(
+                    "phase-classified Agent Plans require explicit review-pass, write-scope and deadline budgets"
+                )
+            if any(
+                getattr(step, "harness", None) in ("provider-adjudicate", "provider-proposal")
+                for step in plan.steps
+            ):
+                raise FleetPlanInvalid(
+                    "adjudication and repair Agents require a review-repair loop"
+                )
             if expected_plan_id is not None and expected_plan_id != plan.plan_id:
                 raise FleetPlanInvalid("Agent Plan identity changed after review")
             from oh_goon.core.product_identity import repository_id
 
-            repo_path = agent_repository_root / handoff.source.repository_reference.removeprefix(
-                "local:"
+            selected_handoff = (
+                next(iter(handoff.values())) if isinstance(handoff, dict) else handoff
+            )
+            repo_path = (
+                agent_repository_root
+                / selected_handoff.source.repository_reference.removeprefix("local:")
             )
             owner = next(iter(repository_ids))
             if repository_id(repo_path) != owner:
                 raise FleetPlanInvalid(
                     "frozen Agent repository differs from selected Fleet repository"
                 )
-            from oh_goon.services.execution_lock_persistence import load_execution_lock
-
-            lock = load_execution_lock(lock_path or (plan_path.parent / LOCK_FILE_NAME))
             verify_execution_lock(build_execution_lock(plan), lock)
             target = self._agent_target(plan, handoff, source_sha256, owner)
         else:
@@ -436,24 +468,40 @@ class FleetPlanService:
         )
 
     def _agent_target(self, plan, handoff, source_sha256: str, owner: str, *, repair=None):
-        packet = handoff.encode_prework_delivery()
-        stored = self._content_store.put_frozen_bytes(packet, owner_repository_id=owner)
-        agent = next(step for step in plan.steps if isinstance(step, ResolvedLocalSearchAgentStep))
-        return FleetPlanTarget(
-            kind="fleet_plan",
-            plan=plan,
-            source=PlanFileSource(sha256=source_sha256),
-            identity=ExecutionIdentity(digest=build_execution_lock(plan).digest),
-            agent_deliveries=(
-                AgentStepDeliveryReference(
-                    step_id=agent.step_id,
-                    handoff_identity=agent.handoff_identity,
-                    delivery_sha256=agent.delivery_sha256,
-                    reference_id=stored.reference_id,
-                ),
-            ),
-            agent_repair=repair,
+        agents = [step for step in plan.steps if isinstance(step, ResolvedLocalSearchAgentStep)]
+        deliveries = (
+            handoff if isinstance(handoff, dict) else {agent.step_id: handoff for agent in agents}
         )
+        references = []
+        try:
+            for agent in agents:
+                packet = deliveries[agent.step_id].encode_prework_delivery()
+                stored = self._content_store.put_frozen_bytes(packet, owner_repository_id=owner)
+                references.append(
+                    AgentStepDeliveryReference(
+                        step_id=agent.step_id,
+                        handoff_identity=agent.handoff_identity,
+                        delivery_sha256=agent.delivery_sha256,
+                        reference_id=stored.reference_id,
+                    )
+                )
+            return FleetPlanTarget(
+                kind="fleet_plan",
+                plan=plan,
+                source=PlanFileSource(sha256=source_sha256),
+                identity=ExecutionIdentity(digest=build_execution_lock(plan).digest),
+                agent_deliveries=tuple(references),
+                agent_repair=repair,
+            )
+        except Exception as error:
+            for reference in references:
+                try:
+                    self._content_store.release_reference(
+                        reference.reference_id, owner_repository_id=owner
+                    )
+                except Exception as cleanup_error:
+                    error.add_note(f"unadmitted Agent source cleanup failed: {cleanup_error}")
+            raise
 
     def repair(
         self,
@@ -470,6 +518,8 @@ class FleetPlanService:
         extensions_path: Path | None = None,
         cancel_requested: Callable[[], bool] | None = None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
+        review_write_roots: tuple[str, ...] | None = None,
+        agent_connection: AgentConnection | None = None,
     ) -> AgentRepairResult:
         """Bounded caller-authorized repair, using only original separately admitted Runs.
 
@@ -513,45 +563,81 @@ class FleetPlanService:
             )
 
         def discard_unadmitted_source(target, reason, message=""):
-            try:
-                self._content_store.release_reference(
-                    target.agent_deliveries[0].reference_id,
-                    owner_repository_id=repository_id,
-                )
-            except Exception as cleanup_error:
-                message = f"{message}; unadmitted source cleanup failed: {cleanup_error}"
+            for delivery in target.agent_deliveries:
+                try:
+                    self._content_store.release_reference(
+                        delivery.reference_id,
+                        owner_repository_id=repository_id,
+                    )
+                except Exception as cleanup_error:
+                    message = f"{message}; unadmitted source cleanup failed: {cleanup_error}"
             return result(reason, message)
 
         if (stop := stop_requested()) is not None:
             return result(stop)
+        campaign = None
+        lock = load_execution_lock(lock_path or (plan_path.parent / LOCK_FILE_NAME))
+        capture_options: AgentCaptureOptions = dict(
+            inputs=selected_inputs,
+            repository_root=agent_repository_root,
+            skill_root=agent_skill_root,
+            allowed_acceptance=accepted,
+            extensions_path=extensions_path,
+            cancel_requested=lambda: stop_requested() is not None,
+            connection=AgentConnection.model_validate(agent_connection.model_dump())
+            if agent_connection is not None
+            else None,
+            locked_skills=lock.skill_sources,
+        )
         try:
-            plan, handoff, source_sha = self._resolver.resolve_frozen_local_search_agent(
-                plan_path,
-                inputs=selected_inputs,
-                repository_root=agent_repository_root,
-                skill_root=agent_skill_root,
-                allowed_acceptance=accepted,
-                extensions_path=extensions_path,
-                cancel_requested=lambda: stop_requested() is not None,
-            )
+            if review_write_roots is not None:
+                plan, handoff, source_sha = self._resolver.resolve_frozen_agents(
+                    plan_path, **capture_options
+                )
+                campaign = AgentReviewRepairCampaign(
+                    plan,
+                    handoff,
+                    resolver=self._resolver,
+                    plan_path=plan_path,
+                    capture_options=capture_options,
+                    passes=budget.max_attempts,
+                    write_roots=review_write_roots,
+                )
+            else:
+                plan, handoff, source_sha = self._resolver.resolve_frozen_local_search_agent(
+                    plan_path,
+                    inputs=selected_inputs,
+                    repository_root=agent_repository_root,
+                    skill_root=agent_skill_root,
+                    allowed_acceptance=accepted,
+                    extensions_path=extensions_path,
+                    cancel_requested=capture_options["cancel_requested"],
+                    locked_skills=lock.skill_sources,
+                )
         except OperationCancelledError:
             return result(stop_requested() or RepairStop.CANCELLED)
         from oh_goon.core.product_identity import repository_id as identify_repository
 
-        repository = agent_repository_root / handoff.source.repository_reference.removeprefix(
-            "local:"
+        repository_handoff = next(iter(handoff.values())) if isinstance(handoff, dict) else handoff
+        repository = (
+            agent_repository_root
+            / repository_handoff.source.repository_reference.removeprefix("local:")
         )
         if identify_repository(repository) != repository_id:
             raise FleetPlanInvalid("repair capture differs from selected Fleet repository")
-        steps = validate_agent_repair_plan(plan, handoff)
-        lock = load_execution_lock(lock_path or (plan_path.parent / LOCK_FILE_NAME))
+        steps = validate_agent_repair_plan(plan, handoff) if campaign is None else None
         verify_execution_lock(build_execution_lock(plan), lock)
+        maximum_runs = (
+            budget.max_attempts if campaign is None else 4 * (budget.max_attempts - 1) + 2
+        )
+        if campaign is not None:
+            plan = campaign.plan
         from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
         with RepositoryWorkspaceAuthority.pin_repository_subject(
             repository
         ) as require_same_subject:
-            for ordinal in range(1, budget.max_attempts + 1):
+            for ordinal in range(1, maximum_runs + 1):
                 if (stop := stop_requested()) is not None:
                     return result(stop)
                 try:
@@ -561,7 +647,19 @@ class FleetPlanService:
                 repair_context = AgentRepairContext(
                     repair_id=repair_id,
                     attempt=ordinal,
-                    max_attempts=budget.max_attempts,
+                    max_attempts=maximum_runs,
+                    **(
+                        dict(
+                            phase=campaign.phase,
+                            review_pass=campaign.review_pass,
+                            original_execution_digest=campaign.original_digest,
+                            candidate_identity=campaign.candidate_identity,
+                            scope_identity=campaign.scope_identity,
+                            write_roots=campaign.write_roots,
+                        )
+                        if campaign is not None
+                        else {}
+                    ),
                     limits=FleetPlanRunLimits(
                         deadline_at=deadline_at,
                         step_timeout_seconds=budget.step_timeout_seconds,
@@ -679,6 +777,20 @@ class FleetPlanService:
                 attempts.append(detail)
                 if forced_stop is not None:
                     return result(forced_stop)
+                if campaign is not None:
+                    try:
+                        require_same_subject()
+                        decision = campaign.advance(detail)
+                        require_same_subject()
+                    except OperationCancelledError:
+                        return result(stop_requested() or RepairStop.CANCELLED)
+                    except (OSError, FleetPlanInvalid, ValueError) as exc:
+                        return result(RepairStop.SOURCE_CHANGED, str(exc))
+                    if decision is not None:
+                        return result(decision, campaign.message)
+                    plan, handoff = campaign.plan, campaign.handoffs
+                    continue
+                assert steps is not None
                 decision = repair_attempt_decision(detail, steps)
                 if decision is not None:
                     return result(decision)
@@ -700,6 +812,7 @@ class FleetPlanService:
                         skill_root=agent_skill_root,
                         allowed_acceptance=accepted,
                         cancel_requested=capture_cancelled,
+                        locked_skills=lock.skill_sources,
                     )
                     require_same_subject()
                 except OperationCancelledError:
@@ -726,6 +839,7 @@ class FleetPlanService:
                     execution=plan.execution,
                     steps=(steps.test, rebound, steps.apply, steps.retest),
                     requirements=plan.requirements,
+                    skill_sources=plan.skill_sources,
                     imports=plan.imports,
                     step_sources=plan.step_sources,
                 )

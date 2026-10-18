@@ -95,8 +95,10 @@ def collect(root: Path) -> dict:
     plans = PlanTemplateStore(root / "templates/plans")
     goons = GoonTemplateStore(root / "templates/goons")
     inventory = collect_catalog(root)
+    plan_keys = plans.keys()
+    goon_keys = goons.keys()
     results = []
-    for key in plans.keys():
+    for key in plan_keys:
         source = plans.source(key)
         try:
             draft = propose_plan(key=key, expected_sha256=source.sha256, plans=plans, goons=goons)
@@ -126,15 +128,18 @@ def collect(root: Path) -> dict:
     link_results = guide_links(root)
     invalid_links = [v for v in link_results if v["status"] != "OK"]
     package_results = inventory["packages"]
+    expected_packages = {("goon", key) for key in goon_keys} | {("plan", key) for key in plan_keys}
+    observed_packages = [(p["kind"], p["key"]) for p in package_results]
     catalog_good = (
-        len(package_results) == 65
-        and sum(p["kind"] == "goon" for p in package_results) == 41
-        and sum(p["kind"] == "plan" for p in package_results) == 24
-        and inventory["metrics"].get("unresolved_readme_links", 0) == 0
+        bool(goon_keys)
+        and bool(plan_keys)
+        and len(observed_packages) == len(set(observed_packages))
+        and set(observed_packages) == expected_packages
+        and inventory["metrics"].get("unresolved_readme_links") == 0
     )
     success = (
         catalog_good
-        and len(results) == 24
+        and len(results) == len(plan_keys)
         and all(x["status"] == "PASS" for x in results)
         and not invalid_links
     )
@@ -145,7 +150,7 @@ def collect(root: Path) -> dict:
         "execution_permission": "NONE",
         "save_permission": "NONE",
         "catalog": {
-            "goons": 41,
+            "goons": len(goon_keys),
             "plans": len(results),
             "canonical_inventory_status": "PASS" if catalog_good else "FAIL",
             "readme_missing_or_bad_links": inventory["metrics"].get("unresolved_readme_links"),

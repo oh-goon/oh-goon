@@ -33,6 +33,7 @@ def _authenticated_lifecycle(database: LocalDatabase) -> FleetRunLifecycle:
     lifecycle = object.__new__(FleetRunLifecycle)
     lifecycle._database = database
     lifecycle._require_authenticated_fleet = True
+    lifecycle._standard_local_fleet = False
     lifecycle._fleet_prework = Mock(side_effect=AssertionError("native observation before gate"))
     lifecycle._fleet_provisioner = Mock(side_effect=AssertionError("provisioning before gate"))
     return lifecycle

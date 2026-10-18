@@ -38,7 +38,7 @@ def _read_original_admission(
         raise TrustProtocolError("durable Fleet Journal and exact Run identity required")
     try:
         batch = journal.read_view().run_events(run_id)
-    except (ValueError, OSError, KeyError, RunNotFound) as exc:
+    except (ValueError, OSError, KeyError, RunNotFound, RuntimeError) as exc:
         raise TrustProtocolError("durable Run admission is unavailable") from exc
     if (
         len(batch.events) != 1

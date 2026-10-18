@@ -14,6 +14,7 @@ import pytest
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations.fleet_plan_bind_source_custody import OriginalBindSourceLease
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import _require_original_native_fd_handoff
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.unit.runtime.test_p1b27b2b2a_pinned_bind_source import _argv, _prepared
 from tests.unit.runtime.test_p1b27b2b3b2b2_native_fd_handoff import AtomicStub
 
@@ -102,6 +103,5 @@ def test_x0_original_command_boundary_is_enforced(tmp_path: Path) -> None:
         for source in ("fleet_plan_bind_source_custody.py", "fleet_plan_bubblewrap_isolation.py"):
             shutil.copy2(package / "integrations" / source, sandbox / source)
         candidate = sandbox / file_name
-        assert fragment in candidate.read_text()
-        candidate.write_text(candidate.read_text().replace(fragment, "False", 1))
+        candidate.write_text(replace_python_syntax(candidate.read_text(), fragment, "False"))
         assert _check_p1b27b2b3b2b3b_fd_argv_boundary(sandbox.parent)

@@ -6,7 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_phase_3_trust_and_journal_do_not_start_execution_or_duplicate_resolver():
+def test_phase_3_trust_and_journal_do_not_start_execution_or_duplicate_resolver() -> (
+    None
+):
     base = ROOT / "backend/src/oh_goon"
     for name in ["core/enforcer_lace_trust.py", "runtime/enforcer_lace_journal.py"]:
         ast.parse((base / name).read_text(encoding="utf-8"))
@@ -31,6 +33,10 @@ def test_phase_3_trust_and_journal_do_not_start_execution_or_duplicate_resolver(
             ):
                 callers.append(str(path.relative_to(base)))
     assert set(callers) == {
+        "runtime/database.py",
+        "runtime/enforcer_lace_original_physical_sampling.py",
+        "services/fleet_native_run_contract_compiler.py",
+        "services/agent_authoring_sources.py",
         "services/fleet_admission.py",
         "services/fleet_run_lifecycle.py",
         "services/fleet_run_execution.py",

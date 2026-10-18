@@ -1,13 +1,15 @@
 """Keep M153 lease ownership and rollout limits visible across code/docs."""
 
+import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_only_existing_sqlite_lease_owner_is_used_by_enforcer():
+def test_only_existing_sqlite_lease_owner_is_used_by_enforcer() -> None:
     owner = (ROOT / "backend/src/oh_goon/runtime/execution/sqlite_lease.py").read_text()
     enforcer = (ROOT / "backend/src/oh_goon/services/fleet_admission.py").read_text()
+    enforcer = ast.unparse(ast.parse(enforcer))
     assert "def require_initial_fleet_control_in(" in owner
     assert "def initial_fleet_control_is_current(" in owner
     assert "def publish_with_owned_fleet_control(" in enforcer

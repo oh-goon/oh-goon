@@ -373,7 +373,7 @@ def test_package_slim_rejects_symlink_output(
 
 
 def test_slim_archive_excludes_frontend_build_output(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import package_slim as module
 
@@ -641,7 +641,7 @@ def test_package_slim_rejects_stale_generated_frontend_projection(
 
 
 def test_canonical_source_identity_ignores_exact_current_transient_state(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     root = tmp_path / "repo"
     root.mkdir()

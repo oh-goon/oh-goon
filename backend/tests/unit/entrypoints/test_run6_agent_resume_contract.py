@@ -207,6 +207,7 @@ def test_full_agent_run_id_resume_and_existing_evidence_views(capsys):
             "--fleet-run-id",
             run_id,
             "--json",
+            "--no-wait",
         ],
     )
     assert code == 0

@@ -1,5 +1,7 @@
 # python/secure
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Run Python quality, then the native dependency and repository vulnerability scanners. The scanner report retention requires the configured strict content store.
 
 ## Before you run

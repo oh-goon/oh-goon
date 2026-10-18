@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from email.message import Message
+
+import os
+import time
+import urllib.request
+
 import io
 import json
 import urllib.error
@@ -15,7 +21,7 @@ def _error(code: int, body: dict[str, object]) -> urllib.error.HTTPError:
         "http://example.test",
         code,
         "error",
-        hdrs=None,
+        hdrs=Message(),
         fp=io.BytesIO(json.dumps(body).encode("utf-8")),
     )
 
@@ -29,7 +35,7 @@ def test_parallel_runtime_accepts_only_declared_behaviors(tmp_path: Path) -> Non
 
 
 def test_team_ids_extracts_only_valid_repository_rows_and_requires_both(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     left = tmp_path / "left"
     right = tmp_path / "right"
@@ -72,56 +78,60 @@ def test_document_revision_requires_exact_sha256_shape() -> None:
             parallel._document_revision({"sha256": value})
 
 
-def test_wait_parallel_children_and_dead_cover_success_and_timeout(monkeypatch) -> None:
-    monkeypatch.setattr(parallel.time, "sleep", lambda delay: None)
+def test_wait_parallel_children_and_dead_cover_success_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(time, "sleep", lambda delay: None)
     monkeypatch.setattr(parallel, "_processes_for_revision", lambda revision: {20, 10})
     monkeypatch.setattr(parallel, "_pid_alive", lambda pid: True)
     ticks = iter([0.0, 0.1])
-    monkeypatch.setattr(parallel.time, "monotonic", lambda: next(ticks, 0.1))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 0.1))
     assert parallel._wait_parallel_children("rev", timeout_seconds=1.0) == (10, 20)
 
     monkeypatch.setattr(parallel, "_processes_for_revision", lambda revision: {10})
     ticks = iter([0.0, 2.0])
-    monkeypatch.setattr(parallel.time, "monotonic", lambda: next(ticks, 2.0))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 2.0))
     with pytest.raises(RuntimeError, match="never had two physical"):
         parallel._wait_parallel_children("rev", timeout_seconds=1.0)
 
     monkeypatch.setattr(parallel, "_pid_alive", lambda pid: False)
     monkeypatch.setattr(parallel, "_processes_for_revision", lambda revision: set())
     ticks = iter([0.0, 0.1])
-    monkeypatch.setattr(parallel.time, "monotonic", lambda: next(ticks, 0.1))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 0.1))
     parallel._wait_children_dead((10, 20), "rev", timeout_seconds=1.0)
 
     monkeypatch.setattr(parallel, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(parallel, "_processes_for_revision", lambda revision: {10})
     ticks = iter([0.0, 2.0])
-    monkeypatch.setattr(parallel.time, "monotonic", lambda: next(ticks, 2.0))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 2.0))
     with pytest.raises(RuntimeError, match="left physical children alive"):
         parallel._wait_children_dead((10, 20), "rev", timeout_seconds=1.0)
 
 
-def test_pid_alive_falls_back_to_os_probe(monkeypatch) -> None:
+def test_pid_alive_falls_back_to_os_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(parallel, "observe_process_liveness", lambda pid: True)
     assert parallel._pid_alive(1) is True
     monkeypatch.setattr(parallel, "observe_process_liveness", lambda pid: None)
-    monkeypatch.setattr(parallel.os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
     assert parallel._pid_alive(1) is True
     monkeypatch.setattr(
-        parallel.os,
+        os,
         "kill",
         lambda pid, sig: (_ for _ in ()).throw(ProcessLookupError()),
     )
     assert parallel._pid_alive(1) is False
     monkeypatch.setattr(
-        parallel.os,
+        os,
         "kill",
         lambda pid, sig: (_ for _ in ()).throw(PermissionError()),
     )
     assert parallel._pid_alive(1) is True
 
 
-def test_wait_run_handles_progress_wrong_terminal_and_timeout(monkeypatch) -> None:
-    monkeypatch.setattr(parallel.time, "sleep", lambda delay: None)
+def test_wait_run_handles_progress_wrong_terminal_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(time, "sleep", lambda delay: None)
     replies = iter(
         [
             {"run": {"status": "RUNNING"}},
@@ -132,7 +142,7 @@ def test_wait_run_handles_progress_wrong_terminal_and_timeout(monkeypatch) -> No
         parallel, "_request_json", lambda *args, **kwargs: next(replies)
     )
     ticks = iter([0.0, 0.1, 0.2])
-    monkeypatch.setattr(parallel.time, "monotonic", lambda: next(ticks, 0.2))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 0.2))
     observed = parallel._wait_run(
         "http://frontend",
         "run",
@@ -146,7 +156,7 @@ def test_wait_run_handles_progress_wrong_terminal_and_timeout(monkeypatch) -> No
         parallel, "_request_json", lambda *args, **kwargs: {"run": {"status": "FAILED"}}
     )
     ticks = iter([0.0, 0.1])
-    monkeypatch.setattr(parallel.time, "monotonic", lambda: next(ticks, 0.1))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 0.1))
     with pytest.raises(RuntimeError, match="reached 'FAILED'"):
         parallel._wait_run(
             "http://frontend",
@@ -162,7 +172,7 @@ def test_wait_run_handles_progress_wrong_terminal_and_timeout(monkeypatch) -> No
         lambda *args, **kwargs: {"run": {"status": "RUNNING"}},
     )
     ticks = iter([0.0, 2.0])
-    monkeypatch.setattr(parallel.time, "monotonic", lambda: next(ticks, 2.0))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 2.0))
     with pytest.raises(RuntimeError, match="did not reach"):
         parallel._wait_run(
             "http://frontend",
@@ -173,7 +183,9 @@ def test_wait_run_handles_progress_wrong_terminal_and_timeout(monkeypatch) -> No
         )
 
 
-def test_preview_and_repository_instance_authority_fail_closed(monkeypatch) -> None:
+def test_preview_and_repository_instance_authority_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     preview = {
         "ready_count": 2,
         "blocked_count": 0,
@@ -242,11 +254,13 @@ def test_preview_and_repository_instance_authority_fail_closed(monkeypatch) -> N
         )
 
 
-def test_expected_error_and_start_validate_wire_contract(monkeypatch) -> None:
-    def open_error(request, timeout):
+def test_expected_error_and_start_validate_wire_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def open_error(request: urllib.request.Request, timeout: float) -> None:
         raise _error(409, {"code": "FLEET_PLAN_SOURCE_STALE"})
 
-    monkeypatch.setattr(parallel.urllib.request, "urlopen", open_error)
+    monkeypatch.setattr(urllib.request, "urlopen", open_error)
     assert (
         parallel._request_expected_error(
             "POST",
@@ -270,7 +284,7 @@ def test_expected_error_and_start_validate_wire_contract(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        parallel.urllib.request,
+        urllib.request,
         "urlopen",
         lambda request, timeout: object(),
     )
@@ -317,24 +331,26 @@ def test_expected_error_and_start_validate_wire_contract(monkeypatch) -> None:
 
 
 def test_wait_marker_observes_real_marker_and_times_out(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     marker = tmp_path / "parallel-started-rev"
     marker.write_text("1\n", encoding="utf-8")
-    monkeypatch.setattr(parallel.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(time, "monotonic", lambda: 0.0)
     assert (
         parallel._wait_marker(tmp_path, "started", "rev", timeout_seconds=1) == marker
     )
 
     marker.unlink()
     ticks = iter([0.0, 2.0])
-    monkeypatch.setattr(parallel.time, "monotonic", lambda: next(ticks, 2.0))
-    monkeypatch.setattr(parallel.time, "sleep", lambda delay: None)
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 2.0))
+    monkeypatch.setattr(time, "sleep", lambda delay: None)
     with pytest.raises(RuntimeError, match="did not produce started marker"):
         parallel._wait_marker(tmp_path, "started", "rev", timeout_seconds=1)
 
 
-def test_parallel_cancellation_full_success_path(monkeypatch, tmp_path: Path) -> None:
+def test_parallel_cancellation_full_success_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("OH_GOON_EXECUTORS_FILE", "/tmp/executors.yml")
     left = tmp_path / "parallel-shared-left"
     right = tmp_path / "parallel-shared-right"
@@ -391,7 +407,9 @@ def test_parallel_cancellation_full_success_path(monkeypatch, tmp_path: Path) ->
     assert success.startswith("shared-parallel-success-")
 
 
-def test_parallel_failure_repair_full_success_path(monkeypatch, tmp_path: Path) -> None:
+def test_parallel_failure_repair_full_success_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("OH_GOON_EXECUTORS_FILE", "/tmp/executors.yml")
     failing = tmp_path / "parallel-failure-left"
     sibling = tmp_path / "parallel-failure-right"
@@ -449,7 +467,9 @@ def test_parallel_failure_repair_full_success_path(monkeypatch, tmp_path: Path) 
     assert repaired_id.startswith("shared-parallel-repaired-")
 
 
-def test_parallel_stale_preview_full_recovery_path(monkeypatch, tmp_path: Path) -> None:
+def test_parallel_stale_preview_full_recovery_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("OH_GOON_EXECUTORS_FILE", "/tmp/executors.yml")
     left = tmp_path / "parallel-stale-left"
     right = tmp_path / "parallel-stale-right"
@@ -508,7 +528,7 @@ def test_parallel_stale_preview_full_recovery_path(monkeypatch, tmp_path: Path) 
 
 
 def test_parallel_real_world_functions_refuse_missing_executor(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("OH_GOON_EXECUTORS_FILE", raising=False)
     for function in (

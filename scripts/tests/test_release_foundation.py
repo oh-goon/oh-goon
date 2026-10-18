@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import Any
+from collections.abc import Sequence
+
+import pytest
+
 import hashlib
 import json
 import subprocess
@@ -79,7 +84,7 @@ def test_dependency_lock_check_delegates_backend_to_uv_and_frontend_to_npm(
     _write_valid_locks(tmp_path)
     calls: list[tuple[str, ...]] = []
 
-    def runner(argv, **_kwargs):
+    def runner(argv: Sequence[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(tuple(argv))
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
@@ -125,7 +130,7 @@ def test_dependency_lock_check_detects_missing_committed_backend_lock(
 def test_dependency_lock_check_preserves_native_npm_failure(tmp_path: Path) -> None:
     _write_valid_locks(tmp_path)
 
-    def runner(argv, **_kwargs):
+    def runner(argv: Sequence[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         command = tuple(argv)
         if command and command[0] == "npm":
             return subprocess.CompletedProcess(
@@ -153,7 +158,9 @@ def test_locked_runtime_install_exports_uv_lock_and_installs_wheel_without_depen
     temp.mkdir()
     commands: list[tuple[str, ...]] = []
 
-    def runner(argv, **kwargs):
+    def runner(
+        argv: Sequence[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[object]:
         command = tuple(str(item) for item in argv)
         commands.append(command)
         if command[:2] == ("uv", "venv"):
@@ -189,7 +196,9 @@ def test_real_release_acceptance_delegates_dependency_admission_to_build_release
 ) -> None:
     calls: list[tuple[str, ...]] = []
 
-    def runner(command: tuple[str, ...], **_kwargs: object) -> object:
+    def runner(
+        command: tuple[str, ...], **_kwargs: object
+    ) -> subprocess.CompletedProcess[object]:
         calls.append(command)
         raise RuntimeError("build-release owns dependency admission")
 
@@ -226,7 +235,7 @@ def test_release_http_wait_fails_immediately_when_installed_process_exits() -> N
 
 
 def test_installed_runtime_environment_cannot_import_or_configure_from_source(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("PYTHONPATH", "/source/backend/src")
     monkeypatch.setenv("PYTHONHOME", "/source/python")
@@ -317,7 +326,7 @@ def test_installed_release_acceptance_uses_configurable_serve_command() -> None:
 
 
 def test_installed_package_origin_probe_rejects_source_import(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     command = tmp_path / "venv/bin/oh-goon"
     command.parent.mkdir(parents=True)
@@ -339,7 +348,7 @@ def test_installed_package_origin_probe_rejects_source_import(
 
 
 def test_installed_package_origin_probe_rejects_version_drift(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     command = tmp_path / "venv/bin/oh-goon"
     command.parent.mkdir(parents=True)
@@ -443,7 +452,7 @@ def test_release_identity_check_does_not_import_runtime_application() -> None:
 
 
 def test_release_stamp_rejects_symlinked_native_manifest_owner(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -482,7 +491,7 @@ def test_release_stamp_rejects_symlinked_native_manifest_owner(
 
 
 def test_release_stamp_restores_native_owned_files_when_native_version_command_fails(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -554,7 +563,7 @@ def test_make_exposes_explicit_backend_resolution_and_frontend_lock_authoring_ta
 
 
 def test_release_set_version_delegates_backend_and_frontend_versioning_to_uv_and_npm(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -672,7 +681,7 @@ def test_release_set_version_delegates_backend_and_frontend_versioning_to_uv_and
 
 
 def test_release_source_cleanup_removes_only_declared_transients(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling import source_normalization
 
@@ -742,7 +751,7 @@ def test_release_source_cleanup_removes_only_declared_transients(
 
 
 def test_release_source_cleanup_removes_generated_static_without_recreating_bootstrap_input(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling import source_normalization
 
@@ -758,7 +767,7 @@ def test_release_source_cleanup_removes_generated_static_without_recreating_boot
 
 
 def test_source_normalization_never_mutates_git_metadata(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling import source_normalization
 
@@ -778,7 +787,7 @@ def test_source_normalization_never_mutates_git_metadata(
 
 
 def test_package_source_checkpoint_help_does_not_publish(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from oh_goon.repository_tooling.release import package_source_checkpoint
 
@@ -796,7 +805,7 @@ def test_package_source_checkpoint_help_does_not_publish(
 
 
 def test_release_stamp_updates_certification_source_version_transactionally(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 

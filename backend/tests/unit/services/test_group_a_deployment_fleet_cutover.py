@@ -1,4 +1,4 @@
-"""M175: public application composition always uses authenticated policy-only Fleet."""
+"""Public composition defaults to local execution; deployments retain strict admission."""
 
 from __future__ import annotations
 
@@ -26,15 +26,17 @@ def test_public_application_entrypoint_passes_exact_deployment_provisioner(monke
     built = object()
     observed = []
 
-    def foundation_builder(*, fleet_provisioner=None):
-        observed.append(fleet_provisioner)
+    def foundation_builder(*, fleet_provisioner=None, standard_local=False):
+        observed.append((fleet_provisioner, standard_local))
         return built
 
     monkeypatch.setattr(foundation, "build_runtime_foundation", foundation_builder)
     monkeypatch.setattr(services, "build_product_services", lambda obj: obj)
     assert ApplicationRuntime.build() is built
     assert ApplicationRuntime.build(fleet_provisioner=sentinel) is built
-    assert observed == [None, sentinel]
+    assert ApplicationRuntime.build(standard_local=True) is built
+    assert ApplicationRuntime.build(standard_local=False) is built
+    assert observed == [(None, True), (sentinel, False), (None, True), (None, False)]
 
 
 def test_production_foundation_defaults_are_fail_closed():
@@ -62,6 +64,7 @@ def test_product_composition_cannot_restore_legacy_fleet_path(bad):
         require_compiled_fleet_contract=True,
         fleet_prework=None,
         fleet_provisioner=None,
+        standard_local_fleet=False,
     )
     if bad == "legacy":
         good["require_authenticated_fleet"] = False
@@ -71,7 +74,7 @@ def test_product_composition_cannot_restore_legacy_fleet_path(bad):
         good["fleet_prework"] = object()
     else:
         good["fleet_provisioner"] = object()
-    with pytest.raises(TrustProtocolError, match="policy-only authenticated admission"):
+    with pytest.raises(TrustProtocolError):
         _build_fleet_services(SimpleNamespace(**good), None, None, None)
 
 

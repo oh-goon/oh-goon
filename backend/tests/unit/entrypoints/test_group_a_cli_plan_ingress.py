@@ -12,10 +12,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from oh_goon.core.models.goon_plan_source import PlanFileSource
-from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.vocabulary import FleetRunStatus
 from oh_goon.services.fleet_plans import FleetPlanService
 from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
@@ -24,26 +24,19 @@ from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 
 
 def args(*, run_id: str | None = None, inputs=None) -> Namespace:
-    return Namespace(
-        command="plan",
-        plan_command="run",
-        plan=Path("missing-plan.yml"),
-        extensions=None,
-        repository_ids=["repo"],
-        all_repositories=False,
-        fleet_run_id=run_id,
-        priority=SchedulingPriority.NORMAL,
-        plan_inputs=inputs,
-        lock_file=None,
-        wait=False,
-        repair_handoff=False,
+    parsed = build_parser().parse_args(
+        ["plan", "run", "missing-plan.yml", "--repository-id", "repo", "--strict", "--no-wait"]
     )
+    parsed.fleet_run_id = run_id
+    parsed.plan_inputs = inputs
+    return parsed
 
 
 def lifecycle(*, provisioner: FleetPreworkProvisioner | None, authenticated=True):
     # No database or native host effects are needed to exercise the owner.
     owner = object.__new__(FleetRunLifecycle)
     owner._require_authenticated_fleet = authenticated
+    owner._standard_local_fleet = False
     owner._fleet_provisioner = provisioner
     return owner
 

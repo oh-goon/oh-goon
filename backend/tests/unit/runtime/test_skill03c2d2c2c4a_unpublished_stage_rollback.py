@@ -51,7 +51,9 @@ def test_original_rollback_clears_only_directory_flags_and_does_not_delete(monke
 
 def test_refuse_unexpected_symlink_before_unsealing_anything(monkeypatch, tmp_path):
     stage = _stage(tmp_path)
+    (stage / "repository").chmod(0o700)
     (stage / "repository" / "escape").symlink_to("/tmp")
+    (stage / "repository").chmod(0o500)
     values, _ = _kernel_flags(monkeypatch)
     for path in (stage, stage / "repository"):
         values[(path.stat().st_dev, path.stat().st_ino)] = immutable._FS_IMMUTABLE_FL

@@ -28,6 +28,7 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 MODEL_ENV = "OH_GOON_AGENT_MODEL"
 REQUIRED_ENV = "OH_GOON_REQUIRE_NATIVE_AGENT_MODEL"
+pytestmark = pytest.mark.certification
 
 
 def _locked_hashmarks_version() -> str:

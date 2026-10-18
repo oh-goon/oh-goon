@@ -6,6 +6,23 @@
       "sh": [],
       "uv": []
     },
+    "agents/adjudicate": {
+      "agent": []
+    },
+    "agents/agentic-review-repair-loop": {},
+    "agents/regression": {
+      "check": []
+    },
+    "agents/repair": {
+      "oh-goon": [],
+      "propose": []
+    },
+    "agents/review": {
+      "agent": []
+    },
+    "agents/verification": {
+      "check": []
+    },
     "kubernetes/release": {},
     "kubernetes/rollout-verify": {
       "verify": []

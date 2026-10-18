@@ -56,7 +56,9 @@ Frontend presentation follows the same rule. Durable Runs review identity is URL
 ## Execution environment and admission
 
 The selected execution contract determines its required guarantees. Standard
-local work uses the existing Fleet/Step lifecycle; a deployment that selects
+local work is the default and uses the existing Fleet/Step lifecycle. Omitted
+Plan execution settings select verification, and the CLI waits for completion.
+Untrusted code or extra isolation requires an explicit strict choice. A deployment that selects
 authenticated or strict execution supplies the corresponding native policy,
 resource, and custody authority. These contracts do not add a setup gate to
 unrelated local development or read-only inspection.

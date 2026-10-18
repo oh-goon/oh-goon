@@ -12,9 +12,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _hatch_build_module(monkeypatch: pytest.MonkeyPatch):
+def _hatch_build_module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     interface = types.ModuleType("hatchling.builders.hooks.plugin.interface")
-    interface.BuildHookInterface = type("BuildHookInterface", (), {})
+    setattr(interface, "BuildHookInterface", type("BuildHookInterface", (), {}))
     for name in (
         "hatchling",
         "hatchling.builders",

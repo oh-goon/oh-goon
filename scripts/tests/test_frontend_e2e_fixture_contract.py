@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from oh_goon.repository_tooling.architecture import frontend_base_contract
 
 
@@ -9,7 +13,9 @@ def test_current_e2e_fixture_sources_satisfy_generated_types_without_double_cast
     assert frontend_base_contract.check_frontend_e2e_fixture_type_integrity() == []
 
 
-def test_e2e_fixture_double_cast_is_rejected(tmp_path, monkeypatch) -> None:
+def test_e2e_fixture_double_cast_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     e2e = tmp_path / "e2e"
     e2e.mkdir()
     (e2e / "fixture.ts").write_text(

@@ -274,6 +274,7 @@ def test_cli_to_real_plan_service_to_one_fleet_admission_returns_original_id(
             "--input",
             "revision=abcdef1",
             "--json",
+            "--no-wait",
         ]
     )
     assert run_plan_command(SimpleNamespace(plans=plans), args) == 0

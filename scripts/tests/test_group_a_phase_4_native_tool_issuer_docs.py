@@ -6,7 +6,9 @@ ROOT = Path(__file__).resolve().parents[2]
 ISSUER = ROOT / "backend/src/oh_goon/native_issuer/enforcer_lace_native_tool_issuer.py"
 
 
-def test_native_tools_reuse_existing_authorities_without_installing_or_launching():
+def test_native_tools_reuse_existing_authorities_without_installing_or_launching() -> (
+    None
+):
     code = ISSUER.read_text()
     for phrase in (
         "_read_original_admission",
@@ -24,7 +26,7 @@ def test_native_tools_reuse_existing_authorities_without_installing_or_launching
     assert "capture_host_tools(" not in code
 
 
-def test_no_live_execution_imports_issuer_module():
+def test_no_live_execution_imports_issuer_module() -> None:
     for folder in (
         ROOT / "backend/src/oh_goon/runtime",
         ROOT / "backend/src/oh_goon/integrations",

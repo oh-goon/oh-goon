@@ -26,7 +26,7 @@ def _fixture_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_qenv1_is_registered_as_original_project_architecture_check():
+def test_qenv1_is_registered_as_original_project_architecture_check() -> None:
     source = (
         ROOT / "backend/src/oh_goon/repository_tooling/check_architecture.py"
     ).read_text()
@@ -67,7 +67,9 @@ def test_qenv1_is_registered_as_original_project_architecture_check():
         ("-m oh_goon.repository_tooling.check_architecture", "-m unknown.architecture"),
     ],
 )
-def test_qenv1_rejects_environment_drift_before_any_ring(tmp_path, before, after):
+def test_qenv1_rejects_environment_drift_before_any_ring(
+    tmp_path: Path, before: str, after: str
+) -> None:
     repo = _fixture_root(tmp_path)
     path = repo / "scripts/qualify_b12_development_wsl.sh"
     content = path.read_text()
@@ -78,7 +80,7 @@ def test_qenv1_rejects_environment_drift_before_any_ring(tmp_path, before, after
     assert any("QENV1" in issue.message for issue in issues)
 
 
-def test_qenv1_make_frontdoor_cannot_reinstall(tmp_path):
+def test_qenv1_make_frontdoor_cannot_reinstall(tmp_path: Path) -> None:
     repo = _fixture_root(tmp_path)
     make = repo / "Makefile"
     make.write_text(
@@ -110,7 +112,9 @@ def _fragments(shell: str) -> tuple[str, str]:
     return host + prep, host + ring
 
 
-def test_qenv1_simulated_one_prepare_verify_multiple_direct_interpreter_rings(tmp_path):
+def test_qenv1_simulated_one_prepare_verify_multiple_direct_interpreter_rings(
+    tmp_path: Path,
+) -> None:
     """Exercise the real shell branches using fakes, without WSL or a dependency install."""
     script = WITNESS.read_text()
     setup, ring = _fragments(script)
@@ -183,7 +187,7 @@ exit 99
     assert "UV_ENV_VERIFY=0" in (evidence / "RING_RESULTS.txt").read_text()
 
 
-def test_qenv1_environment_check_failure_blocks_all_rings(tmp_path):
+def test_qenv1_environment_check_failure_blocks_all_rings(tmp_path: Path) -> None:
     script = WITNESS.read_text()
     setup, _ = _fragments(script)
     evidence = tmp_path / "evidence"

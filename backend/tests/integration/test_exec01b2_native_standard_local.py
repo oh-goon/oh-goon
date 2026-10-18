@@ -100,7 +100,14 @@ def _reopened_tape(run_id: str):
 
 
 def test_native_cli_success_journal_and_game_tape_survive_restart(tmp_path, monkeypatch, capsys):
+    from oh_goon.cli import main
+
     repo = _repo(tmp_path, monkeypatch)
+    # Ordinary authoring needs neither an execution policy nor local/wait flags.
+    source = repo / "goon.yml"
+    source.write_text("version: 1\nsteps:\n- id: hello\n  run: sh scripts/hello.sh\n")
+    assert main(["lock", str(source)]) == 0
+    capsys.readouterr()
     _register(repo)
     data = _cli(
         [
@@ -109,8 +116,6 @@ def test_native_cli_success_journal_and_game_tape_survive_restart(tmp_path, monk
             str(repo / "goon.yml"),
             "--repository-id",
             repository_id(repo),
-            "--standard-local",
-            "--wait",
             "--json",
         ],
         capsys,

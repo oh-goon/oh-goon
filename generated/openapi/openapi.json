@@ -40,24 +40,280 @@
         "title": "AdoptUvPreview",
         "type": "object"
       },
+      "AgentAdjudicationRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_identity": {
+            "title": "Candidate Identity",
+            "type": "string"
+          },
+          "dispositions": {
+            "items": {
+              "$ref": "#/components/schemas/FindingDisposition"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "title": "Dispositions",
+            "type": "array"
+          },
+          "queue": {
+            "items": {
+              "$ref": "#/components/schemas/RepairQueueEntry"
+            },
+            "maxItems": 128,
+            "title": "Queue",
+            "type": "array"
+          },
+          "schema": {
+            "const": "oh-goon.agent-adjudication/v1",
+            "default": "oh-goon.agent-adjudication/v1",
+            "title": "Schema",
+            "type": "string"
+          },
+          "scope_identity": {
+            "title": "Scope Identity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_identity",
+          "scope_identity",
+          "dispositions",
+          "queue"
+        ],
+        "title": "AgentAdjudicationRecord",
+        "type": "object"
+      },
+      "AgentConnection": {
+        "additionalProperties": false,
+        "description": "Frozen public connection facts. Credential values remain process authority.",
+        "properties": {
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/AgentProvider"
+          },
+          "provider_name": {
+            "title": "Provider Name",
+            "type": "string"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/AgentModel"
+          }
+        },
+        "required": [
+          "profile",
+          "provider_name",
+          "provider",
+          "selection"
+        ],
+        "title": "AgentConnection",
+        "type": "object"
+      },
+      "AgentModel": {
+        "additionalProperties": false,
+        "properties": {
+          "chat_token_parameter": {
+            "default": "max_tokens",
+            "enum": [
+              "max_tokens",
+              "max_completion_tokens"
+            ],
+            "title": "Chat Token Parameter",
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "default": 1024,
+            "maximum": 1048576.0,
+            "minimum": 1.0,
+            "title": "Max Output Tokens",
+            "type": "integer"
+          },
+          "model": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "maxProperties": 32,
+            "title": "Parameters",
+            "type": "object"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "AgentModel",
+        "type": "object"
+      },
+      "AgentProvider": {
+        "additionalProperties": false,
+        "properties": {
+          "api": {
+            "enum": [
+              "ollama",
+              "openai-chat-completions",
+              "openai-responses",
+              "anthropic-messages"
+            ],
+            "title": "Api",
+            "type": "string"
+          },
+          "api_key_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Env"
+          },
+          "base_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Base Url",
+            "type": "string"
+          },
+          "ca_file": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ca File"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 32,
+            "title": "Headers",
+            "type": "object"
+          },
+          "headers_from_env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 32,
+            "title": "Headers From Env",
+            "type": "object"
+          },
+          "max_request_bytes": {
+            "default": 1048576,
+            "maximum": 16777216.0,
+            "minimum": 1024.0,
+            "title": "Max Request Bytes",
+            "type": "integer"
+          },
+          "max_response_bytes": {
+            "default": 1048576,
+            "maximum": 16777216.0,
+            "minimum": 1024.0,
+            "title": "Max Response Bytes",
+            "type": "integer"
+          },
+          "proxy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Url"
+          },
+          "timeout_seconds": {
+            "default": 60.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 600.0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "api",
+          "base_url"
+        ],
+        "title": "AgentProvider",
+        "type": "object"
+      },
       "AgentRepairContext": {
         "additionalProperties": false,
         "description": "Frozen limits transported in each original admitted target, never model data.",
         "properties": {
           "attempt": {
-            "maximum": 32.0,
+            "maximum": 160.0,
             "minimum": 1.0,
             "title": "Attempt",
             "type": "integer"
+          },
+          "candidate_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Identity"
           },
           "limits": {
             "$ref": "#/components/schemas/FleetPlanRunLimits"
           },
           "max_attempts": {
-            "maximum": 32.0,
+            "maximum": 160.0,
             "minimum": 1.0,
             "title": "Max Attempts",
             "type": "integer"
+          },
+          "original_execution_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Execution Digest"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "review",
+                  "adjudicate",
+                  "repair",
+                  "regression",
+                  "verification"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
           },
           "previous_run_id": {
             "anyOf": [
@@ -76,6 +332,38 @@
             "minLength": 1,
             "title": "Repair Id",
             "type": "string"
+          },
+          "review_pass": {
+            "anyOf": [
+              {
+                "maximum": 32.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Pass"
+          },
+          "scope_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Identity"
+          },
+          "write_roots": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Write Roots",
+            "type": "array"
           }
         },
         "required": [
@@ -85,6 +373,106 @@
           "limits"
         ],
         "title": "AgentRepairContext",
+        "type": "object"
+      },
+      "AgentReviewObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "agent_review",
+            "default": "agent_review",
+            "title": "Kind",
+            "type": "string"
+          },
+          "record": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentReviewRecord"
+              },
+              {
+                "$ref": "#/components/schemas/AgentAdjudicationRecord"
+              }
+            ],
+            "title": "Record"
+          }
+        },
+        "required": [
+          "record"
+        ],
+        "title": "AgentReviewObservation",
+        "type": "object"
+      },
+      "AgentReviewRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_identity": {
+            "title": "Candidate Identity",
+            "type": "string"
+          },
+          "findings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReviewFinding"
+            },
+            "maxItems": 64,
+            "title": "Findings",
+            "type": "array"
+          },
+          "reviewed_paths": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 4096,
+            "title": "Reviewed Paths",
+            "type": "array"
+          },
+          "reviewer": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Reviewer",
+            "type": "string"
+          },
+          "schema": {
+            "const": "oh-goon.agent-review/v1",
+            "default": "oh-goon.agent-review/v1",
+            "title": "Schema",
+            "type": "string"
+          },
+          "scope_identity": {
+            "title": "Scope Identity",
+            "type": "string"
+          },
+          "skill_identity": {
+            "title": "Skill Identity",
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "FINDING",
+              "CLEAN",
+              "LEAVE_ALONE",
+              "INSUFFICIENT_EVIDENCE"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reviewer",
+          "candidate_identity",
+          "scope_identity",
+          "skill_identity",
+          "verdict",
+          "summary",
+          "reviewed_paths"
+        ],
+        "title": "AgentReviewRecord",
         "type": "object"
       },
       "AgentStepDeliveryReference": {
@@ -2027,6 +2415,7 @@
             "items": {
               "discriminator": {
                 "mapping": {
+                  "agent_review": "#/components/schemas/AgentReviewObservation",
                   "dependency": "#/components/schemas/DependencyObservationSnapshot"
                 },
                 "propertyName": "kind"
@@ -2034,6 +2423,9 @@
               "oneOf": [
                 {
                   "$ref": "#/components/schemas/DependencyObservationSnapshot"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentReviewObservation"
                 }
               ]
             },
@@ -4155,6 +4547,7 @@
             "items": {
               "discriminator": {
                 "mapping": {
+                  "agent_review": "#/components/schemas/AgentReviewObservation",
                   "dependency": "#/components/schemas/DependencyObservationSnapshot"
                 },
                 "propertyName": "kind"
@@ -4162,6 +4555,9 @@
               "oneOf": [
                 {
                   "$ref": "#/components/schemas/DependencyObservationSnapshot"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentReviewObservation"
                 }
               ]
             },
@@ -4293,6 +4689,60 @@
         ],
         "title": "FailureImpact",
         "type": "string"
+      },
+      "FindingDisposition": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "repair",
+              "leave_alone"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "finding_id": {
+            "title": "Finding Id",
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "reviewer": {
+            "title": "Reviewer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reviewer",
+          "finding_id",
+          "decision",
+          "rationale"
+        ],
+        "title": "FindingDisposition",
+        "type": "object"
+      },
+      "FindingReference": {
+        "additionalProperties": false,
+        "properties": {
+          "finding_id": {
+            "title": "Finding Id",
+            "type": "string"
+          },
+          "reviewer": {
+            "title": "Reviewer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reviewer",
+          "finding_id"
+        ],
+        "title": "FindingReference",
+        "type": "object"
       },
       "FleetAttention": {
         "additionalProperties": false,
@@ -12947,6 +13397,7 @@
         "title": "InvariantSeverity",
         "type": "string"
       },
+      "JsonValue": {},
       "KubernetesApiCredentials": {
         "additionalProperties": false,
         "properties": {
@@ -13856,6 +14307,53 @@
           "revision"
         ],
         "title": "LocationsResponse",
+        "type": "object"
+      },
+      "LockedSkillSource": {
+        "additionalProperties": false,
+        "description": "One declared Git collection resolved by native Git to an exact commit.",
+        "properties": {
+          "commit": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "title": "Commit",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "ref": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "title": "Skills",
+            "type": "array"
+          },
+          "source": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "ref",
+          "commit",
+          "skills"
+        ],
+        "title": "LockedSkillSource",
         "type": "object"
       },
       "MaintenanceExecutionPolicy": {
@@ -19611,6 +20109,45 @@
         "title": "RepairPlan",
         "type": "object"
       },
+      "RepairQueueEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingReference"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "title": "Findings",
+            "type": "array"
+          },
+          "queue_id": {
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$",
+            "title": "Queue Id",
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "regression_expectation": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Regression Expectation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "queue_id",
+          "findings",
+          "rationale",
+          "regression_expectation"
+        ],
+        "title": "RepairQueueEntry",
+        "type": "object"
+      },
       "RepositoryCatalogEntry": {
         "discriminator": {
           "mapping": {
@@ -20926,6 +21463,14 @@
             "title": "Requirements",
             "type": "array"
           },
+          "skill_sources": {
+            "items": {
+              "$ref": "#/components/schemas/LockedSkillSource"
+            },
+            "maxItems": 128,
+            "title": "Skill Sources",
+            "type": "array"
+          },
           "step_sources": {
             "items": {
               "$ref": "#/components/schemas/ResolvedStepSource"
@@ -21183,6 +21728,24 @@
               }
             ],
             "title": "Parent Import Id"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "review",
+                  "adjudicate",
+                  "repair",
+                  "regression",
+                  "verification"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
           },
           "requirements": {
             "items": {
@@ -21565,7 +22128,7 @@
       },
       "ResolvedLocalSearchAgentStep": {
         "additionalProperties": false,
-        "description": "Original Step-shaped, non-model, read-only Agent tool intent.\n\nThe immutable AG-02 packet is transported *separately* by the original\nattempt. This identity-only plan value never embeds captured repository or\nSkill bytes in journal/Plan projections. Unlike a generic command, it\nkeeps ``kind=agent`` visible and forbids caller-supplied command arguments.",
+        "description": "Resolved read-only Agent intent for a fixed tool or provider harness.\n\nThe immutable AG-02 packet is transported *separately* by the original\nattempt. This identity-only plan value never embeds captured repository or\nSkill bytes in journal/Plan projections. Unlike a generic command, it\nkeeps ``kind=agent`` visible and forbids caller-supplied command arguments.",
         "properties": {
           "argv": {
             "items": {
@@ -21589,6 +22152,16 @@
           },
           "capabilities": {
             "$ref": "#/components/schemas/PlanStepCapabilities"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentConnection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "delivery_sha256": {
             "pattern": "^[0-9a-f]{64}$",
@@ -21643,7 +22216,10 @@
               "local-model-files",
               "local-model-skill-resources",
               "local-model-skill-loop",
-              "local-model-proposal"
+              "local-model-proposal",
+              "provider-review",
+              "provider-adjudicate",
+              "provider-proposal"
             ],
             "title": "Harness",
             "type": "string"
@@ -21694,6 +22270,18 @@
           },
           "retry": {
             "$ref": "#/components/schemas/StepRetryPolicy"
+          },
+          "review_context": {
+            "anyOf": [
+              {
+                "maxLength": 65536,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Context"
           },
           "source_step_id": {
             "maxLength": 80,
@@ -22551,6 +23139,66 @@
           "reference_id"
         ],
         "title": "RetainedPlanCacheSource",
+        "type": "object"
+      },
+      "ReviewEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "line": {
+            "minimum": 1.0,
+            "title": "Line",
+            "type": "integer"
+          },
+          "path": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "line"
+        ],
+        "title": "ReviewEvidence",
+        "type": "object"
+      },
+      "ReviewFinding": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewEvidence"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Evidence",
+            "type": "array"
+          },
+          "explanation": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Explanation",
+            "type": "string"
+          },
+          "finding_id": {
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$",
+            "title": "Finding Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "finding_id",
+          "explanation",
+          "evidence"
+        ],
+        "title": "ReviewFinding",
         "type": "object"
       },
       "ReviewOperationEvidence": {
@@ -27116,6 +27764,7 @@
             "items": {
               "discriminator": {
                 "mapping": {
+                  "agent_review": "#/components/schemas/AgentReviewObservation",
                   "dependency": "#/components/schemas/DependencyObservationSnapshot"
                 },
                 "propertyName": "kind"
@@ -27123,6 +27772,9 @@
               "oneOf": [
                 {
                   "$ref": "#/components/schemas/DependencyObservationSnapshot"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentReviewObservation"
                 }
               ]
             },

@@ -59,7 +59,31 @@ Mutable rows are coordination state while an effect is unresolved; completed evi
 ### Recovery mutation evidence participates in result freshness
 If recovery changes execution-relevant state, downstream freshness/result identity must see that mutation rather than serving an older supposedly-current result.
 
+## Skill source ownership
+
+`.goonskills.yml` beside the root Plan/Goon owns local names and grouped Git
+source/ref/path declarations. Native Git acquires each declared collection;
+`goon.lock` owns its exact resolved commit. Cache directories are replaceable
+materializations, not version selectors. Normal runs and repair recaptures use
+locked commits, including after a cache miss. Only explicit `lock --update-skills`
+refreshes moving selectors. INI and Gitlink registry modes are removed.
+
+The existing Agent source capture reads complete selected directories once,
+and the existing handoff transports those bytes. Skill acquisition creates no
+agent runtime, permission grant or native-agent configuration owner. Plan/Goon
+Steps continue to own execution order and task inputs. See [Agent Skills](../AGENT_SKILLS.md).
+
 ## Verification and strict-executor authority
+
+### Ordinary execution defaults to trusted local verification
+Omitted Plan/Goon execution settings select verification. Public application construction
+and CLI Plan runs default to local execution and wait for completion, using the existing
+Fleet/Step lifecycle. Configuration validation, deadlines, cancellation, durable outcomes
+and cleanup still apply. Independent signer custody, fs-verity and privileged enrollment
+belong to explicitly selected strict execution, for untrusted code or additional guarantees.
+An explicit deployment provisioner selects strict admission; `--strict` also selects that
+profile. Missing strict authority fails before workload and never falls back to local use.
+Provider/model setup is separate and uses the caller-selected JSON or TOML catalog.
 
 ### APP verification has no strict placement authority
 `execution.purpose: verification` consumes the already-initialized repository and durable certification control state. It does not manufacture, inherit, validate, materialize, export, or require strict release/CI executor inventory, certification cgroup overrides, or certification systemd-delegation markers.

@@ -7,7 +7,7 @@ import pytest
 
 
 def test_set_version_resumes_without_reauthoring_when_native_versions_already_match(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -96,7 +96,7 @@ def test_set_version_resumes_without_reauthoring_when_native_versions_already_ma
 
 
 def test_already_stamped_resume_does_not_require_dependency_freshness_reconciliation(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -159,7 +159,7 @@ def test_release_version_target_stamps_and_regenerates_without_dependency_materi
 
 
 def test_release_version_transition_rejects_invalid_source_before_any_mutation(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -211,7 +211,7 @@ def test_release_version_transition_rejects_invalid_source_before_any_mutation(
 
 
 def test_release_version_transition_rolls_back_version_and_generated_authority_on_failure(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -306,7 +306,7 @@ def test_release_version_transition_rolls_back_version_and_generated_authority_o
 
 
 def test_source_identity_match_consumes_captured_dependency_receipt_without_rechecking_portability(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -349,7 +349,7 @@ def test_source_identity_match_consumes_captured_dependency_receipt_without_rech
 
 
 def test_release_stamp_rejects_preexisting_private_registry_lock_without_rewriting_it(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -397,7 +397,7 @@ def test_release_stamp_rejects_preexisting_private_registry_lock_without_rewriti
 
 
 def test_release_stamp_requires_uv_frozen_to_leave_lock_byte_identical(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 

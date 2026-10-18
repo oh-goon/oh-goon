@@ -56,7 +56,7 @@ def test_provider_discovery_is_offline_and_does_not_require_credentials(
 def test_path_does_not_read_or_create_configuration(tmp_path, monkeypatch, capsys, no_runtime):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert main(["agent", "providers", "path", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["config"] == str(tmp_path / "oh-goon/providers.toml")
+    assert json.loads(capsys.readouterr().out)["config"] == str(tmp_path / "oh-goon/providers.json")
     assert not (tmp_path / "oh-goon").exists()
 
 
@@ -137,3 +137,54 @@ def test_request_refusal_and_configuration_errors_are_safe_json(
     path.write_text(CONFIG.replace('api_key_env = "MY_KEY"', 'api_key = "PRIVATE_KEY"'))
     assert main(["agent", "providers", "validate", "--config", str(path), "--json"]) == 2
     assert "PRIVATE_KEY" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("provider", ["ollama", "litellm"])
+def test_setup_creates_an_offline_schema_backed_catalog_and_keeps_existing_settings(
+    tmp_path, monkeypatch, capsys, no_runtime, provider
+):
+    from oh_goon.integrations.agent_provider_client import AgentProviderClient
+    from oh_goon.runtime.agent_providers import load_agent_providers
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        AgentProviderClient, "complete", lambda *args: pytest.fail("setup must not connect")
+    )
+    command = ["agent", "providers", "setup", "--provider", provider, "--model", "team/model:tag"]
+    assert main([*command, "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "configured_not_connected"
+    path = tmp_path / "oh-goon/providers.json"
+    raw = path.read_bytes()
+    payload = json.loads(raw)
+    schema = path.parent / payload["$schema"]
+    assert "providers" in json.loads(schema.read_bytes())["properties"]
+    config = load_agent_providers(path)
+    assert config.resolve(None, environment={}).model == "team/model:tag"
+    assert main(command) == 2
+    assert "already exists" in capsys.readouterr().err
+    assert path.read_bytes() == raw
+
+
+def test_invalid_setup_cannot_create_files_or_print_accidental_credentials(
+    tmp_path, monkeypatch, capsys, no_runtime
+):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert (
+        main(
+            [
+                "agent",
+                "providers",
+                "setup",
+                "--provider",
+                "litellm",
+                "--model",
+                "model",
+                "--base-url",
+                "https://user:PRIVATE_SECRET@example.com/v1",
+            ]
+        )
+        == 2
+    )
+    assert "PRIVATE_SECRET" not in capsys.readouterr().err
+    assert not list(tmp_path.iterdir())

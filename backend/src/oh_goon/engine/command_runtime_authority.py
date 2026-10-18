@@ -344,7 +344,10 @@ def _script_runtime_lease(
         return CommandRuntimeAuthorityLease(
             receipt=receipt,
             launch_argv=(
-                str(interpreter_path),
+                # Native Python and other interpreters use their invocation path
+                # for environment selection. Seal the resolved bytes, but retain
+                # argv[0] from the sealed script's shebang (including a venv path).
+                shebang[0],
                 *shebang[1:],
                 executable.proc_path,
                 *argv[1:],

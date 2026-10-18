@@ -173,8 +173,9 @@ class ResolvedAgentModel:
 
 
 class AgentProvidersConfig(ImmutableModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True, serialize_by_alias=True)
 
+    schema_uri: str | None = Field(default=None, alias="$schema", max_length=2048)
     version: int = Field(default=1, ge=1, le=1)
     default_model: str | None = None
     providers: dict[str, AgentProvider] = Field(default_factory=dict, max_length=64)
@@ -237,6 +238,35 @@ class AgentProvidersConfig(ImmutableModel):
 class AgentMessage:
     role: Literal["system", "user", "assistant"]
     content: str
+
+
+class AgentConnection(ImmutableModel):
+    """Frozen public connection facts. Credential values remain process authority."""
+
+    profile: str
+    provider_name: str
+    provider: AgentProvider
+    selection: AgentModel
+
+    @classmethod
+    def select(cls, config: AgentProvidersConfig, profile: str | None = None) -> AgentConnection:
+        name = profile if profile is not None else config.default_model
+        if name is None or name not in config.models:
+            raise AgentProviderError("Select an agent model profile or configure default_model")
+        model = config.models[name]
+        return cls(
+            profile=name,
+            provider_name=model.provider,
+            provider=config.providers[model.provider].model_copy(deep=True),
+            selection=model.model_copy(deep=True),
+        )
+
+    def resolve(self, environment: Mapping[str, str]) -> ResolvedAgentModel:
+        return AgentProvidersConfig(
+            default_model=self.profile,
+            providers={self.provider_name: self.provider},
+            models={self.profile: self.selection},
+        ).resolve(self.profile, environment=environment)
 
 
 @dataclass(frozen=True, slots=True)

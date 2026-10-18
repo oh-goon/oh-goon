@@ -15,6 +15,9 @@ import pytest
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.integrations import _fleet_plan_cgroup_resources as cg
+from tests.factories.fleet_plan_executor import simulated_cgroup_custody  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("simulated_cgroup_custody")
 
 
 def _lease(tmp_path: Path, policy: CicdResourcePolicy | None = None) -> cg.CgroupV2AttemptLease:

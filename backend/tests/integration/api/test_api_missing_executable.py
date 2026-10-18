@@ -1,14 +1,23 @@
+"""Local executable failures stay native; selected strict admission stays explicit."""
+
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
+import pytest
+
+from oh_goon.api import dependencies
 from oh_goon.api.app import app as api_app
+from oh_goon.application import ApplicationRuntime
 from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.models.fleet_plan import (
+    PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
+    PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
+)
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.integration.api.client import authenticated_api_client
-
-TERMINAL = {"COMPLETED", "CANCELLED", "FAILED"}
 
 
 def _write_lock(repository: Path) -> None:
@@ -28,31 +37,45 @@ def _team_authority(client, repository: Path) -> tuple[str, str]:
     return team["pipeline"]["sha256"], team["repository_instance_id"]
 
 
-def test_missing_declared_executable_does_not_bypass_unprovisioned_fleet_admission(
+@pytest.mark.parametrize(
+    "kind,standard_local",
+    [
+        ("missing", True),
+        ("permission", True),
+        ("invalid-format", True),
+        ("missing-interpreter", True),
+        ("missing", False),
+    ],
+)
+def test_executable_failure_respects_selected_execution_profile(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    standard_local: bool,
 ) -> None:
+    factory = ApplicationRuntime.build
+    monkeypatch.setattr(ApplicationRuntime, "build", lambda: factory(standard_local=standard_local))
     root = tmp_path / "repos"
-    repository = root / "missing-tool"
+    repository = root / "project"
     repository.mkdir(parents=True)
-    (repository / ".git").mkdir()
-    (repository / "pyproject.toml").write_text(
-        "[project]\nname='missing-tool'\nversion='0.0.0'\n",
-        encoding="utf-8",
-    )
-    executable = "definitely-not-an-oh-goon-executable-9d61"
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    (repository / "pyproject.toml").write_text("[project]\nname='example'\nversion='0.0.0'\n")
+    command = "definitely-not-an-oh-goon-executable-9d61 --version"
+    if kind != "missing":
+        executable = repository / "tool.sh"
+        content, mode = {
+            "permission": ("#!/bin/sh\necho should-not-run\n", 0o644),
+            "invalid-format": ("echo no-shebang\n", 0o755),
+            "missing-interpreter": ("#!/definitely/missing/interpreter\necho hi\n", 0o755),
+        }[kind]
+        executable.write_text(content)
+        executable.chmod(mode)
+        command = "./tool.sh"
     (repository / "goon.yml").write_text(
-        f"""version: 1
-execution:
-  purpose: verification
-steps:
-- id: missing-tool-step
-  run: "{executable} --version"
-""",
-        encoding="utf-8",
+        f'version: 1\nsteps:\n- id: executable\n  run: "{command}"\n'
     )
-
     _write_lock(repository)
-
+    run_id = "executable-api"
     with authenticated_api_client(api_app) as client:
         assert client.post("/api/locations", json={"path": str(root)}).status_code == 200
         pipeline_sha256, repository_instance_id = _team_authority(client, repository)
@@ -60,179 +83,39 @@ steps:
             "/api/league/team-runs",
             json={
                 "repository": str(repository),
-                "fleet_run_id": "missing-executable-api",
+                "fleet_run_id": run_id,
                 "expected_pipeline_sha256": pipeline_sha256,
                 "expected_repository_instance_id": repository_instance_id,
                 "inputs": {},
             },
         )
-        # The authenticated Fleet Plan issuer is not provisioned in this API
-        # fixture. Invalid or missing executables must not create a Run by
-        # falling back to an untrusted step-execution path.
-        assert accepted.status_code == 409
-        body = accepted.json()
-        assert body["code"] == "STATE_CONFLICT"
+        if not standard_local:
+            assert accepted.status_code == 409
+            body = accepted.json()
+            assert body["code"] == "STATE_CONFLICT"
+            assert (
+                body["message"]
+                == "Fleet Plan execution requires valid authenticated admission authority"
+            )
+            assert client.get(f"/api/fleet/runs/{run_id}").status_code == 404
+            return
+        assert accepted.status_code == 202
+        detail = dependencies.application().runs.wait_for_terminal(run_id, timeout=10)
+        assert detail.run.status.terminal
+        assert detail.outcome.value == "ATTENTION_REQUIRED"
+        assert len(detail.operations) == 1
+        step = detail.operations[0].evidence.plan.steps[0]
+        assert step.status == "FAILED"
+        expected = (
+            PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE
+            if kind == "missing"
+            else PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE
+        )
+        assert step.returncode == expected
+        response = client.get(f"/api/fleet/runs/{run_id}")
+        assert response.status_code == 200
+        assert response.json()["outcome"] == "ATTENTION_REQUIRED"
         assert (
-            body["message"]
-            == "Fleet Plan execution requires valid authenticated admission authority"
+            response.json()["operations"][0]["evidence"]["plan"]["steps"][0]["returncode"]
+            == expected
         )
-        assert client.get("/api/fleet/runs/missing-executable-api").status_code == 404
-
-
-def test_non_executable_command_does_not_bypass_unprovisioned_fleet_admission(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "repos"
-    repository = root / "permission-tool"
-    repository.mkdir(parents=True)
-    (repository / ".git").mkdir()
-    (repository / "pyproject.toml").write_text(
-        "[project]\nname='permission-tool'\nversion='0.0.0'\n",
-        encoding="utf-8",
-    )
-    executable = repository / "tool.sh"
-    executable.write_text("#!/bin/sh\necho should-not-run\n", encoding="utf-8")
-    executable.chmod(0o644)
-    (repository / "goon.yml").write_text(
-        """version: 1
-execution:
-  purpose: verification
-steps:
-- id: permission-step
-  run: ./tool.sh
-""",
-        encoding="utf-8",
-    )
-
-    _write_lock(repository)
-
-    with authenticated_api_client(api_app) as client:
-        assert client.post("/api/locations", json={"path": str(root)}).status_code == 200
-        pipeline_sha256, repository_instance_id = _team_authority(client, repository)
-        accepted = client.post(
-            "/api/league/team-runs",
-            json={
-                "repository": str(repository),
-                "fleet_run_id": "permission-executable-api",
-                "expected_pipeline_sha256": pipeline_sha256,
-                "expected_repository_instance_id": repository_instance_id,
-                "inputs": {},
-            },
-        )
-        # The authenticated Fleet Plan issuer is not provisioned in this API
-        # fixture. Invalid or missing executables must not create a Run by
-        # falling back to an untrusted step-execution path.
-        assert accepted.status_code == 409
-        body = accepted.json()
-        assert body["code"] == "STATE_CONFLICT"
-        assert (
-            body["message"]
-            == "Fleet Plan execution requires valid authenticated admission authority"
-        )
-        assert client.get("/api/fleet/runs/permission-executable-api").status_code == 404
-
-
-def test_invalid_executable_format_does_not_bypass_unprovisioned_fleet_admission(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "repos"
-    repository = root / "invalid-format-tool"
-    repository.mkdir(parents=True)
-    (repository / ".git").mkdir()
-    (repository / "pyproject.toml").write_text(
-        "[project]\nname='invalid-format-tool'\nversion='0.0.0'\n",
-        encoding="utf-8",
-    )
-    executable = repository / "tool"
-    executable.write_text("echo no-shebang\n", encoding="utf-8")
-    executable.chmod(0o755)
-    (repository / "goon.yml").write_text(
-        """version: 1
-execution:
-  purpose: verification
-steps:
-- id: invalid-format-step
-  run: ./tool
-""",
-        encoding="utf-8",
-    )
-
-    _write_lock(repository)
-
-    with authenticated_api_client(api_app) as client:
-        assert client.post("/api/locations", json={"path": str(root)}).status_code == 200
-        pipeline_sha256, repository_instance_id = _team_authority(client, repository)
-        accepted = client.post(
-            "/api/league/team-runs",
-            json={
-                "repository": str(repository),
-                "fleet_run_id": "invalid-format-executable-api",
-                "expected_pipeline_sha256": pipeline_sha256,
-                "expected_repository_instance_id": repository_instance_id,
-                "inputs": {},
-            },
-        )
-        # The authenticated Fleet Plan issuer is not provisioned in this API
-        # fixture. Invalid or missing executables must not create a Run by
-        # falling back to an untrusted step-execution path.
-        assert accepted.status_code == 409
-        body = accepted.json()
-        assert body["code"] == "STATE_CONFLICT"
-        assert (
-            body["message"]
-            == "Fleet Plan execution requires valid authenticated admission authority"
-        )
-        assert client.get("/api/fleet/runs/invalid-format-executable-api").status_code == 404
-
-
-def test_missing_interpreter_does_not_bypass_unprovisioned_fleet_admission(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "repos"
-    repository = root / "missing-interpreter-tool"
-    repository.mkdir(parents=True)
-    (repository / ".git").mkdir()
-    (repository / "pyproject.toml").write_text(
-        "[project]\nname='missing-interpreter-tool'\nversion='0.0.0'\n",
-        encoding="utf-8",
-    )
-    executable = repository / "tool.sh"
-    executable.write_text("#!/definitely/missing/interpreter\necho hi\n", encoding="utf-8")
-    executable.chmod(0o755)
-    (repository / "goon.yml").write_text(
-        """version: 1
-execution:
-  purpose: verification
-steps:
-- id: missing-interpreter-step
-  run: ./tool.sh
-""",
-        encoding="utf-8",
-    )
-
-    _write_lock(repository)
-
-    with authenticated_api_client(api_app) as client:
-        assert client.post("/api/locations", json={"path": str(root)}).status_code == 200
-        pipeline_sha256, repository_instance_id = _team_authority(client, repository)
-        accepted = client.post(
-            "/api/league/team-runs",
-            json={
-                "repository": str(repository),
-                "fleet_run_id": "missing-interpreter-api",
-                "expected_pipeline_sha256": pipeline_sha256,
-                "expected_repository_instance_id": repository_instance_id,
-                "inputs": {},
-            },
-        )
-        # The authenticated Fleet Plan issuer is not provisioned in this API
-        # fixture. Invalid or missing executables must not create a Run by
-        # falling back to an untrusted step-execution path.
-        assert accepted.status_code == 409
-        body = accepted.json()
-        assert body["code"] == "STATE_CONFLICT"
-        assert (
-            body["message"]
-            == "Fleet Plan execution requires valid authenticated admission authority"
-        )
-        assert client.get("/api/fleet/runs/missing-interpreter-api").status_code == 404

@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_new_owner_and_test_are_present_without_second_admission_service():
+def test_new_owner_and_test_are_present_without_second_admission_service() -> None:
     enforcer = (ROOT / "backend/src/oh_goon/services/fleet_admission.py").read_text()
     owner = (
         ROOT / "backend/src/oh_goon/core/enforcer_lace_issuer_evidence.py"

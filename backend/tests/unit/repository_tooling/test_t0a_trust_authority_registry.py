@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from tests.factories.x0_architecture import replace_python_syntax
 
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.trust_authority_registry_contract import (
@@ -37,8 +38,7 @@ def _minimal_tree(tmp_path: Path) -> Path:
 
 def _change(path: Path, before: str, after: str) -> None:
     original = path.read_text(encoding="utf-8")
-    assert before in original
-    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+    path.write_text(replace_python_syntax(original, before, after), encoding="utf-8")
 
 
 def _json_update(root: Path, transform) -> None:

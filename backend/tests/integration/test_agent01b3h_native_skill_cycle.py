@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 import oh_goon.integrations.fleet_plan_step_execution as step_execution
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.execution_lock_identity import build_execution_lock
@@ -19,11 +21,16 @@ from oh_goon.services.execution_lock_persistence import write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.integration.test_agent01b3c_native_model_review import (
     _native_agent_source,  # imported pytest fixture checks real Hashmarks and real Ollama
+    actual_model,  # noqa: F401 - shared native-model fixture
 )
+
+pytestmark = pytest.mark.certification
 
 
 def test_native_skill_and_repository_review_persists_real_evidence(
-    actual_model, tmp_path, monkeypatch
+    actual_model,  # noqa: F811 - pytest fixture injection
+    tmp_path,
+    monkeypatch,
 ):
     plan, repository, opts = _native_agent_source(tmp_path, monkeypatch, actual_model)
     skill = tmp_path / "skills" / "team" / "search"

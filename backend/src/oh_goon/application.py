@@ -70,16 +70,19 @@ class ApplicationRuntime:
         cls,
         *,
         fleet_provisioner: FleetPreworkProvisioner | None = None,
-        standard_local: bool = False,
+        standard_local: bool | None = None,
     ) -> ApplicationRuntime:
         # Concrete dependencies remain statically visible in the private application wiring
         # modules, but are materialized only when a process runtime is actually built.
-        from oh_goon._application_foundation import build_runtime_foundation
+        from oh_goon._application_foundation import build_runtime_foundation, standard_local_profile
         from oh_goon._application_services import build_product_services
 
         return build_product_services(
             build_runtime_foundation(
-                fleet_provisioner=fleet_provisioner, standard_local=standard_local
+                fleet_provisioner=fleet_provisioner,
+                standard_local=standard_local_profile(
+                    standard_local, deployment_selected=fleet_provisioner is not None
+                ),
             )
         )
 

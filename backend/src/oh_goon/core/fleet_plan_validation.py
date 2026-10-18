@@ -47,7 +47,10 @@ def validate_resolved_plan(plan: Any) -> None:
         published[step.step_id] = {item.name for item in getattr(step, "outputs", ())}
         # A validated Agent proposal is a scalar Step output, not a hidden
         # model-controlled command or grant. Only this explicit harness exports it.
-        if step.kind == "agent" and getattr(step, "harness", None) == "local-model-proposal":
+        if step.kind == "agent" and getattr(step, "harness", None) in (
+            "local-model-proposal",
+            "provider-proposal",
+        ):
             published[step.step_id].add("proposal")
         if step.workspace.publish:
             published_workspaces.add(step.step_id)
@@ -56,6 +59,9 @@ def validate_resolved_plan(plan: Any) -> None:
     _validate_kubernetes_rollout_links(plan)
     _validate_plan_requirements(plan)
     _validate_imports(plan)
+    from oh_goon.core.agent_review_plan import agent_review_phases
+
+    agent_review_phases(plan)
     _validate_plan_identity(plan)
 
 
@@ -367,6 +373,9 @@ def _validate_requirement_paths(requirement: Any, *, prefix: str = "") -> None:
 
 
 def _validate_plan_identity(plan: Any) -> None:
+    sources = plan.skill_sources
+    if tuple(item.name for item in sources) != tuple(sorted({item.name for item in sources})):
+        raise ValueError("Resolved Skill sources must have unique sorted names")
     payload = {
         "contract_version": plan.contract_version,
         "name": plan.name,
@@ -383,6 +392,9 @@ def _validate_plan_identity(plan: Any) -> None:
         "steps": [
             step.model_dump(mode="json", exclude_computed_fields=True) for step in plan.steps
         ],
+        **(
+            {"skill_sources": [item.model_dump(mode="json") for item in sources]} if sources else {}
+        ),
     }
     if plan.plan_id != stable_id("fleet-plan", payload):
         raise ValueError("Resolved Fleet plan_id must match canonical resolved content")

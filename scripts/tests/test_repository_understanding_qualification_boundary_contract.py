@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture import (
@@ -12,7 +13,7 @@ def test_repository_understanding_qualification_boundary_current_tree() -> None:
 
 
 def test_hashmarks_adapter_cannot_import_ru_grading_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
@@ -40,7 +41,7 @@ def test_hashmarks_adapter_cannot_import_ru_grading_authority(
 
 
 def test_hashmarks_adapter_cannot_address_secret_answer_tree(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
@@ -64,7 +65,7 @@ def test_hashmarks_adapter_cannot_address_secret_answer_tree(
 
 
 def test_hashmarks_package_boundary_is_recursive_and_filename_independent(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
@@ -93,7 +94,7 @@ def test_hashmarks_package_boundary_is_recursive_and_filename_independent(
 
 
 def test_hashmarks_package_secret_rule_is_filename_independent(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
@@ -117,7 +118,7 @@ def test_hashmarks_package_secret_rule_is_filename_independent(
 
 
 def test_ru_qualification_owner_cannot_import_hashmarks_semantics(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
@@ -141,9 +142,9 @@ def test_ru_qualification_owner_cannot_import_hashmarks_semantics(
 
 
 def test_architecture_boundary_does_not_revalidate_repository_understanding_source_ranges(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def stale_exam():
+    def stale_exam() -> None:
         raise ValueError("stale Repository Understanding source range")
 
     import oh_goon.repository_tooling.repository_understanding_material as material

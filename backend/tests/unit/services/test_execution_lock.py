@@ -83,6 +83,7 @@ def test_step_command_and_requirement_changes_invalidate_goon(tmp_path: Path) ->
     source = _package(goons, "general/a", _atomic("a"))
     plan_path = tmp_path / "plan.yml"
     _plan(plan_path, ("general/a",))
+    plan_path.write_text("execution: {purpose: cicd}\n" + plan_path.read_text(), encoding="utf-8")
     before_plan, before_graph = _resolve(plan_path, goons)
     before = build_execution_lock(before_plan)
 

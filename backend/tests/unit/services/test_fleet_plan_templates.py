@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from oh_goon.core.models.fleet_plan import CompiledGoonImportStep
+from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.template_identity import TemplateClassification
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_source_graph import analyze_fleet_plan_sources
@@ -15,6 +16,7 @@ from tests.factories.shipped_templates import PLAN_TEMPLATES as PLANS
 
 def test_shipped_template_classification_is_category_owned() -> None:
     expected = {
+        "agents": TemplateClassification.PRODUCTION,
         "advanced": TemplateClassification.TEACHING_EXAMPLE,
         "kubernetes": TemplateClassification.PRODUCTION,
         "ml": TemplateClassification.TEACHING_EXAMPLE,
@@ -69,7 +71,15 @@ def test_every_shipped_goon_is_atomic_or_composite_never_both() -> None:
                 else:
                     # Recipient-local pass is the explicit same-name binding shorthand;
                     # do not mistake it for ambient propagation or Plan-level syntax.
-                    assert set(item) <= {"import", "with", "pass", "failure_impact"}, (key, item)
+                    assert set(item) <= {
+                        "import",
+                        "with",
+                        "pass",
+                        "failure_impact",
+                        "as",
+                        "from",
+                        "phase",
+                    }, (key, item)
                     passed = item.get("pass", ())
                     assert isinstance(passed, (list, tuple)), (key, item)
                     assert all(type(name) is str for name in passed), (key, item)
@@ -148,6 +158,8 @@ def test_production_plans_do_not_repeat_default_resource_envelopes() -> None:
         execution = payload.get("execution", {})
         assert "resources" not in execution, key
         compiled = PLANS.source(key).compiled
+        if not isinstance(compiled.execution, CicdExecutionPolicy):
+            continue
         assert compiled.execution.resources.cpu_millis is None, key
         assert compiled.execution.resources.memory_mib is None, key
         assert compiled.execution.resources.max_processes is None, key

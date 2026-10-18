@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Any
+from collections.abc import Sequence
+
 import shutil
 import subprocess
 from pathlib import Path
@@ -27,11 +30,13 @@ def test_native_command_runs_exactly_once_for_transient_looking_failures(
     seen: list[tuple[str, ...]] = []
     command = ("uv", "sync", "--project", "backend", "--frozen")
 
-    def fake_run(args, **_kwargs):
+    def fake_run(
+        args: Sequence[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         seen.append(tuple(args))
         return subprocess.CompletedProcess(args, returncode, stdout="", stderr=stderr)
 
-    monkeypatch.setattr(native_command.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert (
         native_command.run_native_command(command, show_command_banner=False)
         == returncode
@@ -46,11 +51,13 @@ def test_native_command_process_start_error_is_one_attempt(
     seen: list[tuple[str, ...]] = []
     command = ("uv", "sync", "--project", "backend", "--frozen")
 
-    def fake_run(args, **_kwargs):
+    def fake_run(
+        args: Sequence[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         seen.append(tuple(args))
         raise OSError("temporary process start failure")
 
-    monkeypatch.setattr(native_command.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert native_command.run_native_command(command, show_command_banner=False) == 127
     assert seen == [command]
     assert "Failure class: process_start" in capsys.readouterr().err
@@ -63,7 +70,9 @@ def test_native_command_display_sanitization_never_changes_native_command(
     command = ("tool", "--output", private_root + "/artifact")
     seen: list[tuple[str, ...]] = []
 
-    def fake_run(args, **_kwargs):
+    def fake_run(
+        args: Sequence[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         seen.append(tuple(args))
         return subprocess.CompletedProcess(
             args,
@@ -72,7 +81,7 @@ def test_native_command_display_sanitization_never_changes_native_command(
             stderr=f"cache {private_root}/cache\n",
         )
 
-    monkeypatch.setattr(native_command.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert (
         native_command.run_native_command(
             command,
@@ -107,11 +116,13 @@ def test_native_command_banner_runs_with_declared_posix_shell_only(
 
     seen: list[tuple[str, ...]] = []
 
-    def fake_run(args, **_kwargs):
+    def fake_run(
+        args: Sequence[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         seen.append(tuple(args))
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(native_command.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert native_command.main(["--", "uv", "sync", "--frozen"]) == 0
     assert seen == [("uv", "sync", "--frozen")]
 
@@ -121,11 +132,13 @@ def test_native_command_cli_applies_environment_only_to_child(
 ) -> None:
     seen: list[dict[str, str] | None] = []
 
-    def fake_run(_args, **kwargs):
+    def fake_run(
+        _args: Sequence[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
         seen.append(kwargs.get("env"))
         return subprocess.CompletedProcess(("uv", "sync"), 0, stdout="", stderr="")
 
-    monkeypatch.setattr(native_command.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert (
         native_command.main(
             ["--env", "UV_PROJECT_ENVIRONMENT=/tmp/venv", "--", "uv", "sync"]
@@ -141,14 +154,16 @@ def test_native_command_preserves_operator_uv_configuration_without_printing_sec
 ) -> None:
     seen: list[dict[str, str] | None] = []
 
-    def fake_run(_args, **kwargs):
+    def fake_run(
+        _args: Sequence[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
         seen.append(kwargs.get("env"))
         return subprocess.CompletedProcess(("uv", "sync"), 0, stdout="", stderr="")
 
     secret_index = "https://user:secret@internal.example/simple"
     monkeypatch.setenv("UV_DEFAULT_INDEX", secret_index)
     monkeypatch.setenv("UV_SYSTEM_CERTS", "true")
-    monkeypatch.setattr(native_command.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert native_command.main(["--owner", "uv", "--", "uv", "sync", "--frozen"]) == 0
     assert seen and seen[0] is not None
     assert seen[0]["UV_DEFAULT_INDEX"] == secret_index
@@ -164,12 +179,14 @@ def test_native_command_strips_ambient_virtual_env_from_child(
 ) -> None:
     seen: list[dict[str, str] | None] = []
 
-    def fake_run(_args, **kwargs):
+    def fake_run(
+        _args: Sequence[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
         seen.append(kwargs.get("env"))
         return subprocess.CompletedProcess(("uv", "sync"), 0, stdout="", stderr="")
 
     monkeypatch.setenv("VIRTUAL_ENV", "backend/.venv")
-    monkeypatch.setattr(native_command.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert native_command.main(["--", "uv", "sync", "--frozen"]) == 0
     assert seen and seen[0] is not None
     assert "VIRTUAL_ENV" not in seen[0]

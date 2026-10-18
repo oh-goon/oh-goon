@@ -9,7 +9,9 @@ ISSUER = (
 )
 
 
-def test_issuer_delegates_to_existing_native_owners_and_has_no_runnable_effects():
+def test_issuer_delegates_to_existing_native_owners_and_has_no_runnable_effects() -> (
+    None
+):
     data = ISSUER.read_text()
     for fragment in (
         "environment_owner._observe(",

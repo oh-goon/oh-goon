@@ -24,3 +24,5 @@ Add `python/test` to a Plan’s ordered `goons:` list with a plain import to kee
 `junit.xml` is written in the selected project and recorded as artifact evidence. A nonzero pytest exit remains a failed Step. The template does not force a `src` layout, coverage target or coverage floor.
 
 Append another Goon to the Plan to add a capability. To change this command sequence, create a project-owned Atomic Goon and import it with an explicit `from:` source. See [authoring and local imports](../../../README.md#append-your-own-capability).
+
+See [artifact retention](../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md) for Run evidence and retained content.

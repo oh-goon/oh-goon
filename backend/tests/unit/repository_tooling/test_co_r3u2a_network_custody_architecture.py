@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from tests.factories.x0_architecture import replace_python_syntax
 
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     _check_co_r3u2a_original_egress_custody,
@@ -31,8 +32,7 @@ def test_removing_a_native_cut_is_rejected(tmp_path: Path, cut: str) -> None:
     target = directory / OWNER
     target.parent.mkdir(parents=True)
     original = (ROOT / "backend/src/oh_goon" / OWNER).read_text(encoding="utf-8")
-    assert cut in original
-    target.write_text(original.replace(cut, "None  # malicious custody bypass", 1))
+    target.write_text(replace_python_syntax(original, cut, "None  # malicious custody bypass"))
     assert _check_co_r3u2a_original_egress_custody(directory)
 
 
@@ -44,7 +44,8 @@ def test_replacing_original_gate_import_with_local_permit_is_rejected(
     target.parent.mkdir(parents=True)
     original = (ROOT / "backend/src/oh_goon" / OWNER).read_text(encoding="utf-8")
     target.write_text(
-        original.replace(
+        replace_python_syntax(
+            original,
             "from oh_goon.integrations._fleet_plan_cgroup_resources import require_independent_native_parent_custody",
             "def require_independent_native_parent_custody(**kwargs): pass",
         )

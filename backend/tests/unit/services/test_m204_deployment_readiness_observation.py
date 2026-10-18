@@ -121,7 +121,12 @@ def test_readiness_does_not_enter_cli_or_create_ambient_deployment(monkeypatch):
     monkeypatch.setattr(
         cli.ApplicationRuntime,
         "build",
-        classmethod(lambda cls: observed.append("ordinary-no-provisioner") or object()),
+        classmethod(
+            lambda cls, *, standard_local=False: observed.append(
+                "standard-local" if standard_local else "ordinary-no-provisioner"
+            )
+            or object()
+        ),
     )
     monkeypatch.setattr(cli, "_execute_stateful_command", lambda _runtime, _args: 2)
     assert (
@@ -138,7 +143,7 @@ def test_readiness_does_not_enter_cli_or_create_ambient_deployment(monkeypatch):
         )
         == 2
     )
-    assert observed == ["ordinary-no-provisioner"]
+    assert observed == ["standard-local"]
 
 
 def test_deployment_probe_rejects_no_or_duplicate_enrollments(tmp_path, monkeypatch):

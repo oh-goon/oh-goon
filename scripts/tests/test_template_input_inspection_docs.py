@@ -22,7 +22,7 @@ def _broken_links(path: Path) -> list[str]:
     ]
 
 
-def test_inspection_navigation_and_links_are_current():
+def test_inspection_navigation_and_links_are_current() -> None:
     for path in (GUIDE, *LINKED):
         assert not _broken_links(path), path
         if path != GUIDE:

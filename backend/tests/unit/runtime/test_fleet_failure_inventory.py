@@ -52,6 +52,7 @@ def test_later_success_for_same_plan_slot_clears_current_failure(tmp_path: Path)
 def test_success_for_different_plan_slot_does_not_hide_current_failure(tmp_path: Path) -> None:
     failed = admitted_fleet_plan_execution(tmp_path, returncodes=(5,), fleet_run_id="failure-run")
     different_plan = """version: 1
+execution: {purpose: cicd}
 steps:
   - id: other-check
     run: "true"

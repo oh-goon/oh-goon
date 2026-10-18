@@ -33,7 +33,7 @@ def add_plan_commands(
     plan_inputs_inspect.add_argument(
         "--source-closure",
         action="store_true",
-        help="AG-01 read-only repository/skill closure evidence (no Run)",
+        help="Inspect repository/Skill closure; may prepare declared Git sources (no Run)",
     )
     plan_inputs_inspect.add_argument(
         "--input", action="append", dest="plan_inputs", metavar="NAME=VALUE"
@@ -84,11 +84,27 @@ def add_plan_commands(
     plan_run.add_argument(
         "--json", action="store_true", dest="as_json", help="Emit one machine-readable Run result"
     )
-    plan_run.add_argument("--wait", action="store_true", help="Wait for terminal FleetRun state")
     plan_run.add_argument(
+        "--wait",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Wait for completion; --no-wait is available for deployed strict execution",
+    )
+    profile = plan_run.add_mutually_exclusive_group()
+    profile.add_argument(
         "--standard-local",
-        action="store_true",
-        help="Explicitly run a non-CI/CD Plan on this host (not sandboxed); requires --wait",
+        action="store_const",
+        const=True,
+        default=None,
+        dest="standard_local",
+        help="Run a trusted repository on this host (the ordinary default)",
+    )
+    profile.add_argument(
+        "--strict",
+        action="store_const",
+        const=False,
+        dest="standard_local",
+        help="Require the configured isolated/deployment execution profile",
     )
     plan_run.add_argument(
         "--agent-repository-root",
@@ -110,6 +126,23 @@ def add_plan_commands(
     )
     plan_run.add_argument(
         "--repair-attempts", type=int, help="Authorize a bounded test/propose/apply/retest loop"
+    )
+    plan_run.add_argument(
+        "--review-passes",
+        type=int,
+        help="Bound review passes, reserving a fresh review after every repair",
+    )
+    plan_run.add_argument(
+        "--repair-write-root",
+        action="append",
+        help="Explicit repository-relative repair scope; repeat for multiple roots",
+    )
+    plan_run.add_argument(
+        "--agent-model-profile",
+        help="Provider model profile; defaults to the configured default_model",
+    )
+    plan_run.add_argument(
+        "--agent-providers-file", type=Path, help="Explicit provider configuration file"
     )
     plan_run.add_argument(
         "--repair-timeout",

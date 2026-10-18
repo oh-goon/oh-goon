@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+import pytest
+
 import json
 import subprocess
 from pathlib import Path
@@ -13,7 +17,9 @@ class FakeRunner:
         self.versions = versions
         self.calls: list[tuple[str, ...]] = []
 
-    def __call__(self, argv, **_kwargs):
+    def __call__(
+        self, argv: Sequence[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         command = tuple(argv)
         self.calls.append(command)
         name = command[0]
@@ -254,13 +260,15 @@ def test_frontend_component_check_does_not_read_backend_manifest(
 
 
 def test_cli_component_filter_supports_bootstrap_only_check(
-    monkeypatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     root = _root(tmp_path)
     monkeypatch.setattr(startup_environment, "ROOT", root)
     seen: list[tuple[str, ...] | None] = []
 
-    def fake_report(_root_arg, *, components=None, **_kwargs):
+    def fake_report(
+        _root_arg: Path, *, components: tuple[str, ...] | None = None, **_kwargs: object
+    ) -> tuple[tuple[str, str, bool, str], ...]:
         seen.append(components)
         return (("uv", "uv 0.12.5", True, "requires >=0.10,<0.13"),)
 

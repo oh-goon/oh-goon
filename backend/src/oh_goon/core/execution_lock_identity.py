@@ -11,6 +11,7 @@ from oh_goon.core.models.execution_lock_models import (
     ExecutionLock,
     LockedExternalArtifact,
     LockedGoon,
+    LockedSkillSource,
 )
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedImport
 
@@ -53,6 +54,7 @@ def build_execution_lock(
             "external": [
                 item.model_dump(mode="json", exclude_computed_fields=True) for item in external
             ],
+            **_skill_source_identity(plan.skill_sources),
         }
     )
     return ExecutionLock(
@@ -60,6 +62,7 @@ def build_execution_lock(
         plan=plan_digest,
         execution=goons,
         external=external,
+        skill_sources=plan.skill_sources,
         digest=overall,
     )
 
@@ -78,6 +81,8 @@ def verify_execution_lock(expected: ExecutionLock, actual: ExecutionLock) -> Non
         raise FleetPlanInvalid(
             "goon.lock external artifact identity is stale; regenerate goon.lock"
         )
+    if actual.skill_sources != expected.skill_sources:
+        raise FleetPlanInvalid("goon.lock Skill sources are stale; regenerate goon.lock")
     if actual.digest != expected.digest:
         raise FleetPlanInvalid("goon.lock execution digest is stale; regenerate goon.lock")
 
@@ -145,6 +150,7 @@ def _goon_digest(plan: ResolvedFleetPlan, root: ResolvedImport) -> str:
         "composition": [
             {
                 "import_id": item.import_id,
+                **({"phase": item.phase} if item.phase is not None else {}),
                 "parent_import_id": item.parent_import_id,
                 "name": item.name,
                 "requirements": [
@@ -183,8 +189,13 @@ def _recompute_overall(lock: ExecutionLock) -> str:
             "external": [
                 item.model_dump(mode="json", exclude_computed_fields=True) for item in lock.external
             ],
+            **_skill_source_identity(lock.skill_sources),
         }
     )
+
+
+def _skill_source_identity(sources: tuple[LockedSkillSource, ...]) -> dict[str, Any]:
+    return {"skill_sources": [item.model_dump(mode="json") for item in sources]} if sources else {}
 
 
 def _bytes_digest(payload: bytes) -> str:

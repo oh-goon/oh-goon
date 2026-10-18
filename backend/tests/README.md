@@ -27,6 +27,19 @@ Product/service integration             tests/integration/services/
 
 These remain backend-owned because they do not require another top-level repository owner. Tests that genuinely cross backend/generated/frontend or backend/repository-tooling boundaries belong in root `../tests/integration/`.
 
+## Optional native qualification
+
+Ordinary backend and integration checks run repository-correctness tests without
+root privileges or an installed model server. Tests that require privileged
+cross-UID custody, chroot, fs-verity, or real installed model inference carry the
+existing `certification` marker and run explicitly for those execution profiles.
+Their portable negative and lifecycle tests remain in the ordinary checks.
+
+Run privileged/native probes with `pytest -m certification tests/unit` on a host
+providing the selected facilities. Use `scripts/qualify_agent_local_model.sh`
+for actual Ollama inference. Unavailable native facilities remain unverified for
+that optional profile; a portable pass grants no strict-execution qualification.
+
 ## Shared test support
 
 ```text

@@ -9,7 +9,7 @@ ISSUER = (
 )
 
 
-def test_m161_issuer_uses_runtime_owner_not_inline_backend_fallback():
+def test_m161_issuer_uses_runtime_owner_not_inline_backend_fallback() -> None:
     source = ISSUER.read_text()
     assert "configured_executor_pool(" in source
     assert "_read_original_admission(" in source

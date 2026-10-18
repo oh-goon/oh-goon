@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from pathlib import Path
 
+from oh_goon.core.models.fleet_observation import ObservationSourceEvidence
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.dependency_observations import DependencyObservationStore
@@ -33,6 +35,12 @@ def test_complete_snapshot_atomically_replaces_removed_dependency(tmp_path: Path
     assert store.package_rows("mlflow") == []
     assert [row["resolved_version"] for row in store.package_rows("requests")] == ["2.32.1"]
     assert repository.repository_id in store.observed_repository_ids()
+    reopened_database = LocalDatabase(database.path)
+    reopened = DependencyObservationStore(reopened_database, Journal(reopened_database))
+    persisted = reopened.snapshot_rows()[0]["sources_json"]
+    assert tuple(
+        ObservationSourceEvidence.model_validate(item) for item in json.loads(persisted)
+    ) == (ObservationSourceEvidence(path="uv.lock", sha256="1" * 64),)
 
 
 def test_newer_repository_state_marks_dependency_evidence_stale(tmp_path: Path) -> None:

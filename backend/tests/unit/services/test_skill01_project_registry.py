@@ -34,8 +34,8 @@ steps:
     (skill_root / "review" / "SKILL.md").write_text("# Review\n")
     (skill_root / "review" / "references").mkdir()
     (skill_root / "review" / "references" / "guide.md").write_text("a reference\n")
-    registry = tmp_path / ".goonskills"
-    registry.write_text('[skill "review"]\n  path = review\n  source = local\n')
+    registry = tmp_path / ".goonskills.yml"
+    registry.write_text("local: {review: review}\n")
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(tmp_path / "goons"))
     _, sha = resolver.input_definitions_with_source(plan)
     values = {"repo": "local:project", "skill": "review", "acceptance": "semantic-verifier"}
@@ -76,7 +76,7 @@ def test_registry_change_cannot_reuse_selected_source_identity(tmp_path):
     before = resolver.capture_agent_sources(plan, inputs=values, **opts)
     (opts["skill_root"] / "review2").mkdir()
     (opts["skill_root"] / "review2" / "SKILL.md").write_text("# Other\n")
-    registry.write_text('[skill "review"]\npath = review2\nsource = local\n')
+    registry.write_text("local: {review: review2}\n")
     after = resolver.capture_agent_sources(plan, inputs=values, **opts)
     assert before.capture_identity != after.capture_identity
     assert after.resolved_skill_reference == "local:review2"
@@ -105,19 +105,21 @@ def test_explicit_alias_and_project_registry_are_mutually_exclusive(tmp_path):
 @pytest.mark.parametrize(
     "body",
     [
-        '[skill "Review"]\npath = review\nsource = local\n',
-        '[skill "review"]\npath = ../outside\nsource = local\n',
-        '[skill "review"]\npath = /tmp/outside\nsource = local\n',
-        '[skill "review"]\npath = review\\other\nsource = local\n',
-        '[skill "review"]\npath = .secret\nsource = local\n',
-        '[skill "review"]\npath = review//other\nsource = local\n',
-        '[skill "review"]\npath = review\nsource = git\n',
-        '[skill "review"]\npath = review\nsource = local\nref = latest\n',
-        '[skill "review"]\npath = review\nsource = local\n[skill "review"]\npath = review\nsource = local\n',
-        '[DEFAULT]\npath = other\n[skill "review"]\nsource = local\n',
-        '[other "review"]\npath = review\nsource = local\n',
-        '[skill "review"]\npath = review\nsource = local\npath = other\n',
-        '[skill "review"]\npath = review\nsource = local\n[skill "other"]\npath = review\nsource = github\n',
+        "local: {Review: review}\n",
+        "local: {review: ../outside}\n",
+        "local: {review: /tmp/outside}\n",
+        'local: {review: "review\\other"}\n',
+        "local: {review: .secret}\n",
+        "local: {review: review//other}\n",
+        "local: {review: review, review: other}\n",
+        "unknown: {review: review}\n",
+        "local: [review]\n",
+        "local: {}\n",
+        'sources: {team: {source: "https://example.test/skills.git", ref: main, skills: [../review]}}\n',
+        'sources: {team: {source: "https://example.test/skills.git", skills: [review]}}\n',
+        'sources: {team: {source: "https://example.test/skills.git", ref: main, skills: [a/review, b/review]}}\n',
+        'sources: {team: {source: "https://example.test/skills.git", ref: main, skills: [review], unknown: true}}\n',
+        'local: {team/review: review}\nsources: {team: {source: "https://example.test/skills.git", ref: main, skills: [review]}}\n',
     ],
 )
 def test_registry_invalid_fails_before_skill_capture(tmp_path, body, monkeypatch):
@@ -130,7 +132,7 @@ def test_registry_invalid_fails_before_skill_capture(tmp_path, body, monkeypatch
     monkeypatch.setattr(
         "oh_goon.services.agent_authoring_sources._snapshot_authorized_tree", never_read
     )
-    with pytest.raises(FleetPlanInvalid, match="SKILL-1"):
+    with pytest.raises(FleetPlanInvalid, match="[Ss]kill|YAML"):
         resolver.explain_agent_sources(plan, inputs=values, **opts)
 
 
@@ -139,18 +141,18 @@ def test_registry_symlink_and_oversize_are_refused(tmp_path):
     outside = tmp_path / "outside"
     registry.rename(outside)
     registry.symlink_to(outside)
-    with pytest.raises(FleetPlanInvalid, match="SKILL-1"):
+    with pytest.raises(FleetPlanInvalid, match="[Ss]kill|YAML"):
         resolver.explain_agent_sources(plan, inputs=values, **opts)
     registry.unlink()
     registry.write_text("x" * 65537)
-    with pytest.raises(FleetPlanInvalid, match="SKILL-1"):
+    with pytest.raises(FleetPlanInvalid, match="[Ss]kill|YAML"):
         resolver.explain_agent_sources(plan, inputs=values, **opts)
 
 
 def test_bad_registry_does_not_change_normal_plan_resolution(tmp_path):
     resolver, plan, registry, values, opts = fixture(tmp_path)
     registry.write_text("garbage registry\n")
-    with pytest.raises(FleetPlanInvalid, match="SKILL-1"):
+    with pytest.raises(FleetPlanInvalid, match="[Ss]kill|YAML"):
         resolver.explain_agent_sources(plan, inputs=values, **opts)
     # The typed Agent Step still has no executable route; registry cannot admit it.
     with pytest.raises(FleetPlanInvalid):
@@ -176,9 +178,7 @@ steps:
   harness: opencode
   task: Review repository
 """)
-    (tmp_path / ".goonskills").write_text(
-        '[skill "team/review"]\npath = team/review\nsource = local\n'
-    )
+    (tmp_path / ".goonskills.yml").write_text("local: {team/review: team/review}\n")
     repo = tmp_path / "repos" / "my-project"
     repo.mkdir(parents=True)
     (repo / "main.py").write_text("print(1)\n")

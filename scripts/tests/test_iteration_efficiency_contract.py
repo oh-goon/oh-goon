@@ -190,7 +190,7 @@ def test_batch_runner_splits_and_reports_without_monolithic_first_attempt(
 
 
 def test_repository_understanding_process_cache_returns_defensive_snapshots(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from oh_goon.repository_tooling import repository_understanding_material as material
 

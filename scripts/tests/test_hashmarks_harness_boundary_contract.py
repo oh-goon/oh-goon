@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture import (
@@ -5,7 +6,7 @@ from oh_goon.repository_tooling.architecture import (
 )
 
 
-def _configure_package(tmp_path: Path, monkeypatch) -> Path:
+def _configure_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     package = tmp_path / "oh_goon"
     package.mkdir(exist_ok=True)
     monkeypatch.setattr(contract, "BACKEND_PACKAGE_ROOT", package)
@@ -56,7 +57,7 @@ def test_hashmarks_harness_boundary_contract() -> None:
 
 
 def test_hashmarks_boundary_documentation_can_be_reworded_without_architecture_effect(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _configure_package(tmp_path, monkeypatch)
     contract.AGENTS.write_text(
@@ -69,7 +70,7 @@ def test_hashmarks_boundary_documentation_can_be_reworded_without_architecture_e
 
 
 def test_hashmarks_boundary_requires_real_structural_integration_owner(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = _configure_package(tmp_path, monkeypatch)
     integration = package / "integrations" / "hashmarks"
@@ -90,7 +91,7 @@ def test_hashmarks_boundary_requires_real_structural_integration_owner(
 
 
 def test_private_names_do_not_define_hashmarks_ownership(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = _configure_package(tmp_path, monkeypatch)
     path = package / "anything.py"
@@ -105,7 +106,7 @@ def test_private_names_do_not_define_hashmarks_ownership(
 
 
 def test_direct_hashmarks_import_outside_integration_boundary_fails(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = _configure_package(tmp_path, monkeypatch)
     path = package / "runtime_owner.py"
@@ -119,7 +120,7 @@ def test_direct_hashmarks_import_outside_integration_boundary_fails(
 
 
 def test_hashmarks_integration_filename_is_semantically_irrelevant(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = _configure_package(tmp_path, monkeypatch)
     integration = package / "integrations" / "hashmarks"
@@ -132,7 +133,7 @@ def test_hashmarks_integration_filename_is_semantically_irrelevant(
 
 
 def test_hashmarks_prefix_outside_explicit_package_has_no_privilege(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = _configure_package(tmp_path, monkeypatch)
     integrations = package / "integrations"
@@ -148,7 +149,7 @@ def test_hashmarks_prefix_outside_explicit_package_has_no_privilege(
 
 
 def test_hashmarks_integration_rejects_producer_execution_import(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = _configure_package(tmp_path, monkeypatch)
     integration = package / "integrations" / "hashmarks"
@@ -163,7 +164,7 @@ def test_hashmarks_integration_rejects_producer_execution_import(
 
 
 def test_hashmarks_integration_rejects_ambient_daemon_socket_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = _configure_package(tmp_path, monkeypatch)
     integration = package / "integrations" / "hashmarks"
@@ -189,7 +190,7 @@ def test_hashmarks_execution_reuses_existing_schedule_authority() -> None:
 
 
 def test_canonical_validation_authority_cannot_import_hashmarks_selection(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = tmp_path / "self_certification_plan.py"
     owner.write_text(
@@ -211,7 +212,7 @@ def test_canonical_validation_authority_retains_mandatory_gate_owner() -> None:
 
 
 def test_validation_gate_source_representation_is_not_architecture_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = tmp_path / "_self_certification_plan_units.py"
     owner.write_text(
@@ -233,13 +234,14 @@ def test_validation_gate_source_representation_is_not_architecture_authority(
 
 
 def test_validation_gate_semantics_accept_equivalent_sequence_types_and_ordering(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     resolved = contract._resolved_validation_gate_dependencies()
-    equivalent = {
-        gate: list(dependencies)
-        for gate, dependencies in reversed(tuple(resolved.items()))
-    }
+    equivalent = {}
+    for gate, dependencies in reversed(tuple(resolved.items())):
+        assert isinstance(dependencies, (list, tuple, set, frozenset))
+        equivalent[gate] = list(dependencies)
+
     monkeypatch.setattr(
         contract, "_resolved_validation_gate_dependencies", lambda: equivalent
     )
@@ -248,7 +250,7 @@ def test_validation_gate_semantics_accept_equivalent_sequence_types_and_ordering
 
 
 def test_validation_gate_missing_required_surface_fails_semantically(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     resolved = dict(contract._resolved_validation_gate_dependencies())
     resolved.pop("architecture")
@@ -265,7 +267,7 @@ def test_validation_gate_missing_required_surface_fails_semantically(
 
 
 def test_dead_validation_gate_fragments_cannot_satisfy_semantic_proof(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = tmp_path / "_self_certification_plan_units.py"
     owner.write_text(
@@ -301,7 +303,7 @@ def test_hashmarks_contract_identity_is_preserved_across_admission_materializati
 
 
 def test_game_tape_cannot_project_raw_hashmarks_repository_context(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "game_tape.py"
     path.write_text("canonical_payload_json = 'forbidden'\n", encoding="utf-8")
@@ -315,7 +317,7 @@ def test_game_tape_cannot_project_raw_hashmarks_repository_context(
 
 
 def test_offline_proof_architecture_rejects_execution_reuse_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.architecture import (
         _hashmarks_verification_boundary_contract as verification_contract,

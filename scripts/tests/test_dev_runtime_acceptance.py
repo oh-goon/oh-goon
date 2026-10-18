@@ -21,7 +21,7 @@ def test_dev_has_one_python_frontdoor_and_plan_owns_exact_commands() -> None:
 
 
 def test_acceptance_refuses_to_compete_for_owned_runtime_port(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     vite = tmp_path / "frontend" / "node_modules" / ".bin" / "vite"
     vite.parent.mkdir(parents=True)
@@ -37,7 +37,7 @@ def test_acceptance_refuses_to_compete_for_owned_runtime_port(
 
 
 def test_acceptance_delegates_process_start_failure_to_native_launch_owner(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
         dev_runtime_acceptance,
@@ -45,7 +45,7 @@ def test_acceptance_delegates_process_start_failure_to_native_launch_owner(
         lambda **_kwargs: ({}, False, None),
     )
 
-    def fail_native_launch(*_args, **_kwargs):
+    def fail_native_launch(*_args: object, **_kwargs: object) -> None:
         raise FileNotFoundError("native launch executable unavailable")
 
     monkeypatch.setattr(dev_runtime_acceptance, "_launch_dev", fail_native_launch)

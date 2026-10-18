@@ -1,3 +1,5 @@
+import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -120,7 +122,7 @@ def test_provider_path_precedence_is_independent_of_database_and_checkout(tmp_pa
         "XDG_CONFIG_HOME": str(tmp_path / "config"),
         "OH_GOON_DB": str(tmp_path / "database.sqlite"),
     }
-    assert agent_providers_path(environment) == tmp_path / "config/oh-goon/providers.toml"
+    assert agent_providers_path(environment) == tmp_path / "config/oh-goon/providers.json"
     environment["OH_GOON_PROVIDERS_FILE"] = str(tmp_path / "team.toml")
     assert agent_providers_path(environment) == tmp_path / "team.toml"
     assert (
@@ -132,7 +134,7 @@ def test_provider_path_precedence_is_independent_of_database_and_checkout(tmp_pa
 def test_empty_xdg_setting_keeps_user_config_outside_the_checkout(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     assert (
-        agent_providers_path({"XDG_CONFIG_HOME": ""}) == tmp_path / ".config/oh-goon/providers.toml"
+        agent_providers_path({"XDG_CONFIG_HOME": ""}) == tmp_path / ".config/oh-goon/providers.json"
     )
 
 
@@ -154,3 +156,19 @@ def test_shipped_example_loads_without_provider_packages_or_credentials():
     config = load_agent_providers(root / "examples/agent-providers/providers.toml")
     assert set(config.providers) == {"ollama", "litellm", "openrouter", "openai", "anthropic"}
     assert config.resolve("local", environment={}).provider.api == "ollama"
+
+
+def test_json_and_toml_share_one_provider_contract(tmp_path):
+    toml = load(tmp_path)
+    payload = tomllib.loads(CONFIG)
+    payload["$schema"] = "./providers.schema.json"
+    path = tmp_path / "providers.json"
+    path.write_text(json.dumps(payload))
+    native = load_agent_providers(path)
+    assert native.providers == toml.providers
+    assert native.models == toml.models
+    assert native.resolve("offline", environment={}) == toml.resolve("offline", environment={})
+    path.write_text('{"version":1,"version":1,"PRIVATE_SECRET":"do not disclose"}')
+    with pytest.raises(AgentProviderError, match="unique keys") as error:
+        load_agent_providers(path)
+    assert "PRIVATE_SECRET" not in str(error.value)

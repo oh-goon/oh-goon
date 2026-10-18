@@ -37,7 +37,6 @@ def test_goon_top_level_authoring_rejects_ambiguous_or_redundant_forms() -> None
         "version: 1\nname: x\ndescription: x\nrequirements: []\nsteps: [{run: echo hi}]\n",
         "version: 1\nname: x\ndescription: x\nrequirements: x\nsteps: [{run: echo hi}]\n",
         "version: 1\nname: x\ndescription: x\nunknown: 1\nsteps: [{run: echo hi}]\n",
-        "version: 1\nname: x\ndescription: x\nexecution: {purpose: cicd}\nsteps: [{run: echo hi}]\n",
         "version: 1\nname: x\ndescription: x\ninputs: [a]\nsteps: [{run: echo hi}]\n",
         "version: 1\nname: x\ndescription: x\ninputs: {}\ngoons: [python/ruff]\n",
         "version: 1\nname: x\ndescription: x\ninputs: []\ngoons: [python/ruff]\n",
@@ -62,11 +61,24 @@ def test_plan_authoring_rejects_execution_fields_unknowns_missing_goons_and_bad_
         "version: 1\n",
         "version: 1\ninputs: []\ngoons: [python/ruff]\n",
         "version: 1\ninputs: [a, '']\ngoons: [python/ruff]\n",
-        "version: 1\nexecution: {purpose: cicd}\ngoons: [python/ruff]\n",
     ]
     for text in invalid:
         with pytest.raises(FleetPlanInvalid):
             c.parse_plan_template(text)
+
+
+def test_execution_defaults_to_verification_and_preserves_explicit_strict_policy() -> None:
+    ordinary = c.parse_plan_template("version: 1\ngoons: [python/ruff]\n")
+    assert ordinary.execution.purpose.value == "verification"
+    goon = c.parse_goon_template("version: 1\nsteps: [{run: echo hi}]\n", source="x.yml")
+    assert goon.execution.purpose.value == "verification"
+    for trusted in (True, False):
+        strict = c.parse_plan_template(
+            "version: 1\nexecution:\n  purpose: cicd\n"
+            f"  trust_repository_code: {str(trusted).lower()}\ngoons: [python/ruff]\n"
+        )
+        assert strict.execution.purpose.value == "cicd"
+        assert strict.execution.trust_repository_code is trusted
 
 
 def test_goon_import_compiler_validates_shapes_fields_bindings_and_duplicate_occurrences() -> None:

@@ -10,38 +10,25 @@ at commit `40be826e6883d819ee6cf5c10946c793f0ef0f5f`, verified from the public
 repository on 2026-10-18. The Skill is maintained by agentsCookbook. OH-Goon owns
 source capture and the existing Agent Step execution contract.
 
-## Pin the upstream source with Git
+## Declare the source once
 
-From the root of your Git workflow repository, using an unused submodule path:
+Create `.goonskills.yml` beside your root Plan or Goon:
 
-```sh
-git submodule add https://github.com/Hugloss/agentsCookbook.git libs/agents-cookbook
-git -C libs/agents-cookbook checkout --detach 40be826e6883d819ee6cf5c10946c793f0ef0f5f
+```yaml
+sources:
+  cookbook:
+    source: https://github.com/Hugloss/agentsCookbook.git
+    ref: 40be826e6883d819ee6cf5c10946c793f0ef0f5f
+    skills:
+      - skills/codebase-finding-derivation
 ```
 
-Add this section to `.goonskills` beside your root Plan or Goon. Preserve any
-other registry entries:
-
-```ini
-[skill "cookbook/codebase-finding-derivation"]
-source = gitlink
-path = libs/agents-cookbook/skills/codebase-finding-derivation
-gitlink = libs/agents-cookbook
-revision = 40be826e6883d819ee6cf5c10946c793f0ef0f5f
-```
-
-Commit the registry and the actual Gitlink together. OH-Goon validates the
-committed superproject entry, not just the submodule's current checkout:
-
-```sh
-git add .gitmodules .goonskills libs/agents-cookbook
-git commit -m "Pin cookbook finding-derivation Skill"
-```
-
-On a fresh clone of that workflow repository, native
-`git submodule update --init -- libs/agents-cookbook` materializes the recorded
-commit. Git owns acquisition and updates. A missing or dirty submodule is a
-source-selection error; OH-Goon does not fetch or repair it during a Run.
+Select `cookbook/codebase-finding-derivation` in the existing `skill` input.
+OH-Goon uses native Git to prepare the source in its managed cache. The normal
+`oh-goon lock` command records the exact revision in `goon.lock`. Branches and
+tags work too: ordinary execution keeps the locked commit, and `lock
+--update-skills` deliberately refreshes it. A cache miss fetches the locked
+commit again. No submodule or `.gitmodules` setup is needed.
 
 ## Inspect the selected source
 
@@ -66,9 +53,9 @@ SOURCE_SHA=the_reported_root_source_sha256
 uv run --project "$OH_GOON_SOURCE/backend" --offline --frozen --no-sync oh-goon plan inputs goon.yml --source-closure --expect-sha256 "$SOURCE_SHA" --repository-root "$REPOSITORY_ROOT" --skill-root . --allow-acceptance review --input repo=local:my-project --input skill=cookbook/codebase-finding-derivation --input acceptance=review
 ```
 
-The report's Skill reference binds the exact Gitlink commit and Skill path;
+The report's Skill reference binds the exact repository, commit and Skill path;
 its members include the upstream `SKILL.md`. This verifies source selection and
-capture. It does not run a review or establish model quality.
+capture. Source inspection may prepare the declared remote source; it does not run a review.
 
 For execution, select an existing supported Agent harness, its permitted model
 recipient and installed model, and a narrow task suited to that harness. Reuse

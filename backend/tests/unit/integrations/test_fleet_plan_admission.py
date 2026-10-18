@@ -16,6 +16,7 @@ from oh_goon.core.models.fleet_plan import (
 )
 from oh_goon.core.models.fleet_plan_execution_policy import (
     CicdExecutionPolicy,
+    ExecutionPurpose,
     MaintenanceExecutionPolicy,
     VerificationExecutionPolicy,
 )
@@ -709,10 +710,11 @@ steps:
     assert resolved.requirements == ()
 
 
-def test_cicd_root_goon_inherits_executor_capacity_by_default(tmp_path: Path) -> None:
+def test_explicit_cicd_root_goon_inherits_executor_capacity(tmp_path: Path) -> None:
     source = tmp_path / "goon.yml"
     source.write_text(
         """version: 1
+execution: {purpose: cicd}
 steps:
   - id: check
     run: "true"
@@ -722,6 +724,7 @@ steps:
 
     resolved = FleetPlanResolver().resolve(source)
 
+    assert resolved.execution.purpose is ExecutionPurpose.CICD
     assert resolved.execution.trust_repository_code is True
     assert resolved.execution.resources.cpu_millis is None
     assert resolved.execution.resources.memory_mib is None

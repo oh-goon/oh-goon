@@ -1,0 +1,6 @@
+sources:
+  cookbook:
+    source: https://github.com/Hugloss/agentsCookbook.git
+    ref: 40be826e6883d819ee6cf5c10946c793f0ef0f5f
+    skills:
+      - skills/codebase-finding-derivation

@@ -15,6 +15,7 @@ from oh_goon.repository_tooling.architecture.x0_single_execution_contract import
     _check_p1b27a_signed_host_tool_observation,
 )
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.unit.runtime.test_b22_original_physical_sampling import seeded
 
 PACKAGE = ROOT / "backend/src/oh_goon"
@@ -152,25 +153,29 @@ def test_x0_rejects_physical_target_bypass(tmp_path, mutation):
         dst.parent.mkdir(parents=True, exist_ok=True)
         code = source.read_text(encoding="utf-8")
         if mutation == "omit-tools" and rel.startswith("core/"):
-            code = code.replace("return targets + self._host_tool_targets", "return targets", 1)
+            code = replace_python_syntax(
+                code, "return targets + self._host_tool_targets", "return targets"
+            )
         if mutation == "omit-shell" and rel.startswith("core/"):
-            code = code.replace("tool.name == 'sh'", "tool.name == 'not-sh'", 1)
+            code = replace_python_syntax(code, "tool.name == 'sh'", "tool.name == 'not-sh'")
         if mutation == "omit-roster" and rel.startswith("core/"):
-            code = code.replace("len(set(declared)) != len(declared)", "False", 1)
+            code = replace_python_syntax(code, "len(set(declared)) != len(declared)", "False")
         if mutation == "omit-alias" and rel.startswith("integrations/"):
-            code = code.replace('binding.name == "sh"', 'binding.name == "not-sh"', 1)
+            code = replace_python_syntax(code, 'binding.name == "sh"', 'binding.name == "not-sh"')
         if mutation == "omit-shadow" and rel.startswith("core/"):
-            code = code.replace(
-                "raise ValueError('original mount source shadows a protected target')", "pass", 1
+            code = replace_python_syntax(
+                code, "raise ValueError('original mount source shadows a protected target')", "pass"
             )
         if mutation == "omit-consumer" and rel.startswith("integrations/"):
-            code = code.replace(
+            code = replace_python_syntax(
+                code,
                 "SANDBOX_PATHS.toolchain / binding.name",
                 "SANDBOX_PATHS.workspace / binding.name",
-                1,
             )
         if mutation == "omit-owner" and rel.startswith("runtime/"):
-            code = code.replace("scope.mount_targets != mount_intent.binding_targets", "False", 1)
+            code = replace_python_syntax(
+                code, "scope.mount_targets != mount_intent.binding_targets", "False"
+            )
         dst.write_text(code, encoding="utf-8")
     assert _check_p1b27a_signed_host_tool_observation(tmp_path)
 
@@ -198,12 +203,13 @@ def test_qenv1_rejects_removed_p1b27a_selection(tmp_path):
 
     shell = (ROOT / "scripts/qualify_b12_development_wsl.sh").read_text()
     selected = "if [[ -f .checkpoint/P1B27A_SOURCE.sha256 ]]; then embedded='.checkpoint/P1B27A_SOURCE.sha256'; fi"
-    assert selected in shell
     (tmp_path / "scripts").mkdir()
     (tmp_path / ".checkpoint").mkdir()
     (tmp_path / "Makefile").write_bytes((ROOT / "Makefile").read_bytes())
     (tmp_path / ".checkpoint/P1B27A_SOURCE.sha256").write_text("fixture")
-    (tmp_path / "scripts/qualify_b12_development_wsl.sh").write_text(shell.replace(selected, "", 1))
+    (tmp_path / "scripts/qualify_b12_development_wsl.sh").write_text(
+        replace_python_syntax(shell, selected, "")
+    )
     assert any(
         "current manifest" in issue.message
         for issue in check_qualification_environment_contract(tmp_path)

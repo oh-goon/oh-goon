@@ -12,6 +12,7 @@ from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     _check_original_signed_stage_mount,
 )
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.fixtures.db1b2_legacy_sqlite import CausalJournalError
 from tests.unit.services.test_ag02b2b3b2_original_mount_intent_preflight import live_case
 
@@ -128,14 +129,21 @@ def test_x0_stage_mount_owner_and_mutations(tmp_path):
     mutations = [
         (
             "journal",
-            journal.replace('binding["source_mount"] = {', 'binding["unused_mount"] = {', 1),
+            replace_python_syntax(
+                journal, 'binding["source_mount"] = {', 'binding["unused_mount"] = {'
+            ),
         ),
         (
             "journal",
-            journal.replace('checked_mount.target != "/opt/oh-goon/agent-source"', "False", 1),
+            replace_python_syntax(
+                journal, 'checked_mount.target != "/opt/oh-goon/agent-source"', "False"
+            ),
         ),
-        ("fleet", fleet.replace("source_mount=source_mount,", "source_mount=None,", 1)),
-        ("fleet", fleet.replace("signed_stage.get('source_mount') != {", "None != {", 1)),
+        ("fleet", replace_python_syntax(fleet, "source_mount=source_mount,", "source_mount=None,")),
+        (
+            "fleet",
+            replace_python_syntax(fleet, "signed_stage.get('source_mount') != {", "None != {"),
+        ),
     ]
     for i, (which, content) in enumerate(mutations):
         root = tmp_path / str(i)

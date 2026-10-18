@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.unit.repository_tooling.test_co_r01_lifecycle_architecture import _fixture
 
 from oh_goon.repository_tooling.architecture.co_r01_lifecycle_contract import (
@@ -58,6 +59,11 @@ def test_conformance_bypass_is_rejected_by_original_x0(
     root = _fixture(tmp_path)
     target = root / relative
     content = target.read_text(encoding="utf-8")
-    assert old in content
-    target.write_text(content.replace(old, new, 1), encoding="utf-8")
+    mutated = (
+        replace_python_syntax(content, old, new)
+        if target.suffix == ".py" and not old.startswith("os._exit(")
+        else content.replace(old, new, 1)
+    )
+    assert mutated != content
+    target.write_text(mutated, encoding="utf-8")
     assert any(issue.path == target for issue in check_co_r01_lifecycle_edges(root))

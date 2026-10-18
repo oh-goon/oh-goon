@@ -129,7 +129,7 @@ def _run_serve_command(args) -> int:
 def _build_application_runtime(
     *,
     fleet_provisioner: FleetPreworkProvisioner | None = None,
-    standard_local: bool = False,
+    standard_local: bool | None = None,
 ) -> ApplicationRuntime | None:
     try:
         if fleet_provisioner is not None:
@@ -197,9 +197,18 @@ def main(
         # construction, storage/lease mutation, or any pre-runtime commands.
         fleet_provisioner.require_enrolled_identity(args.fleet_run_id)
 
-    standard_local = bool(getattr(args, "standard_local", False))
-    if standard_local and (fleet_provisioner is not None or not args.wait):
-        parser.error("--standard-local requires --wait and cannot use deployment Fleet enrollment")
+    standard_local = None
+    if args.command == "plan" and args.plan_command == "run":
+        from oh_goon._application_foundation import standard_local_profile
+
+        standard_local = standard_local_profile(
+            args.standard_local, deployment_selected=fleet_provisioner is not None
+        )
+        args.standard_local = standard_local
+        if standard_local and (fleet_provisioner is not None or not args.wait):
+            parser.error(
+                "local execution waits for completion and cannot use deployment enrollment"
+            )
 
     if args.command == "templates":
         from oh_goon.cli_templates import run_template_command

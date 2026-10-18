@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
+from oh_goon.repository_tooling.architecture.common import Violation
 
 from oh_goon.repository_tooling.architecture import filesystem_identity_contract
 from oh_goon.repository_tooling.architecture._structural_project_dependency_contract import (
@@ -30,7 +33,7 @@ def test_release_architecture_ignores_private_rollback_helper_name(
 
 
 def test_hashmarks_version_alias_is_not_architecture_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     adapter = tmp_path / "identity.py"
     adapter.write_text(
@@ -45,7 +48,7 @@ def test_hashmarks_version_alias_is_not_architecture_authority(
 
 
 def test_hashmarks_version_lookup_location_is_not_identity_architecture_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     adapter = tmp_path / "identity.py"
     adapter.write_text(
@@ -442,7 +445,7 @@ def test_wheel_force_include_toml_representation_is_semantic(tmp_path: Path) -> 
     )
     for text in equivalent_forms:
         pyproject.write_text(text, encoding="utf-8")
-        violations = []
+        violations: list[Violation] = []
         _check_wheel_force_include(pyproject, violations)
         assert violations == []
 
@@ -460,7 +463,7 @@ def test_wheel_force_include_semantic_target_change_is_rejected(tmp_path: Path) 
         '"../templates/plans" = "oh_goon/templates/plans"\n',
         encoding="utf-8",
     )
-    violations = []
+    violations: list[Violation] = []
     _check_wheel_force_include(pyproject, violations)
     assert any(
         'wheel packaging must include "../templates/goons"' in item.message

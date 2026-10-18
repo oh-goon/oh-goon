@@ -5,6 +5,9 @@ from pathlib import Path
 import pytest
 
 from oh_goon.repository_tooling import dependency_resolution_bootstrap as module
+from oh_goon.repository_tooling._dependency_resolution_primitives import (
+    DependencyResolutionError,
+)
 from oh_goon.repository_tooling._dependency_lock_portability import (
     backend_lock_portability_issues,
 )
@@ -26,7 +29,9 @@ def test_dependency_policy_is_publication_only() -> None:
         assert token not in source
 
 
-def test_public_lock_policy_accepts_public_lock(monkeypatch, capsys) -> None:
+def test_public_lock_policy_accepts_public_lock(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(module, "backend_lock_portability_issues", lambda _lock: ())
     monkeypatch.setattr(module, "_require_regular", lambda *_args: None)
     monkeypatch.setattr(module, "_sha256", lambda _path: "a" * 64)
@@ -34,13 +39,15 @@ def test_public_lock_policy_accepts_public_lock(monkeypatch, capsys) -> None:
     assert "DEPENDENCY LOCK PUBLICATION POLICY PASSED" in capsys.readouterr().out
 
 
-def test_public_lock_policy_rejects_repository_private_sources(monkeypatch) -> None:
+def test_public_lock_policy_rejects_repository_private_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         module, "backend_lock_portability_issues", lambda _lock: ("private registry",)
     )
     monkeypatch.setattr(module, "_require_regular", lambda *_args: None)
     with pytest.raises(
-        module.DependencyResolutionError, match="DEPENDENCY LOCK PORTABILITY FAILED"
+        DependencyResolutionError, match="DEPENDENCY LOCK PORTABILITY FAILED"
     ):
         module.command_public_lock_check()
 

@@ -162,7 +162,7 @@ def test_container_acceptance_proves_installed_wheel_origin(
             stderr="",
         )
 
-    monkeypatch.setattr(accept_container_module.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     issues = accept_container_module._verify_container_package_origin(
         ("docker", "compose"), root=tmp_path, env={}
     )
@@ -240,7 +240,7 @@ def test_dependency_lock_checker_rejects_parent_symlink_escape(tmp_path: Path) -
 
 
 def test_release_stamp_rejects_parent_symlink_escape(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -370,7 +370,7 @@ def test_container_acceptance_reaches_native_docker_without_startup_preflight(
         calls.append(tuple(command))
         raise RuntimeError("native docker operation reached")
 
-    monkeypatch.setattr(accept_container_module.subprocess, "run", native_run)
+    monkeypatch.setattr(subprocess, "run", native_run)
     with pytest.raises(RuntimeError, match="native docker operation reached"):
         accept_container_module.accept_container(tmp_path)
     assert calls

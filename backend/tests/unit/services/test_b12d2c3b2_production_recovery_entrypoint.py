@@ -34,6 +34,8 @@ def coordinator(tmp_path):
 
 def production_session(monkeypatch, journal, owner, tmp_path):
     """Exercise real ExecutionSession and FleetRunLifecycle code with in-memory lease stubs."""
+    from unittest.mock import Mock
+
     from oh_goon.core.ports.local_lace_crash_reconciliation import LocalLaceCrashObservation
     from oh_goon.services import fleet_local_lace_takeover as takeover
     from oh_goon.services import fleet_run_lifecycle as module
@@ -85,6 +87,19 @@ def production_session(monkeypatch, journal, owner, tmp_path):
     provisioner.binding.configured = configured
     provisioner.binding.current = configured
     provisioner.binding.authenticator = authenticator()
+    provisioner.binding.trusted_public_roots = {}
+    provisioner.binding.key_directory = tmp_path / "test-only-signer"
+    # This fixture isolates recovery coordination, without provisioning a signer.
+    # Real signed-epoch admission/revocation is exercised by
+    # test_co_r3p_original_fleet_effect_revocation through the original database.
+    from oh_goon.native_issuer import enforcer_lace_signer_custody as custody
+    from oh_goon.runtime import enforcer_lace_admitted_signer_epoch as admitted_epoch
+    from oh_goon.runtime import enforcer_lace_signer_trust_epoch as signer_epoch
+
+    epoch = Mock(spec=signer_epoch.SignerTrustEpochAuthority)
+    monkeypatch.setattr(signer_epoch, "SignerTrustEpochAuthority", lambda _connection: epoch)
+    monkeypatch.setattr(custody, "deployment_signer_policy_snapshot", Mock())
+    monkeypatch.setattr(admitted_epoch, "require_original_admitted_signer_epoch_in", Mock())
     monkeypatch.setattr(module, "FleetPreworkProvisioner", Provisioner)
     monkeypatch.setattr(module, "StrictFleetPolicyEnrollment", Enrollment)
     monkeypatch.setattr(module, "_execution_authority_in", lambda *_args: expected)

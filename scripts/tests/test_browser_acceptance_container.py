@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Any
+from collections.abc import Callable
+
 import json
 from pathlib import Path
 import subprocess
@@ -40,9 +43,9 @@ def _npm_tree(
     )
 
 
-def _npm_runner(payload: str):
+def _npm_runner(payload: str) -> Callable[..., subprocess.CompletedProcess[object]]:
     def runner(
-        command: tuple[str, ...], **kwargs
+        command: tuple[str, ...], **kwargs: Any
     ) -> subprocess.CompletedProcess[object]:
         assert command == (
             "npm",
@@ -94,7 +97,7 @@ def test_container_runner_uses_locked_image_and_disposable_shm_bounded_run(
     commands: list[tuple[str, ...]] = []
 
     def runner(
-        command: tuple[str, ...], **kwargs
+        command: tuple[str, ...], **kwargs: Any
     ) -> subprocess.CompletedProcess[object]:
         if command[0] == "npm":
             assert kwargs["cwd"] == tmp_path / "frontend"

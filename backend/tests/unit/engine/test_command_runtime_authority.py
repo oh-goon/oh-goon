@@ -12,6 +12,16 @@ import pytest
 from oh_goon.engine.command import RuntimeAuthorityBinding, run_command
 
 
+def test_sealed_python_entrypoint_retains_native_virtual_environment(tmp_path: Path) -> None:
+    entrypoint = tmp_path / "python-entrypoint"
+    entrypoint.write_text(f"#!{sys.executable}\nimport sys\nprint(sys.prefix)\n", encoding="utf-8")
+    entrypoint.chmod(0o755)
+    native = subprocess.run([str(entrypoint)], check=True, capture_output=True, text=True)
+    sealed = run_command(str(entrypoint))
+    assert sealed.returncode == 0, sealed.stderr
+    assert sealed.stdout == native.stdout.rstrip("\n")
+
+
 def test_run_command_captures_actual_executable_and_path_authority(tmp_path: Path) -> None:
     executable = tmp_path / "authority-tool"
     executable.write_text("#!/bin/sh\nprintf authority-ok", encoding="utf-8")

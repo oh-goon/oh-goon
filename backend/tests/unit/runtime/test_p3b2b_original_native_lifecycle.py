@@ -13,6 +13,7 @@ from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     _check_p3b2b_original_native_lifecycle,
 )
+from tests.factories.x0_architecture import replace_python_syntax
 
 WITNESS = ROOT / "backend/tests/native/test_p1b27b2b3b2b3a_effectful_mount.py"
 
@@ -44,15 +45,17 @@ def test_one_native_lifecycle_owner_and_original_selection():
 )
 def test_architecture_detects_bypassed_native_lifecycle(tmp_path: Path, removed: str):
     source = WITNESS.read_text(encoding="utf-8")
-    assert removed in source
     altered = tmp_path / "backend/tests/native/test_p1b27b2b3b2b3a_effectful_mount.py"
     altered.parent.mkdir(parents=True)
     head, native = source.split("def test_original_effectful_fd_mount_lifecycle_is_supervised", 1)
-    assert removed in native
     altered.write_text(
         head
         + "def test_original_effectful_fd_mount_lifecycle_is_supervised"
-        + native.replace(removed, "REMOVED_NATIVE_REQUIREMENT", 1)
+        + (
+            native.replace(removed, "REMOVED_NATIVE_REQUIREMENT", 1)
+            if removed in {"P3_NATIVE_CHILD_READY", "/proc/self/mountinfo"}
+            else replace_python_syntax(native, removed, "REMOVED_NATIVE_REQUIREMENT")
+        )
     )
     assert _check_p3b2b_original_native_lifecycle(tmp_path)
 

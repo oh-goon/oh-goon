@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from oh_goon.repository_tooling import (
+    certification_bootstrap_protocol,
+)
+
+import os
+import subprocess
+import sys
+
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -13,12 +23,12 @@ EXPECTED_VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 MODULE_PATH = Path(workflow_run.__file__).resolve()
 
 
-def _seed_product_version(root: Path, monkeypatch) -> None:
+def _seed_product_version(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (root / "VERSION").write_text(EXPECTED_VERSION + "\n", encoding="utf-8")
 
 
 def test_certification_product_version_comes_from_checkout_version(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
     _seed_product_version(tmp_path, monkeypatch)
@@ -27,7 +37,7 @@ def test_certification_product_version_comes_from_checkout_version(
 
 
 def test_certification_product_version_is_not_a_package_metadata_mirror(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
     (tmp_path / "VERSION").write_text("9999.0.0\n", encoding="utf-8")
@@ -36,10 +46,10 @@ def test_certification_product_version_is_not_a_package_metadata_mirror(
 
 
 def test_main_explicit_empty_args_cannot_inherit_frontdoor_process_args(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        workflow_run.sys,
+        sys,
         "argv",
         [
             "oh-goon-workflow",
@@ -142,7 +152,7 @@ def test_offline_app_treats_dependency_acquisition_as_application_contract_failu
 
 
 def test_run_has_backend_context_then_one_bootstrap_sequence_then_one_plan_run(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
@@ -163,13 +173,13 @@ def test_run_has_backend_context_then_one_bootstrap_sequence_then_one_plan_run(
 
     calls: list[list[str]] = []
 
-    def fake_capture(args: list[str], *, env=None):
+    def fake_capture(args: list[str], *, env: Mapping[str, str] | None = None) -> Mock:
         calls.append(args)
         return Mock(returncode=0, stdout="")
 
     streamed: list[list[str]] = []
 
-    def fake_stream(args: list[str], *, env):
+    def fake_stream(args: list[str], *, env: Mapping[str, str]) -> tuple[int, str]:
         streamed.append(args)
         return 0, ""
 
@@ -185,10 +195,7 @@ def test_run_has_backend_context_then_one_bootstrap_sequence_then_one_plan_run(
         "/state/locks/app-certification.goon.lock",
     ]
     assert len(streamed) == 1
-    cli = str(
-        Path(workflow_run.os.path.abspath(workflow_run.sys.executable)).parent
-        / "oh-goon"
-    )
+    cli = str(Path(os.path.abspath(sys.executable)).parent / "oh-goon")
     assert streamed[0][:4] == [cli, "plan", "run", workflow_run.APP_PLAN]
     assert "--repository-id" in streamed[0]
     assert (
@@ -198,7 +205,7 @@ def test_run_has_backend_context_then_one_bootstrap_sequence_then_one_plan_run(
 
 
 def test_self_verify_selects_fast_plan_through_same_plan_run(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
@@ -218,11 +225,11 @@ def test_self_verify_selects_fast_plan_through_same_plan_run(
     calls: list[list[str]] = []
     streamed: list[list[str]] = []
 
-    def fake_capture(args: list[str], *, env=None):
+    def fake_capture(args: list[str], *, env: Mapping[str, str] | None = None) -> Mock:
         calls.append(args)
         return Mock(returncode=0, stdout="")
 
-    def fake_stream(args: list[str], *, env):
+    def fake_stream(args: list[str], *, env: Mapping[str, str]) -> tuple[int, str]:
         streamed.append(args)
         return 0, ""
 
@@ -237,7 +244,9 @@ def test_self_verify_selects_fast_plan_through_same_plan_run(
     assert not any("dependency_supply_reference=" in item for item in streamed[0])
 
 
-def test_workflow_main_verify_selects_self_verify(monkeypatch) -> None:
+def test_workflow_main_verify_selects_self_verify(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(workflow_run, "run_self_verify", lambda: 23)
     assert workflow_run.main(["verify"]) == 23
 
@@ -250,7 +259,7 @@ def test_classifier_does_not_treat_generic_sudo_or_missing_dependencies_as_envir
 
 
 def test_backend_cli_sibling_uses_invoked_venv_path_without_resolving_python_symlink(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     venv_bin = tmp_path / "backend/.venv/bin"
     venv_bin.mkdir(parents=True)
@@ -260,14 +269,14 @@ def test_backend_cli_sibling_uses_invoked_venv_path_without_resolving_python_sym
     invoked_python = venv_bin / "python"
     invoked_python.symlink_to(base_python)
 
-    monkeypatch.setattr(workflow_run.sys, "executable", str(invoked_python))
+    monkeypatch.setattr(sys, "executable", str(invoked_python))
 
     assert workflow_run._backend_cli_executable() == str(venv_bin / "oh-goon")
-    assert Path(workflow_run.sys.executable).resolve().parent != venv_bin
+    assert Path(sys.executable).resolve().parent != venv_bin
 
 
 def test_app_bootstrap_returns_control_authority_without_strict_executor(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
     _seed_product_version(tmp_path, monkeypatch)
@@ -285,13 +294,11 @@ def test_app_bootstrap_returns_control_authority_without_strict_executor(
     }
     calls: list[tuple[list[str], dict[str, str]]] = []
 
-    def fake_capture(args: list[str], *, env=None):
+    def fake_capture(args: list[str], *, env: Mapping[str, str] | None = None) -> Mock:
         calls.append((args, dict(env or {})))
         return Mock(
             returncode=0,
-            stdout=workflow_run.certification_bootstrap_protocol.render_success_record(
-                payload
-            )
+            stdout=certification_bootstrap_protocol.render_success_record(payload)
             + "\n",
         )
 
@@ -315,7 +322,7 @@ def test_app_bootstrap_returns_control_authority_without_strict_executor(
 
 
 def test_release_bootstrap_explicitly_requests_and_exports_strict_executor(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
     _seed_product_version(tmp_path, monkeypatch)
@@ -330,13 +337,11 @@ def test_release_bootstrap_explicitly_requests_and_exports_strict_executor(
     }
     calls: list[list[str]] = []
 
-    def fake_capture(args: list[str], *, env=None):
+    def fake_capture(args: list[str], *, env: Mapping[str, str] | None = None) -> Mock:
         calls.append(args)
         return Mock(
             returncode=0,
-            stdout=workflow_run.certification_bootstrap_protocol.render_success_record(
-                payload
-            )
+            stdout=certification_bootstrap_protocol.render_success_record(payload)
             + "\n",
         )
 
@@ -360,7 +365,7 @@ def test_release_bootstrap_explicitly_requests_and_exports_strict_executor(
 
 
 def test_app_bootstrap_rejects_accidental_strict_executor_authority(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state-home"))
     payload = {
@@ -376,9 +381,7 @@ def test_app_bootstrap_rejects_accidental_strict_executor_authority(
         "_backend_cli",
         lambda _args, env=None: Mock(
             returncode=0,
-            stdout=workflow_run.certification_bootstrap_protocol.render_success_record(
-                payload
-            )
+            stdout=certification_bootstrap_protocol.render_success_record(payload)
             + "\n",
         ),
     )
@@ -391,7 +394,7 @@ def test_app_bootstrap_rejects_accidental_strict_executor_authority(
 
 
 def test_backend_bootstrap_environment_failure_is_structured(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
@@ -403,10 +406,7 @@ def test_backend_bootstrap_environment_failure_is_structured(
         "_backend_cli",
         lambda _args, env=None: Mock(
             returncode=2,
-            stdout=workflow_run.certification_bootstrap_protocol.render_error_record(
-                error
-            )
-            + "\n",
+            stdout=certification_bootstrap_protocol.render_error_record(error) + "\n",
         ),
     )
 
@@ -420,7 +420,7 @@ def test_backend_bootstrap_environment_failure_is_structured(
 
 
 def test_backend_bootstrap_unstructured_failure_is_application(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
@@ -458,7 +458,7 @@ def test_workflow_does_not_reimplement_executor_or_backend_domain_rules() -> Non
 
 
 def test_plan_bootstrap_failure_is_rendered_with_command_and_real_cause(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
@@ -487,7 +487,7 @@ def test_plan_bootstrap_failure_is_rendered_with_command_and_real_cause(
 
 
 def test_plan_bootstrap_source_failure_is_not_misclassified_as_environment(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
@@ -513,7 +513,7 @@ def test_plan_bootstrap_source_failure_is_not_misclassified_as_environment(
 
 
 def test_native_dependency_network_failure_is_environment_blocker(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
@@ -540,7 +540,7 @@ def test_native_dependency_network_failure_is_environment_blocker(
 
 
 def test_success_labels_app_certification_not_generic_ready(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
@@ -595,7 +595,9 @@ def test_raw_eio_bootstrap_failure_is_environment_classified() -> None:
     )
 
 
-def test_backend_cli_forwards_only_activity_records_live(monkeypatch) -> None:
+def test_backend_cli_forwards_only_activity_records_live(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class FakeProcess:
         stdout = iter(
             (
@@ -613,9 +615,7 @@ def test_backend_cli_forwards_only_activity_records_live(monkeypatch) -> None:
     monkeypatch.setattr(
         workflow_run, "_backend_cli_executable", lambda: "/env/bin/oh-goon"
     )
-    monkeypatch.setattr(
-        workflow_run.subprocess, "Popen", lambda *args, **kwargs: FakeProcess()
-    )
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
     observed: list[str] = []
     monkeypatch.setattr(workflow_run, "_transient_activity", observed.append)
 

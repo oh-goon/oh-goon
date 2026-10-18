@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator, model_validator
 
 from oh_goon.core.dependency_identity import normalize_package_name
+from oh_goon.core.models.agent_review import AgentAdjudicationRecord, AgentReviewRecord
 from oh_goon.core.models.base import ImmutableModel
 
 
@@ -86,4 +87,11 @@ class DependencyObservationSnapshot(ImmutableModel):
         return self
 
 
-FleetObservationEvidence = Annotated[DependencyObservationSnapshot, Field(discriminator="kind")]
+class AgentReviewObservation(ImmutableModel):
+    kind: Literal["agent_review"] = "agent_review"
+    record: AgentReviewRecord | AgentAdjudicationRecord
+
+
+FleetObservationEvidence = Annotated[
+    DependencyObservationSnapshot | AgentReviewObservation, Field(discriminator="kind")
+]

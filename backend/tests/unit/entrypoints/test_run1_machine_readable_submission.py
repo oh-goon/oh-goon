@@ -51,7 +51,7 @@ def _runtime(*, reject: bool = False):
 
 def test_async_run_json_is_one_admitted_owner_result(capsys):
     runtime = _runtime()
-    assert _run(runtime, _args("--json", "--fleet-run-id", "fleet-1")) == 0
+    assert _run(runtime, _args("--json", "--strict", "--no-wait", "--fleet-run-id", "fleet-1")) == 0
     value = json.loads(capsys.readouterr().out)
     assert value == {
         "schema": "oh-goon.plan-run-result/v1",
@@ -88,7 +88,7 @@ def test_waited_run_json_reuses_original_terminal_classification_without_stdout_
 
     monkeypatch.setattr(command, "_wait_for_terminal_with_progress", fake_wait)
     runtime = _runtime()
-    assert _run(runtime, _args("--json", "--wait")) == code
+    assert _run(runtime, _args("--json")) == code
     streams = capsys.readouterr()
     assert streams.err == "Observed activity: real owner\n"
     value = json.loads(streams.out)
@@ -115,9 +115,9 @@ def test_json_repair_pair_rejects_before_reading_plan_or_fleet(capsys):
     assert "cannot be combined" in json.loads(capsys.readouterr().out)["message"]
 
 
-def test_default_human_run_output_is_unchanged(capsys):
+def test_async_human_run_reports_the_admitted_run(capsys):
     runtime = _runtime()
-    assert _run(runtime, _args()) == 0
+    assert _run(runtime, _args("--strict", "--no-wait")) == 0
     assert capsys.readouterr().out.splitlines() == [
         "Fleet Run ID: fleet-1",
         "Plan ID: plan-sha",

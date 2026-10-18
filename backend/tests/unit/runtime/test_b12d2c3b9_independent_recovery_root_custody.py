@@ -12,8 +12,9 @@ import pytest
 
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from tests.unit.runtime.test_b12d2c3b8_original_issuer_restart_fence import (
-    _snapshot,  # noqa: F401 - dependent test fixture
+    _snapshot,
     _transfer,
+    owner,  # noqa: F401 - dependent test fixture
 )
 
 
@@ -31,7 +32,7 @@ from tests.unit.runtime.test_b12d2c3b8_original_issuer_restart_fence import (
         "fake_attestation",
     ],
 )
-def test_absent_independent_root_custody_blocks_before_transfer(owner, attack):
+def test_absent_independent_root_custody_blocks_before_transfer(owner, attack):  # noqa: F811 - pytest fixture injection
     conn, journal, service, provisioner, *_ = owner
     if attack == "missing_owner":
         provisioner.public_root_owner_uid = None
@@ -46,7 +47,7 @@ def test_absent_independent_root_custody_blocks_before_transfer(owner, attack):
     assert journal._row("run-one")[1:3] == (1, "lease-one")
 
 
-def test_independent_custody_observed_before_and_after_transfer(owner):
+def test_independent_custody_observed_before_and_after_transfer(owner):  # noqa: F811 - pytest fixture injection
     conn, _, service, provisioner, *_ = owner
     assert provisioner.custody_calls == 0
     result = _transfer(service)
@@ -54,7 +55,7 @@ def test_independent_custody_observed_before_and_after_transfer(owner):
     assert provisioner.custody_calls == 2
 
 
-def test_custody_lost_after_provisional_transfer_rolls_back(owner, monkeypatch):
+def test_custody_lost_after_provisional_transfer_rolls_back(owner, monkeypatch):  # noqa: F811 - pytest fixture injection
     conn, journal, service, provisioner, *_ = owner
     before = _snapshot(conn)
     from oh_goon.runtime import enforcer_lace_restart_transfer as transfer

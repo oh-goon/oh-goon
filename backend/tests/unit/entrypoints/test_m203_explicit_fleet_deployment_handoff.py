@@ -19,6 +19,15 @@ PLAN_ARGS = [
 ]
 
 
+@pytest.fixture
+def deployment_provisioner(tmp_path, monkeypatch):
+    _, _, connection, _, _, _, provisioner, *_ = provisioned(tmp_path, monkeypatch)
+    try:
+        yield provisioner
+    finally:
+        connection.close()
+
+
 def _guard_before_work(monkeypatch):
     """Make any pre-command work or DB/runtime construction visibly forbidden."""
     monkeypatch.setattr(
@@ -29,8 +38,10 @@ def _guard_before_work(monkeypatch):
     )
 
 
-def test_original_deployment_object_transported_once_to_public_composition(tmp_path, monkeypatch):
-    *_, provisioner, _inventory, _trusted, _admit = provisioned(tmp_path, monkeypatch)
+def test_original_deployment_object_transported_once_to_public_composition(
+    monkeypatch, deployment_provisioner
+):
+    provisioner = deployment_provisioner
     events = []
     runtime = object()
 
@@ -50,8 +61,10 @@ def test_original_deployment_object_transported_once_to_public_composition(tmp_p
 
 
 @pytest.mark.parametrize("run_id", ["not-enrolled", "", None])
-def test_wrong_run_enrollment_blocks_before_any_runtime_or_plan_read(tmp_path, monkeypatch, run_id):
-    *_, provisioner, _inventory, _trusted, _admit = provisioned(tmp_path, monkeypatch)
+def test_wrong_run_enrollment_blocks_before_any_runtime_or_plan_read(
+    monkeypatch, run_id, deployment_provisioner
+):
+    provisioner = deployment_provisioner
     _guard_before_work(monkeypatch)
     args = ["plan", "run", "missing.yml", "--repository-id", "repo-1"]
     if run_id is not None:
@@ -72,9 +85,9 @@ def test_wrong_run_enrollment_blocks_before_any_runtime_or_plan_read(tmp_path, m
     ],
 )
 def test_deployment_handoff_cannot_be_ignored_or_leak_to_other_commands(
-    tmp_path, monkeypatch, args
+    monkeypatch, args, deployment_provisioner
 ):
-    *_, provisioner, _inventory, _trusted, _admit = provisioned(tmp_path, monkeypatch)
+    provisioner = deployment_provisioner
     _guard_before_work(monkeypatch)
     with pytest.raises(TrustProtocolError, match="only valid for plan run"):
         cli.main(args, fleet_provisioner=provisioner)
@@ -95,8 +108,13 @@ def test_ordinary_shell_cli_cannot_read_environment_as_provisioner(monkeypatch):
     monkeypatch.setattr(
         cli.ApplicationRuntime,
         "build",
-        classmethod(lambda cls: observed.append("no-provisioner") or object()),
+        classmethod(
+            lambda cls, *, standard_local=False: observed.append(
+                "standard-local" if standard_local else "no-provisioner"
+            )
+            or object()
+        ),
     )
     monkeypatch.setattr(cli, "_execute_stateful_command", lambda _runtime, _args: 2)
     assert cli.main(PLAN_ARGS) == 2
-    assert observed == ["no-provisioner"]
+    assert observed == ["standard-local"]

@@ -170,6 +170,7 @@ class RepositoryEffectRecovery:
             result = self._reconciler.reconcile(
                 current.repository.path,
                 current.operation_id,
+                report=view.operation(current.operation_id),
                 safety=current.safety,
                 baseline=current.baseline,
             )

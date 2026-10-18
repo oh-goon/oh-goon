@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.unit.repository_tooling.test_db3_backup_owner_architecture import _db3_fixture
 
 from oh_goon.repository_tooling.architecture.canonical_database_owner_contract import (
@@ -38,8 +39,7 @@ def test_db4_rejects_snapshot_verifier_shortcut(
     (tmp_path / ".checkpoint/DB4_SOURCE.sha256").write_text("test-only\n")
     source = package / "runtime/database.py"
     text = source.read_text()
-    assert needle in text
-    source.write_text(text.replace(needle, replacement, 1))
+    source.write_text(replace_python_syntax(text, needle, replacement))
     assert any("DB4" in issue.message for issue in check_canonical_database_owner(tmp_path))
 
 

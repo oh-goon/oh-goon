@@ -8,6 +8,11 @@ Plan → Goons → Steps → native tools → Run and Game Tape
 
 An Atomic Goon contains `steps:`. A Composite Goon contains `goons:`. A Plan contains an ordered `goons:` list. Add work to a Plan by importing a Goon; add commands inside an Atomic Goon. Written order and repeated imports are preserved.
 
+For bounded agentic work, use [agents/agentic-review-repair-loop](plans/agents/agentic-review-repair-loop/README.md).
+Its imports declare `phase:` beside each Goon. The existing repair owner runs
+linked native phase Runs with explicit review, write-scope and deadline budgets.
+See the [setup and customization example](../examples/agentic-review-repair-loop/README.md).
+
 ## First local Python run
 
 Use an initialized Oh-Goon installation. Source-checkout users should use the prepared CLI described in the [backend guide](../backend/README.md). Run the following commands from your workload repository root.
@@ -20,14 +25,7 @@ oh-goon templates list --kind plan
 oh-goon templates show python/quality --kind plan > plan.yml
 ```
 
-Add the following beside `version:` in your copied Plan to explicitly select local verification:
-
-```yaml
-execution:
-  purpose: verification
-```
-
-The shipped Plan's default is CI/CD. `--standard-local` explicitly executes a verification Plan on your host; it does not provide sandbox isolation. Infrastructure and retained-content workflows have their own execution requirements described in their package READMEs.
+Plans default to local verification on your host. The CLI waits for completion. Use trusted repositories for this ordinary path. Explicit strict CI/CD and untrusted-code isolation are described in the [execution contract](../docs/CI_CD_CONTRACT.md); workflows that require strict snapshots or retained content declare that policy in their YAML.
 
 Inspect the available inputs, then validate and author the execution lock:
 
@@ -42,7 +40,7 @@ Register the folder containing your repository and read its repository ID from `
 ```sh
 oh-goon league add-folder ..
 oh-goon league scan --json
-oh-goon plan run plan.yml --repository-id REPOSITORY_ID --standard-local --wait
+oh-goon plan run plan.yml --repository-id REPOSITORY_ID
 ```
 
 Replace `REPOSITORY_ID` with the exact ID returned for this repository. A separate Plan does not require a repository-owned `goon.yml`.
@@ -92,7 +90,7 @@ Select one values file and optionally override individual values on the command 
 oh-goon plan validate plan.yml --inputs-file values/dev.yml --input typechecker=ty
 oh-goon lock plan.yml --inputs-file values/dev.yml --input typechecker=ty
 oh-goon plan run plan.yml --inputs-file values/dev.yml --input typechecker=ty \
-  --repository-id REPOSITORY_ID --standard-local --wait
+  --repository-id REPOSITORY_ID
 ```
 
 The explicit CLI value wins over the same name in the file. Unspecified inputs keep the Goon's defaults. Duplicate keys or repeated CLI names are errors. Files contain scalar values under one `inputs:` mapping; keep credentials in explicitly declared secret/environment bindings. There are no layered values files, inheritance or implicit environment overrides.
@@ -233,4 +231,6 @@ The [Goon guide](goons/README.md) describes capabilities; the [Plan guide](plans
 
 Each package contains exactly `README.md` plus `goon.yml` or `plan.yml`, under `<kind>/<category>/<name>/`. Its identity is `category/name`; README owns the explanation, YAML owns machine facts. No helper scripts or sidecars belong in shipped packages.
 
-See [Goon authoring](../docs/development/GOON_AUTHORING.md), [input resolution](../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md), [input inspection](../docs/development/TEMPLATE_INPUT_INSPECTION.md), [artifact retention](../docs/development/TEMPLATE_ARTIFACT_RETENTION.md) and the [CI/CD contract](../docs/CI_CD_CONTRACT.md) for their owning contracts. Native tools retain dependency resolution, configuration and result authority.
+See [Goon authoring](../docs/development/GOON_AUTHORING.md), [input resolution](../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md), [input inspection](../docs/development/TEMPLATE_INPUT_INSPECTION.md), [artifact retention](../docs/development/TEMPLATE_ARTIFACT_RETENTION.md), [network settings](../docs/development/TEMPLATE_NETWORK_AUTHORITY.md) and the [CI/CD contract](../docs/CI_CD_CONTRACT.md) for their owning contracts. Native tools retain dependency resolution, configuration and result authority.
+
+The [catalog identity guide](../docs/development/TEMPLATE_CATALOG_DETERMINISM.md) explains how native discovery binds template contents and catalogue identity.

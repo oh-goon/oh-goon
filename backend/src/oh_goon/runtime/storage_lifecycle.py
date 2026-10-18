@@ -9,6 +9,7 @@ from oh_goon.core.game_tape_policy import (
     GAME_TAPE_TERMINAL_RETENTION_SECONDS,
 )
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.integrations.agent_skill_sources import skill_source_cache
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.runtime.database import DATABASE_SCHEMA_VERSION, database_path_for_environment
 from oh_goon.runtime.diagnostics import (
@@ -118,6 +119,15 @@ def storage_inventory(environment: dict[str, str] | None = None) -> tuple[Storag
     ) = _inventory_paths(env)
     return (
         (
+            StorageClass(
+                "skills.git-sources",
+                skill_source_cache(env),
+                "native Git Skill source preparation",
+                "replaceable-source-cache",
+                "commits retained by native Git refs; temporary worktrees close after capture",
+                "native Git maintenance; explicit reset only while no worktrees are active",
+                False,
+            ),
             StorageClass(
                 "configuration.league-folders",
                 league_file,
@@ -422,8 +432,8 @@ def storage_census(environment: dict[str, str] | None = None) -> StorageCensus:
     """Account for declared Oh-Goon cache/state roots and expose residual bytes.
 
     Declared ownership must cover bytes, not merely reserve a convenient ancestor name.
-    Cache namespaces have no Oh-Goon dependency-cache ownership. Any bytes below the
-    Oh-Goon cache root are therefore unclassified unless a current inventory owner exists.
+    Only declared storage classes, including native Git Skill sources, own cache
+    namespaces. Other bytes below the Oh-Goon cache root remain unclassified.
     Unknown bytes remain
     reporting-only and receive no cleanup authority.
     """
@@ -452,7 +462,7 @@ def storage_census(environment: dict[str, str] | None = None) -> StorageCensus:
     unknown.extend(
         _residual_named_children(
             cache_root,
-            known=set(),
+            known={"skill-sources"},
             root_kind="cache",
             reason=generic_reason,
         )

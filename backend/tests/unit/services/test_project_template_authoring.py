@@ -12,6 +12,8 @@ from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from tests.factories.agent_review import agent_review_case
+from tests.factories.shipped_templates import AGENT_PLAN_TEMPLATES
 
 
 def package(root: Path, key: str, content: str) -> Path:
@@ -372,7 +374,13 @@ def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
         values = tmp_path / "values.yml"
         values.write_text(example.group(1))
         snapshot = read_caller_input_file(values, root=tmp_path)
-        assert resolver.resolve(source.path, inputs=snapshot.values()).steps, key
+        if key in AGENT_PLAN_TEMPLATES:
+            agent_resolver, path, _, options = agent_review_case(tmp_path / key, plan_template=key)
+            options["inputs"] = snapshot.values()
+            resolved, _, _ = agent_resolver.resolve_frozen_agents(path, **options)
+        else:
+            resolved = resolver.resolve(source.path, inputs=snapshot.values())
+        assert resolved.steps, key
 
 
 def test_complete_developer_guide_plan_examples_resolve_with_the_catalog(tmp_path):

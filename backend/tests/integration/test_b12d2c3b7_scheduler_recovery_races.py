@@ -24,6 +24,7 @@ from tests.integration.test_b12d2c3b6_native_restart_witness import (
     _join,
     _replacement_worker,
     _stop_old,
+    original_native_owner,  # noqa: F401 - dependent test fixture
 )
 from tests.unit.core.test_enforcer_lace_trust import authenticator
 from tests.unit.runtime.test_b12d2c3b7_scheduler_reclaim_fence import FakeJournal
@@ -82,8 +83,10 @@ def _generic_writer(path: str, start, result, mode: str):
 
 @pytest.mark.parametrize("mode", ["startup", "cancel"])
 def test_independent_generic_writer_cannot_erase_original_dead_lease(
-    original_native_owner, tmp_path, mode
-):  # noqa: F811 - pytest fixture injection
+    original_native_owner,  # noqa: F811 - pytest fixture injection
+    tmp_path,
+    mode,
+):
     ctx, _connection, _journal, predecessor = original_native_owner
     path = tmp_path / "original.sqlite"
     _stop_old(predecessor)

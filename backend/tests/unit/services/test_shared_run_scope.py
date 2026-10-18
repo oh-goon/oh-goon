@@ -22,6 +22,9 @@ steps:
     observed: dict[str, object] = {}
 
     class RecordingRuns:
+        def require_plan_ingress_preparation(self, run_id):
+            assert run_id is None
+
         def start_prepared_plan(self, target, **kwargs):
             observed.update(kwargs)
             return object()

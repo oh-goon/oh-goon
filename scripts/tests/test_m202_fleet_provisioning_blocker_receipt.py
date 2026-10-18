@@ -15,7 +15,9 @@ from oh_goon.core.enforcer_lace_trust import (
 from oh_goon.repository_tooling import certification_bootstrap_protocol as protocol
 
 
-def _run_blocked(monkeypatch, capsys, tail: str) -> tuple[int, str]:
+def _run_blocked(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tail: str
+) -> tuple[int, str]:
     monkeypatch.setattr(
         workflow,
         "_certification_environment",
@@ -30,7 +32,7 @@ def _run_blocked(monkeypatch, capsys, tail: str) -> tuple[int, str]:
     "reason", [UNPROVISIONED_FLEET_PLAN_INGRESS, UNPROVISIONED_FLEET_ADMISSION]
 )
 def test_original_native_denial_yields_one_non_authorizing_receipt(
-    monkeypatch, capsys, reason: str
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], reason: str
 ) -> None:
     rc, output = _run_blocked(monkeypatch, capsys, reason + "\n")
     assert rc == 2
@@ -66,7 +68,7 @@ def test_original_native_denial_yields_one_non_authorizing_receipt(
     ],
 )
 def test_unrelated_failure_cannot_forge_provisioning_classification(
-    monkeypatch, capsys, tail: str
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tail: str
 ) -> None:
     rc, output = _run_blocked(monkeypatch, capsys, tail)
     assert rc == 2

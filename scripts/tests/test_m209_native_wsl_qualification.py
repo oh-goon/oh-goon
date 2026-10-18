@@ -116,13 +116,11 @@ def _post(evidence: Path) -> str:
     return (evidence / "M209_POST_RUN_PROVENANCE.txt").read_text()
 
 
-def test_wsl_guard_rejects_unqualified_linux_before_work(tmp_path: Path) -> None:
+def test_wsl_guard_rejects_unqualified_linux_before_work(
+    tmp_path: Path, non_wsl_grep: Path
+) -> None:
     source, env = _fixture(tmp_path)
-    # Do not run this test on WSL: the intended guard is genuinely environment-bound.
-    if "microsoft" in os.uname().release.lower() or "wsl" in os.uname().release.lower():
-        pytest.skip("this negative guard fixture requires non-WSL host")
-    # Use the system grep, bypassing the fixture's WSL-only mock.
-    env["PATH"] = os.environ["PATH"]
+    env["PATH"] = str(non_wsl_grep) + os.pathsep + os.environ["PATH"]
     result = _run(source, env, tmp_path / "proof")
     assert result.returncode == 3
     assert "WSL kernel required" in result.stderr

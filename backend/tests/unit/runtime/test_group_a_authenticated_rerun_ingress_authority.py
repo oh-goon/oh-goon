@@ -71,6 +71,7 @@ def _manager(*, requested: str = "parent", mode: str = "direct", authenticated: 
     manager._journal = SimpleNamespace(read_view=read_view)  # type: ignore[attr-defined]
     lifecycle = SimpleNamespace(
         _require_authenticated_fleet=authenticated,
+        _standard_local_fleet=False,
         serialize_admission=lambda _key: nullcontext(),
     )
     lifecycle.require_fleet_prework_available = (  # type: ignore[attr-defined]

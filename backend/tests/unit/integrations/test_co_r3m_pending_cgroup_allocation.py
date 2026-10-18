@@ -16,6 +16,9 @@ import pytest
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.integrations import _fleet_plan_cgroup_resources as cg
+from tests.factories.fleet_plan_executor import simulated_cgroup_custody  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("simulated_cgroup_custody")
 
 
 def _lease(root: Path) -> cg.CgroupV2AttemptLease:
@@ -145,12 +148,14 @@ def test_live_existing_record_is_never_overwritten_before_mkdir(tmp_path: Path) 
 def test_real_child_exit_between_mkdir_and_identity_publication(tmp_path: Path) -> None:
     lease = _lease(tmp_path)
     # An actual child exits at the precise allocation cut. The production
-    # CgroupV2AttemptLease.open path is used, with only Path.mkdir fault-hooked.
+    # CgroupV2AttemptLease.open path is used on temporary directories after the
+    # same simulated custody boundary as the parent, with Path.mkdir fault-hooked.
     program = """
 import os
 from pathlib import Path
 from oh_goon.integrations import _fleet_plan_cgroup_resources as cg
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
+cg.require_independent_native_parent_custody=lambda **_kwargs: None
 root=Path(os.environ['TEST_ROOT'])
 lease=cg.CgroupV2AttemptLease(root=root/'cgroup',cgroup=root/'cgroup'/('attempt-'+'a'*16),state_file=root/'state'/'lease.json',lock_path=root/'locks'/'owner.lock',policy=CicdResourcePolicy(),attempt_root=root/'attempt')
 original=Path.mkdir

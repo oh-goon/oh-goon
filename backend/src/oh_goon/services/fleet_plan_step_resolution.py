@@ -53,6 +53,7 @@ def resolve_plan_step(
     plan_base: Path,
     step_id: str,
     value_compiler: PipelineValueCompiler,
+    agent_handoff: object | None = None,
 ) -> ResolvedPlanStep:
     if isinstance(step, OciBuildPlanStep):
         return resolve_oci_build(step, step_id=step_id)
@@ -72,15 +73,22 @@ def resolve_plan_step(
         assert git_step is not None
         return git_step
     if isinstance(step, AgentPlanStep):
-        handoff = context.agent_handoff
-        if context.agent_owner_path != plan_base / "goon.yml":
+        from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+
+        handoff = agent_handoff if agent_handoff is not None else context.agent_handoff
+        if not isinstance(handoff, FrozenAgentStepHandoff):
+            raise FleetPlanInvalid("Agent Step requires its original frozen handoff")
+        if agent_handoff is None and context.agent_owner_path != plan_base / "goon.yml":
             raise FleetPlanInvalid("Agent Step is not bound to original frozen source owner")
         require_agent_step_handoff(
             step,
             handoff,
             owner_source_sha256=context.source_graph.node(plan_base / "goon.yml").source_sha256,
         )
-        resolved = resolve_delivered_local_search_agent_step(handoff)
+        connection = context.agent_connection if step.harness.startswith("provider-") else None
+        if step.harness.startswith("provider-") and callable(connection):
+            connection = connection()
+        resolved = resolve_delivered_local_search_agent_step(handoff, connection=connection)
         if step.feedback is not None:
             from oh_goon.core.fleet_plan_output_refs import step_output_reference
             from oh_goon.core.models.fleet_plan_step_primitives import StepStatusCondition
@@ -252,6 +260,8 @@ def require_agent_step_handoff(
 
 def resolve_delivered_local_search_agent_step(
     handoff: "FrozenAgentStepHandoff",
+    *,
+    connection=None,
 ) -> ResolvedLocalSearchAgentStep:
     """Preserve the typed Agent Step across the original resolved-Step boundary.
 
@@ -276,6 +286,9 @@ def resolve_delivered_local_search_agent_step(
             "local-model-skill-resources",
             "local-model-skill-loop",
             "local-model-proposal",
+            "provider-review",
+            "provider-adjudicate",
+            "provider-proposal",
         )
         or requested.repository_access != "read_only"
         or requested.capabilities.egress.mode != "none"
@@ -293,6 +306,17 @@ def resolve_delivered_local_search_agent_step(
         term = handoff.task[7:].strip()
         if not term or len(term) > 200 or any(ord(ch) < 32 for ch in term):
             raise FleetPlanInvalid("resolved Agent search query must be bounded printable text")
+    elif handoff.harness.startswith("provider-"):
+        from oh_goon.core.models.agent_providers import AgentConnection
+
+        if (
+            not isinstance(connection, AgentConnection)
+            or requested.recipients not in ((connection.provider_name,), ("configured_model",))
+            or requested.model not in (None, connection.profile)
+        ):
+            raise FleetPlanInvalid(
+                "provider Agent requires its explicitly selected recipient and profile"
+            )
     else:
         if (
             requested.recipients != ("ollama_local",)
@@ -303,11 +327,12 @@ def resolve_delivered_local_search_agent_step(
     return ResolvedLocalSearchAgentStep(
         step_id=handoff.step_id,
         argv=("rg",),
-        success_codes=(0, 1),
+        success_codes=(0,) if handoff.harness.startswith("provider-") else (0, 1),
         timeout_seconds=handoff.timeout_seconds,
         delivery_sha256=hashlib.sha256(handoff.encode_prework_delivery()).hexdigest(),
         handoff_identity=handoff.handoff_identity,
         source_step_id=handoff.step_id,
         harness=handoff.harness,
         model=requested.model,
+        connection=connection if handoff.harness.startswith("provider-") else None,
     )

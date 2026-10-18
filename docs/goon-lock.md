@@ -7,7 +7,7 @@ Canonical ownership stays deliberately narrow:
 - `plan.yml` = human-authored intent; selects and orders Goons.
 - `goon.yml` = human-authored executable behavior; owns composition, Steps, inputs and requirements.
 - resolver = the one canonical interpretation of Plan/Goon execution semantics.
-- `goon.lock` = compact frozen execution fingerprint.
+- `goon.lock` = compact frozen execution fingerprint and exact remote Skill source commits.
 - ecosystem dependency authority remains external to `goon.lock`: for Oh-Goon Python, `backend/pyproject.toml` owns intent and committed `backend/uv.lock` is native uv's exact resolution authority; `frontend/package-lock.json`, `Cargo.lock`, `go.sum`, etc. remain owned by their ecosystems according to each repository's policy.
 - Enforcer/admission = authorization and policy.
 - executor = executes the exact already-verified resolved identity.
@@ -15,7 +15,7 @@ Canonical ownership stays deliberately narrow:
 
 ## Minimal format
 
-The generated file contains only lock format version, resolved Plan/root digest, ordered top-level Goon reference/digest pairs, optional explicitly relevant external artifact path/digest pairs, and the overall digest.
+The generated file contains only lock format version, resolved Plan/root digest, ordered top-level Goon reference/digest pairs, optional explicitly relevant external artifact path/digest pairs, optional remote Skill source pins, and the overall digest.
 
 It never contains Step definitions, commands, complete composition trees, resolved inputs, requirements, provenance trees, dependency inventories, lockfile contents, logs, outputs, runtime observations, repository targets, run IDs or timestamps.
 
@@ -29,13 +29,28 @@ An Atomic Goon digest covers its resolved execution-affecting Step semantics and
 
 The Plan/root digest covers root-owned execution policy and executable semantics plus the ordered selected top-level Goon references. Repository-root `goon.yml` is supported as an execution root without inventing a fake Goon reference.
 
-The overall digest covers the lock version, Plan/root digest, ordered Goon reference/digest pairs, and ordered external artifact path/digest pairs.
+The overall digest covers the lock version, Plan/root digest, ordered Goon reference/digest pairs, ordered external artifact path/digest pairs, and declared remote Skill pins.
 
 ## External artifacts
 
 External artifacts are never discovered by repository scanning and the lock is never allowed to decide which artifacts matter. The current 1112 execution model has no separate canonical source-side external-artifact declaration, so generated locks contain no external entries.
 
 The lock format retains the minimal path/digest representation required for an explicitly owned external dependency once real execution semantics provide that fact. Until then, adding an external entry by hand makes the lock stale rather than creating a new source of truth.
+
+## Remote Skills
+
+The adjacent `.goonskills.yml` declares Git source URLs, authored branch/tag/commit
+selectors and explicit Skill directories. Native Git resolves them. `skill_sources`
+records one entry per collection with `name`, `source`, `ref`, `skills` and exact
+`commit`. These small pins are needed to restore the same source after a cache
+miss; captured Skill bytes and worktree locations are not stored in the lock.
+
+The resolver transports those resolved pins in `ResolvedFleetPlan`. Lock hashing
+consumes that exact representation, including through repair phase Plans. Normal
+runs and lock regeneration retain pins. `oh-goon lock --update-skills` explicitly
+resolves selectors again and atomically writes a new lock after successful capture.
+Changed declarations require that explicit update. No cache miss can select a
+new branch head. See [Agent Skills](AGENT_SKILLS.md) for the configuration.
 
 ## Runtime invariant
 

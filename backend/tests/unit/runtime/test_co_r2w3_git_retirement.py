@@ -13,7 +13,11 @@ from oh_goon.core.errors import WorkspaceStateStale
 from oh_goon.core.vocabulary.workspace import WorkspaceLifecycleState
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
-from tests.unit.runtime.test_co_r2w2_native_git_recovery import _git, _setup
+from tests.unit.runtime.test_co_r2w2_native_git_recovery import (
+    _git,
+    _offline_identity,  # noqa: F401 - same deterministic identity in parent and child
+    _setup,
+)
 
 
 def _finalized(root: Path):
@@ -79,8 +83,8 @@ owner.retire_worktree(workspace, expected_state_version=owner.state(workspace_id
 
 def _child(root: Path, workspace_id: str, cut: str):
     result = subprocess.run(
-        [sys.executable, "-c", CHILD, str(root), workspace_id, cut],
-        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3] / "src")},
+        [sys.executable, "-I", "-c", CHILD, str(root), workspace_id, cut],
+        env=dict(os.environ),
         capture_output=True,
         text=True,
         check=False,

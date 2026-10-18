@@ -101,8 +101,8 @@ owner.materialize_worktree(workspace, Path(source_path), binding, expected_state
 
 def _child(root: Path, source: Path, read: Path, workspace_id: str, cut: str) -> int:
     result = subprocess.run(
-        [sys.executable, "-c", _CHILD, str(root), str(source), str(read), workspace_id, cut],
-        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3] / "src")},
+        [sys.executable, "-I", "-c", _CHILD, str(root), str(source), str(read), workspace_id, cut],
+        env=dict(os.environ),
         text=True,
         capture_output=True,
         timeout=25,

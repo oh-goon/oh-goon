@@ -22,3 +22,5 @@ Add `python/uv-audit` to a Plan’s ordered `goons:` list with a plain import to
 Native uv owns dependency and vulnerability interpretation. Its JSON stdout and exit status are Run evidence. This Goon does not create a separate audit report file or rewrite the lock.
 
 Append another Goon to the Plan to add a capability. To change this command sequence, create a project-owned Atomic Goon and import it with an explicit `from:` source. See [authoring and local imports](../../../README.md#append-your-own-capability).
+
+Scanner database updates use unrestricted network access. See [network settings](../../../../docs/development/TEMPLATE_NETWORK_AUTHORITY.md) for the available isolation policies.

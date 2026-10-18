@@ -10,6 +10,7 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
+from oh_goon.cli_agent_providers import agent_connection_from_args
 from oh_goon.cli_plan_inputs import plan_inputs
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.execution_lock_models import ExecutionLock
@@ -62,18 +63,29 @@ def run_stateless_lock(args: argparse.Namespace) -> int:
             raise FleetPlanInvalid(
                 "Agent lock requires both authorized source roots and acceptance"
             )
-        resolved, _, _ = resolver.resolve_frozen_local_search_agent(
+
+        from oh_goon.services.execution_lock_persistence import (
+            LOCK_FILE_NAME,
+            load_execution_lock,
+            write_execution_lock,
+        )
+
+        destination = output or (plan.parent / LOCK_FILE_NAME)
+        existing = load_execution_lock(destination) if destination.exists() else None
+        resolved, _, _ = resolver.resolve_frozen_agents(
             plan,
             inputs=inputs or {},
             repository_root=args.agent_repository_root,
             skill_root=args.agent_skill_root,
             allowed_acceptance=tuple(args.allow_agent_acceptance),
+            connection=lambda: agent_connection_from_args(args),
+            locked_skills=existing.skill_sources if existing else None,
+            update_skills=args.update_skills,
         )
         from oh_goon.core.execution_lock_identity import build_execution_lock
-        from oh_goon.services.execution_lock_persistence import LOCK_FILE_NAME, write_execution_lock
 
         lock = build_execution_lock(resolved)
-        write_execution_lock(output or (plan.parent / LOCK_FILE_NAME), lock)
+        write_execution_lock(destination, lock)
         return lock
 
     return run_lock_with_owner(args, canonical_lock)

@@ -24,6 +24,7 @@ def _manager(*, authenticated: bool, child: object | None = None):
     reads: list[str] = []
     _wire_readmission_dependencies(manager, parent, child, reads=reads)
     manager._lifecycle._require_authenticated_fleet = authenticated  # type: ignore[attr-defined]
+    manager._lifecycle._standard_local_fleet = False  # type: ignore[attr-defined]
     manager._lifecycle.require_fleet_prework_available = (  # type: ignore[attr-defined]
         lambda *args, **kwargs: FleetRunLifecycle.require_fleet_prework_available(
             manager._lifecycle,

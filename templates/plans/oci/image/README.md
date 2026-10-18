@@ -1,5 +1,7 @@
 # oci/image
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Standalone typed OCI image build for an admitted Python/uv repository. Buildah runs in Fleet isolation, external base pulls are limited to one declared TLS registry, and Containerfile RUN instructions have no network. Output is a retained OCI archive plus deterministic build evidence; nothing is pushed.
 
 ## Use this Plan

@@ -18,6 +18,8 @@ from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import facts
 from tests.unit.services.test_group_a_explicit_issuer_keyring import secure_roots
 from tests.unit.services.test_group_a_fleet_provisioning_authority import provisioned
 
+pytestmark = pytest.mark.certification
+
 
 def _foreign_uid() -> int:
     return 65534 if os.geteuid() != 65534 else 65533

@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from email.message import Message
+
+from typing import Any
+
+import urllib.request
+
+import pytest
+
 import json
 import os
 from pathlib import Path
@@ -32,12 +40,18 @@ PREVIEW_PAYLOAD = {
 
 
 def test_baseline_shared_plan_preview_to_run_carries_exact_authority(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, str, dict[str, object] | None]] = []
     preview_payload = PREVIEW_PAYLOAD
 
-    def request(method, url, *, access_token, payload=None):
+    def request(
+        method: str,
+        url: str,
+        *,
+        access_token: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         calls.append((method, url, payload))
         if url.endswith("/shared-plan-previews"):
             return preview_payload
@@ -109,11 +123,11 @@ def test_baseline_shared_plan_preview_to_run_carries_exact_authority(
 
 
 def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, str]] = []
 
-    def urlopen(request, timeout):
+    def urlopen(request: urllib.request.Request, timeout: float) -> None:
         calls.append((request.get_method(), request.full_url))
         if request.get_method() == "PUT":
             body = {
@@ -124,7 +138,7 @@ def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(
                 request.full_url,
                 400,
                 "bad request",
-                hdrs=None,
+                hdrs=Message(),
                 fp=BytesIO(json.dumps(body).encode()),
             )
         body = {"code": "FLEET_PLAN_SOURCE_NOT_FOUND", "message": "not found"}
@@ -132,11 +146,11 @@ def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(
             request.full_url,
             404,
             "not found",
-            hdrs=None,
+            hdrs=Message(),
             fp=BytesIO(json.dumps(body).encode()),
         )
 
-    monkeypatch.setattr(shared_plan.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
 
     shared_plan._assert_invalid_shared_plan_is_rejected_before_persistence(
         "http://local", access_token="token"

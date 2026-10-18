@@ -18,7 +18,7 @@ from tests.unit.integrations.test_b12c_live_prework_resource_bridge import _requ
 PACKAGE = ROOT / "backend/src/oh_goon"
 
 
-def prepared(tmp_path: Path, monkeypatch):
+def prepared(tmp_path: Path, monkeypatch, *, sealed_tool_overlay: bool = False):
     request = _request(tmp_path)
     request.attempt.egress.mode = "none"
     paths = request.attempt.paths
@@ -34,6 +34,18 @@ def prepared(tmp_path: Path, monkeypatch):
             ),
         )
     )
+    if sealed_tool_overlay:
+        request.attempt.host_tools = (
+            SimpleNamespace(
+                name="payload",
+                snapshot_path=tmp_path / "frozen-tool",
+                identity=object(),
+                execution_snapshot_path=tmp_path / "executable-tool",
+                execution_identity=object(),
+            ),
+        )
+        atomic.bubblewrap_bindings[0].sandbox_path = PurePosixPath("/toolchain/bin/payload")
+        monkeypatch.setattr(bwrap, "verify_snapshot", lambda *_a, **_kw: None)
     monkeypatch.setattr(bwrap, "verify_runtime_root", lambda _: None)
     args = bwrap._prepare_mounts(
         "/bin/true", request, atomic_authority=atomic, network_prefix=(), nested_cgroup_root=None
@@ -111,10 +123,27 @@ def test_native_argv_substitution_denied(tmp_path, monkeypatch, mutation):
 def test_nested_cgroup_bind_source_is_required(tmp_path, monkeypatch):
     request, atomic, args = prepared(tmp_path, monkeypatch)
     cgroup = tmp_path / "native-cgroup"
-    args += ["--bind", str(cgroup), "/sys/fs/cgroup"]
+    root_bind = args.index("--ro-bind")
+    args[root_bind + 3 : root_bind + 3] = ["--bind", str(cgroup), "/sys/fs/cgroup"]
     bwrap._require_original_native_mount_argv(args, request, atomic, cgroup)
     with pytest.raises(FleetPlanInvalid, match="native mount"):
         bwrap._require_original_native_mount_argv(args, request, atomic, tmp_path / "foreign")
+
+
+def test_sealed_executable_overlay_is_admitted_only_after_its_prepared_path_bind(
+    tmp_path, monkeypatch
+):
+    request, atomic, args = prepared(tmp_path, monkeypatch, sealed_tool_overlay=True)
+    bwrap._require_original_native_mount_argv(args, request, atomic, None)
+    target = "/toolchain/bin/payload"
+    assert args.count(target) == 2
+    at = args.index("--ro-bind-data")
+    overlay = args[at - 2 : at + 3]
+    del args[at - 2 : at + 3]
+    path_bind = args.index(target) - 2
+    args[path_bind:path_bind] = overlay
+    with pytest.raises(FleetPlanInvalid, match="native mount argv"):
+        bwrap._require_original_native_mount_argv(args, request, atomic, None)
 
 
 def test_x0_guard_is_part_of_normal_original_architecture():
@@ -161,7 +190,7 @@ def test_x0_prevents_future_mount_roster_drift(tmp_path, mutation):
             + guard.replace("for f in atomic_authority.bubblewrap_bindings", "for f in ()", 1)
         )
     else:
-        code = code.replace("or sorted(observed) != sorted(expected)", "or False", 1)
+        code = code.replace("observed != expected", "False", 1)
     p.write_text(code)
     assert _check_p1b27b1_native_mount_roster(tmp_path)
 

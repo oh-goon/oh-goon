@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
+import pytest
+
 from pathlib import Path
 
 from oh_goon.repository_tooling.acceptance import shared_plan_parallel
@@ -48,7 +52,7 @@ def test_parallel_repository_fixture_executes_the_canonical_locked_uv_command(
 
 
 def test_parallel_preview_to_run_carries_exact_plan_and_repository_instance_authority(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, str, dict[str, object] | None]] = []
     repository_ids = ["repo-left", "repo-right"]
@@ -88,7 +92,13 @@ def test_parallel_preview_to_run_carries_exact_plan_and_repository_instance_auth
         ],
     }
 
-    def request(method, url, *, access_token, payload=None):
+    def request(
+        method: str,
+        url: str,
+        *,
+        access_token: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         calls.append((method, url, payload))
         if url.endswith("/shared-plan-previews"):
             return preview_payload

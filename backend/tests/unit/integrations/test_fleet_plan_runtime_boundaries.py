@@ -300,7 +300,11 @@ def test_cidr_egress_builds_kernel_allowlist_and_runs_bwrap_inside_netns(
         return CommandResult(argv=tuple(argv), returncode=0, stdout=output, stderr="")
 
     monkeypatch.setattr(isolation, "run_command", fake_run)
+    monkeypatch.setattr(isolation, "require_bubblewrap_fd_binding", lambda _executable: None)
     monkeypatch.setattr(restricted_egress, "run_command", fake_run)
+    monkeypatch.setattr(
+        restricted_egress, "require_independent_native_parent_custody", lambda **_kw: None
+    )
     monkeypatch.setattr(restricted_egress, "require_restricted_egress_host", lambda backend: None)
     monkeypatch.setattr(
         isolation.CgroupV2AttemptLease,
@@ -451,7 +455,7 @@ def test_parallel_restricted_egress_allocator_skips_existing_host_routes(
     assert not second.overlaps(first)
 
 
-def test_restricted_egress_reconciles_only_dead_owner_resources(
+def test_dead_owner_identity_alone_cannot_authorize_network_orphan_removal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import json
@@ -518,13 +522,11 @@ def test_restricted_egress_reconciles_only_dead_owner_resources(
         state_file=state_dir / "aaaaaaaaaa.json",
     )
 
-    restricted_egress._reconcile_stale_egress_leases(lease)
-
-    assert retired == [state]
-    assert not state.exists()
-    assert ("/usr/bin/nft", "delete", "table", "inet", f"uvf_{suffix}") in commands
-    assert ("/usr/bin/ip", "netns", "delete", f"uvf{suffix}") in commands
-    assert ("/usr/bin/ip", "link", "delete", f"ufh{suffix}") in commands
+    before = state.read_bytes()
+    with pytest.raises(FleetPlanInvalid, match="lacks independent physical custody"):
+        restricted_egress._reconcile_stale_egress_leases(lease)
+    assert retired == [] and commands == []
+    assert state.read_bytes() == before
 
 
 def test_hostname_egress_binds_dns_once_into_effective_cidrs_and_private_hosts(

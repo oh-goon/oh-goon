@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -189,16 +190,9 @@ def test_duplicate_json_keys_rejected_before_mutation(tmp_path):
 
 def test_native_apply_command_has_real_process_exit_status(tmp_path):
     workspace = _workspace(tmp_path)
-    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")}
+    env = dict(os.environ)
     executable = [
-        "uv",
-        "run",
-        "--no-project",
-        "--active",
-        "--offline",
-        "python",
-        "-c",
-        "import sys; from oh_goon.cli import main; sys.exit(main())",
+        str(Path(sys.executable).parent / "oh-goon"),
         "agent",
         "apply",
     ]
@@ -232,17 +226,8 @@ def _sequential_case(tmp_path, monkeypatch, *, insert_stale=False):
             _payload(),
         ],
     )
-    # This test shim only exposes the installed CLI module under a process name.
-    # Fleet itself still launches/supervises a real external operating-system
-    # process; no alternative application runner is introduced.
-    executable = tmp_path / "bin" / "oh-goon"
-    executable.write_text(
-        "#!/bin/sh\n"
-        f"PYTHONPATH={Path(__file__).resolve().parents[2] / 'src'} "
-        "exec uv run --no-project --active --offline python -c "
-        "'import sys; from oh_goon.cli import main; sys.exit(main())' \"$@\"\n"
-    )
-    executable.chmod(0o755)
+    # Transport the prepared native environment to real workload subprocesses.
+    monkeypatch.setenv("PATH", str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"])
     goon = tmp_path / "goons" / "agent" / "search" / "goon.yml"
     if insert_stale:
         stale = tmp_path / "bin" / "stale-original-file"

@@ -18,7 +18,7 @@ Use one canonical lifecycle: Plan → Goons → Steps → original Enforcer → 
 
 ## Immediate engineering effects
 
-Prioritize real Atomic/Composite/multi-Goon runs; real `.goonskills` execution and bounded agentic loops; ordinary Linux/WSL qualification; cancellation/cleanup; and replaceable backends. Standard sandbox support is P1. Defer exhaustive FD/mount/cgroup/namespace custody, privileged sealing/unsealing and high-security Gate A/B/C/certification without a specific requirement.
+Prioritize real Atomic/Composite/multi-Goon runs; real `.goonskills.yml` execution and bounded agentic loops; ordinary Linux/WSL qualification; cancellation/cleanup; and replaceable backends. Standard sandbox support is P1. Defer exhaustive FD/mount/cgroup/namespace custody, privileged sealing/unsealing and high-security Gate A/B/C/certification without a specific requirement.
 
 This decision describes product direction. Current implementation is established
 by the checked-out source and its executable tests. Historical roadmaps and

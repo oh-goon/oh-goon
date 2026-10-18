@@ -34,7 +34,6 @@ def _template_tree(root: Path) -> tuple[Path, Path, Path]:
 
 def _bind_template_roots(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
     templates, goons, plans = _template_tree(root)
-    monkeypatch.setattr(template_layout, "ROOT", root)
     monkeypatch.setattr(template_layout, "TEMPLATES_ROOT", templates)
     monkeypatch.setattr(template_layout, "GOON_TEMPLATES_ROOT", goons)
     monkeypatch.setattr(template_layout, "PLAN_TEMPLATES_ROOT", plans)

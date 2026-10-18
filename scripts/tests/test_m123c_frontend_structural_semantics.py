@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture import (
@@ -21,14 +23,14 @@ def _write(root: Path, relative: str, text: str) -> Path:
     return path
 
 
-def _local_only(root: Path, monkeypatch) -> list[str]:
+def _local_only(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
     source = root / "frontend/src"
     monkeypatch.setattr(frontend_base, "FRONTEND_SOURCE_ROOT", source)
     return [item.message for item in frontend_base.check_frontend_local_only()]
 
 
 def test_frontend_comments_and_strings_do_not_create_transport_or_storage_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(
         tmp_path,
@@ -101,7 +103,7 @@ def test_create_api_client_import_alias_is_still_rejected(tmp_path: Path) -> Non
 
 
 def test_computed_browser_storage_access_is_rejected(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = _write(
         tmp_path,
@@ -122,7 +124,7 @@ def test_computed_browser_storage_access_is_rejected(
 
 
 def test_computed_session_storage_access_is_rejected(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(
         tmp_path,
@@ -142,7 +144,7 @@ def test_computed_session_storage_access_is_rejected(
 
 
 def test_computed_document_cookie_access_is_rejected(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(
         tmp_path,
@@ -158,7 +160,7 @@ def test_computed_document_cookie_access_is_rejected(
 
 
 def test_fetch_alias_through_computed_global_access_is_rejected(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(
         tmp_path,
@@ -174,7 +176,9 @@ def test_fetch_alias_through_computed_global_access_is_rejected(
     )
 
 
-def test_split_external_url_literal_is_rejected(tmp_path: Path, monkeypatch) -> None:
+def test_split_external_url_literal_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write(
         tmp_path,
         "frontend/src/features/status.ts",
@@ -187,7 +191,7 @@ def test_split_external_url_literal_is_rejected(tmp_path: Path, monkeypatch) -> 
 
 
 def test_allowed_storage_owner_accepts_computed_local_storage(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(
         tmp_path,
@@ -203,7 +207,7 @@ def test_allowed_storage_owner_accepts_computed_local_storage(
 
 
 def test_allowed_http_transport_accepts_computed_fetch_alias(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(
         tmp_path,
@@ -218,7 +222,7 @@ def test_allowed_http_transport_accepts_computed_fetch_alias(
 
 
 def test_type_only_fetch_reference_does_not_create_network_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(
         tmp_path,

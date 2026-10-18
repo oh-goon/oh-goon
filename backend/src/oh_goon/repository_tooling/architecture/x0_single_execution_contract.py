@@ -521,7 +521,9 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
     issues: list[Violation] = []
     accepted_digest = "a4fdd4595f05932e7ea1a77e68c65731cf86d5da95a1a633a0678f087df122f7"  # Reviewed architecture decision, unchanged
     try:
-        if hashlib.sha256(adr.read_bytes()).hexdigest() != accepted_digest:
+        with adr.open("rb") as stream:
+            observed_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if observed_digest != accepted_digest:
             issues.append(Violation(adr, "X0 AG-00 accepted agent canonical-execution ADR changed"))
     except OSError:
         issues.append(Violation(adr, "X0 AG-00 accepted ADR cannot be read"))
@@ -1453,9 +1455,8 @@ def _check_p1b27b1_native_mount_roster(package: Path) -> list[Violation]:
         "attempt.sandbox_bindings",
         "attempt.host_tools",
         "atomic_authority.bubblewrap_bindings",
-        "len(observed) != len(expected)",
-        "sorted(observed) != sorted(expected)",
-        "len({target for _, _, target in observed}) != len(observed)",
+        "observed != expected",
+        "len(set(observed)) != len(observed)",
         "('--proc', str(SANDBOX_PATHS.proc))",
         "('--dev', str(SANDBOX_PATHS.dev))",
         "args[at - 2:at] != ['--perms', f'{f.mode:o}']",
@@ -1522,7 +1523,7 @@ def _check_p1b27b2a_signed_native_sources(package: Path) -> list[Violation]:
         ),
         "consumer": (
             "prepared_original_native_mounts(request)",
-            "sorted(observed) != sorted(expected)",
+            "observed != expected",
             "raise FleetPlanInvalid",
         ),
         "signed": ("local_resource_identities(request)", "signed_mounts_identity"),

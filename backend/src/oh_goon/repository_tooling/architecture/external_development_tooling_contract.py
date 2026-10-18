@@ -84,7 +84,9 @@ def _runtime_file_leaks(path: Path, kind: str, text: str) -> bool:
         return path.suffix in {".js", ".jsx", ".ts", ".tsx"} and _frontend_imports_external_tool(
             text
         )
-    return kind == "config" and _active_text_references_tool(text)
+    # Package READMEs may explain caller-selected external Skills. Prose is
+    # not an executable dependency; runtime imports and configuration still are.
+    return kind == "config" and path.suffix != ".md" and _active_text_references_tool(text)
 
 
 def _runtime_files(tree: Path, *, skip_repository_tooling: bool) -> Iterable[Path]:

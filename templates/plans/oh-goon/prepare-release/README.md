@@ -1,5 +1,7 @@
 # oh-goon/prepare-release
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 This Plan is the **single orchestration owner** for release-package production. It has one responsibility: `oh-goon/release-package-store` packages the exact source authority that already produced canonical APP PASS and retains that exact ZIP in the strict content store.
 
 ## Use this Plan

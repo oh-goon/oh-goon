@@ -6,7 +6,11 @@ from pathlib import Path
 
 from oh_goon.core import local_access_protocol
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.fleet_plan import ResolvedGitStep, ResolvedPlanStep
+from oh_goon.core.models.fleet_plan import (
+    ResolvedGitStep,
+    ResolvedLocalSearchAgentStep,
+    ResolvedPlanStep,
+)
 from oh_goon.core.models.fleet_plan_values import (
     HostEnvironmentPart,
     LiteralEnvironmentPart,
@@ -118,12 +122,17 @@ def step_host_environment_names(step: ResolvedPlanStep) -> tuple[str, ...]:
     credentials = getattr(step, "credentials", None)
     credential_names = getattr(credentials, "host_environment_names", ())
     names.extend(credential_names)
+    if isinstance(step, ResolvedLocalSearchAgentStep) and step.connection is not None:
+        provider = step.connection.provider
+        if provider.api_key_env is not None:
+            names.append(provider.api_key_env)
+        names.extend(provider.headers_from_env.values())
     return tuple(dict.fromkeys(names))
 
 
 def require_environment(step: ResolvedPlanStep) -> None:
     for binding in getattr(step, "environment", ()):
-        _require_exportable_host_environment_name(binding.name)
+        require_exportable_host_environment_name(binding.name)
         if isinstance(step, ResolvedGitStep) and _is_git_execution_control_environment(
             binding.name
         ):
@@ -132,7 +141,7 @@ def require_environment(step: ResolvedPlanStep) -> None:
             )
     names = step_host_environment_names(step)
     for name in names:
-        _require_exportable_host_environment_name(name)
+        require_exportable_host_environment_name(name)
     missing = [name for name in names if name not in os.environ]
     if missing:
         raise FleetPlanInvalid(
@@ -214,7 +223,7 @@ def _plan_environment(
         env["XDG_DATA_HOME"] = str(home / ".local" / "share")
         env["XDG_STATE_HOME"] = str(home / ".local" / "state")
     for binding in bindings:
-        _require_exportable_host_environment_name(binding.name)
+        require_exportable_host_environment_name(binding.name)
         if binding.name.upper() in _RUNTIME_OWNED_ENV:
             raise FleetPlanInvalid(
                 f"Fleet steps cannot replace runtime-owned environment value {binding.name}"
@@ -233,7 +242,7 @@ def _environment_binding_value(
         if isinstance(part, LiteralEnvironmentPart):
             chunks.append(part.value)
         elif isinstance(part, HostEnvironmentPart):
-            _require_exportable_host_environment_name(part.name)
+            require_exportable_host_environment_name(part.name)
             try:
                 chunks.append(host_environment[part.name])
             except KeyError as exc:
@@ -245,7 +254,7 @@ def _environment_binding_value(
     return "".join(chunks)
 
 
-def _require_exportable_host_environment_name(name: str) -> None:
+def require_exportable_host_environment_name(name: str) -> None:
     if name.upper() in _non_exportable_host_environment():
         raise FleetPlanInvalid(
             f"Fleet steps cannot import process-local control-plane environment value {name}"

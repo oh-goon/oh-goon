@@ -76,7 +76,7 @@ def test_import_gitlab_components_becomes_native_atomic_goon_yaml(tmp_path: Path
     output = tmp_path / "goon.yml"
     migrator.write_goon(output, migration)
     rendered = output.read_text(encoding="utf-8")
-    assert "purpose: cicd" not in rendered
+    assert "purpose: cicd" in rendered
     assert "kind: git_repository" not in rendered
     assert "admission:" not in rendered
     assert "threat_model:" not in rendered
@@ -93,6 +93,7 @@ def test_import_gitlab_components_becomes_native_atomic_goon_yaml(tmp_path: Path
     imported = parse_goon_template(rendered, source=str(output))
     assert imported.execution is not None
     assert imported.execution.purpose is ExecutionPurpose.CICD
+    assert imported.execution == migration.goon.execution
     assert len(imported.steps) == 3
     with pytest.raises(FleetPlanInvalid, match="Plans cannot declare executable work"):
         parse_plan_template(rendered, source=str(output))

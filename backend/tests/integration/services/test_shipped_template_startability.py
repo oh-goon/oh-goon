@@ -21,7 +21,7 @@ from oh_goon.core.models.fleet_plan_isolation import (
 )
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import (
-    StrictFleetExecutionAdmission,
+    DirectFleetExecutionAdmission,
     fleet_repository_scope,
 )
 from oh_goon.core.path_layouts import ManagedPreparationPathLayout
@@ -252,9 +252,9 @@ def test_representative_shipped_plan_reaches_run_admitted_without_step_work(
     detail = state.journal.read_view().required_run_detail("template-startability-positive")
     assert run.status is FleetRunStatus.QUEUED
     assert [event.event_type for event in events] == [FleetRunEventType.RUN_ADMITTED]
-    assert isinstance(detail.execution, StrictFleetExecutionAdmission)
+    assert isinstance(detail.execution, DirectFleetExecutionAdmission)
     assert detail.run.target == target
-    assert backend.availability_checks > 0
+    assert backend.availability_checks == 0
     assert backend.execute_calls == 0
     assert attempts.all() == []
     assert _repository_bytes(repository) == source_before

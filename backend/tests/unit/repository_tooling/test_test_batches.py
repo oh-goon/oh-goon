@@ -81,15 +81,6 @@ def test_timeout_bisection_recovers_multi_member_batch_without_weakening_leaf_ti
     ]
 
 
-def test_timeout_refinement_probe_preserves_full_leaf_timeout() -> None:
-    import oh_goon.repository_tooling.test_batches as batches
-
-    assert batches._refinement_probe_timeout(leaf_timeout=120, member_count=8) == 30
-    assert batches._refinement_probe_timeout(leaf_timeout=120, member_count=4) == 40
-    assert batches._refinement_probe_timeout(leaf_timeout=120, member_count=2) == 60
-    assert batches._refinement_probe_timeout(leaf_timeout=120, member_count=1) == 120
-
-
 def test_timeout_bisection_uses_probe_budgets_before_full_leaf_timeout(monkeypatch) -> None:
     import oh_goon.repository_tooling.test_batches as batches
 

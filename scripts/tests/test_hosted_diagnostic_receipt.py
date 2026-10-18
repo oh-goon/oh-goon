@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import argparse
+
 import hashlib
 import json
 import os
 from pathlib import Path
+from typing import Any
 import subprocess
 import sys
 
@@ -22,8 +25,8 @@ def _host_capability(path: Path, *, interpreter: str | None = None) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _host_capability_payload(*, interpreter: str | None = None) -> dict[str, object]:
-    payload: dict[str, object] = {
+def _host_capability_payload(*, interpreter: str | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "schema": "oh-goon.hosted-dependency-capability/v2",
         "authority": "diagnostic-only",
         "native_authority": False,
@@ -62,7 +65,7 @@ def _host_capability_payload(*, interpreter: str | None = None) -> dict[str, obj
     return payload
 
 
-def _resign(payload: dict[str, object]) -> None:
+def _resign(payload: dict[str, Any]) -> None:
     unsigned = dict(payload)
     unsigned.pop("identity", None)
     encoded = json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode(
@@ -85,7 +88,7 @@ def _batch_report(
     selected_membership_identity: str = "sha256:selected",
 ) -> None:
     members = ["a.py", "b.py"] if members is None else members
-    payload = {
+    payload: dict[str, Any] = {
         "schema": "oh-goon.pytest-batch-execution/v1",
         "status": status,
         "source_identity": source_identity,
@@ -217,7 +220,7 @@ def test_build_receipt_directly_binds_crypto_capability_to_batch_evidence(
     manifest.write_text(f"backend-unit\t1\t{report}\n", encoding="utf-8")
     capability = tmp_path / "host-capability.json"
     _host_capability(capability)
-    args = receipt_module.argparse.Namespace(
+    args = argparse.Namespace(
         output=tmp_path / "receipt.json",
         manifest=manifest,
         host_capability=capability,

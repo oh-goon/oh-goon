@@ -16,11 +16,13 @@ def _verify_rows() -> list[tuple[str, str, str]]:
         capture_output=True,
         check=True,
     )
-    return [
-        tuple(line.split("|", 2))
-        for line in completed.stdout.splitlines()
-        if line.strip()
-    ]  # type: ignore[misc]
+    rows = []
+    for line in completed.stdout.splitlines():
+        if not line.strip():
+            continue
+        owner, label, target = line.split("|", 2)
+        rows.append((owner, label, target))
+    return rows
 
 
 def test_verify_is_broader_than_lean_certification_and_keeps_browser_diagnostics() -> (

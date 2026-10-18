@@ -124,14 +124,6 @@ def parse_goon_template(
     )
 
 
-def _reject_default_execution_ceremony(payload: dict[str, Any], *, source: str, kind: str) -> None:
-    execution = payload.get("execution")
-    if isinstance(execution, dict) and execution.get("purpose") == "cicd":
-        raise FleetPlanInvalid(
-            f"Invalid {kind} {source}: omit execution.purpose: cicd; CI/CD is the backend default"
-        )
-
-
 def _compile_goon_payload(
     payload: dict[str, Any], *, source: str, expected_name: str | None = None
 ) -> CompiledExecutionTemplate:
@@ -141,14 +133,13 @@ def _compile_goon_payload(
     authored_name, authored_description, authored_tools = normalize_goon_authoring_header(
         payload, source=source, expected_name=expected_name
     )
-    _reject_default_execution_ceremony(payload, source=source, kind="Goon")
     if expected_name is None:
         execution = payload.get("execution")
         if execution is None:
-            payload["execution"] = {"purpose": "cicd"}
+            payload["execution"] = {"purpose": "verification"}
         elif isinstance(execution, dict):
             execution = dict(execution)
-            execution.setdefault("purpose", "cicd")
+            execution.setdefault("purpose", "verification")
             payload["execution"] = execution
     if payload.get("requirements") == []:
         raise FleetPlanInvalid(
@@ -246,13 +237,12 @@ def _compile_plan_payload(
     """Compile an already-parsed Plan mapping without reinterpreting YAML syntax."""
 
     payload = dict(payload)
-    _reject_default_execution_ceremony(payload, source=source, kind="Plan")
     execution = payload.get("execution")
     if execution is None:
-        payload["execution"] = {"purpose": "cicd"}
+        payload["execution"] = {"purpose": "verification"}
     elif isinstance(execution, dict):
         execution = dict(execution)
-        execution.setdefault("purpose", "cicd")
+        execution.setdefault("purpose", "verification")
         payload["execution"] = execution
     forbidden = [key for key in ("steps", "run", "command", "script", "imports") if key in payload]
     if forbidden:
@@ -343,7 +333,7 @@ def _compile_goon_imports(
             failure_impact = "blocking"
             authored_alias: str | None = None
         elif isinstance(item, dict) and "import" in item:
-            allowed = {"import", "with", "failure_impact", "as", "pass", "from"}
+            allowed = {"import", "with", "failure_impact", "as", "pass", "from", "phase"}
             unknown = sorted(set(item) - allowed)
             if unknown:
                 raise FleetPlanInvalid(
@@ -453,6 +443,7 @@ def _compile_goon_imports(
                 "step_id": compiled_id,
                 "goon": key,
                 "source_root": source_root,
+                "phase": item.get("phase") if isinstance(item, dict) else None,
                 "failure_impact": failure_impact,
                 "inputs": compiled_bindings,
             }

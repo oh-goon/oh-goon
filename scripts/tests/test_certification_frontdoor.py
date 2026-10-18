@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from typing import Any
+
+from oh_goon.services.certification_bootstrap import (
+    CertificationEnvironmentError,
+)
+
 import json
 import os
 import shutil
 import stat
 import sys
 from pathlib import Path
+from collections.abc import Iterator
 
 import pytest
 
@@ -18,7 +25,7 @@ _REAL_STATIC_SOURCE_ADMISSION = certification_frontdoor._static_source_admission
 
 
 @pytest.fixture(autouse=True)
-def _admit_static_source(monkeypatch):
+def _admit_static_source(monkeypatch: pytest.MonkeyPatch) -> None:
     # certification_frontdoor.main() intentionally updates process environment for
     # its CLI lifetime. Keep that side effect from leaking into unrelated tests that
     # execute later in this same pytest process.
@@ -29,7 +36,7 @@ def _admit_static_source(monkeypatch):
 
 
 def test_app_frontdoor_strips_inherited_strict_executor_authority_before_orchestration(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     inherited = {
         "OH_GOON_EXECUTORS_FILE": "/operator/executors.toml",
@@ -70,7 +77,7 @@ def test_app_frontdoor_strips_inherited_strict_executor_authority_before_orchest
 
 
 def test_app_frontdoor_strips_strict_executor_authority_before_static_admission(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     inherited = {
         "OH_GOON_EXECUTORS_FILE": "/operator/executors.toml",
@@ -112,7 +119,7 @@ def test_strict_release_process_environment_preserves_explicit_executor_authorit
 
 
 def test_missing_systemd_reports_actionable_executor_failure(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("OH_GOON_EXECUTORS_FILE", raising=False)
     monkeypatch.delenv("OH_GOON_CERTIFICATION_CGROUP_ROOT", raising=False)
@@ -123,7 +130,7 @@ def test_missing_systemd_reports_actionable_executor_failure(
             FleetPlanInvalid("init.scope is not delegated")
         ),
     )
-    monkeypatch.setattr(certification_frontdoor.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
     monkeypatch.setattr(
         certification_frontdoor,
         "_workflow_main",
@@ -144,7 +151,7 @@ def test_missing_systemd_reports_actionable_executor_failure(
 
 
 def test_delegated_reentry_rejects_non_strict_app_purpose_before_restoring_authority(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     env_file = tmp_path / "environment.json"
     ready_file = tmp_path / "ready"
@@ -169,7 +176,7 @@ def test_delegated_reentry_rejects_non_strict_app_purpose_before_restoring_autho
 
 
 def test_systemd_command_delegates_without_putting_environment_on_command_line(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     env_file = tmp_path / "environment.json"
@@ -202,7 +209,7 @@ def test_systemd_command_delegates_without_putting_environment_on_command_line(
 
 
 def test_default_app_reentry_preserves_an_empty_workflow_argument_list(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     command = certification_frontdoor._systemd_reentry_command(
         systemd_run=Path("/usr/bin/systemd-run"),
@@ -219,7 +226,7 @@ def test_default_app_reentry_preserves_an_empty_workflow_argument_list(
 
 
 def test_reentry_environment_file_is_private_and_consumed(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     path = certification_frontdoor._write_reentry_environment(
@@ -235,7 +242,7 @@ def test_reentry_environment_file_is_private_and_consumed(
 
 
 def test_systemd_failure_preserves_exact_reason_and_does_not_run_workflow(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("OH_GOON_EXECUTORS_FILE", raising=False)
     monkeypatch.delenv("OH_GOON_CERTIFICATION_CGROUP_ROOT", raising=False)
@@ -247,9 +254,7 @@ def test_systemd_failure_preserves_exact_reason_and_does_not_run_workflow(
             FleetPlanInvalid("current scope cannot delegate")
         ),
     )
-    monkeypatch.setattr(
-        certification_frontdoor.shutil, "which", lambda _name: "/usr/bin/systemd-run"
-    )
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/systemd-run")
     monkeypatch.setattr(
         certification_frontdoor,
         "_stream",
@@ -268,7 +273,9 @@ def test_systemd_failure_preserves_exact_reason_and_does_not_run_workflow(
     assert "No certification Goon ran." in output
 
 
-def test_bus_failure_diagnoses_wsl_without_systemd_pid1(monkeypatch) -> None:
+def test_bus_failure_diagnoses_wsl_without_systemd_pid1(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def read_text(path: Path) -> str:
         if path == Path("/proc/sys/kernel/osrelease"):
             return "6.18.0-microsoft-standard-WSL2"
@@ -301,7 +308,7 @@ def test_bus_failure_diagnoses_wsl_without_systemd_pid1(monkeypatch) -> None:
 
 
 def test_bus_failure_diagnoses_missing_user_manager_when_systemd_is_pid1(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def read_text(path: Path) -> str:
         if path == Path("/proc/sys/kernel/osrelease"):
@@ -328,7 +335,7 @@ def test_bus_failure_diagnoses_missing_user_manager_when_systemd_is_pid1(
 
 
 def test_systemd_child_readiness_means_child_exit_is_the_workflow_result(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("OH_GOON_EXECUTORS_FILE", raising=False)
     monkeypatch.delenv("OH_GOON_CERTIFICATION_CGROUP_ROOT", raising=False)
@@ -340,9 +347,7 @@ def test_systemd_child_readiness_means_child_exit_is_the_workflow_result(
             FleetPlanInvalid("current scope cannot delegate")
         ),
     )
-    monkeypatch.setattr(
-        certification_frontdoor.shutil, "which", lambda _name: "/usr/bin/systemd-run"
-    )
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/systemd-run")
 
     def stream(command: list[str]) -> tuple[int, str]:
         ready = Path(command[command.index("--oh-goon-delegated-reentry") + 2])
@@ -358,11 +363,11 @@ def test_systemd_child_readiness_means_child_exit_is_the_workflow_result(
 
 
 def test_workflow_enters_certification_state_lease_before_orchestration(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from contextlib import contextmanager
 
-    observed: list[object] = []
+    observed: list[tuple[object, ...]] = []
     state = tmp_path / "cert-state"
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state-home"))
     monkeypatch.setattr(
@@ -372,7 +377,7 @@ def test_workflow_enters_certification_state_lease_before_orchestration(
     )
 
     @contextmanager
-    def lease(path: Path):
+    def lease(path: Path) -> Iterator[None]:
         observed.append(("lease-enter", path))
         try:
             yield
@@ -380,26 +385,39 @@ def test_workflow_enters_certification_state_lease_before_orchestration(
             observed.append(("lease-exit", path))
 
     monkeypatch.setattr(certification_frontdoor, "certification_state_lease", lease)
+
+    def record_preflight_certification_database_under_lease(
+        *, source_root: Any, state_home: Any
+    ) -> dict[str, Any]:
+        observed.append(("preflight", source_root, state_home))
+        return {"database": str(state / "oh-goon.db")}
+
     monkeypatch.setattr(
         certification_frontdoor,
         "preflight_certification_database_under_lease",
-        lambda *, source_root, state_home: observed.append(
-            ("preflight", source_root, state_home)
-        )
-        or {"database": str(state / "oh-goon.db")},
+        record_preflight_certification_database_under_lease,
     )
+
+    def record_reconcile_certification_run_workspaces(
+        *, state_home: Any, owned_state_root: Any
+    ) -> Any:
+        observed.append(("reconcile", state_home, owned_state_root))
+        return type("Result", (), {"removed": (), "refused": ()})()
+
     monkeypatch.setattr(
         certification_frontdoor,
         "reconcile_certification_run_workspaces",
-        lambda *, state_home, owned_state_root: observed.append(
-            ("reconcile", state_home, owned_state_root)
-        )
-        or type("Result", (), {"removed": (), "refused": ()})(),
+        record_reconcile_certification_run_workspaces,
     )
+
+    def record_workflow_main(args: Any) -> int:
+        observed.append(("workflow", tuple(args)))
+        return 17
+
     monkeypatch.setattr(
         certification_frontdoor,
         "_workflow_main",
-        lambda args: observed.append(("workflow", tuple(args))) or 17,
+        record_workflow_main,
     )
 
     assert certification_frontdoor._workflow_main_with_state_lease(["app"]) == 17
@@ -412,7 +430,7 @@ def test_workflow_enters_certification_state_lease_before_orchestration(
 
 
 def test_frontdoor_lease_blocks_control_state_reset_until_workflow_finishes(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.services import certification_bootstrap
 
@@ -449,7 +467,7 @@ def test_frontdoor_lease_blocks_control_state_reset_until_workflow_finishes(
 
 
 def test_static_source_failure_blocks_certification_before_workflow(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
         certification_frontdoor, "_static_source_admission", lambda: False
@@ -463,7 +481,7 @@ def test_static_source_failure_blocks_certification_before_workflow(
 
 
 def test_static_source_admission_rejects_transport_contamination_before_compiler(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "backend").mkdir()
     (tmp_path / "backend/uv.lock").write_text("version = 1\n", encoding="utf-8")
@@ -484,7 +502,7 @@ def test_static_source_admission_rejects_transport_contamination_before_compiler
 
 
 def test_static_source_admission_uses_in_process_compiler_authority(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "backend").mkdir()
@@ -509,7 +527,7 @@ def test_static_source_admission_uses_in_process_compiler_authority(
     monkeypatch.setattr(
         certification_frontdoor, "compile_canonical_goons", compile_source
     )
-    monkeypatch.setattr(certification_frontdoor.sys, "executable", "/uv/base/python")
+    monkeypatch.setattr(sys, "executable", "/uv/base/python")
 
     assert _REAL_STATIC_SOURCE_ADMISSION() is True
     assert observed == [tmp_path]
@@ -521,7 +539,7 @@ def test_static_source_admission_uses_in_process_compiler_authority(
 
 
 def test_static_source_admission_preserves_compiler_failure_output(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "backend").mkdir()
@@ -555,7 +573,7 @@ def test_static_source_admission_preserves_compiler_failure_output(
 
 
 def test_real_static_admission_rejects_transitive_missing_tool_before_workflow_state(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = Path(__file__).resolve().parents[2]
     root = tmp_path / "repo"
@@ -592,7 +610,7 @@ def test_real_static_admission_rejects_transitive_missing_tool_before_workflow_s
 
 
 def test_candidate_added_native_tool_cannot_self_authorize_before_fleet_state(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = Path(__file__).resolve().parents[2]
     root = tmp_path / "repo"
@@ -627,9 +645,9 @@ def test_candidate_added_native_tool_cannot_self_authorize_before_fleet_state(
 
 
 def test_certification_process_environment_forces_rollback_journal_policy(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(certification_frontdoor.os, "name", "nt")
+    monkeypatch.setattr(os, "name", "nt")
 
     observed = certification_frontdoor._certification_process_environment(
         {"OH_GOON_SQLITE_JOURNAL_MODE": "WAL", "PATH": "/usr/bin"}
@@ -639,7 +657,7 @@ def test_certification_process_environment_forces_rollback_journal_policy(
 
 
 def test_leased_frontdoor_preflight_failure_blocks_workflow(
-    tmp_path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from contextlib import contextmanager
 
@@ -652,7 +670,7 @@ def test_leased_frontdoor_preflight_failure_blocks_workflow(
     )
 
     @contextmanager
-    def lease(_path: Path):
+    def lease(_path: Path) -> Iterator[None]:
         yield
 
     monkeypatch.setattr(certification_frontdoor, "certification_state_lease", lease)
@@ -660,7 +678,7 @@ def test_leased_frontdoor_preflight_failure_blocks_workflow(
         certification_frontdoor,
         "preflight_certification_database_under_lease",
         lambda **_kwargs: (_ for _ in ()).throw(
-            certification_frontdoor.CertificationEnvironmentError("corrupt sqlite")
+            CertificationEnvironmentError("corrupt sqlite")
         ),
     )
     monkeypatch.setattr(

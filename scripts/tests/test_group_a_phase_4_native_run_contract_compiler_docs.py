@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_compiler_does_not_accept_caller_claimed_derived_identities():
+def test_compiler_does_not_accept_caller_claimed_derived_identities() -> None:
     code = (
         ROOT / "backend/src/oh_goon/services/fleet_native_run_contract_compiler.py"
     ).read_text()

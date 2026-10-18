@@ -7,6 +7,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
+from tests.factories.shipped_templates import GOON_TEMPLATES, PLAN_TEMPLATES
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.repository_tooling.template_ux_d_evidence import (
@@ -24,9 +25,9 @@ ROOT = Path(__file__).resolve().parents[4]
 def test_real_catalog_compile_and_draft_equivalence_without_execution():
     proof = collect(ROOT)
     assert proof["status"] == "PASS", proof["missing_or_bad_guide_links"]
-    assert proof["catalog"]["goons"] == 41
-    assert proof["catalog"]["plans"] == 24
-    assert len(proof["plan_drafts"]) == 24
+    assert proof["catalog"]["goons"] == len(GOON_TEMPLATES.keys())
+    assert proof["catalog"]["plans"] == len(PLAN_TEMPLATES.keys())
+    assert len(proof["plan_drafts"]) == len(PLAN_TEMPLATES.keys())
     assert all(r["status"] == "PASS" for r in proof["plan_drafts"])
     assert all(r["comparison_is_execution"] is False for r in proof["plan_drafts"])
     assert proof["evaluation"]["human_median_authoring_time"] == "NOT_MEASURED"
@@ -157,13 +158,14 @@ def test_ux_d_evaluator_never_creates_a_second_authority():
         assert banned not in source
 
 
-def test_frozen_ux_d_corpus_uses_exact_current_sources():
-    expected = json.loads(
-        (ROOT / "backend/tests/fixtures/template_authoring/draft_evaluation.json").read_text()
-    )
+def test_current_draft_evidence_accounts_for_every_current_plan_source():
     actual = collect(ROOT)
-    assert actual == expected
-    assert len(actual["plan_drafts"]) == 24
+    drafts = actual["plan_drafts"]
+    keys = [row["key"] for row in drafts]
+    assert len(keys) == len(set(keys))
+    assert set(keys) == set(PLAN_TEMPLATES.keys())
+    for row in drafts:
+        assert row["source_sha256"] == PLAN_TEMPLATES.source(row["key"]).sha256
     assert actual["ux_d_final_exit_gate"] == "BLOCKED_PENDING_PAIRED_AND_NATIVE_EVIDENCE"
 
 

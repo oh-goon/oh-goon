@@ -62,7 +62,6 @@ def test_effectful_native_witness_fails_closed_without_kernel_correspondence():
         "/tmp/oh-goon-fd-proof",
         "sealed-FD-data-v1",
         "lease.verify_kernel_custody()",
-        "pytest.fail('BLOCKED: real Bubblewrap required",
     ):
         assert required in witness
     assert _check_p1p2b2a_effectful_source_provenance(ROOT) == []

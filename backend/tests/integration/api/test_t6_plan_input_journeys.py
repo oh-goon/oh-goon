@@ -220,7 +220,7 @@ def test_t6_same_source_input_pair_is_deterministic(journey):
     client, store, plans, runs, _, _ = journey
     doc = _create_from_shipped(client, "python/quality")
     original = store.path(doc["plan_key"]).read_bytes()
-    inputs = {"typechecker": "88"}
+    inputs = {"typechecker": "ty"}
     results = [_assert_accepted(_inspect(client, doc, inputs), doc) for _ in range(3)]
     assert results[0] == results[1] == results[2]
     assert plans.resolve_with_source.call_count == 3

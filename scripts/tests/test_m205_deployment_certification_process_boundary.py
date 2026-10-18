@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from collections.abc import Callable
+from collections.abc import Mapping
+
+from oh_goon.services.certification_workspace_retention import certification_state_root
+
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,7 +27,7 @@ from oh_goon.services import certification_frontdoor as frontdoor
 from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
 
-def _original_owner(monkeypatch) -> FleetPreworkProvisioner:
+def _original_owner(monkeypatch: pytest.MonkeyPatch) -> FleetPreworkProvisioner:
     owner = object.__new__(FleetPreworkProvisioner)
     object.__setattr__(
         owner, "executor_inventory_file", Path("/deployment/inventory.toml")
@@ -36,9 +43,11 @@ def _original_owner(monkeypatch) -> FleetPreworkProvisioner:
     return owner
 
 
-def _canonical_control_state(tmp_path, monkeypatch) -> tuple[str, str]:
+def _canonical_control_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, str]:
     """A1 pre-lease authority: preselect exact DB/League before observing signer."""
-    state = frontdoor.certification_state_root(
+    state = certification_state_root(
         source_root=Path.cwd(),
         state_home=tmp_path,
     )
@@ -49,7 +58,9 @@ def _canonical_control_state(tmp_path, monkeypatch) -> tuple[str, str]:
     return db, league
 
 
-def test_wrong_object_is_rejected_before_static_source_or_state(monkeypatch) -> None:
+def test_wrong_object_is_rejected_before_static_source_or_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         frontdoor, "_static_source_admission", lambda: pytest.fail("source read")
     )
@@ -59,10 +70,12 @@ def test_wrong_object_is_rejected_before_static_source_or_state(monkeypatch) -> 
         )
 
 
-def test_unenrolled_run_fails_before_static_source_and_state(monkeypatch) -> None:
+def test_unenrolled_run_fails_before_static_source_and_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     owner = _original_owner(monkeypatch)
 
-    def deny(_self, _run_id):
+    def deny(_self: object, _run_id: str) -> None:
         raise TrustProtocolError("Fleet Run is not explicitly provisioned")
 
     monkeypatch.setattr(FleetPreworkProvisioner, "require_enrolled_identity", deny)
@@ -74,7 +87,7 @@ def test_unenrolled_run_fails_before_static_source_and_state(monkeypatch) -> Non
 
 
 def test_missing_original_inventory_and_journal_fail_before_static_source(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner = _original_owner(monkeypatch)
     monkeypatch.setattr(
@@ -90,7 +103,7 @@ def test_missing_original_inventory_and_journal_fail_before_static_source(
 
 
 def test_source_admission_denial_does_not_touch_owner_observation_or_lease(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner = _original_owner(monkeypatch)
     monkeypatch.setenv(EXECUTORS_FILE_ENV, str(owner.executor_inventory_file))
@@ -108,7 +121,7 @@ def test_source_admission_denial_does_not_touch_owner_observation_or_lease(
 
 
 def test_original_object_reaches_inprocess_owner_callback_without_serialization(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = _original_owner(monkeypatch)
     monkeypatch.setenv(EXECUTORS_FILE_ENV, str(owner.executor_inventory_file))
@@ -117,7 +130,12 @@ def test_original_object_reaches_inprocess_owner_callback_without_serialization(
     monkeypatch.setattr(frontdoor, "_static_source_admission", lambda: True)
     seen = []
 
-    def run_app(*, deployment_plan_run, deployment_context_guard, fleet_run_id):
+    def run_app(
+        *,
+        deployment_plan_run: Callable[[list[str], dict[str, str]], tuple[int, str]],
+        deployment_context_guard: Callable[[Mapping[str, str]], str | None],
+        fleet_run_id: str,
+    ) -> int:
         assert fleet_run_id == "run-a"
         seen.append(
             deployment_context_guard(
@@ -159,7 +177,7 @@ def test_original_object_reaches_inprocess_owner_callback_without_serialization(
         lambda _args, *, workflow_runner: workflow_runner(_args),
     )
 
-    def cli_main(args, *, fleet_provisioner):
+    def cli_main(args: list[str], *, fleet_provisioner: FleetPreworkProvisioner) -> int:
         assert fleet_provisioner is owner
         assert args[-2:] == ["--fleet-run-id", "run-a"]
         print("Fleet Run ID: run-a")
@@ -177,7 +195,7 @@ def test_original_object_reaches_inprocess_owner_callback_without_serialization(
 
 
 def test_source_context_mismatch_refuses_before_any_bootstrap_command(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = []
     monkeypatch.setattr(
@@ -198,7 +216,9 @@ def test_source_context_mismatch_refuses_before_any_bootstrap_command(
     assert calls == []
 
 
-def test_deployment_never_runs_release_or_self_verify(monkeypatch) -> None:
+def test_deployment_never_runs_release_or_self_verify(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         workflow, "_backend_cli", lambda *_a, **_kw: pytest.fail("bootstrap")
     )
@@ -214,30 +234,36 @@ def test_deployment_never_runs_release_or_self_verify(monkeypatch) -> None:
         assert rc == 2
 
 
-def test_plan_cli_transport_only_after_existing_canonical_lock(monkeypatch) -> None:
+def test_plan_cli_transport_only_after_existing_canonical_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     commands = []
+
+    def record_backend_cli(args: Any, **_kw: Any) -> SimpleNamespace:
+        commands.append(args)
+        return SimpleNamespace(returncode=0, stdout="")
+
     monkeypatch.setattr(
         workflow,
         "_backend_cli",
-        lambda args, **_kw: (
-            commands.append(args),
-            SimpleNamespace(returncode=0, stdout=""),
-        )[1],
+        record_backend_cli,
     )
     monkeypatch.setattr(
         workflow, "_stream", lambda *_a, **_kw: pytest.fail("subprocess Plan")
     )
     plans = []
+
+    def record_deployment_plan_run(args: Any, _env: Any) -> tuple[int, str]:
+        plans.append(args)
+        return (0, "Fleet Run ID: run-a\n")
+
     rc, out = workflow._run_plan(
         plan=workflow.APP_PLAN,
         repo_id="r",
         env={},
         lock_root=Path("/tmp/locks"),
         deployment_context_guard=lambda _env: None,
-        deployment_plan_run=lambda args, _env: (
-            plans.append(args),
-            (0, "Fleet Run ID: run-a\n"),
-        )[1],
+        deployment_plan_run=record_deployment_plan_run,
     )
     assert rc == 0 and "Fleet Run ID: run-a" in out
     assert [c[0] for c in commands] == ["league", "lock"]
@@ -248,7 +274,9 @@ def test_plan_cli_transport_only_after_existing_canonical_lock(monkeypatch) -> N
     )
 
 
-def test_callback_success_cannot_invent_app_pass(monkeypatch, capsys) -> None:
+def test_callback_success_cannot_invent_app_pass(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(
         workflow, "_prepare_plan_context", lambda **_kw: ("r", {}, Path("/tmp"))
     )
@@ -273,7 +301,7 @@ def test_callback_success_cannot_invent_app_pass(monkeypatch, capsys) -> None:
 
 
 def test_original_persisted_app_pass_is_required_after_plan_success(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
         workflow, "_prepare_plan_context", lambda **_kw: ("r", {}, Path("/tmp"))
@@ -282,10 +310,15 @@ def test_original_persisted_app_pass_is_required_after_plan_success(
         workflow, "_run_plan", lambda **_kw: (0, "Fleet Run ID: run-a\n")
     )
     checked = []
+
+    def record_require_current_app_pass(**kw: Any) -> SimpleNamespace:
+        checked.append(kw)
+        return SimpleNamespace(returncode=0)
+
     monkeypatch.setattr(
         workflow,
         "_require_current_app_pass",
-        lambda **kw: (checked.append(kw), SimpleNamespace(returncode=0))[1],
+        record_require_current_app_pass,
     )
     assert (
         workflow._run_self_plan(
@@ -302,7 +335,7 @@ def test_original_persisted_app_pass_is_required_after_plan_success(
 
 
 def test_native_deployment_observation_denial_blocks_state_lease(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = _original_owner(monkeypatch)
     monkeypatch.setenv(EXECUTORS_FILE_ENV, str(owner.executor_inventory_file))
@@ -315,7 +348,7 @@ def test_native_deployment_observation_denial_blocks_state_lease(
         lambda *_a, **_kw: pytest.fail("lease"),
     )
 
-    def revoked(_self, _run_id):
+    def revoked(_self: object, _run_id: str) -> None:
         raise TrustProtocolError("deployment signer policy revoked")
 
     monkeypatch.setattr(
@@ -325,7 +358,9 @@ def test_native_deployment_observation_denial_blocks_state_lease(
         frontdoor.certify_deployment_run(fleet_provisioner=owner, fleet_run_id="run-a")
 
 
-def test_normal_shell_main_cannot_pass_owner_through_arguments(monkeypatch) -> None:
+def test_normal_shell_main_cannot_pass_owner_through_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         frontdoor, "_static_source_admission", lambda: pytest.fail("source admission")
     )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import json
 from pathlib import Path
 from xml.etree import ElementTree
@@ -9,26 +10,12 @@ from zipfile import ZipFile
 
 import pytest
 
-from importlib.util import module_from_spec, spec_from_file_location
 
-
-def _load_evaluator():
-    # Synthetic module identity is test-only and loader is confined to this function.
-    spec = spec_from_file_location(
-        "_oh_goon_test_t6_template_eval_report",
-        Path(__file__).with_name("t6_template_eval_report.py"),
-    )
-    assert spec and spec.loader
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.evaluation_report
-
-
-evaluation_report = _load_evaluator()
+from t6_template_eval_report import evaluation_report
 
 
 @pytest.fixture
-def evidence_inputs(tmp_path: Path):
+def evidence_inputs(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     corpus = tmp_path / "corpus.json"
     corpus.write_text(
         json.dumps(
@@ -62,14 +49,18 @@ def evidence_inputs(tmp_path: Path):
     return corpus, junit, source, checkout
 
 
-def test_t6_evidence_follows_exact_junit_corpus_and_source_bytes(evidence_inputs):
+def test_t6_evidence_follows_exact_junit_corpus_and_source_bytes(
+    evidence_inputs: tuple[Path, Path, Path, Path],
+) -> None:
     corpus, junit, source, checkout = evidence_inputs
     report = evaluation_report(
         corpus=corpus, junit=junit, source_zip=source, source_root=checkout
     )
     assert report["checks_passed"] == 4 and report["checks_total"] == 4
     assert report["case_count"] == 3
-    assert report["source"]["source_members"] == 2
+    source_evidence = report["source"]
+    assert isinstance(source_evidence, dict)
+    assert source_evidence["source_members"] == 2
     assert report["authority"] == "read_only_evaluation_not_execution_or_admission"
     assert report == evaluation_report(
         corpus=corpus, junit=junit, source_zip=source, source_root=checkout
@@ -79,7 +70,9 @@ def test_t6_evidence_follows_exact_junit_corpus_and_source_bytes(evidence_inputs
 @pytest.mark.parametrize(
     "corruption", ["failure", "skipped", "missing", "duplicate", "wrong"]
 )
-def test_t6_evidence_rejects_unearned_pass(evidence_inputs, corruption):
+def test_t6_evidence_rejects_unearned_pass(
+    evidence_inputs: tuple[Path, Path, Path, Path], corruption: str
+) -> None:
     corpus, junit, source, checkout = evidence_inputs
     root = ElementTree.parse(junit).getroot()
     children = root.findall("testcase")
@@ -98,7 +91,9 @@ def test_t6_evidence_rejects_unearned_pass(evidence_inputs, corruption):
         )
 
 
-def test_t6_evidence_rejects_noncanonical_archive(evidence_inputs):
+def test_t6_evidence_rejects_noncanonical_archive(
+    evidence_inputs: tuple[Path, Path, Path, Path],
+) -> None:
     corpus, junit, source, checkout = evidence_inputs
     with ZipFile(source, "a") as archive:
         archive.writestr("../injected", b"x")
@@ -108,7 +103,9 @@ def test_t6_evidence_rejects_noncanonical_archive(evidence_inputs):
         )
 
 
-def test_t6_evidence_rejects_changed_source_file(evidence_inputs):
+def test_t6_evidence_rejects_changed_source_file(
+    evidence_inputs: tuple[Path, Path, Path, Path],
+) -> None:
     corpus, junit, source, checkout = evidence_inputs
     (checkout / "backend/uv.lock").write_bytes(b"mutated")
     with pytest.raises(ValueError, match="differs"):

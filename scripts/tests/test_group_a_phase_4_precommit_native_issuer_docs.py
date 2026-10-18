@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_precommit_native_issuer_owner_and_regression_remain_present():
+def test_precommit_native_issuer_owner_and_regression_remain_present() -> None:
     assert (
         ROOT
         / "backend/tests/unit/services/test_group_a_precommit_native_issuer_migration.py"

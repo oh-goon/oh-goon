@@ -12,6 +12,7 @@ from pathlib import Path
 
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
+from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 TEMPLATES = Path(__file__).resolve().parents[3] / "templates"
 
@@ -43,3 +44,13 @@ class CachedShippedGoonTemplateStore(GoonTemplateStore):
 
 PLAN_TEMPLATES = CachedShippedPlanTemplateStore(TEMPLATES / "plans")
 GOON_TEMPLATES = CachedShippedGoonTemplateStore(TEMPLATES / "goons")
+
+# Agent Plans use captured sources and standard-local admission. Their native
+# lifecycle proofs are parametrized over this same compiler-owned membership.
+AGENT_PLAN_TEMPLATES = tuple(
+    key
+    for key in PLAN_TEMPLATES.keys()
+    if FleetPlanResolver(goon_templates=GOON_TEMPLATES)
+    .analyze_source(PLAN_TEMPLATES.source(key).path)
+    .agent_step_sources()
+)

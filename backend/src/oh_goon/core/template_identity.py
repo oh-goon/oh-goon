@@ -17,6 +17,7 @@ class TemplateClassification(StrEnum):
 
 
 _CATEGORY_CLASSIFICATION: dict[str, TemplateClassification] = {
+    "agents": TemplateClassification.PRODUCTION,
     "advanced": TemplateClassification.TEACHING_EXAMPLE,
     "general": TemplateClassification.TEACHING_EXAMPLE,
     "kubernetes": TemplateClassification.PRODUCTION,

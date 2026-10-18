@@ -44,7 +44,9 @@ def test_fresh_source_zip_rejects_missing_committed_uv_lock_before_native_bootst
     archive.with_name(archive.name + ".sha256").write_text(
         f"{digest}  {archive.name}\n", encoding="utf-8"
     )
-    monkeypatch.setattr(artifacts, "archive_source_identity", lambda _path: "sha256:source")
+    from oh_goon.repository_tooling import _self_certification_artifact_verification as verification
+
+    monkeypatch.setattr(verification, "archive_source_identity", lambda _path: "sha256:source")
     state = tmp_path / "state"
     try:
         artifacts.verify_fresh_source_zip(

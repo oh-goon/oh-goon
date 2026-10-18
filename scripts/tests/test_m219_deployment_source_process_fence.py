@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from collections.abc import Mapping
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +22,7 @@ from oh_goon.services import certification_frontdoor as frontdoor
 from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
 
-def _owner(monkeypatch):
+def _owner(monkeypatch: pytest.MonkeyPatch) -> FleetPreworkProvisioner:
     owner = object.__new__(FleetPreworkProvisioner)
     object.__setattr__(
         owner, "executor_inventory_file", Path("/deployment/inventory.toml")
@@ -36,7 +40,9 @@ def _owner(monkeypatch):
     return owner
 
 
-def test_changed_cwd_denied_before_source_admission_and_state(tmp_path, monkeypatch):
+def test_changed_cwd_denied_before_source_admission_and_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     owner = _owner(monkeypatch)
     monkeypatch.setattr(workflow, "ROOT", Path.cwd().resolve())
     monkeypatch.chdir(tmp_path)
@@ -55,8 +61,8 @@ def test_changed_cwd_denied_before_source_admission_and_state(tmp_path, monkeypa
 
 
 def test_source_context_flip_after_inspection_denies_before_bootstrap(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     owner = _owner(monkeypatch)
     monkeypatch.setattr(workflow, "ROOT", Path.cwd().resolve())
     env = {
@@ -96,15 +102,15 @@ def test_source_context_flip_after_inspection_denies_before_bootstrap(
 
 
 def test_late_context_drift_cannot_accept_successful_callback_as_app_pass(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(workflow, "ROOT", Path.cwd().resolve())
     env = {"OH_GOON_DB": "db", "OH_GOON_LEAGUE_FILE": "league"}
     monkeypatch.setattr(
         workflow, "_prepare_plan_context", lambda **_kw: ("repo-a", env, tmp_path)
     )
 
-    def plan_then_drift(**_kwargs):
+    def plan_then_drift(**_kwargs: object) -> tuple[int, str]:
         monkeypatch.chdir(tmp_path)
         return 0, ""
 
@@ -115,7 +121,7 @@ def test_late_context_drift_cannot_accept_successful_callback_as_app_pass(
         lambda **_kw: pytest.fail("evidence accepted"),
     )
 
-    def guard(_env):
+    def guard(_env: Mapping[str, str]) -> str | None:
         return (
             "Deployment source root differs from imported workflow authority"
             if Path.cwd().resolve() != workflow.ROOT
@@ -134,8 +140,8 @@ def test_late_context_drift_cannot_accept_successful_callback_as_app_pass(
 
 
 def test_unchanged_context_still_checks_exact_run_persisted_success(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(workflow, "ROOT", Path.cwd().resolve())
     env = {"OH_GOON_DB": "db", "OH_GOON_LEAGUE_FILE": "league"}
     monkeypatch.setattr(
@@ -143,10 +149,15 @@ def test_unchanged_context_still_checks_exact_run_persisted_success(
     )
     monkeypatch.setattr(workflow, "_run_plan", lambda **_kw: (0, ""))
     checks = []
+
+    def record_require_current_app_pass(**kw: Any) -> SimpleNamespace:
+        checks.append(kw)
+        return SimpleNamespace(returncode=0)
+
     monkeypatch.setattr(
         workflow,
         "_require_current_app_pass",
-        lambda **kw: (checks.append(kw), SimpleNamespace(returncode=0))[1],
+        record_require_current_app_pass,
     )
     assert (
         workflow._run_self_plan(
@@ -160,7 +171,9 @@ def test_unchanged_context_still_checks_exact_run_persisted_success(
     assert len(checks) == 1 and checks[0]["fleet_run_id"] == "run-a"
 
 
-def test_changed_cwd_denied_for_read_only_deployment_readiness(tmp_path, monkeypatch):
+def test_changed_cwd_denied_for_read_only_deployment_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     owner = _owner(monkeypatch)
     monkeypatch.setattr(workflow, "ROOT", Path.cwd().resolve())
     monkeypatch.chdir(tmp_path)
@@ -170,7 +183,9 @@ def test_changed_cwd_denied_for_read_only_deployment_readiness(tmp_path, monkeyp
         )
 
 
-def test_post_plan_control_state_drift_blocks_evidence_read(tmp_path, monkeypatch):
+def test_post_plan_control_state_drift_blocks_evidence_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     owner = _owner(monkeypatch)
     monkeypatch.setattr(workflow, "ROOT", Path.cwd().resolve())
     monkeypatch.setenv("OH_GOON_DB", "db")
@@ -184,7 +199,7 @@ def test_post_plan_control_state_drift_blocks_evidence_read(tmp_path, monkeypatc
         workflow, "_prepare_plan_context", lambda **_kw: ("repo-a", env, tmp_path)
     )
 
-    def callback_changed_control(**_kwargs):
+    def callback_changed_control(**_kwargs: object) -> tuple[int, str]:
         monkeypatch.setenv("OH_GOON_DB", "different-db")
         return 0, ""
 

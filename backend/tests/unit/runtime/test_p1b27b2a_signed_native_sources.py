@@ -23,6 +23,7 @@ from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     _check_p1b27b2a_signed_native_sources,
 )
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.unit.integrations.test_b12c_live_prework_resource_bridge import _request
 
 PACKAGE = ROOT / "backend/src/oh_goon"
@@ -159,7 +160,9 @@ def test_x0_denies_signing_or_consumption_drift(tmp_path, change):
         if change == "drop-field" and rel.startswith("core/"):
             code = code.replace("    native_mounts: tuple[OriginalNativeMount, ...] = ()", "")
         if change == "drop-sign" and rel.startswith("core/"):
-            code = code.replace("members['native_mounts']", "members['native_unused']")
+            code = replace_python_syntax(
+                code, "members['native_mounts']", "members['native_unused']"
+            )
         if change == "drop-projection" and rel.endswith("fleet_plan_local_lace_intent.py"):
             code = code.replace(
                 "native_mounts=prepared_original_native_mounts(request),", "native_mounts=(),"

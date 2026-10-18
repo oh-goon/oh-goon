@@ -52,6 +52,6 @@ def effect_recovery(
         attempts,
         journal,
         execution,
-        reconciler or RepositoryReconciler(journal, git),
+        reconciler or RepositoryReconciler(git),
         settlement or RepositoryEffectSettlement(database, journal, attempts),
     )

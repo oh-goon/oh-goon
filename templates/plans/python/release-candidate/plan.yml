@@ -1,4 +1,6 @@
 version: 1
+execution:
+  purpose: cicd
 goons:
 - import: python/release-metadata
   pass:

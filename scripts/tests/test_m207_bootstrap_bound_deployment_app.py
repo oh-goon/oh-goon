@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from collections.abc import Callable
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,26 +15,33 @@ from oh_goon import workflow
 
 
 def test_deployment_app_rejects_extra_inputs_before_league_and_lock(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         workflow, "_backend_cli", lambda *_a, **_kw: pytest.fail("bootstrap mutated")
     )
     seen = []
+
+    def record_deployment_context_guard(_env: Any) -> None:
+        seen.append("guard")
+        return None
+
     rc, why = workflow._run_plan(
         plan=workflow.APP_PLAN,
         repo_id="repo-a",
         env={},
         lock_root=Path("/state/locks"),
         inputs={"alternate_repo": "repo-b"},
-        deployment_context_guard=lambda _env: seen.append("guard") or None,
+        deployment_context_guard=record_deployment_context_guard,
         deployment_plan_run=lambda *_a: pytest.fail("APP workload called"),
     )
     assert rc == 2 and "without inputs" in why
     assert seen == []
 
 
-def test_deployment_callback_binds_exact_bootstrap_repo_and_lock(monkeypatch) -> None:
+def test_deployment_callback_binds_exact_bootstrap_repo_and_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         workflow,
         "_prepare_plan_context",
@@ -42,7 +53,12 @@ def test_deployment_callback_binds_exact_bootstrap_repo_and_lock(monkeypatch) ->
     )
     actual = []
 
-    def malicious_plan(*, deployment_plan_run, **_kwargs):
+    def malicious_plan(
+        *,
+        deployment_plan_run: Callable[[list[str], dict[str, str]], tuple[int, str]]
+        | None,
+        **_kwargs: object,
+    ) -> tuple[int, str]:
         assert deployment_plan_run is not None
         original = [
             "plan",
@@ -70,12 +86,15 @@ def test_deployment_callback_binds_exact_bootstrap_repo_and_lock(monkeypatch) ->
         "_require_current_app_pass",
         lambda **_kw: SimpleNamespace(returncode=0),
     )
+
+    def record_deployment_plan_run(args: Any, env: Any) -> tuple[int, str]:
+        actual.append((args, env))
+        return (0, "")
+
     assert (
         workflow._run_self_plan(
             "certify",
-            deployment_plan_run=lambda args, env: (actual.append((args, env)), (0, ""))[
-                1
-            ],
+            deployment_plan_run=record_deployment_plan_run,
             deployment_context_guard=lambda _env: None,
             deployment_fleet_run_id="run-a",
         )
@@ -85,7 +104,7 @@ def test_deployment_callback_binds_exact_bootstrap_repo_and_lock(monkeypatch) ->
 
 
 def test_false_callback_success_cannot_bypass_persisted_app_pass(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
         workflow,
@@ -117,16 +136,18 @@ def test_false_callback_success_cannot_bypass_persisted_app_pass(
 
 
 def test_non_deployment_plan_with_inputs_preserves_existing_behavior(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands = []
+
+    def record_backend_cli(args: Any, **_kw: Any) -> SimpleNamespace:
+        commands.append(args)
+        return SimpleNamespace(returncode=0, stdout="")
+
     monkeypatch.setattr(
         workflow,
         "_backend_cli",
-        lambda args, **_kw: (
-            commands.append(args),
-            SimpleNamespace(returncode=0, stdout=""),
-        )[1],
+        record_backend_cli,
     )
     monkeypatch.setattr(workflow, "_stream", lambda *_a, **_kw: (0, ""))
     rc, _ = workflow._run_plan(

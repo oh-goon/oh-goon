@@ -24,3 +24,5 @@ Add `python/package-artifacts` to a Plan’s ordered `goons:` list with a plain 
 The command produces `package-distributions.tar` and `package-artifacts.json` in its project working directory. The bundle uses `content_store`; the manifest uses `evidence`. Native packaging/versioning remains the project command’s responsibility.
 
 Append another Goon to the Plan to add a capability. To change this command sequence, create a project-owned Atomic Goon and import it with an explicit `from:` source. See [authoring and local imports](../../../README.md#append-your-own-capability).
+
+See [artifact retention](../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md) for Run evidence and retained content.

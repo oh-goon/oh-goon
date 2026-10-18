@@ -294,6 +294,7 @@ def test_remote_runner_preserves_runtime_observation_on_workload_timeout(
     assert result["runtime_authority"] == expected
 
 
+@pytest.mark.certification
 def test_remote_runner_executes_opened_executable_after_path_replacement(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -333,6 +334,7 @@ def test_remote_runner_executes_opened_executable_after_path_replacement(
     assert result["runtime_authority"] == expected
 
 
+@pytest.mark.certification
 def test_remote_runner_restores_bound_interpreter_after_path_mutation(
     tmp_path: Path, monkeypatch
 ) -> None:

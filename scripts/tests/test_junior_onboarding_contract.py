@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 from oh_goon.services.repository_discovery import RepositoryDiscoveryService
@@ -52,7 +53,17 @@ def test_app_test_runner_owns_bootstrap_not_goon_order() -> None:
     assert '"league", "add-folder"' in runner
     assert '["lock", plan, *input_args, "--output", str(lock_path)]' in runner
     assert '"--lock-file",' in runner
-    assert '"plan",\n            "run",\n            plan,' in runner
+    assert any(
+        isinstance(node, (ast.List, ast.Tuple))
+        and len(node.elts) >= 3
+        and [ast.dump(item) for item in node.elts[:3]]
+        == [
+            ast.dump(ast.Constant(value="plan")),
+            ast.dump(ast.Constant(value="run")),
+            ast.dump(ast.Name(id="plan", ctx=ast.Load())),
+        ]
+        for node in ast.walk(ast.parse(runner))
+    )
     assert "repository_tooling.source_normalization" not in runner
     assert "OH_GOON_COPY_VENV" not in runner
     assert "import-certification-dependencies" not in runner

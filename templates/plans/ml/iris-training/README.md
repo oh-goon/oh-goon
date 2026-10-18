@@ -1,5 +1,7 @@
 # ml/iris-training
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Run the project’s Iris training command with configurable training and evaluation inputs.
 
 **Teaching example. Not a production MLOps template.**

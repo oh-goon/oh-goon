@@ -370,9 +370,6 @@ _STEP_OUTPUT_REFERENCE = re.compile(
 _WORKSPACE_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 _AGENT_LOCAL_PATH = r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*"
 _AGENT_LOCAL_REFERENCE = re.compile(rf"^local:{_AGENT_LOCAL_PATH}$")
-_AGENT_GITHUB_REFERENCE = re.compile(
-    rf"^github:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{{40}}:{_AGENT_LOCAL_PATH}$"
-)
 _AGENT_ACCEPTANCE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 # Named skills may be namespaced; acceptance profiles remain single-segment.
 _AGENT_SKILL_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}(?:/[a-z][a-z0-9-]{0,63})*$")
@@ -424,10 +421,8 @@ def validate_domain_input_value(definition: PlanInputDefinition, value: str, *, 
         case PlanInputType.REPOSITORY_REFERENCE:
             valid = _AGENT_LOCAL_REFERENCE.fullmatch(value) is not None
         case PlanInputType.SKILL_REFERENCE:
-            valid = (
-                _AGENT_LOCAL_REFERENCE.fullmatch(value) is not None
-                or _AGENT_GITHUB_REFERENCE.fullmatch(value) is not None
-                or (len(value) <= 128 and _AGENT_SKILL_NAME.fullmatch(value) is not None)
+            valid = _AGENT_LOCAL_REFERENCE.fullmatch(value) is not None or (
+                len(value) <= 128 and _AGENT_SKILL_NAME.fullmatch(value) is not None
             )
         case PlanInputType.ACCEPTANCE_PROFILE:
             valid = _AGENT_ACCEPTANCE.fullmatch(value) is not None

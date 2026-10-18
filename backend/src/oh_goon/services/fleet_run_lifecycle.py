@@ -188,11 +188,9 @@ class FleetRunLifecycle:
                 from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
 
                 agent_steps = [step for step in target.plan.steps if step.kind == "agent"]
-                if (
-                    len(agent_steps) != 1
-                    or not isinstance(agent_steps[0], ResolvedLocalSearchAgentStep)
-                    or len(target.agent_deliveries) != 1
-                ):
+                if any(
+                    not isinstance(step, ResolvedLocalSearchAgentStep) for step in agent_steps
+                ) or len(target.agent_deliveries) != len(agent_steps):
                     raise FleetPlanInvalid(
                         "standard-local Agent requires original typed frozen delivery"
                     )

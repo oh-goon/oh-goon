@@ -50,7 +50,7 @@ def _stack(tmp_path: Path):
         attempts,
         journal,
         execution,
-        RepositoryReconciler(journal, git),
+        RepositoryReconciler(git),
         RepositoryEffectSettlement(database, journal, attempts),
     )
     return database, attempts, journal, execution, git, attempt, recovery

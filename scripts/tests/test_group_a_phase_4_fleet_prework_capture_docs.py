@@ -7,6 +7,6 @@ JOURNAL = ROOT / "backend/src/oh_goon/runtime/journal.py"
 FRONT = ROOT / "backend/src/oh_goon/services/fleet_admission.py"
 
 
-def test_prework_capture_reuses_original_journal_and_fleet_owners():
+def test_prework_capture_reuses_original_journal_and_fleet_owners() -> None:
     assert "prepare_run_admission_in" in JOURNAL.read_text()
     assert "prepare_fleet_prework_capture_in" in FRONT.read_text()

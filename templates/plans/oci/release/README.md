@@ -1,5 +1,7 @@
 # oci/release
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Strict quality-gated OCI release: run the mandatory Python quality pipeline, then build and content-addressedly publish one OCI image. Publication uses explicit host-backed credentials and returns an immutable digest reference. Mutable release tags are not part of this plan.
 
 ## Use this Plan

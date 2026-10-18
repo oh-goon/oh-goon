@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from oh_goon.core.errors import StateConflict
+from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.models.reconciliation import (
     ConfirmedAppliedRepositoryReconciliation,
@@ -10,16 +12,15 @@ from oh_goon.core.models.reconciliation import (
     PartiallyAppliedRepositoryReconciliation,
     RepositoryReconciliation,
 )
+from oh_goon.core.product_identity import repository_id
 from oh_goon.core.vocabulary import CommandSafety, ReconciliationOutcome
 from oh_goon.engine.git import GitService
-from oh_goon.runtime.journal import Journal
 
 
 class RepositoryReconciler:
     """Classify uncertain external effects from durable intent plus repository evidence."""
 
-    def __init__(self, journal: Journal, git: GitService) -> None:
-        self._journal = journal
+    def __init__(self, git: GitService) -> None:
         self._git = git
 
     def reconcile(
@@ -27,10 +28,15 @@ class RepositoryReconciler:
         repository: Path,
         operation_id: str,
         *,
+        report: OperationReport | None,
         safety: CommandSafety,
         baseline: RepositoryStateFingerprint,
     ) -> RepositoryReconciliation:
-        report = self._journal.operation(operation_id)
+        if report is not None and (
+            report.provenance.operation_id != operation_id
+            or report.repository.repository_id != repository_id(repository)
+        ):
+            raise StateConflict("Reconciliation report belongs to another repository effect")
         current = self._git.fingerprint(repository)
         if report is not None:
             return ConfirmedAppliedRepositoryReconciliation(

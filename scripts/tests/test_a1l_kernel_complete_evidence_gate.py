@@ -14,7 +14,7 @@ from oh_goon.repository_tooling import a1_kernel_custody_receipt as module
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _attempt(tmp_path: Path, **changes):
+def _attempt(tmp_path: Path, **changes: str | bool) -> tuple[Path, Path]:
     directory = tmp_path / "proof"
     directory.mkdir()
     suite = ET.Element("testsuite", tests="3", failures="0", errors="0", skipped="0")
@@ -34,7 +34,7 @@ def _attempt(tmp_path: Path, **changes):
             suite,
             "testcase",
             classname="test_a1h_real_linux_process_custody",
-            name=list(suite)[0].get("name"),
+            name=list(suite)[0].get("name", ""),
         )
     if changes.get("wrong_owner"):
         list(suite)[0].set("classname", "test_unrelated")
@@ -47,10 +47,14 @@ def _attempt(tmp_path: Path, **changes):
     return junit, log
 
 
-def test_three_real_kernel_cases_retain_distinct_diagnostic_boundary(tmp_path: Path):
+def test_three_real_kernel_cases_retain_distinct_diagnostic_boundary(
+    tmp_path: Path,
+) -> None:
     junit, log = _attempt(tmp_path)
     result = module.verify(junit, log, 0)
     assert result["test_count"] == 3
+    assert isinstance(result["junit_sha256"], str)
+    assert isinstance(result["log_sha256"], str)
     assert len(result["junit_sha256"]) == len(result["log_sha256"]) == 64
     assert result["real_deployment_custody"] == "NOT_ATTESTED"
     assert result["app_pass"] == "NOT_ESTABLISHED"
@@ -70,7 +74,9 @@ def test_three_real_kernel_cases_retain_distinct_diagnostic_boundary(tmp_path: P
         "malformed_xml",
     ],
 )
-def test_skipped_replaced_or_incomplete_proof_rejected(tmp_path: Path, mutation: str):
+def test_skipped_replaced_or_incomplete_proof_rejected(
+    tmp_path: Path, mutation: str
+) -> None:
     args = (
         {mutation: next(iter(module.EXPECTED))}
         if mutation == "skip"
@@ -88,7 +94,7 @@ def test_skipped_replaced_or_incomplete_proof_rejected(tmp_path: Path, mutation:
         module.verify(junit, log, 1 if mutation == "failed_exit" else 0)
 
 
-def test_native_kernel_target_uses_complete_evidence_gate():
+def test_native_kernel_target_uses_complete_evidence_gate() -> None:
     makefile = (ROOT / "Makefile").read_text()
     target = makefile.split("\na1-native-kernel-custody-test:\n", 1)[1].split(
         "\n\n", 1
@@ -101,7 +107,7 @@ def test_native_kernel_target_uses_complete_evidence_gate():
     assert "scripts/qualify_native_wsl.sh" not in target
 
 
-def test_root_host_cannot_reuse_existing_evidence_directory(tmp_path: Path):
+def test_root_host_cannot_reuse_existing_evidence_directory(tmp_path: Path) -> None:
     """One attempt cannot append receipts to previous attempts."""
     proof = tmp_path / "already-exists"
     proof.mkdir()

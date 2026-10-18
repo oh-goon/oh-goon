@@ -12,6 +12,9 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations import _fleet_plan_cgroup_resources as cg
+from tests.factories.fleet_plan_executor import simulated_cgroup_custody  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("simulated_cgroup_custody")
 
 
 def _cgroup(tmp_path: Path) -> Path:

@@ -1,5 +1,7 @@
 # security/trivy-audit
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Runs the reusable `security/trivy-audit` Goon as one strict Plan.
 
 ## Use this Plan

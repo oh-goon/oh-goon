@@ -44,8 +44,8 @@ def test_owner_key_mutation_moves_api_and_stripping_end_to_end(
     assert child[old_key] == "ordinary-after-owner-move"
 
     with pytest.raises(FleetPlanInvalid, match="process-local control-plane"):
-        fleet_plan_environment._require_exportable_host_environment_name(moved_key)
-    fleet_plan_environment._require_exportable_host_environment_name(old_key)
+        fleet_plan_environment.require_exportable_host_environment_name(moved_key)
+    fleet_plan_environment.require_exportable_host_environment_name(old_key)
 
 
 def test_acceptance_launchers_inject_through_owner(

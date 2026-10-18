@@ -1,5 +1,7 @@
 # oci/tag-gate
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Read-only deployment/release gate for an existing OCI tag. The plan succeeds only when the mutable tag currently resolves to the exact expected sha256 digest. It never mutates registry state; promotion remains unsupported until an atomic compare-and-set registry authority exists.
 
 ## Use this Plan

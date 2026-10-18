@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from oh_goon.repository_tooling.repository_understanding_graph import (
     EXPECTED_EDGES,
     evidence_authority_class,
@@ -10,7 +12,7 @@ from oh_goon.repository_tooling.repository_understanding_graph import (
 )
 
 
-def _assertion(edge, polarity="AFFIRMED"):
+def _assertion(edge: Mapping[str, str], polarity: str = "AFFIRMED") -> dict[str, str]:
     return {
         "question_id": "Q01",
         "subject": edge["subject"],

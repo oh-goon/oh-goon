@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture import (
@@ -9,7 +10,9 @@ def test_current_tree_satisfies_sandbox_provider_boundary() -> None:
     assert contract.check_sandbox_provider_boundary_contract() == []
 
 
-def test_provider_sdk_import_is_rejected(tmp_path: Path, monkeypatch) -> None:
+def test_provider_sdk_import_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = tmp_path
     transport = root / contract._TRANSPORT
     isolation = root / contract._ISOLATION

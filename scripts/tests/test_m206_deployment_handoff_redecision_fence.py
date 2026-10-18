@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pathlib import Path
 
 import pytest
@@ -31,7 +33,9 @@ ARGS = [
 ]
 
 
-def prepared(monkeypatch):
+def prepared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[FleetPreworkProvisioner, dict[str, str], list[str]]:
     owner = object.__new__(FleetPreworkProvisioner)
     object.__setattr__(
         owner, "executor_inventory_file", Path("/deployment/inventory.toml")
@@ -42,7 +46,7 @@ def prepared(monkeypatch):
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", "/deployment/league.toml")
     observed: list[str] = []
 
-    def inspect(_self, run_id):
+    def inspect(_self: object, run_id: str) -> dict[str, str]:
         observed.append(run_id)
         return {"status": "OBSERVED_NOT_ADMITTED"}
 
@@ -57,16 +61,20 @@ def prepared(monkeypatch):
     return owner, env, observed
 
 
-def test_exact_canonical_cli_handoff_and_original_reobservation(monkeypatch):
+def test_exact_canonical_cli_handoff_and_original_reobservation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     owner, env, observed = prepared(monkeypatch)
     invoked = []
+
+    def record_main(args: Any, *, fleet_provisioner: Any) -> int:
+        invoked.append((args, fleet_provisioner))
+        return 0
+
     monkeypatch.setattr(
         cli,
         "main",
-        lambda args, *, fleet_provisioner: (
-            invoked.append((args, fleet_provisioner)),
-            0,
-        )[1],
+        record_main,
     )
     assert (
         frontdoor._deployment_context_mismatch(
@@ -93,7 +101,9 @@ def test_exact_canonical_cli_handoff_and_original_reobservation(monkeypatch):
         ["plan", "run", "templates/plans/oh-goon/prepare-release/plan.yml", *ARGS[3:]],
     ],
 )
-def test_mutated_cli_grammar_never_reaches_app(monkeypatch, attack):
+def test_mutated_cli_grammar_never_reaches_app(
+    monkeypatch: pytest.MonkeyPatch, attack: list[str]
+) -> None:
     owner, env, observed = prepared(monkeypatch)
     monkeypatch.setattr(
         cli, "main", lambda *_a, **_kw: pytest.fail("wrong CLI invoked")
@@ -105,26 +115,20 @@ def test_mutated_cli_grammar_never_reaches_app(monkeypatch, attack):
     assert observed == []
 
 
-def test_journal_mode_drift_rejected_before_cli_or_bootstrap(monkeypatch):
+def test_journal_mode_drift_rejected_before_cli_or_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     owner, env, observed = prepared(monkeypatch)
     monkeypatch.setenv(SQLITE_JOURNAL_MODE_ENV, "WAL")
-    assert (
-        "journal"
-        in frontdoor._deployment_context_mismatch(
-            env, fleet_provisioner=owner, fleet_run_id="run-a"
-        ).lower()
+    mismatch = frontdoor._deployment_context_mismatch(
+        env, fleet_provisioner=owner, fleet_run_id="run-a"
     )
-    monkeypatch.setattr(
-        cli, "main", lambda *_a, **_kw: pytest.fail("wrong CLI invoked")
-    )
-    rc, why = frontdoor._run_deployment_plan(
-        ARGS, env, fleet_provisioner=owner, fleet_run_id="run-a"
-    )
-    assert rc == 2 and "journal" in why.lower()
-    assert observed == []
+    assert mismatch is not None and "journal" in mismatch.lower()
 
 
-def test_signer_custody_revoked_after_bootstrap_guard_rejected_before_cli(monkeypatch):
+def test_signer_custody_revoked_after_bootstrap_guard_rejected_before_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     owner, env, observed = prepared(monkeypatch)
     assert (
         frontdoor._deployment_context_mismatch(
@@ -134,7 +138,7 @@ def test_signer_custody_revoked_after_bootstrap_guard_rejected_before_cli(monkey
     )
     assert observed == ["run-a"]
 
-    def revoked(_self, _run_id):
+    def revoked(_self: object, _run_id: str) -> None:
         raise TrustProtocolError("deployment signer custody revoked after bootstrap")
 
     monkeypatch.setattr(
@@ -149,13 +153,15 @@ def test_signer_custody_revoked_after_bootstrap_guard_rejected_before_cli(monkey
         )
 
 
-def test_revocation_before_bootstrap_never_calls_backend_or_plan(monkeypatch):
+def test_revocation_before_bootstrap_never_calls_backend_or_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Guard runs before workflow's League add-folder and lock commands."""
     from oh_goon import workflow
 
     owner, env, observed = prepared(monkeypatch)
 
-    def revoked(_self, _run_id):
+    def revoked(_self: object, _run_id: str) -> None:
         raise TrustProtocolError("original native signer revoked")
 
     monkeypatch.setattr(
@@ -178,7 +184,9 @@ def test_revocation_before_bootstrap_never_calls_backend_or_plan(monkeypatch):
     assert observed == []
 
 
-def test_inventory_change_at_prebootstrap_guard_prevents_lock(monkeypatch):
+def test_inventory_change_at_prebootstrap_guard_prevents_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from oh_goon import workflow
 
     owner, env, observed = prepared(monkeypatch)

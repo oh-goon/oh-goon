@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_native_kernel_custody_is_explicit_and_keeps_m209_independent():
+def test_native_kernel_custody_is_explicit_and_keeps_m209_independent() -> None:
     makefile = (ROOT / "Makefile").read_text()
     assert ".PHONY: a1-native-kernel-custody-test " in makefile
     target = makefile.split("\na1-native-kernel-custody-test:\n", 1)[1].split(
@@ -34,7 +34,7 @@ def test_native_kernel_custody_is_explicit_and_keeps_m209_independent():
     )
 
 
-def test_unprivileged_host_blocks_before_invoking_native_test(tmp_path):
+def test_unprivileged_host_blocks_before_invoking_native_test(tmp_path: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     (fake_bin / "id").write_text("#!/bin/sh\necho 12345\n")

@@ -1,5 +1,7 @@
 # kubernetes/set-image
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Standalone immutable Kubernetes Deployment image commit. The requested image must already be digest-qualified. This changes one Deployment pod-template image with optimistic JSON Patch tests and intentionally makes no rollout-readiness claim.
 
 ## Use this Plan

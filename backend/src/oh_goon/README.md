@@ -147,4 +147,4 @@ CLI syntax/help changes should update the owning user/contributor documentation 
 
 ## Frozen execution identity
 
-`plan.yml` owns intent, `goon.yml` owns behavior, and the resolver remains the only Plan/Goon interpreter. `goon.lock` is only the generated compact fingerprint of that resolved execution; ecosystem lockfiles retain dependency truth, Enforcer retains authorization, and Game Tape retains execution evidence. See `docs/goon-lock.md`.
+`plan.yml` owns intent, `goon.yml` owns behavior, and the resolver remains the only Plan/Goon interpreter. `goon.lock` records the compact execution fingerprint and exact commits for declared remote Skill sources; ecosystem lockfiles retain dependency truth, Enforcer retains authorization, and Game Tape retains execution evidence. See `docs/goon-lock.md`.

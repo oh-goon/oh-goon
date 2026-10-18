@@ -27,6 +27,8 @@ def render_execution_lock(lock: ExecutionLock) -> str:
     }
     if lock.external:
         payload["external"] = {item.path: item.digest for item in lock.external}
+    if lock.skill_sources:
+        payload["skill_sources"] = [item.model_dump(mode="json") for item in lock.skill_sources]
     payload["digest"] = lock.digest
     return _GENERATED_COMMENT + yaml.safe_dump(
         payload,

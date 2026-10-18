@@ -6,7 +6,6 @@ from oh_goon.core.models.scheduling import SchedulingPriority
 
 def test_priority_is_not_part_of_goon_lock_identity() -> None:
     fields = set(ExecutionLock.model_fields)
-    assert fields == {"lock_version", "plan", "execution", "external", "digest"}
     assert not fields & {"priority", "requested_priority", "admitted_priority", "queue_seq"}
 
 

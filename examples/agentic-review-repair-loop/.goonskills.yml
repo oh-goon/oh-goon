@@ -1,0 +1,9 @@
+sources:
+  cookbook:
+    source: https://github.com/Hugloss/agentsCookbook.git
+    ref: 40be826e6883d819ee6cf5c10946c793f0ef0f5f
+    skills:
+      - skills/single-source-of-truth-review
+      - skills/semantic-redecision-review
+      - skills/resolved-fact-regression-review
+      - skills/canonical-consumer-contract-review

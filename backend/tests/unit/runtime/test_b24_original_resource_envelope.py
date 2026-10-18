@@ -19,6 +19,7 @@ from oh_goon.integrations import linux_physical_observer
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     check_x0_single_execution_path,
 )
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.unit.core.test_enforcer_lace_trust import authenticator
 from tests.unit.runtime.test_b22_original_physical_sampling import (
     mount_descriptor,
@@ -147,9 +148,9 @@ def test_x0_requires_one_bound_envelope_and_rejects_missing_transport(tmp_path):
     assert check_x0_single_execution_path(tmp_path) == []
     owner = tmp_path / "backend/src/oh_goon/runtime/enforcer_lace_fleet_resource_owner.py"
     text = owner.read_text()
-    assert "before.subject_identity, scope, facts, before.envelope," in text
     owner.write_text(
-        text.replace(
+        replace_python_syntax(
+            text,
             "before.subject_identity, scope, facts, before.envelope,",
             "before.subject_identity, scope, facts, None,",
         )

@@ -24,6 +24,7 @@ from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     _check_signed_workspace_mount_projection,
 )
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.unit.integrations.test_b12c_live_prework_resource_bridge import (
     _backend,
     _execute,
@@ -144,30 +145,32 @@ def test_x0_mutations_reject_workspace_bypass(tmp_path, mutation):
         target.parent.mkdir(parents=True, exist_ok=True)
         text = path.read_text()
         if mutation == "drop-field" and rel.startswith("core/"):
-            text = text.replace(
-                "    read_only_workspace: OriginalSandboxMount | None = None\n", "", 1
+            text = replace_python_syntax(
+                text, "    read_only_workspace: OriginalSandboxMount | None = None\n", ""
             )
         elif mutation == "drop-digest" and rel.startswith("core/"):
-            text = text.replace(
-                "members['read_only_workspace'] = {", "members['unused_workspace'] = {", 1
+            text = replace_python_syntax(
+                text, "members['read_only_workspace'] = {", "members['unused_workspace'] = {"
             )
         elif mutation == "drop-target" and rel.startswith("core/"):
-            text = text.replace("targets += (self.read_only_workspace.target,)", "targets += ()", 1)
+            text = replace_python_syntax(
+                text, "targets += (self.read_only_workspace.target,)", "targets += ()"
+            )
         elif mutation == "drop-source" and rel.endswith("fleet_plan_local_lace_intent.py"):
-            text = text.replace(
+            text = replace_python_syntax(
+                text,
                 "source=str(request.read_only_workspace.snapshot_path)",
                 "source=str(request.attempt.paths.workspace)",
-                1,
             )
         elif mutation == "drop-sha" and rel.endswith("fleet_plan_local_lace_intent.py"):
-            text = text.replace(
-                "sha256=request.read_only_workspace.identity.sha256", "sha256='0' * 64", 1
+            text = replace_python_syntax(
+                text, "sha256=request.read_only_workspace.identity.sha256", "sha256='0' * 64"
             )
         elif mutation == "drop-consumption" and rel.endswith("fleet_plan_bubblewrap_isolation.py"):
-            text = text.replace(
+            text = replace_python_syntax(
+                text,
                 "        _require_original_signed_mount_identity(request, signed_mounts_identity)\n",
                 "",
-                1,
             )
         target.write_text(text)
     assert _check_signed_workspace_mount_projection(tmp_path)

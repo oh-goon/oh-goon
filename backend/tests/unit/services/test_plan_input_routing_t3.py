@@ -13,6 +13,7 @@ from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_input_routing import CallerFileRoutingOrigin, _binding_origin
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from tests.factories.shipped_templates import AGENT_PLAN_TEMPLATES
 
 
 def _resolver() -> FleetPlanResolver:
@@ -334,7 +335,7 @@ goons:
     assert shorthand["occurrences"][0]["source_sha256"] != legacy["occurrences"][0]["source_sha256"]
 
 
-def test_every_shipped_plan_route_has_exact_resolved_import_occurrences():
+def test_conventional_plan_routes_have_exact_resolved_import_occurrences():
     """Catalog-wide parity: real resolved import IDs, not synthesized name-only routes."""
     plan_store = PlanTemplateStore()
     resolver = _resolver()
@@ -350,6 +351,8 @@ def test_every_shipped_plan_route_has_exact_resolved_import_occurrences():
     }
     checked: list[str] = []
     for key in plan_store.keys():
+        if key in AGENT_PLAN_TEMPLATES:
+            continue  # Captured Agent imports are exercised by the native Agent fixtures.
         path = plan_store.source(key).path
         canonical = resolver.inspect_inputs(path)
         values = {
@@ -372,4 +375,4 @@ def test_every_shipped_plan_route_has_exact_resolved_import_occurrences():
         ), key
         assert reported["status"] == "resolved_not_executed", key
         checked.append(key)
-    assert len(checked) == 24
+    assert set(checked).union(AGENT_PLAN_TEMPLATES) == set(plan_store.keys())

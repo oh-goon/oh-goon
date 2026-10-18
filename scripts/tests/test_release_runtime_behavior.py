@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+from email.message import Message
+
+
+from typing import Any
+from typing import Self
+from collections.abc import Callable
+from collections.abc import Iterable
+
+import time
+import urllib.request
+
 import io
 from pathlib import Path
 import urllib.error
@@ -163,9 +174,11 @@ def test_entry_point_issues_reports_invalid_metadata(tmp_path: Path) -> None:
 def test_runtime_request_json_wraps_http_and_rejects_non_object(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    error = urllib.error.HTTPError("http://x", 409, "conflict", {}, io.BytesIO(b"boom"))
+    error = urllib.error.HTTPError(
+        "http://x", 409, "conflict", Message(), io.BytesIO(b"boom")
+    )
     monkeypatch.setattr(
-        runtime_journey.urllib.request,
+        urllib.request,
         "urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(error),
     )
@@ -173,19 +186,17 @@ def test_runtime_request_json_wraps_http_and_rejects_non_object(
         runtime_journey._request_json("GET", "http://x", access_token="token")
 
     class Response:
-        def read(self):
+        def read(self) -> bytes:
             return b"[]"
 
-        def __enter__(self):
+        def __enter__(self) -> Self:
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: object) -> None:
             return None
 
     response = Response()
-    monkeypatch.setattr(
-        runtime_journey.urllib.request, "urlopen", lambda *_a, **_k: response
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: response)
     with pytest.raises(RuntimeError, match="expected JSON object"):
         runtime_journey._request_json("GET", "http://x", access_token="token")
 
@@ -261,7 +272,7 @@ def test_start_acceptance_registers_parent_and_submits_displayed_freshness_autho
     calls = []
     expected_path = str(Path("/repos/a").resolve())
 
-    def request(method, url, **kwargs):
+    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         calls.append((method, url, kwargs.get("payload")))
         if url.endswith("/api/locations") and method == "GET":
             return {"locations": []}
@@ -290,7 +301,7 @@ def test_start_acceptance_registers_parent_and_submits_displayed_freshness_autho
 
     calls.clear()
 
-    def already_registered(method, url, **kwargs):
+    def already_registered(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         calls.append((method, url, kwargs.get("payload")))
         if url.endswith("/api/locations") and method == "GET":
             return {"locations": ["/repos"]}
@@ -305,7 +316,7 @@ def test_start_acceptance_registers_parent_and_submits_displayed_freshness_autho
     assert [call[0] for call in calls] == ["GET", "GET", "POST"]
 
 
-def _clock(values):
+def _clock(values: Iterable[float]) -> Callable[[], float]:
     iterator = iter(values)
     return lambda: next(iterator)
 
@@ -318,8 +329,8 @@ def test_wait_for_run_status_success_wrong_terminal_and_timeout(
         "_request_json",
         lambda *_a, **_k: {"run": {"status": "RUNNING"}},
     )
-    monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1, 2.0]))
-    monkeypatch.setattr(runtime_journey.time, "sleep", lambda _x: None)
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1, 2.0]))
+    monkeypatch.setattr(time, "sleep", lambda _x: None)
     with pytest.raises(RuntimeError, match="did not reach"):
         runtime_journey.wait_for_acceptance_run_status(
             base_url="x",
@@ -333,7 +344,7 @@ def test_wait_for_run_status_success_wrong_terminal_and_timeout(
         "_request_json",
         lambda *_a, **_k: {"run": {"status": "FAILED"}},
     )
-    monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1]))
     with pytest.raises(RuntimeError, match="reached 'FAILED'"):
         runtime_journey.wait_for_acceptance_run_status(
             base_url="x", run_id="r", access_token="t", expected_status="COMPLETED"
@@ -343,7 +354,7 @@ def test_wait_for_run_status_success_wrong_terminal_and_timeout(
         "_request_json",
         lambda *_a, **_k: {"run": {"status": "COMPLETED"}, "outcome": "SUCCESS"},
     )
-    monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1]))
     assert (
         runtime_journey.wait_for_acceptance_run_status(
             base_url="x", run_id="r", access_token="t", expected_status="COMPLETED"
@@ -355,13 +366,13 @@ def test_wait_for_run_status_success_wrong_terminal_and_timeout(
 def test_wait_interruptible_step_success_terminal_and_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def started(_method, url, **_kwargs):
+    def started(_method: str, url: str, **_kwargs: object) -> dict[str, Any]:
         if url.endswith("/events?after=0"):
             return {"events": [{"event_type": "PROCESS_STARTED", "pid": 123}]}
         return {"run": {"status": "RUNNING"}}
 
     monkeypatch.setattr(runtime_journey, "_request_json", started)
-    monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1]))
     assert (
         runtime_journey.wait_for_interruptible_step(
             base_url="x", run_id="r", repository=tmp_path, access_token="t"
@@ -373,7 +384,7 @@ def test_wait_interruptible_step_success_terminal_and_timeout(
         "_request_json",
         lambda *_a, **_k: {"run": {"status": "FAILED"}},
     )
-    monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1]))
     with pytest.raises(RuntimeError, match="terminalized before crash point"):
         runtime_journey.wait_for_interruptible_step(
             base_url="x", run_id="r", repository=tmp_path, access_token="t"
@@ -383,8 +394,8 @@ def test_wait_interruptible_step_success_terminal_and_timeout(
         "_request_json",
         lambda *_a, **_k: {"run": {"status": "RUNNING"}},
     )
-    monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1, 2.0]))
-    monkeypatch.setattr(runtime_journey.time, "sleep", lambda _x: None)
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1, 2.0]))
+    monkeypatch.setattr(time, "sleep", lambda _x: None)
     with pytest.raises(
         RuntimeError, match="START_NOT_OBSERVED_WITHIN_ACCEPTANCE_BOUND"
     ) as exc_info:
@@ -406,7 +417,7 @@ def test_run_acceptance_goon_success_failure_missing_tape_and_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(runtime_journey, "start_acceptance_goon", lambda **_k: "run")
-    monkeypatch.setattr(runtime_journey.time, "sleep", lambda _x: None)
+    monkeypatch.setattr(time, "sleep", lambda _x: None)
     monkeypatch.setattr(
         runtime_journey,
         "_request_json",
@@ -416,7 +427,7 @@ def test_run_acceptance_goon_success_failure_missing_tape_and_timeout(
             "game_tape": ["acceptance-step"],
         },
     )
-    monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1]))
     assert (
         runtime_journey.run_acceptance_goon(
             base_url="x", server_repository_path="/r", access_token="t"
@@ -428,7 +439,7 @@ def test_run_acceptance_goon_success_failure_missing_tape_and_timeout(
         "_request_json",
         lambda *_a, **_k: {"run": {"status": "FAILED"}, "outcome": "FAIL"},
     )
-    monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1]))
     with pytest.raises(RuntimeError, match="did not pass"):
         runtime_journey.run_acceptance_goon(
             base_url="x", server_repository_path="/r", access_token="t"
@@ -442,7 +453,7 @@ def test_run_acceptance_goon_success_failure_missing_tape_and_timeout(
             "game_tape": [],
         },
     )
-    monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1]))
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1]))
     with pytest.raises(RuntimeError, match="does not contain"):
         runtime_journey.run_acceptance_goon(
             base_url="x", server_repository_path="/r", access_token="t"
@@ -452,7 +463,7 @@ def test_run_acceptance_goon_success_failure_missing_tape_and_timeout(
         "_request_json",
         lambda *_a, **_k: {"run": {"status": "RUNNING"}},
     )
-    monkeypatch.setattr(runtime_journey.time, "monotonic", _clock([0.0, 0.1, 2.0]))
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1, 2.0]))
     with pytest.raises(RuntimeError, match="did not finish"):
         runtime_journey.run_acceptance_goon(
             base_url="x",

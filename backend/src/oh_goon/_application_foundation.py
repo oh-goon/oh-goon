@@ -181,15 +181,21 @@ def _prove_startup_safety(
     return effect_recovery, auditor, service
 
 
+def standard_local_profile(requested: bool | None, *, deployment_selected: bool) -> bool:
+    """Own the ordinary local default; an explicit deployment selects strict execution."""
+    return not deployment_selected if requested is None else requested
+
+
 def build_runtime_foundation(
     *,
     fleet_provisioner: FleetPreworkProvisioner | None = None,
     standard_local: bool = False,
 ) -> RuntimeFoundation:
-    """Compose production services with mandatory native Fleet Enforcer admission.
+    """Compose the selected local or strict Fleet execution profile.
 
-    The deployment may explicitly enroll Runs using a complete, independently
-    verified provisioner. Absence means reject Fleet Plan work, not legacy mode.
+    Strict deployments enroll Runs through their independently verified
+    provisioner. Ordinary local execution uses the same Fleet lifecycle with
+    host process authority and makes no isolation or custody claim.
     """
     from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 
@@ -207,7 +213,7 @@ def build_runtime_foundation(
     schedule_executions = ScheduleExecutionStore(database)
     git = GitService()
     effect_settlement = RepositoryEffectSettlement(database, local.journal, effect_attempts)
-    effect_reconciler = RepositoryReconciler(local.journal, git)
+    effect_reconciler = RepositoryReconciler(git)
     effect_recovery, auditor, runtime_safety = _prove_startup_safety(
         local.state,
         local.execution,

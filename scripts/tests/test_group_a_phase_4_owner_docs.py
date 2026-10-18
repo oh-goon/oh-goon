@@ -6,11 +6,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def parsed(path):
+def parsed(path: str) -> ast.Module:
     return ast.parse((ROOT / path).read_text(encoding="utf-8"))
 
 
-def test_direct_and_fleet_common_cut_route_through_fleet_planner():
+def test_direct_and_fleet_common_cut_route_through_fleet_planner() -> None:
     direct = parsed("backend/src/oh_goon/services/direct_effect_admission.py")
     fleet = parsed("backend/src/oh_goon/services/fleet_admission.py")
     direct_run = next(
@@ -30,7 +30,7 @@ def test_direct_and_fleet_common_cut_route_through_fleet_planner():
     assert {"admit_runtime_cut", "require_effects_for_cut"} <= plan_calls
 
 
-def test_no_live_causal_journal_activated_outside_phase4_boundary():
+def test_no_live_causal_journal_activated_outside_phase4_boundary() -> None:
     for path in (
         "backend/src/oh_goon/_application_foundation.py",
         "backend/src/oh_goon/_application_services.py",

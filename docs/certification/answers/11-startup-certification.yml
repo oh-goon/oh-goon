@@ -745,7 +745,7 @@ questions:
     misconception_id: identity_scope_confusion
   evidence_expectations:
   - Makefile:1-180
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - scripts/tests/test_dependency_sync_contract.py:1-36
 - id: Q89
   severity: critical
@@ -791,7 +791,7 @@ questions:
     severity: critical
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - scripts/tests/test_native_command.py:1-176
   - scripts/tests/test_dependency_sync_contract.py:1-36
 - id: Q91
@@ -817,7 +817,7 @@ questions:
   evidence_expectations:
   - .gitignore:1-13
   - backend/src/oh_goon/core/source_tree_policy.py:1-128
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - scripts/tests/test_package_slim.py:115-165
 - id: Q92
   severity: normal
@@ -841,7 +841,7 @@ questions:
     severity: normal
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - backend/uv.lock:1-1
   - scripts/tests/test_dependency_resolution.py:1-35
 - id: Q93
@@ -867,7 +867,7 @@ questions:
     severity: normal
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - scripts/tests/test_dependency_sync_contract.py:1-36
 - id: Q94
   severity: normal
@@ -893,7 +893,7 @@ questions:
     misconception_id: semantic_invariant_violation
   evidence_expectations:
   - backend/pyproject.toml:1-95
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - backend/uv.lock:1-1
 - id: Q95
   severity: normal
@@ -971,7 +971,7 @@ questions:
     misconception_id: identity_scope_confusion
   evidence_expectations:
   - backend/src/oh_goon/core/source_tree_policy.py:1-128
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - scripts/tests/test_package_slim.py:115-165
   - scripts/tests/test_native_command.py:1-176
 - id: Q98
@@ -997,7 +997,7 @@ questions:
     misconception_id: absence_as_positive_evidence
   evidence_expectations:
   - backend/src/oh_goon/repository_tooling/public_dependency_privacy.py:1-118
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
 - id: Q99
   severity: normal
   expected_claims:
@@ -1096,7 +1096,7 @@ questions:
     severity: normal
     misconception_id: caller_owner_confusion
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - scripts/tests/test_dependency_resolution.py:1-35
 - id: Q103
   severity: normal
@@ -1463,7 +1463,7 @@ questions:
   - Makefile:113-170
   - README.md:24-29
   - docs/development/APP_CERTIFICATION.md:1-35
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
 - id: Q117
   severity: normal
   expected_claims:
@@ -1891,7 +1891,7 @@ questions:
     misconception_id: observer_authority_confusion
   evidence_expectations:
   - Makefile:1-145
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - scripts/init_doctor.sh:1-98
   - scripts/tests/test_dependency_resolution.py:1-35
   - scripts/tests/test_init_doctor.py:1-50
@@ -1934,7 +1934,7 @@ questions:
   - templates/plans/oh-goon/app-certification/plan.yml:1-8
   - backend/src/oh_goon/cli_self.py:16-62
   - backend/src/oh_goon/workflow.py:1-620
-  - backend/src/oh_goon/repository_tooling/self_certification_plan.py:75-178
+  - backend/src/oh_goon/repository_tooling/self_certification_plan.py:75-142
   - backend/src/oh_goon/repository_tooling/architecture/_structural_authority_certification.py:7-86
   - backend/tests/unit/entrypoints/test_cli_self_plan.py:1-73
   - scripts/tests/test_workflow_run.py:1-280
@@ -2189,7 +2189,7 @@ questions:
     severity: normal
     misconception_id: identity_scope_confusion
   evidence_expectations:
-  - backend/src/oh_goon/runtime/local_launch_reuse.py:1-131
+  - backend/src/oh_goon/runtime/local_launch_reuse.py:1-130
   - backend/src/oh_goon/runtime/local_launch_binding.py:70-145
   - backend/src/oh_goon/cli_start.py:25-105
   - backend/src/oh_goon/repository_tooling/local_dev_launch.py:1-60
@@ -2531,10 +2531,10 @@ questions:
     severity: normal
     misconception_id: identity_scope_confusion
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - templates/plans/oh-goon/app-certification/README.md:1-14
   - docs/development/APP_CERTIFICATION.md:1-35
-  - backend/src/oh_goon/integrations/_fleet_plan_run_lineage.py:289-361
+  - backend/src/oh_goon/integrations/_fleet_plan_run_lineage.py:289-359
   - backend/src/oh_goon/workflow.py:170-330
   - backend/src/oh_goon/runtime/game_tape_live_output.py:20-125
   - backend/src/oh_goon/services/fleet_run_execution.py:25-143
@@ -2764,10 +2764,10 @@ questions:
     severity: normal
     misconception_id: identity_scope_confusion
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-86
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
   - templates/plans/oh-goon/app-certification/README.md:1-14
   - docs/development/APP_CERTIFICATION.md:1-35
-  - backend/src/oh_goon/integrations/_fleet_plan_run_lineage.py:289-361
+  - backend/src/oh_goon/integrations/_fleet_plan_run_lineage.py:289-359
   - backend/src/oh_goon/workflow.py:170-330
   - backend/src/oh_goon/runtime/game_tape_live_output.py:20-125
   - backend/src/oh_goon/services/fleet_run_execution.py:25-143

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pathlib import Path
 
 import pytest
@@ -22,8 +24,8 @@ from oh_goon.core.enforcer_lace_trust import (
 )
 def test_unprovisioned_native_fleet_is_a_blocked_authority_not_application_bug(
     denial: str,
-    monkeypatch,
-    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
         workflow_run,
@@ -32,7 +34,7 @@ def test_unprovisioned_native_fleet_is_a_blocked_authority_not_application_bug(
     )
     calls = []
 
-    def fail_plan(**kwargs):
+    def fail_plan(**kwargs: Any) -> tuple[int, str]:
         calls.append(kwargs)
         return 2, denial + "\n"
 
@@ -50,8 +52,8 @@ def test_unprovisioned_native_fleet_is_a_blocked_authority_not_application_bug(
 
 
 def test_other_prework_failures_are_not_silently_classified_as_missing_provisioning(
-    monkeypatch,
-    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
         workflow_run,
@@ -70,8 +72,8 @@ def test_other_prework_failures_are_not_silently_classified_as_missing_provision
 
 
 def test_admitted_run_error_does_not_reclassify_as_missing_prework_enrollment(
-    monkeypatch,
-    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
         workflow_run,

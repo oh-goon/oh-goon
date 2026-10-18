@@ -9,6 +9,7 @@ from collections.abc import Callable
 from contextvars import ContextVar
 
 from oh_goon.application import ApplicationRuntime
+from oh_goon.cli_agent_providers import agent_connection_from_args
 from oh_goon.cli_plan_definition_commands import (
     _check,
     _diff,
@@ -108,6 +109,13 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
         if repair_budget is not None:
+            review = getattr(args, "review_passes", None) is not None
+            review_options = {}
+            if review:
+                review_options = dict(
+                    review_write_roots=tuple(args.repair_write_root),
+                    agent_connection=agent_connection_from_args(args),
+                )
             result = runtime.plans.repair(
                 args.plan,
                 budget=repair_budget,
@@ -120,6 +128,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 lock_path=args.lock_file,
                 extensions_path=args.extensions,
                 requested_priority=args.priority,
+                **review_options,
             )
             return _print_agent_repair_result(result, as_json=as_json)
         admitted = runtime.plans.run(
@@ -135,6 +144,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             agent_repository_root=args.agent_repository_root,
             agent_skill_root=args.agent_skill_root,
             allowed_agent_acceptance=tuple(args.allow_agent_acceptance or ()),
+            agent_connection=lambda: agent_connection_from_args(args),
         )
         plan_id = admitted.target.plan.plan_id if admitted.target is not None else None
         if not args.wait:
@@ -232,8 +242,29 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 
 
 def _selected_repair_budget(args) -> AgentRepairBudget | None:
+    review_passes = getattr(args, "review_passes", None)
+    if review_passes is not None and getattr(args, "repair_attempts", None) is not None:
+        raise FleetPlanInvalid("choose --review-passes or --repair-attempts")
+    if review_passes is not None and not getattr(args, "repair_write_root", None):
+        raise FleetPlanInvalid("review-repair requires at least one explicit --repair-write-root")
+    if review_passes is not None:
+        from oh_goon.integrations.agent_patch_apply import validate_write_roots
+
+        validate_write_roots(tuple(args.repair_write_root))
+    if review_passes is None and getattr(args, "repair_write_root", None):
+        raise FleetPlanInvalid("repair write roots require --review-passes")
+    if getattr(args, "agent_model_profile", None) or getattr(args, "agent_providers_file", None):
+        if (
+            not args.standard_local
+            or not args.wait
+            or args.agent_repository_root is None
+            or args.agent_skill_root is None
+            or not args.allow_agent_acceptance
+            or args.repair_attempts is not None
+        ):
+            raise FleetPlanInvalid("provider selection requires a standard-local Agent invocation")
     limits = (
-        getattr(args, "repair_attempts", None),
+        review_passes if review_passes is not None else getattr(args, "repair_attempts", None),
         getattr(args, "repair_timeout", None),
         getattr(args, "repair_step_timeout", None),
     )
@@ -266,6 +297,7 @@ def _print_agent_repair_result(result, *, as_json: bool) -> int:
         "repair_id": result.repair_id,
         "stop_reason": result.stop_reason.value,
         "test_passed": result.test_passed,
+        "converged": result.converged,
         "budget": result.budget.model_dump(mode="json"),
         "message": result.message,
         "admitted_run_ids": list(result.admitted_run_ids),
@@ -288,7 +320,13 @@ def _print_agent_repair_result(result, *, as_json: bool) -> int:
         print(f"Stop reason: {result.stop_reason.value}")
         for attempt in receipt["attempts"]:
             print(f"Run {attempt['fleet_run_id']}: {attempt['status']} / {attempt['outcome']}")
-    return 0 if result.test_passed else 130 if result.stop_reason.value == "cancelled" else 1
+    return (
+        0
+        if result.test_passed or result.converged
+        else 130
+        if result.stop_reason.value == "cancelled"
+        else 1
+    )
 
 
 _PROGRESS_WAIT_SLICE_SECONDS = 1.0

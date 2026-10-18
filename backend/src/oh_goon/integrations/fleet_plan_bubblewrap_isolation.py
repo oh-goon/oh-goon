@@ -502,7 +502,7 @@ def _require_original_native_mount_argv(
         for mount in prepared_original_native_mounts(request)
     ]
     if nested_cgroup_root is not None:
-        expected.append(("--bind", str(nested_cgroup_root), "/sys/fs/cgroup"))
+        expected.insert(1, ("--bind", str(nested_cgroup_root), "/sys/fs/cgroup"))
     expected += [
         ("--ro-bind", str(b.snapshot_path), str(b.sandbox_path)) for b in attempt.sandbox_bindings
     ]
@@ -552,15 +552,13 @@ def _require_original_native_mount_argv(
         for i, value in enumerate(args)
         if value in ("--bind", "--ro-bind", "--ro-bind-data")
     ]
-    if (
-        len(observed) != len(expected)
-        or len(set(observed)) != len(observed)
-        or sorted(observed) != sorted(expected)
-        or len({target for _, _, target in observed}) != len(observed)
-    ):
+    if observed != expected or len(set(observed)) != len(observed):
         raise FleetPlanInvalid(
             "Bubblewrap native mount argv differs from original prepared resources"
         )
+    # The sealed executable intentionally overlays its frozen tool path. Exact
+    # ordered comparison above admits that prepared overlay while rejecting an
+    # extra mount or a reordered path bind that would hide the sealed bytes.
     for option, target in (("--proc", str(SANDBOX_PATHS.proc)), ("--dev", str(SANDBOX_PATHS.dev))):
         if sum(args[i : i + 2] == [option, target] for i in range(len(args) - 1)) != 1:
             raise FleetPlanInvalid("Bubblewrap synthetic native mount differs from prepared target")

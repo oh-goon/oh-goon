@@ -150,6 +150,7 @@ def test_verity_lease_refuses_any_unverified_descendant_at_pin(monkeypatch, tmp_
         lease.verify_kernel_custody()
 
 
+@pytest.mark.certification
 @pytest.mark.skipif(__import__("sys").platform != "linux", reason="Linux UAPI only")
 def test_native_filesystem_verity_is_kernel_enforced_when_supported(tmp_path):
     """Physical POSITIVE witness only on a filesystem that truly supports it.

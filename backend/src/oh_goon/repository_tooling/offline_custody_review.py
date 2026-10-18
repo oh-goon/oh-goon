@@ -141,11 +141,14 @@ def inspect_packet(
                 or payload["schema"] != _SCHEMA
             ):
                 raise ReviewRejected("unknown or incomplete review packet schema")
-            registry = json.loads((policy_root / _REGISTRY).read_bytes())
-            policy_digest = hashlib.sha256((policy_root / _REGISTRY).read_bytes()).hexdigest()
-            review_register_digest = hashlib.sha256(
-                (policy_root / "backend/trust-custody-evidence.json").read_bytes()
-            ).hexdigest()
+            with (policy_root / _REGISTRY).open("rb") as stream:
+                registry_bytes = stream.read(_MAX_EVIDENCE + 1)
+            if len(registry_bytes) > _MAX_EVIDENCE:
+                raise ReviewRejected("authority inventory exceeds the evidence limit")
+            registry = json.loads(registry_bytes)
+            policy_digest = hashlib.sha256(registry_bytes).hexdigest()
+            with (policy_root / "backend/trust-custody-evidence.json").open("rb") as stream:
+                review_register_digest = hashlib.file_digest(stream, "sha256").hexdigest()
             if payload["custody_register_sha256"] != review_register_digest:
                 raise ReviewRejected("review packet bound to a different pending custody register")
             if payload["policy_sha256"] != policy_digest:
@@ -224,7 +227,11 @@ def inspect_dossier(
     real deployment custody proof. Never returns an admission/migration decision.
     """
     try:
-        registry = json.loads((policy_root / _REGISTRY).read_bytes())
+        with (policy_root / _REGISTRY).open("rb") as stream:
+            registry_bytes = stream.read(_MAX_EVIDENCE + 1)
+        if len(registry_bytes) > _MAX_EVIDENCE:
+            raise ReviewRejected("authority inventory exceeds the evidence limit")
+        registry = json.loads(registry_bytes)
         expected = expected_subjects(registry)
         names = {
             hashlib.sha256(subject.encode("utf-8")).hexdigest(): subject for subject in expected
@@ -274,7 +281,7 @@ def inspect_dossier(
             os.close(root_fd)
         payload = {
             "subject_packets": observed,
-            "policy_sha256": hashlib.sha256((policy_root / _REGISTRY).read_bytes()).hexdigest(),
+            "policy_sha256": hashlib.sha256(registry_bytes).hexdigest(),
         }
         return {
             "schema": "oh-goon/offline-custody-dossier/v1",

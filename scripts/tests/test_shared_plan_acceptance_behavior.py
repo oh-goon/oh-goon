@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+from email.message import Message
+
+
+from typing import Any
+from typing import Self
+from collections.abc import Callable
+from collections.abc import Iterable
+
+import time
+import urllib.request
+
 import io
 import json
 from pathlib import Path
@@ -11,22 +22,22 @@ from oh_goon.repository_tooling.acceptance import shared_plan
 
 
 class Response:
-    def __init__(self, payload):
+    def __init__(self, payload: object) -> None:
         self.payload = payload
 
-    def read(self):
+    def read(self) -> bytes:
         return json.dumps(self.payload).encode()
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *_args):
+    def __exit__(self, *_args: object) -> None:
         return None
 
 
 def _http_error(code: int, payload: dict[str, object]) -> urllib.error.HTTPError:
     return urllib.error.HTTPError(
-        "http://x", code, "bad", {}, io.BytesIO(json.dumps(payload).encode())
+        "http://x", code, "bad", Message(), io.BytesIO(json.dumps(payload).encode())
     )
 
 
@@ -34,22 +45,20 @@ def test_request_json_success_http_error_and_non_object(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        shared_plan.urllib.request, "urlopen", lambda *_a, **_k: Response({"ok": True})
+        urllib.request, "urlopen", lambda *_a, **_k: Response({"ok": True})
     )
     assert shared_plan._request_json(
         "POST", "http://x", access_token="t", payload={"x": 1}
     ) == {"ok": True}
     error = _http_error(409, {"message": "bad"})
     monkeypatch.setattr(
-        shared_plan.urllib.request,
+        urllib.request,
         "urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(error),
     )
     with pytest.raises(RuntimeError, match="HTTP 409"):
         shared_plan._request_json("GET", "http://x", access_token="t")
-    monkeypatch.setattr(
-        shared_plan.urllib.request, "urlopen", lambda *_a, **_k: Response([])
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: Response([]))
     with pytest.raises(RuntimeError, match="expected JSON object"):
         shared_plan._request_json("GET", "http://x", access_token="t")
 
@@ -99,7 +108,7 @@ def test_invalid_shared_plan_is_rejected_without_becoming_readable(
         ]
     )
     monkeypatch.setattr(
-        shared_plan.urllib.request,
+        urllib.request,
         "urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(next(replies)),
     )
@@ -109,7 +118,7 @@ def test_invalid_shared_plan_is_rejected_without_becoming_readable(
     )
 
 
-def _clock(values):
+def _clock(values: Iterable[float]) -> Callable[[], float]:
     it = iter(values)
     return lambda: next(it)
 
@@ -122,8 +131,8 @@ def test_wait_run_terminal_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
         ]
     )
     monkeypatch.setattr(shared_plan, "_request_json", lambda *_a, **_k: next(replies))
-    monkeypatch.setattr(shared_plan.time, "monotonic", _clock([0.0, 0.1, 0.2]))
-    monkeypatch.setattr(shared_plan.time, "sleep", lambda _x: None)
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 0.1, 0.2]))
+    monkeypatch.setattr(time, "sleep", lambda _x: None)
     assert (
         shared_plan._wait_run("x", "r", access_token="t", timeout_seconds=1)["outcome"]
         == "SUCCESS"
@@ -131,12 +140,12 @@ def test_wait_run_terminal_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         shared_plan, "_request_json", lambda *_a, **_k: {"run": {"status": "RUNNING"}}
     )
-    monkeypatch.setattr(shared_plan.time, "monotonic", _clock([0.0, 2.0]))
+    monkeypatch.setattr(time, "monotonic", _clock([0.0, 2.0]))
     with pytest.raises(RuntimeError, match="did not finish"):
         shared_plan._wait_run("x", "r", access_token="t", timeout_seconds=1)
 
 
-def _preview(tmp_path: Path):
+def _preview(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
     left = tmp_path / "left"
     right = tmp_path / "right"
     not_applicable = tmp_path / "not-applicable"
@@ -226,6 +235,7 @@ def test_preview_preserves_applicability_without_collapsing_it_into_team_failure
         )
 
     wrong_applicability = dict(preview)
+    assert isinstance(preview["teams"], list)
     rows = [dict(row) for row in preview["teams"]]
     rows[2] = dict(
         rows[2],
@@ -256,9 +266,9 @@ def test_run_ready_shared_plan_success_and_failures(
         "_repository_instance_authority",
         lambda *_a: {"l": "li", "r": "ri"},
     )
-    captured = {}
+    captured: dict[str, Any] = {}
 
-    def request(_method, _url, **kwargs):
+    def request(_method: str, _url: str, **kwargs: Any) -> dict[str, Any]:
         captured.update(kwargs.get("payload") or {})
         return {"fleet_run_id": captured.get("fleet_run_id")}
 
@@ -376,7 +386,7 @@ def test_exercise_shared_plan_runs_after_preview_without_parent_executor_environ
     )
     calls = []
 
-    def request(method, url, **kwargs):
+    def request(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         calls.append((method, url))
         if "shared-plans/acceptance-shared" in url:
             return {"plan_key": "acceptance-shared", "sha256": "a" * 64}

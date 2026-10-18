@@ -14,6 +14,7 @@ from oh_goon.core.ports.original_mount_intent import (
 )
 from oh_goon.integrations import linux_physical_observer
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.unit.core.test_enforcer_lace_trust import authenticator
 from tests.unit.runtime.test_b22_original_physical_sampling import mount_descriptor, seeded
 
@@ -185,9 +186,9 @@ def test_x0_rejects_removed_signed_mount_comparison(tmp_path: Path):
     assert check_x0_single_execution_path(tmp_path) == []
     file = tmp_path / "backend/src/oh_goon/runtime/enforcer_lace_original_physical_sampling.py"
     text = file.read_text()
-    assert "original[0]['payload']['resources']['mounts'] != mount_intent.resource_identity" in text
     file.write_text(
-        text.replace(
+        replace_python_syntax(
+            text,
             "original[0]['payload']['resources']['mounts'] != mount_intent.resource_identity",
             "original[0]['payload']['resources']['mounts'] == mount_intent.resource_identity",
         )

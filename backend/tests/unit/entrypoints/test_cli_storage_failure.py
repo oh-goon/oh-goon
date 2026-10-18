@@ -9,7 +9,7 @@ from oh_goon.runtime.database import DatabasePathIdentityLost
 
 class _Parser:
     def parse_args(self, _argv):
-        return argparse.Namespace(command="plan")
+        return argparse.Namespace(command="plan", plan_command=None)
 
     def print_help(self):
         raise AssertionError("help must not replace storage failure")
@@ -31,7 +31,11 @@ def _prepare(monkeypatch, runtime: _Runtime) -> None:
     monkeypatch.setattr(cli, "run_start_command", lambda _args: None)
     monkeypatch.setattr(cli, "run_enforcer_compare_command", lambda _args: None)
     monkeypatch.setattr(cli, "run_state_free_developer_command", lambda _args: None)
-    monkeypatch.setattr(cli.ApplicationRuntime, "build", classmethod(lambda _cls: runtime))
+
+    def build(_cls, *, standard_local=None):
+        return runtime
+
+    monkeypatch.setattr(cli.ApplicationRuntime, "build", classmethod(build))
 
 
 def test_cli_reports_primary_runtime_storage_loss_once_and_shutdown_cannot_mask_it(

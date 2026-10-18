@@ -1,5 +1,7 @@
 # oci/release-deploy
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Strict quality-gated immutable deployment example: run Python quality, build and content-addressedly publish one OCI image, then commit that exact digest reference to one Kubernetes Deployment container, then explicitly verify that exact Deployment generation. No mutable image tag, kubeconfig, Helm/apply merge, or implicit rollout watcher exists.
 
 ## Use this Plan

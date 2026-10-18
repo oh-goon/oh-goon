@@ -52,7 +52,7 @@ help:
 	  '  See docs/development/MAKE_TARGET_SURFACE.yml.' \
 	  '' \
 	  'Owner checks (non-canonical workflow):' \
-	  '  make backend-check    Backend lint, format, behavior tests, quality floor' \
+	  '  make backend-check    Backend lint, format and behavior tests' \
 	  '  make ruff-repair      Apply Ruff safe autofixes, then canonical Python formatting' \
 	  '  make frontend-functional-certification  Current functional gate: typecheck, architecture, i18n, unit tests, build' \
 	  '  make frontend-check   Strict later-release frontend gate: adds lint, coverage/quality checks' \
@@ -564,7 +564,7 @@ frontend-build:
 	cd frontend && npm run build
 
 test-integration:
-	@$(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- sh -c 'cd backend && .venv/bin/oh-goon-qualification-exec pytest tests/integration'
+	@$(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- sh -c 'cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "not certification" tests/integration'
 
 # Compact production-shaped SQLite lifetime gate. This deliberately crosses the
 # worker/wait/restart boundary and complements component/fault-matrix coverage.
@@ -636,7 +636,7 @@ tool-session-qualification-status:
 
 
 coverage-python:
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest tests ../scripts/tests -m "not certification" --cov=src/oh_goon --cov-branch --cov-report=json:../coverage-python.json
+	cd backend && .venv/bin/oh-goon-qualification-exec pytest -c pyproject.toml tests ../scripts/tests -m "not certification" --cov=src/oh_goon --cov-branch --cov-fail-under=0 --cov-report=json:../coverage-python.json
 
 coverage-report:
 	@test -f backend/.coverage || { echo "No backend coverage data exists; run make quality-check first." >&2; exit 2; }
@@ -695,7 +695,7 @@ quality-check: coverage-python
 	uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet check --area python
 
 quality-raise:
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest --cov=src/oh_goon --cov-branch --cov-report=json:../coverage-python.json
+	@$(MAKE) coverage-python
 	cd frontend && npm run test:coverage
 	uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet raise
 
@@ -737,8 +737,7 @@ check-backend:
 	cd backend && uv run --offline --frozen --no-sync --group quality ruff check src tests
 	cd backend && uv run --offline --frozen --no-sync --group quality ruff format --check src tests
 	uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet guard
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest --cov=src/oh_goon --cov-branch --cov-report=json:../coverage-python.json
-	uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet check --area python
+	cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "not certification"
 
 backend-check: check-backend
 

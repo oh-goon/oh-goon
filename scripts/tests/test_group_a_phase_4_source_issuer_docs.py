@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_source_signer_is_outside_enforcer_and_not_runtime_wired():
+def test_source_signer_is_outside_enforcer_and_not_runtime_wired() -> None:
     owner = (
         ROOT / "backend/src/oh_goon/repository_tooling/enforcer_lace_source_issuer.py"
     )

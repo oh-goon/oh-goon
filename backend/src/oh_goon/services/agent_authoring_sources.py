@@ -45,6 +45,7 @@ def capture_agent_sources(
     skill_aliases: Mapping[str, str] | None = None,
     previous_source: agent_source.FrozenAgentSourceCapture | None = None,
     cancel_requested: Callable[[], bool] | None = None,
+    tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
 ) -> agent_source.FrozenAgentSourceCapture:
     """Capture bytes ONCE via the existing AG-01 reader, without effects.
 
@@ -72,6 +73,7 @@ def capture_agent_sources(
         skill_aliases=skill_aliases,
         _captured=captured,
         cancel_requested=cancel_requested,
+        tree_cache=tree_cache,
     )
     frozen = agent_source.FrozenAgentSourceCapture(
         plan_source_sha256=plan_source_sha256,
@@ -142,6 +144,7 @@ def explain_agent_sources(
     skill_aliases: Mapping[str, str] | None = None,
     _captured: dict[str, agent_source.FrozenSourceTree] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
+    tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
 ) -> dict[str, object]:
     """Project immutable read-only identities without admitting or executing work."""
     repo_ref, authored_skill_ref, accepted = agent_source_references(definitions, values)
@@ -152,24 +155,15 @@ def explain_agent_sources(
     ):
         raise FleetPlanInvalid("AG-01 acceptance profile is not explicitly authorized")
     skill_ref = authored_skill_ref
-    git_pin = None
-    if not skill_ref.startswith(("local:", "github:")):
-        # No environment lookup, mutable team alias directory, or second
-        # resolver. The caller supplies the exact explicit prework mapping.
+    prepared = None
+    if not skill_ref.startswith("local:"):
         if skill_aliases is None or skill_ref not in skill_aliases:
             raise FleetPlanInvalid("AG-01 skill alias has no explicit frozen expansion")
         from oh_goon.services.agent_skill_registry import FrozenSkillRegistry
 
         if isinstance(skill_aliases, FrozenSkillRegistry):
-            git_pin = skill_aliases.pins.get(skill_ref)
-        skill_ref = skill_aliases[skill_ref]
-        # A Gitlink can only come from the original adjacent .goonskills
-        # registry, never an arbitrary explicit --skill-alias expansion.
-        if git_pin is not None:
-            if skill_ref != git_pin.reference:
-                raise FleetPlanInvalid("SKILL-2 pinned registry reference changed")
-            git_pin.verify(skill_root)
-            skill_ref = "local:" + git_pin.path
+            prepared = skill_aliases.prepared.get(skill_ref)
+        skill_ref = "local:" + prepared.path if prepared else skill_aliases[skill_ref]
         try:
             validate_domain_input_value(
                 PlanInputDefinition(name="skill", input_type=PlanInputType.SKILL_REFERENCE),
@@ -180,18 +174,11 @@ def explain_agent_sources(
             raise FleetPlanInvalid(
                 "AG-01 skill alias expands to an invalid source reference"
             ) from exc
-        if not skill_ref.startswith(("local:", "github:")):
+        if not skill_ref.startswith("local:"):
             raise FleetPlanInvalid("AG-01 chained aliases are not allowed")
     if not repo_ref.startswith("local:"):
         raise FleetPlanInvalid(
             "AG-01 repository acquisition requires an explicitly authorized local root"
-        )
-    if skill_ref.startswith("github:"):
-        # A full SHA alone cannot authenticate *where* content was acquired.
-        # Only original source-acquisition authority may verify/publish a
-        # pinned global checkout. Do not invent a parallel network fetcher.
-        raise FleetPlanInvalid(
-            "AG-01 pinned GitHub skill requires original source-acquisition proof; unavailable"
         )
     if not skill_ref.startswith("local:"):
         raise FleetPlanInvalid("AG-01 skill must use a bounded, immutable source reference")
@@ -203,23 +190,20 @@ def explain_agent_sources(
         max_bytes=agent_source.MAX_REPOSITORY_BYTES,
         captured=_captured,
         cancel_requested=cancel_requested,
+        tree_cache=tree_cache,
     )
-    # For a Gitlink, retain the *same* single AG-01 fd-anchored byte read.
-    # Compare those already-captured bytes to the committed Git blob identities;
-    # Git metadata is not a second reader or materialization authority.
-    skill_capture = _captured if _captured is not None else {}
     skill = _snapshot_authorized_tree(
-        skill_root,
+        prepared.root if prepared else skill_root,
         skill_ref,
         label="skill",
         max_bytes=agent_source.MAX_SKILL_BYTES,
-        captured=skill_capture if git_pin is not None else _captured,
+        captured=_captured,
         cancel_requested=cancel_requested,
+        tree_cache=tree_cache,
     )
-    if git_pin is not None:
-        git_pin.verify(skill_root, skill_capture["skill"])
-        skill["reference"] = git_pin.reference
-        skill["source_origin"] = "COMMITTED_GITLINK_OFFLINE_CAPTURE"
+    if prepared is not None:
+        skill["reference"] = prepared.reference
+        skill["source_origin"] = "LOCKED_GIT_SOURCE"
     if "SKILL.md" not in {item["path"] for item in skill["members"]}:
         raise FleetPlanInvalid("AG-01 skill package must include a regular SKILL.md at its root")
     return {
@@ -247,6 +231,7 @@ def _snapshot_authorized_tree(
     max_bytes: int,
     captured: dict[str, agent_source.FrozenSourceTree] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
+    tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
 ) -> dict[str, Any]:
     """Read exactly once from an fd-anchored authorized tree.
 
@@ -256,6 +241,19 @@ def _snapshot_authorized_tree(
     """
     if cancel_requested is not None and cancel_requested():
         raise OperationCancelledError("Agent source capture cancelled")
+    cache_key = (label, str(root) + "\0" + reference)
+    if tree_cache is not None and cache_key in tree_cache:
+        frozen = tree_cache[cache_key]
+        if captured is not None:
+            captured[label] = frozen
+        return {
+            "reference": reference,
+            "content_identity": frozen.content_identity,
+            "members": [
+                {"path": item.path, "sha256": item.sha256, "bytes": len(item.data)}
+                for item in frozen.members
+            ],
+        }
     if root.is_symlink() or not root.is_dir():
         raise FleetPlanInvalid(f"AG-01 {label} authorized root must be a regular directory")
     relative = PurePosixPath(reference.removeprefix("local:"))
@@ -301,7 +299,7 @@ def _snapshot_authorized_tree(
             if cancel_requested is not None and cancel_requested():
                 raise OperationCancelledError("Agent source capture cancelled")
             rel = subpath / entry.name
-            if is_transient_source_path(rel):
+            if ".git" in rel.parts or (label == "repository" and is_transient_source_path(rel)):
                 continue
             before = os.stat(entry.name, dir_fd=dir_fd, follow_symlinks=False)
             if stat.S_ISDIR(before.st_mode):
@@ -428,6 +426,8 @@ def _snapshot_authorized_tree(
         )
         frozen.verify()
         captured[label] = frozen
+        if tree_cache is not None:
+            tree_cache[cache_key] = frozen
     return {
         "reference": reference,
         "content_identity": content_id,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import os
 import subprocess
 import sys
@@ -61,7 +63,7 @@ def test_owned_workflow_process_group_escalates_and_reaps_descendants(
 
 
 def test_workflow_stream_launches_owned_command_in_separate_process_group(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     observed: dict[str, object] = {}
 
@@ -69,17 +71,17 @@ def test_workflow_stream_launches_owned_command_in_separate_process_group(
         stdout = iter(())
         pid = 12345
 
-        def wait(self, timeout=None):
+        def wait(self, timeout: float | None = None) -> int:
             return 0
 
-        def poll(self):
+        def poll(self) -> int:
             return 0
 
-    def fake_popen(*args, **kwargs):
+    def fake_popen(*args: object, **kwargs: Any) -> FakeProcess:
         observed.update(kwargs)
         return FakeProcess()
 
-    monkeypatch.setattr(workflow_run.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     assert workflow_run._stream(["probe"], env={}) == (0, "")
     if os.name != "nt":
         assert observed["start_new_session"] is True

@@ -11,7 +11,7 @@ SCRIPT = (
 )
 
 
-def _bundle(tmp_path: Path):
+def _bundle(tmp_path: Path) -> dict[str, str]:
     names = {
         "candidate": "candidate.zip",
         "parent_patch": "parent.patch",
@@ -43,7 +43,7 @@ def _manifest(tmp_path: Path) -> Path:
     return manifest
 
 
-def test_complete_bundle_is_staged_but_not_committed(tmp_path: Path):
+def test_complete_bundle_is_staged_but_not_committed(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     data = json.loads(manifest.read_text())
     assert data["state"] == "staged"
@@ -57,7 +57,7 @@ def test_complete_bundle_is_staged_but_not_committed(tmp_path: Path):
     assert "STAGED PASS" in ok.stdout
 
 
-def test_commit_is_create_only_and_binds_verified_manifest(tmp_path: Path):
+def test_commit_is_create_only_and_binds_verified_manifest(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     commit = tmp_path / "commit.json"
     made = subprocess.run(
@@ -97,7 +97,7 @@ def test_commit_is_create_only_and_binds_verified_manifest(tmp_path: Path):
     assert again.returncode == 1
 
 
-def test_mutation_before_commit_cannot_advance_authority(tmp_path: Path):
+def test_mutation_before_commit_cannot_advance_authority(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     (tmp_path / "handoff.md").write_text("changed")
     commit = tmp_path / "commit.json"
@@ -118,7 +118,7 @@ def test_mutation_before_commit_cannot_advance_authority(tmp_path: Path):
     assert not commit.exists()
 
 
-def test_mutation_after_commit_invalidates_committed_authority(tmp_path: Path):
+def test_mutation_after_commit_invalidates_committed_authority(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     commit = tmp_path / "commit.json"
     subprocess.run(
@@ -142,7 +142,7 @@ def test_mutation_after_commit_invalidates_committed_authority(tmp_path: Path):
     assert "manifest" in bad.stdout
 
 
-def test_incomplete_bundle_cannot_create_staged_manifest(tmp_path: Path):
+def test_incomplete_bundle_cannot_create_staged_manifest(tmp_path: Path) -> None:
     names = _bundle(tmp_path)
     (tmp_path / names["checksums"]).unlink()
     cmd = [
@@ -198,7 +198,7 @@ def _committed_phase(
     return directory
 
 
-def test_discovery_ignores_higher_uncommitted_phase_directory(tmp_path: Path):
+def test_discovery_ignores_higher_uncommitted_phase_directory(tmp_path: Path) -> None:
     archive = tmp_path / "archive"
     _committed_phase(archive, "1267.0.961", "1267.0.959")
     staged = archive / "1267.0.999 abandoned staging"
@@ -213,7 +213,7 @@ def test_discovery_ignores_higher_uncommitted_phase_directory(tmp_path: Path):
     assert json.loads(result.stdout)["phase"] == "1267.0.961"
 
 
-def test_discovery_ignores_invalid_higher_commit(tmp_path: Path):
+def test_discovery_ignores_invalid_higher_commit(tmp_path: Path) -> None:
     archive = tmp_path / "archive"
     _committed_phase(archive, "1267.0.961", "1267.0.959")
     bad = _committed_phase(archive, "1267.0.999", "1267.0.998")
@@ -227,7 +227,9 @@ def test_discovery_ignores_invalid_higher_commit(tmp_path: Path):
     assert json.loads(result.stdout)["phase"] == "1267.0.961"
 
 
-def test_discovery_fails_closed_on_duplicate_valid_committed_phase(tmp_path: Path):
+def test_discovery_fails_closed_on_duplicate_valid_committed_phase(
+    tmp_path: Path,
+) -> None:
     archive = tmp_path / "archive"
     _committed_phase(archive, "1267.0.961", "1267.0.960", "961-a")
     _committed_phase(archive, "1267.0.961", "1267.0.960", "961-b")
@@ -240,7 +242,7 @@ def test_discovery_fails_closed_on_duplicate_valid_committed_phase(tmp_path: Pat
     assert "ambiguous committed authority" in result.stdout
 
 
-def test_discovery_fails_when_no_valid_commit_exists(tmp_path: Path):
+def test_discovery_fails_when_no_valid_commit_exists(tmp_path: Path) -> None:
     archive = tmp_path / "archive"
     archive.mkdir()
     (archive / "1267.0.999").mkdir()

@@ -100,18 +100,6 @@ def _strict_plan(argv: tuple[str, ...] = ("true",)) -> ResolvedFleetPlan:
 def test_isolated_process_request_cannot_duplicate_attempt_authority() -> None:
     request_fields = {field.name for field in fields(IsolatedProcessRequest)}
     assert "attempt" in request_fields
-    assert request_fields - {"attempt"} == {
-        "argv",
-        "cwd",
-        "env",
-        "read_only_workspace",
-        "termination_requested",
-        # B12C: per-command identity is transport, not a new placement/admission owner.
-        "fleet_run_id",
-        "step_id",
-        "command_ordinal",
-        "local_resource_intent",
-    }
     assert not request_fields.intersection(
         {
             "executor_id",

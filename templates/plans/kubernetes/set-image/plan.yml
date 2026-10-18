@@ -1,3 +1,5 @@
 version: 1
+execution:
+  purpose: cicd
 goons:
 - kubernetes/set-image

@@ -143,10 +143,9 @@ class FleetPlanRunner:
             if target.agent_deliveries:
                 # Admission already selected this typed Step; verify the exact
                 # retained packet is available before EFFECT_STARTED.
-                self._agent_delivery_for(target, attempt.repository.repository_id)(
-                    target.agent_deliveries[0].step_id,
-                    target.agent_deliveries[0].handoff_identity,
-                )
+                delivery_for = self._agent_delivery_for(target, attempt.repository.repository_id)
+                for delivery in target.agent_deliveries:
+                    delivery_for(delivery.step_id, delivery.handoff_identity)
             if request.isolation_backend is not None:
                 raise StateConflict(
                     "Non-CI/CD Fleet plans cannot consume process-isolation admission evidence"
@@ -211,6 +210,7 @@ class FleetPlanRunner:
         import hashlib
 
         from oh_goon.core.errors import FleetPlanInvalid
+        from oh_goon.core.models.agent_source import MAX_PREWORK_PACKET_BYTES
 
         references = {item.step_id: item for item in target.agent_deliveries}
 
@@ -223,7 +223,10 @@ class FleetPlanRunner:
                 owner_repository_id=repository_id,
                 expected_kind="file",
             )
-            packet = stored.path.read_bytes()
+            with stored.path.open("rb") as stream:
+                packet = stream.read(MAX_PREWORK_PACKET_BYTES + 1)
+            if len(packet) > MAX_PREWORK_PACKET_BYTES:
+                raise FleetPlanInvalid("retained Agent source exceeds its delivery budget")
             if hashlib.sha256(packet).hexdigest() != reference.delivery_sha256:
                 raise FleetPlanInvalid("retained Agent source changed before Step execution")
             return packet

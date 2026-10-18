@@ -119,7 +119,8 @@ def test_exempt_post_is_only_read_only_input_inspection() -> None:
     )
     assert 'operation_id="inspect_shared_plan_inputs"' in source
     assert '"/shared-plan-input-inspections"' in source
-    assert "not admission" in ast.get_docstring(function)
+    docstring = ast.get_docstring(function)
+    assert docstring is not None and "not admission" in docstring
 
 
 def test_route_census_detects_uninventoried_mutation_in_synthetic_source() -> None:

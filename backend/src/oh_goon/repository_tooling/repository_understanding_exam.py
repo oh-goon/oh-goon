@@ -15,11 +15,40 @@ from oh_goon.repository_tooling._repository_understanding_exam_inputs import (
     _candidate_configuration_bundle,
     _validate_candidate_submission,
 )
+from oh_goon.repository_tooling._repository_understanding_exam_report import (
+    human_report as human_report,
+)
 from oh_goon.repository_tooling._repository_understanding_exam_validation import _score_inputs
+from oh_goon.repository_tooling.repository_understanding_calibration import (
+    calibration_report as calibration_report,
+)
 from oh_goon.repository_tooling.repository_understanding_capability import (
     CAPABILITY_ACTIONS as CAPABILITY_ACTIONS,
 )
+from oh_goon.repository_tooling.repository_understanding_capability import (
+    capability_certificate as capability_certificate,
+)
+from oh_goon.repository_tooling.repository_understanding_capability import (
+    capability_check as capability_check,
+)
+from oh_goon.repository_tooling.repository_understanding_game_tape import game_tape as game_tape
+from oh_goon.repository_tooling.repository_understanding_game_tape import (
+    human_game_tape_report as human_game_tape_report,
+)
 from oh_goon.repository_tooling.repository_understanding_graph import graph_manifest
+from oh_goon.repository_tooling.repository_understanding_integrity import (
+    adversarial_report as adversarial_report,
+)
+from oh_goon.repository_tooling.repository_understanding_integrity import (
+    benchmark_integrity_report as benchmark_integrity_report,
+)
+from oh_goon.repository_tooling.repository_understanding_integrity import challenge_set
+from oh_goon.repository_tooling.repository_understanding_lifecycle import (
+    authorize_question_transition as authorize_question_transition,
+)
+from oh_goon.repository_tooling.repository_understanding_lifecycle import (
+    human_baseline_report as human_baseline_report,
+)
 from oh_goon.repository_tooling.repository_understanding_material import (
     GRADER_SCHEMA_VERSION,
     QA_SCHEMA_VERSION,
@@ -32,11 +61,16 @@ from oh_goon.repository_tooling.repository_understanding_material import (
     manifest,
 )
 from oh_goon.repository_tooling.repository_understanding_material import (
+    benchmark_registry as benchmark_registry,
+)
+from oh_goon.repository_tooling.repository_understanding_material import prepare as prepare
+from oh_goon.repository_tooling.repository_understanding_material import (
     question_audit as question_audit,
 )
 from oh_goon.repository_tooling.repository_understanding_material import (
     question_lifecycle as question_lifecycle,
 )
+from oh_goon.repository_tooling.repository_understanding_material import verify as verify
 from oh_goon.repository_tooling.repository_understanding_policy import (
     DEFAULT_QUALIFICATION_PROFILE,
     QUALIFICATION_POLICY_VERSION,
@@ -44,6 +78,14 @@ from oh_goon.repository_tooling.repository_understanding_policy import (
     SCORING_POLICY_VERSION,
     evaluate,
 )
+from oh_goon.repository_tooling.repository_understanding_recertification import (
+    differential_recertification_plan as differential_recertification_plan,
+)
+from oh_goon.repository_tooling.repository_understanding_stability import (
+    stability_report as stability_report,
+)
+
+build_challenge_set = challenge_set
 
 
 def grade_template(

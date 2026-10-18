@@ -59,7 +59,7 @@ def _sidecar_bytes(state: Path) -> int:
     return sum(path.stat().st_size for path in family if path.is_file())
 
 
-def _stable_payload(value):
+def _stable_payload(value: object) -> object:
     if isinstance(value, dict):
         return {
             key: _stable_payload(item) for key, item in sorted(value.items()) if key != "window"

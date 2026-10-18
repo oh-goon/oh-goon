@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import runpy
 from pathlib import Path
 
@@ -14,24 +13,27 @@ from oh_goon.integrations.fleet_plan_compilation import (
     compile_plan_document,
     parse_fleet_yaml_document,
 )
+from oh_goon.runtime.goon_templates import GoonTemplateStore
+from oh_goon.runtime.plan_templates import PlanTemplateStore
 
 ROOT = Path(__file__).resolve().parents[4]
 
 
-def test_frozen_shipped_catalog_compiles_and_occurrences_do_not_change() -> None:
+def test_current_shipped_catalog_compiles_and_accounts_for_every_package() -> None:
     # The tool delegates *all* source acceptance to original catalog stores and compiler.
     collect = runpy.run_path(
         str(ROOT / "backend/src/oh_goon/repository_tooling/template_ux_a_inventory.py")
     )["collect"]
     actual = collect(ROOT)
-    baseline = json.loads(
-        (ROOT / "backend/tests/fixtures/template_authoring/catalog.json").read_text()
-    )
-    assert actual == baseline
-    assert actual["metrics"]["goon_packages"] == 41
-    assert actual["metrics"]["plan_packages"] == 24
+    expected = {
+        (kind, key)
+        for kind, store in (("goon", GoonTemplateStore()), ("plan", PlanTemplateStore()))
+        for key in store.keys()
+    }
+    observed = [(item["kind"], item["key"]) for item in actual["packages"]]
+    assert len(observed) == len(set(observed))
+    assert set(observed) == expected
     assert actual["metrics"]["unresolved_readme_links"] == 0
-    assert len(actual["packages"]) == 65
     assert all(len(x["root_source_sha256"]) == 64 for x in actual["packages"])
     assert all(x["readme_present"] for x in actual["packages"])
 

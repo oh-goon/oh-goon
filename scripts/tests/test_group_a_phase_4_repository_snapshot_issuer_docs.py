@@ -13,7 +13,7 @@ ISSUER = (
 OWNER = ROOT / "backend/src/oh_goon/integrations/source_snapshot.py"
 
 
-def test_issuer_uses_existing_native_owner_and_no_second_hash_engine():
+def test_issuer_uses_existing_native_owner_and_no_second_hash_engine() -> None:
     source = ISSUER.read_text()
     parsed = ast.parse(source)
     names = {
@@ -36,7 +36,7 @@ def test_issuer_uses_existing_native_owner_and_no_second_hash_engine():
     )
 
 
-def test_private_signer_is_not_imported_into_runtime_or_enforcer():
+def test_private_signer_is_not_imported_into_runtime_or_enforcer() -> None:
     for relative in (
         "backend/src/oh_goon/services/fleet_admission.py",
         "backend/src/oh_goon/core/enforcer_lace_issuer_evidence.py",

@@ -132,7 +132,7 @@ def test_capture_rejects_stale_source_or_unavailable_remote_acquisition(tmp_path
     resolver, plan, kw, _, _ = _case(tmp_path)
     with pytest.raises(FleetPlanInvalid, match="revision changed"):
         resolver.capture_agent_sources(plan, **{**kw, "expected_source_sha256": "0" * 64})
-    with pytest.raises(FleetPlanInvalid, match="original source-acquisition proof"):
+    with pytest.raises(FleetPlanInvalid, match="invalid skill_reference"):
         resolver.capture_agent_sources(
             plan,
             **{

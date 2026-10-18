@@ -96,7 +96,11 @@ class FleetPlanTarget(ImmutableModel):
         }
         if len(found) != len(self.agent_deliveries) or found != expected_agent:
             raise ValueError("Fleet Agent source reference does not match original Plan Step")
-        if self.agent_repair is not None and len(expected_agent) != 1:
+        if (
+            self.agent_repair is not None
+            and self.agent_repair.phase is None
+            and len(expected_agent) != 1
+        ):
             raise ValueError("repair admission requires one original Agent Step")
         if self.agent_repair is not None and self.plan.contract_version < 44:
             raise ValueError("repair admission requires Plan contract version 44")

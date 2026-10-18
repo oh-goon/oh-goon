@@ -7,7 +7,7 @@ SUITE = ROOT / "backend/src/oh_goon/native_issuer/enforcer_lace_native_issuer_su
 CUSTODY = ROOT / "backend/src/oh_goon/native_issuer/enforcer_lace_signer_custody.py"
 
 
-def test_signing_dispatch_is_fixed_to_six_native_owners_not_an_api():
+def test_signing_dispatch_is_fixed_to_six_native_owners_not_an_api() -> None:
     text = SUITE.read_text()
     for fn in (
         "issue_observed_captured_run_repository_identity",

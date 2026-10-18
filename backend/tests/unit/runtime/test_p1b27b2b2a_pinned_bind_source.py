@@ -17,6 +17,7 @@ from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     _check_p1b27b2b2a_source_fd_custody,
 )
+from tests.factories.x0_architecture import replace_python_syntax
 from tests.unit.integrations.test_b12c_live_prework_resource_bridge import _request
 
 PACKAGE = ROOT / "backend/src/oh_goon"
@@ -170,7 +171,9 @@ def test_new_x0_guard_is_integrated_and_detects_bypass(tmp_path):
     bwrap.parent.mkdir(parents=True)
     shutil.copy2(PACKAGE / "integrations/fleet_plan_bubblewrap_isolation.py", bwrap)
     bwrap.write_text(
-        bwrap.read_text().replace("mount_source_lease.consume_validated_argv(args)", "pass", 1)
+        replace_python_syntax(
+            bwrap.read_text(), "mount_source_lease.consume_validated_argv(args)", "pass"
+        )
     )
     assert _check_p1b27b2b2a_source_fd_custody(tmp_path)
 
@@ -226,6 +229,5 @@ def test_x0_rejects_pinned_fd_custody_drift(tmp_path, mutation):
         "partial-roster": ("for tool in attempt.host_tools:", "for tool in ():"),
     }
     before, after = changes[mutation]
-    assert before in original, mutation
-    path.write_text(original.replace(before, after, 1))
+    path.write_text(replace_python_syntax(original, before, after))
     assert _check_p1b27b2b2a_source_fd_custody(tmp_path), mutation

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture import shard_execution_contract as contract
@@ -10,7 +12,7 @@ def test_shard_execution_contract_is_green() -> None:
 
 
 def test_shard_execution_contract_rejects_loss_of_exact_context_field(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     runtime_model = tmp_path / "shard_models.py"
     runtime_model.write_text(
@@ -29,7 +31,7 @@ def test_shard_execution_contract_rejects_loss_of_exact_context_field(
 
 
 def test_standalone_shard_cli_rejects_parallel_runtime_or_service_ownership(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     cli = tmp_path / "hashmarks_shard_execution.py"
     cli.write_text(
@@ -43,7 +45,7 @@ def test_standalone_shard_cli_rejects_parallel_runtime_or_service_ownership(
 
 
 def test_private_runtime_local_rename_does_not_change_architecture(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import re
 
@@ -61,7 +63,7 @@ def test_private_runtime_local_rename_does_not_change_architecture(
 
 
 def test_runtime_shard_schema_owner_value_change_needs_no_architecture_literal_edit(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     owner = tmp_path / "shard_models.py"
     owner.write_text(
@@ -91,7 +93,7 @@ def _canonical_schema_value() -> str:
 
 
 def test_canonical_shard_schema_owner_value_change_needs_no_architecture_literal_edit(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     current = _canonical_schema_value()
     assert current
@@ -107,7 +109,7 @@ def test_canonical_shard_schema_owner_value_change_needs_no_architecture_literal
 
 
 def test_canonical_shard_schema_owner_requires_fixed_matching_literal(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     current = _canonical_schema_value()
     owner = tmp_path / "shard_execution.py"
@@ -128,7 +130,7 @@ def test_canonical_shard_schema_owner_requires_fixed_matching_literal(
 
 
 def test_runtime_schema_owner_representation_is_refactor_tolerant(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     inspected = tmp_path / "shard_models.py"
     text = contract.RUNTIME_MODEL_OWNER.read_text(encoding="utf-8")
@@ -148,7 +150,7 @@ def test_runtime_schema_owner_representation_is_refactor_tolerant(
 
 
 def test_runtime_schema_owner_rejects_wrong_assignment_even_with_comment_decoy(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     inspected = tmp_path / "shard_models.py"
     expected_line = 'PASS_EVIDENCE_SCHEMA = "oh-goon.shard-pass-evidence/v3"'
@@ -170,7 +172,7 @@ def test_runtime_schema_owner_rejects_wrong_assignment_even_with_comment_decoy(
 
 
 def test_runtime_schema_constants_reject_second_assignment_owner(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     duplicate = tmp_path / "parallel_owner.py"
     duplicate.write_text(
@@ -184,7 +186,7 @@ def test_runtime_schema_constants_reject_second_assignment_owner(
 
 
 def test_fleet_shard_evidence_annotation_alias_is_refactor_tolerant(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     evidence = tmp_path / "fleet_plan_evidence.py"
     text = contract.FLEET_EVIDENCE.read_text(encoding="utf-8")
@@ -202,7 +204,7 @@ def test_fleet_shard_evidence_annotation_alias_is_refactor_tolerant(
 
 
 def test_fleet_shard_evidence_relationship_cannot_be_removed(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     evidence = tmp_path / "fleet_plan_evidence.py"
     evidence.write_text(
@@ -222,7 +224,7 @@ def test_fleet_shard_evidence_relationship_cannot_be_removed(
 
 
 def test_projection_expression_refactor_does_not_change_architecture(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     projection = tmp_path / "game_tape_projection.py"
     text = contract.GAME_TAPE_PROJECTION.read_text(encoding="utf-8")

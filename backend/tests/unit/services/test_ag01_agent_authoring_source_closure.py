@@ -115,7 +115,7 @@ def test_same_skill_bytes_have_same_content_identity_at_distinct_authorized_orig
         ({"skill": "github:team/skills@main:reviews/semantic"}, "invalid skill_reference"),
         (
             {"skill": "github:team/skills@" + "a" * 40 + ":reviews/semantic"},
-            "original source-acquisition proof",
+            "invalid skill_reference",
         ),
         ({"acceptance": "not-authorized"}, "not explicitly authorized"),
     ],

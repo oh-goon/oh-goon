@@ -12,6 +12,7 @@ import pytest
 
 from oh_goon.core.enforcer_lace_trust import canonical_bytes, digest
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.fleet_plan import AgentStepRequestedEffects
 from oh_goon.runtime.enforcer_lace_journal import (
     CausalJournalError,
     CausalRunJournal,
@@ -53,7 +54,10 @@ def test_original_signed_run_correlates_exact_demand_and_keeps_zero_effect_autho
     assert reserve(conn, journal, args) == 3
     verified = journal.verify("run-one", auth=args["auth"])
     binding = verified[-1]["payload"]["binding"]
-    source = json.loads(packet)["step"]["requested_effects"]
+    # Transport omits optional null fields; the signed demand is the decoded model.
+    source = AgentStepRequestedEffects.model_validate(
+        json.loads(packet)["step"]["requested_effects"]
+    ).model_dump(mode="json")
     assert binding["requested_effects_identity"] == digest(
         "oh-goon/agent-requested-effects/v1",
         canonical_bytes(source),

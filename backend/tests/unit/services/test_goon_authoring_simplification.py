@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
 from oh_goon.integrations.fleet_plan_preview import preview_plan
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -18,10 +19,10 @@ def _package(root: Path, key: str, body: str) -> None:
     (directory / "README.md").write_text(f"# {key}\n", encoding="utf-8")
 
 
-def _plan(tmp_path: Path, goons: str, *, inputs: str = "") -> Path:
+def _plan(tmp_path: Path, goons: str, *, inputs: str = "", execution: str = "") -> Path:
     path = tmp_path / "plan.yml"
     path.write_text(
-        f"""version: 1\n{inputs}goons:\n{goons}""",
+        f"""version: 1\n{execution}{inputs}goons:\n{goons}""",
         encoding="utf-8",
     )
     return path
@@ -32,17 +33,14 @@ def _atomic(name: str, *, run: str = "true", requirements: str = "") -> str:
     return f"""version: 1\n{requirement_block}steps:\n  - id: check\n    run: "{run}"\n"""
 
 
-def test_minimal_repository_goon_inherits_executor_capacity_by_default(tmp_path: Path) -> None:
+def test_minimal_repository_goon_defaults_to_local_verification(tmp_path: Path) -> None:
     root = tmp_path / "goon.yml"
     root.write_text(
         """version: 1\nsteps:\n  - id: check\n    run: 'true'\n""",
         encoding="utf-8",
     )
     plan = FleetPlanResolver().resolve(root)
-    assert plan.execution.trust_repository_code is True
-    assert plan.execution.resources.cpu_millis is None
-    assert plan.execution.resources.memory_mib is None
-    assert plan.execution.resources.max_processes is None
+    assert isinstance(plan.execution, VerificationExecutionPolicy)
 
 
 def test_composition_order_and_duplicates_are_preserved(tmp_path: Path) -> None:
@@ -269,7 +267,7 @@ def test_requirement_provenance_survives_nested_composition(tmp_path: Path) -> N
         "general/bundle",
         """version: 1\ngoons:\n  - import: general/leaf\n""",
     )
-    root = _plan(tmp_path, "  - import: general/bundle\n")
+    root = _plan(tmp_path, "  - import: general/bundle\n", execution="execution: {purpose: cicd}\n")
     plan = FleetPlanResolver(goon_templates=GoonTemplateStore(store_root)).resolve(root)
     leaf = next(item for item in plan.imports if item.name == "general/leaf")
     assert {getattr(item, "path", None) for item in leaf.requirements if hasattr(item, "path")} == {
@@ -475,7 +473,7 @@ def test_import_applicability_uses_snapshot_content_not_git_topology(tmp_path: P
         "general/leaf",
         _atomic("leaf", requirements="- kind: file_exists\n  path: marker.txt"),
     )
-    root = _plan(tmp_path, "  - import: general/leaf\n")
+    root = _plan(tmp_path, "  - import: general/leaf\n", execution="execution: {purpose: cicd}\n")
     plan = FleetPlanResolver(goon_templates=GoonTemplateStore(store_root)).resolve(root)
 
     snapshot = tmp_path / "snapshot"

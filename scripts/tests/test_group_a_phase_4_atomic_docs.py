@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_atomic_publication_has_one_owner_and_no_new_live_wiring():
+def test_atomic_publication_has_one_owner_and_no_new_live_wiring() -> None:
     planner = (ROOT / "backend/src/oh_goon/services/fleet_admission.py").read_text()
     journal = (
         ROOT / "backend/src/oh_goon/runtime/enforcer_lace_journal.py"

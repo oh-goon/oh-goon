@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 
-from scripts.tests.test_m199_wsl_wheel_qualification import _fixture
+from test_m199_wsl_wheel_qualification import _fixture
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/qualify_native_issuer_wheel.sh"

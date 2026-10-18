@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from tests.factories.x0_architecture import replace_python_syntax
 
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
@@ -143,11 +144,11 @@ def test_x0_non_authoritative_observer_and_mutants(tmp_path):
     target = tmp_path / "backend/src/oh_goon/repository_tooling/custody_host_observation.py"
     raw = source.read_text()
     for mutation in (
-        raw.replace("'custody_proven': False", "'custody_proven': True", 1),
-        raw.replace("'gate_a': 'BLOCKED'", "'gate_a': 'PASS'", 1),
-        raw.replace("'effect_permission': 'NONE'", "'effect_permission': 'GRANTED'", 1),
-        raw.replace("_public_key_fingerprint(public_key)", "None", 1),
-        raw.replace("_proc_start_time(_fd_read(fd, 'stat'))", "123", 1),
+        replace_python_syntax(raw, "'custody_proven': False", "'custody_proven': True"),
+        replace_python_syntax(raw, "'gate_a': 'BLOCKED'", "'gate_a': 'PASS'"),
+        replace_python_syntax(raw, "'effect_permission': 'NONE'", "'effect_permission': 'GRANTED'"),
+        replace_python_syntax(raw, "_public_key_fingerprint(public_key)", "None"),
+        replace_python_syntax(raw, "_proc_start_time(_fd_read(fd, 'stat'))", "123"),
     ):
         target.write_text(mutation)
         assert _check_native_custody_observer_non_authority(tmp_path)

@@ -204,6 +204,13 @@ automatic exposure of new child outputs. Any proposed shorthand needs actual
 authoring evidence and the same visibility and permission boundaries; see
 [template UX evaluation](../templates/TEMPLATE_UX_D_EVALUATION.md).
 
+An import may also declare `phase: review`, `adjudicate`, `repair`, `regression`
+or `verification` for a bounded Agent review–repair loop. Label an import or its
+children: every concrete Step must belong to exactly one phase, in that order.
+Phase membership participates in the execution lock. Ordinary imports need no
+phase. See [Agent loop authoring and execution](../AGENT_SKILLS.md#native-agentic-reviewrepair-loop)
+for phase contracts and caller limits.
+
 ## Plans expose; Goons own
 
 A plain Plan import uses the Goon's defaults and automatically exposes its unambiguous public inputs to caller values:

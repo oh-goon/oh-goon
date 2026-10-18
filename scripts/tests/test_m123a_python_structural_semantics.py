@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+from oh_goon.repository_tooling.architecture.common import Violation
+
+import pytest
+
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture import filesystem_identity_contract
@@ -26,7 +31,7 @@ def _write(root: Path, relative: str, source: str) -> Path:
     return path
 
 
-def _messages(violations) -> tuple[str, ...]:
+def _messages(violations: Iterable[Violation]) -> tuple[str, ...]:
     return tuple(item.message for item in violations)
 
 
@@ -168,7 +173,7 @@ def test_placement_aliased_sleep_is_still_raw_polling_authority(tmp_path: Path) 
 
 
 def test_hashlib_comment_and_hashmarks_import_alias_are_representation_only(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     adapter = _valid_hashmarks_adapter(tmp_path)
     identity = _write(
@@ -182,7 +187,9 @@ def test_hashlib_comment_and_hashmarks_import_alias_are_representation_only(
     assert filesystem_identity_contract.check_filesystem_identity_contract() == []
 
 
-def test_renamed_hashlib_owner_is_rejected(tmp_path: Path, monkeypatch) -> None:
+def test_renamed_hashlib_owner_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     adapter = _valid_hashmarks_adapter(tmp_path)
     identity = _write(
         tmp_path,

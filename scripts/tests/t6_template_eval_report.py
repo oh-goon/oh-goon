@@ -89,7 +89,7 @@ def evaluation_report(
             "Actual JUnit test identity differs from the frozen T6 evaluation corpus"
         )
     failures = [
-        item.get("name")
+        item.get("name", "")
         for item in testcases
         if any(item.find(tag) is not None for tag in ("failure", "error", "skipped"))
     ]

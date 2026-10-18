@@ -1,5 +1,7 @@
 # oci/release-candidate
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Quality-gated OCI release candidate: run the strict Python quality pipeline, then build one retained OCI archive through the typed image-builder boundary. The plan never pushes to a registry and imports no registry credentials.
 
 ## Use this Plan

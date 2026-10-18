@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+from email.message import Message
+
+from typing import Self
+
+import os
+import time
+import urllib.request
+
+from pathlib import Path
+from typing import Literal
+
 import io
 import urllib.error
 
 import pytest
 
 from oh_goon.repository_tooling import dev_runtime_acceptance as acceptance
+from oh_goon.repository_tooling.acceptance import dev_runtime_repositories
 
 
 class _Response:
@@ -16,10 +28,10 @@ class _Response:
         self._body = body
         self.headers = {"Set-Cookie": cookie} if cookie else {}
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> Literal[False]:
         return False
 
     def read(self) -> bytes:
@@ -35,7 +47,7 @@ class _Reader:
 
 
 class _Running:
-    def __init__(self, token="token") -> None:
+    def __init__(self, token: str = "token") -> None:
         self.token = token
         self.stop_calls = 0
         self.crash_calls = 0
@@ -51,16 +63,22 @@ class _Running:
 
 
 class _Process:
-    def __init__(self, *, poll_result=None, returncode=None, pid: int = 1234) -> None:
+    def __init__(
+        self,
+        *,
+        poll_result: int | None = None,
+        returncode: int | None = None,
+        pid: int = 1234,
+    ) -> None:
         self._poll_result = poll_result
         self.returncode = returncode
         self.pid = pid
         self.wait_calls: list[float | None] = []
 
-    def poll(self):
+    def poll(self) -> int | None:
         return self._poll_result
 
-    def wait(self, timeout=None):
+    def wait(self, timeout: float | None = None) -> int:
         self.wait_calls.append(timeout)
         self._poll_result = 0
         return 0
@@ -73,19 +91,21 @@ def _http_error(code: int, body: dict[str, object]) -> urllib.error.HTTPError:
         "http://example.test",
         code,
         "error",
-        hdrs=None,
+        hdrs=Message(),
         fp=io.BytesIO(json.dumps(body).encode("utf-8")),
     )
 
 
-def test_http_helpers_preserve_headers_status_and_json(monkeypatch) -> None:
-    observed: list[tuple[object, float]] = []
+def test_http_helpers_preserve_headers_status_and_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[urllib.request.Request, float]] = []
 
-    def open_ok(request, timeout):
+    def open_ok(request: urllib.request.Request, timeout: float) -> _Response:
         observed.append((request, timeout))
         return _Response(status=202, body=b'{"ready": true}')
 
-    monkeypatch.setattr(acceptance.urllib.request, "urlopen", open_ok)
+    monkeypatch.setattr(urllib.request, "urlopen", open_ok)
     assert (
         acceptance._http_status(
             "http://example.test/check",
@@ -102,7 +122,7 @@ def test_http_helpers_preserve_headers_status_and_json(monkeypatch) -> None:
     assert request.get_method() == "POST"
 
     monkeypatch.setattr(
-        acceptance.urllib.request,
+        urllib.request,
         "urlopen",
         lambda request, timeout: _Response(body=b'{"value": 7}'),
     )
@@ -110,20 +130,20 @@ def test_http_helpers_preserve_headers_status_and_json(monkeypatch) -> None:
         "value": 7
     }
 
-    def open_error(request, timeout):
+    def open_error(request: urllib.request.Request, timeout: float) -> None:
         raise _http_error(401, {"code": "NOPE"})
 
-    monkeypatch.setattr(acceptance.urllib.request, "urlopen", open_error)
+    monkeypatch.setattr(urllib.request, "urlopen", open_error)
     assert acceptance._http_status("http://example.test/check") == 401
 
 
 def test_expected_error_helper_accepts_exact_error_and_rejects_drift(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def exact(request, timeout):
+    def exact(request: urllib.request.Request, timeout: float) -> None:
         raise _http_error(409, {"code": "EXECUTION_BUSY"})
 
-    monkeypatch.setattr(acceptance.urllib.request, "urlopen", exact)
+    monkeypatch.setattr(urllib.request, "urlopen", exact)
     assert acceptance._post_json_expect_error(
         "http://example.test/run",
         token="token",
@@ -142,7 +162,7 @@ def test_expected_error_helper_accepts_exact_error_and_rejects_drift(
         )
 
     monkeypatch.setattr(
-        acceptance.urllib.request,
+        urllib.request,
         "urlopen",
         lambda request, timeout: _Response(status=204),
     )
@@ -166,10 +186,10 @@ def test_expected_error_helper_accepts_exact_error_and_rejects_drift(
     ],
 )
 def test_cookie_exchange_rejects_invalid_session_contract(
-    monkeypatch, status, cookie, message
+    monkeypatch: pytest.MonkeyPatch, status: int, cookie: str, message: str
 ) -> None:
     monkeypatch.setattr(
-        acceptance.urllib.request,
+        urllib.request,
         "urlopen",
         lambda request, timeout: _Response(status=status, cookie=cookie),
     )
@@ -177,9 +197,11 @@ def test_cookie_exchange_rejects_invalid_session_contract(
         acceptance._exchange_cookie("http://frontend", "token")
 
 
-def test_cookie_exchange_returns_only_cookie_pair(monkeypatch) -> None:
+def test_cookie_exchange_returns_only_cookie_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
-        acceptance.urllib.request,
+        urllib.request,
         "urlopen",
         lambda request, timeout: _Response(
             status=204, cookie="sid=abc; Path=/; HttpOnly; SameSite=strict"
@@ -188,16 +210,18 @@ def test_cookie_exchange_returns_only_cookie_pair(monkeypatch) -> None:
     assert acceptance._exchange_cookie("http://frontend", "token") == "sid=abc"
 
 
-def test_wait_helpers_cover_success_retry_and_timeout(monkeypatch) -> None:
+def test_wait_helpers_cover_success_retry_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     statuses = iter([503, 200])
     monkeypatch.setattr(
         acceptance, "_http_status", lambda url, token=None: next(statuses)
     )
-    monkeypatch.setattr(acceptance.time, "sleep", lambda delay: None)
+    monkeypatch.setattr(time, "sleep", lambda delay: None)
     acceptance._wait_status("http://example.test", 200, timeout=1.0)
 
     ticks = iter([0.0, 0.1, 0.2])
-    monkeypatch.setattr(acceptance.time, "monotonic", lambda: next(ticks, 0.2))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 0.2))
     monkeypatch.setattr(
         acceptance,
         "_http_status",
@@ -209,34 +233,36 @@ def test_wait_helpers_cover_success_retry_and_timeout(monkeypatch) -> None:
     calls = iter([False, True, True])
     monkeypatch.setattr(acceptance, "_port_is_free", lambda port: next(calls))
     ticks = iter([0.0, 0.05, 0.1])
-    monkeypatch.setattr(acceptance.time, "monotonic", lambda: next(ticks, 0.1))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 0.1))
     assert acceptance._wait_ports_free(timeout=0.15) is True
 
     monkeypatch.setattr(acceptance, "_port_is_free", lambda port: False)
     ticks = iter([0.0, 0.2])
-    monkeypatch.setattr(acceptance.time, "monotonic", lambda: next(ticks, 0.2))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 0.2))
     assert acceptance._wait_ports_free(timeout=0.1) is False
 
 
-def test_pid_liveness_and_wait_dead_cover_observer_and_os_fallback(monkeypatch) -> None:
+def test_pid_liveness_and_wait_dead_cover_observer_and_os_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(acceptance, "observe_process_liveness", lambda pid: True)
     assert acceptance._pid_is_alive(1) is True
     monkeypatch.setattr(acceptance, "observe_process_liveness", lambda pid: False)
     assert acceptance._pid_is_alive(1) is False
 
     monkeypatch.setattr(acceptance, "observe_process_liveness", lambda pid: None)
-    monkeypatch.setattr(acceptance.os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
     assert acceptance._pid_is_alive(1) is True
 
     monkeypatch.setattr(
-        acceptance.os,
+        os,
         "kill",
         lambda pid, sig: (_ for _ in ()).throw(ProcessLookupError()),
     )
     assert acceptance._pid_is_alive(1) is False
 
     monkeypatch.setattr(
-        acceptance.os,
+        os,
         "kill",
         lambda pid, sig: (_ for _ in ()).throw(PermissionError()),
     )
@@ -244,13 +270,15 @@ def test_pid_liveness_and_wait_dead_cover_observer_and_os_fallback(monkeypatch) 
 
     alive = iter([True, False])
     monkeypatch.setattr(acceptance, "_pid_is_alive", lambda pid: next(alive, False))
-    monkeypatch.setattr(acceptance.time, "sleep", lambda delay: None)
+    monkeypatch.setattr(time, "sleep", lambda delay: None)
     ticks = iter([0.0, 0.1, 0.2])
-    monkeypatch.setattr(acceptance.time, "monotonic", lambda: next(ticks, 0.2))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 0.2))
     assert acceptance._wait_pid_dead(1, timeout=0.15) is True
 
 
-def test_access_boundaries_collect_wrong_token_and_cookie_failures(monkeypatch) -> None:
+def test_access_boundaries_collect_wrong_token_and_cookie_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     waits: list[tuple[str, int, str | None]] = []
     monkeypatch.setattr(
         acceptance,
@@ -276,7 +304,7 @@ def test_access_boundaries_collect_wrong_token_and_cookie_failures(monkeypatch) 
 
 
 def test_restart_persistence_accepts_complete_state_and_rejects_each_missing_surface(
-    monkeypatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     repositories = tmp_path / "repositories"
     repositories.mkdir()
@@ -324,7 +352,9 @@ def test_restart_persistence_accepts_complete_state_and_rejects_each_missing_sur
             )
 
 
-def test_parallel_restart_validators_cover_success_and_failure(monkeypatch) -> None:
+def test_parallel_restart_validators_cover_success_and_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     replies = iter(
         [
             {"run": {"status": "CANCELLED"}, "outcome": "CANCELLED"},
@@ -394,7 +424,9 @@ def test_parallel_restart_validators_cover_success_and_failure(monkeypatch) -> N
         )
 
 
-def test_restart_history_and_primary_state_validate_durable_truth(monkeypatch) -> None:
+def test_restart_history_and_primary_state_validate_durable_truth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     acceptance._verify_restart_history(
         "run-a run-b",
         required_ids=("run-a", None, "run-b"),
@@ -439,7 +471,9 @@ def test_restart_history_and_primary_state_validate_durable_truth(monkeypatch) -
         )
 
 
-def _invoke_restart_journey(tmp_path, issues: list[str], *, parallel: bool) -> None:
+def _invoke_restart_journey(
+    tmp_path: Path, issues: list[str], *, parallel: bool
+) -> None:
     acceptance._verify_crash_restart_journey(
         root=tmp_path,
         env={},
@@ -463,7 +497,7 @@ def _invoke_restart_journey(tmp_path, issues: list[str], *, parallel: bool) -> N
 
 
 def test_crash_restart_journey_composes_all_durable_checks(
-    monkeypatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     running = _Running("token-2")
     monkeypatch.setattr(acceptance, "_launch_dev", lambda root, env: running)
@@ -530,7 +564,7 @@ def test_crash_restart_journey_composes_all_durable_checks(
 
 
 def test_crash_restart_journey_records_restart_failure_and_still_stops(
-    monkeypatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     running = _Running("token-2")
     monkeypatch.setattr(acceptance, "_launch_dev", lambda root, env: running)
@@ -548,7 +582,7 @@ def test_crash_restart_journey_records_restart_failure_and_still_stops(
 
 
 def test_accept_dev_runtime_simulated_full_journey_preserves_authority(
-    monkeypatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     vite = tmp_path / "frontend" / "node_modules" / ".bin" / "vite"
     vite.parent.mkdir(parents=True)
@@ -558,14 +592,14 @@ def test_accept_dev_runtime_simulated_full_journey_preserves_authority(
 
     monkeypatch.setattr(acceptance, "_port_is_free", lambda port: True)
     monkeypatch.setattr(
-        acceptance,
+        dev_runtime_repositories,
         "prepare_acceptance_repository",
         lambda path: events.append(f"prepare:{path.name}"),
     )
     monkeypatch.setattr(
-        acceptance,
+        dev_runtime_repositories,
         "prepare_interruptible_acceptance_repository",
-        lambda path: events.append(f"interruptible:{path.name}"),
+        lambda path, **_kwargs: events.append(f"interruptible:{path.name}"),
     )
     monkeypatch.setattr(
         acceptance,
@@ -653,7 +687,7 @@ def test_accept_dev_runtime_simulated_full_journey_preserves_authority(
 
 
 def test_accept_dev_runtime_stops_gracefully_when_pre_restart_journey_fails(
-    monkeypatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     vite = tmp_path / "frontend" / "node_modules" / ".bin" / "vite"
     vite.parent.mkdir(parents=True)
@@ -661,9 +695,13 @@ def test_accept_dev_runtime_stops_gracefully_when_pre_restart_journey_fails(
     running = _Running("token")
 
     monkeypatch.setattr(acceptance, "_port_is_free", lambda port: True)
-    monkeypatch.setattr(acceptance, "prepare_acceptance_repository", lambda path: None)
     monkeypatch.setattr(
-        acceptance, "prepare_interruptible_acceptance_repository", lambda path: None
+        dev_runtime_repositories, "prepare_acceptance_repository", lambda path: None
+    )
+    monkeypatch.setattr(
+        dev_runtime_repositories,
+        "prepare_interruptible_acceptance_repository",
+        lambda path, **_kwargs: None,
     )
     monkeypatch.setattr(
         acceptance,

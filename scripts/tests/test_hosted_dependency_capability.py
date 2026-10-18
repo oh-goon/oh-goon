@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-import argparse
+from typing import Any, cast
+from collections.abc import Callable
+
 import importlib.metadata
+
+import argparse
 import json
 import os
 import subprocess
@@ -17,11 +21,11 @@ from oh_goon.repository_tooling import hosted_dependency_capability as capabilit
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _build(**kwargs):
-    return capability.build_capability(**kwargs)
+def _build(**kwargs: Any) -> dict[str, Any]:
+    return cast(dict[str, Any], capability.build_capability(**kwargs))
 
 
-def _versions(**overrides: str):
+def _versions(**overrides: str) -> Callable[[str], str]:
     defaults = {
         "cryptography": "46.0.4",
         "fastapi": "0.128.2",
@@ -34,6 +38,7 @@ def _versions(**overrides: str):
         "pytest-cov": "7.0.0",
         "mypy": "1.20.2",
         "ruff": "0.16.0",
+        "types-pyyaml": "6.0.12",
         "editables": "0.5",
         "hatchling": "1.32.0",
     }
@@ -325,7 +330,7 @@ def test_default_cryptography_probe_blocks_when_public_key_load_is_broken(
 ) -> None:
     from cryptography.hazmat.primitives import serialization
 
-    def broken_load(_payload: bytes):
+    def broken_load(_payload: bytes) -> None:
         raise RuntimeError("public-key load unavailable")
 
     monkeypatch.setattr(serialization, "load_pem_public_key", broken_load)
@@ -337,7 +342,7 @@ def test_default_cryptography_probe_blocks_when_x509_load_is_broken(
 ) -> None:
     from cryptography import x509
 
-    def broken_load(_payload: bytes):
+    def broken_load(_payload: bytes) -> None:
         raise RuntimeError("x509 load unavailable")
 
     monkeypatch.setattr(x509, "load_pem_x509_certificates", broken_load)
@@ -360,7 +365,7 @@ def test_default_import_probe_accepts_repository_local_virtualenv_dependency(
 ) -> None:
     installed = ROOT / "backend/.venv/lib/python3.14/site-packages/fastapi/__init__.py"
     monkeypatch.setattr(
-        capability.importlib,
+        importlib,
         "import_module",
         lambda _name: SimpleNamespace(__file__=str(installed)),
     )
@@ -372,7 +377,7 @@ def test_default_import_probe_rejects_repository_shadow(
 ) -> None:
     shadow = ROOT / "backend/src/shadow.py"
     monkeypatch.setattr(
-        capability.importlib,
+        importlib,
         "import_module",
         lambda _name: SimpleNamespace(__file__=str(shadow)),
     )
@@ -388,10 +393,8 @@ def test_default_cryptography_probe_rejects_module_metadata_version_mismatch(
     module = SimpleNamespace(
         __file__="/host/site-packages/cryptography/__init__.py", __version__="46.0.5"
     )
-    monkeypatch.setattr(capability.importlib, "import_module", lambda _name: module)
-    monkeypatch.setattr(
-        capability.importlib.metadata, "version", lambda _name: "46.0.4"
-    )
+    monkeypatch.setattr(importlib, "import_module", lambda _name: module)
+    monkeypatch.setattr(importlib.metadata, "version", lambda _name: "46.0.4")
     with pytest.raises(
         capability.HostedCapabilityError, match="cryptography import metadata mismatch"
     ):

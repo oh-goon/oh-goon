@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -26,8 +27,10 @@ EXPECTED = {
 }
 
 
-def _load() -> dict[str, object]:
-    return yaml.safe_load(SCORECARD.read_text(encoding="utf-8"))
+def _load() -> dict[str, Any]:
+    payload = yaml.safe_load(SCORECARD.read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
 
 
 def test_phase25_scorecard_covers_only_required_execution_metrics() -> None:

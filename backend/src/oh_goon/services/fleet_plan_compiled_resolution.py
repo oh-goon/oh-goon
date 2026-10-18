@@ -11,6 +11,7 @@ from oh_goon.core.fleet_plan_composition import (
 )
 from oh_goon.core.fleet_plan_output_refs import goon_workspace_reference
 from oh_goon.core.models.fleet_plan import (
+    AgentPlanStep,
     CompiledExecutionTemplate,
     CompiledGoonImportStep,
     ResolvedImport,
@@ -91,12 +92,26 @@ def resolve_compiled_steps(
         step = qualify_step_dependencies(
             step, prefix, goon_aliases, preserved_step_ids=external_step_ids
         )
+        agent_handoff = (
+            context.agent_capture(
+                plan_path,
+                # Rendering revalidates numeric defaults. Preserve the authored
+                # timeout scalar so existing immutable deliveries keep their bytes.
+                step.model_copy(update={"timeout_seconds": raw_step.timeout_seconds}),
+                qualified_step_id(prefix, step.step_id),
+                compiled.inputs,
+                input_values,
+            )
+            if isinstance(step, AgentPlanStep) and context.agent_capture is not None
+            else None
+        )
         resolved_step = resolve_plan_step(
             context,
             step,
             plan_base=plan_path.parent,
             step_id=qualified_step_id(prefix, step.step_id),
             value_compiler=value_compiler,
+            agent_handoff=agent_handoff,
         )
         resolved.append(resolved_step)
         source = _resolved_step_source(context, plan_path, raw_step.step_id, resolved_step.step_id)
@@ -164,6 +179,7 @@ def resolve_goon_edge(
     bind_goon_alias(step, scope, goon_aliases, goon_workspaces)
     parent = ResolvedImport(
         import_id=scope.prefix,
+        phase=step.phase,
         name=step.goon,
         source_sha256=source.source_sha256,
         step_ids=tuple(item.step_id for item in scope.steps),

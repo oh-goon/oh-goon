@@ -31,6 +31,11 @@ own Run. Do not introduce another scheduler or executable-recipe owner.
 
 ## Product authority
 
+Ordinary Plan/Goon execution defaults to trusted local verification and waits for
+completion. Deep custody and privileged native qualification apply only to explicitly
+selected strict execution for untrusted code or requested additional guarantees.
+Keep normal startup and provider configuration simple; see `docs/CI_CD_CONTRACT.md`.
+
 Oh-Goon orchestrates native tools; it does not reimplement their semantics.
 Native uv, npm, pytest, Ruff, mypy, Git, Docker/BuildKit, Kubernetes, and operating
 system facilities retain their own resolution, cache, process, and result
@@ -171,7 +176,7 @@ Each shipped package contains exactly YAML and README:
   local packages never shadow shipped imports. Shared Plan storage owns only its
   Plan file and refuses external local imports. See `templates/README.md`.
 - Classification is backend-owned and category-derived: `python`, `security`,
-  `oci`, and `kubernetes` are production; `advanced`, `general`, and `ml` are
+  `oci`, `kubernetes`, and `agents` are production; `advanced`, `general`, and `ml` are
   teaching; `oh-goon` is internal. Unknown categories fail. Production imports
   production only; teaching/internal may reuse production but not each other.
 - Read and parse each source once; derive compilation and source positions
@@ -299,3 +304,8 @@ Report completion in the response, not in new repository status files:
 A timeout or skipped suite is unverified. Never claim all tests pass unless all
 tests ran. Keep contributor instructions concise and link owning documents;
 there is no arbitrary line-count gate.
+
+Ordinary backend/integration gates exclude the existing `certification` marker.
+Privileged custody, fs-verity and installed-model proofs belong to explicitly
+selected strict/native qualification. Keep their portable negative/lifecycle
+checks in ordinary validation; see `backend/tests/README.md`.

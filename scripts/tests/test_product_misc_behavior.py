@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+from typing import Self, cast
+from collections.abc import Sequence
+
+import subprocess
+import time
+import urllib.request
+
 import json
 import os
 from pathlib import Path
+from collections.abc import Iterator
 import socket
 from types import SimpleNamespace
 import urllib.error
@@ -17,20 +25,23 @@ from oh_goon.repository_tooling.runtime_loopback_guard import (
     _allowed_address,
 )
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
+from oh_goon.integrations.fleet_plan_compilation import parse_goon_template
 
 
 class Response:
-    def __init__(self, payload, *, status=200):
+    def __init__(self, payload: object, *, status: int = 200) -> None:
         self.payload = payload
         self.status = status
 
-    def read(self):
+    def read(self) -> bytes:
         return json.dumps(self.payload).encode()
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *_args):
+    def __exit__(self, *_args: object) -> None:
         return None
 
 
@@ -77,29 +88,31 @@ def test_get_json_and_wait_http_success_retry_and_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        product.urllib.request, "urlopen", lambda *_a, **_k: Response({"ok": True})
+        urllib.request, "urlopen", lambda *_a, **_k: Response({"ok": True})
     )
     assert product._get_json("http://x", access_token="t") == {"ok": True}
-    replies = iter([urllib.error.URLError("down"), Response({}, status=204)])
+    replies: Iterator[urllib.error.URLError | Response] = iter(
+        [urllib.error.URLError("down"), Response({}, status=204)]
+    )
 
-    def open_retry(*_a, **_k):
+    def open_retry(*_a: object, **_k: object) -> Response:
         item = next(replies)
         if isinstance(item, Exception):
             raise item
         return item
 
-    monkeypatch.setattr(product.urllib.request, "urlopen", open_retry)
-    monkeypatch.setattr(product.time, "sleep", lambda _x: None)
+    monkeypatch.setattr(urllib.request, "urlopen", open_retry)
+    monkeypatch.setattr(time, "sleep", lambda _x: None)
     ticks = iter([0.0, 0.1, 0.2])
-    monkeypatch.setattr(product.time, "monotonic", lambda: next(ticks, 0.2))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 0.2))
     product._wait_http("http://x", timeout_seconds=1)
     monkeypatch.setattr(
-        product.urllib.request,
+        urllib.request,
         "urlopen",
         lambda *_a, **_k: (_ for _ in ()).throw(urllib.error.URLError("down")),
     )
     ticks = iter([0.0, 0.1, 2.0])
-    monkeypatch.setattr(product.time, "monotonic", lambda: next(ticks, 2.0))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks, 2.0))
     with pytest.raises(RuntimeError, match="timed out waiting"):
         product._wait_http("http://x", timeout_seconds=1)
 
@@ -177,23 +190,23 @@ def test_stop_process_graceful_and_kill_paths(monkeypatch: pytest.MonkeyPatch) -
     graceful = SimpleNamespace(
         terminate=lambda: None, wait=lambda timeout: 0, kill=lambda: pytest.fail("kill")
     )
-    product._stop(graceful)
-    calls = []
+    product._stop(cast(subprocess.Popen[bytes], graceful))
+    calls: list[str | tuple[str, float]] = []
 
     class Stuck:
-        def terminate(self):
+        def terminate(self) -> None:
             calls.append("terminate")
 
-        def wait(self, timeout):
+        def wait(self, timeout: float) -> int:
             calls.append(("wait", timeout))
             if timeout == 10:
-                raise product.subprocess.TimeoutExpired("x", timeout)
+                raise subprocess.TimeoutExpired("x", timeout)
             return 0
 
-        def kill(self):
+        def kill(self) -> None:
             calls.append("kill")
 
-    product._stop(Stuck())
+    product._stop(cast(subprocess.Popen[bytes], Stuck()))
     assert calls == ["terminate", ("wait", 10), "kill", ("wait", 5)]
 
 
@@ -223,7 +236,7 @@ def test_source_runtime_environment_strips_ambient_authority(
     )
 
 
-def _fake_process():
+def _fake_process() -> SimpleNamespace:
     return SimpleNamespace(
         terminate=lambda: None, wait=lambda timeout: 0, kill=lambda: None
     )
@@ -234,7 +247,7 @@ def test_accept_source_product_backend_only_and_browser_dependency_paths(
 ) -> None:
     monkeypatch.setattr(product, "_free_port", lambda: 1234)
     monkeypatch.setattr(product, "new_certification_access_token", lambda: "token")
-    monkeypatch.setattr(product.subprocess, "Popen", lambda *_a, **_k: _fake_process())
+    monkeypatch.setattr(subprocess, "Popen", lambda *_a, **_k: _fake_process())
     monkeypatch.setattr(product, "_wait_http", lambda *_a, **_k: None)
     monkeypatch.setattr(product, "exercise_product_api", lambda **_k: "run")
     monkeypatch.setattr(product, "exercise_location_lifecycle", lambda **_k: None)
@@ -280,8 +293,8 @@ def test_loopback_address_policy() -> None:
         ("::1", 1),
     ):
         assert _allowed_address(value) is True
-    for value in ((), (123, 1), ("example.com", 443), ("8.8.8.8", 53), object()):
-        assert _allowed_address(value) is False
+    for denied in ((), (123, 1), ("example.com", 443), ("8.8.8.8", 53), object()):
+        assert _allowed_address(denied) is False
 
 
 def test_loopback_guard_records_blocked_connect_and_restores(
@@ -376,36 +389,24 @@ def test_plan_diagnostic_root_containment(tmp_path: Path) -> None:
         outside.unlink(missing_ok=True)
 
 
-def _dumping(**values):
-    return SimpleNamespace(model_dump=lambda **_kwargs: dict(values))
-
-
-def _plan(plan_id: str, *, steps, name="n", description="d"):
-    return SimpleNamespace(
-        plan_id=plan_id,
-        contract_version=1,
+def _plan(*, steps: Sequence[ResolvedCommandStep], name: str) -> ResolvedFleetPlan:
+    return ResolvedFleetPlan.create(
         name=name,
-        description=description,
-        execution=_dumping(mode="direct"),
-        requirements=[_dumping(name="req")],
-        imports=[_dumping(name="imp")],
-        steps=steps,
+        description="d",
+        execution=VerificationExecutionPolicy(),
+        steps=tuple(steps),
     )
 
 
-def _step(step_id: str, **values):
-    return SimpleNamespace(step_id=step_id, model_dump=lambda **_kwargs: dict(values))
+def _step(step_id: str, *, run: str) -> ResolvedCommandStep:
+    return ResolvedCommandStep(step_id=step_id, argv=(run,))
 
 
 def test_semantic_plan_diff_added_removed_changed_and_plan_fields() -> None:
-    before = _plan(
-        "before", name="old", steps=[_step("same", run="a"), _step("gone", run="x")]
-    )
-    after = _plan(
-        "after", name="new", steps=[_step("same", run="b"), _step("added", run="y")]
-    )
+    before = _plan(name="old", steps=[_step("same", run="a"), _step("gone", run="x")])
+    after = _plan(name="new", steps=[_step("same", run="b"), _step("added", run="y")])
     diff = diagnostics.semantic_plan_diff(before, after)
-    assert diff.before_plan_id == "before" and diff.after_plan_id == "after"
+    assert diff.before_plan_id == before.plan_id and diff.after_plan_id == after.plan_id
     assert any(item.field == "name" for item in diff.plan_fields)
     kinds = {item.step_id: item.kind.value for item in diff.steps}
     assert kinds == {"added": "added", "gone": "removed", "same": "changed"}
@@ -416,7 +417,9 @@ def test_check_plan_sources_override_and_invalid(
 ) -> None:
     plan = tmp_path / "a.yml"
     plan.write_text("bad", encoding="utf-8")
-    compiled = SimpleNamespace()
+    compiled = parse_goon_template(
+        "version: 1\nsteps: [{run: echo}]\n", source="fixture.yml"
+    )
     report = diagnostics.check_plan_sources(plan, compiled_overrides={plan: compiled})
     assert report.checked_files == 1 and report.issues == ()
     monkeypatch.setattr(

@@ -6,6 +6,7 @@ import copy
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -21,11 +22,15 @@ BROWSER_TARGETS = {
 }
 
 
-def _goon(key: str) -> dict:
-    return yaml.safe_load((GOONS / key / "goon.yml").read_text(encoding="utf-8"))
+def _goon(key: str) -> dict[str, Any]:
+    payload = yaml.safe_load((GOONS / key / "goon.yml").read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
 
 
-def _workspace_errors(repository: dict, producer: dict) -> tuple[str, ...]:
+def _workspace_errors(
+    repository: dict[str, Any], producer: dict[str, Any]
+) -> tuple[str, ...]:
     """Test-only convergence check, not another parser or runtime decision maker."""
     problems: list[str] = []
     if repository["steps"][0]["run"] != producer["steps"][0]["run"]:
@@ -47,7 +52,7 @@ def _workspace_errors(repository: dict, producer: dict) -> tuple[str, ...]:
     return tuple(problems)
 
 
-def _browser_errors(goons: dict[str, dict]) -> tuple[str, ...]:
+def _browser_errors(goons: dict[str, dict[str, Any]]) -> tuple[str, ...]:
     problems = []
     seen_commands: set[str] = set()
     for key, native_target in BROWSER_TARGETS.items():

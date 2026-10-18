@@ -256,6 +256,7 @@ def test_nested_bubblewrap_projects_only_the_delegated_cgroup_mount(
             host_tools=(),
         ),
         read_only_workspace=None,
+        local_resource_intent=None,
     )
     monkeypatch.setattr(bubblewrap_isolation, "verify_runtime_root", lambda _root: None)
     monkeypatch.setattr(bubblewrap_isolation, "_append_managed_inputs", lambda *_args: None)

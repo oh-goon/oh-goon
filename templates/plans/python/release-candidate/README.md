@@ -1,5 +1,7 @@
 # python/release-candidate
 
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
 Calculate candidate metadata, run Python quality and retain the project’s distribution bundle. Building uses the project’s version; metadata calculation does not stamp a new version into source.
 
 ## Before you run

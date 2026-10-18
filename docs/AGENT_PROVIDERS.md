@@ -2,7 +2,14 @@
 
 Oh-Goon can connect to configured model endpoints without installing their servers or provider SDKs. Ollama, LiteLLM, OpenRouter and OpenAI are connection choices, not repository dependencies. OpenAI connections use API keys; ChatGPT/Codex subscription sign-in is outside this interface.
 
-This is the connection layer for future agentic workflows. The existing [Agent Step](AGENT_SKILLS.md) continues to use its separately authorized local harness. Configuring a provider does not grant a Step network access, disclose repository files, execute model tool calls or create Run evidence.
+The native [Agentic Review–Repair Loop](AGENT_SKILLS.md#native-agentic-reviewrepair-loop)
+uses these profiles through the existing supervised Agent Step. Select a profile
+with `--agent-model-profile` on `lock` and `plan run`, or keep `default_model`.
+`--agent-providers-file` selects an explicit configuration; otherwise the normal
+configuration path applies. Endpoint and model parameters are frozen before
+admission; credential values remain in process environment/header authority.
+Legacy local-model harnesses retain their explicit Ollama contract. Merely
+configuring a provider grants no Step effects or verification authority.
 
 ## Configure once
 
@@ -12,25 +19,33 @@ Print the default user configuration path:
 oh-goon agent providers path
 ```
 
-On Linux it is `$XDG_CONFIG_HOME/oh-goon/providers.toml`, falling back to `~/.config/oh-goon/providers.toml`. macOS uses `~/Library/Application Support/oh-goon/providers.toml`; Windows uses `%APPDATA%/oh-goon/providers.toml`. `OH_GOON_PROVIDERS_FILE` selects another file; explicit `--config` takes precedence. The chosen file is the entire catalog. There is no directory discovery, layering or dependency on the database path.
+On Linux it is `$XDG_CONFIG_HOME/oh-goon/providers.json`, falling back to `~/.config/oh-goon/providers.json`. macOS uses `~/Library/Application Support/oh-goon/providers.json`; Windows uses `%APPDATA%/oh-goon/providers.json`. `OH_GOON_PROVIDERS_FILE` selects another file; explicit `--config` takes precedence. The chosen file is the entire catalog. There is no directory discovery, layering or dependency on the database path.
 
-Create its parent directory yourself and save a minimal configuration:
+Create a configuration for a model already installed in Ollama:
 
-```toml
-version = 1
-default_model = "review"
-
-[providers.local]
-api = "ollama"
-base_url = "http://127.0.0.1:11434"
-
-[models.review]
-provider = "local"
-model = "YOUR_INSTALLED_MODEL"
-max_output_tokens = 1024
+```sh
+oh-goon agent providers setup --provider ollama --model YOUR_INSTALLED_MODEL
 ```
 
-The complete [example catalog](../examples/agent-providers/providers.toml) includes Ollama, LiteLLM, OpenRouter, OpenAI and Anthropic. Provider names and model profile names are user-defined. Model IDs are passed unchanged, including slashes or version suffixes. A profile chooses its provider and model; `default_model` is optional if you select `--model` explicitly.
+For a running LiteLLM proxy, use `--provider litellm --model YOUR_MODEL_ALIAS`. `--base-url` selects another endpoint and `--api-key-env` names its credential variable. Setup writes the selected JSON file and a sibling `providers.schema.json` derived from Oh-Goon's configuration model. It creates the directory and refuses to overwrite an existing catalog. Setup does not connect, pull a model or install a server.
+
+The resulting catalog is editable JSON with `$schema` support:
+
+```json
+{
+  "$schema": "providers.schema.json",
+  "version": 1,
+  "default_model": "default",
+  "providers": {
+    "ollama": {"api": "ollama", "base_url": "http://127.0.0.1:11434"}
+  },
+  "models": {
+    "default": {"provider": "ollama", "model": "YOUR_INSTALLED_MODEL"}
+  }
+}
+```
+
+`oh-goon agent providers schema` prints that same model-derived schema. JSON files use the `.json` extension. Existing TOML catalogs remain supported when selected explicitly; the [example catalog](../examples/agent-providers/providers.toml) includes Ollama, LiteLLM, OpenRouter, OpenAI and Anthropic. Provider names and model profile names are user-defined. Model IDs pass unchanged, including slashes or version suffixes. `default_model` is optional when selecting a profile explicitly.
 
 ## Validate offline, connect explicitly
 
@@ -119,7 +134,7 @@ reply = AgentProviderClient().complete(
 print(reply.text)
 ```
 
-This API adds no agent loop, tool supervisor, scheduler or execution authority. Future Agent Step integration must bind the selected connection and disclosure permissions through the existing Fleet owners.
+The native Agent Step consumes this same resolved connection through the existing Fleet owners. Its captured source, permitted writes and native verification remain governed by the selected Plan.
 
 ## Protocol references
 

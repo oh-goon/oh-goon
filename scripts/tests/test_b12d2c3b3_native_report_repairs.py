@@ -24,7 +24,7 @@ def _root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _clean(root: Path):
+def _clean(root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(root / "scripts/source_transport_clean.sh")],
         cwd=root,
@@ -34,7 +34,9 @@ def _clean(root: Path):
     )
 
 
-def test_transport_cleanup_needs_no_build_index_and_preserves_source(tmp_path):
+def test_transport_cleanup_needs_no_build_index_and_preserves_source(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path)
     source = root / "backend/pyproject.toml"
     original = source.read_bytes()
@@ -56,7 +58,9 @@ def test_transport_cleanup_needs_no_build_index_and_preserves_source(tmp_path):
     )
 
 
-def test_transport_cleanup_rejects_symlink_without_partial_mutation(tmp_path):
+def test_transport_cleanup_rejects_symlink_without_partial_mutation(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path)
     victim = root / "backend" / "victim"
     victim.write_text("important", encoding="utf-8")
@@ -69,7 +73,7 @@ def test_transport_cleanup_rejects_symlink_without_partial_mutation(tmp_path):
     assert victim.read_text() == "important" and sidecar.exists()
 
 
-def test_native_report_ui_boundary_uses_shared_presentation_owner():
+def test_native_report_ui_boundary_uses_shared_presentation_owner() -> None:
     shared = ROOT / "frontend/src/components/common/PlanInputDiagnostic.tsx"
     league = (
         ROOT / "frontend/src/features/league/components/SharedPlanPanel.tsx"
