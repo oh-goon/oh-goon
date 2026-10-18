@@ -1,0 +1,238 @@
+schema_version: 1
+source_version: 1267.0.1052
+section: strict-isolation-tool-authority
+questions:
+- id: Q41
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Each resolved Step explicitly carries environment imports, workspace lineage, cache lineage, logical host tools, egress, isolation threat model, and resource guarantees. Repository filesystem authority comes only from the central repository/run/sandbox path model; arbitrary host paths and host Docker-daemon authority are absent.
+    critical: true
+  - id: ownership_boundary
+    statement: Strict authority is compiled into the resolved Step and enforced by the selected backend, not discovered ad hoc.
+    critical: true
+  - id: consequence
+    statement: Prevents hidden host capabilities and a second sidecar policy/state machine.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Allows an undeclared ambient environment/workspace/cache/tool/network capability into strict execution.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/CI_CD_CONTRACT.md:238-244
+  - backend/src/oh_goon/core/models/fleet_plan_step_contract.py:31-40
+  - backend/src/oh_goon/core/models/fleet_plan_step_contract.py:107-150
+  - backend/src/oh_goon/core/models/fleet_plan_step_contract.py:219-240
+- id: Q42
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: A strict host tool is admitted by logical name and executed from one run-owned immutable snapshot. Deployment path authority is resolved/frozen during preparation and attempt evidence must match it; ambient PATH lookup, version fallback, and runtime substitution are forbidden after admission.
+    critical: true
+  - id: ownership_boundary
+    statement: Tool identity is frozen execution authority, not a late host lookup.
+    critical: true
+  - id: consequence
+    statement: Prevents time-of-check/time-of-use tool substitution.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Allows strict tool execution to perform a late host PATH/tool lookup instead of using the admitted immutable snapshot.
+    severity: critical
+    misconception_id: hidden_fallback_assumption
+  evidence_expectations:
+  - docs/CI_CD_CONTRACT.md:333-335
+  - backend/src/oh_goon/core/path_authority.py:240-318
+  - backend/src/oh_goon/integrations/_fleet_plan_host_resources.py:138-180
+- id: Q43
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: PlanStepCapabilities.tools names additional child programs that repository-owned command delegation may invoke beyond the primary executable. Those tools are resolved and frozen by the same strict host-path authority; ambient PATH remains unavailable.
+    critical: true
+  - id: ownership_boundary
+    statement: Delegated child tools are explicit capability, not inherited process environment.
+    critical: true
+  - id: consequence
+    statement: Prevents a primary command such as make from gaining unbounded child executable authority.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Allows delegated child tools to appear from ambient PATH rather than explicit PlanStepCapabilities.tools authority.
+    severity: critical
+    misconception_id: hidden_fallback_assumption
+  evidence_expectations:
+  - backend/src/oh_goon/core/models/fleet_plan_step_contract.py:195-216
+- id: Q44
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Managed runtimes are snapshotted before execution and mounted at Fleet-owned canonical destinations such as /managed/000. Original host topology must not become sandbox semantics, and preparation uses Fleet-owned HOME/tmp/cache/config with a minimal environment.
+    critical: true
+  - id: ownership_boundary
+    statement: Sandbox paths are Fleet-owned identities; host source layout is implementation detail.
+    critical: true
+  - id: consequence
+    statement: Prevents host-path leakage and non-portable execution authority.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Uses live host runtime layout/paths as sandbox execution authority instead of Fleet-owned frozen runtime destinations.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - docs/development/DATAFLOW.md:14-14
+  - backend/src/oh_goon/integrations/_fleet_plan_run_resources.py:227-293
+- id: Q45
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: plan.yml owns authored intent; goon.yml owns executable behavior; the resolver owns canonical interpretation; goon.lock is only the compact frozen resolved-execution fingerprint; Enforcer/admission owns authorization; the executor executes the verified target; Game Tape owns execution evidence.
+    critical: false
+  - id: ownership_boundary
+    statement: Fingerprint, authorization, execution, and evidence must not collapse into one artifact.
+    critical: false
+  - id: consequence
+    statement: Prevents goon.lock from becoming a second authoring or policy format.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/goon-lock.md:1-14
+  - backend/src/oh_goon/core/execution_lock_identity.py:27-74
+- id: Q178
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Each resolved Step explicitly carries environment imports, workspace lineage, cache lineage, logical host tools, egress, isolation threat model, and resource guarantees. Repository filesystem authority comes only from the central repository/run/sandbox path model; arbitrary host paths and host Docker-daemon authority are absent.
+    critical: true
+  - id: ownership_boundary
+    statement: Strict authority is compiled into the resolved Step and enforced by the selected backend, not discovered ad hoc.
+    critical: true
+  - id: consequence
+    statement: Prevents hidden host capabilities and a second sidecar policy/state machine.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows an undeclared ambient environment/workspace/cache/tool/network capability into strict execution.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/CI_CD_CONTRACT.md:238-244
+  - backend/src/oh_goon/core/models/fleet_plan_step_contract.py:31-40
+  - backend/src/oh_goon/core/models/fleet_plan_step_contract.py:107-150
+  - backend/src/oh_goon/core/models/fleet_plan_step_contract.py:219-240
+- id: Q179
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: A strict host tool is admitted by logical name and executed from one run-owned immutable snapshot. Deployment path authority is resolved/frozen during preparation and attempt evidence must match it; ambient PATH lookup, version fallback, and runtime substitution are forbidden after admission.
+    critical: true
+  - id: ownership_boundary
+    statement: Tool identity is frozen execution authority, not a late host lookup.
+    critical: true
+  - id: consequence
+    statement: Prevents time-of-check/time-of-use tool substitution.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows strict tool execution to perform a late host PATH/tool lookup instead of using the admitted immutable snapshot.
+    severity: critical
+    misconception_id: hidden_fallback_assumption
+  evidence_expectations:
+  - docs/CI_CD_CONTRACT.md:333-335
+  - backend/src/oh_goon/core/path_authority.py:240-318
+  - backend/src/oh_goon/integrations/_fleet_plan_host_resources.py:138-180
+- id: Q180
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: PlanStepCapabilities.tools names additional child programs that repository-owned command delegation may invoke beyond the primary executable. Those tools are resolved and frozen by the same strict host-path authority; ambient PATH remains unavailable.
+    critical: true
+  - id: ownership_boundary
+    statement: Delegated child tools are explicit capability, not inherited process environment.
+    critical: true
+  - id: consequence
+    statement: Prevents a primary command such as make from gaining unbounded child executable authority.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows delegated child tools to appear from ambient PATH rather than explicit PlanStepCapabilities.tools authority.
+    severity: critical
+    misconception_id: hidden_fallback_assumption
+  evidence_expectations:
+  - backend/src/oh_goon/core/models/fleet_plan_step_contract.py:195-216
+- id: Q181
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Managed runtimes are snapshotted before execution and mounted at Fleet-owned canonical destinations such as /managed/000. Original host topology must not become sandbox semantics, and preparation uses Fleet-owned HOME/tmp/cache/config with a minimal environment.
+    critical: true
+  - id: ownership_boundary
+    statement: Sandbox paths are Fleet-owned identities; host source layout is implementation detail.
+    critical: true
+  - id: consequence
+    statement: Prevents host-path leakage and non-portable execution authority.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Uses live host runtime layout/paths as sandbox execution authority instead of Fleet-owned frozen runtime destinations.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - docs/development/DATAFLOW.md:14-14
+  - backend/src/oh_goon/integrations/_fleet_plan_run_resources.py:227-293
+- id: Q182
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: plan.yml owns authored intent; goon.yml owns executable behavior; the resolver owns canonical interpretation; goon.lock is only the compact frozen resolved-execution fingerprint; Enforcer/admission owns authorization; the executor executes the verified target; Game Tape owns execution evidence.
+    critical: false
+  - id: ownership_boundary
+    statement: Fingerprint, authorization, execution, and evidence must not collapse into one artifact.
+    critical: false
+  - id: consequence
+    statement: Prevents goon.lock from becoming a second authoring or policy format.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/goon-lock.md:1-14
+  - backend/src/oh_goon/core/execution_lock_identity.py:27-74
+
+- id: Q209
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Hashmarks v0.13.0 owns exact flat logical verification membership and explicitly leaves physical execution layout external; process isolation, grouping, concurrency, retry, and timeout refinement are Oh-Goon execution-policy decisions.
+    critical: true
+  - id: ownership_boundary
+    statement: Hashmarks may not smuggle `isolated_process`, batching, or other execution-layout policy into its admitted downstream contract/envelope; Oh-Goon must reject such extra fields and preserve the exact selected membership while materializing its own ShardWork.
+    critical: true
+  - id: consequence
+    statement: Keeping layout external prevents repository intelligence from becoming execution authority while exact membership conservation prevents Oh-Goon execution policy from becoming a second verification selector.
+    critical: false
+  contradictions:
+  - id: boundary-01
+    statement: Claims Hashmarks may dictate physical isolation/grouping, or allows Oh-Goon grouping/isolation choices to omit, duplicate, add, or independently reselect admitted Hashmarks members.
+    severity: critical
+    misconception_id: test_as_runtime_authority
+  evidence_expectations:
+  - AGENTS.md:113-120
+  - backend/src/oh_goon/integrations/hashmarks/verification_selection_primitives.py:101-136
+  - backend/src/oh_goon/repository_tooling/hashmarks_verification_execution.py:21-78
+  - backend/src/oh_goon/runtime/execution/shard_models.py:79-113

@@ -1,0 +1,12 @@
+# Self-contained, offline authoring fixture. This Agent Step is preview-only.
+inputs:
+  repo:
+    type: repository_reference
+  skill:
+    type: skill_reference
+  acceptance:
+    type: acceptance_profile
+steps:
+  - uses: agent
+    harness: opencode
+    task: Review the repository using the selected pinned source resources.

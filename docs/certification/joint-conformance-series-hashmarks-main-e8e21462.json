@@ -1,0 +1,30 @@
+{
+  "schema": "oh-goon.hashmarks-joint-conformance-series.v1",
+  "series_id": "joint-962-hashmarks-main-e8e21462-v1",
+  "oh_goon_parent": {
+    "version": "1267.0.961",
+    "relationship": "committed development parent"
+  },
+  "hashmarks": {
+    "checkpoint": "main@e8e2146273401cbe7de0b5239727a396426953df",
+    "version": "0.14.0",
+    "canonical_source_identity": "git-tree:bf6aebe674c05660604fae25933dec7c8eec6fff",
+    "git_commit": "e8e2146273401cbe7de0b5239727a396426953df",
+    "git_tree": "bf6aebe674c05660604fae25933dec7c8eec6fff",
+    "artifact_identity": "sha256:75ff93025f14ec4bcf677e4bd721d037860c9dc318d969df078c736e56bdda95",
+    "producer_implementation_identity": "sha256:8cf452098e99afbc019dcdbeaf9b9c79e17bc8e09f37b3eea53527ae66f013bd"
+  },
+  "derivation": {
+    "source": "Hugloss/Hashmarks main resolved once to immutable commit",
+    "build": "GitHub Actions exact-commit checkout + uv build --wheel",
+    "workflow_run_id": 35450220479,
+    "workflow_artifact_id": 10586564403,
+    "workflow_artifact_zip_sha256": "sha256:75e854256de2ba4f5572879599f8f0eaf90ebffcf2e841e6df9a4b2cea898811"
+  },
+  "authority": {
+    "hashmarks": "repository-intelligence-delta-freshness-ownership-relationships-and-verification-selection",
+    "oh_goon": "admission-execution-retries-sufficiency-enforcement-verification-certification-and-mutation",
+    "consumer_rule": "verify-producer-semantics-never-recreate-repair-or-reinterpret"
+  },
+  "rule": "Moving Hashmarks main creates a new immutable supply identity; Oh-Goon never treats branch name or package version alone as producer authority."
+}

@@ -1,0 +1,22 @@
+version: 1
+uv:
+  group: dev
+inputs:
+  release_channel:
+    type: choice
+    choices:
+    - alpha
+    - beta
+    - production
+    default: alpha
+  revision:
+    type: git_revision
+outputs:
+  project_version: ${{ steps.compute.outputs.PROJECT_VERSION }}
+  release_version: ${{ steps.compute.outputs.RELEASE_VERSION }}
+steps:
+- id: compute
+  run: uv run release-metadata --channel ${{ inputs.release_channel }} --revision ${{ inputs.revision }} --output-dir .fleet/release
+  outputs:
+    PROJECT_VERSION: .fleet/release/PROJECT_VERSION
+    RELEASE_VERSION: .fleet/release/RELEASE_VERSION

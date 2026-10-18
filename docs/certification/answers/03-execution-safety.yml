@@ -1,0 +1,290 @@
+schema_version: 1
+source_version: 1267.0.1052
+section: execution-safety
+questions:
+- id: Q11
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Repository/path isolation is backend execution safety and a trust boundary, owned at backend/integration/runtime boundaries rather than frontend presentation.
+    critical: true
+  - id: ownership_boundary
+    statement: It is security behavior, not a convenience check or UI policy.
+    critical: true
+  - id: consequence
+    statement: A path leak can expose code/workspaces outside an agent or execution assignment.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Treats repository/path isolation as convenience or UI policy rather than backend execution security/trust authority.
+    severity: critical
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - backend/AGENTS.md:68-76
+  - AGENTS.md:63-89
+  - backend/src/oh_goon/services/fleet_admission.py:148-169
+- id: Q12
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: make certify delegates to CERTIFICATION_FRONTDOOR, which uses scripts/run_logged.sh certify around one locked uv/pyproject oh-goon-workflow runner; the backend certification frontdoor bootstraps authority and invokes the single APP Plan at templates/plans/oh-goon/app-certification/plan.yml.
+    critical: false
+  - id: ownership_boundary
+    statement: APP Goon ordering belongs only to the APP Plan; Make/workflow must not duplicate Plan orchestration.
+    critical: false
+  - id: consequence
+    statement: Preserves a single certification orchestration owner and first-failure semantics.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - Makefile:3-8
+  - Makefile:400-401
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - backend/src/oh_goon/workflow.py:14-31
+  - backend/src/oh_goon/workflow.py:489-513
+- id: Q13
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: make certify never runs sudo, silently changes host configuration, or acquires strict executor authority. Explicit one-time WSL strict-executor host mutation is make strict-executor-setup.
+    critical: true
+  - id: ownership_boundary
+    statement: Strict-executor host repair/setup is explicit and separate from APP verification.
+    critical: true
+  - id: consequence
+    statement: Certification must not gain hidden host mutation authority.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Allows make certify to run sudo or silently mutate host configuration.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - scripts/tests/test_run_logging.py:151-162
+- id: Q14
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: "backend API source \u2192 FastAPI/OpenAPI \u2192 generated/openapi/openapi.json \u2192 generated/frontend/ \u2192 frontend."
+    critical: true
+  - id: ownership_boundary
+    statement: No hand-repeated endpoint/request/response facts in frontend and no backend dependency on frontend.
+    critical: true
+  - id: consequence
+    statement: Maintains one cross-boundary contract authority.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows authored frontend code to recreate or hand-maintain backend API contract facts.
+    severity: critical
+    misconception_id: duplicate_owner_assumption
+  - id: fatal-02
+    statement: Makes backend/API authority depend on authored frontend or generated frontend consumers, reversing the canonical backend-to-generated-to-frontend dependency direction.
+    severity: critical
+    misconception_id: dependency_direction_reversal
+  evidence_expectations:
+  - AGENTS.md:143-149
+  - backend/src/oh_goon/repository_tooling/generation/export_openapi.py:13-47
+  - backend/src/oh_goon/repository_tooling/generation/generate_api_types.py:29-99
+- id: Q15
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Schedule = explicit repository target set + one resolved Plan + active/paused wall-clock interval. ScheduleService owns that public model; ScheduleScheduler owns periodic invocation only, and startup is not a trigger.
+    critical: false
+  - id: ownership_boundary
+    statement: Shared Runs remain the many-repository path; scheduler/Schedule must not become a second execution graph.
+    critical: false
+  - id: consequence
+    statement: Prevents scheduling from mirroring Plan execution and repository selection semantics.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/AGENTS.md:38-40
+  - backend/src/oh_goon/services/shared_plan_schedules.py:26-94
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:21-22
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:80-82
+- id: Q158
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Repository/path isolation is backend execution safety and a trust boundary, owned at backend/integration/runtime boundaries rather than frontend presentation.
+    critical: true
+  - id: ownership_boundary
+    statement: It is security behavior, not a convenience check or UI policy.
+    critical: true
+  - id: consequence
+    statement: A path leak can expose code/workspaces outside an agent or execution assignment.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Treats repository/path isolation as convenience or UI policy rather than backend execution security/trust authority.
+    severity: critical
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - backend/AGENTS.md:68-76
+  - AGENTS.md:63-89
+  - backend/src/oh_goon/services/fleet_admission.py:148-169
+- id: Q159
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: make certify delegates to CERTIFICATION_FRONTDOOR, which uses scripts/run_logged.sh certify around one locked uv/pyproject oh-goon-workflow runner; the backend certification frontdoor bootstraps authority and invokes the single APP Plan at templates/plans/oh-goon/app-certification/plan.yml.
+    critical: false
+  - id: ownership_boundary
+    statement: APP Goon ordering belongs only to the APP Plan; Make/workflow must not duplicate Plan orchestration.
+    critical: false
+  - id: consequence
+    statement: Preserves a single certification orchestration owner and first-failure semantics.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - Makefile:3-8
+  - Makefile:400-401
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - backend/src/oh_goon/workflow.py:14-31
+  - backend/src/oh_goon/workflow.py:489-513
+- id: Q160
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: make certify never runs sudo, silently changes host configuration, or acquires strict executor authority. Explicit one-time WSL strict-executor host mutation is make strict-executor-setup.
+    critical: true
+  - id: ownership_boundary
+    statement: Strict-executor host repair/setup is explicit and separate from APP verification.
+    critical: true
+  - id: consequence
+    statement: Certification must not gain hidden host mutation authority.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows make certify to run sudo or silently mutate host configuration.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - scripts/tests/test_run_logging.py:151-162
+- id: Q161
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: "backend API source \u2192 FastAPI/OpenAPI \u2192 generated/openapi/openapi.json \u2192 generated/frontend/ \u2192 frontend."
+    critical: true
+  - id: ownership_boundary
+    statement: No hand-repeated endpoint/request/response facts in frontend and no backend dependency on frontend.
+    critical: true
+  - id: consequence
+    statement: Maintains one cross-boundary contract authority.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows authored frontend code to recreate or hand-maintain backend API contract facts.
+    severity: critical
+    misconception_id: duplicate_owner_assumption
+  - id: fatal-02
+    statement: Makes backend/API authority depend on authored frontend or generated frontend consumers, reversing the canonical backend-to-generated-to-frontend dependency direction.
+    severity: critical
+    misconception_id: dependency_direction_reversal
+  evidence_expectations:
+  - AGENTS.md:143-149
+  - backend/src/oh_goon/repository_tooling/generation/export_openapi.py:13-47
+  - backend/src/oh_goon/repository_tooling/generation/generate_api_types.py:29-99
+- id: Q162
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Schedule = explicit repository target set + one resolved Plan + active/paused wall-clock interval. ScheduleService owns that public model; ScheduleScheduler owns periodic invocation only, and startup is not a trigger.
+    critical: false
+  - id: ownership_boundary
+    statement: Shared Runs remain the many-repository path; scheduler/Schedule must not become a second execution graph.
+    critical: false
+  - id: consequence
+    statement: Prevents scheduling from mirroring Plan execution and repository selection semantics.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/AGENTS.md:38-40
+  - backend/src/oh_goon/services/shared_plan_schedules.py:26-94
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:21-22
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:80-82
+- id: Q203
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Hashmarks owns verification selection/relevance evidence only; Oh-Goon owns process launch, timeout/isolation, verification-result authority, and certification. Selecting a test does not authorize, execute, or certify it.
+    critical: true
+  - id: ownership_boundary
+    statement: Verification-selection authority and verification-result authority are separate planes and neither may silently absorb the other.
+    critical: true
+  - id: consequence
+    statement: Treating selection as execution would let repository evidence bypass admission, runtime policy, result acceptance, and certification.
+    critical: true
+  contradictions:
+  - id: boundary-01
+    statement: Claims that Hashmarks selecting a relevant test authorizes or executes that test, or that Oh-Goon should independently choose repository verification relevance.
+    severity: critical
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - AGENTS.md:93-128
+  - backend/src/oh_goon/integrations/hashmarks/verification_selection.py:57-83
+  - backend/src/oh_goon/repository_tooling/hashmarks_verification_execution.py:21-78
+
+- id: Q207
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: "Hashmarks owns the exact flat logical verification membership it selected. Oh-Goon may change physical execution grouping after timeout, but every refinement must conserve the admitted membership: child union equals parent membership with no omission, duplicate, extra, or independent reselection."
+    critical: true
+  - id: ownership_boundary
+    statement: Timeout/refinement and physical batching belong to Oh-Goon; logical verification-membership selection remains frozen Hashmarks repository evidence.
+    critical: true
+  - id: consequence
+    statement: Prevents an execution recovery optimization from silently becoming a second verification selector.
+    critical: false
+  contradictions:
+  - id: boundary-01
+    statement: Allows Oh-Goon timeout bisection to drop, duplicate, add, or independently reselect Hashmarks test membership.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - AGENTS.md:113-120
+  - backend/src/oh_goon/repository_tooling/hashmarks_verification_execution.py:21-78
+  - backend/src/oh_goon/runtime/execution/shards.py:124-159
+
+- id: Q212
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Timeout, retry/resume, worker concurrency, scheduling, machine placement, environment recovery, and result authority belong to Oh-Goon's execution/certification plane and are forbidden as Hashmarks repository-work authority.
+    critical: true
+  - id: ownership_boundary
+    statement: Oh-Goon admits only the exact frozen native Hashmarks downstream-contract and selection-envelope schemas and must reject extra execution-policy/layout fields rather than honoring them.
+    critical: true
+  - id: consequence
+    statement: Exact-shape admission prevents a repository-evidence producer from smuggling runtime authority into the execution plane.
+    critical: false
+  contradictions:
+  - id: boundary-01
+    statement: Honors Hashmarks-provided timeout, retry, concurrency, scheduling, placement, or recovery policy because the envelope identity is otherwise valid.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/integrations/hashmarks/verification_selection_primitives.py:101-136
+  - backend/src/oh_goon/repository_tooling/hashmarks_shard_execution.py:84-153
+  - AGENTS.md:93-120

@@ -1,0 +1,7 @@
+version: 1
+execution:
+  repositories:
+    mode: parallel
+    max_parallel: 16
+goons:
+- python/dependency-inventory

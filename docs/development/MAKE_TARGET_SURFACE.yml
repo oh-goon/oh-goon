@@ -1,0 +1,166 @@
+schema: 1
+canonical_human_workflow:
+  ordered_frontdoors:
+  - make init
+  - make check
+  - make verify
+  - make certify
+  release_plan: templates/plans/oh-goon/prepare-release/plan.yml
+  release_frontdoor: make prepare-release
+  make_targets:
+  - init
+  - check
+  - verify
+  - certify
+  - prepare-release
+noncanonical_make_target_classes:
+  owner-local-validation:
+  - a1-native-kernel-custody-test
+  - acceptance-browser-container
+  - acceptance-container
+  - acceptance-product
+  - acceptance-release
+  - acceptance-scale
+  - architecture
+  - backend-check
+  - backend-lock-check
+  - backend-package-build-check
+  - backend-python-capability-check
+  - backend-dependencies-check
+  - browser-check-system-chromium
+  - browser-test
+  - check-backend
+  - check-frontend
+  - check-generated
+  - check-tooling
+  - coverage-python
+  - coverage-report
+  - format
+  - format-check
+  - frontend-architecture
+  - frontend-check
+  - frontend-functional-certification
+  - frontend-lock-check
+  - frontend-schedule-plan-input-regression
+  - frontend-typecheck
+  - goon-compile
+  - goon-tool-authority
+  - i18n-check
+  - lint
+  - local-runtime-verification
+  - strict-local-runtime-acceptance
+  - template-startability-certification
+  - local-state-check
+  - local-state-prelaunch-check
+  - quality-check
+  - quality-raise
+  - python-static-sanity
+  - release-accept
+  - release-locks-check
+  - ruff-repair
+  - repository-understanding-exam
+  - repository-understanding-test-batch
+  - repository-understanding-tests-batched
+  - scout-corruption-recovery-certification
+  - scout-crash-restart-certification
+  - scout-failure-isolation-certification
+  - scout-http-load-probe
+  - scout-load-probe
+  - scout-network-certification
+  - scout-overhead-certification
+  - scout-proxy-certification
+  - scout-retention-checkpoint-certification
+  - source-transport-clean
+  - test-execution-fast
+  - test-frontend
+  - test-integration
+  - test-journal-coverage
+  - test-log
+  - test-python
+  - test-python-complete
+  - test-python-core-diagnostic
+  - test-python-dependency-complete
+  - test-real-lifecycle
+  - test-real-world
+  - test-real-world-parallel
+  - test-sqlite-coverage
+  - test-sqlite-real-usage
+  - test-tooling
+  - test-tooling-complete
+  - theme-contrast
+  - tooling-check
+  - typecheck
+  - verify-local
+  - verify-p0
+  - verify-p1
+  diagnostic:
+  - diagnostic-dependency-check
+  - diagnostic-startup-check
+  - diagnostic-system-check
+  - browser-harness-preflight
+  - browser-localhost-transport-preflight
+  - browser-preflight
+  - browser-required-certification
+  - browser-runtime-preflight
+  - browser-setup
+  - browser-system-deps
+  - browser-targeted-certification
+  - certification-database-preflight
+  - certification-preflight
+  - certification-state-reset
+  - certify-log
+  - dev
+  - qualify-development-wsl
+  - qualify-native-wsl
+  - pre-commit
+  - pre-commit-acquire
+  - recovery-checkpoint
+  - recovery-resume
+  - recovery-status
+  - diagnostics-log
+  - diagnostics-path
+  - docker-accept
+  - docker-accept-opensuse
+  - docker-down
+  - docker-prepare
+  - docker-up
+  - docker-up-opensuse
+  - init-doctor
+  - local-state-path
+  - local-state-reset
+  - logs
+  - start
+  - storage-prune
+  - storage-status
+  - test
+  - test-python-profile
+  - tool-session-qualification
+  - tool-session-qualification-status
+  internal-generated:
+  - api-schema
+  - api-types
+  - backend-install
+  - build-release
+  - candidate-convergence-preflight
+  - certification-explain
+  - strict-executor-setup
+  - cli-install
+  - contracts
+  - frontend-build
+  - frontend-install
+  - frontend-lock
+  - generate
+  - goon-static-admission
+  - help
+  - native-qualification-boundary-check
+  - phase-evidence-convergence-check
+  - release-source-clean
+  - release-source-package-artifact
+  - release-version-set
+  - sync
+  - venv-clean
+  deprecated: []
+forbidden_wrapper_aliases:
+- quick
+- dev-first
+- certify-fast

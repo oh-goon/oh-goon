@@ -1,0 +1,30 @@
+{
+  "schema": "oh-goon.hashmarks-joint-conformance-series.v1",
+  "series_id": "joint-993-hashmarks-0.15.0-65c5ae4c-v1",
+  "oh_goon_parent": {
+    "version": "1267.0.992",
+    "relationship": "persisted development parent"
+  },
+  "hashmarks": {
+    "checkpoint": "main@65c5ae4cf1afddd72b83b0dbbbc412d0a77363dd",
+    "version": "0.15.0",
+    "canonical_source_identity": "git-tree:b3147e7fa3143372b18e50acbcffc09be0de05f5",
+    "git_commit": "65c5ae4cf1afddd72b83b0dbbbc412d0a77363dd",
+    "git_tree": "b3147e7fa3143372b18e50acbcffc09be0de05f5",
+    "artifact_identity": "sha256:7a9f622c74e81186a6f52338218c944b04470ce598f97c8296b642fb7017367c",
+    "producer_implementation_identity": "sha256:c38f55c3dd6c673ee448da9df5c1f54b9c4b1e9037f908a81f608486649944fc"
+  },
+  "derivation": {
+    "source": "Hugloss/Hashmarks main resolved to the merged 0.15.0 qualification commit",
+    "build": "GitHub Actions exact-commit checkout + repository wheel build",
+    "workflow_run_id": 35639962706,
+    "workflow_artifact_id": 10658220258,
+    "workflow_artifact_zip_sha256": "sha256:c7e2aa2ea6d3e8ee99e05fda936fe31cc06b7c1abd192f3408dabaae04657855"
+  },
+  "authority": {
+    "hashmarks": "repository-intelligence-delta-freshness-ownership-relationships-and-verification-selection",
+    "oh_goon": "admission-execution-retries-sufficiency-enforcement-verification-certification-and-mutation",
+    "consumer_rule": "verify-producer-semantics-never-recreate-repair-or-reinterpret"
+  },
+  "rule": "Changing Hashmarks commit, tree, wheel bytes, producer implementation identity, or Oh-Goon parent creates a new immutable joint series."
+}

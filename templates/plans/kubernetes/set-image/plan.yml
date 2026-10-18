@@ -1,0 +1,9 @@
+version: 1
+inputs:
+- kubernetes_api_hostname
+- namespace
+- deployment
+- container
+- image
+goons:
+- kubernetes/set-image

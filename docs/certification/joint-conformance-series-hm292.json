@@ -1,0 +1,38 @@
+{
+  "schema": "oh-goon.hashmarks-joint-conformance-series.v1",
+  "series_id": "joint-885-hashmarks-hm292-v1",
+  "oh_goon_parent": {
+    "version": "1267.0.884",
+    "zip_sha256": "0248a21766ec2b6590b4eb223c84a9148f9033fd2cbbfbb6c6c007f17222517d",
+    "source_identity": "sha256:e4ad9a289f014518c123d0410e27e40a9c0a54880a1ba92c49aa41823f347e8f"
+  },
+  "hashmarks": {
+    "checkpoint": "HM292",
+    "version": "0.13.0",
+    "canonical_source_archive_identity": "sha256:6929a3403ac19013f1f6aab249a49d417f658943a90bd56c9b85c5ae2e1b5a71",
+    "artifact_identity": "sha256:8b4d3bac2eef8d24926ab80910dae38560814890c153f68507fdd09d123a2fea",
+    "producer_implementation_identity": "sha256:626ce6497a703ff8b3afd3c33a685c4b2e0709701d2791d1c36d9f615563f398"
+  },
+  "derivation": {
+    "source_archive": "/Hashmarks Phases Archive/HM292 First-use Ownership Economics Closure/hashmarks-hm292-FIRST-USE-OWNERSHIP-ECONOMICS-CLOSURE-DEVELOPMENT-CANDIDATE.zip",
+    "source_archive_sha256": "6929a3403ac19013f1f6aab249a49d417f658943a90bd56c9b85c5ae2e1b5a71",
+    "wheel_build": "uv build --offline --wheel",
+    "deterministic_rebuild": "PASS byte-identical"
+  },
+  "authority": {
+    "hashmarks": "repository-intelligence-and-verification-selection",
+    "oh_goon": "admission-execution-verification-certification",
+    "consumer_rule": "verify-producer-semantics-never-recreate-repair-or-reinterpret"
+  },
+  "qualification": {
+    "hashmarks_source_members": 629,
+    "hashmarks_hosted_shards": "64/64 PASS",
+    "hashmarks_selected_nodes": "1022/1022 PASS",
+    "hashmarks_pytest_cases": "1110/1110 PASS",
+    "hashmarks_focused_source_ring": "122/122 PASS",
+    "hashmarks_native_promotion_authority": "HM283 (HM292 native gate blocked by offline pytest supply)",
+    "oh_goon_parent": "exact persisted 1267.0.884 IN-PROGRESS NON-COVERAGE",
+    "oh_goon_interoperability": "focused consumer/storage/version regression owners PASS; complete native certification pending"
+  },
+  "rule": "Changing HM292 source, derived retained wheel, producer implementation, or Oh-Goon parent creates a new comparison series. Hashmarks evidence never grants Oh-Goon execution authority."
+}

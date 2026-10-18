@@ -1,0 +1,29 @@
+version: 1
+inputs:
+  source_workspace:
+    type: workspace_reference
+  publish_registry_hostname:
+    type: hostname
+  publish_repository:
+    type: oci_repository
+env:
+  OCI_REGISTRY_USERNAME:
+    from: host
+  OCI_REGISTRY_PASSWORD:
+    from: host
+outputs:
+  OCI_DIGEST: ${{ steps.publish.outputs.OCI_DIGEST }}
+  OCI_REFERENCE: ${{ steps.publish.outputs.OCI_REFERENCE }}
+steps:
+- uses: oci_publish
+  id: publish
+  target:
+    registry:
+      hostname: ${{ inputs.publish_registry_hostname }}
+    repository: ${{ inputs.publish_repository }}
+  credentials:
+    username_env: OCI_REGISTRY_USERNAME
+    password_env: OCI_REGISTRY_PASSWORD
+  workspace:
+    from: step
+    step: ${{ inputs.source_workspace }}

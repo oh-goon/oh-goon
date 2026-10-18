@@ -1,0 +1,8 @@
+version: 1
+uv:
+  group: dev
+steps:
+- run: uv run pyinstrument -r html -o pytest-profile.html -m pytest
+  artifacts:
+  - path: pytest-profile.html
+    retention: evidence

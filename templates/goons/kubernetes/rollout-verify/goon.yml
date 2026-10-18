@@ -1,0 +1,33 @@
+version: 1
+inputs:
+  kubernetes_api_hostname:
+    type: hostname
+  namespace:
+    type: kubernetes_name
+  deployment:
+    type: kubernetes_deployment_name
+  container:
+    type: kubernetes_name
+  expected_generation:
+    type: string
+  expected_image:
+    type: string
+env:
+  KUBERNETES_TOKEN:
+    from: host
+  KUBERNETES_CA_CERTIFICATE:
+    from: host
+steps:
+- uses: kubernetes_rollout_verify
+  id: verify
+  target:
+    api:
+      hostname: ${{ inputs.kubernetes_api_hostname }}
+    namespace: ${{ inputs.namespace }}
+    name: ${{ inputs.deployment }}
+    container: ${{ inputs.container }}
+  expected_generation: ${{ inputs.expected_generation }}
+  expected_image: ${{ inputs.expected_image }}
+  credentials:
+    token_env: KUBERNETES_TOKEN
+    ca_certificate_env: KUBERNETES_CA_CERTIFICATE

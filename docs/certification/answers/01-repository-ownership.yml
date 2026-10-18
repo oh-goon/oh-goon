@@ -1,0 +1,327 @@
+schema_version: 1
+source_version: 1267.0.1052
+section: repository-ownership
+questions:
+- id: Q01
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: API routes/schemas and HTTP translation belong in backend/src/oh_goon/api; semantic work delegates to the owning service/core fact; focused backend API behavior tests belong in backend/tests/unit/api.
+    critical: false
+  - id: ownership_boundary
+    statement: API must not become the owner of product semantics.
+    critical: false
+  - id: consequence
+    statement: Prevents HTTP translation from becoming a second product-semantics owner.
+    critical: false
+  - id: change_impact
+    statement: A response-contract change should exercise focused backend API behavior and generated-contract reproduction, while service/core semantics stay untouched unless the underlying product fact changes.
+    critical: false
+  contradictions:
+  - id: trap-01
+    statement: Treats backend API routes/schemas or HTTP translation as the owner of product semantics instead of delegating semantic work to the owning service/core fact.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:31-39
+  - AGENTS.md:177-200
+- id: Q02
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Start in services/fleet_plan_* resolution owners; change core models/policy only when the durable/framework-independent fact itself changes.
+    critical: false
+  - id: ownership_boundary
+    statement: Services compose resolution; core owns facts, not orchestration.
+    critical: false
+  - id: consequence
+    statement: Keeps orchestration out of core and prevents duplicate resolution authorities.
+    critical: false
+  - id: change_impact
+    statement: Resolution-semantic changes should exercise resolver/compilation contracts and their focused tests; runtime execution must continue consuming the resolved representation rather than becoming a second resolver.
+    critical: false
+  contradictions:
+  - id: trap-01
+    statement: Moves Plan/Goon resolution orchestration into core or runtime execution merely because those layers consume the resolved fact, creating a second resolver/owner.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:41-43
+  - backend/src/oh_goon/README.md:57-59
+  - backend/src/oh_goon/README.md:83-84
+- id: Q03
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Open features/<feature>/*Feature.ts or *Feature.tsx first; it is the single top-level composition entrypoint for the capability and reveals its private components/hooks/models.
+    critical: false
+  - id: ownership_boundary
+    statement: A feature owns its private implementation; navigation starts at composition rather than random leaf files.
+    critical: false
+  - id: consequence
+    statement: Improves bounded context and avoids cross-feature private imports.
+    critical: false
+  - id: change_impact
+    statement: A frontend-local capability change should move with its feature-local tests; backend API and generated contract authority remain untouched when no contract fact changes.
+    critical: false
+  contradictions:
+  - id: trap-01
+    statement: Treats an arbitrary frontend leaf/shared file as the capability owner and bypasses the feature composition entrypoint/private-boundary ownership model.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - frontend/src/README.md:40-53
+  - frontend/src/README.md:65-67
+- id: Q04
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Frontend presentation/feature changes stay local with colocated tests plus frontend check; when a generated contract fact changes, stop at the boundary, change backend/API or generator authority, regenerate/check generated contracts, then return to frontend consumption.
+    critical: false
+  - id: ownership_boundary
+    statement: Frontend must not recreate missing backend/generated facts.
+    critical: false
+  - id: consequence
+    statement: Prevents authored frontend code from becoming a mirror API schema.
+    critical: false
+  - id: change_impact
+    statement: Frontend-local behavior should exercise frontend checks/tests; a real contract change must update backend/generator authority and regenerate outputs, never hand-edit generated artifacts as the workaround.
+    critical: false
+  contradictions:
+  - id: trap-01
+    statement: Treats authored frontend code or a hand-edited generated artifact as an alternate owner of a missing backend/generated contract fact.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - frontend/src/README.md:108-124
+- id: Q05
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: "Shipped Goons live at templates/goons/<category>/<name>/{goon.yml,README.md}; Plans mirror that under templates/plans. Canonical Goon identity is exactly category/name from the package path. Shipped Goon YAML omits name and description; if general Goon authoring supplies name, it must match the expected package basename."
+    critical: false
+  - id: ownership_boundary
+    statement: "No lookup aliases, hidden prefixes, fallback lookup, or third classification level. An import-local as: label names one occurrence without changing its package identity or lookup."
+    critical: false
+  - id: consequence
+    statement: Identity drift is a provenance and ownership defect.
+    critical: false
+  contradictions:
+  - id: trap-01
+    statement: Treats aliases, hidden prefixes, fallback lookup, or another path spelling as equivalent template identity authority despite the canonical category/name package identity.
+    severity: normal
+    misconception_id: hidden_fallback_assumption
+  evidence_expectations:
+  - AGENTS.md:151-166
+  - backend/src/oh_goon/integrations/fleet_plan_goon_authoring.py:46-57
+- id: Q148
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: API routes/schemas and HTTP translation belong in backend/src/oh_goon/api; semantic work delegates to the owning service/core fact; focused backend API behavior tests belong in backend/tests/unit/api.
+    critical: false
+  - id: ownership_boundary
+    statement: API must not become the owner of product semantics.
+    critical: false
+  - id: consequence
+    statement: Prevents HTTP translation from becoming a second product-semantics owner.
+    critical: false
+  - id: change_impact
+    statement: A response-contract change should exercise focused backend API behavior and generated-contract reproduction, while service/core semantics stay untouched unless the underlying product fact changes.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: trap-01
+    statement: Treats backend API routes/schemas or HTTP translation as the owner of product semantics instead of delegating semantic work to the owning service/core fact.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:31-39
+  - AGENTS.md:177-200
+- id: Q149
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Start in services/fleet_plan_* resolution owners; change core models/policy only when the durable/framework-independent fact itself changes.
+    critical: false
+  - id: ownership_boundary
+    statement: Services compose resolution; core owns facts, not orchestration.
+    critical: false
+  - id: consequence
+    statement: Keeps orchestration out of core and prevents duplicate resolution authorities.
+    critical: false
+  - id: change_impact
+    statement: Resolution-semantic changes should exercise resolver/compilation contracts and their focused tests; runtime execution must continue consuming the resolved representation rather than becoming a second resolver.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: trap-01
+    statement: Moves Plan/Goon resolution orchestration into core or runtime execution merely because those layers consume the resolved fact, creating a second resolver/owner.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:41-43
+  - backend/src/oh_goon/README.md:57-59
+  - backend/src/oh_goon/README.md:83-84
+- id: Q150
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Open features/<feature>/*Feature.ts or *Feature.tsx first; it is the single top-level composition entrypoint for the capability and reveals its private components/hooks/models.
+    critical: false
+  - id: ownership_boundary
+    statement: A feature owns its private implementation; navigation starts at composition rather than random leaf files.
+    critical: false
+  - id: consequence
+    statement: Improves bounded context and avoids cross-feature private imports.
+    critical: false
+  - id: change_impact
+    statement: A frontend-local capability change should move with its feature-local tests; backend API and generated contract authority remain untouched when no contract fact changes.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: trap-01
+    statement: Treats an arbitrary frontend leaf/shared file as the capability owner and bypasses the feature composition entrypoint/private-boundary ownership model.
+    severity: normal
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - frontend/src/README.md:40-53
+  - frontend/src/README.md:65-67
+- id: Q151
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Frontend presentation/feature changes stay local with colocated tests plus frontend check; when a generated contract fact changes, stop at the boundary, change backend/API or generator authority, regenerate/check generated contracts, then return to frontend consumption.
+    critical: false
+  - id: ownership_boundary
+    statement: Frontend must not recreate missing backend/generated facts.
+    critical: false
+  - id: consequence
+    statement: Prevents authored frontend code from becoming a mirror API schema.
+    critical: false
+  - id: change_impact
+    statement: Frontend-local behavior should exercise frontend checks/tests; a real contract change must update backend/generator authority and regenerate outputs, never hand-edit generated artifacts as the workaround.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: trap-01
+    statement: Treats authored frontend code or a hand-edited generated artifact as an alternate owner of a missing backend/generated contract fact.
+    severity: normal
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - frontend/src/README.md:108-124
+- id: Q152
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: "Shipped Goons live at templates/goons/<category>/<name>/{goon.yml,README.md}; Plans mirror that under templates/plans. Canonical Goon identity is exactly category/name from the package path. Shipped Goon YAML omits name and description; if general Goon authoring supplies name, it must match the expected package basename."
+    critical: false
+  - id: ownership_boundary
+    statement: "No lookup aliases, hidden prefixes, fallback lookup, or third classification level. An import-local as: label names one occurrence without changing its package identity or lookup."
+    critical: false
+  - id: consequence
+    statement: Identity drift is a provenance and ownership defect.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: trap-01
+    statement: Treats aliases, hidden prefixes, fallback lookup, or another path spelling as equivalent template identity authority despite the canonical category/name package identity.
+    severity: normal
+    misconception_id: hidden_fallback_assumption
+  evidence_expectations:
+  - AGENTS.md:151-166
+  - backend/src/oh_goon/integrations/fleet_plan_goon_authoring.py:46-57
+
+- id: Q210
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: New repository-intelligence capabilities belong in Hashmarks, not in Oh-Goon. Oh-Goon may consume only a frozen, versioned Hashmarks evidence contract needed for admission, execution, certification, or projection.
+    critical: true
+  - id: ownership_boundary
+    statement: An integrations/hashmarks adapter is a thin consumer and must not become a local prototype or extension point for CodeMap, impact, ranking, context selection, verification relevance, repository-negative recovery, or shard-membership behavior.
+    critical: true
+  - id: consequence
+    statement: This keeps repository-evidence evolution independent from Oh-Goon's execution/certification control plane and prevents duplicate ownership.
+    critical: false
+  contradictions:
+  - id: boundary-01
+    statement: Recommends implementing or experimenting with a new Hashmarks-specific repository-intelligence feature inside Oh-Goon first and upstreaming it later.
+    severity: critical
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - AGENTS.md:104-111
+  - backend/src/oh_goon/repository_tooling/architecture/hashmarks_harness_boundary_contract.py:50-78
+
+- id: Q211
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Solution reasoning and editing belong to the coding agent/harness. Hashmarks supplies repository evidence and Oh-Goon supplies execution/certification control; neither decides what source change should be made.
+    critical: true
+  - id: ownership_boundary
+    statement: Repository evidence may constrain or inform the coding agent, and execution policy may admit or reject its work, but neither plane may turn those responsibilities into solution authorship.
+    critical: true
+  - id: consequence
+    statement: Separating the solution plane prevents repository retrieval or certification policy from becoming a hidden autonomous coding agent.
+    critical: false
+  contradictions:
+  - id: boundary-01
+    statement: Claims Hashmarks should choose the code edit because it knows the repository, or Oh-Goon should choose the edit because it controls execution/certification.
+    severity: critical
+    misconception_id: caller_owner_confusion
+  evidence_expectations:
+  - AGENTS.md:93-102
+  - backend/src/oh_goon/repository_tooling/architecture/hashmarks_harness_boundary_contract.py:50-78
+
+- id: Q213
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Executable repository Python is pyproject-owned under backend/src/oh_goon/repository_tooling and is exposed through a named backend project entrypoint invoked with uv; scripts/ is deliberately not a second Python package.
+    critical: true
+  - id: ownership_boundary
+    statement: scripts/ may contain shell or JavaScript launch support, repository-tooling tests, and documentation, while executable Python modules and parallel import surfaces under scripts/ are forbidden.
+    critical: true
+  - id: consequence
+    statement: Keeping one Python ownership and invocation surface prevents repository tooling from gaining a second dependency, import, and execution authority.
+    critical: false
+  contradictions:
+  - id: boundary-01
+    statement: Recommends an importable or executable scripts/audit Python package because scripts/ broadly owns repository tooling.
+    severity: critical
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - scripts/README.md:3-20
+  - AGENTS.md:9-24
+
+- id: Q216
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: LOC, fan-in, fan-out, and similar complexity metrics are investigation signals, not proof that a module is a God Object or must be split.
+    critical: true
+  - id: ownership_boundary
+    statement: A candidate must be classified by responsibility as KEEP COHESIVE, REFACTOR INTERNALLY, EXTRACT RESPONSIBILITY, or DECOMPOSE MULTIPLE RESPONSIBILITIES, while preserving authority and invariant locality before any extraction is justified.
+    critical: true
+  - id: consequence
+    statement: A hard numeric split rule can scatter durable or execution authority, create mechanical modules, and make ownership harder rather than safer.
+    critical: false
+  contradictions:
+  - id: metric-01
+    statement: Treats an inbound-import or LOC threshold as sufficient evidence that decomposition is required without responsibility and authority-locality analysis.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/RESPONSIBILITY_COMPLEXITY_REFACTORING.md:7-12
+  - AGENTS.md:209-213

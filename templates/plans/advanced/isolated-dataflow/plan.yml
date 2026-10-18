@@ -1,0 +1,6 @@
+version: 1
+inputs:
+- tag
+- test_timeout_seconds
+goons:
+- advanced/isolated-dataflow

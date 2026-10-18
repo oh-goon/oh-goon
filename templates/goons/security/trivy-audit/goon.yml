@@ -1,0 +1,9 @@
+version: 1
+steps:
+- run: trivy fs --disable-telemetry --skip-version-check --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --no-progress --format json --output trivy-audit.json .
+  artifacts:
+  - path: trivy-audit.json
+    retention: content_store
+  capabilities:
+    egress:
+      mode: host_unrestricted

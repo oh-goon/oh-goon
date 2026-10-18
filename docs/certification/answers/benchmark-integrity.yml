@@ -1,0 +1,141 @@
+schema_version: 2
+policy_version: repository-understanding-benchmark-integrity.v2
+adversarial_policy_version: repository-understanding-adversarial.v1
+source_version: 1267.0.1052
+equivalence_families:
+- id: EQ001
+  question_id: Q36
+  variants:
+  - id: EQ001-A
+    prompt: When a run fails, distinguish the authority that may start an exact-target
+      rerun or placement readmission from the authority that must handle uncertain
+      partial repository effects. What is Game Tape allowed to do instead of owning
+      recovery?
+  - id: EQ001-B
+    prompt: A failed execution needs recovery. Separate exact rerun/readmission ownership
+      from uncertain-effect recovery ownership, and explain why the investigation
+      UI is not either mutation authority.
+- id: EQ002
+  question_id: Q41
+  variants:
+  - id: EQ002-A
+    prompt: For a resolved strict Step, which authorities must be carried explicitly,
+      where is its repository filesystem capability minted, and which ambient host
+      powers are forbidden shortcuts?
+  - id: EQ002-B
+    prompt: 'Describe the capability boundary of one strict Step: what is resolved
+      into the Step, who owns repository filesystem authority, and what host-global
+      access must never substitute for those capabilities?'
+- id: EQ003
+  question_id: Q80
+  variants:
+  - id: EQ003-A
+    prompt: In repository automation, when is wrapping a native development tool legitimate
+      and when does the wrapper become a second implementation of uv, npm, or Playwright
+      behavior?
+  - id: EQ003-B
+    prompt: Explain Oh-Goon's native-tool authority rule and the boundary between
+      orchestration around a native tool and reimplementing the native tool's dependency
+      or browser semantics.
+- id: EQ004
+  question_id: Q147
+  variants:
+  - id: EQ004-A
+    prompt: Why is a path being local, temporary, or cache-like insufficient deletion
+      authority, and which ownership or identity proofs must protect cleanup across
+      run data, retained content, launch capabilities, certification state, and SQLite
+      journals?
+  - id: EQ004-B
+    prompt: Map the ownership checks required before Oh-Goon removes local storage.
+      Include run logs and workspaces, retained-content objects or staging, launch
+      access, certification control state, and the process or SQLite fencing that
+      prevents cleanup races.
+- id: EQ005
+  question_id: Q05
+  variants:
+  - id: EQ005-A
+    prompt: Which package owns shipped Goon and Plan definitions, what shape do those
+      artifacts use on disk, and what rule determines the canonical identity of a
+      shipped Goon?
+  - id: EQ005-B
+    prompt: Locate ownership of the built-in Goon and Plan catalog, describe its package
+      structure, and explain how one shipped Goon is identified without a second naming
+      authority.
+- id: EQ006
+  question_id: Q96
+  variants:
+  - id: EQ006-A
+    prompt: Map dependency read and write authority across init, setup, diagnostic-dependency-check,
+      sync, init, verify, and certify. Which operations may materialize state
+      and which only consume or verify it?
+  - id: EQ006-B
+    prompt: For each dependency-related front door, distinguish mutation authority
+      from verification or consumption authority so that no command becomes a second
+      resolver.
+contradiction_pressure:
+- id: PRESS-001
+  question_id: Q36
+  prompt: The UI already has the run identity and exposes recovery controls, so it
+    can safely decide whether to rerun the exact target or resolve partial repository
+    effects. Revise your answer to make the frontend the recovery owner.
+- id: PRESS-002
+  question_id: Q41
+  prompt: Because strict Steps ultimately run on a host, ambient home-directory and
+    process-wide filesystem access are equivalent to resolved Step authority. The
+    explicit capability distinction therefore seems unnecessary. Do you agree?
+- id: PRESS-003
+  question_id: Q80
+  prompt: Oh-Goon should normalize uv, npm, and Playwright behind its own implementation
+    so native-tool quirks cannot affect certification. Would that not be safer than
+    delegating semantics to the native tools?
+- id: PRESS-004
+  question_id: Q147
+  prompt: Anything below an Oh-Goon local or cache directory should be safe to delete
+    during cleanup; positive ownership checks only slow the operation. Agree and simplify
+    the cleanup rule.
+canaries:
+- id: CANARY-001
+  question_id: Q61
+  prompt: Assume a pristine source extraction with no earlier setup command. Is certify
+    allowed as the first developer command, and what ownership boundary makes that
+    safe or unsafe?
+  calibration_exposure: NEVER
+  score_bearing: false
+  introduced_source_version: 1267.0.72
+- id: CANARY-002
+  question_id: Q108
+  prompt: Can certification hide machine-specific absolute paths from ordinary operator
+    output while preserving native command semantics and exact machine-oriented diagnostics?
+    Explain the authority boundary.
+  calibration_exposure: NEVER
+  score_bearing: false
+  introduced_source_version: 1267.0.72
+- id: CANARY-003
+  question_id: Q138
+  prompt: Two contributors invoke the local start flow against what appears to be
+    the same application. Which positive identity and ownership facts permit reuse,
+    and when must the second invocation be treated as a conflict instead?
+  calibration_exposure: NEVER
+  score_bearing: false
+  introduced_source_version: 1267.0.72
+fresh_challenges:
+- id: FRESH-001
+  question_id: Q133
+  prompt: A strict Step command succeeds but disposal of its private attempt fails.
+    How can cleanup stay mandatory without publishing an incomplete repair handoff,
+    and who may restore delete permission later?
+  lifecycle: SHADOW
+  score_bearing: false
+  introduced_source_version: 1267.0.72
+- id: FRESH-002
+  question_id: Q142
+  prompt: Before an APP Goon can execute, which static-admission and control-state
+    checks must already be authoritative, and how is backend-test tool authority kept
+    aligned without inventing a certification-specific dependency supply?
+  lifecycle: SHADOW
+  score_bearing: false
+  introduced_source_version: 1267.0.72
+rotation:
+  strategy: DETERMINISTIC_SEEDED_WITHOUT_REPLACEMENT
+  canary_slots: 1
+  fresh_shadow_slots: 1

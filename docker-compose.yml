@@ -1,0 +1,23 @@
+services:
+  oh-goon:
+    build:
+      context: .
+      dockerfile: ${OH_GOON_DOCKERFILE:-docker/ubuntu/Dockerfile}
+    init: true
+    restart: unless-stopped
+    user: "${OH_GOON_UID:-1000}:${OH_GOON_GID:-1000}"
+    environment:
+      OH_GOON_CONTAINER: "1"
+      OH_GOON_DB: /var/lib/oh-goon/oh-goon.db
+      OH_GOON_LEAGUE_FILE: /var/lib/oh-goon/league.yml
+      OH_GOON_LOCAL_ACCESS_TOKEN: ${OH_GOON_LOCAL_ACCESS_TOKEN:-}
+    ports:
+      - "127.0.0.1:${OH_GOON_PORT:-8787}:8787"
+    volumes:
+      - type: bind
+        source: ${OH_GOON_DATA_DIR:-./.oh-goon-data}
+        target: /var/lib/oh-goon
+      - type: bind
+        source: ${OH_GOON_REPOSITORIES_DIR:-./repositories}
+        target: /repositories
+    stop_grace_period: 20s

@@ -1,0 +1,9 @@
+version: 1
+uv:
+  group: dev
+steps:
+- run: uv run ruff format --check --diff .
+- run: uv run ruff check . --output-format=gitlab --output-file=ruff-code-quality.json
+  artifacts:
+  - path: ruff-code-quality.json
+    retention: evidence

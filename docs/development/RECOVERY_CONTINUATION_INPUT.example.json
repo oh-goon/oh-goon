@@ -1,0 +1,27 @@
+{
+  "schema": "oh-goon-development-continuation-input-v1",
+  "completed_phases": [
+    {
+      "id": "example-completed-phase",
+      "state": "NEWLY_CLOSED",
+      "evidence": "name the exact durable proof receipt or command outcome"
+    }
+  ],
+  "open_phases": [
+    {
+      "id": "example-next-phase",
+      "state": "OPEN",
+      "intent": "describe the next semantic boundary to execute"
+    }
+  ],
+  "proof_receipts": [
+    {
+      "selection": "focused owner regression",
+      "outcome": "PASS",
+      "detail": "preserve PASS/FAIL/INCOMPLETE exactly"
+    }
+  ],
+  "qualification_state": "NATIVE-QUALIFICATION-INCOMPLETE",
+  "next_executable_phase": "example-next-phase",
+  "durability_invariant": "Changing sessions or losing the current container may lose all conversational and workspace state without losing project authority, completed-phase evidence, or the remaining execution plan."
+}

@@ -1,0 +1,193 @@
+{
+  "goons": {
+    "advanced/isolated-dataflow": {
+      "prepare": [],
+      "pytest": [],
+      "sh": [],
+      "uv": []
+    },
+    "kubernetes/release": {},
+    "kubernetes/rollout-verify": {
+      "verify": []
+    },
+    "kubernetes/set-image": {
+      "commit": []
+    },
+    "ml/iris-train": {
+      "iris-train": []
+    },
+    "oci/image": {
+      "build": []
+    },
+    "oci/publish": {
+      "publish": []
+    },
+    "oci/publish-image": {},
+    "oci/tag-assert": {
+      "assert": []
+    },
+    "oh-goon/architecture": {
+      "make": []
+    },
+    "oh-goon/backend-p0": {
+      "make": [
+        "git",
+        "ldd",
+        "sh",
+        "uv"
+      ]
+    },
+    "oh-goon/backend-p1": {
+      "make": [
+        "bash",
+        "git",
+        "sh"
+      ]
+    },
+    "oh-goon/backend-tests": {
+      "make": [
+        "git",
+        "ldd",
+        "node",
+        "npm",
+        "sh",
+        "true",
+        "uv"
+      ]
+    },
+    "oh-goon/browser-engine-preflight": {
+      "make": [
+        "node",
+        "npm",
+        "sh"
+      ]
+    },
+    "oh-goon/browser-harness-preflight": {
+      "make": [
+        "node",
+        "npm",
+        "sh"
+      ]
+    },
+    "oh-goon/browser-localhost-transport-preflight": {
+      "make": [
+        "node",
+        "npm",
+        "sh"
+      ]
+    },
+    "oh-goon/browser-required": {
+      "make": [
+        "node",
+        "npm",
+        "sh"
+      ]
+    },
+    "oh-goon/browser-runtime-preflight": {
+      "make": [
+        "node",
+        "npm",
+        "sh"
+      ]
+    },
+    "oh-goon/browser-targeted": {
+      "make": [
+        "node",
+        "npm",
+        "sh"
+      ]
+    },
+    "oh-goon/frontend-functional": {
+      "make": [
+        "node",
+        "npm",
+        "sh"
+      ]
+    },
+    "oh-goon/generated-contracts": {
+      "make": []
+    },
+    "oh-goon/integration-contract": {
+      "make": [
+        "sh"
+      ]
+    },
+    "oh-goon/integration-tests": {
+      "make": [
+        "sh"
+      ]
+    },
+    "oh-goon/local-runtime": {
+      "make": [
+        "node",
+        "npm"
+      ]
+    },
+    "oh-goon/release-identity": {
+      "oh-goon-release-version": []
+    },
+    "oh-goon/release-locks": {
+      "make": [
+        "npm",
+        "sh",
+        "uv"
+      ]
+    },
+    "oh-goon/release-package-store": {
+      "package": []
+    },
+    "oh-goon/repository-exam": {
+      "oh-goon-repository-understanding-exam": []
+    },
+    "oh-goon/template-startability": {
+      "make": [
+        "ldd",
+        "sh",
+        "true",
+        "uv"
+      ]
+    },
+    "oh-goon/tooling-tests": {
+      "make": [
+        "bash",
+        "dd",
+        "git",
+        "node",
+        "sh",
+        "uv"
+      ]
+    },
+    "python/dependency-inventory": {
+      "dependency-inventory": []
+    },
+    "python/package-artifacts": {
+      "package-artifacts": []
+    },
+    "python/profile": {
+      "pyinstrument": []
+    },
+    "python/quality": {},
+    "python/release-metadata": {
+      "compute": []
+    },
+    "python/ruff": {
+      "ruff": [],
+      "ruff-2": []
+    },
+    "python/test": {
+      "pytest": []
+    },
+    "python/typecheck": {
+      "pyright": [],
+      "ty": []
+    },
+    "python/uv-audit": {
+      "uv": []
+    },
+    "security/cve-combined": {},
+    "security/trivy-audit": {
+      "trivy": []
+    }
+  },
+  "schema": 1
+}

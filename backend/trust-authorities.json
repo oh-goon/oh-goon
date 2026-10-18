@@ -1,0 +1,62 @@
+{
+  "deployment_custody": "NOT_OBSERVED",
+  "families": {
+    "admission_issuer_evidence": {
+      "algorithm": "Ed25519",
+      "claims": {
+        "backend_capability_manifest_identity": "UNREVIEWED",
+        "execution_environment_identity": "UNREVIEWED",
+        "lock_identity": "UNREVIEWED",
+        "native_tool_identity": "UNREVIEWED",
+        "repository_identity": "UNREVIEWED",
+        "source_identity": "UNREVIEWED"
+      },
+      "currently_required_distinct_key_count": 6,
+      "custody_evidence": "MISSING_NATIVE_GATE_A",
+      "independent_semantic_authorities_verified": false,
+      "owner": "native_enforcer_issuer_claim_owners",
+      "protocol": "oh-goon/admission-issuer-evidence/v2",
+      "root_loader": "backend/src/oh_goon/runtime/enforcer_lace_issuer_keyring.py:load_explicit_issuer_verifier",
+      "signature_domain": "oh-goon/admission-issuer-ed25519/v2\\x00",
+      "signer": "backend/src/oh_goon/native_issuer/enforcer_lace_signer_custody.py:issue_with_deployment_signer",
+      "source": "backend/src/oh_goon/core/enforcer_lace_issuer_evidence.py",
+      "verifier": "TrustedIssuerVerifier.verify"
+    },
+    "control_plane_receipts": {
+      "algorithm": "HMAC-SHA256",
+      "custody_evidence": "MISSING_NATIVE_GATE_A",
+      "owner": "original_enforcer_control_plane",
+      "receipt_domains": [
+        "admission",
+        "admission-signer-epoch",
+        "agent-source-prework",
+        "agent-source-prework-stage",
+        "agent-tool-launch-grant",
+        "recovery-transfer",
+        "step-output",
+        "terminal",
+        "unresolved"
+      ],
+      "signature_domain": "oh-goon/receipt-hmac-sha256/v1\\x00",
+      "signer_verifier": "ReceiptAuthenticator.issue/verify",
+      "source": "backend/src/oh_goon/core/enforcer_lace_trust.py"
+    },
+    "signer_trust_epoch": {
+      "authority": "ACTIVE_REVOKED_GENERATION_FENCING",
+      "owner": "original_enforcer_admission_db_transaction",
+      "separate_cryptographic_signer": false,
+      "source": "backend/src/oh_goon/runtime/enforcer_lace_signer_trust_epoch.py",
+      "verifier": "SignerTrustEpochAuthority.require_in"
+    }
+  },
+  "gate_a": "BLOCKED",
+  "migration": "NOT_STARTED_T1",
+  "parent_checkpoint": "B3B3B4",
+  "policy_provenance": "NOT_ATTESTED",
+  "schema": "oh-goon/trust-authority-registry/v1",
+  "status": "SOURCE_CENSUS_ONLY_NOT_RUNTIME_AUTHORITY",
+  "unimplemented_roles": [
+    "externally_provisioned_root_or_bootstrap_attestation",
+    "independently_custodied_physical_observer_attestation"
+  ]
+}

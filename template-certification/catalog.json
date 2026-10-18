@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "plans": {
+    "advanced/isolated-dataflow": {
+      "fixture": "advanced/isolated-dataflow",
+      "inputs": {"tag": "dev", "test_timeout_seconds": "600"}
+    },
+    "kubernetes/set-image": {
+      "fixture": "repository/empty",
+      "inputs": {
+        "kubernetes_api_hostname": "kube.example.com",
+        "namespace": "production",
+        "deployment": "api",
+        "container": "api",
+        "image": "harbor.example.com/team/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "ml/iris-training": {
+      "fixture": "ml/iris",
+      "inputs": {"random_seed": "42", "test_size_percent": "20", "minimum_accuracy_percent": "90", "max_iterations": "300"}
+    },
+    "oci/image": {
+      "fixture": "oci/image",
+      "inputs": {"base_registry_hostname": "registry.example.com", "containerfile": "Dockerfile", "context": ".", "platform": "linux/amd64"}
+    },
+    "oci/publish-image": {
+      "fixture": "oci/image",
+      "inputs": {"base_registry_hostname": "registry.example.com", "publish_registry_hostname": "harbor.example.com", "publish_repository": "team/app", "containerfile": "Dockerfile", "context": ".", "platform": "linux/amd64"}
+    },
+    "oci/release-candidate": {
+      "fixture": "oci/release",
+      "inputs": {"base_registry_hostname": "registry.example.com", "containerfile": "Dockerfile", "context": ".", "platform": "linux/amd64", "coverage_threshold": "90"}
+    },
+    "oci/release-deploy": {
+      "fixture": "oci/release",
+      "inputs": {"coverage_threshold": "90", "base_registry_hostname": "registry.example.com", "publish_registry_hostname": "harbor.example.com", "publish_repository": "team/app", "containerfile": "Dockerfile", "context": ".", "platform": "linux/amd64", "kubernetes_api_hostname": "kube.example.com", "namespace": "production", "deployment": "api", "container": "api"}
+    },
+    "oci/release": {
+      "fixture": "oci/release",
+      "inputs": {"base_registry_hostname": "registry.example.com", "publish_registry_hostname": "harbor.example.com", "publish_repository": "team/app", "containerfile": "Dockerfile", "context": ".", "platform": "linux/amd64", "coverage_threshold": "90"}
+    },
+    "oci/tag-gate": {
+      "fixture": "repository/empty",
+      "inputs": {"registry_hostname": "harbor.example.com", "repository": "team/app", "tag": "production", "expected_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+    },
+    "oh-goon/app-certification": {"fixture": "oh-goon/self-host", "inputs": {}},
+    "oh-goon/prepare-release": {"fixture": "oh-goon/self-host", "inputs": {}},
+    "oh-goon/repository-understanding-certification": {"fixture": "oh-goon/self-host", "inputs": {}},
+    "oh-goon/self-verification": {"fixture": "oh-goon/self-host", "inputs": {}},
+    "python/dependency-inventory": {"fixture": "repository/empty", "inputs": {}},
+    "python/package-artifacts": {"fixture": "python/standard", "inputs": {}},
+    "python/profile": {"fixture": "python/standard", "inputs": {}},
+    "python/quality": {"fixture": "python/standard", "inputs": {"coverage_threshold": "90"}},
+    "python/release-candidate": {"fixture": "python/standard", "inputs": {"release_channel": "production", "revision": "abc1234", "coverage_threshold": "90"}},
+    "python/release-metadata": {"fixture": "python/standard", "inputs": {"release_channel": "production", "revision": "abc1234"}},
+    "python/secure": {"fixture": "python/standard", "inputs": {"coverage_threshold": "90"}},
+    "python/standard": {"fixture": "python/standard", "inputs": {"release_channel": "production", "revision": "abc1234", "coverage_threshold": "90"}},
+    "python/uv-audit": {"fixture": "security/audit", "inputs": {}},
+    "security/cve-combined": {"fixture": "security/audit", "inputs": {}},
+    "security/trivy-audit": {"fixture": "repository/empty", "inputs": {}}
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "oh-goon.external-development-tool/v1",
+  "tool": "agentsCookbook",
+  "repository": "https://github.com/Hugloss/agentsCookbook",
+  "commit": "40be826e6883d819ee6cf5c10946c793f0ef0f5f",
+  "purpose": "canonical external review Skill references and optional caller-owned Gitlink source example",
+  "production_dependency": false,
+  "runtime_authority": false,
+  "certification_authority": false,
+  "repository_intelligence_authority": false,
+  "notes": "Public main and HEAD verified through native Git on 2026-10-18; referenced Skill files were inspected at this exact commit. Reusable review methodology remains upstream. Oh-Goon does not import or vendor cookbook code, install its adapters, or require its checkout. A caller may select its Markdown resources through the existing local/Gitlink Skill source contract; this record does not authorize execution or establish live-model qualification."
+}

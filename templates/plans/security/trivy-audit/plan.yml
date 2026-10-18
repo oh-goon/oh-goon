@@ -1,0 +1,3 @@
+version: 1
+goons:
+- security/trivy-audit

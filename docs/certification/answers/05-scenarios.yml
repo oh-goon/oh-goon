@@ -1,0 +1,384 @@
+schema_version: 1
+source_version: 1267.0.1052
+section: scenarios
+questions:
+- id: Q21
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. API owns HTTP translation only; repository eligibility/admission semantics belong in the existing service/core authority
+      and the route delegates.
+    critical: false
+  - id: ownership_boundary
+    statement: Do not create endpoint-local product semantics.
+    critical: false
+  - id: consequence
+    statement: Avoids parallel semantic owners by transport surface.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:28-39
+  - backend/src/oh_goon/README.md:57-59
+- id: Q22
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. Plan selects/orders Goons; executable steps/run/command/script belong in an Atomic Goon.
+    critical: false
+  - id: ownership_boundary
+    statement: Plan never executes Steps directly.
+    critical: false
+  - id: consequence
+    statement: Preserves one executable ownership chain.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - AGENTS.md:155-166
+- id: Q23
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. Parser/source graph is single-pass authority; source positions reuse the same parsed tree and runtime consumes ResolvedFleetPlan.
+    critical: false
+  - id: ownership_boundary
+    statement: No second parse, identity normalization, or graph rediscovery below parser/resolution.
+    critical: false
+  - id: consequence
+    statement: Eliminates divergent interpretation/provenance.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:61-75
+- id: Q24
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. Stop at the contract boundary, change backend/API or generator authority, regenerate, then consume the generated fact.
+    critical: false
+  - id: ownership_boundary
+    statement: Authored frontend must not recreate backend response or operation metadata.
+    critical: false
+  - id: consequence
+    statement: Prevents frontend mirror contracts.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - frontend/src/README.md:95-105
+  - frontend/src/README.md:113-124
+  - AGENTS.md:143-149
+- id: Q25
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. Fix authoritative source/generator and regenerate; generated artifacts are reproducible and not authored truth.
+    critical: false
+  - id: ownership_boundary
+    statement: Never hand-edit generated output as the fix.
+    critical: false
+  - id: consequence
+    statement: Manual generated edits disappear or drift at regeneration.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - AGENTS.md:143-149
+- id: Q26
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. Schedule owns explicit repository targets plus one resolved Plan and interval; Shared Runs own explicit multi-repository
+      execution. Do not add all_repositories/repeated discovery semantics to Schedule.
+    critical: false
+  - id: ownership_boundary
+    statement: Schedule is not a second Shared Run/repository-selection workflow.
+    critical: false
+  - id: consequence
+    statement: Avoids duplicate repository scope and execution owners.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/AGENTS.md:38-40
+  - backend/src/oh_goon/services/shared_plan_schedules.py:26-94
+- id: Q27
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. Game Tape is read-only; it may explain/navigate, while Runs owns exact-target rerun/readmission and Recovery owns uncertain/partial-effect
+      recovery writes.
+    critical: false
+  - id: ownership_boundary
+    statement: Evidence projection cannot become mutation authority.
+    critical: false
+  - id: consequence
+    statement: Separates observation/evidence from destructive recovery authority.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - frontend/src/README.md:92-93
+  - docs/ARCHITECTURE.md:211-213
+- id: Q28
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Invalid. Destructive cancellation target must be explicit and identity-bound; UI passes the displayed run.fleet_run_id through
+      cancelFleet(runId) to cancelFleetRun(runId).
+    critical: true
+  - id: ownership_boundary
+    statement: Ambient active state must never choose a destructive target.
+    critical: true
+  - id: consequence
+    statement: Prevents async UI identity drift from cancelling the wrong Run.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Allows ambient active state to choose the destructive cancellation target instead of the explicit displayed Run ID.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/STRUCTURAL_AUTHORITY_GUARD.md:8-18
+  - frontend/src/features/maintenance/components/CurrentRunPanel.tsx:19-22
+  - frontend/src/features/maintenance/components/CurrentRunPanel.tsx:64-65
+  - frontend/src/app/FleetRunProvider.tsx:212-214
+- id: Q29
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: "Invalid. Confirmation is bound to the exact displayed Run ID and is cleared when run identity changes; A\u2192B\u2192A cannot\
+      \ inherit the first A confirmation."
+    critical: true
+  - id: ownership_boundary
+    statement: Confirmation is identity state, not a generic boolean.
+    critical: true
+  - id: consequence
+    statement: Prevents destructive intent from crossing identity changes.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Allows cancellation confirmation to survive or transfer across a Run identity change.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - docs/development/STRUCTURAL_AUTHORITY_GUARD.md:22-32
+  - frontend/src/features/maintenance/components/CurrentRunPanel.tsx:30-47
+- id: Q30
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Invalid if absence alone is used to manufacture COMPLETED. A sufficiently new durable snapshot may supersede a stale local active
+      projection, but completedLocalRun still requires explicit terminal evidence; absence is not terminal status evidence.
+    critical: true
+  - id: ownership_boundary
+    statement: Snapshot ownership and terminal lifecycle evidence are distinct.
+    critical: true
+  - id: consequence
+    statement: Prevents frontend inference from inventing lifecycle state.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Claims that absence from a newer snapshot alone proves terminal completion.
+    severity: critical
+    misconception_id: absence_as_positive_evidence
+  evidence_expectations:
+  - frontend/src/app/fleetRun/runStatusProjection.ts:23-32
+  - frontend/src/app/fleetRun/runStatusProjection.ts:58-89
+- id: Q31
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. ScheduleScheduler owns periodic invocation only; process startup is explicitly not a trigger.
+    critical: false
+  - id: ownership_boundary
+    statement: Startup must not manufacture execution intent.
+    critical: false
+  - id: consequence
+    statement: Avoids duplicate/unreviewed scheduled execution after restarts.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/AGENTS.md:38-40
+  - docs/AUTOMATION_MODEL.md:80-80
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:21-22
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:42-53
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:80-82
+- id: Q32
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. ApiClientProvider requires supplied read and mutation controllers to share one CausalityClock and throws otherwise.
+    critical: false
+  - id: ownership_boundary
+    statement: Read/write ordering has one causality authority.
+    critical: false
+  - id: consequence
+    statement: Two clocks can let stale reads/writes disagree about ordering.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - frontend/src/app/ApiClientProvider.tsx:42-50
+- id: Q33
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. Difficulty choosing an owner means inspect the nearest existing owner/test; do not create common.py/utils.py or another
+      generic layer.
+    critical: false
+  - id: ownership_boundary
+    statement: Use core/engine/integrations/runtime/services according to the decision ladder.
+    critical: false
+  - id: consequence
+    statement: Generic dumping grounds become ghost ownership.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:23-33
+- id: Q34
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. Features own private components/hooks/models; cross-feature interaction goes through existing app/domain contracts rather
+      than private implementation imports.
+    critical: false
+  - id: ownership_boundary
+    statement: Feature-private implementation is not a cross-feature API.
+    critical: false
+  - id: consequence
+    statement: Preserves feature ownership and prevents hidden coupling.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - frontend/src/README.md:55-71
+- id: Q35
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Invalid if the proposed fix adds a second resolver/cache/materialization path or makes APP certification reacquire dependencies already established by canonical `make init`.
+    critical: true
+  - id: ownership_boundary
+    statement: Native uv/npm own package acquisition and retry/TLS/registry semantics during initialization; APP certification consumes the initialized repository and must not own dependency acquisition or host-unrestricted package-manager egress.
+    critical: true
+  - id: consequence
+    statement: Registry/TLS availability after successful initialization cannot become an APP prerequisite merely because certification discarded the established environment and attempted to rebuild it.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Adds a certification-specific resolver/cache/download/materialization path or broadens APP egress to compensate for discarded initialization authority.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:5-37
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - scripts/tests/test_app_certification_contract.py:53-86
+
+- id: Q168
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. ScheduleScheduler owns periodic invocation only; process startup is explicitly not a trigger.
+    critical: false
+  - id: ownership_boundary
+    statement: Startup must not manufacture execution intent.
+    critical: false
+  - id: consequence
+    statement: Avoids duplicate/unreviewed scheduled execution after restarts.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut,
+      and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/AGENTS.md:38-40
+  - docs/AUTOMATION_MODEL.md:80-80
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:21-22
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:42-53
+  - backend/src/oh_goon/runtime/schedule_scheduler.py:80-82
+- id: Q169
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. ApiClientProvider requires supplied read and mutation controllers to share one CausalityClock and throws otherwise.
+    critical: false
+  - id: ownership_boundary
+    statement: Read/write ordering has one causality authority.
+    critical: false
+  - id: consequence
+    statement: Two clocks can let stale reads/writes disagree about ordering.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut,
+      and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - frontend/src/app/ApiClientProvider.tsx:42-50
+- id: Q170
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. Difficulty choosing an owner means inspect the nearest existing owner/test; do not create common.py/utils.py or another
+      generic layer.
+    critical: false
+  - id: ownership_boundary
+    statement: Use core/engine/integrations/runtime/services according to the decision ladder.
+    critical: false
+  - id: consequence
+    statement: Generic dumping grounds become ghost ownership.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut,
+      and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:23-33
+- id: Q171
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Invalid. Features own private components/hooks/models; cross-feature interaction goes through existing app/domain contracts rather
+      than private implementation imports.
+    critical: false
+  - id: ownership_boundary
+    statement: Feature-private implementation is not a cross-feature API.
+    critical: false
+  - id: consequence
+    statement: Preserves feature ownership and prevents hidden coupling.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut,
+      and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - frontend/src/README.md:55-71
+- id: Q172
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Invalid if the proposed fix introduces a second dependency resolver/cache or broadens APP verification capability. Canonical `make init`
+      owns dependency acquisition before certification; the APP verification Plan consumes the initialized repository and must not reacquire packages
+      or gain host-unrestricted egress merely to repeat materialization.
+    critical: true
+  - id: ownership_boundary
+    statement: uv/npm own package acquisition and retry semantics at canonical initialization; APP certification owns verification of the initialized
+      product and keeps its semantic Goons scoped to the capabilities their verification actually requires.
+    critical: true
+  - id: consequence
+    statement: A registry/TLS failure during canonical initialization is reported by the native owner instead of being hidden by a repository-owned
+      download/cache fallback; after successful initialization, registry availability is not a prerequisite for reacquiring the same APP dependencies.
+    critical: true
+  - id: reasoning_extension
+    statement: Use repository evidence to distinguish native semantic authority from Oh-Goon orchestration and do not invent a second source of
+      truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Adds a second resolver/cache/download path, moves dependency acquisition back inside APP certification, or grants host-unrestricted
+      egress to verification Steps merely to reacquire already-materialized dependencies.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - docs/development/APP_CERTIFICATION.md:1-35
+  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_authority_workflow.py:150-180

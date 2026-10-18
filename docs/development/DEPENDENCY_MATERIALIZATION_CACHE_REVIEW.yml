@@ -1,0 +1,31 @@
+version: 2
+phase: 23
+rule: native_tools_own_package_materialization_and_cache_semantics
+operations:
+- id: python-environment
+  why: materialize the exact backend dependency/runtime graph needed by the current checkout
+  owner: native uv invoked directly by make init
+  reuse_identity: native uv owns environment and cache reuse from backend/pyproject.toml plus committed backend/uv.lock; Oh-Goon
+    keeps no parallel dependency cache identity
+- id: npm-graph
+  why: materialize the committed frontend dependency graph needed by the current checkout
+  owner: native npm ci invoked directly by make init or make frontend-install
+  reuse_identity: native npm owns node_modules reconstruction and cache reuse from frontend/package.json plus frontend/package-lock.json;
+    Oh-Goon keeps no parallel node_modules cache identity
+- id: browsers
+  why: materialize Playwright engines only for browser/release work
+  owner: native Playwright install; runtime proof owned by frontend/e2e/browser-preflight.mjs
+  reuse_identity: Playwright package-selected executable revisions plus successful requested-engine launch
+- id: retained-content
+  why: avoid recopying large immutable retained inputs between runs
+  owner: backend/src/oh_goon/integrations/fleet_content_store.py
+  reuse_identity: repository-scoped reference + content object kind + SnapshotIdentity sha256/byte_count/entry_count + root
+    mode
+- id: source-snapshots
+  why: freeze source bytes before isolated execution and publication
+  owner: backend/src/oh_goon/runtime/workspaces.py plus content_snapshot.py
+  reuse_identity: durable workspace identity/state-version CAS + SourceSnapshotBinding SnapshotIdentity
+- id: workspaces
+  why: materialize isolated execution state without aliasing path presence to durable identity
+  owner: RepositoryWorkspaceAuthority
+  reuse_identity: immutable WorkspaceRef + durable lifecycle/state version + expected source/materialization identity

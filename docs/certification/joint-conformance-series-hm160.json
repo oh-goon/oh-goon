@@ -1,0 +1,26 @@
+{
+  "schema": "oh-goon.hashmarks-joint-conformance-series.v1",
+  "series_id": "joint-750-hm160-v1",
+  "oh_goon_parent": {
+    "version": "1267.0.750",
+    "zip_sha256": "9d56e5b60f1858250c6beda7d8676710482f9ebb67784abf7079b03e28022e10",
+    "source_identity": "sha256:22869cf8becce0aa25a5e6f2a3c5b26b8ae9b883a798820900739c4040d561f0"
+  },
+  "hashmarks": {
+    "version": "0.12.0",
+    "canonical_source_archive_identity": "sha256:acd56c8e6b02ba85b330779ec8161579dd0055750282eb574d887eba3487693f",
+    "artifact_identity": "sha256:30a6adec66ac97ac724adc4aae0ca8ba406210b934bcd79a461da40d8ff7b2b6",
+    "producer_implementation_identity": "sha256:1796f75656d2c2a82696b34eed7ffdfbdb4d2ddf94ce7cb176d53fd6f4d4fb5e"
+  },
+  "authority": {
+    "hashmarks": "repository-intelligence-and-verification-selection",
+    "oh_goon": "admission-execution-verification-certification",
+    "consumer_rule": "verify-producer-semantics-never-recreate-repair-or-reinterpret"
+  },
+  "qualification": {
+    "hm160_native_profile": "923/923 PASS",
+    "hm160_promotion_status": "CANONICAL",
+    "oh_goon_parent": "exact 1267.0.750 FINAL CANDIDATE"
+  },
+  "rule": "Changing canonical HM160 source, retained wheel, producer implementation, or Oh-Goon parent creates a new comparison series."
+}

@@ -1,0 +1,5 @@
+version: 1
+execution:
+  shell: sh
+steps:
+- run: make verify-p0

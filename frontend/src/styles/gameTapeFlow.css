@@ -1,0 +1,511 @@
+.game-tape-flowchart {
+  position:relative;
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+  display:grid;
+  overflow-x:clip;
+  gap:var(--space-medium);
+  padding:var(--space-medium);
+  border:1px solid var(--ice-frost-line);
+  border-radius:var(--radius-large);
+  background:linear-gradient(180deg,var(--ice-subtle-background),var(--surface-panel));
+  box-shadow:inset 0 1px 0 var(--ice-snow-sheen)
+}
+.game-tape-flowchart__heading {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:var(--space-large)
+}
+.game-tape-flowchart__heading h3 {
+  margin:2px 0 4px;
+  font-size:1.05rem
+}
+.game-tape-flowchart__heading p {
+  max-width:680px;
+  margin:0;
+  color:var(--text-secondary);
+  font-size:.76rem;
+  line-height:1.5
+}
+.game-tape-flowchart__legend,.game-tape-flowchart__score,.game-tape-flowchart__lane-nav {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px
+}
+.game-tape-flowchart__legend {
+  justify-content:flex-end;
+  color:var(--text-muted);
+  font-size:.66rem;
+  font-weight:760
+}
+.game-tape-flowchart__score {
+  justify-content:center
+}
+.game-tape-flowchart__plan {
+  display:flex;
+  width:min(620px,100%);
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--space-medium);
+  justify-self:center;
+  padding:14px 16px;
+  border:1px solid var(--status-info-border);
+  border-radius:var(--radius-large);
+  background:linear-gradient(135deg,var(--action-primary-soft),var(--ice-panel-background));
+  box-shadow:var(--shadow-low)
+}
+.game-tape-flowchart__plan>div,.game-tape-flowchart__repository>div,.game-tape-flowchart__source>header {
+  display:grid;
+  gap:3px;
+  min-width:0
+}
+.game-tape-flowchart__plan strong,.game-tape-flowchart__repository strong,.game-tape-flowchart__source strong,.game-tape-flowchart__step strong,.game-tape-flowchart__outcome strong {
+  overflow-wrap:anywhere;
+  color:var(--text-primary)
+}
+.game-tape-flowchart__plan small,.game-tape-flowchart__repository small,.game-tape-flowchart__source small,.game-tape-flowchart__step small {
+  overflow-wrap:anywhere;
+  color:var(--text-muted);
+  font-size:.65rem
+}
+.game-tape-flowchart__type {
+  color:var(--status-info);
+  font-size:.6rem;
+  font-weight:850;
+  letter-spacing:.08em;
+  text-transform:uppercase
+}
+.game-tape-flowchart__branch {
+  width:2px;
+  height:18px;
+  justify-self:center;
+  background:var(--ice-rink-line)
+}
+.game-tape-flowchart__lane-nav {
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+  contain:inline-size;
+  overflow-x:auto;
+  padding:4px 0 6px;
+  flex-wrap:nowrap;
+  scrollbar-color:var(--border-strong) transparent
+}
+.game-tape-flowchart__lane-link {
+  display:flex;
+  flex:0 0 auto;
+  align-items:center;
+  gap:8px;
+  min-width:min(220px,70vw);
+  max-width:min(420px,78vw);
+  padding:7px 9px;
+  border:1px solid var(--border-subtle);
+  border-radius:var(--radius-pill);
+  color:var(--text-secondary);
+  background:var(--surface-panel);
+  cursor:pointer;
+  font-size:.7rem;
+  font-weight:760
+}
+.game-tape-flowchart__lane-link>span:first-child {
+  min-width:0;
+  overflow-wrap:anywhere
+}
+.game-tape-flowchart__lane-link:hover,.game-tape-flowchart__lane-link:focus-visible,.game-tape-flowchart__lane-link--selected {
+  border-color:var(--status-info-border);
+  color:var(--text-primary);
+  background:var(--action-primary-soft)
+}
+.game-tape-flowchart__lane-link--selected {
+  box-shadow:inset 0 0 0 1px var(--ice-rink-line)
+}
+.game-tape-flowchart__lane-link--match {
+  border-color:var(--status-info-border)
+}
+.game-tape-flowchart__lanes {
+  display:grid;
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+  gap:var(--space-medium)
+}
+.game-tape-flowchart__lane {
+  position:relative;
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+  display:grid;
+  overflow-x:clip;
+  gap:var(--space-small);
+  padding:12px;
+  border:1px solid var(--border-subtle);
+  border-radius:var(--radius-large);
+  background:var(--surface-subtle);
+  scroll-margin-block:calc(var(--layout-shell-height) + var(--space-large))
+}
+.game-tape-flowchart__lane::before {
+  content:"";
+  position:absolute;
+  top:-13px;
+  left:50%;
+  width:1px;
+  height:13px;
+  background:var(--ice-rink-line)
+}
+.game-tape-flowchart__repository {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--space-medium);
+  padding:8px 10px;
+  border-left:3px solid var(--status-info);
+  border-radius:var(--radius-small);
+  background:var(--surface-emphasis)
+}
+.game-tape-flowchart__repository-actions {
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+  gap:8px
+}
+.game-tape-flowchart__track {
+  display:flex;
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+  contain:inline-size;
+  align-items:stretch;
+  gap:22px;
+  overflow-x:auto;
+  padding:4px 2px 8px;
+  scrollbar-color:var(--border-strong) transparent
+}
+.game-tape-flowchart__source {
+  position:relative;
+  flex:0 0 auto;
+  min-width:min(520px,82vw);
+  max-width:760px;
+  padding:10px;
+  border:1px solid var(--border-subtle);
+  border-radius:var(--radius-medium);
+  background:var(--ice-panel-background);
+  box-shadow:inset 0 1px 0 var(--ice-snow-sheen)
+}
+.game-tape-flowchart__source::after {
+  content:"→";
+  position:absolute;
+  top:50%;
+  right:-18px;
+  color:var(--status-info);
+  font-size:1rem;
+  font-weight:800;
+  transform:translateY(-50%)
+}
+.game-tape-flowchart__source[data-source-kind="goon"] {
+  border-color:var(--status-info-border)
+}
+.game-tape-flowchart__source>header {
+  padding:0 2px 8px;
+  border-bottom:1px solid var(--border-subtle)
+}
+.game-tape-flowchart__source ol {
+  display:flex;
+  align-items:stretch;
+  gap:18px;
+  margin:10px 0 0;
+  padding:0;
+  list-style:none
+}
+.game-tape-flowchart__source li {
+  position:relative;
+  display:flex;
+  min-width:0
+}
+.game-tape-flowchart__source li:not(:last-child)::after {
+  content:"";
+  position:absolute;
+  top:50%;
+  right:-14px;
+  width:10px;
+  border-top:2px solid var(--ice-rink-line)
+}
+.game-tape-flowchart__source li:not(:last-child)::before {
+  content:"";
+  position:absolute;
+  top:calc(50% - 3px);
+  right:-14px;
+  border:4px solid transparent;
+  border-left-color:var(--ice-rink-line)
+}
+.game-tape-flowchart__step {
+  display:grid;
+  grid-template-columns:30px minmax(130px,1fr) auto;
+  align-items:center;
+  gap:8px;
+  min-width:250px;
+  padding:10px;
+  border:1px solid var(--border-subtle);
+  border-radius:var(--radius-medium);
+  color:var(--text-primary);
+  background:var(--surface-panel);
+  border-left:3px solid var(--gt-status-border);
+  text-align:left;
+  cursor:pointer;
+  scroll-margin:24px
+}
+.game-tape-flowchart__step:hover,.game-tape-flowchart__step--selected {
+  border-color:var(--status-info-border);
+  background:var(--surface-emphasis);
+  transform:translateY(-1px)
+}
+.game-tape-flowchart__step--selected {
+  box-shadow:var(--shadow-focus)
+}
+.game-tape-flowchart__step--focus:not(.game-tape-flowchart__step--selected) {
+  box-shadow:inset 0 0 0 1px var(--ice-rink-line)
+}
+.game-tape-flowchart__step--match {
+  outline:2px solid var(--status-info-border);
+  outline-offset:2px
+}
+.game-tape-flowchart__order {
+  display:grid;
+  width:28px;
+  height:28px;
+  place-items:center;
+  border:1px solid var(--ice-rink-line);
+  border-radius:50%;
+  color:var(--text-primary);
+  background:var(--ice-navigation-background);
+  font-family:"SFMono-Regular",Consolas,monospace;
+  font-size:.68rem;
+  font-weight:850
+}
+.game-tape-flowchart__step-copy,.game-tape-flowchart__step-status {
+  display:grid;
+  gap:3px;
+  min-width:0
+}
+.game-tape-flowchart__step-status {
+  justify-items:end
+}
+.game-tape-flowchart__focus-label {
+  color:var(--status-info)!important;
+  font-weight:800
+}
+.game-tape-flowchart__outcome {
+  display:grid;
+  flex:0 0 150px;
+  align-content:center;
+  justify-items:start;
+  gap:7px;
+  padding:10px;
+  border:1px solid var(--border-strong);
+  border-radius:var(--radius-medium);
+  background:linear-gradient(135deg,var(--surface-emphasis),var(--ice-subtle-background))
+}
+.game-tape-flowchart__outcome[data-status] {
+  border-color:var(--gt-status-border)
+}
+.game-tape-flowchart__truth {
+  margin:0;
+  padding-top:var(--space-small);
+  border-top:1px solid var(--border-subtle);
+  color:var(--text-muted);
+  font-size:.66rem;
+  line-height:1.45
+}
+@media(max-width:760px) {
+  .game-tape-flowchart__heading {
+    flex-direction:column
+  }
+  .game-tape-flowchart__legend {
+    justify-content:flex-start
+  }
+  .game-tape-flowchart__source {
+    min-width:min(440px,86vw)
+  }
+  .game-tape-flowchart__repository {
+    align-items:flex-start
+  }
+  .game-tape-flowchart__repository-actions {
+    justify-content:flex-start
+  }
+
+}
+@media(max-width:520px) {
+  .game-tape-flowchart {
+    padding:var(--space-small)
+  }
+  .game-tape-flowchart__source ol {
+    display:grid;
+    overflow:visible
+  }
+  .game-tape-flowchart__source::after {
+    content:"↓";
+    top:auto;
+    right:50%;
+    bottom:-20px;
+    transform:translateX(50%)
+  }
+  .game-tape-flowchart__source li:not(:last-child)::after {
+    top:auto;
+    right:50%;
+    bottom:-13px;
+    width:0;
+    height:9px;
+    border-top:0;
+    border-left:2px solid var(--ice-rink-line)
+  }
+  .game-tape-flowchart__source li:not(:last-child)::before {
+    top:auto;
+    right:calc(50% - 3px);
+    bottom:-17px;
+    border-left-color:transparent;
+    border-top-color:var(--ice-rink-line)
+  }
+  .game-tape-flowchart__step {
+    grid-template-columns:30px minmax(0,1fr);
+    min-width:0;
+    width:100%
+  }
+  .game-tape-flowchart__step-status {
+    grid-column:2;
+    justify-items:start
+  }
+  .game-tape-flowchart__outcome {
+    width:100%;
+    min-width:0
+  }
+  .game-tape-flowchart__repository {
+    display:grid
+  }
+  .game-tape-flowchart__repository-actions {
+    justify-content:start
+  }
+
+}
+.game-tape-flowchart__group-status {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px
+}
+.game-tape-flowchart__signal-label {
+  font-weight:760
+}
+.game-tape-flowchart__step--bottleneck {
+  box-shadow:inset 0 -2px 0 var(--ice-rink-line)
+}
+@media (prefers-reduced-motion:no-preference) {
+  .game-tape-flowchart__step[data-status="RUNNING"] .game-tape-flowchart__order {
+    animation:game-tape-flow-puck 1.6s ease-in-out infinite
+  }
+  @keyframes game-tape-flow-puck {
+    0%,100% {
+      box-shadow:0 0 0 0 var(--action-primary-soft)
+    }
+    50% {
+      box-shadow:0 0 0 6px var(--action-primary-soft)
+    }
+
+  }
+
+}
+.game-tape-flowchart__lane:has(.game-tape-flowchart__step--selected) {
+  border-color:var(--status-info-border);
+  box-shadow:inset 0 0 0 1px var(--ice-rink-line)
+}
+.game-tape-flowchart__source:has(.game-tape-flowchart__step--selected) {
+  border-color:var(--status-info-border);
+  box-shadow:0 0 0 1px var(--ice-rink-line),inset 0 1px 0 var(--ice-snow-sheen)
+}
+.game-tape-flowchart__repository[data-status] {
+  border-left-color:var(--gt-status)
+}
+.game-tape-flowchart__plan[data-status] {
+  border-color:var(--gt-status-border)
+}
+.game-tape-flowchart__score {
+  justify-self:center;
+  max-width:100%;
+  padding:6px;
+  border:1px solid var(--border-subtle);
+  border-radius:var(--radius-pill);
+  background:var(--ice-navigation-background);
+  overflow-x:auto;
+  flex-wrap:nowrap;
+  box-shadow:inset 0 1px 0 var(--ice-snow-sheen)
+}
+.game-tape-flowchart__selected-dock {
+  display:grid;
+  border-color:var(--status-info-border);
+  background:linear-gradient(135deg,var(--action-primary-soft),var(--ice-panel-background))
+}
+.game-tape-flowchart__selected-copy {
+  display:grid;
+  gap:4px
+}
+.game-tape-flowchart__selected-copy strong,.game-tape-flowchart__selected-copy code {
+  overflow-wrap:anywhere
+}
+.game-tape-flowchart__selected-metrics {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:6px;
+  margin:0
+}
+.game-tape-flowchart__selected-metrics div {
+  padding:7px;
+  border:1px solid var(--border-subtle);
+  border-radius:var(--radius-small);
+  background:var(--surface-subtle)
+}
+.game-tape-flowchart__selected-metrics dt {
+  color:var(--text-muted);
+  font-size:.6rem;
+  font-weight:800
+}
+.game-tape-flowchart__selected-metrics dd {
+  margin:2px 0 0;
+  color:var(--text-secondary);
+  font-size:.68rem
+}
+@media(max-width:620px) {
+  .game-tape-flowchart__selected-metrics {
+    grid-template-columns:1fr
+  }
+
+}
+.game-tape-flowchart__step-status-line {
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:6px
+}
+.game-tape-flowchart__step[data-status] {
+  background:linear-gradient(135deg,var(--gt-status-bg),var(--surface-panel) 42%)
+}
+@media(max-width:520px) {
+  .game-tape-flowchart__step-status-line {
+    justify-content:flex-start
+  }
+
+}
+
+.game-tape-flowchart__scope-connector {
+  display:block;
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+
+}

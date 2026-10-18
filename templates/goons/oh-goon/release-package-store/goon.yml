@@ -1,0 +1,20 @@
+version: 1
+uv:
+  project: backend
+  group: build
+outputs:
+  archive_sha256: ${{ steps.package.outputs.ARCHIVE_SHA256 }}
+steps:
+- id: package
+  run: uv run oh-goon-package-source
+  workspace:
+    from: repository
+  outputs:
+    ARCHIVE_SHA256: release-artifacts/archive-sha256.txt
+  artifacts:
+  - path: release-artifacts/source.zip
+    retention: content_store
+  - path: release-artifacts/source.zip.sha256
+    retention: evidence
+  - path: release-artifacts/source-manifest.json
+    retention: evidence

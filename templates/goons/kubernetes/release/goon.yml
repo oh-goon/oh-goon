@@ -1,0 +1,19 @@
+version: 1
+inputs:
+- kubernetes_api_hostname
+- namespace
+- deployment
+- container
+- image
+outputs:
+  KUBERNETES_RESOURCE_VERSION: ${{ goons.kubernetes-set-image.outputs.KUBERNETES_RESOURCE_VERSION }}
+  KUBERNETES_GENERATION: ${{ goons.kubernetes-set-image.outputs.KUBERNETES_GENERATION }}
+  KUBERNETES_IMAGE: ${{ goons.kubernetes-set-image.outputs.KUBERNETES_IMAGE }}
+goons:
+- import: kubernetes/set-image
+  pass: [kubernetes_api_hostname, namespace, deployment, container, image]
+- import: kubernetes/rollout-verify
+  pass: [kubernetes_api_hostname, namespace, deployment, container]
+  with:
+    expected_generation: ${{ goons.kubernetes-set-image.outputs.KUBERNETES_GENERATION }}
+    expected_image: ${{ goons.kubernetes-set-image.outputs.KUBERNETES_IMAGE }}

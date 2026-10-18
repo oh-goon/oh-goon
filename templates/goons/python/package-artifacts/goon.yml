@@ -1,0 +1,10 @@
+version: 1
+uv:
+  group: dev
+steps:
+- run: uv run package-artifacts --output-dir dist --bundle package-distributions.tar --manifest package-artifacts.json
+  artifacts:
+  - path: package-distributions.tar
+    retention: content_store
+  - path: package-artifacts.json
+    retention: evidence

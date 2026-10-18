@@ -1,0 +1,39 @@
+{
+  "schema": "oh-goon.hashmarks-joint-conformance-series.v1",
+  "series_id": "joint-892-hashmarks-0.14.0-rc-v1",
+  "oh_goon_parent": {
+    "version": "1267.0.891",
+    "zip_sha256": "9b8ac5b580fb57e5321e78fe9f6d4d4417978f2d5c67347eebe2d6e597a90c79",
+    "source_identity": "sha256:e09a5a7ff71d3577b2f60918b2827935271148b6e6d9775ec75138e1a18c6c4a"
+  },
+  "hashmarks": {
+    "checkpoint": "0.14.0 RELEASE CANDIDATE",
+    "version": "0.14.0",
+    "canonical_source_archive_identity": "sha256:720e3dae89b188bdac49a553cb2b246a53172a6e14c36994dcc79c3522cea376",
+    "repository_identity": "sha256:0434d82a99b32533f0f8947c3e1e5a5fae682a1579a41772ec0950d1da14b453:636",
+    "artifact_identity": "sha256:3de1cb0724e6fe27be2ade289a2699b3152393419c374823b77bda4b7c7fdee2",
+    "producer_implementation_identity": "sha256:807849dfad1d196cde004eddee7c7e6d28a5328e270e00642d34ac0176bc17f9"
+  },
+  "derivation": {
+    "source_archive": "/Hashmarks Releases/0.14.0 Release Candidate/hashmarks-0.14.0-RELEASE-CANDIDATE.zip",
+    "source_archive_sha256": "720e3dae89b188bdac49a553cb2b246a53172a6e14c36994dcc79c3522cea376",
+    "released_wheel": "/Hashmarks Releases/0.14.0 Release Candidate/hashmarks-0.14.0-py3-none-any.whl",
+    "released_wheel_sha256": "3de1cb0724e6fe27be2ade289a2699b3152393419c374823b77bda4b7c7fdee2",
+    "source_zip_deterministic_rebuild": "PASS byte-identical",
+    "hm303_to_release_patch_sha256": "88f915336fe7e5e2aa595d4fb3a81b873e277fd0917c018fd577c333aaac7f71"
+  },
+  "authority": {
+    "hashmarks": "repository-intelligence-and-verification-selection",
+    "oh_goon": "admission-execution-verification-certification",
+    "consumer_rule": "verify-producer-semantics-never-recreate-repair-or-reinterpret"
+  },
+  "qualification": {
+    "hashmarks_release_candidate": "persisted exact 0.14.0 RC",
+    "hashmarks_source_members": 636,
+    "hashmarks_source_zip_ab": "PASS byte-identical",
+    "hashmarks_patch_replay": "636/636 byte-identical",
+    "oh_goon_parent": "exact persisted 1267.0.891 IN-PROGRESS NON-COVERAGE",
+    "oh_goon_interoperability": "focused consumer/dependency/startup/certification regressions required before 892 closure"
+  },
+  "rule": "Changing the Hashmarks 0.14.0 RC source, released wheel, producer implementation, or Oh-Goon parent creates a new comparison series. Hashmarks evidence never grants Oh-Goon execution authority."
+}

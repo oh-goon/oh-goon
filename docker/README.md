@@ -1,0 +1,3 @@
+# Docker dependency authority
+
+Docker is optional. Public source contains `backend/pyproject.toml`, committed `backend/uv.lock`, and committed frontend `package-lock.json`. Container builds require native uv to prove that `backend/uv.lock` is current with `uv sync --locked`; they never reconstruct or rewrite Python dependency resolution inside the image build. Release-wheel construction uses `uv build --no-sources` so uv-only source overrides cannot become hidden release authority. Runtime dependencies are exported from the already-checked lock and installed with hashes before the Oh-Goon wheel is installed with `--no-deps`.

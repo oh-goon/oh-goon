@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from oh_goon.core.process_birth import (
+    ProcessBirthIdentity,
+    observe_process_birth,
+    observe_process_liveness,
+    process_birth_matches,
+)
+
+
+def _proc_tree(tmp_path: Path, *, pid: int, boot_id: str, start_ticks: int, comm: str = "python worker", state: str = "S") -> Path:
+    proc = tmp_path / "proc"
+    (proc / "sys/kernel/random").mkdir(parents=True, exist_ok=True)
+    (proc / "sys/kernel/random/boot_id").write_text(boot_id + "\n", encoding="utf-8")
+    (proc / str(pid)).mkdir(exist_ok=True)
+    # tail begins at stat field 3. starttime is field 22 => tail index 19.
+    tail = [state] + [str(index) for index in range(4, 22)] + [str(start_ticks), "0"]
+    (proc / str(pid) / "stat").write_text(
+        f"{pid} ({comm}) " + " ".join(tail) + "\n",
+        encoding="utf-8",
+    )
+    return proc
+
+
+def test_linux_proc_birth_identity_uses_boot_and_start_ticks_not_pid_alone(tmp_path: Path) -> None:
+    proc = _proc_tree(tmp_path, pid=77, boot_id="boot-a", start_ticks=123456, comm="name ) with spaces")
+    identity = observe_process_birth(77, proc_root=proc)
+    assert identity == ProcessBirthIdentity(pid=77, boot_id="boot-a", start_ticks=123456)
+    assert process_birth_matches(identity, proc_root=proc)  # type: ignore[arg-type]
+
+
+def test_pid_reuse_is_rejected_when_start_ticks_change(tmp_path: Path) -> None:
+    proc = _proc_tree(tmp_path, pid=77, boot_id="boot-a", start_ticks=10)
+    expected = observe_process_birth(77, proc_root=proc)
+    assert expected is not None
+    _proc_tree(tmp_path, pid=77, boot_id="boot-a", start_ticks=20)
+    assert not process_birth_matches(expected, proc_root=proc)
+
+
+def test_missing_or_unsupported_procfs_returns_unknown_not_false_terminal(tmp_path: Path) -> None:
+    assert observe_process_birth(77, proc_root=tmp_path / "missing-proc") is None
+
+
+def test_process_liveness_does_not_treat_zombie_pid_as_live(tmp_path: Path) -> None:
+    live = _proc_tree(tmp_path, pid=88, boot_id="boot-a", start_ticks=1, state="S")
+    assert observe_process_liveness(88, proc_root=live) is True
+    _proc_tree(tmp_path, pid=88, boot_id="boot-a", start_ticks=1, state="Z")
+    assert observe_process_liveness(88, proc_root=live) is False
+    (live / "88" / "stat").unlink()
+    assert observe_process_liveness(88, proc_root=live) is False
+    assert observe_process_liveness(88, proc_root=tmp_path / "missing-proc") is None

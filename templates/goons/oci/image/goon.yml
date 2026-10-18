@@ -1,0 +1,26 @@
+version: 1
+inputs:
+  base_registry_hostname:
+    type: hostname
+  containerfile:
+    type: repository_path
+    default: Dockerfile
+  context:
+    type: repository_path
+    default: .
+  platform:
+    type: choice
+    choices: [linux/amd64, linux/arm64]
+    default: linux/amd64
+steps:
+- uses: oci_build
+  id: build
+  containerfile: ${{ inputs.containerfile }}
+  context: ${{ inputs.context }}
+  registries:
+  - hostname: ${{ inputs.base_registry_hostname }}
+  policy:
+    platform: ${{ inputs.platform }}
+  workspace:
+    from: repository
+    publish: true

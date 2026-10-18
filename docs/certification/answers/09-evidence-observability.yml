@@ -1,0 +1,290 @@
+schema_version: 1
+source_version: 1267.0.1052
+section: evidence-observability
+questions:
+- id: Q51
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Historical Game Tape may expose the failed Step exit/reason plus durable stdout/stderr anchor facts such as stream, SHA-256, line count, byte count, and attempt number when available. Historical raw bytes and source-line extraction are not durable and must be reported unavailable rather than reconstructed.
+    critical: false
+  - id: ownership_boundary
+    statement: Durable evidence fingerprints are not raw-log storage.
+    critical: false
+  - id: consequence
+    statement: Prevents fabricated debugging evidence and accidental persistent raw-log authority.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/development/GAME_TAPE.md:120-131
+  - backend/src/oh_goon/core/models/game_tape.py:44-64
+  - backend/src/oh_goon/core/game_tape_step_projection.py:163-205
+- id: Q52
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Scout owns cross-execution analytical observations/aggregates and read navigation only. It never executes, schedules, admits, retries, cancels, places, throttles, or modifies work; execution has no runtime dependency on Scout and must behave identically if Scout is unavailable. Scout API is GET-only.
+    critical: true
+  - id: ownership_boundary
+    statement: Analytics is an optional observer, never an execution dependency.
+    critical: true
+  - id: consequence
+    statement: Prevents optional analytics from becoming a control-plane or availability dependency.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Allows Scout to execute, mutate, authorize, or become a dependency of execution.
+    severity: critical
+    misconception_id: observer_authority_confusion
+  - id: fatal-02
+    statement: Treats Scout observations, aggregates, or navigation projections as canonical Run/execution truth merely because they observe the system.
+    severity: critical
+    misconception_id: observer_authority_confusion
+  evidence_expectations:
+  - docs/development/THE_SCOUT.md:10-18
+  - docs/development/THE_SCOUT.md:58-69
+  - backend/src/oh_goon/scout/service.py:41-70
+- id: Q53
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: enforcer.yml is a deterministic non-secret debugging projection for one admitted strict run. Journal and canonical operation evidence remain authoritative and the receipt can be regenerated; it is not pipeline configuration, durable truth, mutable state, or another validation engine.
+    critical: false
+  - id: ownership_boundary
+    statement: Enforcer proves admission; the receipt only projects that proof and later facts.
+    critical: false
+  - id: consequence
+    statement: Prevents a convenient receipt from becoming ghost policy/state ownership.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/development/ENFORCER_RECEIPTS.md:1-9
+  - docs/development/ENFORCER_RECEIPTS.md:180-189
+  - backend/src/oh_goon/services/enforcer_run_receipt.py:43-102
+- id: Q54
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: If a fact already exists in Run/Game Tape, add only a read projection/aggregation. Typed execution evidence needing fleet query belongs in its narrow domain observation owner. High-volume analytical/resource telemetry belongs to optional Scout. Do not create GenericMetric/GenericObservation, a central metrics DB, frontend status derivation, or an observability write path into execution.
+    critical: false
+  - id: ownership_boundary
+    statement: New observability follows the existing fact owner and missing-data semantics.
+    critical: false
+  - id: consequence
+    statement: Prevents observability from becoming a generic second product state model.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/OBSERVABILITY.md:14-39
+  - backend/src/oh_goon/core/models/execution_observability.py:50-61
+  - backend/src/oh_goon/scout/service.py:41-70
+- id: Q55
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: An empty execution time-grid cell means no execution observation exists for that repository/bucket. It is absence of evidence, not a new NO_EXECUTION lifecycle/status value.
+    critical: false
+  - id: ownership_boundary
+    statement: Absence in a projection must not invent canonical state.
+    critical: false
+  - id: consequence
+    statement: Prevents UI/analytics absence from manufacturing lifecycle semantics.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/OBSERVABILITY.md:16-20
+  - backend/src/oh_goon/core/models/execution_observability.py:27-41
+  - backend/src/oh_goon/core/execution_observability.py:81-140
+- id: Q188
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Historical Game Tape may expose the failed Step exit/reason plus durable stdout/stderr anchor facts such as stream, SHA-256, line count, byte count, and attempt number when available. Historical raw bytes and source-line extraction are not durable and must be reported unavailable rather than reconstructed.
+    critical: false
+  - id: ownership_boundary
+    statement: Durable evidence fingerprints are not raw-log storage.
+    critical: false
+  - id: consequence
+    statement: Prevents fabricated debugging evidence and accidental persistent raw-log authority.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/development/GAME_TAPE.md:120-131
+  - backend/src/oh_goon/core/models/game_tape.py:44-64
+  - backend/src/oh_goon/core/game_tape_step_projection.py:163-205
+- id: Q189
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Scout owns cross-execution analytical observations/aggregates and read navigation only. It never executes, schedules, admits, retries, cancels, places, throttles, or modifies work; execution has no runtime dependency on Scout and must behave identically if Scout is unavailable. Scout API is GET-only.
+    critical: true
+  - id: ownership_boundary
+    statement: Analytics is an optional observer, never an execution dependency.
+    critical: true
+  - id: consequence
+    statement: Prevents optional analytics from becoming a control-plane or availability dependency.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows Scout to execute, mutate, authorize, or become a dependency of execution.
+    severity: critical
+    misconception_id: observer_authority_confusion
+  - id: fatal-02
+    statement: Treats Scout observations, aggregates, or navigation projections as canonical Run/execution truth merely because they observe the system.
+    severity: critical
+    misconception_id: observer_authority_confusion
+  evidence_expectations:
+  - docs/development/THE_SCOUT.md:10-18
+  - docs/development/THE_SCOUT.md:58-69
+  - backend/src/oh_goon/scout/service.py:41-70
+- id: Q190
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: enforcer.yml is a deterministic non-secret debugging projection for one admitted strict run. Journal and canonical operation evidence remain authoritative and the receipt can be regenerated; it is not pipeline configuration, durable truth, mutable state, or another validation engine.
+    critical: false
+  - id: ownership_boundary
+    statement: Enforcer proves admission; the receipt only projects that proof and later facts.
+    critical: false
+  - id: consequence
+    statement: Prevents a convenient receipt from becoming ghost policy/state ownership.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/development/ENFORCER_RECEIPTS.md:1-9
+  - docs/development/ENFORCER_RECEIPTS.md:180-189
+  - backend/src/oh_goon/services/enforcer_run_receipt.py:43-102
+- id: Q191
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: If a fact already exists in Run/Game Tape, add only a read projection/aggregation. Typed execution evidence needing fleet query belongs in its narrow domain observation owner. High-volume analytical/resource telemetry belongs to optional Scout. Do not create GenericMetric/GenericObservation, a central metrics DB, frontend status derivation, or an observability write path into execution.
+    critical: false
+  - id: ownership_boundary
+    statement: New observability follows the existing fact owner and missing-data semantics.
+    critical: false
+  - id: consequence
+    statement: Prevents observability from becoming a generic second product state model.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/OBSERVABILITY.md:14-39
+  - backend/src/oh_goon/core/models/execution_observability.py:50-61
+  - backend/src/oh_goon/scout/service.py:41-70
+- id: Q192
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: An empty execution time-grid cell means no execution observation exists for that repository/bucket. It is absence of evidence, not a new NO_EXECUTION lifecycle/status value.
+    critical: false
+  - id: ownership_boundary
+    statement: Absence in a projection must not invent canonical state.
+    critical: false
+  - id: consequence
+    statement: Prevents UI/analytics absence from manufacturing lifecycle semantics.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/OBSERVABILITY.md:16-20
+  - backend/src/oh_goon/core/models/execution_observability.py:27-41
+  - backend/src/oh_goon/core/execution_observability.py:81-140
+- id: Q205
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Hashmarks may retain fresh, generation-bound repository-negative evidence that a hypothesis/edit target was disproven; Oh-Goon owns execution failure classification plus retry, resume, timeout refinement, and environment recovery policy.
+    critical: true
+  - id: ownership_boundary
+    statement: Repository-negative evidence is input evidence to a later decision, not an autonomous recovery strategy or execution command.
+    critical: true
+  - id: consequence
+    statement: Prevents repository evidence from silently acquiring execution-loop authority.
+    critical: false
+  contradictions:
+  - id: boundary-01
+    statement: Lets Hashmarks negative evidence choose or launch a retry/recovery action, or stores Oh-Goon execution recovery as Hashmarks repository-negative state.
+    severity: critical
+    misconception_id: duplicate_owner_assumption
+  evidence_expectations:
+  - AGENTS.md:93-120
+  - docs/development/HASHMARKS_EXECUTION_LAYER.md:3-17
+- id: Q208
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Game Tape is Oh-Goon's read-only projection over already-owned durable execution and referenced repository evidence. It never schedules, retries, mutates, admits, or becomes a second result/lifecycle authority.
+    critical: true
+  - id: ownership_boundary
+    statement: Execution owners and backend canonical result semantics remain authoritative; Game Tape only projects their facts.
+    critical: true
+  - id: consequence
+    statement: Prevents observability from becoming an execution or lifecycle control plane.
+    critical: false
+  contradictions:
+  - id: boundary-01
+    statement: Makes Game Tape decide, schedule, retry, or reinterpret execution because it can display repository and execution provenance.
+    severity: critical
+    misconception_id: observer_authority_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/core/game_tape_projection.py:29-69
+  - backend/src/oh_goon/repository_tooling/repository_understanding_game_tape.py:1-53
+
+
+- id: Q214
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Historical plan status markers are not current defect truth by themselves; their version context must be compared with the current checkout and corroborated by present source, tests, contracts, checkpoint evidence, or native observations.
+    critical: true
+  - id: ownership_boundary
+    statement: A planning document may describe intended architecture or a blocker that was real for an older candidate, but it does not own current implementation or qualification state after later checkpoints have superseded that packet.
+    critical: true
+  - id: consequence
+    statement: Treating stale GATED/BLOCKED text as live findings creates false positives and can reopen already-closed work.
+    critical: false
+  contradictions:
+  - id: stale-status-01
+    statement: Converts every CANDIDATE, GATED, BLOCKED, or externally blocked marker in the historical plan directly into a current actionable finding without version/current-evidence corroboration.
+    severity: critical
+    misconception_id: lifecycle_state_confusion
+  evidence_expectations:
+  - docs/architecture/ADR_CANONICAL_OWNER_REPLACEABLE_IMPLEMENTATIONS.md:1-5
+  - docs/certification/README.md:11-23
+  - VERSION:1
+
+- id: Q218
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: A numeric severity-times-impact formula may be a triage aid, but it is not sufficient evidence that a finding exists or that its rank is authoritative.
+    critical: true
+  - id: ownership_boundary
+    statement: Prioritization must preserve evidence quality, currentness, reproducibility, affected authority/invariant, and explicit uncertainty; stale hypotheses, metric-only signals, and insufficient-evidence candidates must not be promoted into confirmed top findings by arithmetic alone.
+    critical: true
+  - id: consequence
+    statement: A forced top-ten list can create false precision, hide a non-compensatory critical invariant behind aggregate scores, and turn unsupported hypotheses into apparent facts.
+    critical: false
+  contradictions:
+  - id: score-01
+    statement: Treats severity weight multiplied by impact factor as a sufficient proxy for criticality and forces exactly ten winners even when evidence is stale, ambiguous, or insufficient.
+    severity: critical
+    misconception_id: absence_as_positive_evidence
+  evidence_expectations:
+  - docs/certification/README.md:11-23
+  - docs/certification/README.md:129-135
+  - docs/certification/README.md:211-215

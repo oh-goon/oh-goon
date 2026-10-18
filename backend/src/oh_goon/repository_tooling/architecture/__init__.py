@@ -1,0 +1,1 @@
+"""Architecture validation helpers."""

@@ -1,0 +1,264 @@
+# Current lifecycle coverage references, not an execution result or PASS record.
+version: real-lifecycle-qa.v2
+policy:
+  principle: >-
+    Critical behavior is not proven by component success alone. It must be exercised
+    through the real lifecycle in which production uses it: public entrypoint,
+    authority acquisition, work or mutation, durable publication, teardown, fresh
+    owner reconstruction, and normal observed readback.
+  proof_levels:
+    unit: proves a component can satisfy a local contract
+    boundary: proves two owners agree at a handoff
+    lifecycle: proves a production-shaped journey composes across owners
+    adversarial: proves the lifecycle stays correct under failure, interruption, races, or forbidden authority
+    mutation: proves the named regression goes red when its protected invariant is deliberately broken
+  release_rule: >-
+    Critical lifecycle coverage is tracked by lifecycle/boundary/failure coverage,
+    not raw pytest count. A critical journey may not be marked covered by only unit proofs.
+
+lifecycles:
+- id: bootstrap-convergence
+  journey: clean-or-partial-source -> make-init -> native backend/frontend materialization -> executable smoke
+  entrypoint: make init
+  durable_observation: backend/.venv + backend/uv.lock + frontend/node_modules; no release build output
+  required_modes: [lifecycle, adversarial, mutation]
+  proofs:
+  - mode: lifecycle
+    test: scripts/tests/test_init_hostile_clean_extraction.py::test_make_init_delegates_materialization_to_native_package_managers
+  - mode: adversarial
+    test: scripts/tests/test_init_hostile_clean_extraction.py::test_make_init_retries_only_when_operator_reinvokes_failed_native_owner
+  - mode: mutation
+    test: scripts/tests/test_init_hostile_clean_extraction.py::test_make_init_does_not_depend_on_release_static_or_source_cleanup
+
+- id: execution-durable-reload
+  journey: API-admit -> execute -> terminalize -> destroy runtime graph -> reconstruct -> API-read
+  entrypoint: POST /api/fleet/runs
+  durable_observation: GET /api/fleet/runs/{id} and GET /api/fleet/runs/{id}/events
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    test: backend/tests/integration/api/test_real_lifecycle_golden.py::test_completed_run_survives_full_runtime_graph_reconstruction
+  - mode: adversarial
+    test: backend/tests/integration/api/test_real_lifecycle_golden.py::test_failed_run_then_rerun_uses_new_runtime_authority_and_preserves_source
+  - mode: boundary
+    test: backend/tests/unit/runtime/test_terminal_completion_handoff.py::test_local_wait_reconstructs_terminal_truth_from_fresh_sqlite_after_worker_retires
+
+- id: cancellation-durable-reload
+  journey: API-admit -> running -> cancel -> terminalize -> reconstruct -> cancel/read again
+  entrypoint: POST /api/fleet/runs/{id}/cancel
+  durable_observation: cancelled run remains terminal and absent from active projection
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    test: backend/tests/integration/api/test_real_lifecycle_golden.py::test_cancelled_run_remains_terminal_after_runtime_reconstruction
+  - mode: adversarial
+    test: backend/tests/unit/runtime/test_fleet_worker_settlement.py::test_fleet_cancel_replays_canonical_request_after_ambiguous_commit_response
+
+- id: recovery-reconciliation
+  journey: effect-start -> owner-loss -> quarantine -> normal recovery API -> reconcile/acknowledge
+  entrypoint: GET/POST /api/recovery
+  durable_observation: canonical reconciliation survives retry and stale writers are rejected
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    test: backend/tests/integration/api/test_api_recovery.py::test_recovery_status_and_reconciliation_api
+  - mode: adversarial
+    test: backend/tests/unit/runtime/test_recovery_reconciliation.py::test_reconciliation_compare_and_set_rejects_stale_writer
+
+- id: identity-and-repository-isolation
+  journey: multi-repository admit -> distinct operations -> terminalize -> reconstruct -> identity-preserving readback
+  entrypoint: POST /api/fleet/runs
+  durable_observation: repository identities and operation identities stay distinct after reload
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    test: backend/tests/integration/api/test_real_lifecycle_golden.py::test_multi_repository_run_preserves_distinct_operation_identity_after_reload
+  - mode: adversarial
+    test: backend/tests/integration/api/test_real_lifecycle_golden.py::test_explicit_repository_instance_scope_is_enforced_through_public_run_api
+  - mode: adversarial
+    test: backend/tests/unit/integrations/test_fleet_plan_cache_isolation.py::test_retained_cache_object_cannot_cross_repository_ownership_boundary
+
+- id: executor-authority-lifecycle
+  journey: admit -> executor authority -> settlement/readmission -> stale or revoked authority rejected
+  entrypoint: FleetRunControlPlane/FleetExecutorPool
+  durable_observation: canonical parent/child and terminal settlement evidence
+  required_modes: [boundary, adversarial]
+  proofs:
+  - mode: boundary
+    test: backend/tests/unit/runtime/test_executor_readmission.py::test_readmission_creates_new_intent_and_preserves_source_run
+  - mode: adversarial
+    test: backend/tests/unit/runtime/test_fleet_worker_settlement.py::test_fleet_worker_fails_closed_if_current_capability_no_longer_matches_admission
+
+- id: shared-plan-multi-repository
+  journey: shared-plan select -> freeze source -> explicit multi-repository run -> history/readback
+  entrypoint: SharedPlanService
+  durable_observation: one exact plan source with explicit repository scope and stable history
+  required_modes: [boundary, adversarial]
+  proofs:
+  - mode: boundary
+    test: backend/tests/unit/services/test_shared_run_scope.py::test_shared_plan_run_still_preserves_explicit_multi_repository_scope
+  - mode: adversarial
+    test: backend/tests/unit/services/test_shared_plan_service.py::test_shared_plan_run_rejects_exact_source_revision_change_even_before_execution
+
+- id: repository-understanding-candidate
+  journey: public exam -> secret removed -> evidence observations -> secret grading -> certificate or refusal
+  entrypoint: repository-understanding exam/grade
+  durable_observation: qualification certificate reflects claim/evidence semantics and vetoes
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    test: scripts/tests/test_repository_understanding_certification.py::test_perfect_semantic_observations_produce_high_confidence_certificate
+  - mode: adversarial
+    test: scripts/tests/test_repository_understanding_certification.py::test_critical_claim_misunderstanding_vetoes_qualification_even_with_high_average
+
+- id: game-tape-observed-state
+  journey: runtime evidence -> terminal publication -> Game Tape projection -> retained readback
+  entrypoint: Game Tape projection/read APIs
+  durable_observation: terminal facts, timing, provenance, and failure state derive from canonical evidence
+  required_modes: [boundary, adversarial]
+  proofs:
+  - mode: boundary
+    test: backend/tests/unit/core/test_game_tape_projection.py::test_game_tape_projects_plan_order_timing_outcomes_and_safe_provenance
+  - mode: adversarial
+    test: backend/tests/unit/core/test_game_tape_projection.py::test_game_tape_lifecycle_rejects_unprojectable_terminal_facts
+  - mode: lifecycle
+    test: backend/tests/integration/api/test_api_run_lifecycle.py::test_execution_observations_api_projects_existing_run_game_tape_facts
+
+- id: executable-authority-post-launch-mutation
+  journey: command-launch -> frozen-runtime-receipt -> executable-replaced-or-removed -> PATH-shadowed -> attempt-evidence
+  entrypoint: strict Fleet command execution
+  durable_observation: attempt evidence reports the executable authority that actually launched and never re-resolves later PATH/filesystem state
+  required_modes: [adversarial]
+  proofs:
+  - mode: adversarial
+    test: backend/tests/unit/integrations/test_fleet_plan_tool_authority.py::test_direct_attempt_tool_evidence_survives_post_launch_executable_mutation
+
+- id: sqlite-preparation-execution-lifetime
+  journey: preparation-observer -> immutable input capture -> observer close -> execution callback -> physical attempt
+  entrypoint: strict Fleet execution
+  durable_observation: execution never calls a preparation-only closed SQLite observer
+  required_modes: [lifecycle, mutation]
+  proofs:
+  - mode: lifecycle
+    test: backend/tests/unit/integrations/test_fleet_plan_runtime_boundaries.py::test_strict_preparation_cancellation_callback_does_not_escape_into_execution
+  - mode: mutation
+    test: backend/tests/unit/integrations/test_fleet_plan_runtime_boundaries.py::test_callback_lifetime_regression_proof_goes_red_when_boundary_is_mutated
+
+- id: race-and-ambiguous-commit
+  journey: decision -> concurrent/ambiguous commit -> replay -> canonical winner
+  entrypoint: runtime transaction/reconciliation boundary
+  durable_observation: exactly one canonical result; stale/late writers cannot replace it
+  required_modes: [adversarial]
+  proofs:
+  - mode: adversarial
+    test: backend/tests/unit/runtime/test_recovery_reconciliation.py::test_concurrent_reconciliation_retries_replay_one_canonical_result
+  - mode: adversarial
+    test: backend/tests/unit/runtime/test_fleet_worker_settlement.py::test_fleet_terminal_settlement_replays_canonical_terminal_state_after_ambiguous_response
+
+
+- id: terminal-progress-presentation
+  journey: run-logged -> progress-descriptor -> TTY-or-captured-caller -> durable-log
+  entrypoint: scripts/run_logged.sh / make certify
+  durable_observation: interactive caller gets one in-place spinner line; captured output suppresses heartbeat frames; durable log excludes transient progress
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    test: scripts/tests/test_run_logging.py::test_logged_runner_uses_one_live_spinner_line_on_a_real_terminal
+  - mode: adversarial
+    test: scripts/tests/test_run_logging.py::test_logged_runner_suppresses_spinner_frames_when_output_is_captured
+
+
+- id: full-stack-dev-process-restart
+  journey: make-dev -> browser-facing-proxy -> authenticated-HTTP -> real-repository-Goon -> Game-Tape/Shared-Plan -> process-group-SIGKILL -> restart -> durable-readback -> second-real-Goon
+  entrypoint: make test-real-world
+  durable_observation: configured location, historical Game Tape, Shared Plan, and distinct pre/post-restart Fleet Runs survive abrupt owner destruction without EXIT cleanup and are visible through the restarted frontend proxy
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    command: make strict-local-runtime-acceptance
+  - mode: adversarial
+    command: make strict-local-runtime-acceptance
+
+
+- id: active-step-crash-recovery-real-world
+  journey: real-repository-Step-started -> process-group-SIGKILL -> child-process-death -> restart -> interrupted-Run-terminalization -> no-ghost-active-run -> new-real-execution
+  entrypoint: make test-real-world
+  durable_observation: physically started interrupted Run is fail-closed with canonical restart evidence, no orphan Step process or ghost active Run survives, prior successful evidence remains, and a new post-restart Run succeeds
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    command: make strict-local-runtime-acceptance
+  - mode: adversarial
+    command: make strict-local-runtime-acceptance
+
+- id: live-step-cancellation-real-world
+  journey: real-repository-Step-started -> wrong-run-cancel-rejected -> competing-repository-busy-rejected -> identity-bound-public-cancel -> child-process-death -> canonical-CANCELLED -> lease-release -> previously-blocked-repository-executes -> restart -> durable-readback
+  entrypoint: make test-real-world
+  durable_observation: wrong identity and competing admission cannot disturb the physically active child; the exact Run cancellation kills only its owned child, clears the global execution lease, permits a fresh repository Run, remains CANCELLED through restart, and leaves no ghost active Run
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    command: make strict-local-runtime-acceptance
+  - mode: adversarial
+    command: make strict-local-runtime-acceptance
+
+- id: parallel-shared-plan-physical-cancellation
+  journey: strict-Shared-Plan -> two-parallel-repository-targets -> two-physical-release-metadata-children -> public-Fleet-cancel -> both-children-dead -> canonical-CANCELLED -> no-ghost-active-run -> fresh-parallel-Shared-Plan-SUCCESS -> restart-durable-readback
+  entrypoint: make test-real-world-parallel
+  durable_observation: with one validated strict executor inventory, both target processes are simultaneously alive under one Fleet Run; exact public cancellation kills both, releases execution ownership without orphan processes, and a fresh parallel Shared Plan succeeds with both repository identities preserved
+  required_modes: [native]
+  external_gate: true
+  reason: strict CI/CD Shared Plan execution requires a real operator-configured executor/cgroup/isolation boundary; source-only QA must not fabricate that authority
+
+- id: parallel-shared-plan-failure-isolation-repair
+  journey: strict-Shared-Plan -> two-parallel-repository-targets -> both-physical-children-start -> repository-A-owned-failure -> repository-B-continues-SUCCESS -> deterministic-per-repository-Game-Tape -> no-ghost-active-run -> repair-A-source -> fresh-Shared-Plan-SUCCESS -> restart-durable-readback
+  entrypoint: make test-real-world-parallel
+  durable_observation: a genuine repository-owned failure must not corrupt or misattribute its already-running sibling; the sibling finishes successfully, only its successful operation is retained, failure attribution stays with the failing repository, explicit source repair enables a fresh successful run, and both histories survive restart
+  required_modes: [native]
+  external_gate: true
+  reason: strict CI/CD Shared Plan parallelism requires a real operator-configured executor/cgroup/isolation boundary; source-only QA proves fixture/process semantics and refuses to fabricate execution authority
+
+- id: parallel-shared-plan-stale-preview-fencing
+  journey: strict-Shared-Plan-save -> exact-plan-revision-preview -> per-Team-instance-authority -> replace-one-checkout-at-same-path -> stale-run-request -> HTTP-409-FLEET_PLAN_SOURCE_STALE -> zero-physical-children -> zero-Run-admission -> refreshed-preview -> parallel-SUCCESS -> restart-durable-readback
+  entrypoint: make test-real-world-parallel
+  durable_observation: preview-to-run authority carries exact Plan revision and Team instance IDs; replacing one repository at the same path invalidates the stale command before any child or Fleet Run is admitted, while a refreshed preview executes successfully and remains durable through restart
+  required_modes: [native]
+  external_gate: true
+  reason: strict CI/CD Shared Plan execution requires a real operator-configured executor/cgroup/isolation boundary; source-only QA validates the HTTP payload/schema and repository-instance fencing contract but does not fabricate execution authority
+
+- id: sqlite-preparation-observer-atomic-cut
+  journey: admitted-persistent-preparation-observer -> BEGIN-read-cut -> identity-proof -> exact-lease-proof -> cancellation-read -> rollback-close -> bounded-cadence -> concurrent-writer-progress -> explicit-reset-recovery
+  entrypoint: strict Fleet preparation / make local-state-reset
+  durable_observation: one bounded preparation scope reuses one query-only SQLite handle while every due observation owns a fresh transaction and coherent read snapshot; hot-loop callbacks remain memory-only between cadence cuts, legitimate writers continue making progress, corruption remains fail-closed, and the documented confirmed source reset command deletes only disposable local SQLite state
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    test: backend/tests/unit/runtime/test_preparation_cancellation.py::test_persistent_preparation_observer_survives_sustained_concurrent_sqlite_writer
+  - mode: adversarial
+    test: backend/tests/unit/runtime/test_sqlite_fault_matrix.py::test_observer_cache_release_detects_in_place_header_corruption_without_reopen
+  - mode: lifecycle
+    test: backend/tests/unit/runtime/test_local_state_maintenance.py::test_source_local_state_reset_entrypoint_accepts_make_confirmation
+
+- id: packaged-source-real-environment
+  journey: canonical ZIP -> fresh extraction -> make init -> startup/admission -> certification -> durable terminal read
+  entrypoint: canonical source artifact
+  durable_observation: exact retained bytes survive the same public workflow used by operators
+  required_modes: [native]
+  external_gate: true
+  reason: requires supported native uv/npm/browser/isolation supply and is intentionally not faked inside source-only QA
+
+- id: exact-artifact-public-self-host-dogfood
+  journey: canonical ZIP -> fresh extraction -> normal materialization -> real-world Game Tape/browser journey -> oh-goon self verify -> public Fleet Run ID -> oh-goon dev explain-run -> oh-goon self certify
+  entrypoint: oh-goon-native-real-lifecycle-artifact --deep-dogfood
+  durable_observation: the exact artifact can run itself through canonical Fleet authority and the resulting durable run is readable through the installed public CLI without private implementation inspection
+  required_modes: [native]
+  external_gate: true
+  reason: clean-room self-hosting, browser/Game Tape composition, and native public readback require the supported dependency-complete host; source-only QA must not simulate this evidence or promote dogfood to certification authority
+
+- id: delegated-runtime-acceptance-configuration-authority
+  journey: caller-override -> resolve-once -> systemd-delegation -> resolved-authority-transport -> delegated-execution -> report-once
+  entrypoint: make strict-local-runtime-acceptance
+  durable_observation: non-default runtime-acceptance timing survives delegation unchanged; delegated re-entry does not re-resolve ambient timing configuration; exactly one execution owner reports the effective policy; an observation-bound expiry after RUN_STARTED is preserved as incomplete evidence with bounded semantic diagnostics rather than misclassified as dispatch failure
+  required_modes: [native]
+  external_gate: true
+  reason: systemd/cgroup delegation and host scheduling economics require the supported native environment; source-only QA proves resolution/transport behavior but must not fabricate native delegation authority

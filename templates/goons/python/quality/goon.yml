@@ -1,0 +1,8 @@
+version: 1
+inputs:
+- coverage_threshold
+goons:
+- python/ruff
+- python/typecheck
+- import: python/test
+  pass: [coverage_threshold]

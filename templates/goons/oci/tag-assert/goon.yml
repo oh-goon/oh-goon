@@ -1,0 +1,31 @@
+version: 1
+inputs:
+  registry_hostname:
+    type: hostname
+  repository:
+    type: oci_repository
+  tag:
+    type: string
+    pattern: '[a-z0-9_][a-z0-9_.-]{0,127}'
+  expected_digest:
+    type: digest
+env:
+  OCI_REGISTRY_USERNAME:
+    from: host
+  OCI_REGISTRY_PASSWORD:
+    from: host
+outputs:
+  OCI_TAG_DIGEST: ${{ steps.assert.outputs.OCI_TAG_DIGEST }}
+  OCI_TAG_RESOLVED_REFERENCE: ${{ steps.assert.outputs.OCI_TAG_RESOLVED_REFERENCE }}
+steps:
+- uses: oci_tag_assert
+  id: assert
+  target:
+    registry:
+      hostname: ${{ inputs.registry_hostname }}
+    repository: ${{ inputs.repository }}
+    tag: ${{ inputs.tag }}
+  expected_digest: ${{ inputs.expected_digest }}
+  credentials:
+    username_env: OCI_REGISTRY_USERNAME
+    password_env: OCI_REGISTRY_PASSWORD

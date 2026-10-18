@@ -1,0 +1,34 @@
+version: 1
+inputs:
+  kubernetes_api_hostname:
+    type: hostname
+  namespace:
+    type: kubernetes_name
+  deployment:
+    type: kubernetes_deployment_name
+  container:
+    type: kubernetes_name
+  image:
+    type: oci_reference
+env:
+  KUBERNETES_TOKEN:
+    from: host
+  KUBERNETES_CA_CERTIFICATE:
+    from: host
+outputs:
+  KUBERNETES_RESOURCE_VERSION: ${{ steps.commit.outputs.KUBERNETES_RESOURCE_VERSION }}
+  KUBERNETES_GENERATION: ${{ steps.commit.outputs.KUBERNETES_GENERATION }}
+  KUBERNETES_IMAGE: ${{ steps.commit.outputs.KUBERNETES_IMAGE }}
+steps:
+- uses: kubernetes_set_image
+  id: commit
+  target:
+    api:
+      hostname: ${{ inputs.kubernetes_api_hostname }}
+    namespace: ${{ inputs.namespace }}
+    name: ${{ inputs.deployment }}
+    container: ${{ inputs.container }}
+  image: ${{ inputs.image }}
+  credentials:
+    token_env: KUBERNETES_TOKEN
+    ca_certificate_env: KUBERNETES_CA_CERTIFICATE

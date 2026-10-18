@@ -1,0 +1,211 @@
+schema_version: 1
+source_version: 1267.0.1052
+section: plan-goon-compilation
+questions:
+- id: Q06
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: "Exactly category/name at every layer, derived from the package path templates/goons/<category>/<name>/goon.yml. Current shipped YAML does not repeat name or description. General Goon authoring may supply name, but the parser requires it to equal the expected package basename."
+    critical: true
+  - id: ownership_boundary
+    statement: "No legacy lookup aliases, prefixes, identity normalization, or fuzzy lookup. Import-local as: labels are occurrence IDs and do not alter canonical package identity."
+    critical: true
+  - id: consequence
+    statement: One identity must survive authoring through execution and provenance.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Accepts an alias, hidden prefix, fallback, fuzzy lookup, or identity normalization as equivalent to canonical category/name identity.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - AGENTS.md:151-166
+  - backend/src/oh_goon/core/template_identity.py:31-46
+  - backend/src/oh_goon/integrations/fleet_plan_goon_authoring.py:46-57
+  - backend/tests/unit/integrations/test_template_ux_b_import_alias.py:24-34
+- id: Q07
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Parse each Plan/Goon source once into ParsedFleetYamlDocument, reuse the same syntax tree for compilation/source positions, load each unique Goon once, and reuse the exact source graph/resolved plan.
+    critical: true
+  - id: ownership_boundary
+    statement: Do not reparse YAML, renormalize identity, rediscover the graph, or rebuild generic include/template identities later.
+    critical: true
+  - id: consequence
+    statement: Repeated interpretation creates mirror truth and provenance races.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows Plan/Goon YAML to be reparsed, graph-rediscovered, or identity-renormalized below the canonical parser/resolver.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:61-75
+  - AGENTS.md:171-173
+  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:27-51
+  - backend/src/oh_goon/integrations/fleet_plan_source_snapshot.py:41-70
+  - backend/src/oh_goon/services/fleet_plan_source_graph.py:179-210
+- id: Q08
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: 'A Plan selects/orders Goons with goons: and explicit with: bindings only; it never owns executable steps, run, command, or script.'
+    critical: true
+  - id: ownership_boundary
+    statement: Executable behavior belongs to Atomic Goons; Plans are run intent.
+    critical: true
+  - id: consequence
+    statement: "Preserves Plan \u2192 Goon \u2192 Step ownership and avoids a second execution language."
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Assigns executable Step behavior directly to a Plan instead of an Atomic Goon.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - AGENTS.md:155-166
+  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:227-274
+  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:153-209
+- id: Q09
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: "Plan/Goon YAML \u2192 strict parse/validation \u2192 CompiledExecutionTemplate (CompiledGoonImportStep edges) \u2192 one source-graph/resolution pass \u2192 ResolvedFleetPlan \u2192 runtime execution."
+    critical: false
+  - id: ownership_boundary
+    statement: CompiledExecutionTemplate is internal execution representation, not another authoring model.
+    critical: false
+  - id: consequence
+    statement: Keeps authoring, compilation and runtime representations unambiguous.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:61-75
+- id: Q10
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Never hand-edit generated/openapi, generated/frontend, or other generated output. Fix authoritative backend/generator source, run make generate, and use make check-generated for freshness.
+    critical: false
+  - id: ownership_boundary
+    statement: Generated output is reproducible consumption, not authored truth.
+    critical: false
+  - id: consequence
+    statement: Prevents generated mirrors from diverging from their source authority.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - AGENTS.md:143-149
+- id: Q153
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: "Exactly category/name at every layer, derived from the package path templates/goons/<category>/<name>/goon.yml. Current shipped YAML does not repeat name or description. General Goon authoring may supply name, but the parser requires it to equal the expected package basename."
+    critical: true
+  - id: ownership_boundary
+    statement: "No legacy lookup aliases, prefixes, identity normalization, or fuzzy lookup. Import-local as: labels are occurrence IDs and do not alter canonical package identity."
+    critical: true
+  - id: consequence
+    statement: One identity must survive authoring through execution and provenance.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Accepts an alias, hidden prefix, fallback, fuzzy lookup, or identity normalization as equivalent to canonical category/name identity.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - AGENTS.md:151-166
+  - backend/src/oh_goon/core/template_identity.py:31-46
+  - backend/src/oh_goon/integrations/fleet_plan_goon_authoring.py:46-57
+  - backend/tests/unit/integrations/test_template_ux_b_import_alias.py:24-34
+- id: Q154
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Parse each Plan/Goon source once into ParsedFleetYamlDocument, reuse the same syntax tree for compilation/source positions, load each unique Goon once, and reuse the exact source graph/resolved plan.
+    critical: true
+  - id: ownership_boundary
+    statement: Do not reparse YAML, renormalize identity, rediscover the graph, or rebuild generic include/template identities later.
+    critical: true
+  - id: consequence
+    statement: Repeated interpretation creates mirror truth and provenance races.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows Plan/Goon YAML to be reparsed, graph-rediscovered, or identity-renormalized below the canonical parser/resolver.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:61-75
+  - AGENTS.md:171-173
+  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:27-51
+  - backend/src/oh_goon/integrations/fleet_plan_source_snapshot.py:41-70
+  - backend/src/oh_goon/services/fleet_plan_source_graph.py:179-210
+- id: Q155
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: 'A Plan selects/orders Goons with goons: and explicit with: bindings only; it never owns executable steps, run, command, or script.'
+    critical: true
+  - id: ownership_boundary
+    statement: Executable behavior belongs to Atomic Goons; Plans are run intent.
+    critical: true
+  - id: consequence
+    statement: "Preserves Plan \u2192 Goon \u2192 Step ownership and avoids a second execution language."
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Assigns executable Step behavior directly to a Plan instead of an Atomic Goon.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - AGENTS.md:155-166
+  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:227-274
+  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:153-209
+- id: Q156
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: "Plan/Goon YAML \u2192 strict parse/validation \u2192 CompiledExecutionTemplate (CompiledGoonImportStep edges) \u2192 one source-graph/resolution pass \u2192 ResolvedFleetPlan \u2192 runtime execution."
+    critical: false
+  - id: ownership_boundary
+    statement: CompiledExecutionTemplate is internal execution representation, not another authoring model.
+    critical: false
+  - id: consequence
+    statement: Keeps authoring, compilation and runtime representations unambiguous.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:61-75
+- id: Q157
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Never hand-edit generated/openapi, generated/frontend, or other generated output. Fix authoritative backend/generator source, run make generate, and use make check-generated for freshness.
+    critical: false
+  - id: ownership_boundary
+    statement: Generated output is reproducible consumption, not authored truth.
+    critical: false
+  - id: consequence
+    statement: Prevents generated mirrors from diverging from their source authority.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - AGENTS.md:143-149

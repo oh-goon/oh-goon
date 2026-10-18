@@ -1,0 +1,9 @@
+version: 1
+execution:
+  purpose: verification
+goons:
+- oh-goon/backend-p0
+- oh-goon/architecture
+- oh-goon/template-startability
+- oh-goon/frontend-functional
+- oh-goon/local-runtime

@@ -1,0 +1,34 @@
+version: test-setup-isolation-qa.v1
+policy:
+  principle: >-
+    Repeated test setup is acceptable when it is the owner of isolation, environment
+    sanitisation, process identity stability, or external-authority stubbing. Do not
+    widen fixture scope merely to remove repetition when the measured runtime benefit
+    is negligible relative to the isolation risk.
+  scope_change_rule: >-
+    A function-scoped isolation fixture may move to module/session scope only when the
+    change has an explicit no-state-leakage regression, preserves the same isolation
+    authority across ordering/retry/failure cases, and demonstrates a meaningful
+    measured benefit. Micro-optimisations alone are not sufficient.
+fixtures:
+  - path: backend/tests/conftest.py
+    expected_scope: function
+    autouse: true
+    owner: portable process-identity isolation
+    reason: >-
+      Keeps process-identity shims scoped to each test when procfs is unavailable so
+      cached/runtime state from one test cannot silently become another test's authority.
+  - path: scripts/tests/test_certification_frontdoor.py
+    expected_scope: function
+    autouse: true
+    owner: certification CLI environment/static-admission isolation
+    reason: >-
+      Restores the SQLite journal environment and static-source admission stub for each
+      test because certification_frontdoor.main intentionally mutates process state.
+  - path: scripts/tests/test_package_slim.py
+    expected_scope: function
+    autouse: true
+    owner: package-slim dependency-lock test isolation
+    reason: >-
+      Keeps dependency-lock authority stubbing local to each packaging test so one test
+      cannot leak patched dependency state into another.

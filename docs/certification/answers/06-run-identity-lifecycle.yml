@@ -1,0 +1,240 @@
+schema_version: 1
+source_version: 1267.0.1052
+section: run-identity-lifecycle
+questions:
+- id: Q36
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Runs owns exact-target rerun and executor-placement readmission; Recovery owns uncertain or partially committed repository effects. Game Tape is read-only and may only explain or navigate to those canonical actions.
+    critical: true
+  - id: ownership_boundary
+    statement: Failure explanation is a projection; write/recovery authority stays with Runs/Recovery.
+    critical: true
+  - id: consequence
+    statement: Prevents a debugging surface from becoming a second recovery executor.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Makes Game Tape/failure explanation a mutation, rerun, readmission, or recovery authority.
+    severity: critical
+    misconception_id: observer_authority_confusion
+  evidence_expectations:
+  - frontend/AGENTS.md:68-74
+  - docs/development/GAME_TAPE.md:270-270
+  - backend/src/oh_goon/services/fleet_run_control_plane.py:171-187
+  - backend/src/oh_goon/services/effect_recovery.py:38-68
+  - backend/src/oh_goon/core/models/game_tape.py:278-296
+- id: Q37
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: The process-local access capability authorizes transport to the local API only. It creates no User/Tenant/Role/repository ACL or product identity model; IDs remain identifiers, not credentials. Rerun/readmission authority derives from the durable parent Run and requires a fresh unused child Run ID.
+    critical: true
+  - id: ownership_boundary
+    statement: Transport authorization, product identity, and parent/child Run authority are separate concerns.
+    critical: true
+  - id: consequence
+    statement: Prevents transport credentials or public IDs from becoming ambient object authority.
+    critical: true
+  contradictions:
+  - id: fatal-01
+    statement: Treats local transport access as product User/Tenant identity or parent/child Run authorization.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - docs/PRIVACY.md:34-38
+  - backend/src/oh_goon/api/local_access.py:24-58
+  - backend/src/oh_goon/services/fleet_run_control_plane.py:508-603
+- id: Q38
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: A still-live execution owner is respected. Once ownership is genuinely abandoned, an interrupted cancellation is finalized CANCELLED, while another abandoned non-terminal Run is recorded failed rather than left permanently active.
+    critical: false
+  - id: ownership_boundary
+    statement: Restart reconciliation may settle abandoned lifecycle facts but may not steal a live execution lease.
+    critical: false
+  - id: consequence
+    statement: Avoids split-brain execution and permanent phantom-active Runs.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/PRIVACY.md:28-32
+  - backend/src/oh_goon/services/effect_recovery.py:57-68
+  - backend/src/oh_goon/services/effect_recovery.py:179-223
+- id: Q39
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Final Whistle cleanPass is a backend-derived read fact requiring no failed Plan Step plus canonical completed teardown evidence for every strict Step. React renders the generated receipt; it does not calculate cleanPass, and the fact does not imply signing, vulnerability, rollout readiness, or external rollback guarantees.
+    critical: false
+  - id: ownership_boundary
+    statement: The backend owns lifecycle/evidence meaning; hockey UI is presentation only.
+    critical: false
+  - id: consequence
+    statement: Prevents UI semantics from overstating what execution evidence proves.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/HACKER_HOCKEY_THEME.md:427-433
+  - backend/src/oh_goon/core/fleet_plan_trust_receipt.py:145-168
+- id: Q40
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: No. Plan/Goon source is parsed and source-graph-resolved once; runtime receives only the immutable ResolvedFleetPlan and must not reparse YAML, renormalize identity, or rediscover the graph.
+    critical: true
+  - id: ownership_boundary
+    statement: Resolver owns interpretation; runtime consumes resolved truth.
+    critical: true
+  - id: consequence
+    statement: Prevents execution-time drift from the exact source identity that was previewed and admitted.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows runtime execution to reparse or reinterpret Plan/Goon source instead of consuming resolved immutable truth.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:61-75
+  - docs/development/DATAFLOW.md:10-12
+  - backend/src/oh_goon/core/models/target.py:51-66
+  - backend/src/oh_goon/services/fleet_plans.py:359-389
+- id: Q173
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: Runs owns exact-target rerun and executor-placement readmission; Recovery owns uncertain or partially committed repository effects. Game Tape is read-only and may only explain or navigate to those canonical actions.
+    critical: true
+  - id: ownership_boundary
+    statement: Failure explanation is a projection; write/recovery authority stays with Runs/Recovery.
+    critical: true
+  - id: consequence
+    statement: Prevents a debugging surface from becoming a second recovery executor.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Makes Game Tape/failure explanation a mutation, rerun, readmission, or recovery authority.
+    severity: critical
+    misconception_id: observer_authority_confusion
+  evidence_expectations:
+  - frontend/AGENTS.md:68-74
+  - docs/development/GAME_TAPE.md:270-270
+  - backend/src/oh_goon/services/fleet_run_control_plane.py:171-187
+  - backend/src/oh_goon/services/effect_recovery.py:38-68
+  - backend/src/oh_goon/core/models/game_tape.py:278-296
+- id: Q174
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: The process-local access capability authorizes transport to the local API only. It creates no User/Tenant/Role/repository ACL or product identity model; IDs remain identifiers, not credentials. Rerun/readmission authority derives from the durable parent Run and requires a fresh unused child Run ID.
+    critical: true
+  - id: ownership_boundary
+    statement: Transport authorization, product identity, and parent/child Run authority are separate concerns.
+    critical: true
+  - id: consequence
+    statement: Prevents transport credentials or public IDs from becoming ambient object authority.
+    critical: true
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Treats local transport access as product User/Tenant identity or parent/child Run authorization.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - docs/PRIVACY.md:34-38
+  - backend/src/oh_goon/api/local_access.py:24-58
+  - backend/src/oh_goon/services/fleet_run_control_plane.py:508-603
+- id: Q175
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: A still-live execution owner is respected. Once ownership is genuinely abandoned, an interrupted cancellation is finalized CANCELLED, while another abandoned non-terminal Run is recorded failed rather than left permanently active.
+    critical: false
+  - id: ownership_boundary
+    statement: Restart reconciliation may settle abandoned lifecycle facts but may not steal a live execution lease.
+    critical: false
+  - id: consequence
+    statement: Avoids split-brain execution and permanent phantom-active Runs.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/PRIVACY.md:28-32
+  - backend/src/oh_goon/services/effect_recovery.py:57-68
+  - backend/src/oh_goon/services/effect_recovery.py:179-223
+- id: Q176
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Final Whistle cleanPass is a backend-derived read fact requiring no failed Plan Step plus canonical completed teardown evidence for every strict Step. React renders the generated receipt; it does not calculate cleanPass, and the fact does not imply signing, vulnerability, rollout readiness, or external rollback guarantees.
+    critical: false
+  - id: ownership_boundary
+    statement: The backend owns lifecycle/evidence meaning; hockey UI is presentation only.
+    critical: false
+  - id: consequence
+    statement: Prevents UI semantics from overstating what execution evidence proves.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions: []
+  evidence_expectations:
+  - docs/HACKER_HOCKEY_THEME.md:427-433
+  - backend/src/oh_goon/core/fleet_plan_trust_receipt.py:145-168
+- id: Q177
+  severity: critical
+  expected_claims:
+  - id: concept
+    statement: No. Plan/Goon source is parsed and source-graph-resolved once; runtime receives only the immutable ResolvedFleetPlan and must not reparse YAML, renormalize identity, or rediscover the graph.
+    critical: true
+  - id: ownership_boundary
+    statement: Resolver owns interpretation; runtime consumes resolved truth.
+    critical: true
+  - id: consequence
+    statement: Prevents execution-time drift from the exact source identity that was previewed and admitted.
+    critical: false
+  - id: reasoning_extension
+    statement: The answer must use repository evidence to distinguish the canonical owner/authority from a plausible nearby observer or shortcut, and must reason about the requested boundary, change, failure, or adjacent owner without inventing a second source of truth.
+    critical: false
+  contradictions:
+  - id: fatal-01
+    statement: Allows runtime execution to reparse or reinterpret Plan/Goon source instead of consuming resolved immutable truth.
+    severity: critical
+    misconception_id: semantic_invariant_violation
+  evidence_expectations:
+  - backend/src/oh_goon/README.md:61-75
+  - docs/development/DATAFLOW.md:10-12
+  - backend/src/oh_goon/core/models/target.py:51-66
+  - backend/src/oh_goon/services/fleet_plans.py:359-389
+- id: Q206
+  severity: normal
+  expected_claims:
+  - id: concept
+    statement: Hashmarks downstream-contract identity, repository/source identity, selection-envelope provenance, and selected-membership identity are producer-side repository facts; Oh-Goon execution-plan/work identities, a Fleet Run, and each physical attempt have distinct execution identities. None is an alias for another.
+    critical: true
+  - id: ownership_boundary
+    statement: Admission, resume, evidence, and Game Tape must preserve the lineage between these identities instead of collapsing producer identity into run/attempt identity.
+    critical: true
+  - id: consequence
+    statement: Prevents stale producer evidence from being mistaken for current execution and prevents execution facts from rewriting repository evidence identity.
+    critical: false
+  contradictions:
+  - id: boundary-01
+    statement: Treats Hashmarks contract/envelope/membership identity as the Oh-Goon execution plan, Run, or physical attempt identity, or permits resume solely because one of those unrelated identity domains matches.
+    severity: critical
+    misconception_id: identity_scope_confusion
+  evidence_expectations:
+  - backend/src/oh_goon/integrations/hashmarks/verification_selection.py:19-55
+  - backend/src/oh_goon/repository_tooling/hashmarks_verification_execution.py:21-78
+  - backend/src/oh_goon/runtime/execution/shard_models.py:116-177
+  - docs/development/GAME_TAPE.md:45-49
+

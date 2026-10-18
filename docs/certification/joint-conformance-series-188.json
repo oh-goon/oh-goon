@@ -1,0 +1,38 @@
+{
+  "schema": "oh-goon.hashmarks-joint-conformance-series.v1",
+  "series_id": "joint-188-au-v1",
+  "oh_goon_parent": {
+    "version": "1267.0.188",
+    "zip_sha256": "968719894ac1dd142522c4e3bd2791d071d97a4b37a4f05b0f0d64347e7433fe",
+    "source_identity": "sha256:08d0d02814a6b2a7b35a244e0ac571d34b6c348366f958c6ed053ccb4041a1ea"
+  },
+  "hashmarks": {
+    "version": "0.11.21",
+    "artifact_identity": "sha256:2e8b81e82eb1642db06ad8f9efecc7acbffe975e483d8e9f1f7fd6a7530b504c",
+    "producer_implementation_identity": "sha256:54e26953c0a01588328333ad0d7296ffb3b8aefcb3a287785b27859866a573fb"
+  },
+  "authority": {
+    "hashmarks": "repository-intelligence-and-verification-selection",
+    "oh_goon": "admission-execution-verification-certification",
+    "consumer_rule": "verify-producer-semantics-never-recreate-repair-or-reinterpret"
+  },
+  "experiments": {
+    "X01": "covered-by-prior-phase",
+    "X02": "covered",
+    "X03": "covered-by-prior-phase",
+    "X04": "covered-by-prior-phase",
+    "X05": "covered",
+    "X06": "covered-by-prior-phase",
+    "X07": "covered-by-prior-phase",
+    "X08": "covered-by-prior-phase",
+    "X09": "covered",
+    "X10": "covered-by-prior-phase",
+    "X11": "covered-by-prior-phase",
+    "X12": "covered-by-prior-phase",
+    "X13": "covered-by-prior-phase",
+    "X14": "covered-by-prior-phase",
+    "X15": "covered-by-prior-phase",
+    "X16": "native-reproof-required"
+  },
+  "rule": "Changing any frozen artifact, fixture, corpus, manifest, source or producer identity creates a new comparison series."
+}
