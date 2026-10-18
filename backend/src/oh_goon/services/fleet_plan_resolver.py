@@ -40,7 +40,11 @@ from oh_goon.integrations.fleet_plan_compilation import (
 )
 from oh_goon.integrations.fleet_plan_preview import preview_plan
 from oh_goon.services.fleet_plan_compiled_resolution import resolve_compiled_steps
-from oh_goon.services.fleet_plan_input_inspection import InputInspection
+from oh_goon.services.fleet_plan_input_inspection import (
+    InputInspection,
+    InputInterfaceInspection,
+    inspect_input_interface,
+)
 from oh_goon.services.fleet_plan_input_resolution import (
     InputResolutionContext,
     materialize_projected_inputs,
@@ -299,12 +303,25 @@ class FleetPlanResolver:
         containment_root: Path | None = None,
         root_expected_name: str | None = None,
     ) -> tuple[tuple["InputInspection", ...], str]:
+        """Preserve the definition-only view of the canonical input interface."""
+        inspection, digest = self.inspect_input_interface_with_source(
+            plan_path,
+            containment_root=containment_root,
+            root_expected_name=root_expected_name,
+        )
+        return inspection.inputs, digest
+
+    def inspect_input_interface_with_source(
+        self,
+        plan_path: Path,
+        *,
+        containment_root: Path | None = None,
+        root_expected_name: str | None = None,
+    ) -> tuple[InputInterfaceInspection, str]:
         """Inspect one canonical source cut and report only the *root-file* digest.
 
         Never label this root SHA-256 as a full imported-Goon closure identity.
         """
-        from oh_goon.services.fleet_plan_input_inspection import inspect_projected_inputs
-
         graph = self.analyze_source(
             plan_path,
             containment_root=containment_root,
@@ -313,7 +330,7 @@ class FleetPlanResolver:
         digest = graph.root.source_sha256
         if digest is None:
             raise FleetPlanInvalid("Fleet plan source fingerprint is unavailable")
-        return inspect_projected_inputs(graph), digest
+        return inspect_input_interface(graph), digest
 
     def inspect_inputs(
         self,

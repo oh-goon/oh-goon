@@ -55,3 +55,5 @@ ordered roster and its exact projection; examples must not substitute a fictiona
 ## Extend a Plan
 
 Follow the [developer journey](../README.md#append-an-existing-capability). Plans and Composite Goons both support explicit import-local `pass:` and `with:`. A unique named input projects its child contract automatically; multiple recipients require explicit bindings. Project-owned packages use an explicit `from:` directory and never shadow shipped imports.
+
+For task-specific customization, see [independent values for repeated imports](../README.md#give-repeated-imports-independent-values) and [changing the order of work](../README.md#change-the-order-of-work). Select Atomic Goons directly when you need another order inside a Composite. Producer outputs and workspaces must come from earlier imports.

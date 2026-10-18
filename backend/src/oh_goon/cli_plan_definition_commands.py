@@ -12,7 +12,7 @@ from oh_goon.cli_plan_summary import resolved_plan_summary as _resolved_plan_sum
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.runtime.goon_templates import GoonTemplateStore
-from oh_goon.services.fleet_plan_input_inspection import InputInspection
+from oh_goon.services.fleet_plan_input_inspection import InputInspection, InputInterfaceInspection
 from oh_goon.services.fleet_plan_input_routing import CallerFileRoutingOrigin
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plans import FleetPlanService
@@ -50,7 +50,7 @@ def _inspection_input(item: InputInspection) -> dict[str, object]:
 
 def _print_input_inspection(
     args: argparse.Namespace,
-    inspector: Callable[[Path], tuple[tuple[InputInspection, ...], str]],
+    inspector: Callable[[Path], tuple[InputInterfaceInspection, str]],
 ) -> int:
     try:
         inspected, root_digest = inspector(args.plan)
@@ -62,8 +62,10 @@ def _print_input_inspection(
         "root": args.plan.as_posix(),
         "root_source_sha256": root_digest,
         "status": "contract_inspected",
-        "inputs": [_inspection_input(item) for item in inspected],
+        "inputs": [_inspection_input(item) for item in inspected.inputs],
     }
+    if inspected.unrouted_inputs:
+        report["unrouted_inputs"] = list(inspected.unrouted_inputs)
     if args.as_json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0
@@ -71,8 +73,8 @@ def _print_input_inspection(
     print("Read-only input contracts and defaults. No work started.")
     if not report["inputs"]:
         print("Inputs: none")
-        return 0
-    print("Inputs:")
+    else:
+        print("Inputs:")
     for item in report["inputs"]:
         requirement = "required" if item["required"] else "optional"
         details = []
@@ -95,6 +97,13 @@ def _print_input_inspection(
             print(f"    Owner: {' -> '.join(path)}")
         if not item["owner_paths"]:
             print("    Owner: directly authored root input")
+    if inspected.unrouted_inputs:
+        print("Shared inputs requiring explicit routing:")
+        for name in inspected.unrouted_inputs:
+            print(f"  {name}")
+        print("Use pass: [NAME] on intended imports, or with: to expose renamed caller inputs.")
+    if not inspected.inputs and not inspected.unrouted_inputs:
+        return 0
     print("Set --input NAME=VALUE or --inputs-file values.yml; CLI values override file values.")
     print("Use --json for source provenance, or plan explain --routes for resolved recipients.")
     return 0
@@ -102,7 +111,7 @@ def _print_input_inspection(
 
 def _inputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     """Direct dispatcher parity for service users; never selects values."""
-    return _print_input_inspection(args, runtime.plans.inspect_inputs_with_source)
+    return _print_input_inspection(args, runtime.plans.inspect_input_interface_with_source)
 
 
 def _inputs_pre_runtime(args: argparse.Namespace) -> int:
@@ -153,7 +162,7 @@ def _inputs_pre_runtime(args: argparse.Namespace) -> int:
             "AG-01 source parameters require --source-closure; ordinary inputs inspection is value-free"
         )
         return 2
-    return _print_input_inspection(args, resolver.inspect_inputs_with_source)
+    return _print_input_inspection(args, resolver.inspect_input_interface_with_source)
 
 
 def _validate_with_resolver(

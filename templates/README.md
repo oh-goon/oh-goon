@@ -75,6 +75,8 @@ goons:
     typechecker: ty
 ```
 
+That binding fixes `typechecker` to `ty` for this Plan. A CLI or values-file entry cannot replace it. For a per-run choice, keep the plain import or bind the child input to a named caller input as shown below.
+
 Atomic Goons own input types, descriptions, defaults and validation. Plans automatically expose unambiguous, unbound public inputs from their direct imports to `--input` and `--inputs-file`. A fixed `with:` binding is already selected and is not exposed automatically. Composite Goons keep their own public interface and internal forwarding. `plan inputs` shows the effective caller contract. For a project under `backend`, create a `values/` directory and save this as `values/dev.yml`:
 
 ```yaml
@@ -131,18 +133,59 @@ goons:
 
 `pass:` selects recipients for same-name caller values; it is unnecessary for a unique input. Use `with:` for a renamed caller input, a fixed value or a producer output. The Goon keeps its schema and internal bindings. Optional Plan `inputs: [name, ...]` restricts the public interface when needed.
 
-For repeated imports, `as:` names the occurrence:
+`oh-goon plan inputs plan.yml` lists any shared inputs that still need routing separately from the accepted caller inputs. `plan explain plan.yml --routes` shows the resolved recipients after you select the required values.
+
+## Give repeated imports independent values
+
+`as:` names one occurrence. Bind its child inputs to distinct caller names when each occurrence needs a different per-run choice:
 
 ```yaml
+version: 1
+goons:
 - import: python/typecheck
-  as: second-checker
+  as: api
   with:
     project: backend
-    dependency_group: dev
-    typechecker: ty
+    typechecker: ${{ inputs.api_checker }}
+- import: python/typecheck
+  as: tooling
+  with:
+    project: tools
+    typechecker: ${{ inputs.tooling_checker }}
 ```
 
-Validate, inspect the resolved order, refresh the lock and run again. Appending a Goon does not modify the imported package.
+The projects are fixed; `api_checker` and `tooling_checker` inherit their contracts and defaults from the Goon. Select them independently without repeating input schemas:
+
+```sh
+oh-goon plan validate plan.yml --input api_checker=ty --input tooling_checker=pyright
+oh-goon lock plan.yml --input api_checker=ty --input tooling_checker=pyright
+```
+
+Both imports use the native default dependency group. Route `dependency_group` explicitly if callers should change it. Use the same input flags when running. Moving an aliased import keeps its name and bindings together.
+
+## Change the order of work
+
+Move entries in `goons:` to change their execution order. To customize the internal order of a Composite such as `python/quality`, select its Atomic Goons directly. This Plan runs tests before formatting, linting and type checking, with one shared project/group selection:
+
+```yaml
+version: 1
+goons:
+- import: python/test
+  pass: [project, dependency_group]
+- import: python/ruff
+  pass: [project, dependency_group]
+- import: python/typecheck
+  pass: [project, dependency_group]
+```
+
+```sh
+oh-goon plan validate plan.yml --input project=backend --input typechecker=ty
+oh-goon lock plan.yml --input project=backend --input typechecker=ty
+```
+
+The unique `typechecker` input needs no forwarding. For different fixed projects or tool choices, set `with:` on the corresponding import instead of routing that input with `pass:`. Keep each producer before consumers of its outputs or workspace; an invalid order fails validation. Oh-Goon preserves the order you wrote.
+
+Append another import wherever it should run. Validate the new order, inspect routing, refresh the lock and run with the same inputs. The imported packages keep their own definitions.
 
 ## Append your own capability
 

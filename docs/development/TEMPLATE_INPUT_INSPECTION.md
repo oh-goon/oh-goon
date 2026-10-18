@@ -65,8 +65,20 @@ application runtime, never selects values, and cannot produce an admission
 receipt. The versioned JSON response has `schema=oh-goon.plan-input-inspection/v1`,
 `status=contract_inspected`, `inputs` with canonical owner paths, and
 `root_source_sha256` identifying **only the root file**. The root digest is not
-an imported-closure digest. Fields that do not apply are omitted rather than
+an imported-closure digest. When shared names need explicit routing, the optional
+`unrouted_inputs` array lists those names in canonical source order. They are
+excluded from accepted `inputs`; supplying one remains an ambiguity error.
+The human report lists them even when there are no accepted inputs and suggests
+`pass:` recipient selection or renamed `with:` bindings. Neither presentation
+includes fixed binding values, environment values, or producer output bytes.
+Fields that do not apply are omitted rather than
 filled with invented owners, values, or empty authority claims.
+
+`FleetPlanResolver.inspect_input_interface_with_source()` returns this richer
+read-only interface and the root digest from one analyzed source cut. Existing
+definition-only inspection methods remain projections of the same interface.
+Ambiguity comes from canonical materialization; presentation does not infer
+another set of input owners or resolve values.
 
 After [development setup](../DEVELOPMENT.md), use the source CLI from the
 repository root:

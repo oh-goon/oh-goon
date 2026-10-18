@@ -344,6 +344,11 @@ def _resolve_output_reference(
     goon_reference = goon_output_reference(value)
     if goon_reference is not None:
         goon_id, output = goon_reference
+        if goon_id not in goon_aliases:
+            raise FleetPlanInvalid(
+                f"Goon output {goon_id}.{output} is unavailable from earlier imports; "
+                "place the producer before this consumer and check the import ID and published output"
+            )
         concrete = goon_aliases.get(goon_id, {}).get(output)
         if concrete is None:
             raise FleetPlanInvalid(f"Goon import {goon_id} does not publish output {output!r}")

@@ -63,6 +63,7 @@ from oh_goon.services.execution_lock_persistence import (
     write_execution_lock,
 )
 from oh_goon.services.fleet_caller_file_freshness import require_caller_file_fresh
+from oh_goon.services.fleet_plan_input_inspection import InputInterfaceInspection
 from oh_goon.services.fleet_plan_input_routing import CallerFileRoutingOrigin
 from oh_goon.services.fleet_plan_preparation import prepare_declared_plan_runtimes
 from oh_goon.services.fleet_plan_repair import repair_attempt_decision, validate_agent_repair_plan
@@ -160,6 +161,16 @@ class FleetPlanService:
     ):
         """Thin read-only adapter for the canonical resolver's single source cut."""
         return self._resolver.inspect_inputs_with_source(
+            plan_path, root_expected_name=root_expected_name
+        )
+
+    def inspect_input_interface_with_source(
+        self,
+        plan_path: Path,
+        *,
+        root_expected_name: str | None = None,
+    ) -> tuple[InputInterfaceInspection, str]:
+        return self._resolver.inspect_input_interface_with_source(
             plan_path, root_expected_name=root_expected_name
         )
 

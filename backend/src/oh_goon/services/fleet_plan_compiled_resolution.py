@@ -220,22 +220,19 @@ def child_goon_bindings(
         workspace_goon = (
             goon_workspace_reference(item.value) if isinstance(item.value, str) else None
         )
-        if definition.input_type is PlanInputType.WORKSPACE_REFERENCE:
-            if workspace_goon is None:
-                raise FleetPlanInvalid(
-                    f"Goon input {item.name!r} is a structural workspace reference and must bind "
-                    "one ${{ goons.<goon>.workspace }} value"
-                )
-            producer = goon_workspaces.get(workspace_goon)
-            if producer is None:
-                raise FleetPlanInvalid(f"Goon import {workspace_goon} does not publish a workspace")
-            explicit[item.name] = producer
-            origins[item.name] = f"workspace:{workspace_goon}"
-            referenced_workspaces.add(producer)
-            continue
+        if definition.input_type is PlanInputType.WORKSPACE_REFERENCE and workspace_goon is None:
+            raise FleetPlanInvalid(
+                f"Goon input {item.name!r} is a structural workspace reference and must bind "
+                "one ${{ goons.<goon>.workspace }} value"
+            )
         if workspace_goon is not None:
             producer = goon_workspaces.get(workspace_goon)
             if producer is None:
+                if workspace_goon not in goon_aliases:
+                    raise FleetPlanInvalid(
+                        f"Goon workspace {workspace_goon} is unavailable from earlier imports; "
+                        "place the producer before this consumer and check the import ID and workspace publication"
+                    )
                 raise FleetPlanInvalid(f"Goon import {workspace_goon} does not publish a workspace")
             explicit[item.name] = producer
             origins[item.name] = f"workspace:{workspace_goon}"

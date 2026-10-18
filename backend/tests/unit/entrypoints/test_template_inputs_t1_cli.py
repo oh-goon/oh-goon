@@ -36,6 +36,7 @@ def test_cli_inspection_prints_canonical_json_and_exact_root_digest(monkeypatch,
     assert parsed["schema"] == "oh-goon.plan-input-inspection/v1"
     assert parsed["root_source_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
     assert parsed["status"] == "contract_inspected"
+    assert "unrouted_inputs" not in parsed
     inputs = {item["name"]: item for item in parsed["inputs"]}
     assert set(inputs) == {"project", "dependency_group", "typechecker"}
     assert inputs["typechecker"]["choices"] == ["pyright", "ty"]
@@ -139,7 +140,9 @@ def test_invalid_or_missing_source_rejects_without_runtime(monkeypatch, capsys, 
 def test_direct_service_dispatch_and_presentation_use_the_same_inspection(capsys):
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     args = SimpleNamespace(command="plan", plan_command="inputs", plan=_plan(), as_json=True)
-    service = SimpleNamespace(inspect_inputs_with_source=resolver.inspect_inputs_with_source)
+    service = SimpleNamespace(
+        inspect_input_interface_with_source=resolver.inspect_input_interface_with_source
+    )
     runtime = SimpleNamespace(plans=service)
     assert _inputs(runtime, args) == 0
     through_service = capsys.readouterr().out
@@ -155,3 +158,67 @@ def test_inspection_does_not_call_runtime_resolution_or_bind_inputs(monkeypatch,
     monkeypatch.setattr(FleetPlanResolver, "resolve_source_graph", forbidden)
     assert main(["plan", "inputs", str(_plan()), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["inputs"]
+
+
+@pytest.mark.parametrize(
+    ("imports", "accepted", "unrouted"),
+    [
+        ("- python/quality\n- python/profile\n", ["typechecker"], ["project", "dependency_group"]),
+        (
+            "- python/typecheck\n- python/typecheck\n",
+            [],
+            ["project", "dependency_group", "typechecker"],
+        ),
+        (
+            "- import: python/typecheck\n  with: {project: PRIVATE_PROJECT, typechecker: ty}\n"
+            "- import: python/typecheck\n  with: {project: PRIVATE_PROJECT, typechecker: ty}\n",
+            [],
+            ["dependency_group"],
+        ),
+    ],
+)
+def test_shared_input_discovery_is_separate_readonly_and_value_free(
+    tmp_path, monkeypatch, capsys, imports, accepted, unrouted
+):
+    import oh_goon.cli as cli
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("input discovery must not start runtime or resolve values")
+
+    monkeypatch.setattr(cli, "_build_application_runtime", forbidden)
+    monkeypatch.setattr(FleetPlanResolver, "resolve", forbidden)
+    monkeypatch.setattr(FleetPlanResolver, "resolve_source_graph", forbidden)
+    path = tmp_path / "plan.yml"
+    content = f"version: 1\ngoons:\n{imports}"
+    path.write_text(content)
+    assert main(["plan", "inputs", str(path), "--json"]) == 0
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert [item["name"] for item in report["inputs"]] == accepted
+    assert report["unrouted_inputs"] == unrouted
+    assert "PRIVATE_PROJECT" not in output
+    assert main(["plan", "inputs", str(path)]) == 0
+    human = capsys.readouterr().out
+    assert "Shared inputs requiring explicit routing:" in human
+    assert "pass: [NAME]" in human
+    assert all(name in human for name in unrouted)
+    assert "PRIVATE_PROJECT" not in human
+    assert path.read_text() == content
+
+
+def test_explicit_recipient_routing_removes_shared_input_warning(tmp_path, capsys):
+    path = tmp_path / "plan.yml"
+    path.write_text("""version: 1
+goons:
+- import: python/typecheck
+  pass: [project, dependency_group, typechecker]
+- python/typecheck
+""")
+    assert main(["plan", "inputs", str(path), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert "unrouted_inputs" not in report
+    assert {item["name"] for item in report["inputs"]} == {
+        "project",
+        "dependency_group",
+        "typechecker",
+    }

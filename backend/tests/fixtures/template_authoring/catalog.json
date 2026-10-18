@@ -1428,7 +1428,7 @@
       "readme_path": "templates/goons/security/cve-combined/README.md",
       "readme_present": true,
       "repeated_import_packages": [],
-      "root_source_sha256": "b13c8fdcab79ff9acae1bd1dd7e8c06281ab0f20ec1756af8649607a81bf3f8c",
+      "root_source_sha256": "10ca6c38bc8f0ae06f1ab611aba04e944614116ce4d03af71a0a5c90c088ce67",
       "source_path": "templates/goons/security/cve-combined/goon.yml"
     },
     {

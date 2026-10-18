@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from oh_goon.cli_plan_input_files import read_caller_input_file
 from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid
@@ -237,6 +238,86 @@ goons:
     )
 
 
+def test_reordering_aliased_imports_preserves_independent_caller_values(tmp_path):
+    path = tmp_path / "plan.yml"
+    document = {
+        "version": 1,
+        "goons": [
+            {
+                "import": "python/typecheck",
+                "as": "api",
+                "with": {"project": "backend", "typechecker": "${{ inputs.api_checker }}"},
+            },
+            {
+                "import": "python/typecheck",
+                "as": "tooling",
+                "with": {"project": "tools", "typechecker": "${{ inputs.tooling_checker }}"},
+            },
+        ],
+    }
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
+    values = {"api_checker": "ty", "tooling_checker": "pyright"}
+    path.write_text(yaml.safe_dump(document, sort_keys=False))
+    before = resolver.resolve(path, inputs=values)
+    document["goons"].reverse()
+    path.write_text(yaml.safe_dump(document, sort_keys=False))
+    after = resolver.resolve(path, inputs=values)
+    assert [step.step_id for step in before.steps] == ["api.ty", "tooling.pyright"]
+    assert [step.step_id for step in after.steps] == ["tooling.pyright", "api.ty"]
+    assert {step.step_id: (step.working_directory, step.argv) for step in before.steps} == {
+        step.step_id: (step.working_directory, step.argv) for step in after.steps
+    }
+
+
+@pytest.mark.parametrize("resource", ["output", "workspace"])
+def test_consumer_before_producer_fails_with_ordering_guidance(tmp_path, resource):
+    path = tmp_path / "plan.yml"
+    if resource == "output":
+        imports = [
+            {"import": "oci/publish-image", "as": "publisher"},
+            {
+                "import": "kubernetes/release",
+                "as": "deployer",
+                "with": {"image": "${{ goons.publisher.outputs.OCI_REFERENCE }}"},
+            },
+        ]
+    else:
+        imports = [
+            {"import": "oci/image", "as": "builder"},
+            {
+                "import": "oci/publish",
+                "as": "publisher",
+                "with": {"source_workspace": "${{ goons.builder.workspace }}"},
+            },
+        ]
+    document = {"version": 1, "goons": imports}
+    path.write_text(yaml.safe_dump(document, sort_keys=False))
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
+    values = {
+        "base_registry_hostname": "base.example.com",
+        "publish_registry_hostname": "publish.example.com",
+        "publish_repository": "team/app",
+    }
+    if resource == "output":
+        values.update(
+            kubernetes_api_hostname="kube.example.com",
+            namespace="production",
+            deployment="app",
+            container="app",
+        )
+    resolved = resolver.resolve(path, inputs=values)
+    assert [item.import_id for item in resolved.imports if item.parent_import_id is None] == [
+        item["as"] for item in imports
+    ]
+    imports.reverse()
+    path.write_text(yaml.safe_dump(document, sort_keys=False))
+    with pytest.raises(FleetPlanInvalid, match="place the producer before this consumer") as error:
+        resolver.resolve(path, inputs=values)
+    assert f"Goon {resource}" in str(error.value)
+    assert "unavailable from earlier imports" in str(error.value)
+    assert "does not publish" not in str(error.value)
+
+
 def test_uv_inputs_bind_environment_working_directory_reports_and_requirements(tmp_path):
     path = tmp_path / "goon.yml"
     path.write_text("""version: 1
@@ -292,3 +373,16 @@ def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
         values.write_text(example.group(1))
         snapshot = read_caller_input_file(values, root=tmp_path)
         assert resolver.resolve(source.path, inputs=snapshot.values()).steps, key
+
+
+def test_complete_developer_guide_plan_examples_resolve_with_the_catalog(tmp_path):
+    plans = PlanTemplateStore()
+    guide = (plans.root.parent / "README.md").read_text()
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
+    path = tmp_path / "plan.yml"
+    for example in re.findall(r"```yaml\n(.*?)\n```", guide, re.S):
+        document = yaml.safe_load(example)
+        if not isinstance(document, dict) or "version" not in document or "goons" not in document:
+            continue
+        path.write_text(example)
+        assert resolver.resolve(path).steps
