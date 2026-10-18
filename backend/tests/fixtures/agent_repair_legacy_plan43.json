@@ -1,0 +1,65 @@
+{
+  "contract_version": 43,
+  "plan_id": "fleet-plan-0fe301ce31faa48b4c893823fce1689b0c5f906e0eca6d8377e29ab831f70270",
+  "name": "retained-legacy-verification",
+  "description": "",
+  "execution": {
+    "purpose": "verification",
+    "repositories": {
+      "mode": "serial"
+    }
+  },
+  "requirements": [],
+  "imports": [],
+  "steps": [
+    {
+      "kind": "command",
+      "step_id": "check",
+      "lifecycle": "normal",
+      "argv": [
+        "true"
+      ],
+      "timeout_seconds": 3600.0,
+      "uv": null,
+      "working_directory": ".",
+      "imports": {
+        "env": []
+      },
+      "workspace": {
+        "source": {
+          "kind": "repository"
+        },
+        "publish": false
+      },
+      "cache": {
+        "source": {
+          "kind": "empty"
+        },
+        "publish": false,
+        "retain": false
+      },
+      "capabilities": {
+        "egress": {
+          "mode": "none"
+        },
+        "tools": [],
+        "nested_strict_execution": false
+      },
+      "success_codes": [
+        0
+      ],
+      "on_failure": "stop",
+      "when": null,
+      "retry": {
+        "max_attempts": 1,
+        "known_transient_exit_codes": [],
+        "reason": null,
+        "delays_seconds": []
+      },
+      "artifacts": [],
+      "outputs": [],
+      "environment": []
+    }
+  ],
+  "step_sources": []
+}

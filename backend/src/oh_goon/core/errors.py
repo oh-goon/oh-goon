@@ -35,6 +35,10 @@ class StateConflict(FleetDomainError):
     kind = ErrorKind.CONFLICT
 
 
+class OperationDeadlineExpired(StateConflict):
+    code = "OPERATION_DEADLINE_EXPIRED"
+
+
 class WorkspaceNotFound(ResourceNotFound):
     code = "WORKSPACE_NOT_FOUND"
 

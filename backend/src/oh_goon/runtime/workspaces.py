@@ -7,13 +7,14 @@ import shutil
 import sqlite3
 import stat
 import tempfile
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Iterator
 
 from oh_goon.core.errors import (
     CandidateCheckpointNotFound,
     CandidateCheckpointStale,
+    FleetPlanInvalid,
     WorkspaceNotFound,
     WorkspaceStateStale,
     WorkspaceTransitionInvalid,
@@ -101,6 +102,51 @@ class RepositoryWorkspaceAuthority:
         self._database = database
         layout = ApplicationStatePathLayout.from_database(database.path)
         self._root = ensure_private_directory(layout.managed_workspaces)
+
+    @staticmethod
+    @contextmanager
+    def pin_repository_subject(repository: Path):
+        """Hold native root/Git handles across authorized edits without freezing directory ctime.
+
+        Directory entries may change during an apply. Open handles prevent inode reuse
+        from impersonating the original subject; per-Run admission still captures its
+        fresh ordinary repository-instance authority.
+        """
+        root = canonical_path(repository)
+        with ExitStack() as owned:
+            pinned = []
+            absent = []
+            for path in (root, root / ".git"):
+                try:
+                    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                except FileNotFoundError:
+                    if path == root:
+                        raise
+                    absent.append(path)
+                    continue
+                owned.callback(os.close, fd)
+                initial = os.fstat(fd)
+                pinned.append((path, fd, initial))
+
+            def require_current():
+                for path, fd, initial in pinned:
+                    current = path.lstat()
+                    held = os.fstat(fd)
+                    if (
+                        (current.st_dev, current.st_ino, current.st_mode)
+                        != (held.st_dev, held.st_ino, held.st_mode)
+                        or current.st_mode != initial.st_mode
+                        or (
+                            not stat.S_ISDIR(initial.st_mode)
+                            and current.st_ctime_ns != initial.st_ctime_ns
+                        )
+                    ):
+                        raise FleetPlanInvalid("repair repository or Git authority was replaced")
+                if any(path.exists() or path.is_symlink() for path in absent):
+                    raise FleetPlanInvalid("repair repository acquired a different Git authority")
+
+            require_current()
+            yield require_current
 
     def request(
         self,

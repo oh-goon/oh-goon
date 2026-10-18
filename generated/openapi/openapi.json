@@ -40,6 +40,53 @@
         "title": "AdoptUvPreview",
         "type": "object"
       },
+      "AgentRepairContext": {
+        "additionalProperties": false,
+        "description": "Frozen limits transported in each original admitted target, never model data.",
+        "properties": {
+          "attempt": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/FleetPlanRunLimits"
+          },
+          "max_attempts": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "previous_run_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Run Id"
+          },
+          "repair_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Repair Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repair_id",
+          "attempt",
+          "max_attempts",
+          "limits"
+        ],
+        "title": "AgentRepairContext",
+        "type": "object"
+      },
       "AgentStepDeliveryReference": {
         "additionalProperties": false,
         "properties": {
@@ -5892,6 +5939,29 @@
         "title": "FleetPlanRolloutVerificationTrustReceipt",
         "type": "object"
       },
+      "FleetPlanRunLimits": {
+        "additionalProperties": false,
+        "description": "Caller-resolved limits consumed by the original Fleet Step supervisor.",
+        "properties": {
+          "deadline_at": {
+            "format": "date-time",
+            "title": "Deadline At",
+            "type": "string"
+          },
+          "step_timeout_seconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 21600.0,
+            "title": "Step Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "deadline_at",
+          "step_timeout_seconds"
+        ],
+        "title": "FleetPlanRunLimits",
+        "type": "object"
+      },
       "FleetPlanRuntimeToolTrustReceipt": {
         "additionalProperties": false,
         "properties": {
@@ -6011,6 +6081,16 @@
             },
             "title": "Agent Deliveries",
             "type": "array"
+          },
+          "agent_repair": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRepairContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "caller_input_file": {
             "anyOf": [
@@ -17652,6 +17732,38 @@
         "title": "PlanStepWorkspace",
         "type": "object"
       },
+      "PlanStreamOutput": {
+        "additionalProperties": false,
+        "description": "A bounded scalar from this exact native attempt's captured output.",
+        "properties": {
+          "max_bytes": {
+            "default": 4096,
+            "maximum": 65536.0,
+            "minimum": 1.0,
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "name": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "stream": {
+            "enum": [
+              "stdout",
+              "stderr"
+            ],
+            "title": "Stream",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "stream"
+        ],
+        "title": "PlanStreamOutput",
+        "type": "object"
+      },
       "PlanTemplateCatalog": {
         "additionalProperties": false,
         "properties": {
@@ -20221,7 +20333,14 @@
           },
           "outputs": {
             "items": {
-              "$ref": "#/components/schemas/PlanPublishedOutput"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PlanPublishedOutput"
+                },
+                {
+                  "$ref": "#/components/schemas/PlanStreamOutput"
+                }
+              ]
             },
             "maxItems": 16,
             "title": "Outputs",
@@ -20714,8 +20833,11 @@
         "description": "Fully bound immutable execution plan.  Runtime never re-reads YAML/TOML.",
         "properties": {
           "contract_version": {
-            "const": 43,
-            "default": 43,
+            "default": 44,
+            "enum": [
+              43,
+              44
+            ],
             "title": "Contract Version",
             "type": "integer"
           },
@@ -21557,7 +21679,14 @@
           },
           "outputs": {
             "items": {
-              "$ref": "#/components/schemas/PlanPublishedOutput"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PlanPublishedOutput"
+                },
+                {
+                  "$ref": "#/components/schemas/PlanStreamOutput"
+                }
+              ]
             },
             "maxItems": 16,
             "title": "Outputs",

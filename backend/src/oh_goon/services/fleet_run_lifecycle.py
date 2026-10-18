@@ -171,6 +171,16 @@ class FleetRunLifecycle:
         rerun_from_run_id: str | None = None,
     ) -> None:
         """Reject uncut Fleet ingress before Plan work, replay, or native observation."""
+        if isinstance(target, FleetPlanTarget) and target.agent_repair is not None:
+            repair = target.agent_repair
+            if readmitted_from_run_id is not None or rerun_from_run_id is not None:
+                raise FleetPlanInvalid("repair limits cannot be inherited by rerun or readmission")
+            if repair.attempt == 1 and run_id != repair.repair_id:
+                raise FleetPlanInvalid(
+                    "first repair admission must use the selected repair identity"
+                )
+            if repair.attempt > 1 and run_id in {repair.repair_id, repair.previous_run_id}:
+                raise FleetPlanInvalid("repair continuation requires a separate Run identity")
         if isinstance(target, FleetPlanTarget) and self._standard_local_fleet:
             if isinstance(target.plan.execution, CicdExecutionPolicy):
                 raise FleetPlanInvalid("standard-local host execution refuses CI/CD plans")

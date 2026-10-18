@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator, model_validator
 
 from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.caller_input_file import (
     CallerInputFileIdentity,
@@ -67,6 +68,9 @@ class FleetPlanTarget(ImmutableModel):
     source: FleetPlanSource
     identity: ExecutionIdentity
     agent_deliveries: tuple[AgentStepDeliveryReference, ...] = ()
+    agent_repair: AgentRepairContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     caller_input_file: CallerInputFileIdentity | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -92,6 +96,10 @@ class FleetPlanTarget(ImmutableModel):
         }
         if len(found) != len(self.agent_deliveries) or found != expected_agent:
             raise ValueError("Fleet Agent source reference does not match original Plan Step")
+        if self.agent_repair is not None and len(expected_agent) != 1:
+            raise ValueError("repair admission requires one original Agent Step")
+        if self.agent_repair is not None and self.plan.contract_version < 44:
+            raise ValueError("repair admission requires Plan contract version 44")
         if self.caller_input_file is not None and self.scheduled_caller_file is not None:
             raise ValueError(
                 "live caller source and scheduled snapshot custody are mutually exclusive"

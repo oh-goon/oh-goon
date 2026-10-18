@@ -7,6 +7,7 @@ not turn an Agent's output into write authority.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
@@ -23,6 +24,23 @@ from oh_goon.integrations.exact_file_write import (
 
 _MAX_PROPOSAL_BYTES = 4096
 _FIELDS = {"schema", "handoff_identity", "path", "source_sha256", "replacement", "summary"}
+
+
+def add_apply_arguments(parser: argparse.ArgumentParser) -> None:
+    """The original apply CLI's argument contract, also checked before repair admission."""
+    parser.add_argument("--proposal", required=True)
+    parser.add_argument("--expected-path", required=True)
+    parser.add_argument("--expected-handoff-identity")
+
+
+def parse_apply_arguments(arguments: tuple[str, ...]):
+    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False, allow_abbrev=False)
+    add_apply_arguments(parser)
+    try:
+        # argparse's error path raises SystemExit for missing required options.
+        return parser.parse_args(arguments)
+    except (argparse.ArgumentError, SystemExit) as exc:
+        raise FleetPlanInvalid("repair apply Step has invalid native apply arguments") from exc
 
 
 def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:

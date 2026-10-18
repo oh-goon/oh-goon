@@ -17,7 +17,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanIsolationBackendEvidence,
     PlanStepExecution,
 )
-from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
+from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose, FleetPlanRunLimits
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunDetail
@@ -191,6 +191,7 @@ class FleetPlanRunExecutor:
         repository_id: str | None = None,
         lifecycle_observer: StepLifecycleObserver | None = None,
         agent_delivery_for: Callable[[str, str], bytes] | None = None,
+        execution_limits: FleetPlanRunLimits | None = None,
     ) -> PlanExecutionOutcome:
         """Execute one already-preflighted direct plan through live host authority."""
 
@@ -202,6 +203,7 @@ class FleetPlanRunExecutor:
             repository_id,
             lifecycle_observer,
             agent_delivery_for=agent_delivery_for,
+            execution_limits=execution_limits,
         )
         sequence = FleetPlanStepSequence(repository, runtime, output_observer)
         for step in plan.steps:
@@ -272,6 +274,7 @@ class FleetPlanRunExecutor:
         trusted_local_consent: TrustedLocalRunConsent | None = None,
         trusted_local_scope: TrustedLocalRunScope | None = None,
         agent_delivery_for: Callable[[str, str], bytes] | None = None,
+        execution_limits: FleetPlanRunLimits | None = None,
     ) -> StepRuntime:
         return StepRuntime(
             git=self._git,
@@ -287,6 +290,7 @@ class FleetPlanRunExecutor:
             trusted_local_consent=trusted_local_consent,
             trusted_local_scope=trusted_local_scope,
             agent_delivery_for=agent_delivery_for,
+            execution_limits=execution_limits,
         )
 
     @staticmethod

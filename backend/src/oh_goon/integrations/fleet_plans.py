@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import cast
 
 from oh_goon.core.canonical_result_semantics import CanonicalResultSemantics
-from oh_goon.core.errors import CapabilityUnavailable, StateConflict
+from oh_goon.core.errors import CapabilityUnavailable, OperationDeadlineExpired, StateConflict
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution, FleetPlanResult
 from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
@@ -135,6 +135,11 @@ class FleetPlanRunner:
             )
 
         if target.plan.execution.purpose is not ExecutionPurpose.CICD:
+            if (
+                target.agent_repair is not None
+                and utc_now() >= target.agent_repair.limits.deadline_at
+            ):
+                raise OperationDeadlineExpired("Agent repair admission deadline expired")
             if target.agent_deliveries:
                 # Admission already selected this typed Step; verify the exact
                 # retained packet is available before EFFECT_STARTED.
@@ -193,6 +198,9 @@ class FleetPlanRunner:
                 attempt.repository.repository_id,
             )
             if target.agent_deliveries
+            else None,
+            execution_limits=target.agent_repair.limits
+            if target.agent_repair is not None
             else None,
         )
         after = self._git.fingerprint(attempt.repository.path, request.cancel_requested)

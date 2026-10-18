@@ -11,6 +11,7 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import (
     PathExistsCondition,
     PathMissingCondition,
+    PlanStreamOutput,
     ResolvedExtensionStep,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
@@ -74,6 +75,8 @@ def validate_step_declared_paths(repository: Path, step: ResolvedPlanStep) -> No
     for artifact in getattr(step, "artifacts", ()):
         repository_relative_path(repository, artifact.path, kind=f"artifact for {step.step_id}")
     for output in getattr(step, "outputs", ()):
+        if isinstance(output, PlanStreamOutput):
+            continue
         repository_relative_path(
             repository, output.path, kind=f"published output for {step.step_id}"
         )
@@ -88,17 +91,27 @@ def collect_published_outputs(
     step: ResolvedPlanStep,
     *,
     producer_execution_identity: str | None = None,
+    streams: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, str], tuple[PublishedPlanOutputEvidence, ...]]:
     values: dict[str, str] = {}
     evidence: list[PublishedPlanOutputEvidence] = []
     for output in getattr(step, "outputs", ()):
-        payload = _read_published_output(
-            repository,
-            output.path,
-            step_id=step.step_id,
-            output_name=output.name,
-            max_bytes=output.max_bytes,
-        )
+        if isinstance(output, PlanStreamOutput):
+            if streams is None or output.stream not in streams:
+                raise FleetPlanInvalid("Native attempt output is unavailable for publication")
+            payload = streams[output.stream].encode("utf-8")
+            if len(payload) > output.max_bytes:
+                raise FleetPlanInvalid(
+                    f"Fleet plan step {step.step_id} output {output.name} exceeds {output.max_bytes} bytes"
+                )
+        else:
+            payload = _read_published_output(
+                repository,
+                output.path,
+                step_id=step.step_id,
+                output_name=output.name,
+                max_bytes=output.max_bytes,
+            )
         try:
             value = payload.decode("utf-8").strip()
         except UnicodeDecodeError as exc:

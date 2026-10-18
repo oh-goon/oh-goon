@@ -27,7 +27,7 @@ from oh_goon.core.models.run_launch import (
 )
 from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceFact
-from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.vocabulary import (
     FleetRunFailureStage,
     FleetRunOutcome,
@@ -264,6 +264,11 @@ class FleetRunDetail(ImmutableModel):
         from oh_goon.core.capability_registry import capability_by_id
         from oh_goon.core.errors import CapabilityUnavailable
 
+        if (
+            isinstance(self.run.target, FleetPlanTarget)
+            and self.run.target.agent_repair is not None
+        ):
+            return False
         try:
             return capability_by_id(self.run.capability.capability_id).rerun_supported
         except CapabilityUnavailable:

@@ -66,6 +66,13 @@ goons: [agent/search]
     # External Hashmarks producer is not installed on this hosted test machine.
     # Replace only its leaf adapter; all Fleet admission, execution and Game Tape are real.
     def supply_hashmarks(path: Path, **_kwargs):
+        if path.is_file():
+            payload = path.read_bytes()
+            return external_identity.HashmarksTreeIdentity(
+                sha256=hashlib.sha256(payload).hexdigest(),
+                byte_count=len(payload),
+                entry_count=1,
+            )
         files = sorted(p for p in path.rglob("*") if p.is_file() and ".git" not in p.parts)
         payload = b"".join(p.relative_to(path).as_posix().encode() + p.read_bytes() for p in files)
         return external_identity.HashmarksTreeIdentity(

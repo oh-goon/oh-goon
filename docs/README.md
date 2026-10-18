@@ -8,7 +8,7 @@ Start with the current operator and developer guides. The linked owners define b
 2. [CI/CD contract](CI_CD_CONTRACT.md) and [Automation model](AUTOMATION_MODEL.md) — repository runs, Shared Runs, and Schedules.
 3. [Observability](OBSERVABILITY.md) and [Game Tape](development/GAME_TAPE.md) — inspect recorded Run outcomes, logs, and outputs.
 4. [Safety](SAFETY.md), [Policy](POLICY.md), and [Privacy](PRIVACY.md) — operator boundaries and local data handling.
-5. [Agent Skills](AGENT_SKILLS.md) — captured Skill resources, bounded local model work, explicit proposal/apply/test, and failed-test review.
+5. [Agent Skills](AGENT_SKILLS.md) — captured Skills, bounded local model work, failed-test feedback, and caller-authorized repair/retest loops.
 
 ## Developer guides
 

@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -24,7 +25,7 @@ from oh_goon.core.agent_model_selection import (
     parse_local_model_tool_review_decision,
     parse_one_local_model_query,
 )
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
     ResolvedCommandStep,
@@ -39,6 +40,7 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedPlanStep,
     ResolvedPreCommitStep,
 )
+from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits
 from oh_goon.core.models.fleet_plan_observation_steps import ResolvedDependencyInventoryStep
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
 from oh_goon.core.models.termination import TerminationSignal
@@ -50,6 +52,7 @@ from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.ports.step_output import StepOutputObserver
+from oh_goon.core.time import utc_now
 from oh_goon.engine.command import (
     CommandCancelledError,
     CommandOutputLimitExceeded,
@@ -157,6 +160,7 @@ class StepRuntime:
     # Original admitted attempt supplies the AG-02 packet once. This callback
     # only transports bytes; it is not an authorization or a second runner.
     agent_delivery_for: Callable[[str, str], bytes] | None = None
+    execution_limits: FleetPlanRunLimits | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +182,29 @@ def execute_direct_step(
     step_order: int,
     output_observer: StepOutputObserver | None = None,
 ) -> StepOutcome:
+    if runtime.cancel_requested is not None and runtime.cancel_requested():
+        raise OperationCancelledError("Fleet Step cancelled before preparation")
+    runner = _direct_step_command_runner
+    if runtime.execution_limits is not None:
+        limits = runtime.execution_limits
+        remaining = (limits.deadline_at - utc_now()).total_seconds()
+        if remaining <= 0:
+            raise OperationDeadlineExpired("Fleet deadline expired before Step preparation")
+        deadline = time.monotonic() + min(remaining, limits.step_timeout_seconds)
+
+        def bounded_runner(*args, timeout=10.0, **kwargs):
+            cancelled = kwargs.get("cancel_requested")
+            if cancelled is not None and cancelled():
+                raise OperationCancelledError("Fleet Step cancelled before native launch")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise OperationDeadlineExpired("Agent repair deadline expired before native launch")
+            if kwargs.get("runtime_supervision") is not None:
+                raise FleetPlanInvalid("repair deadline cannot replace an admitted native watchdog")
+            selected_timeout = remaining if timeout is None else min(timeout, remaining)
+            return _direct_step_command_runner(*args, timeout=selected_timeout, **kwargs)
+
+        runner = bounded_runner
     with tempfile.TemporaryDirectory(prefix="oh-goon-step-") as private_root:
         paths = AttemptPathLayout.from_root(Path(private_root))
         for path in (paths.home, paths.tmp, paths.cache, paths.config):
@@ -194,8 +221,8 @@ def execute_direct_step(
             paths=paths,
             environment=environment,
             host_environment=os.environ,
-            command_runner=_direct_step_command_runner,
-            git_command_runner=_direct_step_command_runner,
+            command_runner=runner,
+            git_command_runner=runner,
             managed_runtime=None,
         )
         process = _with_lifecycle_observer(
@@ -881,6 +908,8 @@ def _direct_step_command_runner(
     process_observer: CommandProcessObserver | None = None,
     runtime_supervision: CommandRuntimeSupervision | None = None,
 ) -> CommandResult:
+    if cancel_requested is not None and cancel_requested():
+        raise OperationCancelledError("Fleet Step cancelled before process launch")
     return run_command(
         *args,
         timeout=timeout,

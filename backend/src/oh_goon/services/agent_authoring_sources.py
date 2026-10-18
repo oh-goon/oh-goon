@@ -25,6 +25,7 @@ from oh_goon.core.models.fleet_plan_composition import (
 )
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.source_tree_policy import is_transient_source_path
+from oh_goon.engine.errors import OperationCancelledError
 
 if TYPE_CHECKING:
     from oh_goon.core.enforcer_lace_trust import ReceiptAuthenticator
@@ -42,12 +43,24 @@ def capture_agent_sources(
     plan_source_sha256: str,
     plan_graph_identity: str,
     skill_aliases: Mapping[str, str] | None = None,
+    previous_source: agent_source.FrozenAgentSourceCapture | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> agent_source.FrozenAgentSourceCapture:
     """Capture bytes ONCE via the existing AG-01 reader, without effects.
 
     Not exposed as a CLI writer or agent runner. A future Step must carry these
     bytes through original admission and must not re-open source paths.
     """
+    if cancel_requested is not None and cancel_requested():
+        raise OperationCancelledError("Agent source capture cancelled")
+    if previous_source is not None:
+        previous_source.verify()
+        if agent_source_references(definitions, values) != (
+            previous_source.repository_reference,
+            previous_source.authored_skill_reference,
+            previous_source.acceptance_profile,
+        ):
+            raise FleetPlanInvalid("Agent repair source selection differs from previous capture")
     captured: dict[str, agent_source.FrozenSourceTree] = {}
     preview = explain_agent_sources(
         definitions,
@@ -58,6 +71,7 @@ def capture_agent_sources(
         plan_source_sha256=plan_source_sha256,
         skill_aliases=skill_aliases,
         _captured=captured,
+        cancel_requested=cancel_requested,
     )
     frozen = agent_source.FrozenAgentSourceCapture(
         plan_source_sha256=plan_source_sha256,
@@ -70,21 +84,23 @@ def capture_agent_sources(
         skill=captured["skill"],
     )
     frozen.verify()
+    if previous_source is not None and (
+        frozen.resolved_skill_reference != previous_source.resolved_skill_reference
+        or frozen.skill != previous_source.skill
+    ):
+        raise FleetPlanInvalid(
+            "Agent repair changed the selected Skill; new authorization required"
+        )
+    if cancel_requested is not None and cancel_requested():
+        raise OperationCancelledError("Agent source capture cancelled")
     return frozen
 
 
-def explain_agent_sources(
+def agent_source_references(
     definitions: tuple[PlanInputDefinition, ...],
     values: dict[str, PlanInputValue],
-    *,
-    repository_root: Path,
-    skill_root: Path,
-    allowed_acceptance: tuple[str, ...],
-    plan_source_sha256: str,
-    skill_aliases: Mapping[str, str] | None = None,
-    _captured: dict[str, agent_source.FrozenSourceTree] | None = None,
-) -> dict[str, object]:
-    """Project immutable read-only identities without admitting or executing work."""
+) -> tuple[str, str, str]:
+    """Select the original bound source roles without reacquiring any source bytes."""
     declared: dict[PlanInputType, str] = {}
     for definition in definitions:
         if definition.input_type not in {
@@ -108,15 +124,33 @@ def explain_agent_sources(
             "AG-01 requires repository_reference, skill_reference and acceptance_profile"
         )
 
-    accepted = declared[PlanInputType.ACCEPTANCE_PROFILE]
+    return (
+        declared[PlanInputType.REPOSITORY_REFERENCE],
+        declared[PlanInputType.SKILL_REFERENCE],
+        declared[PlanInputType.ACCEPTANCE_PROFILE],
+    )
+
+
+def explain_agent_sources(
+    definitions: tuple[PlanInputDefinition, ...],
+    values: dict[str, PlanInputValue],
+    *,
+    repository_root: Path,
+    skill_root: Path,
+    allowed_acceptance: tuple[str, ...],
+    plan_source_sha256: str,
+    skill_aliases: Mapping[str, str] | None = None,
+    _captured: dict[str, agent_source.FrozenSourceTree] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> dict[str, object]:
+    """Project immutable read-only identities without admitting or executing work."""
+    repo_ref, authored_skill_ref, accepted = agent_source_references(definitions, values)
     if (
         not allowed_acceptance
         or accepted not in allowed_acceptance
         or len(set(allowed_acceptance)) != len(allowed_acceptance)
     ):
         raise FleetPlanInvalid("AG-01 acceptance profile is not explicitly authorized")
-    repo_ref = declared[PlanInputType.REPOSITORY_REFERENCE]
-    authored_skill_ref = declared[PlanInputType.SKILL_REFERENCE]
     skill_ref = authored_skill_ref
     git_pin = None
     if not skill_ref.startswith(("local:", "github:")):
@@ -168,6 +202,7 @@ def explain_agent_sources(
         label="repository",
         max_bytes=agent_source.MAX_REPOSITORY_BYTES,
         captured=_captured,
+        cancel_requested=cancel_requested,
     )
     # For a Gitlink, retain the *same* single AG-01 fd-anchored byte read.
     # Compare those already-captured bytes to the committed Git blob identities;
@@ -179,6 +214,7 @@ def explain_agent_sources(
         label="skill",
         max_bytes=agent_source.MAX_SKILL_BYTES,
         captured=skill_capture if git_pin is not None else _captured,
+        cancel_requested=cancel_requested,
     )
     if git_pin is not None:
         git_pin.verify(skill_root, skill_capture["skill"])
@@ -210,6 +246,7 @@ def _snapshot_authorized_tree(
     label: str,
     max_bytes: int,
     captured: dict[str, agent_source.FrozenSourceTree] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Read exactly once from an fd-anchored authorized tree.
 
@@ -217,6 +254,8 @@ def _snapshot_authorized_tree(
     Pathname re-resolution or symlink swaps cannot redirect reads outside the
     chosen authorized root. Descriptor identities are checked across traversal.
     """
+    if cancel_requested is not None and cancel_requested():
+        raise OperationCancelledError("Agent source capture cancelled")
     if root.is_symlink() or not root.is_dir():
         raise FleetPlanInvalid(f"AG-01 {label} authorized root must be a regular directory")
     relative = PurePosixPath(reference.removeprefix("local:"))
@@ -248,6 +287,8 @@ def _snapshot_authorized_tree(
 
     def read_dir(dir_fd: int, subpath: Path, depth: int, root_device: int) -> None:
         nonlocal total, directory_count
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Agent source capture cancelled")
         directory_count += 1
         if directory_count > agent_source.MAX_SOURCE_ENTRIES or depth > 64:
             raise FleetPlanInvalid(f"AG-01 {label} closure exceeds directory budget")
@@ -257,6 +298,8 @@ def _snapshot_authorized_tree(
         with os.scandir(dir_fd) as iterator:
             entries = sorted(iterator, key=lambda entry: entry.name)
         for entry in entries:
+            if cancel_requested is not None and cancel_requested():
+                raise OperationCancelledError("Agent source capture cancelled")
             rel = subpath / entry.name
             if is_transient_source_path(rel):
                 continue
@@ -302,6 +345,8 @@ def _snapshot_authorized_tree(
                 while chunk := os.read(
                     fd, min(1024 * 1024, agent_source.MAX_SOURCE_FILE_BYTES + 1 - count)
                 ):
+                    if cancel_requested is not None and cancel_requested():
+                        raise OperationCancelledError("Agent source capture cancelled")
                     count += len(chunk)
                     if count > agent_source.MAX_SOURCE_FILE_BYTES or total + count > max_bytes:
                         raise FleetPlanInvalid(f"AG-01 {label} source grew beyond budget")

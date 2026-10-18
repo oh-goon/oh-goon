@@ -49,9 +49,9 @@ def _add_agent_apply_commands(subparsers):
     apply = commands.add_parser(
         "apply", help="Apply one frozen source-bound replacement to the selected workspace"
     )
-    apply.add_argument("--proposal", required=True)
-    apply.add_argument("--expected-path", required=True)
-    apply.add_argument("--expected-handoff-identity")
+    from oh_goon.integrations.agent_patch_apply import add_apply_arguments
+
+    add_apply_arguments(apply)
 
 
 def _add_local_app_commands(

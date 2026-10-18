@@ -71,21 +71,13 @@ def resolve_plan_step(
         return git_step
     if isinstance(step, AgentPlanStep):
         handoff = context.agent_handoff
-        if (
-            handoff is None
-            or context.agent_owner_path != plan_base / "goon.yml"
-            or handoff.step_id != step.step_id
-            or handoff.owner_source_sha256
-            != context.source_graph.node(plan_base / "goon.yml").source_sha256
-        ):
+        if context.agent_owner_path != plan_base / "goon.yml":
             raise FleetPlanInvalid("Agent Step is not bound to original frozen source owner")
-        if (
-            step.harness != handoff.harness
-            or step.task != handoff.task
-            or step.timeout_seconds != handoff.timeout_seconds
-            or step.requested_effects != handoff.requested_effects
-        ):
-            raise FleetPlanInvalid("Agent Step meaning changed after source capture")
+        require_agent_step_handoff(
+            step,
+            handoff,
+            owner_source_sha256=context.source_graph.node(plan_base / "goon.yml").source_sha256,
+        )
         resolved = resolve_delivered_local_search_agent_step(handoff)
         if step.feedback is not None:
             from oh_goon.core.fleet_plan_output_refs import step_output_reference
@@ -93,7 +85,7 @@ def resolve_plan_step(
 
             reference = step_output_reference(step.feedback)
             if (
-                step.harness != "local-model-skill-loop"
+                step.harness not in ("local-model-skill-loop", "local-model-proposal")
                 or reference is None
                 or not isinstance(step.when, StepStatusCondition)
                 or step.when.step_id != reference[0]
@@ -210,6 +202,31 @@ def extension_entrypoint(project: Path, extension: str, command: str) -> str:
             f"Managed extension {extension} no longer exposes a valid entry point for {command!r}"
         )
     return entrypoint
+
+
+def require_agent_step_handoff(
+    step: AgentPlanStep,
+    handoff: "FrozenAgentStepHandoff",
+    *,
+    owner_source_sha256: str | None,
+) -> None:
+    """Verify the same authored Step binding at resolution and repair recapture."""
+    from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+
+    if (
+        type(handoff) is not FrozenAgentStepHandoff
+        or handoff.step_id != step.step_id
+        or handoff.owner_source_sha256 != owner_source_sha256
+    ):
+        raise FleetPlanInvalid("Agent Step is not bound to original frozen source owner")
+    handoff.verify()
+    if (
+        step.harness != handoff.harness
+        or step.task != handoff.task
+        or step.timeout_seconds != handoff.timeout_seconds
+        or step.requested_effects != handoff.requested_effects
+    ):
+        raise FleetPlanInvalid("Agent Step meaning changed after source capture")
 
 
 def resolve_delivered_local_search_agent_step(

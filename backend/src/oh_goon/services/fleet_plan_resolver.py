@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,6 +31,7 @@ from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepCache,
 )
 from oh_goon.core.path_authority import RepositoryPathSpace, navigation_path
+from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.integrations.fleet_plan_compilation import (
@@ -114,6 +116,8 @@ class FleetPlanResolver:
         skill_root: Path,
         allowed_acceptance: tuple[str, ...],
         extensions_path: Path | None = None,
+        handoff: "FrozenAgentStepHandoff | None" = None,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> tuple[ResolvedFleetPlan, "FrozenAgentStepHandoff", str]:
         """One original source graph, immutable packet, original typed pipeline.
 
@@ -123,6 +127,8 @@ class FleetPlanResolver:
         from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
         from oh_goon.core.models.fleet_plan import AgentPlanStep
 
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Agent source capture cancelled")
         graph = self.analyze_source(plan_path)
         matches = graph.agent_step_sources()
         if len(matches) != 1 or graph.root.source_sha256 is None:
@@ -138,25 +144,33 @@ class FleetPlanResolver:
         )
         if authored is None:
             raise FleetPlanInvalid("original Agent Step source owner is missing")
-        source = self._capture_agent_source_graph(
-            graph,
-            inputs=inputs,
-            repository_root=repository_root,
-            skill_root=skill_root,
-            allowed_acceptance=allowed_acceptance,
-            expected_source_sha256=graph.root.source_sha256,
-            skill_aliases=None,
-        )
-        handoff = FrozenAgentStepHandoff(
-            source=source,
-            owner_source_sha256=graph.node(owner).source_sha256 or "",
-            step_id=raw_id,
-            harness=authored.harness,
-            task=authored.task,
-            timeout_seconds=authored.timeout_seconds,
-            requested_effects=authored.requested_effects,
-        )
+        if handoff is None:
+            source = self._capture_agent_source_graph(
+                graph,
+                inputs=inputs,
+                repository_root=repository_root,
+                skill_root=skill_root,
+                allowed_acceptance=allowed_acceptance,
+                expected_source_sha256=graph.root.source_sha256,
+                skill_aliases=None,
+                cancel_requested=cancel_requested,
+            )
+            handoff = FrozenAgentStepHandoff(
+                source=source,
+                owner_source_sha256=graph.node(owner).source_sha256 or "",
+                step_id=raw_id,
+                harness=authored.harness,
+                task=authored.task,
+                timeout_seconds=authored.timeout_seconds,
+                requested_effects=authored.requested_effects,
+            )
+        elif type(handoff) is not FrozenAgentStepHandoff:
+            raise FleetPlanInvalid("Agent source requires an original immutable handoff")
         handoff.verify()
+        if handoff.source.acceptance_profile not in allowed_acceptance or len(
+            set(allowed_acceptance)
+        ) != len(allowed_acceptance):
+            raise FleetPlanInvalid("Agent acceptance profile is not explicitly authorized")
         plan, _, _ = self._resolve_graph(
             graph,
             extensions_path=extensions_path,
@@ -169,6 +183,76 @@ class FleetPlanResolver:
         if len(resolved) != 1:
             raise FleetPlanInvalid("Agent Step did not resolve through the original pipeline")
         return plan, handoff, graph.root.source_sha256
+
+    def recapture_agent_step_handoff(
+        self,
+        plan_path: Path,
+        *,
+        previous_handoff: "FrozenAgentStepHandoff",
+        expected_previous_handoff_identity: str,
+        inputs: dict[str, PlanInputValue],
+        repository_root: Path,
+        skill_root: Path,
+        allowed_acceptance: tuple[str, ...],
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> "FrozenAgentStepHandoff":
+        """Explicitly capture a repaired repository for a separately admitted attempt.
+
+        The previous delivery remains immutable. Plan, Step, source selection and
+        Skill changes require a new authorization rather than repair continuation.
+        This creates prework only; Fleet still owns admission and cancellation.
+        """
+        from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+        from oh_goon.core.models.fleet_plan import AgentPlanStep
+        from oh_goon.services.fleet_plan_step_resolution import require_agent_step_handoff
+
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Agent repair capture cancelled")
+        if (
+            type(previous_handoff) is not FrozenAgentStepHandoff
+            or type(expected_previous_handoff_identity) is not str
+            or previous_handoff.handoff_identity != expected_previous_handoff_identity
+        ):
+            raise FleetPlanInvalid("Agent repair previous handoff identity mismatch")
+        graph = self.analyze_source(plan_path)
+        if (
+            graph.root.source_sha256 != previous_handoff.source.plan_source_sha256
+            or graph.immutable_source_closure_identity()
+            != previous_handoff.source.plan_graph_identity
+        ):
+            raise FleetPlanInvalid(
+                "Agent repair Plan/Step source changed; new authorization required"
+            )
+        matches = graph.agent_step_sources()
+        if len(matches) != 1:
+            raise FleetPlanInvalid("Agent repair requires exactly one original Agent Step")
+        owner, step_id = matches[0]
+        authored = next(
+            step
+            for step in graph.node(owner).compiled.steps
+            if isinstance(step, AgentPlanStep) and step.step_id == step_id
+        )
+        require_agent_step_handoff(
+            authored,
+            previous_handoff,
+            owner_source_sha256=graph.node(owner).source_sha256,
+        )
+        source = self._capture_agent_source_graph(
+            graph,
+            inputs=inputs,
+            repository_root=repository_root,
+            skill_root=skill_root,
+            allowed_acceptance=allowed_acceptance,
+            expected_source_sha256=previous_handoff.source.plan_source_sha256,
+            skill_aliases=None,
+            previous_source=previous_handoff.source,
+            cancel_requested=cancel_requested,
+        )
+        handoff = replace(previous_handoff, source=source)
+        handoff.verify()
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Agent repair capture cancelled")
+        return handoff
 
     def input_definitions(
         self,
@@ -521,6 +605,8 @@ class FleetPlanResolver:
         allowed_acceptance: tuple[str, ...],
         expected_source_sha256: str,
         skill_aliases: Mapping[str, str] | None,
+        previous_source: "FrozenAgentSourceCapture | None" = None,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> "FrozenAgentSourceCapture":
         """One graph cut reused by AG-02A capture and AG-02B Step binding."""
         from oh_goon.services.agent_authoring_sources import capture_agent_sources
@@ -543,6 +629,8 @@ class FleetPlanResolver:
             plan_source_sha256=expected_source_sha256,
             plan_graph_identity=source_graph.immutable_source_closure_identity(),
             skill_aliases=original_skill_aliases(source_graph.root.path, skill_aliases),
+            previous_source=previous_source,
+            cancel_requested=cancel_requested,
         )
 
     def prepare_agent_step_handoff(
@@ -651,6 +739,21 @@ class FleetPlanResolver:
                     "Run/Step admission, LACE and disclosure gates are not qualified"
                 )
         input_values = bind_inputs(compiled, inputs or {}, context=str(plan_path))
+        if agent_handoff is not None:
+            from oh_goon.services.agent_authoring_sources import agent_source_references
+
+            captured = agent_handoff.source
+            if (
+                captured.plan_source_sha256 != source_sha256
+                or captured.plan_graph_identity != source_graph.immutable_source_closure_identity()
+                or agent_source_references(compiled.inputs, input_values)
+                != (
+                    captured.repository_reference,
+                    captured.authored_skill_reference,
+                    captured.acceptance_profile,
+                )
+            ):
+                raise FleetPlanInvalid("Agent handoff source selection differs from resolved Plan")
         scope = resolve_compiled_steps(
             context,
             plan_path,

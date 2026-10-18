@@ -92,7 +92,7 @@ def test_kubernetes_credentials_fail_malformed_cheap_preflight(
 
 def test_kubernetes_template_resolves_to_v28_exact_api_authority() -> None:
     plan = _plan()
-    assert plan.contract_version == 43
+    assert plan.contract_version == 44
     assert len(plan.steps) == 1
     step = plan.steps[0]
     assert isinstance(step, ResolvedKubernetesSetImageStep)

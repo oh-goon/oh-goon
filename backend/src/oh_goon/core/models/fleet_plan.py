@@ -116,6 +116,7 @@ from oh_goon.core.models.fleet_plan_step_primitives import (
     MissingConfigPolicy,
     PlanArtifactDeclaration,
     PlanPublishedOutput,
+    PlanStreamOutput,
     StepCondition,
     StepFailurePolicy,
     StepLifecycle,
@@ -140,7 +141,7 @@ from oh_goon.core.models.fleet_plan_values import (
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
-FLEET_PLAN_CONTRACT_VERSION = 43
+FLEET_PLAN_CONTRACT_VERSION = 44
 DEFAULT_PRE_COMMIT_REQUIREMENT = "pre-commit==4.6.2"
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 3600.0
 
@@ -183,7 +184,9 @@ class CommandPlanStep(ImmutableModel):
     when: StepCondition | None = None
     retry: StepRetryPolicy = Field(default_factory=StepRetryPolicy)
     artifacts: tuple[PlanArtifactDeclaration, ...] = Field(default_factory=tuple, max_length=32)
-    outputs: tuple[PlanPublishedOutput, ...] = Field(default_factory=tuple, max_length=16)
+    outputs: tuple[PlanPublishedOutput | PlanStreamOutput, ...] = Field(
+        default_factory=tuple, max_length=16
+    )
 
     _success_codes = field_validator("success_codes")(_validate_success_codes)
 
@@ -458,8 +461,13 @@ class ResolvedLocalSearchAgentStep(ResolvedCommandStep):
             or self.workspace.publish
         ):
             raise ValueError("local-search Agent Step must retain the fixed offline tool contract")
-        if self.feedback_reference is not None and self.harness != "local-model-skill-loop":
-            raise ValueError("only the read-only Skill loop accepts failed-test feedback")
+        if self.feedback_reference is not None and self.harness not in (
+            "local-model-skill-loop",
+            "local-model-proposal",
+        ):
+            raise ValueError(
+                "only the read-only Skill loop and proposal harness accept failed-test feedback"
+            )
         if (self.harness == "local-search" and self.model is not None) or (
             self.harness
             in (
@@ -642,7 +650,8 @@ class ResolvedImport(ImmutableModel):
 class ResolvedFleetPlan(ImmutableModel):
     """Fully bound immutable execution plan.  Runtime never re-reads YAML/TOML."""
 
-    contract_version: Literal[43] = FLEET_PLAN_CONTRACT_VERSION
+    # Retained Runs keep their original execution identity when reopened.
+    contract_version: Literal[43, 44] = FLEET_PLAN_CONTRACT_VERSION
     plan_id: str
     name: str
     description: str = ""

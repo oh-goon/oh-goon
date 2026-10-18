@@ -108,6 +108,19 @@ def add_plan_commands(
         action="store_true",
         help="Print a self-contained repair handoff when a waited Plan run fails",
     )
+    plan_run.add_argument(
+        "--repair-attempts", type=int, help="Authorize a bounded test/propose/apply/retest loop"
+    )
+    plan_run.add_argument(
+        "--repair-timeout",
+        type=float,
+        help="Total repair deadline in seconds; required with --repair-attempts",
+    )
+    plan_run.add_argument(
+        "--repair-step-timeout",
+        type=float,
+        help="Per-Step repair deadline in seconds; required with --repair-attempts",
+    )
     _add_run_readback_commands(plan_subparsers)
     _add_plan_schedule_commands(plan_subparsers)
 

@@ -23,6 +23,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
 )
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepEgress
+from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent, TrustedLocalRunScope
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
@@ -1038,7 +1039,11 @@ def _clear_declared_publish_channels(workspace: Path, step: ResolvedPlanStep) ->
     """Declared outputs/artifacts are produced by this attempt, never inherited evidence."""
 
     paths = RepositoryPathSpace.from_root(workspace)
-    declared = [output.path for output in getattr(step, "outputs", ())]
+    declared = [
+        output.path
+        for output in getattr(step, "outputs", ())
+        if not isinstance(output, PlanStreamOutput)
+    ]
     declared.extend(artifact.path for artifact in getattr(step, "artifacts", ()))
     for value in declared:
         candidate = paths.resolve(value, label="Fleet plan publish path")

@@ -128,7 +128,7 @@ def test_oci_credentials_fail_cheap_preflight_before_secret_capture(
 def test_publish_template_resolves_to_v26_content_addressed_authority() -> None:
     plan = _plan()
 
-    assert plan.contract_version == 43
+    assert plan.contract_version == 44
     assert [step.kind for step in plan.steps] == ["oci_build", "oci_publish"]
     build, publish = plan.steps
     assert isinstance(build, ResolvedOciBuildStep)

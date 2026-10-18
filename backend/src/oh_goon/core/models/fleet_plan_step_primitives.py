@@ -61,6 +61,14 @@ class PlanPublishedOutput(ImmutableModel):
         return value
 
 
+class PlanStreamOutput(ImmutableModel):
+    """A bounded scalar from this exact native attempt's captured output."""
+
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
+    stream: Literal["stdout", "stderr"]
+    max_bytes: int = Field(default=4096, ge=1, le=65536)
+
+
 class PlanArtifactDeclaration(ImmutableModel):
     """One declared artifact path with explicit retention semantics."""
 
@@ -167,8 +175,8 @@ class MissingConfigPolicy(StrEnum):
 
 
 def _validate_published_outputs(
-    value: tuple[PlanPublishedOutput, ...],
-) -> tuple[PlanPublishedOutput, ...]:
+    value: tuple[PlanPublishedOutput | PlanStreamOutput, ...],
+) -> tuple[PlanPublishedOutput | PlanStreamOutput, ...]:
     names = [item.name for item in value]
     if len(names) != len(set(names)):
         raise ValueError("Fleet plan published output names must be unique per step")

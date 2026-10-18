@@ -143,7 +143,10 @@ def _published_outputs(
 ) -> AttemptPublication:
     try:
         values, evidence = collect_published_outputs(
-            repository, step, producer_execution_identity=producer_execution_identity
+            repository,
+            step,
+            producer_execution_identity=producer_execution_identity,
+            streams={"stdout": outcome.stdout, "stderr": outcome.stderr},
         )
     except FleetPlanInvalid as exc:
         return AttemptPublication(

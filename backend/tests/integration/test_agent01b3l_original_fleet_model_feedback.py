@@ -130,7 +130,7 @@ def test_invalid_or_future_feedback_ref_refused_during_resolution(
 
 
 def test_older_harness_cannot_gain_feedback_input(tmp_path, monkeypatch):
-    plan, repo, opts, _ = _feedback_case(tmp_path, monkeypatch, harness="local-model-proposal")
+    plan, repo, opts, _ = _feedback_case(tmp_path, monkeypatch, harness="local-model-files")
     with pytest.raises((FleetPlanInvalid, ValueError)):
         _lock(plan, opts)
     assert not (tmp_path / "calls").exists()

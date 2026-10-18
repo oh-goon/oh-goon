@@ -13,8 +13,9 @@ does not grant tool access, writes, model recipients, or verification authority.
 
 The current local model interface is deliberately bounded. It can inspect
 captured files, propose one file replacement, and interpret a failed test's
-declared diagnostic. A complete autonomous edit/test/repair loop with fresh
-source capture between attempts is still open work.
+declared diagnostic. An operator can explicitly recapture repaired source for a
+separately admitted attempt, or authorize an automatic repair/retest loop with
+explicit attempt, overall-deadline and per-Step limits.
 
 ## Prepare a development checkout
 
@@ -48,6 +49,7 @@ or grant shell, network, or repository-write capabilities.
 | File proposal | `local-model-proposal` can return a bounded replacement bound to one captured file's source digest. | A proposal is data and does not modify the repository. |
 | Explicit apply and test | A later operator-authored command Step can invoke `oh-goon agent apply` for the explicitly selected path, followed by an authored test Step. | The apply owner checks the proposed source identity; the native test's real result remains authoritative. |
 | Failed-test feedback | An explicitly selected earlier command output can feed a later `local-model-skill-loop` Step. | The recipient remains read-only, and an earlier failed test keeps the Run failed. |
+| Automatic repair | A caller-bounded test → proposal → apply → retest sequence can repeat with fresh captures. | Each attempt is a separate original Fleet Run; native test results decide continuation. |
 
 Ordinary local execution selects `plan run --standard-local --wait` and uses the
 existing supervised host backend. This profile does not claim kernel sandbox
@@ -89,11 +91,125 @@ The execution CLI uses `--agent-repository-root`, `--agent-skill-root`, and
 apply. The read-only `plan inputs --source-closure` command uses
 `--repository-root`, `--skill-root`, and `--allow-acceptance` for source inspection.
 
+## Capture a repaired source for another attempt
+
+The Python service interface supports an explicit capture boundary. After an
+authorized apply, call `FleetPlanResolver.recapture_agent_step_handoff` with the
+previous `FrozenAgentStepHandoff`, its expected handoff identity, and the same
+Plan, inputs, authorized repository/Skill roots and acceptance selection. Only
+the repository bytes may change in this repair request. A changed Plan, Goon,
+source selector or Skill requires a new authorization. A cancellation callback
+can interrupt capture, including file reads, without returning a next handoff.
+
+The previous handoff and its encoded packet remain unchanged. Resolve the new
+handoff with `resolve_frozen_local_search_agent(..., handoff=new_handoff)`, review
+and write its execution lock through the existing lock owner, and explicitly
+submit `FleetPlanService.run(..., agent_handoff=new_handoff)` under a new Run ID.
+Fleet verifies the lock and transports that selected packet; admission and Step
+execution do not recapture live repository or Skill files. Omitting
+`agent_handoff` preserves the ordinary capture-at-run-entry behavior.
+
+Each Run retains its own source identity, native test result and Game Tape. A
+passing retest does not rewrite the earlier failed test. Manual recapture does
+not start another Run. The automatic mode below uses this same capture boundary;
+the original Run lifecycle still owns execution and cancellation.
+
+## Automatic bounded repair
+
+`FleetPlanService.repair` and `plan run --repair-attempts` execute an explicitly
+authorized four-Step workflow: native test, `local-model-proposal`, native
+`oh-goon agent apply`, and native retest. The operator selects the repository,
+Skill, model, tools and exact apply path in the existing Goon/Plan contract.
+The model cannot change those selections or increase the caller's budget.
+
+The test must use `on_failure: continue`, one native attempt, and a declared
+`stream: stdout` or `stream: stderr` diagnostic bounded to at most 2048 bytes.
+The Agent selects that exact output and a FAILED-only condition. Apply runs only
+after a completed proposal; retest runs only after a completed apply. Retest
+declares the same diagnostic output name and also permits a continued failure.
+All four Steps use the selected repository workspace and one native attempt.
+For example, an operator-owned `goon.yml` can contain:
+
+```yaml
+execution: {purpose: verification}
+inputs:
+  repo: {type: repository_reference}
+  skill: {type: skill_reference}
+  acceptance: {type: acceptance_profile}
+steps:
+  - id: check
+    run: verify-project
+    on_failure: continue
+    outputs: [{name: diagnostic, stream: stdout, max_bytes: 2048}]
+  - id: propose
+    uses: agent
+    harness: local-model-proposal
+    task: Repair the failing check in src/module.py using the selected Skill
+    feedback: "${{ steps.check.outputs.diagnostic }}"
+    when: {kind: step_status, step_id: check, statuses: [FAILED]}
+    requested_effects:
+      recipients: [ollama_local]
+      model: YOUR_INSTALLED_MODEL
+  - id: apply
+    run: "oh-goon agent apply --proposal ${{ steps.propose.outputs.proposal }} --expected-path src/module.py"
+    when: {kind: step_status, step_id: propose, statuses: [COMPLETED]}
+  - id: retest
+    run: verify-project
+    on_failure: continue
+    when: {kind: step_status, step_id: apply, statuses: [COMPLETED]}
+    outputs: [{name: diagnostic, stream: stdout, max_bytes: 2048}]
+```
+
+`verify-project` is your selected native test executable. It writes its bounded
+diagnostic to the declared stream and returns its real exit code. For source
+installations, the apply command may use
+`uv run --project /absolute/path/to/oh-goon/backend --offline --frozen --no-sync oh-goon agent apply ...`.
+The ordinary apply CLI owns path selection and source-digest validation.
+
+Review and author the initial lock with the normal `oh-goon lock` command and
+the same Agent inputs/roots. Then authorize the loop explicitly:
+
+```bash
+uv run --offline --frozen --no-sync --project backend oh-goon plan run /path/to/goon.yml \
+  --standard-local --wait --repository-id YOUR_REPOSITORY_ID \
+  --agent-repository-root /authorized/repos --agent-skill-root /authorized/skills \
+  --allow-agent-acceptance review \
+  --input repo=local:team/app --input skill=local:team/review --input acceptance=review \
+  --repair-attempts 3 --repair-timeout 120 --repair-step-timeout 30 --json
+```
+
+All three limits are required; there is no implicit repair budget. The attempt
+ceiling is 1–32. The deadlines travel with each admitted target and bound native
+processes through the existing Step supervisor. Cancellation stops the active
+Run and prevents another capture or attempt; owned cleanup remains with that
+supervisor. The Python interface takes an immutable `AgentRepairBudget` and can
+also receive a cancellation callback.
+
+Continuation requires a failed native retest with admissible current feedback,
+unchanged Plan/Goon/Skill authority, and remaining budget. A passing initial test
+starts no model or apply. A passing retest stops the loop. Exhausted attempts,
+cancel, timeout, missing/malformed/oversized feedback, a failed/stale apply, a
+changed source contract or unresolved execution all stop further repair work.
+Native stream diagnostics come from the current attempt's capture, not an old
+repository file. General single-Run file-based outputs remain supported.
+
+The initial lock is never rewritten automatically. Subsequent Runs contain the
+new frozen source identity, attempt ordinal, parent Run and original limits.
+The result receipt lists the admitted Runs and a stop reason. `test_passed`
+means the selected native verification passed; original failed Steps and Game
+Tapes remain failed, including a failed check preceding a successful retest.
+Generic rerun/readmission cannot inherit a repair budget. A restart does not
+automatically resume the loop; existing Fleet recovery governs any active Run.
+
+New Plans use contract version 44. Stored version-43 Plans remain readable with
+their original identities. This execution feature does not establish real
+Ollama model quality, native Linux/WSL qualification, or release certification.
+
 ## Failed-test feedback
 
 The producer must be an earlier command Step with `on_failure: continue`, a
 declared bounded output file, and one permitted attempt. The receiving
-`local-model-skill-loop` Agent selects one exact
+`local-model-skill-loop` or `local-model-proposal` Agent selects one exact
 `${{ steps.test.outputs.diagnostic }}` reference and a matching
 `FAILED`-only `step_status` condition. The original sequencer binds the actual
 published scalar; the model receives it as escaped **UNTRUSTED DATA**.

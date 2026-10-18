@@ -20,7 +20,8 @@ from oh_goon.cli_plan_definition_commands import (
 )
 from oh_goon.cli_plan_inputs import plan_inputs
 from oh_goon.cli_plan_run_readback import run_plan_readback
-from oh_goon.core.errors import FleetDomainError
+from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
+from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
     FailedPlanStepTeardownEvidence,
@@ -100,11 +101,27 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         # Only after the exact enrolled-Run preflight may caller bytes be read.
         # The frozen target transports the identity; the original Fleet owners
         # reprove it before admission and again on the worker before any work.
+        repair_budget = _selected_repair_budget(args)
         selected_inputs = plan_inputs(args)
         snapshot = getattr(args, "_caller_input_file_snapshot", None)
         source_identity = (
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
+        if repair_budget is not None:
+            result = runtime.plans.repair(
+                args.plan,
+                budget=repair_budget,
+                repository_id=args.repository_ids[0],
+                inputs=selected_inputs,
+                agent_repository_root=args.agent_repository_root,
+                agent_skill_root=args.agent_skill_root,
+                allowed_agent_acceptance=tuple(args.allow_agent_acceptance),
+                fleet_run_id=args.fleet_run_id,
+                lock_path=args.lock_file,
+                extensions_path=args.extensions,
+                requested_priority=args.priority,
+            )
+            return _print_agent_repair_result(result, as_json=as_json)
         admitted = runtime.plans.run(
             args.plan,
             extensions_path=args.extensions,
@@ -212,6 +229,66 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     if args.repair_handoff:
         _print_repair_handoff(runtime, detail)
     return 1
+
+
+def _selected_repair_budget(args) -> AgentRepairBudget | None:
+    limits = (
+        getattr(args, "repair_attempts", None),
+        getattr(args, "repair_timeout", None),
+        getattr(args, "repair_step_timeout", None),
+    )
+    if all(value is None for value in limits):
+        return None
+    if (
+        any(value is None for value in limits)
+        or not args.standard_local
+        or not args.wait
+        or args.all_repositories
+        or len(args.repository_ids or ()) != 1
+        or getattr(args, "inputs_file", None) is not None
+        or args.repair_handoff
+        or args.agent_repository_root is None
+        or args.agent_skill_root is None
+        or not args.allow_agent_acceptance
+    ):
+        raise FleetPlanInvalid(
+            "repair requires all three limits, --standard-local --wait, one repository, "
+            "Agent roots and acceptance; inputs-file and repair-handoff are unavailable"
+        )
+    return AgentRepairBudget(
+        max_attempts=limits[0], timeout_seconds=limits[1], step_timeout_seconds=limits[2]
+    )
+
+
+def _print_agent_repair_result(result, *, as_json: bool) -> int:
+    receipt = {
+        "schema": "oh-goon.agent-repair-result/v1",
+        "repair_id": result.repair_id,
+        "stop_reason": result.stop_reason.value,
+        "test_passed": result.test_passed,
+        "budget": result.budget.model_dump(mode="json"),
+        "message": result.message,
+        "admitted_run_ids": list(result.admitted_run_ids),
+        "unresolved_run_ids": list(result.unresolved_run_ids),
+        "attempts": [
+            {
+                "fleet_run_id": detail.run.fleet_run_id,
+                "status": detail.run.status.value,
+                "outcome": detail.outcome.value,
+                "game_tape_status": detail.game_tape.status.value,
+                "execution_digest": detail.run.target.execution_digest,
+            }
+            for detail in result.attempts
+        ],
+    }
+    if as_json:
+        print(json.dumps(receipt, sort_keys=True))
+    else:
+        print(f"Repair: {result.repair_id}")
+        print(f"Stop reason: {result.stop_reason.value}")
+        for attempt in receipt["attempts"]:
+            print(f"Run {attempt['fleet_run_id']}: {attempt['status']} / {attempt['outcome']}")
+    return 0 if result.test_passed else 130 if result.stop_reason.value == "cancelled" else 1
 
 
 _PROGRESS_WAIT_SLICE_SECONDS = 1.0

@@ -11,12 +11,26 @@ from oh_goon.core.models.fleet_plan_step_contract import (
     StepPlanCacheSource,
     StepWorkspaceSource,
 )
+from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
 from oh_goon.core.path_authority import repository_relative_parts
 from oh_goon.core.product_identity import stable_id
 
 
 def validate_resolved_plan(plan: Any) -> None:
     """Validate cross-step invariants that require the fully resolved plan graph."""
+    if plan.contract_version < 44:
+        if any(
+            isinstance(output, PlanStreamOutput)
+            for step in plan.steps
+            for output in getattr(step, "outputs", ())
+        ):
+            raise ValueError("native stream publication requires Plan contract version 44")
+        if any(
+            getattr(step, "harness", None) == "local-model-proposal"
+            and getattr(step, "feedback_reference", None) is not None
+            for step in plan.steps
+        ):
+            raise ValueError("proposal feedback requires Plan contract version 44")
     prior: set[str] = set()
     published: dict[str, set[str]] = {}
     published_workspaces: set[str] = set()
@@ -174,7 +188,11 @@ def _validate_step_paths(step: Any) -> None:
     elif getattr(step, "kind", None) == "oci_publish":
         values.append((step.archive, "OCI publish archive"))
     values.extend((item.path, "artifact path") for item in getattr(step, "artifacts", ()))
-    values.extend((item.path, "published output path") for item in getattr(step, "outputs", ()))
+    values.extend(
+        (item.path, "published output path")
+        for item in getattr(step, "outputs", ())
+        if not isinstance(item, PlanStreamOutput)
+    )
     condition = getattr(step, "when", None)
     if getattr(condition, "kind", None) in {"path_exists", "path_missing"}:
         values.append((condition.path, "condition path"))
