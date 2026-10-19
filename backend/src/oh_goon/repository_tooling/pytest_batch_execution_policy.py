@@ -1,4 +1,5 @@
 """Small deterministic execution-budget policies for pytest batch launches."""
+
 from __future__ import annotations
 
 import math

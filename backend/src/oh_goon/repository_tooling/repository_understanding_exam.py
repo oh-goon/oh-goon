@@ -7,15 +7,47 @@ Oh-Goon policy owns scoring and qualification.
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 from typing import Any
 
+from oh_goon.repository_tooling._repository_understanding_exam_inputs import (
+    _candidate_configuration_bundle,
+    _validate_candidate_submission,
+)
+from oh_goon.repository_tooling._repository_understanding_exam_report import (
+    human_report as human_report,
+)
+from oh_goon.repository_tooling._repository_understanding_exam_validation import _score_inputs
+from oh_goon.repository_tooling.repository_understanding_calibration import (
+    calibration_report as calibration_report,
+)
 from oh_goon.repository_tooling.repository_understanding_capability import (
-    CAPABILITY_ACTIONS,
-    capability_certificate,
-    capability_check,
+    CAPABILITY_ACTIONS as CAPABILITY_ACTIONS,
+)
+from oh_goon.repository_tooling.repository_understanding_capability import (
+    capability_certificate as capability_certificate,
+)
+from oh_goon.repository_tooling.repository_understanding_capability import (
+    capability_check as capability_check,
+)
+from oh_goon.repository_tooling.repository_understanding_game_tape import game_tape as game_tape
+from oh_goon.repository_tooling.repository_understanding_game_tape import (
+    human_game_tape_report as human_game_tape_report,
+)
+from oh_goon.repository_tooling.repository_understanding_graph import graph_manifest
+from oh_goon.repository_tooling.repository_understanding_integrity import (
+    adversarial_report as adversarial_report,
+)
+from oh_goon.repository_tooling.repository_understanding_integrity import (
+    benchmark_integrity_report as benchmark_integrity_report,
+)
+from oh_goon.repository_tooling.repository_understanding_integrity import challenge_set
+from oh_goon.repository_tooling.repository_understanding_lifecycle import (
+    authorize_question_transition as authorize_question_transition,
+)
+from oh_goon.repository_tooling.repository_understanding_lifecycle import (
+    human_baseline_report as human_baseline_report,
 )
 from oh_goon.repository_tooling.repository_understanding_material import (
     GRADER_SCHEMA_VERSION,
@@ -24,34 +56,21 @@ from oh_goon.repository_tooling.repository_understanding_material import (
     RUBRIC_VERSION,
     _canonical_json_sha256,
     _source_version,
-    benchmark_registry,
     exam_snapshot,
     load_exam,
     manifest,
-    question_audit,
-    question_lifecycle,
-    prepare,
-    verify,
 )
-from oh_goon.repository_tooling.repository_understanding_calibration import calibration_report
-from oh_goon.repository_tooling.repository_understanding_lifecycle import (
-    authorize_question_transition,
-    human_baseline_report,
+from oh_goon.repository_tooling.repository_understanding_material import (
+    benchmark_registry as benchmark_registry,
 )
-from oh_goon.repository_tooling.repository_understanding_stability import stability_report
-from oh_goon.repository_tooling.repository_understanding_recertification import (
-    differential_recertification_plan,
+from oh_goon.repository_tooling.repository_understanding_material import prepare as prepare
+from oh_goon.repository_tooling.repository_understanding_material import (
+    question_audit as question_audit,
 )
-from oh_goon.repository_tooling.repository_understanding_integrity import (
-    adversarial_report,
-    benchmark_integrity_report,
-    challenge_set as build_challenge_set,
+from oh_goon.repository_tooling.repository_understanding_material import (
+    question_lifecycle as question_lifecycle,
 )
-from oh_goon.repository_tooling.repository_understanding_game_tape import (
-    game_tape,
-    human_game_tape_report,
-)
-from oh_goon.repository_tooling.repository_understanding_graph import graph_manifest
+from oh_goon.repository_tooling.repository_understanding_material import verify as verify
 from oh_goon.repository_tooling.repository_understanding_policy import (
     DEFAULT_QUALIFICATION_PROFILE,
     QUALIFICATION_POLICY_VERSION,
@@ -59,14 +78,14 @@ from oh_goon.repository_tooling.repository_understanding_policy import (
     SCORING_POLICY_VERSION,
     evaluate,
 )
-
-
-from oh_goon.repository_tooling._repository_understanding_exam_report import human_report
-from oh_goon.repository_tooling._repository_understanding_exam_inputs import (
-    _candidate_configuration_bundle,
-    _validate_candidate_submission,
+from oh_goon.repository_tooling.repository_understanding_recertification import (
+    differential_recertification_plan as differential_recertification_plan,
 )
-from oh_goon.repository_tooling._repository_understanding_exam_validation import _score_inputs
+from oh_goon.repository_tooling.repository_understanding_stability import (
+    stability_report as stability_report,
+)
+
+build_challenge_set = challenge_set
 
 
 def grade_template(
@@ -91,12 +110,16 @@ def grade_template(
     }
     submission_digest, submission_bundle = _validate_candidate_submission(submission)
     configuration_bundle = (
-        None if candidate_configuration is None else _candidate_configuration_bundle(candidate_configuration)
+        None
+        if candidate_configuration is None
+        else _candidate_configuration_bundle(candidate_configuration)
     )
     if candidate_run_identity is not None:
         candidate_run_identity = candidate_run_identity.strip()
         if not candidate_run_identity or len(candidate_run_identity) > 128:
-            raise ValueError("candidate run identity must be a non-empty string of at most 128 characters")
+            raise ValueError(
+                "candidate run identity must be a non-empty string of at most 128 characters"
+            )
     return {
         "artifact_type": "repository-understanding-grader-observations",
         "source_version": _source_version(),
@@ -169,7 +192,6 @@ def grade_template(
     }
 
 
-
 def score(grades_path: Path, *, submission: Path | None = None) -> dict[str, Any]:
     payload = json.loads(grades_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -235,7 +257,6 @@ def score(grades_path: Path, *, submission: Path | None = None) -> dict[str, Any
         }
     )
     return result
-
 
 
 def main() -> int:

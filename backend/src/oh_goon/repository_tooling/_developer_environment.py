@@ -1,10 +1,11 @@
 """Disposable developer-environment transport boundary."""
+
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 if __package__:
     from ._dependency_resolution_primitives import DependencyResolutionError
@@ -29,8 +30,12 @@ def discard_unusable_developer_environment(backend: Path, root: Path) -> None:
     if interpreter is not None and os.access(interpreter, os.X_OK):
         try:
             probe = subprocess.run(
-                (str(interpreter), "--version"), cwd=root, check=False,
-                capture_output=True, text=True, timeout=10,
+                (str(interpreter), "--version"),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             usable = probe.returncode == 0
         except (OSError, subprocess.SubprocessError):
@@ -38,4 +43,6 @@ def discard_unusable_developer_environment(backend: Path, root: Path) -> None:
     if usable:
         return
     shutil.rmtree(environment)
-    print("Developer environment: discarded unusable/copied backend/.venv before native uv materialization")
+    print(
+        "Developer environment: discarded unusable/copied backend/.venv before native uv materialization"
+    )

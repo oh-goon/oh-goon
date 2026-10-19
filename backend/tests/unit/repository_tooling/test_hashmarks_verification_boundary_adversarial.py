@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.repository_tooling.architecture import _hashmarks_verification_boundary_contract as contract
+from oh_goon.repository_tooling.architecture import (
+    _hashmarks_verification_boundary_contract as contract,
+)
 
 
 def _write(path: Path, text: str) -> Path:
@@ -28,15 +30,23 @@ def _bind(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Path]:
     }
     monkeypatch.setattr(contract, "BACKEND_PACKAGE_ROOT", package)
     for attr, key in (
-        ("_SELECTION", "selection"), ("_SELECTION_PRIMITIVES", "primitives"), ("_BUILDER", "builder"),
-        ("_SHARD_MODEL", "shard"), ("_PYTEST_MEMBER", "member"), ("_PYTEST_PROJECTOR", "projector"),
-        ("_REFINEMENT", "refinement"), ("_OFFLINE_PROOF", "offline"), ("_TERMINAL_ATTESTATION", "terminal"),
+        ("_SELECTION", "selection"),
+        ("_SELECTION_PRIMITIVES", "primitives"),
+        ("_BUILDER", "builder"),
+        ("_SHARD_MODEL", "shard"),
+        ("_PYTEST_MEMBER", "member"),
+        ("_PYTEST_PROJECTOR", "projector"),
+        ("_REFINEMENT", "refinement"),
+        ("_OFFLINE_PROOF", "offline"),
+        ("_TERMINAL_ATTESTATION", "terminal"),
     ):
         monkeypatch.setattr(contract, attr, paths[key])
     return paths
 
 
-def test_hashmarks_boundary_reports_missing_primary_owners(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hashmarks_boundary_reports_missing_primary_owners(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _bind(monkeypatch, tmp_path)
     issues = contract.check_hashmarks_verification_boundary_contract()
     text = "\n".join(issue.message for issue in issues)
@@ -62,7 +72,7 @@ def test_selection_boundary_rejects_schema_layout_runtime_and_missing_structure(
     )
     _write(
         p["primitives"],
-        "from hashmarks.consumer_conformance import validate_native_consumer_bundle\n"
+        "from hashmarks import validate_native_consumer_bundle\n"
         "DOWNSTREAM_CONTRACT_SCHEMA = 'x'\n"
         "layout = {'preferred_granularity': True}\n",
     )
@@ -72,7 +82,6 @@ def test_selection_boundary_rejects_schema_layout_runtime_and_missing_structure(
     assert "must not consume Hashmarks layout advisory 'preferred_granularity'" in text
     assert "must not import runtime/control-plane authority" in text
     assert "missing structural evidence fields" in text
-
 
 
 def test_selection_boundary_is_invariant_to_private_adapter_class_name(
@@ -94,10 +103,11 @@ def test_selection_boundary_is_invariant_to_private_adapter_class_name(
     )
     _write(
         p["primitives"],
-        "from hashmarks.consumer_conformance import validate_native_consumer_bundle\n",
+        "from hashmarks import validate_native_consumer_bundle\n",
     )
     issues = contract._selection_violations()
     assert not any("missing structural evidence fields" in issue.message for issue in issues)
+
 
 def test_builder_boundary_rejects_execution_imports_and_hashmarks_layout_advisory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -157,14 +167,20 @@ def test_shard_model_contract_is_invariant_to_private_class_names(
 ) -> None:
     p = _bind(monkeypatch, tmp_path)
     shared_fields = (
-        "producer_implementation_identity", "producer_contract_identity",
-        "verification_selection_evidence_identity", "selected_membership_identity",
-        "selected_test_nodes", "unproven_owner_members",
+        "producer_implementation_identity",
+        "producer_contract_identity",
+        "verification_selection_evidence_identity",
+        "selected_membership_identity",
+        "selected_test_nodes",
+        "unproven_owner_members",
     )
     plan_fields = (*shared_fields, "shards")
     report_fields = (
-        *shared_fields, "results", "actual_executed_membership_identity",
-        "actual_executed_members", "membership_complete",
+        *shared_fields,
+        "results",
+        "actual_executed_membership_identity",
+        "actual_executed_members",
+        "membership_complete",
     )
     body = ["from dataclasses import dataclass"]
     for name, fields in (("PrivateA", plan_fields), ("PrivateB", report_fields)):
@@ -174,7 +190,10 @@ def test_shard_model_contract_is_invariant_to_private_class_names(
     assert contract._shard_model_violations() == []
 
     p["shard"].write_text(
-        p["shard"].read_text(encoding="utf-8").replace("PrivateA", "RenamedA").replace("PrivateB", "RenamedB"),
+        p["shard"]
+        .read_text(encoding="utf-8")
+        .replace("PrivateA", "RenamedA")
+        .replace("PrivateB", "RenamedB"),
         encoding="utf-8",
     )
     assert contract._shard_model_violations() == []
@@ -228,7 +247,9 @@ def test_structured_pytest_boundary_is_invariant_to_private_model_name(
     assert contract._structured_pytest_projection_violations() == []
 
 
-def test_structured_pytest_behavior_is_owned_by_executable_tests_not_error_message_spelling() -> None:
+def test_structured_pytest_behavior_is_owned_by_executable_tests_not_error_message_spelling() -> (
+    None
+):
     source = Path(contract.__file__).read_text(encoding="utf-8")
     for private_behavior_spelling in (
         "must already be lexically normalized",

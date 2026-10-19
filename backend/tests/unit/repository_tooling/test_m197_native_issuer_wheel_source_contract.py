@@ -3,6 +3,7 @@
 This is a source metadata check, NOT an installed-wheel attestation. A native
 Hatch wheel build, independent installation and import remain release gates.
 """
+
 from __future__ import annotations
 
 import tomllib

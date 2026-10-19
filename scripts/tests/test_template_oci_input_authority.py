@@ -5,9 +5,18 @@ from __future__ import annotations
 import copy
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
+
+from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.fleet_plan_oci_steps import (
+    ResolvedOciBuildStep,
+    ResolvedOciPublishStep,
+)
+from oh_goon.runtime.goon_templates import GoonTemplateStore
+from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 ROOT = Path(__file__).resolve().parents[2]
 GUIDE = ROOT / "docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md"
@@ -15,60 +24,63 @@ OCI_PLANS = ROOT / "templates/plans/oci"
 OCI_GOONS = ROOT / "templates/goons/oci"
 
 
-def _load(relative: str) -> dict:
-    return yaml.safe_load((ROOT / relative).read_text(encoding="utf-8"))
+def _load(relative: str) -> dict[str, Any]:
+    payload = yaml.safe_load((ROOT / relative).read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
 
 
-def _authored_bindings(import_item: dict) -> dict[str, object]:
-    """Expand explicit same-name pass edges solely for static contract comparison.
-
-    The production compiler remains the authority for grammar and normalization.
-    This test view must reject ambiguity instead of silently overwriting either form.
-    """
-    forwarded = dict(import_item.get("with", {}))
-    for name in import_item.get("pass", ()):
-        if name in forwarded:
-            raise ValueError("pass and with both provide the same recipient")
-        forwarded[name] = "${{ inputs." + name + " }}"
-    return forwarded
-
-
-def _registry_route_errors(image: dict, publish: dict, composite: dict) -> tuple[str, ...]:
-    """Static contract review only; production resolution is tested separately."""
+def _registry_route_errors(
+    root: Path,
+    image: dict[str, Any],
+    publish: dict[str, Any],
+    composite: dict[str, Any],
+) -> tuple[str, ...]:
+    """Check the real compiler's resolved endpoint and producer relationships."""
+    goons = root / "goons"
+    for name, document in (
+        ("image", image),
+        ("publish", publish),
+        ("publish-image", composite),
+    ):
+        package = goons / "oci" / name
+        package.mkdir(parents=True)
+        (package / "goon.yml").write_text(yaml.safe_dump(document))
+        (package / "README.md").write_text(f"# oci/{name}\n")
+    plan = root / "plan.yml"
+    plan.write_text(
+        "version: 1\nexecution: {purpose: cicd}\ngoons: [oci/publish-image]\n"
+    )
+    try:
+        resolved = FleetPlanResolver(goon_templates=GoonTemplateStore(goons)).resolve(
+            plan,
+            inputs={
+                "base_registry_hostname": "base.example.com",
+                "publish_registry_hostname": "publish.example.com",
+                "publish_repository": "team/image",
+            },
+        )
+    except FleetPlanInvalid as exc:
+        return (str(exc),)
+    build, pushed = resolved.steps
+    assert isinstance(build, ResolvedOciBuildStep)
+    assert isinstance(pushed, ResolvedOciPublishStep)
     problems = []
-    image_step = image["steps"][0]
-    publish_step = publish["steps"][0]
-    forwarded = {item["import"]: _authored_bindings(item) for item in composite["goons"]}
-    if image_step["registries"] != [
-        {"hostname": "${{ inputs.base_registry_hostname }}"}
-    ]:
-        problems.append("source registry must belong to OCI builder")
-    if publish_step["target"]["registry"]["hostname"] != (
-        "${{ inputs.publish_registry_hostname }}"
+    if tuple(item.hostname for item in build.registries) != ("base.example.com",):
+        problems.append("builder registry differs from its selected input")
+    if pushed.target.registry.hostname != "publish.example.com":
+        problems.append("publisher registry differs from its selected input")
+    if pushed.target.repository != "team/image":
+        problems.append("publisher repository differs from its selected input")
+    if (
+        pushed.workspace.source.kind != "step"
+        or pushed.workspace.source.step_id != build.step_id
     ):
-        problems.append("destination registry must belong to OCI publisher")
-    if publish_step["target"]["repository"] != "${{ inputs.publish_repository }}":
-        problems.append("publisher repository must be independent")
-    if forwarded["oci/image"].get("base_registry_hostname") != (
-        "${{ inputs.base_registry_hostname }}"
-    ):
-        problems.append("base registry forwarder was rewritten")
-    if forwarded["oci/publish"].get("publish_registry_hostname") != (
-        "${{ inputs.publish_registry_hostname }}"
-    ):
-        problems.append("publish registry forwarder was rewritten")
-    if forwarded["oci/publish"].get("publish_repository") != (
-        "${{ inputs.publish_repository }}"
-    ):
-        problems.append("publish repository forwarder was rewritten")
-    if forwarded["oci/publish"].get("source_workspace") != (
-        "${{ goons.oci-image.workspace }}"
-    ):
-        problems.append("published workspace must come from builder")
+        problems.append("publisher must consume the builder workspace")
     return tuple(problems)
 
 
-def _contracts() -> tuple[dict, dict, dict]:
+def _contracts() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     return (
         _load("templates/goons/oci/image/goon.yml"),
         _load("templates/goons/oci/publish/goon.yml"),
@@ -76,16 +88,25 @@ def _contracts() -> tuple[dict, dict, dict]:
     )
 
 
-def test_m135_shipped_registry_and_workspace_routes_have_one_authority() -> None:
-    assert not _registry_route_errors(*_contracts())
+def test_m135_shipped_registry_and_workspace_routes_have_one_authority(
+    tmp_path: Path,
+) -> None:
+    assert not _registry_route_errors(tmp_path, *_contracts())
 
 
 @pytest.mark.parametrize(
     ("which", "field"),
-    ((0, "registry"), (1, "registry"), (2, "forward-base"), (2, "forward-publish"),
-     (2, "workspace")),
+    (
+        (0, "registry"),
+        (1, "registry"),
+        (2, "forward-base"),
+        (2, "forward-publish"),
+        (2, "workspace"),
+    ),
 )
-def test_m135_mutated_registry_or_workspace_wiring_is_detected(which: int, field: str) -> None:
+def test_m135_mutated_registry_or_workspace_wiring_is_detected(
+    tmp_path: Path, which: int, field: str
+) -> None:
     inputs = [copy.deepcopy(value) for value in _contracts()]
     if field == "registry" and which == 0:
         inputs[0]["steps"][0]["registries"][0]["hostname"] = (
@@ -97,56 +118,51 @@ def test_m135_mutated_registry_or_workspace_wiring_is_detected(which: int, field
         )
     elif field == "forward-base":
         # Change only this recipient; the parent name remains declared.
-        inputs[2]["goons"][0]["pass"].remove("base_registry_hostname")
+        inputs[2]["goons"][0] = {"import": "oci/image"}
         inputs[2]["goons"][0].setdefault("with", {})["base_registry_hostname"] = (
             "${{ inputs.publish_registry_hostname }}"
         )
     elif field == "forward-publish":
-        inputs[2]["goons"][1]["pass"].remove("publish_registry_hostname")
         inputs[2]["goons"][1].setdefault("with", {})["publish_registry_hostname"] = (
             "${{ inputs.base_registry_hostname }}"
         )
     else:
         inputs[2]["goons"][1]["with"]["source_workspace"] = "some-local-file"
-    assert _registry_route_errors(*inputs)
-
-
-def test_pass_and_with_cannot_silently_override_one_recipient() -> None:
-    import_item = {"import": "oci/image", "pass": ["base_registry_hostname"],
-                   "with": {"base_registry_hostname": "unexpected"}}
-    with pytest.raises(ValueError, match="both provide the same recipient"):
-        _authored_bindings(import_item)
-
-
-def test_authored_bindings_preserve_workspace_edge_and_exact_recipient() -> None:
-    composite = _contracts()[2]
-    image = _authored_bindings(composite["goons"][0])
-    publish = _authored_bindings(composite["goons"][1])
-    assert "publish_registry_hostname" not in image
-    assert "base_registry_hostname" not in publish
-    assert publish["source_workspace"] == "${{ goons.oci-image.workspace }}"
+    assert _registry_route_errors(tmp_path, *inputs)
 
 
 def test_m135_docs_cover_exact_shipped_caller_inputs_without_a_maximum() -> None:
     document = GUIDE.read_text(encoding="utf-8")
     plan = _load("templates/plans/oci/release-deploy/plan.yml")
-    assert all(re.search(rf"^\| `{re.escape(name)}` \| A:", document, re.M)
-               for name in plan["inputs"])
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
+    names = {
+        item.definition.name
+        for item in resolver.inspect_inputs(OCI_PLANS / "release-deploy/plan.yml")
+    }
+    assert all(
+        re.search(rf"^\| `{re.escape(name)}` \| A:", document, re.M) for name in names
+    )
     assert "no arbitrary maximum input count" in document
     assert "No B/C/D input" in document
-    assert "${{ goons.oci-publish-image.outputs.OCI_REFERENCE }}" == (
-        plan["goons"][-1]["with"]["image"]
+    assert (
+        "${{ goons.oci-publish-image.outputs.OCI_REFERENCE }}"
+        == (plan["goons"][-1]["with"]["image"])
     )
-    assert "image" not in plan["inputs"]
-    assert "source_workspace" not in plan["inputs"]
-    assert "source_workspace" not in _load(
-        "templates/plans/oci/publish-image/plan.yml"
-    )["inputs"]
+    assert "image" not in names
+    assert "source_workspace" not in names
     for name in ("oci/release", "oci/publish-image", "oci/release-deploy"):
-        selected = _load(f"templates/plans/{name}/plan.yml")
-        assert "base_registry_hostname" in selected["inputs"]
-        assert "publish_registry_hostname" in selected["inputs"]
-        assert "publish_repository" in selected["inputs"]
+        public = {
+            item.definition.name
+            for item in resolver.inspect_inputs(
+                ROOT / "templates/plans" / name / "plan.yml"
+            )
+        }
+        assert {
+            "base_registry_hostname",
+            "publish_registry_hostname",
+            "publish_repository",
+        } <= public
+        assert "source_workspace" not in public
 
 
 def test_m135_oci_documentation_links_and_examples_do_not_go_stale() -> None:

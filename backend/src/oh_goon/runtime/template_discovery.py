@@ -11,7 +11,6 @@ from oh_goon.core.template_identity import (
 )
 
 
-
 def discover_template_packages(root: Path, *, source_name: str, kind: str) -> dict[str, Path]:
     """Discover exact type/category/name packages without recursive lookup or aliases."""
 
@@ -106,7 +105,9 @@ def template_readme_description(directory: Path, *, kind: str) -> str:
     try:
         lines = readme.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        raise FleetPlanSourceNotFound(f"{kind} template {directory.name} README.md is unreadable") from exc
+        raise FleetPlanSourceNotFound(
+            f"{kind} template {directory.name} README.md is unreadable"
+        ) from exc
 
     paragraph: list[str] = []
     heading = ""

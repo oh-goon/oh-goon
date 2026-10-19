@@ -60,7 +60,9 @@ def test_recovery_finishes_metadata_cleanup_when_object_already_absent(tmp_path:
     assert not deletion_intent_path(store.root, retained.object_id).exists()
 
 
-def test_recovery_removes_pre_intent_orphan_lifecycle_without_inventing_content(tmp_path: Path) -> None:
+def test_recovery_removes_pre_intent_orphan_lifecycle_without_inventing_content(
+    tmp_path: Path,
+) -> None:
     store = FleetContentStore(tmp_path / "store-orphan")
     retained = _put_file(store, tmp_path, "payload-orphan", "stable")
     store.release_reference(retained.reference_id, owner_repository_id=OWNER)
@@ -94,7 +96,5 @@ def test_abandoned_lifecycle_temp_is_removed_only_under_store_lock_recovery(tmp_
 
     result = store.reconcile_interrupted_maintenance()
 
-    assert result.removed_temporary_records == (
-        "object-lifecycle/file/.dead.json.crash.tmp",
-    )
+    assert result.removed_temporary_records == ("object-lifecycle/file/.dead.json.crash.tmp",)
     assert not temp.exists()

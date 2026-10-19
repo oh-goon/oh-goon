@@ -15,6 +15,7 @@ from oh_goon.repository_tooling.architecture.shell_semantics import (
     shell_semantic_commands,
 )
 
+
 def _check_development_test_runner_boundary(root: Path) -> list[Violation]:
     path = root / "scripts" / "development_test.sh"
     if not path.is_file():
@@ -36,36 +37,73 @@ def _check_development_test_runner_boundary(root: Path) -> list[Violation]:
         if (target := make_target(command.argv)) is not None and not target.startswith("<VAR:")
     ]
     violations: list[Violation] = []
-    required = {"test-python", "test-tooling", "test-integration", "test-frontend", "frontend-typecheck"}
+    required = {
+        "test-python",
+        "test-tooling",
+        "test-integration",
+        "test-frontend",
+        "frontend-typecheck",
+    }
     missing = sorted(required - set(scheduled))
     if missing:
-        violations.append(Violation(path, f"development test runner is missing fast code checks: {', '.join(missing)}"))
+        violations.append(
+            Violation(
+                path, f"development test runner is missing fast code checks: {', '.join(missing)}"
+            )
+        )
     forbidden = {
-        "certify", "browser-test", "browser-required-certification", "browser-targeted-certification",
-        "backend-check", "tooling-check", "frontend-check", "format", "format-check", "lint",
-        "quality-check", "quality-raise", "verify-p1", "local-runtime-verification",
-        "strict-local-runtime-acceptance", "backend-install", "frontend-install",
-        "qualification-preflight", "frontend-dependencies-check",
+        "certify",
+        "browser-test",
+        "browser-required-certification",
+        "browser-targeted-certification",
+        "backend-check",
+        "tooling-check",
+        "frontend-check",
+        "format",
+        "format-check",
+        "lint",
+        "quality-check",
+        "quality-raise",
+        "verify-p1",
+        "local-runtime-verification",
+        "strict-local-runtime-acceptance",
+        "backend-install",
+        "frontend-install",
+        "qualification-preflight",
+        "frontend-dependencies-check",
     }
     leaked = sorted(forbidden & set(scheduled))
     if leaked:
-        violations.append(Violation(path, "development test runner must not schedule later quality/certification or acquisition gates: " + ", ".join(leaked)))
+        violations.append(
+            Violation(
+                path,
+                "development test runner must not schedule later quality/certification or acquisition gates: "
+                + ", ".join(leaked),
+            )
+        )
     ordered = ("test-python-core-diagnostic", "test-python-dependency-complete", "check-generated")
     if all(target in scheduled for target in ordered):
         positions = tuple(scheduled.index(target) for target in ordered)
         if positions != tuple(sorted(positions)):
-            violations.append(Violation(path, "development tests must run dependency-light diagnostics before dependency-complete/generated checks"))
-    authority_tokens = {
-        token
-        for command in commands
-        for token in command.argv
-    }
+            violations.append(
+                Violation(
+                    path,
+                    "development tests must run dependency-light diagnostics before dependency-complete/generated checks",
+                )
+            )
+    authority_tokens = {token for command in commands for token in command.argv}
     if any(
         Path(token).name == "oh-goon-workflow" or token in {"systemd-run", "Delegate=yes"}
         for token in authority_tokens
     ):
-        violations.append(Violation(path, "development test runner must not depend on APP certification or physical executor establishment"))
+        violations.append(
+            Violation(
+                path,
+                "development test runner must not depend on APP certification or physical executor establishment",
+            )
+        )
     return violations
+
 
 def _check_backend_dependency_complete_partition(root: Path) -> list[Violation]:
     """Leaf HTTP-client compatibility must not block unrelated unit collection."""
@@ -81,7 +119,9 @@ def _check_backend_dependency_complete_partition(root: Path) -> list[Violation]:
 
     if product.is_file():
         text = product.read_text(encoding="utf-8")
-        if any(line == "import httpx2" or line.startswith("from httpx2") for line in text.splitlines()):
+        if any(
+            line == "import httpx2" or line.startswith("from httpx2") for line in text.splitlines()
+        ):
             violations.append(
                 Violation(
                     product,
@@ -95,19 +135,32 @@ def _check_backend_dependency_complete_partition(root: Path) -> list[Violation]:
             continue
         for path in surface.rglob("test_*.py"):
             text = path.read_text(encoding="utf-8")
-            if any(line == "import httpx2" or line.startswith("from httpx2") for line in text.splitlines()):
+            if any(
+                line == "import httpx2" or line.startswith("from httpx2")
+                for line in text.splitlines()
+            ):
                 violations.append(
-                    Violation(path, "pre-dependency test surfaces must not import dependency-complete httpx2 directly")
+                    Violation(
+                        path,
+                        "pre-dependency test surfaces must not import dependency-complete httpx2 directly",
+                    )
                 )
 
-    late_httpx2 = tuple(
-        path
-        for path in dependency_complete.rglob("*.py")
-        if "import httpx2" in path.read_text(encoding="utf-8")
-    ) if dependency_complete.is_dir() else ()
+    late_httpx2 = (
+        tuple(
+            path
+            for path in dependency_complete.rglob("*.py")
+            if "import httpx2" in path.read_text(encoding="utf-8")
+        )
+        if dependency_complete.is_dir()
+        else ()
+    )
     if not late_httpx2:
         violations.append(
-            Violation(dependency_complete, "dependency-complete unit surface must own the real httpx2 transport contract")
+            Violation(
+                dependency_complete,
+                "dependency-complete unit surface must own the real httpx2 transport contract",
+            )
         )
 
     violations.extend(_check_hosted_diagnostic_contract(diagnostic))
@@ -129,9 +182,15 @@ def _check_backend_dependency_complete_partition(root: Path) -> list[Violation]:
             return tuple(payload(command.argv) for command in facts.target_commands.get(target, ()))
 
         diagnostic_payloads = target_payloads("test-python-core-diagnostic")
-        if not any(argv[-2:] == ("bash", "scripts/backend_core_test_diagnostic.sh") for argv in diagnostic_payloads):
+        if not any(
+            argv[-2:] == ("bash", "scripts/backend_core_test_diagnostic.sh")
+            for argv in diagnostic_payloads
+        ):
             violations.append(
-                Violation(makefile, "backend unit dependency partition is missing: hosted diagnostic owner")
+                Violation(
+                    makefile,
+                    "backend unit dependency partition is missing: hosted diagnostic owner",
+                )
             )
 
         bounded = {
@@ -481,10 +540,7 @@ def _scan_hosted_shell(
             kind = _classify_hosted_action(argv)
             if kind is None:
                 continue
-            environment = {
-                name: local_scalars.get(name, f"<VAR:{name}>")
-                for name in local_exports
-            }
+            environment = {name: local_scalars.get(name, f"<VAR:{name}>") for name in local_exports}
             environment.update(command_environment)
             actions.append(
                 _HostedDiagnosticAction(
@@ -531,7 +587,9 @@ def _check_hosted_diagnostic_contract(diagnostic: Path) -> list[Violation]:
     violations: list[Violation] = []
 
     if "diagnostic only" not in text.lower():
-        violations.append(Violation(diagnostic, "hosted execution surface must remain diagnostic only"))
+        violations.append(
+            Violation(diagnostic, "hosted execution surface must remain diagnostic only")
+        )
     violations.extend(_check_host_python_selector_contract(diagnostic.parent / "host_python.sh"))
     violations.extend(_surface_contract_violations(diagnostic, functions))
 
@@ -555,7 +613,8 @@ def _check_hosted_diagnostic_contract(diagnostic: Path) -> list[Violation]:
         violations.append(
             Violation(
                 diagnostic,
-                "hosted diagnostic must not perform dependency acquisition: " + " ".join(action.argv[:3]),
+                "hosted diagnostic must not perform dependency acquisition: "
+                + " ".join(action.argv[:3]),
             )
         )
 
@@ -563,24 +622,40 @@ def _check_hosted_diagnostic_contract(diagnostic: Path) -> list[Violation]:
     workloads = [action for action in actions if action.kind == "workload"]
     receipts = [action for action in actions if action.kind == "receipt"]
     if not capabilities:
-        violations.append(Violation(diagnostic, "hosted capability classification action is missing"))
+        violations.append(
+            Violation(diagnostic, "hosted capability classification action is missing")
+        )
     if not workloads:
-        violations.append(Violation(diagnostic, "hosted dependency-light workload action is missing"))
+        violations.append(
+            Violation(diagnostic, "hosted dependency-light workload action is missing")
+        )
     if not receipts:
         violations.append(Violation(diagnostic, "hosted diagnostic receipt action is missing"))
 
     if capabilities and workloads and capabilities[0].order >= workloads[0].order:
         violations.append(
-            Violation(diagnostic, "hosted capability classification must complete before hosted workload execution")
+            Violation(
+                diagnostic,
+                "hosted capability classification must complete before hosted workload execution",
+            )
         )
     if receipts and workloads and receipts[-1].order <= workloads[-1].order:
-        violations.append(Violation(diagnostic, "hosted diagnostic receipt must be produced after hosted workload execution"))
+        violations.append(
+            Violation(
+                diagnostic,
+                "hosted diagnostic receipt must be produced after hosted workload execution",
+            )
+        )
 
     capability_output = _argument(capabilities[0].argv, "--output") if capabilities else None
     if capabilities:
         capability = capabilities[0]
         if capability.environment.get("PYTHONNOUSERSITE") != "1":
-            violations.append(Violation(diagnostic, "hosted capability classification must disable user-site imports"))
+            violations.append(
+                Violation(
+                    diagnostic, "hosted capability classification must disable user-site imports"
+                )
+            )
         try:
             script_index = capability.argv.index("-I") + 1
             capability_script = capability.argv[script_index]
@@ -589,7 +664,9 @@ def _check_hosted_diagnostic_contract(diagnostic: Path) -> list[Violation]:
         if capability_script.startswith("<ROOT>/"):
             capability_path = diagnostic.parent.parent / capability_script[len("<ROOT>/") :]
             if not capability_path.is_file():
-                violations.append(Violation(capability_path, "hosted dependency capability owner is missing"))
+                violations.append(
+                    Violation(capability_path, "hosted dependency capability owner is missing")
+                )
 
     for workload in workloads:
         if workload.environment.get("PYTHONPATH") != "<ROOT>/backend/src":
@@ -601,48 +678,85 @@ def _check_hosted_diagnostic_contract(diagnostic: Path) -> list[Violation]:
                 )
             )
         if workload.environment.get("PYTHONNOUSERSITE") != "1":
-            violations.append(Violation(diagnostic, "hosted workload must disable user-site imports"))
+            violations.append(
+                Violation(diagnostic, "hosted workload must disable user-site imports")
+            )
         if workload.environment.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD") != "1":
-            violations.append(Violation(diagnostic, "hosted workload must disable ambient pytest plugin autoload"))
+            violations.append(
+                Violation(diagnostic, "hosted workload must disable ambient pytest plugin autoload")
+            )
         marker = _argument(workload.argv, "--marker") or ""
         marker_exclusions = set(re.findall(r"\bnot\s+([A-Za-z_][A-Za-z0-9_]*)\b", marker))
         for missing in sorted(required_exclusions - marker_exclusions):
-            violations.append(Violation(diagnostic, f"hosted workload marker exclusion is missing: {missing}"))
+            violations.append(
+                Violation(diagnostic, f"hosted workload marker exclusion is missing: {missing}")
+            )
         workers = _argument(workload.argv, "--workers")
         if workers is None or not workers.isdigit() or int(workers) > 1:
-            violations.append(Violation(diagnostic, "hosted workload worker bound must remain at most 1"))
+            violations.append(
+                Violation(diagnostic, "hosted workload worker bound must remain at most 1")
+            )
         timeout = _argument(workload.argv, "--batch-timeout")
         if timeout is None or not timeout.isdigit() or int(timeout) > 60:
-            violations.append(Violation(diagnostic, "hosted workload timeout bound must remain at most 60 seconds"))
+            violations.append(
+                Violation(
+                    diagnostic, "hosted workload timeout bound must remain at most 60 seconds"
+                )
+            )
         if "--no-timeout-bisection" not in workload.argv:
-            violations.append(Violation(diagnostic, "hosted workload must keep timeout bisection disabled"))
+            violations.append(
+                Violation(diagnostic, "hosted workload must keep timeout bisection disabled")
+            )
 
     if capability_output is not None:
         for receipt in receipts:
             if _argument(receipt.argv, "--host-capability") != capability_output:
                 violations.append(
-                    Violation(diagnostic, "hosted diagnostic receipt must bind the classified host capability artifact")
+                    Violation(
+                        diagnostic,
+                        "hosted diagnostic receipt must bind the classified host capability artifact",
+                    )
                 )
 
-    active_text = "\n".join(line for _, line in _join_shell_lines(list(enumerate(text.splitlines(), start=1))))
-    for token in ("--system-site-packages", "RETAINED_HASHMARKS", "HASHMARKS_SITE", "zipfile -e", "--exclude-dependency"):
+    active_text = "\n".join(
+        line for _, line in _join_shell_lines(list(enumerate(text.splitlines(), start=1)))
+    )
+    for token in (
+        "--system-site-packages",
+        "RETAINED_HASHMARKS",
+        "HASHMARKS_SITE",
+        "zipfile -e",
+        "--exclude-dependency",
+    ):
         if token in active_text:
             violations.append(
-                Violation(diagnostic, f"diagnostic runner must never become dependency/bootstrap authority: {token}")
+                Violation(
+                    diagnostic,
+                    f"diagnostic runner must never become dependency/bootstrap authority: {token}",
+                )
             )
     return violations
 
+
 def _check_local_executor_control_state(root: Path) -> list[Violation]:
     """Local strict executor bookkeeping must never require system-wide /run ownership."""
-    isolation = root / "backend" / "src" / "oh_goon" / "integrations" / "fleet_plan_bubblewrap_isolation.py"
+    isolation = (
+        root / "backend" / "src" / "oh_goon" / "integrations" / "fleet_plan_bubblewrap_isolation.py"
+    )
     violations: list[Violation] = []
     if isolation.is_file():
         text = isolation.read_text(encoding="utf-8")
         for token in ("/run/oh-goon", "/run/lock/oh-goon"):
             if token in text:
-                violations.append(Violation(isolation, "local Bubblewrap locks/recovery metadata must use application-owned private state rather than system-wide /run"))
+                violations.append(
+                    Violation(
+                        isolation,
+                        "local Bubblewrap locks/recovery metadata must use application-owned private state rather than system-wide /run",
+                    )
+                )
                 break
     return violations
+
 
 def _check_certification_storage_loss_boundary(root: Path) -> list[Violation]:
     """Keep storage ownership and fail-closed repair boundaries structural.
@@ -662,7 +776,7 @@ def _check_certification_storage_loss_boundary(root: Path) -> list[Violation]:
         root / "scripts/run_logged.sh",
         root / "backend/src/oh_goon/runtime/storage_health.py",
         root / "scripts/init_doctor.sh",
-        *( (dependency_policy_source,) if dependency_policy_source is not None else () ),
+        *((dependency_policy_source,) if dependency_policy_source is not None else ()),
     )
     if dependency_policy_source is None:
         violations.append(
@@ -673,7 +787,9 @@ def _check_certification_storage_loss_boundary(root: Path) -> list[Violation]:
         )
     for path in owners:
         if not path.is_file():
-            violations.append(Violation(path, "certification/bootstrap storage-loss owner is missing"))
+            violations.append(
+                Violation(path, "certification/bootstrap storage-loss owner is missing")
+            )
 
     makefile = root / "Makefile"
     if makefile.is_file():
@@ -696,12 +812,24 @@ def _check_certification_storage_loss_boundary(root: Path) -> list[Violation]:
                     )
                 )
             if "npm ci --prefer-offline" not in init_body:
-                violations.append(Violation(makefile, "make init must delegate frontend materialization directly to native npm ci"))
+                violations.append(
+                    Violation(
+                        makefile,
+                        "make init must delegate frontend materialization directly to native npm ci",
+                    )
+                )
             if "INIT_DOCTOR" in init_body or "init_doctor.sh" in init_body:
-                violations.append(Violation(makefile, "make init must not preflight host storage; init-doctor is explicit diagnostic-only tooling"))
+                violations.append(
+                    Violation(
+                        makefile,
+                        "make init must not preflight host storage; init-doctor is explicit diagnostic-only tooling",
+                    )
+                )
         if dependency_policy_source is not None:
             capability_path = dependency_policy_source.relative_to(root).as_posix()
-            policy_match = re.search(r"(?m)^DEPENDENCY_POLICY\s*=\s*(?P<command>[^\n]+)$", make_text)
+            policy_match = re.search(
+                r"(?m)^DEPENDENCY_POLICY\s*=\s*(?P<command>[^\n]+)$", make_text
+            )
             policy_command = policy_match.group("command") if policy_match is not None else ""
             if capability_path not in policy_command:
                 violations.append(
@@ -715,7 +843,12 @@ def _check_certification_storage_loss_boundary(root: Path) -> list[Violation]:
             or init_doctor_start < 0
             or "$(INIT_DOCTOR)" not in make_text[init_doctor_start:]
         ):
-            violations.append(Violation(makefile, "make init-doctor must expose the explicit diagnostic-only host-storage probe"))
+            violations.append(
+                Violation(
+                    makefile,
+                    "make init-doctor must expose the explicit diagnostic-only host-storage probe",
+                )
+            )
     else:
         violations.append(Violation(makefile, "make init/bootstrap diagnostic boundary is missing"))
 
@@ -723,6 +856,9 @@ def _check_certification_storage_loss_boundary(root: Path) -> list[Violation]:
     for path in owners:
         if path.is_file() and any(token in path.read_text(encoding="utf-8") for token in forbidden):
             violations.append(
-                Violation(path, "certification/bootstrap diagnostics must never repair host filesystem writability by remounting or permission broadening")
+                Violation(
+                    path,
+                    "certification/bootstrap diagnostics must never repair host filesystem writability by remounting or permission broadening",
+                )
             )
     return violations

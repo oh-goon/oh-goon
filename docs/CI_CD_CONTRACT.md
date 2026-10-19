@@ -155,8 +155,27 @@ Common input validation should use the small domain types (`hostname`, `reposito
 
 ## Normal trust and resources are resolved machine policy
 
-Ordinary CI/CD authors normally omit `execution:` entirely. The compiler resolves the execution
-purpose to `cicd`, trusts repository code by default, and leaves CPU, memory, and PID caps unspecified.
+Omitted `execution:` resolves to local `verification`. Ordinary trusted repository checks and
+agentic loops run through the normal Fleet/Step lifecycle without independent signer custody,
+fs-verity, privileged enrollment or an installed local model. Provider configuration selects
+the actual endpoint and model. The CLI waits for completion by default.
+
+Strict execution is an explicit choice for untrusted code or additional guarantees:
+
+```yaml
+execution:
+  purpose: cicd
+  trust_repository_code: false
+```
+
+Use `oh-goon plan run ... --strict` with the configured strict executor/deployment authority.
+For additional isolation around trusted code, omit `trust_repository_code` or set it to `true`.
+A strict Plan cannot run through the ordinary local profile. Missing strict prerequisites fail
+before workload; the command never falls back to host execution. `--standard-local` remains
+an explicit spelling of the ordinary profile. Deployment integrations select strict admission
+when they supply their provisioner. `--no-wait` is available only for deployed strict execution.
+
+Within strict CI/CD, repository code is trusted by default and CPU, memory, and PID caps are unspecified.
 There are no hidden static CPU/RAM/PID defaults. Omitted caps inherit the capacity available from the
 selected executor for that admitted run, and the exact reserved capacity is bound into admission and
 Enforcer evidence. A later run may legitimately observe different available capacity.
@@ -164,6 +183,8 @@ Enforcer evidence. A later run may legitimately observe different available capa
 Portable/user-authored Plans may impose a hard cap when the operation genuinely requires one:
 
 ```yaml
+execution:
+  purpose: cicd
   resources:
     memory_mib: 4096
 ```
@@ -172,13 +193,7 @@ Omitted resource fields continue to inherit admitted executor capacity. A concre
 hard author cap and therefore requires matching executor/isolation capability before `RUN_ADMITTED`.
 Canonical shipped Plan templates intentionally do not author fixed resource caps.
 
-The normal local Team policy trusts repository code. When a developer deliberately wants the stronger untrusted-code boundary, the friendly authoring switch is:
-
-```yaml
-  trust_repository_code: false
-```
-
-The internal sandbox threat-model enum is not normal pipeline vocabulary. Enforcer records the resolved trust choice and the backend must prove the requested guarantee before execution.
+Enforcer records the resolved strict trust choice and the backend must prove the requested guarantee before execution.
 
 ## Network is explicit without low-level boilerplate
 
@@ -260,7 +275,12 @@ This avoids a second runtime state machine whose observations could disagree wit
 
 ## Plan/Goon composition rules
 
-Plans select and order Goons. Plans never contain executable Steps. Atomic Goons own Steps; Composite Goons own ordered `goons:` imports. A Goon declares one form, never both. Imports are exact `category/name` capability references and mean composition only—never merge, inheritance, patch, overlay, hidden deduplication, or reordering. Inputs cross a Goon boundary only through explicit `with:` bindings and requirements remain owned by the declaring Goon.
+Plans select and order Goons. Plans never contain executable Steps. Atomic Goons own Steps; Composite Goons own ordered `goons:` imports. A Goon declares one form, never both. Imports retain exact `category/name` identities and written order. Inputs use unique named projection or explicit import-local `pass:`/`with:` on Plans and Composite Goons; multiple recipients must be explicit. Project-local sources select a contained catalog with `from:` and never shadow the shipped catalog. Requirements remain owned by their declaring Goon. See the [developer journey](../templates/README.md).
+
+Ordinary verification Plans may carry derived native uv project/group environment
+requirements. Other repository admission requirements remain CI/CD-only. Local
+verification is explicitly selected and does not replace configured strict execution
+for workloads that require its capabilities.
 
 Reusable CI/CD behavior therefore belongs in Goons. Reusable capability bundles should normally be Composite Goons; Plans remain small intent rosters. GitLab migration writes an Atomic Goon via `goon import-gitlab`, never an executable Plan.
 

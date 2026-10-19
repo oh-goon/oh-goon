@@ -16,38 +16,15 @@ from oh_goon.core.models.run import (
     FleetRunFailure,
     FleetRunState,
 )
-from oh_goon.core.run_identity import require_fleet_run_binding
 from oh_goon.core.models.run_admission import (
     ExplicitRepositoryScope,
     FleetRepositoryScope,
     FleetRunAdmissionIntent,
-    fleet_readmission_parent,
-    fleet_rerun_parent,
 )
 from oh_goon.core.models.run_events import (
-    DescendantsQuiescentEvent,
     FleetRunEvent,
     FleetRunEventBatch,
-    ProcessExitedEvent,
-    OutputFinalizedEvent,
-    OutputAbandonedEvent,
-    OutputQuarantinedEvent,
-    ProcessStartedEvent,
-    ProcessStateUnknownEvent,
-    ProcessStartingEvent,
-    ReconciliationCompletedEvent,
-    ReconciliationFailedEvent,
-    ReconciliationRequiredEvent,
-    ReconciliationStartedEvent,
     RepositoryCompletedEvent,
-    RepositoryStartedEvent,
-    StepAttemptCreatedEvent,
-    StepCancelledEvent,
-    StepFailedEvent,
-    StepReachedEvent,
-    StepSkippedEvent,
-    StepStartedEvent,
-    StepSucceededEvent,
     RunAdmittedEvent,
     RunCancelledEvent,
     RunCancelRequestedEvent,
@@ -56,9 +33,8 @@ from oh_goon.core.models.run_events import (
     RunStartedEvent,
     StorageMaintenanceRecordedEvent,
 )
-from oh_goon.core.product_identity import fleet_step_attempt_id
-from oh_goon.core.models.target import OperationTarget
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
+from oh_goon.core.models.target import OperationTarget
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
@@ -68,6 +44,16 @@ from oh_goon.core.vocabulary import (
     OperationAction,
 )
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.journal_admission_validation import (
+    _require_valid_readmission,
+    _require_valid_rerun,
+)
+from oh_goon.runtime.journal_execution_lifecycle import (
+    _execution_lifecycle_event,
+    _execution_lifecycle_identity,
+    _execution_lifecycle_payload,
+    reconciliation_lifecycle_event,
+)
 from oh_goon.runtime.journal_facts import (
     FleetOperationCommitted,
     OperationCommitted,
@@ -75,8 +61,6 @@ from oh_goon.runtime.journal_facts import (
 )
 from oh_goon.runtime.journal_store import JournalFactStore
 from oh_goon.runtime.journal_view import JournalReadView
-from oh_goon.runtime.journal_admission_validation import _require_valid_readmission, _require_valid_rerun
-from oh_goon.runtime.journal_execution_lifecycle import _execution_lifecycle_event, _execution_lifecycle_identity, _execution_lifecycle_payload, reconciliation_lifecycle_event
 
 
 def _admitted_event(
@@ -128,8 +112,6 @@ def _terminal_event(
         fleet_run_id=fleet_run_id,
         failure=failure,
     )
-
-
 
 
 class Journal:
@@ -186,11 +168,11 @@ class Journal:
         project_fleet_run_detail([*run_events, candidate], resolver)
         self._facts.append_fleet_operation(connection, canonical, candidate)
 
-
     def execution_lifecycle_observer(
         self, fleet_run_id: str, repository_id: str, operation_id: str
     ):
         """Bind one runner callback to the exact durable run/repository attempt identity."""
+
         def observe(
             step_id: str,
             step_order: int,
@@ -205,8 +187,12 @@ class Journal:
             output_count: int | None = None,
         ) -> None:
             self.record_execution_lifecycle(
-                fleet_run_id=fleet_run_id, repository_id=repository_id, operation_id=operation_id,
-                event_type=FleetRunEventType(event_type), step_id=step_id, step_order=step_order,
+                fleet_run_id=fleet_run_id,
+                repository_id=repository_id,
+                operation_id=operation_id,
+                event_type=FleetRunEventType(event_type),
+                step_id=step_id,
+                step_order=step_order,
                 attempt_number=attempt_number,
                 physical_execution_id=physical_execution_id,
                 pid=pid,
@@ -215,6 +201,7 @@ class Journal:
                 termination_reason=termination_reason,
                 output_count=output_count,
             )
+
         return observe
 
     def record_execution_lifecycle_in(
@@ -306,15 +293,23 @@ class Journal:
             )
 
     def record_storage_maintenance(
-        self, *, fleet_run_id: str, repository_id: str, operation_id: str, receipt: FleetContentMaintenanceReceipt
+        self,
+        *,
+        fleet_run_id: str,
+        repository_id: str,
+        operation_id: str,
+        receipt: FleetContentMaintenanceReceipt,
     ) -> None:
         with self._database.transaction() as connection:
             view = self._facts.read_view(connection)
             events = view.run_events(fleet_run_id).events
             candidate = StorageMaintenanceRecordedEvent(
                 event_type=FleetRunEventType.STORAGE_MAINTENANCE_RECORDED,
-                sequence=len(events) + 1, fleet_run_id=fleet_run_id,
-                repository_id=repository_id, operation_id=operation_id, receipt=receipt,
+                sequence=len(events) + 1,
+                fleet_run_id=fleet_run_id,
+                repository_id=repository_id,
+                operation_id=operation_id,
+                receipt=receipt,
             )
             project_fleet_run_detail([*events, candidate], view.operation)
             self._facts.append_run_event(connection, candidate)
@@ -417,7 +412,11 @@ class Journal:
         this capture for live pre-work evidence yet (M167+).
         """
         admitted, _ = self._prepare_run_admission_in(
-            connection, fleet_run_id, intent, repository_scope, targets,
+            connection,
+            fleet_run_id,
+            intent,
+            repository_scope,
+            targets,
         )
         return admitted
 
@@ -430,7 +429,9 @@ class Journal:
         targets: list[RepositoryIdentity],
     ) -> tuple[RunAdmittedEvent, FleetRunState]:
         if not isinstance(connection, sqlite3.Connection) or not connection.in_transaction:
-            raise JournalConflict("pre-work Fleet admission requires an existing SQLite transaction")
+            raise JournalConflict(
+                "pre-work Fleet admission requires an existing SQLite transaction"
+            )
         view = self._facts.read_view(connection)
         active = view.active_run()
         if active is not None:
@@ -457,15 +458,21 @@ class Journal:
         # The live legacy admission and the future pre-work projection MUST
         # share this validator/event constructor. Do not create a second owner.
         admitted, state = self._prepare_run_admission_in(
-            connection, fleet_run_id, intent, repository_scope, targets,
+            connection,
+            fleet_run_id,
+            intent,
+            repository_scope,
+            targets,
         )
         if intent.source is FleetRunSource.SCHEDULED:
             from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 
-            if (intent.schedule_run_id is None
-                    or len(targets) != 1
-                    or not isinstance(repository_scope, ExplicitRepositoryScope)
-                    or len(repository_scope.repository_ids) != 1):
+            if (
+                intent.schedule_run_id is None
+                or len(targets) != 1
+                or not isinstance(repository_scope, ExplicitRepositoryScope)
+                or len(repository_scope.repository_ids) != 1
+            ):
                 raise JournalConflict("Scheduled admission requires one exact repository child")
             ScheduleExecutionStore(self._database).bind_admitted_child_in(
                 connection,
@@ -544,7 +551,10 @@ class Journal:
         if state.status.terminal:
             return state
         events = list(batch.events)
-        if intent is FleetRunTerminalIntent.CANCEL and state.status is not FleetRunStatus.CANCELLING:
+        if (
+            intent is FleetRunTerminalIntent.CANCEL
+            and state.status is not FleetRunStatus.CANCELLING
+        ):
             requested = RunCancelRequestedEvent(
                 event_type=FleetRunEventType.RUN_CANCEL_REQUESTED,
                 sequence=len(events) + 1,

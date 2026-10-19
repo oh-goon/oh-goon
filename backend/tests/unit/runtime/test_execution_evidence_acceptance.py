@@ -12,7 +12,9 @@ from tests.factories.execution_materialization import ready_execution_materializ
 
 
 def _materialized(tmp_path: Path):
-    database, manager, workspace, state, checkpoint, assignment, leases, lease, materializations = ready_execution_materialization_candidate(tmp_path)
+    database, manager, workspace, state, checkpoint, assignment, leases, lease, materializations = (
+        ready_execution_materialization_candidate(tmp_path)
+    )
     materialization = materializations.materialize(
         workspace,
         assignment,
@@ -30,11 +32,35 @@ def _materialized(tmp_path: Path):
         leases=leases,
         materializations=materializations,
     )
-    return database, manager, workspace, state, checkpoint, assignment, leases, lease, materialization, authority
+    return (
+        database,
+        manager,
+        workspace,
+        state,
+        checkpoint,
+        assignment,
+        leases,
+        lease,
+        materialization,
+        authority,
+    )
 
 
-def test_acceptance_binds_exact_current_authority_without_interpreting_result(tmp_path: Path) -> None:
-    _db, _manager, workspace, _state, checkpoint, assignment, _leases, lease, materialization, authority = _materialized(tmp_path)
+def test_acceptance_binds_exact_current_authority_without_interpreting_result(
+    tmp_path: Path,
+) -> None:
+    (
+        _db,
+        _manager,
+        workspace,
+        _state,
+        checkpoint,
+        assignment,
+        _leases,
+        lease,
+        materialization,
+        authority,
+    ) = _materialized(tmp_path)
     accepted = authority.accept(
         workspace,
         assignment,
@@ -53,7 +79,18 @@ def test_acceptance_binds_exact_current_authority_without_interpreting_result(tm
 
 
 def test_acceptance_rejects_producer_or_materialization_scope_mismatch(tmp_path: Path) -> None:
-    _db, _manager, workspace, _state, checkpoint, assignment, _leases, lease, materialization, authority = _materialized(tmp_path)
+    (
+        _db,
+        _manager,
+        workspace,
+        _state,
+        checkpoint,
+        assignment,
+        _leases,
+        lease,
+        materialization,
+        authority,
+    ) = _materialized(tmp_path)
     with pytest.raises(ExecutionEvidenceRejected, match="Producer work identity"):
         authority.accept(
             workspace,
@@ -67,7 +104,18 @@ def test_acceptance_rejects_producer_or_materialization_scope_mismatch(tmp_path:
 
 
 def test_acceptance_requires_bound_writer_quiescence(tmp_path: Path) -> None:
-    _db, _manager, workspace, _state, checkpoint, assignment, leases, lease, materialization, authority = _materialized(tmp_path)
+    (
+        _db,
+        _manager,
+        workspace,
+        _state,
+        checkpoint,
+        assignment,
+        leases,
+        lease,
+        materialization,
+        authority,
+    ) = _materialized(tmp_path)
     lease = leases.mark_writer_started(
         lease,
         authority_kind="process_group",
@@ -107,7 +155,18 @@ def test_acceptance_requires_bound_writer_quiescence(tmp_path: Path) -> None:
 
 
 def test_acceptance_allows_exact_attempt_output_checkpoint_lineage(tmp_path: Path) -> None:
-    _db, manager, workspace, state, checkpoint, assignment, _leases, lease, materialization, authority = _materialized(tmp_path)
+    (
+        _db,
+        manager,
+        workspace,
+        state,
+        checkpoint,
+        assignment,
+        _leases,
+        lease,
+        materialization,
+        authority,
+    ) = _materialized(tmp_path)
     candidate_path = manager.physical_path(workspace)
     (candidate_path / "a.txt").write_text("changed\n")
     _next_state, output = manager.create_candidate_checkpoint(
@@ -131,7 +190,18 @@ def test_acceptance_allows_exact_attempt_output_checkpoint_lineage(tmp_path: Pat
 
 
 def test_acceptance_rejects_output_checkpoint_from_other_attempt(tmp_path: Path) -> None:
-    _db, manager, workspace, state, checkpoint, assignment, _leases, lease, materialization, authority = _materialized(tmp_path)
+    (
+        _db,
+        manager,
+        workspace,
+        state,
+        checkpoint,
+        assignment,
+        _leases,
+        lease,
+        materialization,
+        authority,
+    ) = _materialized(tmp_path)
     candidate_path = manager.physical_path(workspace)
     (candidate_path / "a.txt").write_text("foreign\n")
     _next_state, output = manager.create_candidate_checkpoint(
@@ -154,7 +224,18 @@ def test_acceptance_rejects_output_checkpoint_from_other_attempt(tmp_path: Path)
 
 
 def test_acceptance_is_single_final_receipt_per_materialization(tmp_path: Path) -> None:
-    _db, _manager, workspace, _state, checkpoint, assignment, _leases, lease, materialization, authority = _materialized(tmp_path)
+    (
+        _db,
+        _manager,
+        workspace,
+        _state,
+        checkpoint,
+        assignment,
+        _leases,
+        lease,
+        materialization,
+        authority,
+    ) = _materialized(tmp_path)
     authority.accept(
         workspace,
         assignment,

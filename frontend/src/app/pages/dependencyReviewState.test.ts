@@ -9,7 +9,6 @@ describe("dependencyReviewState", () => {
       packageName: "mlflow",
       versionSpecifier: "<2.18.0",
       advisoryId: "CVE-2026-MLFLOW",
-      relationship: "direct",
       evidence: "current",
       coverage: "matching",
       offset: 25,
@@ -22,7 +21,6 @@ describe("dependencyReviewState", () => {
       packageName: "mlflow",
       versionSpecifier: "<2.18.0",
       advisoryId: "CVE-2026-MLFLOW",
-      relationship: "direct",
       evidence: "current",
       coverage: "matching",
       offset: 25,
@@ -39,14 +37,13 @@ describe("dependencyReviewState", () => {
     expect(state.resolvedVersion).toBe("");
     expect(state.versionSpecifier).toBe("");
     expect(state.advisoryId).toBe("");
-    expect(state.relationship).toBe("all");
     expect(state.evidence).toBe("all");
   });
 
   it("serializes a non-default coverage population explicitly", () => {
-    expect(dependencyQuery({ packageName: "mlflow", coverage: "proven_no_match" })).toEqual({
+    expect(dependencyQuery({ packageName: "mlflow", coverage: "absent_from_lock" })).toEqual({
       package: "mlflow",
-      coverage: "proven_no_match",
+      coverage: "absent_from_lock",
     });
   });
 });

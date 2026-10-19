@@ -11,15 +11,15 @@ from tempfile import TemporaryDirectory
 from time import perf_counter
 
 from oh_goon.core.execution_observability import RepositoryRunObservation
-from oh_goon.scout.models import ScoutWindow
+from oh_goon.core.time import utc_now
+from oh_goon.core.vocabulary import GameTapeStatus
+from oh_goon.runtime.database import LocalDatabase
 from oh_goon.scout.evidence import (
     ScoutEvidenceSnapshot,
     ScoutStepObservation,
 )
+from oh_goon.scout.models import ScoutWindow
 from oh_goon.scout.projection import project_scout_findings, project_scout_overview
-from oh_goon.core.time import utc_now
-from oh_goon.core.vocabulary import GameTapeStatus
-from oh_goon.runtime.database import LocalDatabase
 from oh_goon.scout.store import ScoutObservationStore
 
 
@@ -70,9 +70,7 @@ def run_probe(
     snapshot = build_scout_load_snapshot(
         repositories=repositories, steps_per_repository=steps_per_repository, now=now
     )
-    overview_ms = _projection_ms(
-        lambda: project_scout_overview(snapshot, window=window, limit=20)
-    )
+    overview_ms = _projection_ms(lambda: project_scout_overview(snapshot, window=window, limit=20))
     findings_ms = _projection_ms(
         lambda: project_scout_findings(
             snapshot, window=window, category="CPU_OUTLIER", offset=0, limit=20
@@ -261,12 +259,8 @@ def build_scout_load_snapshot(
             eligible_attempts=1,
             cpu_observed_attempts=1,
             memory_observed_attempts=1,
-            observed_cpu_seconds=20.0
-            if repository == 0
-            else float((repository % 7) + 1),
-            complete_cpu_seconds=20.0
-            if repository == 0
-            else float((repository % 7) + 1),
+            observed_cpu_seconds=20.0 if repository == 0 else float((repository % 7) + 1),
+            complete_cpu_seconds=20.0 if repository == 0 else float((repository % 7) + 1),
             observed_peak_memory_bytes=256 * 1024 * 1024,
             complete_peak_memory_bytes=256 * 1024 * 1024,
             environment_key=(
@@ -281,9 +275,7 @@ def build_scout_load_snapshot(
         for repository in range(repositories)
         for step in range(steps_per_repository)
     )
-    return ScoutEvidenceSnapshot(
-        journal_revision=journal_revision, runs=runs, steps=steps
-    )
+    return ScoutEvidenceSnapshot(journal_revision=journal_revision, runs=runs, steps=steps)
 
 
 def _changed_snapshot(
@@ -312,9 +304,7 @@ def _changed_snapshot(
         for step in snapshot.steps
         if step.run_id in selected
     )
-    return ScoutEvidenceSnapshot(
-        journal_revision=journal_revision, runs=runs, steps=steps
-    )
+    return ScoutEvidenceSnapshot(journal_revision=journal_revision, runs=runs, steps=steps)
 
 
 def _milliseconds_since(started: float) -> float:

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from contextlib import closing
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
 from oh_goon.runtime.database import (
     DATABASE_SCHEMA_VERSION,
-    DatabasePathIdentityLost,
-    LocalDatabase,
     SQLITE_JOURNAL_DELETE,
     SQLITE_JOURNAL_WAL,
+    DatabasePathIdentityLost,
+    LocalDatabase,
     default_database_path,
     sqlite_journal_mode_for_path,
 )
@@ -165,32 +165,24 @@ def test_local_database_confirms_persistent_notadb_before_identity_loss(
     assert [event.outcome for event in events] == ["requested", "requested", "failed"]
 
 
-def test_sqlite_journal_auto_refuses_wal_before_fixed_sqlite(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_sqlite_journal_auto_refuses_wal_before_fixed_sqlite(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         "oh_goon.runtime._database_policy._filesystem_type_for_path", lambda _path: "ext4"
     )
 
     assert (
-        sqlite_journal_mode_for_path(
-            tmp_path / "state.db", sqlite_version=(3, 51, 2)
-        )
+        sqlite_journal_mode_for_path(tmp_path / "state.db", sqlite_version=(3, 51, 2))
         == SQLITE_JOURNAL_DELETE
     )
 
 
-def test_sqlite_journal_auto_refuses_wal_on_unsafe_filesystem(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_sqlite_journal_auto_refuses_wal_on_unsafe_filesystem(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         "oh_goon.runtime._database_policy._filesystem_type_for_path", lambda _path: "9p"
     )
 
     assert (
-        sqlite_journal_mode_for_path(
-            tmp_path / "state.db", sqlite_version=(3, 51, 3)
-        )
+        sqlite_journal_mode_for_path(tmp_path / "state.db", sqlite_version=(3, 51, 3))
         == SQLITE_JOURNAL_DELETE
     )
 
@@ -203,9 +195,7 @@ def test_sqlite_journal_auto_allows_wal_only_on_proven_safe_runtime_and_filesyst
     )
 
     assert (
-        sqlite_journal_mode_for_path(
-            tmp_path / "state.db", sqlite_version=(3, 51, 3)
-        )
+        sqlite_journal_mode_for_path(tmp_path / "state.db", sqlite_version=(3, 51, 3))
         == SQLITE_JOURNAL_WAL
     )
 
@@ -225,9 +215,7 @@ def test_explicit_wal_fails_closed_when_storage_is_not_proven_safe(
         )
 
 
-def test_local_database_applies_resolved_rollback_journal_mode(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_local_database_applies_resolved_rollback_journal_mode(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OH_GOON_SQLITE_JOURNAL_MODE", "DELETE")
     path = tmp_path / "state" / "oh-goon.db"
 
@@ -252,9 +240,12 @@ def test_admitted_observer_has_query_only_and_authorizer_mutation_fences(
             connection.execute("CREATE TABLE should_never_exist(value INTEGER)")
 
     with closing(sqlite3.connect(path)) as connection:
-        assert connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='should_never_exist'"
-        ).fetchone() is None
+        assert (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='should_never_exist'"
+            ).fetchone()
+            is None
+        )
 
 
 def test_write_capable_runtime_connection_reasserts_synchronous_full(
@@ -283,10 +274,14 @@ def test_local_database_rejects_same_inode_schema_cookie_drift_with_same_user_ve
     admitted_inode = path.stat().st_ino
 
     with closing(sqlite3.connect(path)) as connection:
-        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == DATABASE_SCHEMA_VERSION
+        assert (
+            int(connection.execute("PRAGMA user_version").fetchone()[0]) == DATABASE_SCHEMA_VERSION
+        )
         connection.execute("CREATE TABLE external_schema_drift(value INTEGER)")
         connection.commit()
-        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == DATABASE_SCHEMA_VERSION
+        assert (
+            int(connection.execute("PRAGMA user_version").fetchone()[0]) == DATABASE_SCHEMA_VERSION
+        )
     assert path.stat().st_ino == admitted_inode
 
     with pytest.raises(DatabasePathIdentityLost, match="schema identity changed"):
@@ -456,7 +451,9 @@ def _sqlite_economics_snapshot(database: LocalDatabase) -> tuple[tuple[object, .
 def test_sqlite_access_diagnostics_observer_effect_is_semantically_neutral(tmp_path: Path) -> None:
     """J-05/X14: enabling passive economics counters cannot change durable semantics."""
 
-    def exercise(path: Path, *, diagnostics: bool) -> tuple[int, int, tuple[tuple[object, ...], ...]]:
+    def exercise(
+        path: Path, *, diagnostics: bool
+    ) -> tuple[int, int, tuple[tuple[object, ...], ...]]:
         database = LocalDatabase(path, journal_mode="DELETE")
         database.sqlite_diagnostics.set_enabled(diagnostics)
         before = database.durable_revision()

@@ -1,22 +1,48 @@
 # oci/release-deploy
 
-**Production template. Production Plan.**
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
 Strict quality-gated immutable deployment example: run Python quality, build and content-addressedly publish one OCI image, then commit that exact digest reference to one Kubernetes Deployment container, then explicitly verify that exact Deployment generation. No mutable image tag, kubeconfig, Helm/apply merge, or implicit rollout watcher exists.
 
-## Contract
+## Use this Plan
 
-- Canonical identity: `oci/release-deploy`.
-- Effective execution/resource policy is machine-owned and rendered by Plan inspection; this README does not duplicate it.
-- Executable behavior is forbidden here; this file is an ordered Goon roster.
-- Inputs: `coverage_threshold`, `base_registry_hostname`, `publish_registry_hostname`, `publish_repository`, `containerfile`, `context`, `platform`, `kubernetes_api_hostname`, `namespace`, `deployment`, `container`.
-- Ordered Goons: `python/quality`, `oci/publish-image`, `kubernetes/release`.
+```sh
+oh-goon templates show oci/release-deploy --kind plan
+oh-goon plan inputs templates/plans/oci/release-deploy/plan.yml
+```
 
-## Safety boundary
+Copy with `oh-goon templates show oci/release-deploy --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
 
-The Plan contains no executable Steps. It only selects ordered Goons; execution/resource policy is resolved by the machine-owned Plan contract and admitted executor capacity, while implementation, requirements, secrets, network authority, and artifacts stay with the owning Goons.
+Prepare the selected OCI execution provider and registry access before execution. Base-image pull and destination publication registries are independent inputs. Credentials use the declared host-backed environment sources, never values files. Inspect digest/workspace outputs through the Run; publishing and retained bytes require their configured owners.
 
-Machine-readable truth is [`plan.yml`](./plan.yml). The README explains intent and safety only; it is never runtime authority.
+## Configure a copy
+
+Save the following illustrative values as `values.yml`. Replace example infrastructure addresses and targets with your own before submitting work. Credentials remain in the declared environment bindings.
+
+```yaml
+inputs:
+  base_registry_hostname: registry.example.com
+  publish_registry_hostname: harbor.example.com
+  publish_repository: team/app
+  containerfile: Dockerfile
+  context: .
+  platform: linux/amd64
+  kubernetes_api_hostname: kube.example.com
+  namespace: production
+  deployment: api
+  container: api
+  typechecker: ty
+```
+
+Validate and lock the same selection:
+
+```sh
+oh-goon plan validate plan.yml --inputs-file values.yml
+oh-goon lock plan.yml --inputs-file values.yml
+```
+
+Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.
+
 
 ## OCI registry and caller-choice contract
 

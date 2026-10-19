@@ -3,14 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.fleet_plan_output_refs import goon_workspace_reference
 from oh_goon.core.fleet_plan_composition import (
     bind_inputs,
     qualify_step_dependencies,
     render_step,
     resolve_output_references,
 )
+from oh_goon.core.fleet_plan_output_refs import goon_workspace_reference
 from oh_goon.core.models.fleet_plan import (
+    AgentPlanStep,
     CompiledExecutionTemplate,
     CompiledGoonImportStep,
     ResolvedImport,
@@ -27,11 +28,11 @@ from oh_goon.services.fleet_plan_composition_scope import (
     referenced_step_ids,
     render_pipeline_step,
 )
-from oh_goon.services.fleet_plan_resolution_context import FleetPlanResolutionContext
 from oh_goon.services.fleet_plan_input_resolution import (
     materialize_projected_inputs,
     resolve_input_sources,
 )
+from oh_goon.services.fleet_plan_resolution_context import FleetPlanResolutionContext
 from oh_goon.services.fleet_plan_step_resolution import resolve_plan_step
 
 
@@ -91,12 +92,26 @@ def resolve_compiled_steps(
         step = qualify_step_dependencies(
             step, prefix, goon_aliases, preserved_step_ids=external_step_ids
         )
+        agent_handoff = (
+            context.agent_capture(
+                plan_path,
+                # Rendering revalidates numeric defaults. Preserve the authored
+                # timeout scalar so existing immutable deliveries keep their bytes.
+                step.model_copy(update={"timeout_seconds": raw_step.timeout_seconds}),
+                qualified_step_id(prefix, step.step_id),
+                compiled.inputs,
+                input_values,
+            )
+            if isinstance(step, AgentPlanStep) and context.agent_capture is not None
+            else None
+        )
         resolved_step = resolve_plan_step(
             context,
             step,
             plan_base=plan_path.parent,
             step_id=qualified_step_id(prefix, step.step_id),
             value_compiler=value_compiler,
+            agent_handoff=agent_handoff,
         )
         resolved.append(resolved_step)
         source = _resolved_step_source(context, plan_path, raw_step.step_id, resolved_step.step_id)
@@ -130,7 +145,7 @@ def resolve_goon_edge(
     tuple[ResolvedStepSource, ...],
     tuple,
 ]:
-    source = context.source_graph.goon(plan_path, step.goon)
+    source = context.source_graph.goon(plan_path, step)
     child_path = source.path
     child = materialize_projected_inputs(context.source_graph, child_path)
     if source.package_name != step.goon or source.source_sha256 is None:
@@ -164,6 +179,7 @@ def resolve_goon_edge(
     bind_goon_alias(step, scope, goon_aliases, goon_workspaces)
     parent = ResolvedImport(
         import_id=scope.prefix,
+        phase=step.phase,
         name=step.goon,
         source_sha256=source.source_sha256,
         step_ids=tuple(item.step_id for item in scope.steps),
@@ -220,27 +236,20 @@ def child_goon_bindings(
         workspace_goon = (
             goon_workspace_reference(item.value) if isinstance(item.value, str) else None
         )
-        if definition.input_type is PlanInputType.WORKSPACE_REFERENCE:
-            if workspace_goon is None:
-                raise FleetPlanInvalid(
-                    f"Goon input {item.name!r} is a structural workspace reference and must bind "
-                    "one ${{ goons.<goon>.workspace }} value"
-                )
-            producer = goon_workspaces.get(workspace_goon)
-            if producer is None:
-                raise FleetPlanInvalid(
-                    f"Goon import {workspace_goon} does not publish a workspace"
-                )
-            explicit[item.name] = producer
-            origins[item.name] = f"workspace:{workspace_goon}"
-            referenced_workspaces.add(producer)
-            continue
+        if definition.input_type is PlanInputType.WORKSPACE_REFERENCE and workspace_goon is None:
+            raise FleetPlanInvalid(
+                f"Goon input {item.name!r} is a structural workspace reference and must bind "
+                "one ${{ goons.<goon>.workspace }} value"
+            )
         if workspace_goon is not None:
             producer = goon_workspaces.get(workspace_goon)
             if producer is None:
-                raise FleetPlanInvalid(
-                    f"Goon import {workspace_goon} does not publish a workspace"
-                )
+                if workspace_goon not in goon_aliases:
+                    raise FleetPlanInvalid(
+                        f"Goon workspace {workspace_goon} is unavailable from earlier imports; "
+                        "place the producer before this consumer and check the import ID and workspace publication"
+                    )
+                raise FleetPlanInvalid(f"Goon import {workspace_goon} does not publish a workspace")
             explicit[item.name] = producer
             origins[item.name] = f"workspace:{workspace_goon}"
             referenced_workspaces.add(producer)
@@ -259,6 +268,7 @@ def child_goon_bindings(
     external.update(referenced_workspaces)
     return inputs, origins, frozenset(external)
 
+
 def _resolved_step_source(
     context: FleetPlanResolutionContext,
     plan_path: Path,
@@ -271,7 +281,8 @@ def _resolved_step_source(
         return None
     return ResolvedStepSource(
         step_id=resolved_step_id,
-        source=_source_label(context, node.path, node.package_kind, node.package_name),
+        source=node.local_source
+        or _source_label(context, node.path, node.package_kind, node.package_name),
         line=position.line,
         column=position.column,
     )

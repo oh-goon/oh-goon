@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from oh_goon.api.errors import ApiErrorResponse
-from oh_goon.core.errors import ErrorKind
 from oh_goon.core import local_access_protocol
+from oh_goon.core.errors import ErrorKind
 
 LOCAL_ACCESS_HEADER = "X-Oh-Goon-Local-Access"
 LOCAL_ACCESS_COOKIE = "oh_goon_local_access"

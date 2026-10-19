@@ -11,7 +11,6 @@ from oh_goon import cli_parser
 from oh_goon.repository_tooling import _self_certification_plan_units as contract
 from oh_goon.repository_tooling import self_certification_plan as plan_module
 
-
 _CONTRACT_NAMES = {
     "PLAN_NAME",
     "SCRIPTS_SURFACE",
@@ -35,12 +34,14 @@ def test_self_certification_contract_owner_change_reaches_all_consumers(
     root = _root()
     metadata = tmp_path / "checkpoint-parent.json"
     metadata.write_text(
-        json.dumps({
-            "schema": 1,
-            "version": "0.9.0",
-            "artifact": "oh-goon-0.9.0.zip",
-            "sha256": "0" * 64,
-        }),
+        json.dumps(
+            {
+                "schema": 1,
+                "version": "0.9.0",
+                "artifact": "oh-goon-0.9.0.zip",
+                "sha256": "0" * 64,
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(self_certification_artifacts, "PARENT_METADATA", metadata)
@@ -64,9 +65,7 @@ def test_self_certification_contract_owner_change_reaches_all_consumers(
     script_tests = sorted((root / "scripts/tests").glob("test_*.py"))
 
     assert changed["plan"] == "builtin:self-verification-m91-test"
-    assert changed["inherited_closure_contracts"] == {
-        "m91-owner-test": ["one-semantic-owner"]
-    }
+    assert changed["inherited_closure_contracts"] == {"m91-owner-test": ["one-semantic-owner"]}
     assert changed["verification_config_identity"] != baseline["verification_config_identity"]
     assert changed["plan_identity"] != baseline["plan_identity"]
     assert shard_projection["surface"] == "scripts-m91-test"
@@ -77,8 +76,7 @@ def test_self_certification_contract_owner_change_reaches_all_consumers(
     source_units = [item for item in changed["all_units"] if item.get("phase") == "source"]
     assert source_units[0]["unit"] == "goon-static-admission-m91-test"
     assert all(
-        item.get("requires") == ["goon-static-admission-m91-test"]
-        for item in source_units[1:]
+        item.get("requires") == ["goon-static-admission-m91-test"] for item in source_units[1:]
     )
 
     parser = cli_parser.build_parser()
@@ -92,8 +90,10 @@ def test_self_certification_contract_has_one_production_assignment_owner() -> No
     root = _root()
     source_root = root / "backend/src/oh_goon"
     owner = (
-        root / "backend/src/oh_goon/repository_tooling/_self_certification_plan_units.py"
-    ).relative_to(root).as_posix()
+        (root / "backend/src/oh_goon/repository_tooling/_self_certification_plan_units.py")
+        .relative_to(root)
+        .as_posix()
+    )
     assignments: dict[str, list[str]] = {name: [] for name in _CONTRACT_NAMES}
 
     for path in source_root.rglob("*.py"):

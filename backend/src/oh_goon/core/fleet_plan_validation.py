@@ -5,18 +5,32 @@ from typing import Any
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_output_refs import step_output_references
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
 from oh_goon.core.models.fleet_plan_step_contract import (
     RetainedPlanCacheSource,
     StepPlanCacheSource,
     StepWorkspaceSource,
 )
+from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
 from oh_goon.core.path_authority import repository_relative_parts
+from oh_goon.core.product_identity import stable_id
 
 
 def validate_resolved_plan(plan: Any) -> None:
     """Validate cross-step invariants that require the fully resolved plan graph."""
+    if plan.contract_version < 44:
+        if any(
+            isinstance(output, PlanStreamOutput)
+            for step in plan.steps
+            for output in getattr(step, "outputs", ())
+        ):
+            raise ValueError("native stream publication requires Plan contract version 44")
+        if any(
+            getattr(step, "harness", None) == "local-model-proposal"
+            and getattr(step, "feedback_reference", None) is not None
+            for step in plan.steps
+        ):
+            raise ValueError("proposal feedback requires Plan contract version 44")
     prior: set[str] = set()
     published: dict[str, set[str]] = {}
     published_workspaces: set[str] = set()
@@ -33,7 +47,10 @@ def validate_resolved_plan(plan: Any) -> None:
         published[step.step_id] = {item.name for item in getattr(step, "outputs", ())}
         # A validated Agent proposal is a scalar Step output, not a hidden
         # model-controlled command or grant. Only this explicit harness exports it.
-        if step.kind == "agent" and getattr(step, "harness", None) == "local-model-proposal":
+        if step.kind == "agent" and getattr(step, "harness", None) in (
+            "local-model-proposal",
+            "provider-proposal",
+        ):
             published[step.step_id].add("proposal")
         if step.workspace.publish:
             published_workspaces.add(step.step_id)
@@ -42,6 +59,9 @@ def validate_resolved_plan(plan: Any) -> None:
     _validate_kubernetes_rollout_links(plan)
     _validate_plan_requirements(plan)
     _validate_imports(plan)
+    from oh_goon.core.agent_review_plan import agent_review_phases
+
+    agent_review_phases(plan)
     _validate_plan_identity(plan)
 
 
@@ -62,11 +82,7 @@ def _validate_step_structure(
     elif finalizers_started:
         raise ValueError("Resolved Fleet finalizer steps must form one trailing suffix")
     source = step.workspace.source
-    if (
-        step.kind == "command"
-        and step.uv is not None
-        and isinstance(source, StepWorkspaceSource)
-    ):
+    if step.kind == "command" and step.uv is not None and isinstance(source, StepWorkspaceSource):
         raise ValueError(
             f"Resolved Fleet uv-managed command step {step.step_id} must use repository workspace source; "
             "native uv preparation is bound to the admitted repository source"
@@ -178,7 +194,11 @@ def _validate_step_paths(step: Any) -> None:
     elif getattr(step, "kind", None) == "oci_publish":
         values.append((step.archive, "OCI publish archive"))
     values.extend((item.path, "artifact path") for item in getattr(step, "artifacts", ()))
-    values.extend((item.path, "published output path") for item in getattr(step, "outputs", ()))
+    values.extend(
+        (item.path, "published output path")
+        for item in getattr(step, "outputs", ())
+        if not isinstance(item, PlanStreamOutput)
+    )
     condition = getattr(step, "when", None)
     if getattr(condition, "kind", None) in {"path_exists", "path_missing"}:
         values.append((condition.path, "condition path"))
@@ -223,7 +243,14 @@ def _validate_kubernetes_rollout_links(plan: Any) -> None:
 
 def _validate_plan_requirements(plan: Any) -> None:
     requirements = tuple(getattr(plan, "requirements", ()))
-    if requirements and plan.execution.purpose is not ExecutionPurpose.CICD:
+    if (
+        requirements
+        and plan.execution.purpose is not ExecutionPurpose.CICD
+        and (
+            plan.execution.purpose is not ExecutionPurpose.VERIFICATION
+            or any(item.kind != "uv_project" for item in requirements)
+        )
+    ):
         raise ValueError(
             "Fleet repository requirements are supported only for execution.purpose=cicd"
         )
@@ -236,12 +263,19 @@ def _validate_plan_requirements(plan: Any) -> None:
 
 def _validate_imports(plan: Any) -> None:
     imports = tuple(getattr(plan, "imports", ()))
-    if any(item.kind == "goon" for item in imports) and plan.execution.purpose is not ExecutionPurpose.CICD:
+    if (
+        any(item.kind == "goon" for item in imports)
+        and plan.execution.purpose is not ExecutionPurpose.CICD
+    ):
         if plan.execution.purpose is not ExecutionPurpose.VERIFICATION:
             raise ValueError(
                 "Imported Goons are supported outside CI/CD only for execution.purpose=verification"
             )
-        owners = sorted(item.name for item in imports if item.requirements)
+        owners = sorted(
+            item.name
+            for item in imports
+            if any(requirement.kind != "uv_project" for requirement in item.requirements)
+        )
         if owners:
             raise ValueError(
                 "Verification Goon imports cannot carry repository admission requirements; "
@@ -339,16 +373,28 @@ def _validate_requirement_paths(requirement: Any, *, prefix: str = "") -> None:
 
 
 def _validate_plan_identity(plan: Any) -> None:
+    sources = plan.skill_sources
+    if tuple(item.name for item in sources) != tuple(sorted({item.name for item in sources})):
+        raise ValueError("Resolved Skill sources must have unique sorted names")
     payload = {
         "contract_version": plan.contract_version,
         "name": plan.name,
         "description": plan.description,
         "execution": plan.execution.model_dump(mode="json", exclude_computed_fields=True),
         "requirements": [
-            item.model_dump(mode="json", exclude_computed_fields=True) for item in getattr(plan, "requirements", ())
+            item.model_dump(mode="json", exclude_computed_fields=True)
+            for item in getattr(plan, "requirements", ())
         ],
-        "imports": [item.model_dump(mode="json", exclude_computed_fields=True) for item in getattr(plan, "imports", ())],
-        "steps": [step.model_dump(mode="json", exclude_computed_fields=True) for step in plan.steps],
+        "imports": [
+            item.model_dump(mode="json", exclude_computed_fields=True)
+            for item in getattr(plan, "imports", ())
+        ],
+        "steps": [
+            step.model_dump(mode="json", exclude_computed_fields=True) for step in plan.steps
+        ],
+        **(
+            {"skill_sources": [item.model_dump(mode="json") for item in sources]} if sources else {}
+        ),
     }
     if plan.plan_id != stable_id("fleet-plan", payload):
         raise ValueError("Resolved Fleet plan_id must match canonical resolved content")

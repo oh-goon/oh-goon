@@ -157,7 +157,9 @@ def test_copy_data_resumes_stream_from_partial_kernel_copy(
     monkeypatch.setattr(subject, "_try_reflink", lambda *_args: False)
     calls = 0
 
-    def partial_then_refuse(source_descriptor: int, destination_descriptor: int, _count: int) -> int:
+    def partial_then_refuse(
+        source_descriptor: int, destination_descriptor: int, _count: int
+    ) -> int:
         nonlocal calls
         calls += 1
         if calls == 1:

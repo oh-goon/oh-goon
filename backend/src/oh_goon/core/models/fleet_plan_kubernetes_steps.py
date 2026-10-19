@@ -35,8 +35,8 @@ from oh_goon.core.models.fleet_plan_step_primitives import (
 )
 from oh_goon.core.models.fleet_plan_values import PlanStepImports, ResolvedEnvironmentBinding
 
-
 _INPUT_REFERENCE = re.compile(r"\$\{\{\s*inputs\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\}")
+
 
 def _authoring_output_reference(value: str) -> bool:
     return step_output_reference(value) is not None or _INPUT_REFERENCE.fullmatch(value) is not None

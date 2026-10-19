@@ -17,11 +17,7 @@ fabricate a Goon owner. A composite forwarding one input to more than one leaf
 can yield multiple owner paths; these are provenance, not alternate validation
 rules. An unresolved projected owner is an error, not a guessed path.
 
-Example: the shipped `python/quality` Plan exposes `coverage_threshold`, while
-`python/quality` forwards it to `python/test`. Its integer type, default `70`,
-minimum `70` and maximum `100` are owned by the `python/test` Goon, never by the
-Plan README. Inspect the live canonical contract instead of copying this example
-into an independent schema:
+The shipped `python/quality` Plan exposes project, dependency-group and checker choices. The project input has ultimate owners in Ruff, type checking and tests; the checker input belongs only to `python/typecheck`. Inspect the current contract rather than copying schemas into documentation:
 
 ```python
 from oh_goon.runtime.goon_templates import GoonTemplateStore
@@ -42,9 +38,11 @@ for item in inspected:
 - This is *contract inspection*, not the actual resolved input values, environment,
   Git facts, deferred Step outputs, or secret inspection. Do not display or infer
   runtime values from defaults alone.
-- A Plan's `inputs:` declaration projects a child contract; it never inherits,
-  overrides, or duplicates the owning Goon schema. Explicit `with:` forwarding
-  and Composite-local `pass:` are traced only through the same analyzed graph:
+- A Plan automatically exposes unambiguous, unbound direct public inputs. Optional
+  `inputs:` restricts that interface; it never duplicates the owning Goon schema.
+  Shared names with no explicit routing are omitted from caller inputs and retain
+  independent defaults. Supplying one is an ambiguity error. Explicit `with:` forwarding
+  and import-local `pass:` are traced only through the same analyzed graph:
   the latter compiles to identical `with:`-shaped `PlanInputBinding` edges.
   Mixed bindings preserve the same typed definitions and ultimate owner paths;
   inspecting a `pass:` binding does not trigger value resolution. Cycles, ambiguous projection,
@@ -67,8 +65,20 @@ application runtime, never selects values, and cannot produce an admission
 receipt. The versioned JSON response has `schema=oh-goon.plan-input-inspection/v1`,
 `status=contract_inspected`, `inputs` with canonical owner paths, and
 `root_source_sha256` identifying **only the root file**. The root digest is not
-an imported-closure digest. Fields that do not apply are omitted rather than
+an imported-closure digest. When shared names need explicit routing, the optional
+`unrouted_inputs` array lists those names in canonical source order. They are
+excluded from accepted `inputs`; supplying one remains an ambiguity error.
+The human report lists them even when there are no accepted inputs and suggests
+`pass:` recipient selection or renamed `with:` bindings. Neither presentation
+includes fixed binding values, environment values, or producer output bytes.
+Fields that do not apply are omitted rather than
 filled with invented owners, values, or empty authority claims.
+
+`FleetPlanResolver.inspect_input_interface_with_source()` returns this richer
+read-only interface and the root digest from one analyzed source cut. Existing
+definition-only inspection methods remain projections of the same interface.
+Ambiguity comes from canonical materialization; presentation does not infer
+another set of input owners or resolve values.
 
 After [development setup](../DEVELOPMENT.md), use the source CLI from the
 repository root:

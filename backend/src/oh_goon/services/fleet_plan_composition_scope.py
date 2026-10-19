@@ -8,15 +8,17 @@ from oh_goon.core.fleet_plan_composition import resolve_goon_outputs
 from oh_goon.core.fleet_plan_output_refs import step_output_reference
 from oh_goon.core.fleet_plan_values import PipelineValueCompiler
 from oh_goon.core.models.fleet_plan import (
+    CommandPlanStep,
     CompiledExecutionTemplate,
     CompiledGoonImportStep,
     PlanStep,
+    ResolvedCommandStep,
     ResolvedImport,
     ResolvedPlanStep,
     ResolvedStepSource,
 )
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
-from oh_goon.core.models.fleet_plan_requirements import RepositoryRequirement
+from oh_goon.core.models.fleet_plan_requirements import RepositoryRequirement, UvProjectRequirement
 from oh_goon.integrations.fleet_plan_compilation import qualified_step_id
 from oh_goon.services.fleet_plan_resolution_diagnostics import FleetPlanResolutionDiagnostics
 
@@ -140,20 +142,22 @@ def finalize_composition_scope(
     published_workspaces = tuple(step.step_id for step in steps if step.workspace.publish)
     if len(published_workspaces) > 1 and not allow_multiple_published_workspaces:
         raise FleetPlanInvalid("One Goon may publish at most one workspace")
-    workspace = (
-        published_workspaces[0]
-        if len(published_workspaces) == 1
-        else None
-    )
-    declared = tuple(compiled.requirements)
-    requirements = _unique_requirements(declared)
+    workspace = published_workspaces[0] if len(published_workspaces) == 1 else None
+    own_requirements = list(compiled.requirements)
+    if any(isinstance(raw, CommandPlanStep) and raw.uv is not None for raw in compiled.steps):
+        own_requirements.extend(
+            UvProjectRequirement(project=step.uv.project, group=step.uv.group)
+            for step in steps
+            if isinstance(step, ResolvedCommandStep) and step.uv is not None
+        )
+    declared = _unique_requirements(own_requirements)
     return ResolvedCompositionScope(
         prefix=prefix,
         steps=steps,
         step_sources=tuple(step_sources or ()),
         outputs=outputs,
         workspace=workspace,
-        requirements=requirements,
+        requirements=declared,
         declared_requirements=declared,
         imports=tuple(imports or ()),
     )

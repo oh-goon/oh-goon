@@ -4,11 +4,11 @@ import json
 import sqlite3
 
 from oh_goon.core.errors import ExecutionAssignmentNotFound, ExecutionAssignmentStale
-from oh_goon.core.product_identity import new_assignment_id, stable_id
-from oh_goon.core.models.execution_assignment import AttemptBudget, ExecutionAssignment
 from oh_goon.core.models.described_work import ProducerNeutralWorkDescription
+from oh_goon.core.models.execution_assignment import AttemptBudget, ExecutionAssignment
 from oh_goon.core.models.recovery_lifecycle import RecoveryAdmission
 from oh_goon.core.models.workspace import WorkspaceRef
+from oh_goon.core.product_identity import new_assignment_id, stable_id
 from oh_goon.core.time import utc_now
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
@@ -17,7 +17,9 @@ from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 class ExecutionAssignmentAuthority:
     """Single durable owner that resolves immutable execution authority before effects."""
 
-    def __init__(self, database: LocalDatabase, workspaces: RepositoryWorkspaceAuthority | None = None) -> None:
+    def __init__(
+        self, database: LocalDatabase, workspaces: RepositoryWorkspaceAuthority | None = None
+    ) -> None:
         self._database = database
         self._workspaces = workspaces or RepositoryWorkspaceAuthority(database)
 
@@ -109,12 +111,18 @@ class ExecutionAssignmentAuthority:
                         assignment.workspace_id,
                         assignment.input_checkpoint_id,
                         assignment.assignment_fingerprint,
-                        json.dumps(assignment.model_dump(mode="json", exclude_computed_fields=True), sort_keys=True, separators=(",", ":")),
+                        json.dumps(
+                            assignment.model_dump(mode="json", exclude_computed_fields=True),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
                         assignment.created_at.isoformat(),
                     ),
                 )
             except sqlite3.IntegrityError as exc:
-                raise ExecutionAssignmentStale("Execution assignment could not be durably bound") from exc
+                raise ExecutionAssignmentStale(
+                    "Execution assignment could not be durably bound"
+                ) from exc
         return assignment
 
     def issue_described_work_candidate_mutation(
@@ -136,9 +144,13 @@ class ExecutionAssignmentAuthority:
         """Resolve explicit Oh-Goon authority for verified producer-neutral described work."""
         checkpoint = self.current_candidate_checkpoint(workspace, reprove=True)
         if checkpoint.checkpoint_id != expected_checkpoint_id:
-            raise ExecutionAssignmentStale("Described-work checkpoint changed before authority resolution")
+            raise ExecutionAssignmentStale(
+                "Described-work checkpoint changed before authority resolution"
+            )
         if checkpoint.source_sha256 != work.repository_generation_identity.removeprefix("sha256:"):
-            raise ExecutionAssignmentStale("Described-work repository generation does not match current checkpoint")
+            raise ExecutionAssignmentStale(
+                "Described-work repository generation does not match current checkpoint"
+            )
         return self.issue_candidate_mutation(
             workspace,
             attempt_id=attempt_id,
@@ -208,7 +220,9 @@ class ExecutionAssignmentAuthority:
                 f"expected {expected_checkpoint_id}, observed {checkpoint.checkpoint_id}"
             )
         if not attempt_id or not proof_artifact_id:
-            raise ValueError("Protected-effect assignment requires attempt_id and exact proof artifact")
+            raise ValueError(
+                "Protected-effect assignment requires attempt_id and exact proof artifact"
+            )
         budget = AttemptBudget(wall_time_seconds=wall_time_seconds)
         assignment_id = new_assignment_id()
         created_at = utc_now()
@@ -229,18 +243,40 @@ class ExecutionAssignmentAuthority:
             "attempt_budget": budget.model_dump(mode="json", exclude_computed_fields=True),
         }
         assignment = ExecutionAssignment(
-            assignment_id=assignment_id, attempt_id=attempt_id, workspace_id=workspace.workspace_id,
-            input_checkpoint_id=checkpoint.checkpoint_id, filesystem_authority="read_only",
-            process_authority="isolated", network_authority="declared", secret_grants=secret_grants,
-            git_authority=git_authority, publish_authority=True, tool_ids=tool_ids, delegation_limit=0,
-            isolation_requirements=isolation_requirements, input_artifact_ids=(proof_artifact_id,),
-            attempt_budget=budget, assignment_fingerprint=stable_id("execution-assignment", payload), created_at=created_at,
+            assignment_id=assignment_id,
+            attempt_id=attempt_id,
+            workspace_id=workspace.workspace_id,
+            input_checkpoint_id=checkpoint.checkpoint_id,
+            filesystem_authority="read_only",
+            process_authority="isolated",
+            network_authority="declared",
+            secret_grants=secret_grants,
+            git_authority=git_authority,
+            publish_authority=True,
+            tool_ids=tool_ids,
+            delegation_limit=0,
+            isolation_requirements=isolation_requirements,
+            input_artifact_ids=(proof_artifact_id,),
+            attempt_budget=budget,
+            assignment_fingerprint=stable_id("execution-assignment", payload),
+            created_at=created_at,
         )
         with self._database.transaction(write=True) as connection:
             connection.execute(
                 """INSERT INTO execution_assignments(assignment_id, attempt_id, workspace_id, input_checkpoint_id, assignment_fingerprint, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (assignment.assignment_id, assignment.attempt_id, assignment.workspace_id, assignment.input_checkpoint_id,
-                 assignment.assignment_fingerprint, json.dumps(assignment.model_dump(mode="json", exclude_computed_fields=True), sort_keys=True, separators=(",", ":")), assignment.created_at.isoformat()),
+                (
+                    assignment.assignment_id,
+                    assignment.attempt_id,
+                    assignment.workspace_id,
+                    assignment.input_checkpoint_id,
+                    assignment.assignment_fingerprint,
+                    json.dumps(
+                        assignment.model_dump(mode="json", exclude_computed_fields=True),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    assignment.created_at.isoformat(),
+                ),
             )
         return assignment
 

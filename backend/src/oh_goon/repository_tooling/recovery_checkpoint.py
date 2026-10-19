@@ -6,17 +6,26 @@ import json
 import shutil
 import tempfile
 from dataclasses import asdict
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Callable
-from enum import StrEnum
 
 from oh_goon.repository_tooling.development_continuation import (
-    CONTINUATION_INPUT_SCHEMA,
-    CONTINUATION_SCHEMA,
+    CONTINUATION_INPUT_SCHEMA as CONTINUATION_INPUT_SCHEMA,
+)
+from oh_goon.repository_tooling.development_continuation import (
     continuation_input_from_bytes as _continuation_input_from_bytes,
+)
+from oh_goon.repository_tooling.development_continuation import (
     continuation_input_sha256 as _continuation_input_sha256,
+)
+from oh_goon.repository_tooling.development_continuation import (
     continuation_state_bytes as _continuation_state_bytes,
+)
+from oh_goon.repository_tooling.development_continuation import (
     continuation_state_from_bytes as _continuation_state_from_bytes,
+)
+from oh_goon.repository_tooling.development_continuation import (
     render_handoff,
 )
 from oh_goon.repository_tooling.recovery_store import (
@@ -28,7 +37,11 @@ from oh_goon.repository_tooling.recovery_store import (
     PublicationReceipt,
     RecoveryHead,
     RecoveryPublisher,
+)
+from oh_goon.repository_tooling.recovery_store import (
     head_from_bytes as _head_from_bytes,
+)
+from oh_goon.repository_tooling.recovery_store import (
     sha256_path as _sha256,
 )
 from oh_goon.repository_tooling.release.package_slim import (
@@ -81,40 +94,58 @@ def _read_head(publisher: RecoveryPublisher) -> tuple[RecoveryHead | None, str |
 
 
 def _transaction_id(
-    *, campaign_id: str, parent_source_identity: str | None, result_source_identity: str,
-    archive_sha256: str, continuation_state_sha256: str, generation: int,
+    *,
+    campaign_id: str,
+    parent_source_identity: str | None,
+    result_source_identity: str,
+    archive_sha256: str,
+    continuation_state_sha256: str,
+    generation: int,
 ) -> str:
-    payload = _json_bytes({
-        "archive_sha256": archive_sha256,
-        "campaign_id": campaign_id,
-        "continuation_state_sha256": continuation_state_sha256,
-        "generation": generation,
-        "parent_source_identity": parent_source_identity,
-        "result_source_identity": result_source_identity,
-    })
+    payload = _json_bytes(
+        {
+            "archive_sha256": archive_sha256,
+            "campaign_id": campaign_id,
+            "continuation_state_sha256": continuation_state_sha256,
+            "generation": generation,
+            "parent_source_identity": parent_source_identity,
+            "result_source_identity": result_source_identity,
+        }
+    )
     return "sha256:" + _digest(payload)
 
 
 def create_proof_receipt(
-    *, source_identity: str, test_command_identity: str, test_selection: str,
-    environment_identity: str, evidence_identity: str, timestamp: str, proof_level: str,
+    *,
+    source_identity: str,
+    test_command_identity: str,
+    test_selection: str,
+    environment_identity: str,
+    evidence_identity: str,
+    timestamp: str,
+    proof_level: str,
 ) -> bytes:
     if proof_level not in PROOF_LEVELS:
         raise RuntimeError(f"unsupported recovery proof level: {proof_level}")
-    return _json_bytes(asdict(ProofReceipt(
-        schema=PROOF_SCHEMA,
-        source_identity=source_identity,
-        test_command_identity=test_command_identity,
-        test_selection=test_selection,
-        environment_identity=environment_identity,
-        evidence_identity=evidence_identity,
-        timestamp=timestamp,
-        proof_level=proof_level,
-    )))
+    return _json_bytes(
+        asdict(
+            ProofReceipt(
+                schema=PROOF_SCHEMA,
+                source_identity=source_identity,
+                test_command_identity=test_command_identity,
+                test_selection=test_selection,
+                environment_identity=environment_identity,
+                evidence_identity=evidence_identity,
+                timestamp=timestamp,
+                proof_level=proof_level,
+            )
+        )
+    )
 
 
-def _verify_archive_bytes(content: bytes, *, expected_sha: str, expected_size: int,
-                          expected_source_identity: str) -> None:
+def _verify_archive_bytes(
+    content: bytes, *, expected_sha: str, expected_size: int, expected_source_identity: str
+) -> None:
     if len(content) != expected_size or _digest(content) != expected_sha:
         raise RuntimeError("durable recovery archive size/digest mismatch")
     with tempfile.TemporaryDirectory(prefix="oh-goon-recovery-readback-") as temp_dir:
@@ -136,7 +167,10 @@ def _verify_receipt(publisher: RecoveryPublisher, receipt_sha: str) -> Publicati
 
 
 def _verify_continuation(
-    publisher: RecoveryPublisher, *, receipt: PublicationReceipt, head: RecoveryHead | None = None,
+    publisher: RecoveryPublisher,
+    *,
+    receipt: PublicationReceipt,
+    head: RecoveryHead | None = None,
 ) -> dict[str, Any]:
     expected_key = f"continuations/sha256/{receipt.continuation_state_sha256}"
     if receipt.continuation_object_key != expected_key:
@@ -171,7 +205,11 @@ def _verify_continuation(
 
 
 def _checkpoint_lineage(
-    publisher: RecoveryPublisher, *, root: Path, campaign_id: str, expected_generation: int,
+    publisher: RecoveryPublisher,
+    *,
+    root: Path,
+    campaign_id: str,
+    expected_generation: int,
     expected_head_sha256: str | None,
 ) -> tuple[str | None, str | None, int, str]:
     previous, observed_head_sha = _read_head(publisher)
@@ -184,37 +222,64 @@ def _checkpoint_lineage(
         raise RuntimeError("recovery HEAD identity changed")
     if previous and previous.campaign_id != campaign_id:
         raise RuntimeError("recovery HEAD belongs to a different campaign")
-    return previous.source_identity if previous else None, observed_head_sha, actual_generation + 1, canonical_source_identity(root)
+    return (
+        previous.source_identity if previous else None,
+        observed_head_sha,
+        actual_generation + 1,
+        canonical_source_identity(root),
+    )
 
 
 def _transaction_index_key(
-    *, campaign_id: str, generation: int, parent_source_identity: str | None,
-    result_source_identity: str, continuation_input_sha256: str,
+    *,
+    campaign_id: str,
+    generation: int,
+    parent_source_identity: str | None,
+    result_source_identity: str,
+    continuation_input_sha256: str,
 ) -> str:
-    identity = _digest(_json_bytes({
-        "campaign_id": campaign_id,
-        "continuation_input_sha256": continuation_input_sha256,
-        "generation": generation,
-        "parent_source_identity": parent_source_identity,
-        "result_source_identity": result_source_identity,
-    }))
+    identity = _digest(
+        _json_bytes(
+            {
+                "campaign_id": campaign_id,
+                "continuation_input_sha256": continuation_input_sha256,
+                "generation": generation,
+                "parent_source_identity": parent_source_identity,
+                "result_source_identity": result_source_identity,
+            }
+        )
+    )
     return f"transactions/sha256/{identity}"
 
 
 def _commit_recovery_head(
-    publisher: RecoveryPublisher, *, campaign_id: str, generation: int,
-    expected_generation: int, expected_head_sha256: str | None, receipt_sha: str,
-    continuation_state_sha256: str, source_identity: str, qualification_state: str,
-    proof_level: str, state_hook: Callable[[PublicationState], None] | None,
+    publisher: RecoveryPublisher,
+    *,
+    campaign_id: str,
+    generation: int,
+    expected_generation: int,
+    expected_head_sha256: str | None,
+    receipt_sha: str,
+    continuation_state_sha256: str,
+    source_identity: str,
+    qualification_state: str,
+    proof_level: str,
+    state_hook: Callable[[PublicationState], None] | None,
 ) -> RecoveryHead:
     head = RecoveryHead(
-        schema=HEAD_SCHEMA, campaign_id=campaign_id, generation=generation,
-        previous_head_sha256=expected_head_sha256, checkpoint_receipt_sha256=receipt_sha,
-        continuation_state_sha256=continuation_state_sha256, source_identity=source_identity,
-        qualification_state=qualification_state, proof_level=proof_level,
+        schema=HEAD_SCHEMA,
+        campaign_id=campaign_id,
+        generation=generation,
+        previous_head_sha256=expected_head_sha256,
+        checkpoint_receipt_sha256=receipt_sha,
+        continuation_state_sha256=continuation_state_sha256,
+        source_identity=source_identity,
+        qualification_state=qualification_state,
+        proof_level=proof_level,
     )
     if not publisher.compare_and_swap_head(
-        expected_generation=expected_generation, expected_head_sha256=expected_head_sha256,
+        expected_generation=expected_generation,
+        expected_head_sha256=expected_head_sha256,
         content=_json_bytes(asdict(head)),
     ):
         raise RuntimeError("recovery HEAD CAS rejected stale writer")
@@ -223,9 +288,15 @@ def _commit_recovery_head(
 
 
 def _resume_published_transaction(
-    publisher: RecoveryPublisher, *, index_key: str, campaign_id: str, generation: int,
-    parent_source_identity: str | None, result_source_identity: str,
-    continuation_input_sha256: str, expected_generation: int,
+    publisher: RecoveryPublisher,
+    *,
+    index_key: str,
+    campaign_id: str,
+    generation: int,
+    parent_source_identity: str | None,
+    result_source_identity: str,
+    continuation_input_sha256: str,
+    expected_generation: int,
     expected_head_sha256: str | None,
     state_hook: Callable[[PublicationState], None] | None,
 ) -> RecoveryHead | None:
@@ -244,7 +315,10 @@ def _resume_published_transaction(
         receipt.continuation_input_sha256,
     )
     expected = (
-        campaign_id, generation, parent_source_identity, result_source_identity,
+        campaign_id,
+        generation,
+        parent_source_identity,
+        result_source_identity,
         continuation_input_sha256,
     )
     if lineage != expected:
@@ -253,29 +327,41 @@ def _resume_published_transaction(
     if stat.size != receipt.archive_size or stat.sha256 != receipt.archive_sha256:
         raise RuntimeError("resumed recovery archive stat mismatch")
     _verify_archive_bytes(
-        publisher.read(receipt.object_key), expected_sha=receipt.archive_sha256,
-        expected_size=receipt.archive_size, expected_source_identity=result_source_identity,
+        publisher.read(receipt.object_key),
+        expected_sha=receipt.archive_sha256,
+        expected_size=receipt.archive_size,
+        expected_source_identity=result_source_identity,
     )
     _verify_continuation(publisher, receipt=receipt)
     return _commit_recovery_head(
-        publisher, campaign_id=campaign_id, generation=generation,
-        expected_generation=expected_generation, expected_head_sha256=expected_head_sha256,
-        receipt_sha=receipt_sha, continuation_state_sha256=receipt.continuation_state_sha256,
-        source_identity=result_source_identity, qualification_state=receipt.qualification_state,
+        publisher,
+        campaign_id=campaign_id,
+        generation=generation,
+        expected_generation=expected_generation,
+        expected_head_sha256=expected_head_sha256,
+        receipt_sha=receipt_sha,
+        continuation_state_sha256=receipt.continuation_state_sha256,
+        source_identity=result_source_identity,
+        qualification_state=receipt.qualification_state,
         proof_level=receipt.proof_level,
         state_hook=state_hook,
     )
 
 
 def _build_checkpoint_archive(
-    root: Path, *, result_source_identity: str,
+    root: Path,
+    *,
+    result_source_identity: str,
     state_hook: Callable[[PublicationState], None] | None,
 ) -> tuple[str, bytes]:
     with tempfile.TemporaryDirectory(prefix="oh-goon-recovery-build-") as temp_dir:
         archive = Path(temp_dir) / "checkpoint.zip"
         archive_sha = package_slim(archive, root=root)
         _transition(state_hook, PublicationState.BUILT)
-        if _sha256(archive) != archive_sha or archive_source_identity(archive) != result_source_identity:
+        if (
+            _sha256(archive) != archive_sha
+            or archive_source_identity(archive) != result_source_identity
+        ):
             raise RuntimeError("locally verified recovery archive identity mismatch")
         archive_bytes = archive.read_bytes()
     _transition(state_hook, PublicationState.LOCALLY_VERIFIED)
@@ -283,8 +369,12 @@ def _build_checkpoint_archive(
 
 
 def _publish_checkpoint_archive(
-    publisher: RecoveryPublisher, *, archive_sha: str, archive_bytes: bytes,
-    result_source_identity: str, state_hook: Callable[[PublicationState], None] | None,
+    publisher: RecoveryPublisher,
+    *,
+    archive_sha: str,
+    archive_bytes: bytes,
+    result_source_identity: str,
+    state_hook: Callable[[PublicationState], None] | None,
 ) -> str:
     object_key = f"objects/sha256/{archive_sha}"
     _transition(state_hook, PublicationState.PUBLISHING)
@@ -294,7 +384,9 @@ def _publish_checkpoint_archive(
     if stat.size != len(archive_bytes) or stat.sha256 != archive_sha:
         raise RuntimeError("durable recovery archive stat mismatch")
     _verify_archive_bytes(
-        publisher.read(object_key), expected_sha=archive_sha, expected_size=len(archive_bytes),
+        publisher.read(object_key),
+        expected_sha=archive_sha,
+        expected_size=len(archive_bytes),
         expected_source_identity=result_source_identity,
     )
     _transition(state_hook, PublicationState.DURABLY_VERIFIED)
@@ -302,7 +394,10 @@ def _publish_checkpoint_archive(
 
 
 def _publish_checkpoint_proof(
-    publisher: RecoveryPublisher, *, proof_receipt: bytes | None, proof_level: str,
+    publisher: RecoveryPublisher,
+    *,
+    proof_receipt: bytes | None,
+    proof_level: str,
     result_source_identity: str,
 ) -> tuple[str | None, str]:
     if proof_receipt is None:
@@ -321,16 +416,32 @@ def _publish_checkpoint_proof(
 
 
 def _publish_checkpoint_continuation(
-    publisher: RecoveryPublisher, *, root: Path, input_payload: dict[str, Any],
-    campaign_id: str, generation: int, parent_source_identity: str | None,
-    result_source_identity: str, archive_sha: str, archive_size: int, object_key: str,
-    proof_sha: str | None, proof_level: str,
+    publisher: RecoveryPublisher,
+    *,
+    root: Path,
+    input_payload: dict[str, Any],
+    campaign_id: str,
+    generation: int,
+    parent_source_identity: str | None,
+    result_source_identity: str,
+    archive_sha: str,
+    archive_size: int,
+    object_key: str,
+    proof_sha: str | None,
+    proof_level: str,
 ) -> tuple[str, str]:
     content = _continuation_state_bytes(
-        root=root, input_payload=input_payload, campaign_id=campaign_id, generation=generation,
-        parent_source_identity=parent_source_identity, result_source_identity=result_source_identity,
-        archive_sha256=archive_sha, archive_size=archive_size, object_key=object_key,
-        proof_receipt_sha256=proof_sha, proof_level=proof_level,
+        root=root,
+        input_payload=input_payload,
+        campaign_id=campaign_id,
+        generation=generation,
+        parent_source_identity=parent_source_identity,
+        result_source_identity=result_source_identity,
+        archive_sha256=archive_sha,
+        archive_size=archive_size,
+        object_key=object_key,
+        proof_receipt_sha256=proof_sha,
+        proof_level=proof_level,
     )
     continuation_sha = _digest(content)
     key = f"continuations/sha256/{continuation_sha}"
@@ -344,22 +455,41 @@ def _publish_checkpoint_continuation(
 
 
 def _publish_checkpoint_receipt(
-    publisher: RecoveryPublisher, *, index_key: str, transaction_id: str, campaign_id: str,
-    generation: int, parent_source_identity: str | None, result_source_identity: str,
-    archive_sha: str, archive_size: int, object_key: str, continuation_input_sha256: str,
-    continuation_state_sha256: str, continuation_object_key: str, proof_sha: str | None,
-    proof_level: str, qualification_state: str,
+    publisher: RecoveryPublisher,
+    *,
+    index_key: str,
+    transaction_id: str,
+    campaign_id: str,
+    generation: int,
+    parent_source_identity: str | None,
+    result_source_identity: str,
+    archive_sha: str,
+    archive_size: int,
+    object_key: str,
+    continuation_input_sha256: str,
+    continuation_state_sha256: str,
+    continuation_object_key: str,
+    proof_sha: str | None,
+    proof_level: str,
+    qualification_state: str,
     state_hook: Callable[[PublicationState], None] | None,
 ) -> str:
     receipt = PublicationReceipt(
-        schema=RECEIPT_SCHEMA, transaction_id=transaction_id, campaign_id=campaign_id,
-        generation=generation, parent_source_identity=parent_source_identity,
-        result_source_identity=result_source_identity, archive_sha256=archive_sha,
-        archive_size=archive_size, object_key=object_key,
+        schema=RECEIPT_SCHEMA,
+        transaction_id=transaction_id,
+        campaign_id=campaign_id,
+        generation=generation,
+        parent_source_identity=parent_source_identity,
+        result_source_identity=result_source_identity,
+        archive_sha256=archive_sha,
+        archive_size=archive_size,
+        object_key=object_key,
         continuation_input_sha256=continuation_input_sha256,
         continuation_state_sha256=continuation_state_sha256,
-        continuation_object_key=continuation_object_key, proof_receipt_sha256=proof_sha,
-        proof_level=proof_level, qualification_state=qualification_state,
+        continuation_object_key=continuation_object_key,
+        proof_receipt_sha256=proof_sha,
+        proof_level=proof_level,
+        qualification_state=qualification_state,
     )
     receipt_bytes = _json_bytes(asdict(receipt))
     receipt_sha = _digest(receipt_bytes)
@@ -375,8 +505,13 @@ def _publish_checkpoint_receipt(
 
 
 def checkpoint(
-    *, root: Path, publisher: RecoveryPublisher, campaign_id: str, expected_generation: int,
-    continuation_input: bytes, expected_head_sha256: str | None = None,
+    *,
+    root: Path,
+    publisher: RecoveryPublisher,
+    campaign_id: str,
+    expected_generation: int,
+    continuation_input: bytes,
+    expected_head_sha256: str | None = None,
     proof_level: str = "FOCUSED_PROVEN",
     qualification_state: str = "NATIVE-QUALIFICATION-INCOMPLETE",
     proof_receipt: bytes | None = None,
@@ -387,67 +522,112 @@ def checkpoint(
     if proof_level not in PROOF_LEVELS:
         raise RuntimeError(f"unsupported recovery proof level: {proof_level}")
     continuation_payload = _continuation_input_from_bytes(
-        continuation_input, qualification_state=qualification_state,
+        continuation_input,
+        qualification_state=qualification_state,
     )
     continuation_input_sha = _continuation_input_sha256(continuation_payload)
     _transition(state_hook, PublicationState.PLANNED)
-    parent_source_identity, observed_head_sha, generation, result_source_identity = _checkpoint_lineage(
-        publisher, root=root, campaign_id=campaign_id, expected_generation=expected_generation,
-        expected_head_sha256=expected_head_sha256,
+    parent_source_identity, observed_head_sha, generation, result_source_identity = (
+        _checkpoint_lineage(
+            publisher,
+            root=root,
+            campaign_id=campaign_id,
+            expected_generation=expected_generation,
+            expected_head_sha256=expected_head_sha256,
+        )
     )
     index_key = _transaction_index_key(
-        campaign_id=campaign_id, generation=generation,
-        parent_source_identity=parent_source_identity, result_source_identity=result_source_identity,
+        campaign_id=campaign_id,
+        generation=generation,
+        parent_source_identity=parent_source_identity,
+        result_source_identity=result_source_identity,
         continuation_input_sha256=continuation_input_sha,
     )
     resumed = _resume_published_transaction(
-        publisher, index_key=index_key, campaign_id=campaign_id, generation=generation,
-        parent_source_identity=parent_source_identity, result_source_identity=result_source_identity,
-        continuation_input_sha256=continuation_input_sha, expected_generation=expected_generation,
+        publisher,
+        index_key=index_key,
+        campaign_id=campaign_id,
+        generation=generation,
+        parent_source_identity=parent_source_identity,
+        result_source_identity=result_source_identity,
+        continuation_input_sha256=continuation_input_sha,
+        expected_generation=expected_generation,
         expected_head_sha256=expected_head_sha256,
         state_hook=state_hook,
     )
     if resumed is not None:
         return resumed
     archive_sha, archive_bytes = _build_checkpoint_archive(
-        root, result_source_identity=result_source_identity, state_hook=state_hook,
+        root,
+        result_source_identity=result_source_identity,
+        state_hook=state_hook,
     )
     object_key = _publish_checkpoint_archive(
-        publisher, archive_sha=archive_sha, archive_bytes=archive_bytes,
-        result_source_identity=result_source_identity, state_hook=state_hook,
+        publisher,
+        archive_sha=archive_sha,
+        archive_bytes=archive_bytes,
+        result_source_identity=result_source_identity,
+        state_hook=state_hook,
     )
     proof_sha, effective_proof_level = _publish_checkpoint_proof(
-        publisher, proof_receipt=proof_receipt, proof_level=proof_level,
+        publisher,
+        proof_receipt=proof_receipt,
+        proof_level=proof_level,
         result_source_identity=result_source_identity,
     )
     continuation_sha, continuation_key = _publish_checkpoint_continuation(
-        publisher, root=root, input_payload=continuation_payload, campaign_id=campaign_id,
-        generation=generation, parent_source_identity=parent_source_identity,
-        result_source_identity=result_source_identity, archive_sha=archive_sha,
-        archive_size=len(archive_bytes), object_key=object_key, proof_sha=proof_sha,
+        publisher,
+        root=root,
+        input_payload=continuation_payload,
+        campaign_id=campaign_id,
+        generation=generation,
+        parent_source_identity=parent_source_identity,
+        result_source_identity=result_source_identity,
+        archive_sha=archive_sha,
+        archive_size=len(archive_bytes),
+        object_key=object_key,
+        proof_sha=proof_sha,
         proof_level=effective_proof_level,
     )
     transaction_id = _transaction_id(
-        campaign_id=campaign_id, parent_source_identity=parent_source_identity,
-        result_source_identity=result_source_identity, archive_sha256=archive_sha,
-        continuation_state_sha256=continuation_sha, generation=generation,
+        campaign_id=campaign_id,
+        parent_source_identity=parent_source_identity,
+        result_source_identity=result_source_identity,
+        archive_sha256=archive_sha,
+        continuation_state_sha256=continuation_sha,
+        generation=generation,
     )
     receipt_sha = _publish_checkpoint_receipt(
-        publisher, index_key=index_key, transaction_id=transaction_id, campaign_id=campaign_id,
-        generation=generation, parent_source_identity=parent_source_identity,
-        result_source_identity=result_source_identity, archive_sha=archive_sha,
-        archive_size=len(archive_bytes), object_key=object_key,
+        publisher,
+        index_key=index_key,
+        transaction_id=transaction_id,
+        campaign_id=campaign_id,
+        generation=generation,
+        parent_source_identity=parent_source_identity,
+        result_source_identity=result_source_identity,
+        archive_sha=archive_sha,
+        archive_size=len(archive_bytes),
+        object_key=object_key,
         continuation_input_sha256=continuation_input_sha,
-        continuation_state_sha256=continuation_sha, continuation_object_key=continuation_key,
-        proof_sha=proof_sha, proof_level=effective_proof_level,
-        qualification_state=qualification_state, state_hook=state_hook,
+        continuation_state_sha256=continuation_sha,
+        continuation_object_key=continuation_key,
+        proof_sha=proof_sha,
+        proof_level=effective_proof_level,
+        qualification_state=qualification_state,
+        state_hook=state_hook,
     )
     return _commit_recovery_head(
-        publisher, campaign_id=campaign_id, generation=generation,
-        expected_generation=expected_generation, expected_head_sha256=expected_head_sha256,
-        receipt_sha=receipt_sha, continuation_state_sha256=continuation_sha,
-        source_identity=result_source_identity, qualification_state=qualification_state,
-        proof_level=effective_proof_level, state_hook=state_hook,
+        publisher,
+        campaign_id=campaign_id,
+        generation=generation,
+        expected_generation=expected_generation,
+        expected_head_sha256=expected_head_sha256,
+        receipt_sha=receipt_sha,
+        continuation_state_sha256=continuation_sha,
+        source_identity=result_source_identity,
+        qualification_state=qualification_state,
+        proof_level=effective_proof_level,
+        state_hook=state_hook,
     )
 
 
@@ -468,8 +648,10 @@ def verify(*, publisher: RecoveryPublisher) -> RecoveryHead:
     if stat.size != receipt.archive_size or stat.sha256 != receipt.archive_sha256:
         raise RuntimeError("recovery HEAD archive stat mismatch")
     _verify_archive_bytes(
-        publisher.read(receipt.object_key), expected_sha=receipt.archive_sha256,
-        expected_size=receipt.archive_size, expected_source_identity=head.source_identity,
+        publisher.read(receipt.object_key),
+        expected_sha=receipt.archive_sha256,
+        expected_size=receipt.archive_size,
+        expected_source_identity=head.source_identity,
     )
     _verify_continuation(publisher, receipt=receipt, head=head)
     if receipt.proof_receipt_sha256:
@@ -547,10 +729,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         publisher = FilesystemRecoveryPublisher(store)
         checkpoint(
-            root=root, publisher=publisher, campaign_id=args.campaign_id,
+            root=root,
+            publisher=publisher,
+            campaign_id=args.campaign_id,
             expected_generation=args.expected_generation,
             continuation_input=continuation_input.read_bytes(),
-            expected_head_sha256=args.expected_head_sha256, proof_level=args.proof_level,
+            expected_head_sha256=args.expected_head_sha256,
+            proof_level=args.proof_level,
             qualification_state=args.qualification_state,
         )
         observed = status(publisher=publisher)

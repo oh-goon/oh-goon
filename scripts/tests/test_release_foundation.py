@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from typing import Any
+from collections.abc import Sequence
+
+import pytest
+
 import hashlib
 import json
 import subprocess
 from pathlib import Path
 
-from oh_goon.repository_tooling.release.accept_container import _validated_compose_file, accept_container
+from oh_goon.repository_tooling.release.accept_container import (
+    _validated_compose_file,
+    accept_container,
+)
 from oh_goon.repository_tooling.release.accept_release import (
     _install_locked_runtime,
     _installed_runtime_environment,
@@ -42,7 +50,9 @@ def _write_valid_locks(root: Path, *, react: str = "19.2.8") -> tuple[Path, Path
         '[project]\nname="oh-goon"\nversion="1.2.3"\nrequires-python=">=3.12"\n',
         encoding="utf-8",
     )
-    uv_lock.write_text('version = 1\nrequires-python = ">=3.12"\npackage = []\n', encoding="utf-8")
+    uv_lock.write_text(
+        'version = 1\nrequires-python = ">=3.12"\npackage = []\n', encoding="utf-8"
+    )
     _write_frontend_manifest(root, react=react)
     npm_lock.write_text(
         json.dumps(
@@ -68,11 +78,13 @@ def test_dependency_lock_validator_owns_repository_root() -> None:
     assert DEPENDENCY_LOCK_ROOT == Path(__file__).resolve().parents[2]
 
 
-def test_dependency_lock_check_delegates_backend_to_uv_and_frontend_to_npm(tmp_path: Path) -> None:
+def test_dependency_lock_check_delegates_backend_to_uv_and_frontend_to_npm(
+    tmp_path: Path,
+) -> None:
     _write_valid_locks(tmp_path)
     calls: list[tuple[str, ...]] = []
 
-    def runner(argv, **_kwargs):
+    def runner(argv: Sequence[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(tuple(argv))
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
@@ -98,23 +110,32 @@ def test_dependency_lock_check_delegates_backend_to_uv_and_frontend_to_npm(tmp_p
     ]
 
 
-def test_dependency_lock_check_detects_missing_committed_backend_lock(tmp_path: Path) -> None:
+def test_dependency_lock_check_detects_missing_committed_backend_lock(
+    tmp_path: Path,
+) -> None:
     uv_lock, _npm_lock = _write_valid_locks(tmp_path)
     uv_lock.unlink()
     issues = dependency_lock_issues(
         tmp_path,
-        runner=lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        runner=lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 0, stdout="", stderr=""
+        ),
     )
-    assert any(path == uv_lock and "committed backend uv.lock" in reason for path, reason in issues)
+    assert any(
+        path == uv_lock and "committed backend uv.lock" in reason
+        for path, reason in issues
+    )
 
 
 def test_dependency_lock_check_preserves_native_npm_failure(tmp_path: Path) -> None:
     _write_valid_locks(tmp_path)
 
-    def runner(argv, **_kwargs):
+    def runner(argv: Sequence[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         command = tuple(argv)
         if command and command[0] == "npm":
-            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="npm ERR! package-lock mismatch")
+            return subprocess.CompletedProcess(
+                argv, 1, stdout="", stderr="npm ERR! package-lock mismatch"
+            )
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
     issues = dependency_lock_issues(tmp_path, runner=runner)
@@ -137,7 +158,9 @@ def test_locked_runtime_install_exports_uv_lock_and_installs_wheel_without_depen
     temp.mkdir()
     commands: list[tuple[str, ...]] = []
 
-    def runner(argv, **kwargs):
+    def runner(
+        argv: Sequence[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[object]:
         command = tuple(str(item) for item in argv)
         commands.append(command)
         if command[:2] == ("uv", "venv"):
@@ -173,7 +196,9 @@ def test_real_release_acceptance_delegates_dependency_admission_to_build_release
 ) -> None:
     calls: list[tuple[str, ...]] = []
 
-    def runner(command: tuple[str, ...], **_kwargs: object) -> object:
+    def runner(
+        command: tuple[str, ...], **_kwargs: object
+    ) -> subprocess.CompletedProcess[object]:
         calls.append(command)
         raise RuntimeError("build-release owns dependency admission")
 
@@ -186,7 +211,9 @@ def test_real_release_acceptance_delegates_dependency_admission_to_build_release
     assert calls == [("make", "build-release")]
 
 
-def test_container_acceptance_fails_before_docker_without_required_source_evidence(tmp_path: Path) -> None:
+def test_container_acceptance_fails_before_docker_without_required_source_evidence(
+    tmp_path: Path,
+) -> None:
     _lock_tree(tmp_path)
     issues = accept_container(tmp_path)
     assert any("backend/pyproject.toml" in issue for issue in issues)
@@ -208,7 +235,7 @@ def test_release_http_wait_fails_immediately_when_installed_process_exits() -> N
 
 
 def test_installed_runtime_environment_cannot_import_or_configure_from_source(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("PYTHONPATH", "/source/backend/src")
     monkeypatch.setenv("PYTHONHOME", "/source/python")
@@ -245,10 +272,14 @@ def test_installed_release_acceptance_reuses_source_product_lifecycle_and_shared
     None
 ):
     script = (
-        Path(__file__).resolve().parents[2] / "backend/src/oh_goon/repository_tooling/release/accept_release.py"
+        Path(__file__).resolve().parents[2]
+        / "backend/src/oh_goon/repository_tooling/release/accept_release.py"
     ).read_text(encoding="utf-8")
     assert "exercise_location_lifecycle(" in script
-    assert "exercise_shared_plan(base_url, repositories, access_token=access_token)" in script
+    assert (
+        "exercise_shared_plan(base_url, repositories, access_token=access_token)"
+        in script
+    )
     assert script.index("exercise_location_lifecycle(") < script.index(
         "exercise_shared_plan(base_url, repositories, access_token=access_token)"
     )
@@ -258,7 +289,8 @@ def test_installed_release_restart_checks_location_game_tape_and_shared_plan_per
     None
 ):
     script = (
-        Path(__file__).resolve().parents[2] / "backend/src/oh_goon/repository_tooling/release/accept_release.py"
+        Path(__file__).resolve().parents[2]
+        / "backend/src/oh_goon/repository_tooling/release/accept_release.py"
     ).read_text(encoding="utf-8")
     assert "did not preserve location state across restart" in script
     assert "did not preserve historical Game Tape across restart" in script
@@ -267,18 +299,26 @@ def test_installed_release_restart_checks_location_game_tape_and_shared_plan_per
 
 def test_installed_release_restart_executes_again_under_new_runtime_authority() -> None:
     script = (
-        Path(__file__).resolve().parents[2] / "backend/src/oh_goon/repository_tooling/release/accept_release.py"
+        Path(__file__).resolve().parents[2]
+        / "backend/src/oh_goon/repository_tooling/release/accept_release.py"
     ).read_text(encoding="utf-8")
     assert "exercise_product_runtime(" in script
     assert "post_restart_run_id = exercise_product_api(" in script
-    assert script.index("exercise_product_runtime(") < script.index("post_restart_run_id = exercise_product_api(")
-    assert "installed release reused historical Fleet Run identity after restart" in script
-    assert "installed release history did not retain both pre/post-restart runs" in script
+    assert script.index("exercise_product_runtime(") < script.index(
+        "post_restart_run_id = exercise_product_api("
+    )
+    assert (
+        "installed release reused historical Fleet Run identity after restart" in script
+    )
+    assert (
+        "installed release history did not retain both pre/post-restart runs" in script
+    )
 
 
 def test_installed_release_acceptance_uses_configurable_serve_command() -> None:
     script = (
-        Path(__file__).resolve().parents[2] / "backend/src/oh_goon/repository_tooling/release/accept_release.py"
+        Path(__file__).resolve().parents[2]
+        / "backend/src/oh_goon/repository_tooling/release/accept_release.py"
     ).read_text(encoding="utf-8")
     expected = '(str(command), "serve", "--host", HOST, "--port", str(port))'
     assert script.count(expected) == 2
@@ -286,7 +326,7 @@ def test_installed_release_acceptance_uses_configurable_serve_command() -> None:
 
 
 def test_installed_package_origin_probe_rejects_source_import(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     command = tmp_path / "venv/bin/oh-goon"
     command.parent.mkdir(parents=True)
@@ -308,7 +348,7 @@ def test_installed_package_origin_probe_rejects_source_import(
 
 
 def test_installed_package_origin_probe_rejects_version_drift(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     command = tmp_path / "venv/bin/oh-goon"
     command.parent.mkdir(parents=True)
@@ -326,32 +366,33 @@ def test_installed_package_origin_probe_rejects_version_drift(
     assert issues and "expected '1.2.3'" in issues[0]
 
 
-def test_dependency_lock_check_does_not_parse_foreign_lock_formats_when_native_tools_accept_them(tmp_path: Path) -> None:
+def test_dependency_lock_check_does_not_parse_foreign_lock_formats_when_native_tools_accept_them(
+    tmp_path: Path,
+) -> None:
     uv_lock, npm_lock = _write_valid_locks(tmp_path)
-    uv_lock.write_text("version = 999\nanything = 'native-uv-owned'\n", encoding="utf-8")
+    uv_lock.write_text(
+        "version = 999\nanything = 'native-uv-owned'\n", encoding="utf-8"
+    )
     npm_payload = json.loads(npm_lock.read_text(encoding="utf-8"))
     npm_payload["lockfileVersion"] = 999
     npm_lock.write_text(json.dumps(npm_payload), encoding="utf-8")
 
     issues = dependency_lock_issues(
         tmp_path,
-        runner=lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""),
+        runner=lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 0, stdout="", stderr=""
+        ),
     )
 
     assert issues == ()
-
-
-
-
-
-
 
 
 def test_container_acceptance_uses_ephemeral_port_and_canonical_fleet_run_route() -> (
     None
 ):
     script = (
-        Path(__file__).resolve().parents[2] / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
+        Path(__file__).resolve().parents[2]
+        / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
     ).read_text(encoding="utf-8")
     assert "_allocate_acceptance_port()" in script
     assert 'port = "18787"' not in script
@@ -361,7 +402,8 @@ def test_container_acceptance_uses_ephemeral_port_and_canonical_fleet_run_route(
 
 def test_container_acceptance_uses_isolated_compose_project() -> None:
     script = (
-        Path(__file__).resolve().parents[2] / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
+        Path(__file__).resolve().parents[2]
+        / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
     ).read_text(encoding="utf-8")
     assert 'project_name = f"oh-goon-accept-' in script
     assert '"docker"' in script and '"compose"' in script
@@ -382,7 +424,8 @@ def test_container_acceptance_rejects_symlinked_compose_file(tmp_path: Path) -> 
 
 def test_container_acceptance_pins_repository_compose_file() -> None:
     script = (
-        Path(__file__).resolve().parents[2] / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
+        Path(__file__).resolve().parents[2]
+        / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
     ).read_text(encoding="utf-8")
     assert '"--file"' in script
     assert "str(compose_file)" in script
@@ -391,7 +434,8 @@ def test_container_acceptance_pins_repository_compose_file() -> None:
 
 def test_container_acceptance_ignores_caller_compose_environment() -> None:
     script = (
-        Path(__file__).resolve().parents[2] / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
+        Path(__file__).resolve().parents[2]
+        / "backend/src/oh_goon/repository_tooling/release/accept_container.py"
     ).read_text(encoding="utf-8")
     assert '("COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES")' in script
     assert "env.pop(name, None)" in script
@@ -400,13 +444,16 @@ def test_container_acceptance_ignores_caller_compose_environment() -> None:
 
 def test_release_identity_check_does_not_import_runtime_application() -> None:
     script = (
-        Path(__file__).resolve().parents[2] / "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py"
+        Path(__file__).resolve().parents[2]
+        / "backend/src/oh_goon/repository_tooling/release/stamp_release_version.py"
     ).read_text(encoding="utf-8")
     assert 'OPENAPI = ROOT / "generated" / "openapi" / "openapi.json"' in script
     assert "from oh_goon.api.app import create_app" not in script
 
 
-def test_release_stamp_rejects_symlinked_native_manifest_owner(tmp_path: Path, monkeypatch) -> None:
+def test_release_stamp_rejects_symlinked_native_manifest_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
     version = tmp_path / "VERSION"
@@ -418,13 +465,15 @@ def test_release_stamp_rejects_symlinked_native_manifest_owner(tmp_path: Path, m
     package = tmp_path / "package.json"
     package.write_text('{"version":"9.9.9"}\n', encoding="utf-8")
     package_lock = tmp_path / "package-lock.json"
-    package_lock.write_text('{"version":"9.9.9","packages":{"":{"version":"9.9.9"}}}\n', encoding="utf-8")
+    package_lock.write_text(
+        '{"version":"9.9.9","packages":{"":{"version":"9.9.9"}}}\n', encoding="utf-8"
+    )
     monkeypatch.setattr(stamp_release_version, "ROOT", tmp_path)
     monkeypatch.setattr(stamp_release_version, "VERSION_FILE", version)
     monkeypatch.setattr(stamp_release_version, "PYPROJECT", pyproject)
     backend_lock = tmp_path / "backend/uv.lock"
     if backend_lock.parent.is_dir() and not backend_lock.exists():
-        backend_lock.write_text('version = 1\npackage = []\n', encoding="utf-8")
+        backend_lock.write_text("version = 1\npackage = []\n", encoding="utf-8")
     monkeypatch.setattr(stamp_release_version, "BACKEND_LOCK", backend_lock)
     monkeypatch.setattr(stamp_release_version, "FRONTEND_PACKAGE", package)
     monkeypatch.setattr(stamp_release_version, "FRONTEND_LOCK", package_lock)
@@ -432,18 +481,24 @@ def test_release_stamp_rejects_symlinked_native_manifest_owner(tmp_path: Path, m
     try:
         stamp_release_version.stamp()
     except ValueError as exc:
-        assert "backend/pyproject.toml must be a contained regular non-symlink file" in str(exc)
+        assert (
+            "backend/pyproject.toml must be a contained regular non-symlink file"
+            in str(exc)
+        )
     else:
         raise AssertionError("expected symlinked release owner to be rejected")
     assert "9.9.9" in outside.read_text(encoding="utf-8")
 
 
-def test_release_stamp_restores_native_owned_files_when_native_version_command_fails(tmp_path: Path, monkeypatch) -> None:
+def test_release_stamp_restores_native_owned_files_when_native_version_command_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
     backend = tmp_path / "backend"
     frontend = tmp_path / "frontend"
-    backend.mkdir(); frontend.mkdir()
+    backend.mkdir()
+    frontend.mkdir()
     version = tmp_path / "VERSION"
     version.write_text("1.2.3\n", encoding="utf-8")
     pyproject = backend / "pyproject.toml"
@@ -451,17 +506,26 @@ def test_release_stamp_restores_native_owned_files_when_native_version_command_f
     package = frontend / "package.json"
     package.write_text('{"version":"9.9.9"}\n', encoding="utf-8")
     package_lock = frontend / "package-lock.json"
-    package_lock.write_text('{"version":"9.9.9","packages":{"":{"version":"9.9.9"}}}\n', encoding="utf-8")
+    package_lock.write_text(
+        '{"version":"9.9.9","packages":{"":{"version":"9.9.9"}}}\n', encoding="utf-8"
+    )
     monkeypatch.setattr(stamp_release_version, "ROOT", tmp_path)
     monkeypatch.setattr(stamp_release_version, "VERSION_FILE", version)
     monkeypatch.setattr(stamp_release_version, "PYPROJECT", pyproject)
-    backend_lock = backend / "uv.lock" if backend.exists() and backend.is_dir() else tmp_path / "backend/uv.lock"
+    backend_lock = (
+        backend / "uv.lock"
+        if backend.exists() and backend.is_dir()
+        else tmp_path / "backend/uv.lock"
+    )
     if backend_lock.parent.is_dir() and not backend_lock.exists():
-        backend_lock.write_text('version = 1\npackage = []\n', encoding="utf-8")
+        backend_lock.write_text("version = 1\npackage = []\n", encoding="utf-8")
     monkeypatch.setattr(stamp_release_version, "BACKEND_LOCK", backend_lock)
     monkeypatch.setattr(stamp_release_version, "FRONTEND_PACKAGE", package)
     monkeypatch.setattr(stamp_release_version, "FRONTEND_LOCK", package_lock)
-    originals = {path: path.read_bytes() for path in (pyproject, backend_lock, package, package_lock)}
+    originals = {
+        path: path.read_bytes()
+        for path in (pyproject, backend_lock, package, package_lock)
+    }
 
     def fake_run(command: tuple[str, ...], *, cwd: Path) -> str:
         if command[:2] == ("uv", "version"):
@@ -479,11 +543,12 @@ def test_release_stamp_restores_native_owned_files_when_native_version_command_f
     assert {path: path.read_bytes() for path in originals} == originals
 
 
-
-
-
-def test_make_exposes_explicit_backend_resolution_and_frontend_lock_authoring_targets() -> None:
-    makefile = (Path(__file__).resolve().parents[2] / "Makefile").read_text(encoding="utf-8")
+def test_make_exposes_explicit_backend_resolution_and_frontend_lock_authoring_targets() -> (
+    None
+):
+    makefile = (Path(__file__).resolve().parents[2] / "Makefile").read_text(
+        encoding="utf-8"
+    )
     sync = makefile.split("sync:", 1)[1].split("\n\n", 1)[0]
     frontend = makefile.split("frontend-lock:", 1)[1].split("\n\n", 1)[0]
 
@@ -498,7 +563,7 @@ def test_make_exposes_explicit_backend_resolution_and_frontend_lock_authoring_ta
 
 
 def test_release_set_version_delegates_backend_and_frontend_versioning_to_uv_and_npm(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
@@ -511,11 +576,13 @@ def test_release_set_version_delegates_backend_and_frontend_versioning_to_uv_and
     pyproject = backend / "pyproject.toml"
     pyproject.write_text('[project]\nversion="1.2.3"\n', encoding="utf-8")
     backend_lock = backend / "uv.lock"
-    backend_lock.write_text('version = 1\npackage = []\n', encoding="utf-8")
+    backend_lock.write_text("version = 1\npackage = []\n", encoding="utf-8")
     package = frontend / "package.json"
     package.write_text('{"version":"1.2.3"}\n', encoding="utf-8")
     package_lock = frontend / "package-lock.json"
-    package_lock.write_text('{"version":"1.2.3","packages":{"":{"version":"1.2.3"}}}\n', encoding="utf-8")
+    package_lock.write_text(
+        '{"version":"1.2.3","packages":{"":{"version":"1.2.3"}}}\n', encoding="utf-8"
+    )
     openapi = tmp_path / "generated/openapi/openapi.json"
 
     monkeypatch.setattr(stamp_release_version, "ROOT", tmp_path)
@@ -525,13 +592,17 @@ def test_release_set_version_delegates_backend_and_frontend_versioning_to_uv_and
     monkeypatch.setattr(stamp_release_version, "FRONTEND_PACKAGE", package)
     monkeypatch.setattr(stamp_release_version, "FRONTEND_LOCK", package_lock)
     monkeypatch.setattr(stamp_release_version, "OPENAPI", openapi)
-    monkeypatch.setattr(stamp_release_version, "GENERATED_FRONTEND", tmp_path / "generated/frontend")
+    monkeypatch.setattr(
+        stamp_release_version, "GENERATED_FRONTEND", tmp_path / "generated/frontend"
+    )
     monkeypatch.setattr(
         stamp_release_version,
         "GOON_TOOL_AUTHORITY",
         backend / "src/oh_goon/canonical_goon_tool_authority.json",
     )
-    monkeypatch.setattr(stamp_release_version, "assert_canonical_source_layout", lambda _root: None)
+    monkeypatch.setattr(
+        stamp_release_version, "assert_canonical_source_layout", lambda _root: None
+    )
 
     incoming = stamp_release_version.ReleaseDependencyReceipt(
         backend_lock_sha256=hashlib.sha256(backend_lock.read_bytes()).hexdigest(),
@@ -543,21 +614,30 @@ def test_release_set_version_delegates_backend_and_frontend_versioning_to_uv_and
         lambda: incoming,
     )
 
-    def post_receipt(receipt: stamp_release_version.ReleaseDependencyReceipt) -> stamp_release_version.ReleaseDependencyReceipt:
+    def post_receipt(
+        receipt: stamp_release_version.ReleaseDependencyReceipt,
+    ) -> stamp_release_version.ReleaseDependencyReceipt:
         assert receipt is incoming
-        assert hashlib.sha256(backend_lock.read_bytes()).hexdigest() == incoming.backend_lock_sha256
+        assert (
+            hashlib.sha256(backend_lock.read_bytes()).hexdigest()
+            == incoming.backend_lock_sha256
+        )
         return stamp_release_version.ReleaseDependencyReceipt(
             backend_lock_sha256=incoming.backend_lock_sha256,
             frontend_lock_sha256=hashlib.sha256(package_lock.read_bytes()).hexdigest(),
         )
 
-    monkeypatch.setattr(stamp_release_version, "_post_authoring_dependency_receipt", post_receipt)
+    monkeypatch.setattr(
+        stamp_release_version, "_post_authoring_dependency_receipt", post_receipt
+    )
 
     def regenerate() -> None:
         openapi.parent.mkdir(parents=True, exist_ok=True)
         openapi.write_text('{"info":{"version":"2.0.0"}}\n', encoding="utf-8")
 
-    monkeypatch.setattr(stamp_release_version, "_regenerate_generated_authority", regenerate)
+    monkeypatch.setattr(
+        stamp_release_version, "_regenerate_generated_authority", regenerate
+    )
     calls: list[tuple[str, ...]] = []
 
     def fake_run(command: tuple[str, ...], *, cwd: Path) -> str:
@@ -567,9 +647,18 @@ def test_release_set_version_delegates_backend_and_frontend_versioning_to_uv_and
             return "2.0.0"
         if command == ("uv", "version", "--short"):
             return "2.0.0"
-        if command == ("npm", "version", "2.0.0", "--no-git-tag-version", "--allow-same-version"):
+        if command == (
+            "npm",
+            "version",
+            "2.0.0",
+            "--no-git-tag-version",
+            "--allow-same-version",
+        ):
             package.write_text('{"version":"2.0.0"}\n', encoding="utf-8")
-            package_lock.write_text('{"version":"2.0.0","packages":{"":{"version":"2.0.0"}}}\n', encoding="utf-8")
+            package_lock.write_text(
+                '{"version":"2.0.0","packages":{"":{"version":"2.0.0"}}}\n',
+                encoding="utf-8",
+            )
             return "v2.0.0"
         if command == ("npm", "pkg", "get", "version"):
             return '"2.0.0"'
@@ -579,7 +668,10 @@ def test_release_set_version_delegates_backend_and_frontend_versioning_to_uv_and
     stamp_release_version.set_version("2.0.0")
 
     assert version.read_text(encoding="utf-8") == "2.0.0\n"
-    assert hashlib.sha256(backend_lock.read_bytes()).hexdigest() == incoming.backend_lock_sha256
+    assert (
+        hashlib.sha256(backend_lock.read_bytes()).hexdigest()
+        == incoming.backend_lock_sha256
+    )
     assert calls == [
         ("uv", "version", "--frozen", "2.0.0"),
         ("npm", "version", "2.0.0", "--no-git-tag-version", "--allow-same-version"),
@@ -587,8 +679,9 @@ def test_release_set_version_delegates_backend_and_frontend_versioning_to_uv_and
         ("npm", "pkg", "get", "version"),
     ]
 
+
 def test_release_source_cleanup_removes_only_declared_transients(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling import source_normalization
 
@@ -610,12 +703,19 @@ def test_release_source_cleanup_removes_only_declared_transients(
     preserved.mkdir()
     preserved_file = preserved / "owned-elsewhere"
     preserved_file.write_text("keep", encoding="utf-8")
-    (browser_root / "chromium/external-link").symlink_to(preserved, target_is_directory=True)
+    (browser_root / "chromium/external-link").symlink_to(
+        preserved, target_is_directory=True
+    )
     preserved.chmod(0o555)
     preserved_file.chmod(0o444)
     preserved_mode = preserved.stat().st_mode
     preserved_file_mode = preserved_file.stat().st_mode
-    for directory in (browser_root / "chromium", browser_root, tmp_path / "frontend/node_modules/pkg", tmp_path / "frontend/node_modules"):
+    for directory in (
+        browser_root / "chromium",
+        browser_root,
+        tmp_path / "frontend/node_modules/pkg",
+        tmp_path / "frontend/node_modules",
+    ):
         directory.chmod(directory.stat().st_mode & ~0o222)
     (tmp_path / "coverage-python.json").write_text("{}", encoding="utf-8")
     zone = tmp_path / "backend/src/pkg/source.py:Zone.Identifier"
@@ -650,9 +750,8 @@ def test_release_source_cleanup_removes_only_declared_transients(
     assert not (tmp_path / "generated/release/static").exists()
 
 
-
 def test_release_source_cleanup_removes_generated_static_without_recreating_bootstrap_input(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling import source_normalization
 
@@ -667,7 +766,9 @@ def test_release_source_cleanup_removes_generated_static_without_recreating_boot
     assert not static.exists()
 
 
-def test_source_normalization_never_mutates_git_metadata(tmp_path: Path, monkeypatch) -> None:
+def test_source_normalization_never_mutates_git_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from oh_goon.repository_tooling import source_normalization
 
     git_cache = tmp_path / ".git/hooks/__pycache__"
@@ -685,10 +786,14 @@ def test_source_normalization_never_mutates_git_metadata(tmp_path: Path, monkeyp
     assert not source_cache.exists()
 
 
-def test_package_source_checkpoint_help_does_not_publish(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_package_source_checkpoint_help_does_not_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from oh_goon.repository_tooling.release import package_source_checkpoint
 
-    monkeypatch.setattr(package_source_checkpoint, "OUTPUT_DIR", tmp_path / "release-artifacts")
+    monkeypatch.setattr(
+        package_source_checkpoint, "OUTPUT_DIR", tmp_path / "release-artifacts"
+    )
     try:
         package_source_checkpoint.main(["--help"])
     except SystemExit as exc:
@@ -699,13 +804,17 @@ def test_package_source_checkpoint_help_does_not_publish(tmp_path: Path, monkeyp
     assert "canonical retained source package" in capsys.readouterr().out
 
 
-def test_release_stamp_updates_certification_source_version_transactionally(tmp_path: Path, monkeypatch) -> None:
+def test_release_stamp_updates_certification_source_version_transactionally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from oh_goon.repository_tooling.release import stamp_release_version
 
     backend = tmp_path / "backend"
     frontend = tmp_path / "frontend"
     certification = tmp_path / "docs" / "certification" / "questions"
-    backend.mkdir(); frontend.mkdir(); certification.mkdir(parents=True)
+    backend.mkdir()
+    frontend.mkdir()
+    certification.mkdir(parents=True)
     version = tmp_path / "VERSION"
     version.write_text("2.0.0\n", encoding="utf-8")
     pyproject = backend / "pyproject.toml"
@@ -713,15 +822,21 @@ def test_release_stamp_updates_certification_source_version_transactionally(tmp_
     package = frontend / "package.json"
     package.write_text('{"version":"1.0.0"}\n', encoding="utf-8")
     package_lock = frontend / "package-lock.json"
-    package_lock.write_text('{"version":"1.0.0","packages":{"":{"version":"1.0.0"}}}\n', encoding="utf-8")
+    package_lock.write_text(
+        '{"version":"1.0.0","packages":{"":{"version":"1.0.0"}}}\n', encoding="utf-8"
+    )
     metadata = certification / "question-metadata.yml"
     metadata.write_text("schema_version: 2\nsource_version: 1.0.0\n", encoding="utf-8")
     monkeypatch.setattr(stamp_release_version, "ROOT", tmp_path)
     monkeypatch.setattr(stamp_release_version, "VERSION_FILE", version)
     monkeypatch.setattr(stamp_release_version, "PYPROJECT", pyproject)
-    backend_lock = backend / "uv.lock" if backend.exists() and backend.is_dir() else tmp_path / "backend/uv.lock"
+    backend_lock = (
+        backend / "uv.lock"
+        if backend.exists() and backend.is_dir()
+        else tmp_path / "backend/uv.lock"
+    )
     if backend_lock.parent.is_dir() and not backend_lock.exists():
-        backend_lock.write_text('version = 1\npackage = []\n', encoding="utf-8")
+        backend_lock.write_text("version = 1\npackage = []\n", encoding="utf-8")
     monkeypatch.setattr(stamp_release_version, "BACKEND_LOCK", backend_lock)
     monkeypatch.setattr(stamp_release_version, "FRONTEND_PACKAGE", package)
     monkeypatch.setattr(stamp_release_version, "FRONTEND_LOCK", package_lock)
@@ -731,9 +846,15 @@ def test_release_stamp_updates_certification_source_version_transactionally(tmp_
             pyproject.write_text('[project]\nversion="2.0.0"\n', encoding="utf-8")
         elif command[:2] == ("npm", "version"):
             package.write_text('{"version":"2.0.0"}\n', encoding="utf-8")
-            package_lock.write_text('{"version":"2.0.0","packages":{"":{"version":"2.0.0"}}}\n', encoding="utf-8")
+            package_lock.write_text(
+                '{"version":"2.0.0","packages":{"":{"version":"2.0.0"}}}\n',
+                encoding="utf-8",
+            )
         return ""
 
     monkeypatch.setattr(stamp_release_version, "_run", fake_run)
     stamp_release_version.stamp()
-    assert metadata.read_text(encoding="utf-8") == "schema_version: 2\nsource_version: 2.0.0\n"
+    assert (
+        metadata.read_text(encoding="utf-8")
+        == "schema_version: 2\nsource_version: 2.0.0\n"
+    )

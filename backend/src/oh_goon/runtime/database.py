@@ -1,64 +1,65 @@
 from __future__ import annotations
+
 import hashlib
 import os
-import stat
 import secrets
 import sqlite3
-import sys
+import stat
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock, local
 from typing import Literal, TypeVar
 from uuid import uuid4
-from oh_goon.core.path_authority import ensure_private_directory
+
 from oh_goon.core.errors import DatabaseSchemaMismatch
-from oh_goon.runtime.recovery_evidence import ExecutionRecoveryEvent
-from oh_goon.runtime._sqlite_identity_error import sqlite_identity_error as _sqlite_identity_error
-from oh_goon.runtime._sqlite_observer_authority import admitted_observer_authorizer
+from oh_goon.core.path_authority import ensure_private_directory
+from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_DELETE as SQLITE_JOURNAL_DELETE
+from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_WAL as SQLITE_JOURNAL_WAL
+from oh_goon.runtime._database_policy import (
+    DATABASE_SCHEMA_POLICY,
+    DATABASE_SCHEMA_VERSION,
+    database_filesystem_type,
+    default_database_path,
+    inspect_database_path,
+    sqlite_journal_mode_for_path,
+)
+from oh_goon.runtime._database_policy import (
+    database_filesystem_is_local as database_filesystem_is_local,
+)
+from oh_goon.runtime._database_policy import (
+    database_path_for_environment as database_path_for_environment,
+)
+from oh_goon.runtime._database_policy import inspect_local_database as inspect_local_database
+from oh_goon.runtime._database_schema import _SCHEMA_SQL
+from oh_goon.runtime._sqlite_access_diagnostics import SQLiteAccessDiagnostics
 from oh_goon.runtime._sqlite_authority_gate import sqlite_authority_gate
 from oh_goon.runtime._sqlite_connection_configuration import configure_common_connection
+from oh_goon.runtime._sqlite_identity_error import sqlite_identity_error as _sqlite_identity_error
+from oh_goon.runtime._sqlite_observer_authority import admitted_observer_authorizer
 from oh_goon.runtime.durable_revision import (
     advance_durable_revision,
     ensure_durable_revision_schema,
     read_durable_revision,
 )
 from oh_goon.runtime.exclusions import ensure_exclusion_schema
-from oh_goon.core.sqlite_journal_vocabulary import (
-    SQLITE_JOURNAL_AUTO,
-    SQLITE_JOURNAL_DELETE,
-    SQLITE_JOURNAL_MODE_ENV,
-    SQLITE_JOURNAL_WAL,
-)
-from oh_goon.runtime.schema_version_policy import (
-    DurableSchemaDisposition,
-    DurableSchemaPolicy,
-)
 from oh_goon.runtime.local_state_maintenance import (
     LocalStateCompatibility,
-    LocalStateInspection,
     mismatch_message,
 )
-from oh_goon.runtime._database_policy import (
-    DATABASE_SCHEMA_POLICY,
-    DATABASE_SCHEMA_VERSION,
-    DEFAULT_DATABASE_NAME,
-    MIN_SAFE_WAL_SQLITE_VERSION,
-    database_filesystem_is_local,
-    database_filesystem_type,
-    database_path_for_environment,
-    default_database_path,
-    inspect_database_path,
-    inspect_local_database,
-    sqlite_journal_mode_for_path,
+from oh_goon.runtime.recovery_evidence import ExecutionRecoveryEvent
+from oh_goon.runtime.schema_version_policy import (
+    DurableSchemaDisposition,
 )
+
 ADMITTED_SQLITE_REPROOF_ATTEMPTS = 3
 ADMITTED_SQLITE_REPROOF_DELAYS_SECONDS = (0.25, 1.0)
 DATABASE_IDENTITY_COOKIE_MAX = 0x7FFFFFFF
 
 T = TypeVar("T")
+
 
 def _require_private_backup_directory(path: Path) -> Path:
     """Never chmod an arbitrary existing directory to make a backup private."""
@@ -70,9 +71,7 @@ def _require_private_backup_directory(path: Path) -> Path:
     metadata = path.lstat()
     if not stat.S_ISDIR(metadata.st_mode):
         raise RuntimeError("backup destination parent must be a directory")
-    if os.name == "posix" and (
-        metadata.st_uid != os.getuid() or metadata.st_mode & 0o077
-    ):
+    if os.name == "posix" and (metadata.st_uid != os.getuid() or metadata.st_mode & 0o077):
         raise PermissionError("backup directory must be owner-owned and private")
     return path
 
@@ -137,7 +136,6 @@ class CausalAdmissionCommit:
     lease_identity: str
 
 
-
 def _capture_database_path_identity(path: Path) -> DatabasePathIdentity:
     """Observe only filesystem identity for the admitted database path.
 
@@ -173,9 +171,6 @@ def _database_path_observation(path: Path, admitted: DatabasePathIdentity | None
         return f"admitted={admitted!r}, current=unavailable({exc})"
     return f"admitted={admitted!r}, current={current!r}"
 
-
-from oh_goon.runtime._database_schema import _SCHEMA_SQL
-from oh_goon.runtime._sqlite_access_diagnostics import SQLiteAccessDiagnostics
 
 class LocalDatabase:
     """One SQLite database and runtime-session identity for all durable local facts."""
@@ -263,10 +258,14 @@ class LocalDatabase:
                     # DB4: before publication prove the SNAPSHOT itself kept the
                     # exact source cookie and durable revision. SQLite integrity
                     # alone cannot detect a valid but wrong/stale database.
-                    self.verify_offline_backup(LocalStateBackupReceipt(
-                        path=staged, sha256=digest.hexdigest(),
-                        durable_revision=revision, database_identity_cookie=cookie,
-                    ))
+                    self.verify_offline_backup(
+                        LocalStateBackupReceipt(
+                            path=staged,
+                            sha256=digest.hexdigest(),
+                            durable_revision=revision,
+                            database_identity_cookie=cookie,
+                        )
+                    )
                     # Atomic no-clobber publish: link() refuses an existing
                     # destination, unlike os.replace() which would overwrite it.
                     os.link(staged, target, follow_symlinks=False)
@@ -276,8 +275,10 @@ class LocalDatabase:
                     staged.unlink()
                     _sync_backup_directory(target_dir)
                     receipt = LocalStateBackupReceipt(
-                        path=target, sha256=digest.hexdigest(),
-                        durable_revision=revision, database_identity_cookie=cookie,
+                        path=target,
+                        sha256=digest.hexdigest(),
+                        durable_revision=revision,
+                        database_identity_cookie=cookie,
                     )
                     # A successful acknowledgement describes the published
                     # name, not just its previously verified staging name.
@@ -335,9 +336,7 @@ class LocalDatabase:
                 raise sqlite3.DatabaseError("DB4 offline backup SHA-256 mismatch")
             # Reuse the existing SQLite integrity inspector; only read-only
             # sqlite3 is used below, by the ORIGINAL LocalDatabase owner.
-            inspection = inspect_database_path(
-                path, integrity_check=True, foreign_key_check=True
-            )
+            inspection = inspect_database_path(path, integrity_check=True, foreign_key_check=True)
             if inspection.status != LocalStateCompatibility.READY:
                 raise sqlite3.DatabaseError(
                     f"DB4 offline backup integrity failure: {inspection.detail}"
@@ -345,16 +344,21 @@ class LocalDatabase:
             with sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True) as reader:
                 cookie = int(reader.execute("PRAGMA application_id").fetchone()[0])
                 revision = read_durable_revision(reader)
-            if (cookie, revision) != (
-                receipt.database_identity_cookie, receipt.durable_revision
-            ):
+            if (cookie, revision) != (receipt.database_identity_cookie, receipt.durable_revision):
                 raise sqlite3.DatabaseError("DB4 offline backup cookie/revision mismatch")
             after = os.fstat(descriptor)
             current = path.lstat()
-            if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-                    != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-                    or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-                    != (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)):
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            ) or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) != (
+                current.st_dev,
+                current.st_ino,
+                current.st_size,
+                current.st_mtime_ns,
+            ):
                 raise sqlite3.DatabaseError("DB4 offline backup changed during verification")
         finally:
             os.close(descriptor)
@@ -367,7 +371,9 @@ class LocalDatabase:
         self._recovery_observer = observer
 
     def _emit_recovery_event(self, event: ExecutionRecoveryEvent) -> None:
-        self.sqlite_diagnostics.record_recovery(event, getattr(self._connection_scope, "open_context", None))
+        self.sqlite_diagnostics.record_recovery(
+            event, getattr(self._connection_scope, "open_context", None)
+        )
         observer = self._recovery_observer
         if observer is None:
             return
@@ -426,8 +432,12 @@ class LocalDatabase:
         """
 
         active = getattr(self._connection_scope, "active_cut", None)
-        if (active is None or active[0] is not connection
-                or active[1] is not True or not connection.in_transaction):
+        if (
+            active is None
+            or active[0] is not connection
+            or active[1] is not True
+            or not connection.in_transaction
+        ):
             raise RuntimeError("original LocalDatabase atomic write cut required")
 
     @contextmanager
@@ -507,11 +517,18 @@ class LocalDatabase:
         SQLite authorizers.
         """
         self.require_atomic_write_cut(connection)
-        def deny_transaction(action: int, operation: str | None, _arg2: str | None,
-                             _db: str | None, _source: str | None) -> int:
+
+        def deny_transaction(
+            action: int,
+            operation: str | None,
+            _arg2: str | None,
+            _db: str | None,
+            _source: str | None,
+        ) -> int:
             if action == sqlite3.SQLITE_TRANSACTION:
                 return sqlite3.SQLITE_DENY
             return sqlite3.SQLITE_OK
+
         connection.set_authorizer(deny_transaction)
         try:
             yield
@@ -522,29 +539,43 @@ class LocalDatabase:
     def enroll_signer_trust_atomically(self, *, policy_snapshot, roots):
         """Canonical SQLite enrollment; signer domain checks stay with signer owner."""
         from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustEpochAuthority
+
         with self.transaction(write=True) as connection:
             with self._guard_atomic_domain_participant(connection):
                 return SignerTrustEpochAuthority(connection, owner=self).enroll_in(
-                    connection, policy_snapshot=policy_snapshot, roots=roots)
+                    connection, policy_snapshot=policy_snapshot, roots=roots
+                )
 
     def revoke_signer_trust_atomically(self, *, expected) -> None:
         """A stale signer generation may not commit a competing revocation."""
         from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustEpochAuthority
+
         with self.transaction(write=True) as connection:
             with self._guard_atomic_domain_participant(connection):
-                SignerTrustEpochAuthority(connection, owner=self).revoke_in(connection, expected=expected)
+                SignerTrustEpochAuthority(connection, owner=self).revoke_in(
+                    connection, expected=expected
+                )
 
     def rotate_signer_trust_atomically(self, *, expected, policy_snapshot, roots):
         from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustEpochAuthority
+
         with self.transaction(write=True) as connection:
             with self._guard_atomic_domain_participant(connection):
                 return SignerTrustEpochAuthority(connection, owner=self).rotate_in(
-                    connection, expected=expected, policy_snapshot=policy_snapshot, roots=roots)
+                    connection, expected=expected, policy_snapshot=policy_snapshot, roots=roots
+                )
 
     def transfer_causal_control_atomically(
-        self, *, run_id: str, epoch: int, lease_identity: str,
-        next_epoch: int, next_lease_identity: str,
-        signer_grant, policy_snapshot, roots,
+        self,
+        *,
+        run_id: str,
+        epoch: int,
+        lease_identity: str,
+        next_epoch: int,
+        next_lease_identity: str,
+        signer_grant,
+        policy_snapshot,
+        roots,
     ) -> None:
         """DB1B2 pre-live transfer with an exact signer fence in ONE SQLite cut.
 
@@ -552,20 +583,34 @@ class LocalDatabase:
         """
         from oh_goon.runtime.enforcer_lace_journal import CausalRunJournal
         from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustEpochAuthority
+
         with self.transaction(write=True) as connection:
             with self._guard_atomic_domain_participant(connection):
                 SignerTrustEpochAuthority(connection, owner=self).require_in(
-                    connection, grant=signer_grant, policy_snapshot=policy_snapshot,
+                    connection,
+                    grant=signer_grant,
+                    policy_snapshot=policy_snapshot,
                     roots=roots,
                 )
                 CausalRunJournal(connection, owner=self).transfer_control_in(
-                    connection, run_id, epoch=epoch, lease_identity=lease_identity,
-                    next_epoch=next_epoch, next_lease_identity=next_lease_identity,
+                    connection,
+                    run_id,
+                    epoch=epoch,
+                    lease_identity=lease_identity,
+                    next_epoch=next_epoch,
+                    next_lease_identity=next_lease_identity,
                 )
 
     def publish_causal_admission_atomically(
-        self, *, contract, receipt, authenticator, control_epoch: int,
-        lease_identity: str, operational_admission, before_commit=None,
+        self,
+        *,
+        contract,
+        receipt,
+        authenticator,
+        control_epoch: int,
+        lease_identity: str,
+        operational_admission,
+        before_commit=None,
         operational_committed: Callable[[sqlite3.Connection], bool] | None = None,
     ):
         """Explicit pre-live named atomic admission, not an alternate Fleet launcher.
@@ -575,6 +620,7 @@ class LocalDatabase:
         CausalRunJournal transaction wrapper for administrative callers.
         """
         from oh_goon.runtime.enforcer_lace_journal import CausalJournalError, CausalRunJournal
+
         if operational_committed is not None:
             if not callable(operational_committed):
                 raise CausalJournalError("operational reread callback must be callable")
@@ -582,14 +628,22 @@ class LocalDatabase:
         run_id = contract.fields["run_id"] if operational_committed is not None else None
         replay = False
         with self.transaction(write=True) as connection:
-            if (operational_committed is not None and connection.execute(
-                "SELECT 1 FROM lace_run_authority WHERE run_id=?", (run_id,),
-            ).fetchone() is not None):
+            if (
+                operational_committed is not None
+                and connection.execute(
+                    "SELECT 1 FROM lace_run_authority WHERE run_id=?",
+                    (run_id,),
+                ).fetchone()
+                is not None
+            ):
                 # A retry does not run the operational callback a second time.
                 # Merely observing RUN_ADMITTED is not sufficient proof.
                 self._verify_exact_causal_admission(
-                    connection, contract=contract, receipt=receipt,
-                    authenticator=authenticator, control_epoch=control_epoch,
+                    connection,
+                    contract=contract,
+                    receipt=receipt,
+                    authenticator=authenticator,
+                    control_epoch=control_epoch,
                     lease_identity=lease_identity,
                     operational_committed=operational_committed,
                 )
@@ -597,13 +651,22 @@ class LocalDatabase:
             else:
                 with self._guard_atomic_domain_participant(connection):
                     result = CausalRunJournal(connection).publish_admission_in(
-                        connection, contract, receipt, authenticator,
-                        control_epoch=control_epoch, lease_identity=lease_identity,
-                        operational_admission=operational_admission, before_commit=before_commit)
+                        connection,
+                        contract,
+                        receipt,
+                        authenticator,
+                        control_epoch=control_epoch,
+                        lease_identity=lease_identity,
+                        operational_admission=operational_admission,
+                        before_commit=before_commit,
+                    )
                 if operational_committed is not None:
                     self._verify_exact_causal_admission(
-                        connection, contract=contract, receipt=receipt,
-                        authenticator=authenticator, control_epoch=control_epoch,
+                        connection,
+                        contract=contract,
+                        receipt=receipt,
+                        authenticator=authenticator,
+                        control_epoch=control_epoch,
                         lease_identity=lease_identity,
                         operational_committed=operational_committed,
                     )
@@ -613,46 +676,85 @@ class LocalDatabase:
         # uncommitted transaction cannot establish durable persistence.
         with self.transaction() as connection:
             self._verify_exact_causal_admission(
-                connection, contract=contract, receipt=receipt,
-                authenticator=authenticator, control_epoch=control_epoch,
-                lease_identity=lease_identity, operational_committed=operational_committed,
+                connection,
+                contract=contract,
+                receipt=receipt,
+                authenticator=authenticator,
+                control_epoch=control_epoch,
+                lease_identity=lease_identity,
+                operational_committed=operational_committed,
             )
         return CausalAdmissionCommit(
-            "ALREADY_COMMITTED" if replay else "COMMITTED", run_id,
-            contract.identity, control_epoch, lease_identity,
+            "ALREADY_COMMITTED" if replay else "COMMITTED",
+            run_id,
+            contract.identity,
+            control_epoch,
+            lease_identity,
         )
 
     def _verify_exact_causal_admission(
-        self, connection: sqlite3.Connection, *, contract, receipt, authenticator,
-        control_epoch: int, lease_identity: str,
+        self,
+        connection: sqlite3.Connection,
+        *,
+        contract,
+        receipt,
+        authenticator,
+        control_epoch: int,
+        lease_identity: str,
         operational_committed: Callable[[sqlite3.Connection], bool],
     ) -> None:
         """Read-only proof for typed replay; never infer success from a unique error."""
         from oh_goon.runtime.enforcer_lace_journal import CausalJournalError, CausalRunJournal
-        row = connection.execute("""SELECT contract_identity, control_epoch,
+
+        row = connection.execute(
+            """SELECT contract_identity, control_epoch,
             lease_identity, head_seq, state, admitted_contract, admission_receipt,
             admission_mac, admission_key_id, admission_domain
-            FROM lace_run_authority WHERE run_id=?""", (contract.fields["run_id"],)).fetchone()
-        expected = (contract.identity, control_epoch, lease_identity, 1, "ACTIVE",
-                    contract.encoded, receipt.payload, receipt.mac_hex, receipt.key_id,
-                    receipt.domain)
+            FROM lace_run_authority WHERE run_id=?""",
+            (contract.fields["run_id"],),
+        ).fetchone()
+        expected = (
+            contract.identity,
+            control_epoch,
+            lease_identity,
+            1,
+            "ACTIVE",
+            contract.encoded,
+            receipt.payload,
+            receipt.mac_hex,
+            receipt.key_id,
+            receipt.domain,
+        )
         if row is None or tuple(row) != expected:
             raise CausalJournalError("idempotent replay is not the exact original admitted cut")
         events = CausalRunJournal(connection).verify(contract.fields["run_id"], auth=authenticator)
-        if events != ({"run_seq": 1, "kind": "RUN_ADMITTED",
-                       "payload": {"contract_identity": contract.identity}},):
+        if events != (
+            {
+                "run_seq": 1,
+                "kind": "RUN_ADMITTED",
+                "payload": {"contract_identity": contract.identity},
+            },
+        ):
             raise CausalJournalError("idempotent replay journal is not the exact admission")
 
         # A supplied operational proof is not allowed to manufacture the fact it
         # is meant to verify. Deny mutations within the caller-supplied readback.
         forbidden = {
-            sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
-            sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_PRAGMA, sqlite3.SQLITE_ATTACH,
-            sqlite3.SQLITE_DETACH, sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_DROP_TABLE,
+            sqlite3.SQLITE_INSERT,
+            sqlite3.SQLITE_UPDATE,
+            sqlite3.SQLITE_DELETE,
+            sqlite3.SQLITE_TRANSACTION,
+            sqlite3.SQLITE_PRAGMA,
+            sqlite3.SQLITE_ATTACH,
+            sqlite3.SQLITE_DETACH,
+            sqlite3.SQLITE_CREATE_TABLE,
+            sqlite3.SQLITE_DROP_TABLE,
             sqlite3.SQLITE_ALTER_TABLE,
         }
-        def read_only(action: int, _p1: str | None, _p2: str | None,
-                      _db: str | None, _source: str | None) -> int:
+
+        def read_only(
+            action: int, _p1: str | None, _p2: str | None, _db: str | None, _source: str | None
+        ) -> int:
             return sqlite3.SQLITE_DENY if action in forbidden else sqlite3.SQLITE_OK
 
         connection.set_authorizer(read_only)
@@ -676,7 +778,9 @@ class LocalDatabase:
         interleave page changes between autocommit statements.
         """
         if self._path_identity is None:
-            raise RuntimeError("admitted observer connection requires initialized database identity")
+            raise RuntimeError(
+                "admitted observer connection requires initialized database identity"
+            )
         self._require_path_identity()
         connection: sqlite3.Connection | None = None
         last_identity_error: sqlite3.DatabaseError | None = None
@@ -694,12 +798,14 @@ class LocalDatabase:
                             raise sqlite3.DatabaseError(
                                 "SQLite quick_check failed during observer re-proof"
                             )
-                        self._emit_recovery_event(ExecutionRecoveryEvent(
-                            kind="sqlite_reproof",
-                            action="open_fresh_admitted_connection",
-                            reason_code="transient_sqlite_identity_error",
-                            outcome="succeeded",
-                        ))
+                        self._emit_recovery_event(
+                            ExecutionRecoveryEvent(
+                                kind="sqlite_reproof",
+                                action="open_fresh_admitted_connection",
+                                reason_code="transient_sqlite_identity_error",
+                                outcome="succeeded",
+                            )
+                        )
                 break
             except DatabasePathIdentityLost:
                 if connection is not None:
@@ -714,22 +820,26 @@ class LocalDatabase:
                 if _sqlite_identity_error(exc):
                     last_identity_error = exc
                     if attempt + 1 < ADMITTED_SQLITE_REPROOF_ATTEMPTS:
-                        self._emit_recovery_event(ExecutionRecoveryEvent(
-                            kind="sqlite_reproof",
-                            action="open_fresh_admitted_connection",
-                            reason_code="transient_sqlite_identity_error",
-                            outcome="requested",
-                        ))
+                        self._emit_recovery_event(
+                            ExecutionRecoveryEvent(
+                                kind="sqlite_reproof",
+                                action="open_fresh_admitted_connection",
+                                reason_code="transient_sqlite_identity_error",
+                                outcome="requested",
+                            )
+                        )
                         delay = ADMITTED_SQLITE_REPROOF_DELAYS_SECONDS[attempt]
                         if delay:
                             time.sleep(delay)
                         continue
-                    self._emit_recovery_event(ExecutionRecoveryEvent(
-                        kind="sqlite_reproof",
-                        action="open_fresh_admitted_connection",
-                        reason_code="persistent_sqlite_identity_error",
-                        outcome="failed",
-                    ))
+                    self._emit_recovery_event(
+                        ExecutionRecoveryEvent(
+                            kind="sqlite_reproof",
+                            action="open_fresh_admitted_connection",
+                            reason_code="persistent_sqlite_identity_error",
+                            outcome="failed",
+                        )
+                    )
                     raise DatabasePathIdentityLost(
                         "database path no longer contains a readable admitted SQLite database "
                         f"after {ADMITTED_SQLITE_REPROOF_ATTEMPTS} bounded observation-only "
@@ -785,7 +895,10 @@ class LocalDatabase:
             pass
 
     def observe_admitted_read(
-        self, observation: Callable[[sqlite3.Connection], T], *, context: str = "preparation observation"
+        self,
+        observation: Callable[[sqlite3.Connection], T],
+        *,
+        context: str = "preparation observation",
     ) -> T:
         """Run one read-only authority observation with bounded fresh-handle re-proof.
 
@@ -813,12 +926,14 @@ class LocalDatabase:
                                 raise sqlite3.DatabaseError(
                                     "SQLite quick_check failed during admitted observation re-proof"
                                 )
-                        self._emit_recovery_event(ExecutionRecoveryEvent(
-                            kind="sqlite_reproof",
-                            action="open_fresh_admitted_connection",
-                            reason_code="transient_sqlite_identity_error",
-                            outcome="succeeded",
-                        ))
+                        self._emit_recovery_event(
+                            ExecutionRecoveryEvent(
+                                kind="sqlite_reproof",
+                                action="open_fresh_admitted_connection",
+                                reason_code="transient_sqlite_identity_error",
+                                outcome="succeeded",
+                            )
+                        )
                     return result
             except DatabasePathIdentityLost as exc:
                 cause = exc.__cause__
@@ -827,28 +942,34 @@ class LocalDatabase:
                 if (
                     not isinstance(cause, sqlite3.DatabaseError)
                     or not _sqlite_identity_error(cause)
-                    or "after " + str(ADMITTED_SQLITE_REPROOF_ATTEMPTS)
-                    + " bounded observation-only re-proof attempts" in str(exc)
+                    or "after "
+                    + str(ADMITTED_SQLITE_REPROOF_ATTEMPTS)
+                    + " bounded observation-only re-proof attempts"
+                    in str(exc)
                 ):
                     raise
                 last_identity_error = cause
                 if attempt + 1 < ADMITTED_SQLITE_REPROOF_ATTEMPTS:
-                    self._emit_recovery_event(ExecutionRecoveryEvent(
-                        kind="sqlite_reproof",
-                        action="open_fresh_admitted_connection",
-                        reason_code="transient_sqlite_identity_error",
-                        outcome="requested",
-                    ))
+                    self._emit_recovery_event(
+                        ExecutionRecoveryEvent(
+                            kind="sqlite_reproof",
+                            action="open_fresh_admitted_connection",
+                            reason_code="transient_sqlite_identity_error",
+                            outcome="requested",
+                        )
+                    )
                     delay = ADMITTED_SQLITE_REPROOF_DELAYS_SECONDS[attempt]
                     if delay:
                         time.sleep(delay)
                     continue
-                self._emit_recovery_event(ExecutionRecoveryEvent(
-                    kind="sqlite_reproof",
-                    action="open_fresh_admitted_connection",
-                    reason_code="persistent_sqlite_identity_error",
-                    outcome="failed",
-                ))
+                self._emit_recovery_event(
+                    ExecutionRecoveryEvent(
+                        kind="sqlite_reproof",
+                        action="open_fresh_admitted_connection",
+                        reason_code="persistent_sqlite_identity_error",
+                        outcome="failed",
+                    )
+                )
                 raise DatabasePathIdentityLost(
                     "database path no longer contains a readable admitted SQLite database "
                     f"after {ADMITTED_SQLITE_REPROOF_ATTEMPTS} bounded observation-only "
@@ -939,9 +1060,7 @@ class LocalDatabase:
         """Publish a committed revision monotonically under the same proof cut."""
 
         with self._durable_revision_lock:
-            self._durable_revision_floor = max(
-                self._durable_revision_floor, committed_revision
-            )
+            self._durable_revision_floor = max(self._durable_revision_floor, committed_revision)
 
     def _raise_admitted_observer_error(self, exc: sqlite3.DatabaseError) -> None:
         self._raise_if_path_identity_lost(exc)
@@ -972,10 +1091,14 @@ class LocalDatabase:
             raise sqlite3.DatabaseError(
                 "SQLite quick_check failed during admitted database re-proof"
             )
-        self._emit_recovery_event(ExecutionRecoveryEvent(
-            kind="sqlite_reproof", action="open_fresh_admitted_connection",
-            reason_code="transient_sqlite_identity_error", outcome="succeeded",
-        ))
+        self._emit_recovery_event(
+            ExecutionRecoveryEvent(
+                kind="sqlite_reproof",
+                action="open_fresh_admitted_connection",
+                reason_code="transient_sqlite_identity_error",
+                outcome="succeeded",
+            )
+        )
 
     def _open_connection_attempt(
         self, *, admitted: bool, context: str, recovered: bool
@@ -1016,18 +1139,26 @@ class LocalDatabase:
                 if admitted and _sqlite_identity_error(exc):
                     last_identity_error = exc
                     if attempt + 1 < attempts:
-                        self._emit_recovery_event(ExecutionRecoveryEvent(
-                            kind="sqlite_reproof", action="open_fresh_admitted_connection",
-                            reason_code="transient_sqlite_identity_error", outcome="requested",
-                        ))
+                        self._emit_recovery_event(
+                            ExecutionRecoveryEvent(
+                                kind="sqlite_reproof",
+                                action="open_fresh_admitted_connection",
+                                reason_code="transient_sqlite_identity_error",
+                                outcome="requested",
+                            )
+                        )
                         delay = ADMITTED_SQLITE_REPROOF_DELAYS_SECONDS[attempt]
                         if delay:
                             time.sleep(delay)
                         continue
-                    self._emit_recovery_event(ExecutionRecoveryEvent(
-                        kind="sqlite_reproof", action="open_fresh_admitted_connection",
-                        reason_code="persistent_sqlite_identity_error", outcome="failed",
-                    ))
+                    self._emit_recovery_event(
+                        ExecutionRecoveryEvent(
+                            kind="sqlite_reproof",
+                            action="open_fresh_admitted_connection",
+                            reason_code="persistent_sqlite_identity_error",
+                            outcome="failed",
+                        )
+                    )
                     raise DatabasePathIdentityLost(
                         "database path no longer contains a readable admitted SQLite database "
                         f"after {attempts} bounded observation-only re-proof attempts during {context}: "
@@ -1040,7 +1171,10 @@ class LocalDatabase:
         raise AssertionError("unreachable admitted SQLite connection loop")
 
     def _open_sqlite_connection(self, *, admitted: bool) -> sqlite3.Connection:
-        self.sqlite_diagnostics.record(getattr(self._connection_scope, "open_context", None) or "runtime connection", "native_opens")
+        self.sqlite_diagnostics.record(
+            getattr(self._connection_scope, "open_context", None) or "runtime connection",
+            "native_opens",
+        )
         if not admitted:
             return sqlite3.connect(self.path, timeout=30.0, isolation_level=None)
         # Never let sqlite3.connect create replacement bytes after runtime admission.
@@ -1118,7 +1252,9 @@ class LocalDatabase:
             }:
                 detail = DATABASE_SCHEMA_POLICY.version_status_text(version)
                 raise DatabaseSchemaMismatch(
-                    detail + "\n" + mismatch_message(
+                    detail
+                    + "\n"
+                    + mismatch_message(
                         self.path,
                         found=version,
                         expected=DATABASE_SCHEMA_VERSION,
@@ -1146,9 +1282,7 @@ class LocalDatabase:
                             "SQLite database identity cookie could not be persisted"
                         )
                 self._database_identity_cookie = identity_cookie
-                self._schema_cookie = int(
-                    connection.execute("PRAGMA schema_version").fetchone()[0]
-                )
+                self._schema_cookie = int(connection.execute("PRAGMA schema_version").fetchone()[0])
                 with self._durable_revision_lock:
                     self._durable_revision_floor = read_durable_revision(connection)
             except BaseException:

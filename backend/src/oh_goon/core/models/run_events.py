@@ -7,8 +7,6 @@ from pydantic import AwareDatetime, Field, model_validator
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.scheduling import SchedulingEnvelope
-from oh_goon.core.models.run_launch import ApplicationLaunchReceipt, UnmanagedApplicationLaunchReceipt
 from oh_goon.core.models.run import (
     FleetRunFailure,
     FleetRunState,
@@ -19,12 +17,17 @@ from oh_goon.core.models.run_admission import (
     PlanRepositoryAdmissionEvidence,
     _validate_execution_admission,
     _validate_execution_admission_run,
-    _validate_trusted_local_admission,
     _validate_plan_repository_admissions,
+    _validate_trusted_local_admission,
     validate_fleet_repository_capture,
 )
-from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.models.run_launch import (
+    ApplicationLaunchReceipt,
+    UnmanagedApplicationLaunchReceipt,
+)
+from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
+from oh_goon.core.models.target import OperationTarget
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import FleetRunEventType, FleetRunSource
 
@@ -44,7 +47,9 @@ class RunAdmittedEvent(_FleetRunEventBase):
     targets: tuple[RepositoryIdentity, ...]
     execution: FleetExecutionAdmission
     repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...]
-    application_launch: ApplicationLaunchReceipt = Field(default_factory=UnmanagedApplicationLaunchReceipt)
+    application_launch: ApplicationLaunchReceipt = Field(
+        default_factory=UnmanagedApplicationLaunchReceipt
+    )
     scheduling: SchedulingEnvelope | None = None
 
     @model_validator(mode="after")
@@ -62,9 +67,12 @@ class RunAdmittedEvent(_FleetRunEventBase):
         _validate_execution_admission(self.target, self.execution)
         _validate_execution_admission_run(self.execution, self.fleet_run_id)
         _validate_trusted_local_admission(
-            target=self.target, execution=self.execution,
-            fleet_run_id=self.fleet_run_id, source=self.source,
-            repository_scope=self.repository_scope, repository_count=len(self.targets),
+            target=self.target,
+            execution=self.execution,
+            fleet_run_id=self.fleet_run_id,
+            source=self.source,
+            repository_scope=self.repository_scope,
+            repository_count=len(self.targets),
         )
         _validate_plan_repository_admissions(self.target, self.repository_admissions)
         return self

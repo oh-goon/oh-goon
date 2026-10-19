@@ -1,0 +1,44 @@
+version: 1
+inputs:
+- repo
+- goal
+- acceptance
+- adjudication_skill
+- repair_skill
+- regression_command
+- verification_command
+goons:
+- import: agents/review
+  as: single-source
+  phase: review
+  pass: [repo, goal, acceptance]
+  with:
+    skill: cookbook/single-source-of-truth-review
+- import: agents/review
+  as: semantic-redecision
+  phase: review
+  pass: [repo, goal, acceptance]
+  with:
+    skill: cookbook/semantic-redecision-review
+- import: agents/review
+  as: resolved-fact
+  phase: review
+  pass: [repo, goal, acceptance]
+  with:
+    skill: cookbook/resolved-fact-regression-review
+- import: agents/review
+  as: consumer-contract
+  phase: review
+  pass: [repo, goal, acceptance]
+  with:
+    skill: cookbook/canonical-consumer-contract-review
+- import: agents/adjudicate
+  phase: adjudicate
+  pass: [repo, goal, acceptance]
+- import: agents/repair
+  phase: repair
+  pass: [repo, goal, acceptance]
+- import: agents/regression
+  phase: regression
+- import: agents/verification
+  phase: verification

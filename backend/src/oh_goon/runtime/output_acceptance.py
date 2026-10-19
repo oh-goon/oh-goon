@@ -81,4 +81,6 @@ class OutputAcceptanceAuthority:
 
     def _require_active(self, candidate: ExecutionGeneration) -> None:
         if candidate.identity != self._active.identity:
-            raise ValueError("output or side effect belongs to a stale or foreign execution generation")
+            raise ValueError(
+                "output or side effect belongs to a stale or foreign execution generation"
+            )

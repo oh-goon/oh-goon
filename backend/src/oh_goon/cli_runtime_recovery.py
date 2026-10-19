@@ -76,7 +76,9 @@ def run_recovery_command(runtime: ApplicationRuntime, args: argparse.Namespace) 
 
 
 def _effect_quarantine(status: RecoveryStatus, operation_id: str):
-    item = next((item for item in status.effect_quarantines if item.operation_id == operation_id), None)
+    item = next(
+        (item for item in status.effect_quarantines if item.operation_id == operation_id), None
+    )
     if item is None:
         from oh_goon.core.errors import OperationNotFound
 

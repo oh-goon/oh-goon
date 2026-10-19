@@ -4,6 +4,7 @@ TL-1 is eligible only when an exact human consent was transported by the
 original Run authority.  This module does not create a process launcher or
 native custody token; a backend remains responsible for its actual effects.
 """
+
 from __future__ import annotations
 
 from oh_goon.core.errors import FleetPlanInvalid
@@ -82,5 +83,7 @@ def require_policy_aware_lace_backend(
         or backend.enforced_process_limit
         or not backend.exact_argv
     ):
-        raise FleetPlanInvalid("TL-1 requires a separately configured local backend reporting actual host permissions")
+        raise FleetPlanInvalid(
+            "TL-1 requires a separately configured local backend reporting actual host permissions"
+        )
     return None

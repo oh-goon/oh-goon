@@ -30,6 +30,11 @@
     {
       "source": "docs/development/GOON_AUTHORING.md",
       "status": "OK",
+      "target": "../../templates/README.md"
+    },
+    {
+      "source": "docs/development/GOON_AUTHORING.md",
+      "status": "OK",
       "target": "../templates/TEMPLATE_UX_D_EVALUATION.md"
     },
     {
@@ -100,7 +105,7 @@
     {
       "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
       "status": "OK",
-      "target": "../../templates/goons/python/test/goon.yml"
+      "target": "../../templates/goons/python/typecheck/goon.yml"
     },
     {
       "source": "docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md",
@@ -175,12 +180,17 @@
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/development/GOON_AUTHORING.md"
+      "target": "../backend/README.md"
     },
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/development/GOON_AUTHORING.md#import-occurrences"
+      "target": "../docs/CI_CD_CONTRACT.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "../docs/development/GOON_AUTHORING.md"
     },
     {
       "source": "templates/README.md",
@@ -190,90 +200,75 @@
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/development/TEMPLATE_CATALOG_DETERMINISM.md"
-    },
-    {
-      "source": "templates/README.md",
-      "status": "OK",
       "target": "../docs/development/TEMPLATE_INPUT_INSPECTION.md"
     },
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/development/TEMPLATE_INPUT_INSPECTION.md"
-    },
-    {
-      "source": "templates/README.md",
-      "status": "OK",
-      "target": "../docs/development/TEMPLATE_INPUT_INSPECTION.md#evaluation-and-proof-scope"
-    },
-    {
-      "source": "templates/README.md",
-      "status": "OK",
-      "target": "../docs/development/TEMPLATE_INPUT_INSPECTION.md#resolved-recipient-routing"
-    },
-    {
-      "source": "templates/README.md",
-      "status": "OK",
-      "target": "../docs/development/TEMPLATE_INPUT_INSPECTION.md#safe-rejection-diagnostics"
-    },
-    {
-      "source": "templates/README.md",
-      "status": "OK",
       "target": "../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md"
     },
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md"
+      "target": "goons/README.md"
     },
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md"
+      "target": "plans/README.md"
     },
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md#caller-selected-input-files"
+      "target": "plans/advanced/isolated-dataflow/README.md"
     },
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md#scheduled-values-and-provenance"
+      "target": "plans/ml/iris-training/README.md"
     },
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/development/TEMPLATE_NETWORK_AUTHORITY.md"
+      "target": "plans/oci/release-deploy/README.md"
     },
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md"
+      "target": "plans/python/quality/README.md"
     },
     {
       "source": "templates/README.md",
       "status": "OK",
-      "target": "../docs/templates/TEMPLATE_UX_D_EVALUATION.md"
+      "target": "plans/python/release-candidate/README.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "plans/python/standard/README.md"
+    },
+    {
+      "source": "templates/README.md",
+      "status": "OK",
+      "target": "plans/security/cve-combined/README.md"
     }
   ],
   "missing_or_bad_guide_links": [],
   "plan_drafts": [
     {
       "comparison_is_execution": false,
-      "draft_bytes": 84,
+      "draft_bytes": 47,
       "key": "advanced/isolated-dataflow",
       "missing_required_names": [],
       "resolved_status": "RESOLVED_NOT_EXECUTED",
-      "source_bytes": 84,
-      "source_sha256": "9a031bbba2cbc2256785a28a759cd4ce930b82a246061809683990e103d89bbe",
+      "source_bytes": 47,
+      "source_sha256": "a5382005037cbaeb2ed98bbaec9fdadc1543364e123605b3f9a3ee59348bef36",
       "status": "PASS",
       "step_occurrences": 1
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 120,
+      "draft_bytes": 41,
       "key": "kubernetes/set-image",
       "missing_required_names": [
         "container",
@@ -283,38 +278,38 @@
         "namespace"
       ],
       "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
-      "source_bytes": 120,
-      "source_sha256": "d218f63a51c50deadcd0ff7d8b29eefbe1acb4dea7d2d019737d99fa7ff19d2c",
+      "source_bytes": 41,
+      "source_sha256": "a9afa3c2edb4118c3d9e012e821b6b790f2a9b67d0365a6c0333a23e8e7e38e9",
       "status": "PASS",
       "step_occurrences": 1
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 120,
+      "draft_bytes": 34,
       "key": "ml/iris-training",
       "missing_required_names": [],
       "resolved_status": "RESOLVED_NOT_EXECUTED",
-      "source_bytes": 120,
-      "source_sha256": "631d3a3bdf9c8476832c516fe0a8d2bda7d80fa34ffaeb48c89132eadb4884dc",
+      "source_bytes": 34,
+      "source_sha256": "972a73aa162b7f3ab4daf9921dbf310dd4a4295be2221eb5a4bddd5849ef0692",
       "status": "PASS",
       "step_occurrences": 1
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 100,
+      "draft_bytes": 30,
       "key": "oci/image",
       "missing_required_names": [
         "base_registry_hostname"
       ],
       "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
-      "source_bytes": 100,
-      "source_sha256": "c35805bd2ede78249028e7dd5f17395f3f71131ae663be8613257e8b6bc8dc33",
+      "source_bytes": 30,
+      "source_sha256": "471cf57ec5db65dcd967332cb0cf8c67816574b118d5536a2c8163be1779578f",
       "status": "PASS",
       "step_occurrences": 1
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 157,
+      "draft_bytes": 38,
       "key": "oci/publish-image",
       "missing_required_names": [
         "base_registry_hostname",
@@ -322,14 +317,14 @@
         "publish_repository"
       ],
       "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
-      "source_bytes": 157,
-      "source_sha256": "04ce0743b8e73e532301cb2d4ae77b88e2fcc93cc8860f620deb795337e49031",
+      "source_bytes": 38,
+      "source_sha256": "9bd0ec4c5332831e7600f67ae33b0e7aed5e99a8b6aa6c26131c0cc4802acff8",
       "status": "PASS",
       "step_occurrences": 1
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 195,
+      "draft_bytes": 55,
       "key": "oci/release",
       "missing_required_names": [
         "base_registry_hostname",
@@ -337,27 +332,27 @@
         "publish_repository"
       ],
       "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
-      "source_bytes": 195,
-      "source_sha256": "626a6672e8307521ff5f9de7234bd7d2cb0d786421584dd0707768ef949d7a29",
+      "source_bytes": 55,
+      "source_sha256": "fe00617e015f6824aacab67f0358a034b27ab16deaae8568a1b424befea355cb",
       "status": "PASS",
       "step_occurrences": 2
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 138,
+      "draft_bytes": 47,
       "key": "oci/release-candidate",
       "missing_required_names": [
         "base_registry_hostname"
       ],
       "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
-      "source_bytes": 138,
-      "source_sha256": "a3f0f9248bfaa872e1b4e5fd7bae6ba05fcc7a48809618a27ca9519608da2803",
+      "source_bytes": 47,
+      "source_sha256": "cf2be98d03d0f74c026d9032e59b7118d9d389e742023f01ef2a4d5c46e883aa",
       "status": "PASS",
       "step_occurrences": 2
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 359,
+      "draft_bytes": 156,
       "key": "oci/release-deploy",
       "missing_required_names": [
         "base_registry_hostname",
@@ -369,14 +364,14 @@
         "publish_repository"
       ],
       "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
-      "source_bytes": 359,
-      "source_sha256": "29e05c3d5a1022fcdf2f0f58e146674d8ae84a456234d3d7f29f4a610fe0dc0b",
+      "source_bytes": 156,
+      "source_sha256": "44af65bd051ea66455cd0998d18c0c5bdc5fdc842d02b3fa2f5fdb0fe59329d5",
       "status": "PASS",
       "step_occurrences": 3
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 100,
+      "draft_bytes": 35,
       "key": "oci/tag-gate",
       "missing_required_names": [
         "expected_digest",
@@ -385,8 +380,8 @@
         "tag"
       ],
       "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
-      "source_bytes": 100,
-      "source_sha256": "57fd992071d9fd712cd42e786520a521210c8d608a3cf18e3696fa63851ef313",
+      "source_bytes": 35,
+      "source_sha256": "ab3fed640bf4cf7dadb38ce6941da170b0d3adb1f71e545065c38a2a003c2034",
       "status": "PASS",
       "step_occurrences": 1
     },
@@ -469,62 +464,62 @@
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 64,
+      "draft_bytes": 35,
       "key": "python/quality",
       "missing_required_names": [],
       "resolved_status": "RESOLVED_NOT_EXECUTED",
-      "source_bytes": 64,
-      "source_sha256": "372a1a7bc31d1a8b7523ddf1d7ef7d5ad8335b922f812ae163bb2cd29028f7cd",
+      "source_bytes": 35,
+      "source_sha256": "6305fff30488df59edfaaa6279281512f24a9a751caad082a204dee875f43093",
       "status": "PASS",
       "step_occurrences": 1
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 146,
+      "draft_bytes": 235,
       "key": "python/release-candidate",
       "missing_required_names": [
         "revision"
       ],
       "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
-      "source_bytes": 146,
-      "source_sha256": "eea745435eb6ae8be93a9b9e636cd895514fd8efaded60856d92f5525d696910",
+      "source_bytes": 235,
+      "source_sha256": "95c13c76ca4c53a6642a59476bd6c36a4beeb4dbb7ef523760ba6d0e98c1f6bd",
       "status": "PASS",
       "step_occurrences": 3
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 81,
+      "draft_bytes": 44,
       "key": "python/release-metadata",
       "missing_required_names": [
         "revision"
       ],
       "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
-      "source_bytes": 81,
-      "source_sha256": "7712fa41e6a42cf1cc978f628a398b6f910a9756b89fcc14c592699773832ebf",
+      "source_bytes": 44,
+      "source_sha256": "483e20917870180277fcabe392e4f8f1689f1c784b5aaa2853996498a349527f",
       "status": "PASS",
       "step_occurrences": 1
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 88,
+      "draft_bytes": 59,
       "key": "python/secure",
       "missing_required_names": [],
       "resolved_status": "RESOLVED_NOT_EXECUTED",
-      "source_bytes": 88,
-      "source_sha256": "198fa445d8c71ca0e2496094097cd9cae0b792a53f0521d1f2a3ad310511e3e8",
+      "source_bytes": 59,
+      "source_sha256": "f2a8caad597f55c983c01d4a9cdb619640f7fd9802b8c817b04a2080f83a3315",
       "status": "PASS",
       "step_occurrences": 2
     },
     {
       "comparison_is_execution": false,
-      "draft_bytes": 119,
+      "draft_bytes": 159,
       "key": "python/standard",
       "missing_required_names": [
         "revision"
       ],
       "resolved_status": "UNRESOLVED_REQUIRED_INPUTS",
-      "source_bytes": 119,
-      "source_sha256": "ce5049f0c2b860f231d93085b5558f73889d1c2870a2772960bf4bb4c90bd9a7",
+      "source_bytes": 159,
+      "source_sha256": "a1e8e582f4556794d744a35737feae255867faf1c0dd0ae78f8d751e27bce849",
       "status": "PASS",
       "step_occurrences": 2
     },

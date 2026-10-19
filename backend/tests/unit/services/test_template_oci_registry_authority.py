@@ -37,7 +37,9 @@ def test_m135_different_pull_and_publish_registries_remain_independent(plan_key:
     assert publish.policy.reference_mode == "digest"
 
 
-@pytest.mark.parametrize("absent", ("base_registry_hostname", "publish_registry_hostname", "publish_repository"))
+@pytest.mark.parametrize(
+    "absent", ("base_registry_hostname", "publish_registry_hostname", "publish_repository")
+)
 def test_m135_missing_independent_registry_value_rejects_before_plan_exists(absent: str) -> None:
     arguments = {
         "base_registry_hostname": "base.example.org",

@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from oh_goon.core.models.fleet_plan_kubernetes import KubernetesApiEndpoint, KubernetesDeploymentTarget
+from oh_goon.core.models.fleet_plan_kubernetes import (
+    KubernetesApiEndpoint,
+    KubernetesDeploymentTarget,
+)
 from oh_goon.engine.command import CommandResult
-from oh_goon.integrations.fleet_plan_kubernetes_transport import KubernetesPrivateConfig, run_kubernetes_request
+from oh_goon.integrations.fleet_plan_kubernetes_transport import (
+    KubernetesPrivateConfig,
+    run_kubernetes_request,
+)
 
 
-def test_kubernetes_request_cannot_inherit_case_variant_proxy_or_ca_authority(tmp_path: Path) -> None:
+def test_kubernetes_request_cannot_inherit_case_variant_proxy_or_ca_authority(
+    tmp_path: Path,
+) -> None:
     observed: dict[str, str] = {}
 
     def runner(*argv: str, **kwargs) -> CommandResult:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pydantic import AwareDatetime, Field, computed_field, model_validator
 
-from oh_goon.core.product_identity import new_operation_id, stable_id
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.product_identity import new_operation_id, stable_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
     GitBranchState,

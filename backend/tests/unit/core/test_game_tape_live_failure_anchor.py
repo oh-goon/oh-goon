@@ -239,7 +239,10 @@ def test_live_output_reader_emits_identity_bound_diagnostic_when_projection_degr
     )
 
     result = read_game_tape_live_output(
-        Store(), detail, after=0, diagnostics=diagnostics  # type: ignore[arg-type]
+        Store(),
+        detail,
+        after=0,
+        diagnostics=diagnostics,  # type: ignore[arg-type]
     )
 
     assert result.failure_navigation_state is GameTapeFailureNavigationState.DEGRADED

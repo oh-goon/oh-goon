@@ -38,11 +38,16 @@ def project_launch_manifest(
 
     ordered = validate_launch_event_stream(events)
     for event in ordered:
-        match event.launch_id == identity.launch_id, event.owner_generation == identity.owner_generation:
+        match (
+            event.launch_id == identity.launch_id,
+            event.owner_generation == identity.owner_generation,
+        ):
             case (False, _):
                 raise ValueError("Launch Event identity does not match Launch Manifest identity")
             case (_, False):
-                raise ValueError("Launch Event owner generation does not match Launch Manifest identity")
+                raise ValueError(
+                    "Launch Event owner generation does not match Launch Manifest identity"
+                )
 
     requested = {service.service: service for service in intent.services}
     observed: dict[str, LaunchServiceObservation] = {}

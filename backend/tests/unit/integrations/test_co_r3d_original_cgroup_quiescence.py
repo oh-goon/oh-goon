@@ -3,6 +3,7 @@
 These are scoped cgroup observations, NOT independent Enforcer/LACE proof of
 physical writer absence and NEVER permission for workspace/Git retirement.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,6 +14,9 @@ import pytest
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.integrations import _fleet_plan_cgroup_resources as original
+from tests.factories.fleet_plan_executor import simulated_cgroup_custody  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("simulated_cgroup_custody")
 
 
 def _group(tmp_path: Path, *, population: str = "populated 0\n", procs: str = "") -> Path:
@@ -36,23 +40,31 @@ def test_real_kernel_style_empty_cgroup_requires_both_original_observations(tmp_
         original._wait_for_cgroup_empty(group, expected_identity=identity, timeout_seconds=0.02)
 
 
-@pytest.mark.parametrize("population,procs,expected", [
-    ("populated 0\n", "123\n", "disagree"),
-    ("populated 1\n", "", "remained populated"),
-    ("populated 1\n", "123\n", "remained populated"),
-    ("populated 0\npopulated 1\n", "", "ambiguous"),
-    ("populated 2\n", "", "ambiguous"),
-    ("populated 0\n", "abc\n", "malformed"),
-])
+@pytest.mark.parametrize(
+    "population,procs,expected",
+    [
+        ("populated 0\n", "123\n", "disagree"),
+        ("populated 1\n", "", "remained populated"),
+        ("populated 1\n", "123\n", "remained populated"),
+        ("populated 0\npopulated 1\n", "", "ambiguous"),
+        ("populated 2\n", "", "ambiguous"),
+        ("populated 0\n", "abc\n", "malformed"),
+    ],
+)
 def test_false_quiescence_inputs_fail_closed(
-    tmp_path: Path, population: str, procs: str, expected: str,
+    tmp_path: Path,
+    population: str,
+    procs: str,
+    expected: str,
 ) -> None:
     group = _group(tmp_path, population=population, procs=procs)
     with pytest.raises(FleetPlanInvalid, match=expected):
         original._wait_for_cgroup_empty(group, timeout_seconds=0.01)
 
 
-def test_missing_replaced_and_symlink_cgroup_cannot_supply_original_identity(tmp_path: Path) -> None:
+def test_missing_replaced_and_symlink_cgroup_cannot_supply_original_identity(
+    tmp_path: Path,
+) -> None:
     group = _group(tmp_path)
     old = original._exact_cgroup_identity(group)
     renamed = tmp_path / "old"
@@ -71,7 +83,8 @@ def test_missing_replaced_and_symlink_cgroup_cannot_supply_original_identity(tmp
 
 
 def test_original_owner_rejects_replacement_before_kill_and_no_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     group = _group(tmp_path)
     state = tmp_path / "state" / "record.json"
@@ -80,8 +93,12 @@ def test_original_owner_rejects_replacement_before_kill_and_no_evidence(
     attempt = tmp_path / "attempt"
     attempt.mkdir()
     owner = original.CgroupV2AttemptLease(
-        root=tmp_path, cgroup=group, state_file=state, lock_path=tmp_path / "lock",
-        policy=CicdResourcePolicy(), attempt_root=attempt,
+        root=tmp_path,
+        cgroup=group,
+        state_file=state,
+        lock_path=tmp_path / "lock",
+        policy=CicdResourcePolicy(),
+        attempt_root=attempt,
         cgroup_identity=original._exact_cgroup_identity(group),
     )
     renamed = tmp_path / "old"
@@ -97,7 +114,8 @@ def test_original_owner_rejects_replacement_before_kill_and_no_evidence(
 
 
 def test_original_owner_never_publishes_completion_if_native_remove_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     group = _group(tmp_path)
     state = tmp_path / "state" / "record.json"
@@ -106,13 +124,20 @@ def test_original_owner_never_publishes_completion_if_native_remove_fails(
     attempt = tmp_path / "attempt"
     attempt.mkdir()
     owner = original.CgroupV2AttemptLease(
-        root=tmp_path, cgroup=group, state_file=state, lock_path=tmp_path / "lock",
-        policy=CicdResourcePolicy(), attempt_root=attempt,
+        root=tmp_path,
+        cgroup=group,
+        state_file=state,
+        lock_path=tmp_path / "lock",
+        policy=CicdResourcePolicy(),
+        attempt_root=attempt,
         cgroup_identity=original._exact_cgroup_identity(group),
     )
     monkeypatch.setattr(original, "_kill_cgroup", lambda _group, **_kw: None)
-    monkeypatch.setattr(original, "_remove_cgroup", lambda _group, **_kw: (_ for _ in ()).throw(
-        FleetPlanInvalid("native cleanup incomplete")))
+    monkeypatch.setattr(
+        original,
+        "_remove_cgroup",
+        lambda _group, **_kw: (_ for _ in ()).throw(FleetPlanInvalid("native cleanup incomplete")),
+    )
     with pytest.raises(FleetPlanInvalid, match="native cleanup incomplete"):
         owner.close()
     assert state.exists() and list(attempt.iterdir()) == []

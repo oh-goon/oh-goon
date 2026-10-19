@@ -32,7 +32,9 @@ def _walk_results(results: tuple[ShardResult, ...]) -> tuple[ShardResult, ...]:
 
 def _completed_leaf_members(result: ShardResult) -> tuple[str, ...]:
     if result.children:
-        return tuple(member for child in result.children for member in _completed_leaf_members(child))
+        return tuple(
+            member for child in result.children for member in _completed_leaf_members(child)
+        )
     return result.members if result.passed else ()
 
 
@@ -57,7 +59,9 @@ def _lineage_row(result: ShardResult) -> dict[str, object]:
         "parent_work_identity": result.parent_work_identity,
         "refinement_depth": result.refinement_depth,
         "members": list(result.members),
-        "pytest_projection_identities": [member.projection_identity for member in result.pytest_members],
+        "pytest_projection_identities": [
+            member.projection_identity for member in result.pytest_members
+        ],
         "status": result.status,
         "resumed": result.resumed,
         "attempts": _attempt_payload(result),
@@ -69,14 +73,25 @@ def build_execution_coverage(
     report: ShardExecutionReport,
 ) -> VerificationExecutionCoverage:
     walked = _walk_results(report.results)
-    attempted = tuple(sorted({member for result in walked if result.attempts for member in result.members}))
-    resumed = tuple(sorted({member for result in walked if result.resumed for member in result.members}))
-    completed_raw = tuple(member for result in report.results for member in _completed_leaf_members(result))
+    attempted = tuple(
+        sorted({member for result in walked if result.attempts for member in result.members})
+    )
+    resumed = tuple(
+        sorted({member for result in walked if result.resumed for member in result.members})
+    )
+    completed_raw = tuple(
+        member for result in report.results for member in _completed_leaf_members(result)
+    )
     counts: dict[str, int] = {}
     for member in completed_raw:
         counts[member] = counts.get(member, 0) + 1
     selected_set, completed_set = set(selected), set(completed_raw)
-    observed_set = {member for result in walked if result.attempts or result.resumed for member in result.members}
+    observed_set = {
+        member
+        for result in walked
+        if result.attempts or result.resumed
+        for member in result.members
+    }
     missing = tuple(sorted(selected_set - completed_set))
     extras = tuple(sorted(observed_set - selected_set))
     duplicates = tuple(sorted(member for member, count in counts.items() if count > 1))

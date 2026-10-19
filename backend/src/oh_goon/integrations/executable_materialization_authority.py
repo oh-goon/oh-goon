@@ -13,6 +13,7 @@ from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedPlanStep
+from oh_goon.integrations._shell_authority_syntax import materialized_executable_identity
 from oh_goon.integrations.content_snapshot import SnapshotIdentity, snapshot_identity
 from oh_goon.integrations.make_execution_authority import derive_make_target_authority
 from oh_goon.integrations.package_script_execution_authority import (
@@ -21,7 +22,6 @@ from oh_goon.integrations.package_script_execution_authority import (
     npm_run_script,
 )
 from oh_goon.integrations.shell_execution_authority import derive_shell_fragment_authority
-from oh_goon.integrations._shell_authority_syntax import materialized_executable_identity
 from oh_goon.integrations.workload_execution_requirements import make_target_owner
 
 _SHELL_EXECUTABLES = frozenset({"bash", "dash", "sh"})
@@ -125,8 +125,7 @@ def logical_step_execution_authority(
         _require_resolved(step, authority.unresolved, f"npm run {script}")
         return LogicalStepExecutionAuthority(
             source_identities=tuple(
-                (relative, _sha256_file(root / relative)[0])
-                for relative in authority.sources
+                (relative, _sha256_file(root / relative)[0]) for relative in authority.sources
             ),
             package_executables=authority.package_executables,
         )
@@ -150,9 +149,7 @@ def logical_step_execution_authority(
         else None
     )
     if materialized is not None:
-        return LogicalStepExecutionAuthority(
-            materialized_executables=(materialized,)
-        )
+        return LogicalStepExecutionAuthority(materialized_executables=(materialized,))
     return LogicalStepExecutionAuthority()
 
 
@@ -227,9 +224,7 @@ def verify_step_executable_materialization(
                 f"{script.relative_path}"
             )
     if receipt.direct_workspace_executable is not None:
-        observed = _file_receipt(
-            workspace, receipt.direct_workspace_executable.relative_path
-        )
+        observed = _file_receipt(workspace, receipt.direct_workspace_executable.relative_path)
         if observed != receipt.direct_workspace_executable:
             raise FleetPlanInvalid(
                 "Workspace executable changed after materialization binding: "
@@ -444,9 +439,7 @@ def _read_package_bin_link(bin_entry: Path, bin_name: str) -> str:
     try:
         return os.readlink(bin_entry)
     except OSError as exc:
-        raise FleetPlanInvalid(
-            f"Cannot inspect package-local executable link {bin_name}"
-        ) from exc
+        raise FleetPlanInvalid(f"Cannot inspect package-local executable link {bin_name}") from exc
 
 
 def _materialized_provider_target(
@@ -482,9 +475,8 @@ def _symlink_wrapper_payload(mode: int, link_target: str) -> bytes:
         separators=(",", ":"),
     ).encode()
 
-def _verify_provider_manifest(
-    provider_root: Path, authority: PackageExecutableAuthority
-) -> None:
+
+def _verify_provider_manifest(provider_root: Path, authority: PackageExecutableAuthority) -> None:
     manifest = provider_root / "package.json"
     if manifest.is_symlink() or not manifest.is_file():
         raise FleetPlanInvalid(
@@ -499,8 +491,7 @@ def _verify_provider_manifest(
     expected_name = _package_name(authority.package_path)
     if payload.get("name") != expected_name or payload.get("version") != authority.version:
         raise FleetPlanInvalid(
-            f"Materialized provider identity does not match lock authority for "
-            f"{authority.bin_name}"
+            f"Materialized provider identity does not match lock authority for {authority.bin_name}"
         )
     bins = payload.get("bin")
     if isinstance(bins, str):
@@ -593,8 +584,7 @@ def _require_resolved(
         return
     details = "; ".join(unresolved[:3])
     raise FleetPlanInvalid(
-        f"Fleet plan step {step.step_id} execution authority for {owner} is unproven: "
-        f"{details}"
+        f"Fleet plan step {step.step_id} execution authority for {owner} is unproven: {details}"
     )
 
 

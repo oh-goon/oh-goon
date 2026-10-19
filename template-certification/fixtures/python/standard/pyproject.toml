@@ -6,16 +6,24 @@ dependencies = []
 
 [project.scripts]
 package-artifacts = "template_python_fixture:main"
-pyinstrument = "template_python_fixture:main"
-pyright = "template_python_fixture:main"
-pytest = "template_python_fixture:main"
 release-metadata = "template_python_fixture:main"
-ruff = "template_python_fixture:main"
-ty = "template_python_fixture:main"
 
 [dependency-groups]
-dev = []
+dev = ["pytest", "pytest-cov", "ruff", "pyright", "ty", "pyinstrument"]
 
 [build-system]
 requires = ["uv_build>=0.10.0,<0.11.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=template_python_fixture --cov-fail-under=60"
+
+[tool.pyright]
+include = ["src"]
+
+[tool.ty.src]
+include = ["src"]
+
+[tool.ruff]
+line-length = 100

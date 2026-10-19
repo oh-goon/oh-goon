@@ -16,9 +16,7 @@ def test_runtime_authority_registry_classifies_every_physical_owner() -> None:
 
 def test_runtime_authority_registry_names_semantic_domains_not_common_helper() -> None:
     payload = json.loads(
-        (ROOT / "docs/development/RUNTIME_AUTHORITY_REGISTRY.json").read_text(
-            encoding="utf-8"
-        )
+        (ROOT / "docs/development/RUNTIME_AUTHORITY_REGISTRY.json").read_text(encoding="utf-8")
     )
     domains = set(payload["owners"].values())
     assert "local-launch-process-lifecycle" in domains

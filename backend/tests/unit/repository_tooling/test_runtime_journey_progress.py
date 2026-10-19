@@ -33,8 +33,11 @@ def test_interruptible_start_timeout_uses_canonical_lifecycle_not_transient_acti
 
     with pytest.raises(RuntimeError) as exc_info:
         runtime_journey.wait_for_interruptible_step(
-            base_url="http://127.0.0.1:8000", run_id="run-1", repository=tmp_path,
-            access_token="token", timeout_seconds=1.0,
+            base_url="http://127.0.0.1:8000",
+            run_id="run-1",
+            repository=tmp_path,
+            access_token="token",
+            timeout_seconds=1.0,
         )
 
     message = str(exc_info.value)
@@ -50,16 +53,24 @@ def test_interruptible_start_returns_pid_from_canonical_process_started(
     def request_json(method: str, url: str, **_kwargs):
         assert method == "GET"
         if url.endswith("/events?after=0"):
-            return {"events": [
-                {"event_type": "STEP_ATTEMPT_CREATED"},
-                {"event_type": "PROCESS_STARTED", "pid": 4321},
-            ]}
+            return {
+                "events": [
+                    {"event_type": "STEP_ATTEMPT_CREATED"},
+                    {"event_type": "PROCESS_STARTED", "pid": 4321},
+                ]
+            }
         return {"run": {"status": "RUNNING"}}
 
     clock = iter((0.0, 0.0))
     monkeypatch.setattr(runtime_journey, "_request_json", request_json)
     monkeypatch.setattr(runtime_journey.time, "monotonic", lambda: next(clock))
-    assert runtime_journey.wait_for_interruptible_step(
-        base_url="http://127.0.0.1:8000", run_id="run-1", repository=tmp_path,
-        access_token="token", timeout_seconds=1.0,
-    ) == 4321
+    assert (
+        runtime_journey.wait_for_interruptible_step(
+            base_url="http://127.0.0.1:8000",
+            run_id="run-1",
+            repository=tmp_path,
+            access_token="token",
+            timeout_seconds=1.0,
+        )
+        == 4321
+    )

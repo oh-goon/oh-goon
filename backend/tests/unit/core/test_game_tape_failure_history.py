@@ -96,7 +96,12 @@ def _failed_detail(
         finished_at=now + timedelta(milliseconds=duration_ms),
         progress=FleetRunProgress(total=1, succeeded=0, failed=1, needs_attention=1),
     )
-    return FleetRunDetail(repository_admissions=repository_admissions_for(run.target, run.targets), run=run, execution=DirectFleetExecutionAdmission(), operations=(report,))
+    return FleetRunDetail(
+        repository_admissions=repository_admissions_for(run.target, run.targets),
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+        operations=(report,),
+    )
 
 
 def _passed_detail(
@@ -168,7 +173,12 @@ def _passed_detail(
         finished_at=now + timedelta(milliseconds=duration_ms),
         progress=FleetRunProgress(total=1, succeeded=1, failed=0, needs_attention=0),
     )
-    return FleetRunDetail(repository_admissions=repository_admissions_for(run.target, run.targets), run=run, execution=DirectFleetExecutionAdmission(), operations=(report,))
+    return FleetRunDetail(
+        repository_admissions=repository_admissions_for(run.target, run.targets),
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+        operations=(report,),
+    )
 
 
 def test_failure_history_groups_only_exact_prior_signatures(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@
 
 This is an executable *negative* cutover audit, not replay enablement.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -12,14 +13,19 @@ from oh_goon.core.enforcer_lace_trust import (
     admission_receipt,
 )
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
-from tests.unit.core.test_enforcer_lace_trust import authority, authenticator
+from tests.unit.core.test_enforcer_lace_trust import authenticator, authority
+from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import facts, prepared, publish
 from tests.unit.services.test_group_a_m191_native_replay_capture_fence import _case
-from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import prepared, publish, facts
 
 
-@pytest.mark.parametrize("field", [
-    "parent_run_id", "readmitted_from_run_id", "rerun_from_run_id",
-])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "parent_run_id",
+        "readmitted_from_run_id",
+        "rerun_from_run_id",
+    ],
+)
 def test_replay_parent_is_not_an_admitted_run_contract_field(field):
     """A caller cannot smuggle a new lineage authority into a signed contract."""
     fields = authority(run_id="child")
@@ -41,16 +47,18 @@ def test_valid_child_receipt_does_not_assert_parent_lineage():
 
 @pytest.mark.parametrize("kind", ["readmission", "rerun"])
 def test_signed_deployment_policy_claim_does_not_enable_native_replay(
-    tmp_path, monkeypatch, kind,
+    tmp_path,
+    monkeypatch,
+    kind,
 ):
     """Even an authenticated opaque policy claim cannot promote native lineage."""
     args, connection, native_calls = prepared(tmp_path, monkeypatch)
     _, journal, repository_scope, targets, intent = _case(
-        tmp_path / "replay-parent", kind=kind,
+        tmp_path / "replay-parent",
+        kind=kind,
     )
     fields = args["contract"].fields
-    parent_field = ("readmitted_from_run_id" if kind == "readmission"
-                    else "rerun_from_run_id")
+    parent_field = "readmitted_from_run_id" if kind == "readmission" else "rerun_from_run_id"
     fields["lineage_policy"] = {parent_field: "parent"}
     args["contract"] = AdmittedRunContract.freeze(fields)
     args["intent"] = intent

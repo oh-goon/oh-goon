@@ -1,4 +1,5 @@
 """CO-AG4: original goon.lock writer is usable without application runtime."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,7 +29,9 @@ def _no_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_explicit_output_matches_original_service_without_database(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _no_runtime(monkeypatch)
     source = _source()
@@ -36,7 +39,10 @@ def test_explicit_output_matches_original_service_without_database(
     expected_path = tmp_path / "reference" / "goon.lock"
     expected = FleetPlanService(
         FleetPlanResolver(goon_templates=GoonTemplateStore()),
-        None, None, None, None,
+        None,
+        None,
+        None,
+        None,
     ).lock(source, output=expected_path)
     assert main(["lock", str(source), "--output", str(destination)]) == 0
     out = capsys.readouterr().out
@@ -48,7 +54,9 @@ def test_explicit_output_matches_original_service_without_database(
 
 
 def test_default_destination_is_source_adjacent_without_database(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _no_runtime(monkeypatch)
     source = _source()
@@ -66,7 +74,9 @@ def test_default_destination_is_source_adjacent_without_database(
 
 
 def test_invalid_source_and_input_fail_before_writer_or_database(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _no_runtime(monkeypatch)
     bad = tmp_path / "plan.yml"
@@ -75,13 +85,17 @@ def test_invalid_source_and_input_fail_before_writer_or_database(
     assert main(["lock", str(bad), "--output", str(destination)]) == 2
     assert capsys.readouterr().out
     assert not destination.parent.exists()
-    assert main(["lock", str(_source()), "--input", "unknown=secret", "--output", str(destination)]) == 2
+    assert (
+        main(["lock", str(_source()), "--input", "unknown=secret", "--output", str(destination)])
+        == 2
+    )
     assert "unknown" in capsys.readouterr().out.lower()
     assert not destination.parent.exists()
 
 
 def test_original_lock_owner_is_called_once_and_no_parallel_writer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _no_runtime(monkeypatch)
     import oh_goon.cli_lock as cli_lock
@@ -92,8 +106,11 @@ def test_original_lock_owner_is_called_once_and_no_parallel_writer(
     def exact_original(resolver, plan_path, *, extensions_path, inputs, output):
         observed.append((plan_path, output))
         return original(
-            resolver, plan_path, extensions_path=extensions_path,
-            inputs=inputs, output=output,
+            resolver,
+            plan_path,
+            extensions_path=extensions_path,
+            inputs=inputs,
+            output=output,
         )
 
     monkeypatch.setattr(cli_lock, "_generate_execution_lock", exact_original)
@@ -110,7 +127,10 @@ def test_original_service_and_stateful_adapter_remain_compatible(tmp_path: Path,
 
     service = FleetPlanService(
         FleetPlanResolver(goon_templates=GoonTemplateStore()),
-        None, None, None, None,
+        None,
+        None,
+        None,
+        None,
     )
     path = tmp_path / "goon.lock"
     args = Namespace(command="lock", plan=_source(), output=path, plan_inputs=None)
@@ -119,7 +139,9 @@ def test_original_service_and_stateful_adapter_remain_compatible(tmp_path: Path,
     assert load_execution_lock(path).digest
 
 
-def test_atomic_writer_preserves_previous_lock_on_resolution_failure(tmp_path: Path, monkeypatch) -> None:
+def test_atomic_writer_preserves_previous_lock_on_resolution_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
     _no_runtime(monkeypatch)
     path = tmp_path / "goon.lock"
     path.write_text("do-not-replace", encoding="utf-8")

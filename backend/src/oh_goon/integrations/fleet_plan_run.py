@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import posixpath
 import shutil
 import stat
 import tempfile
-import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -23,6 +23,8 @@ from oh_goon.core.models.fleet_plan_evidence import (
 )
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepEgress
+from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
+from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent, TrustedLocalRunScope
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.path_authority import (
@@ -33,12 +35,12 @@ from oh_goon.core.path_authority import (
     canonical_path,
     ensure_private_directory,
 )
-from oh_goon.core.source_tree_policy import EXECUTION_RUNTIME_MATERIALIZATION_ROOTS
 from oh_goon.core.path_layouts import (
     SANDBOX_PATHS,
     AttemptPathLayout,
     RunPathLayout,
 )
+from oh_goon.core.source_tree_policy import EXECUTION_RUNTIME_MATERIALIZATION_ROOTS
 from oh_goon.integrations._fleet_plan_host_resources import HostToolBinding
 from oh_goon.integrations._fleet_plan_run_lineage import _RunLineage
 from oh_goon.integrations._fleet_plan_run_resources import _FleetPlanRunInputs
@@ -47,8 +49,8 @@ from oh_goon.integrations.content_snapshot import (
     SnapshotBinding,
     SnapshotIdentity,
     copy_frozen_directory,
-    snapshot_identity,
     snapshot_file,
+    snapshot_identity,
 )
 from oh_goon.integrations.content_snapshot_dereferenced import snapshot_directory_dereferenced
 from oh_goon.integrations.executable_materialization_authority import (
@@ -56,7 +58,6 @@ from oh_goon.integrations.executable_materialization_authority import (
     bind_step_executable_materialization,
 )
 from oh_goon.integrations.fleet_content_store import FleetContentObject, FleetContentStore
-from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent, TrustedLocalRunScope
 from oh_goon.integrations.fleet_plan_managed_runtime import (
     ManagedRuntimeSpec,
     UvProjectManagedRuntime,
@@ -82,7 +83,9 @@ class SealedAttemptOutputs:
             or self.workspace != canonical_path(attempt.paths.workspace)
             or self.cache != canonical_path(attempt.paths.cache)
         ):
-            raise FleetPlanInvalid("Sealed attempt-output authority does not match physical attempt")
+            raise FleetPlanInvalid(
+                "Sealed attempt-output authority does not match physical attempt"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,8 +129,13 @@ class FleetPlanStepAttempt:
             _authority=self._output_publication_authority,
         )
 
-    def _stage_agent_prework_bytes(self, handoff: object, *, require_kernel_file_verity: bool = False,
-                                   require_kernel_directory_immutable: bool = False) -> dict[str, object]:
+    def _stage_agent_prework_bytes(
+        self,
+        handoff: object,
+        *,
+        require_kernel_file_verity: bool = False,
+        require_kernel_directory_immutable: bool = False,
+    ) -> dict[str, object]:
         """AG-02B2B3: one original attempt-owned, host-private staging operation.
 
         Only the FleetRunLifecycle admission/attempt fence may call this. The
@@ -138,7 +146,7 @@ class FleetPlanStepAttempt:
         from oh_goon.core.enforcer_lace_trust import canonical_bytes, digest
 
         if require_kernel_directory_immutable and not require_kernel_file_verity:
-            raise FleetPlanInvalid('Kernel directory custody also requires file fs-verity')
+            raise FleetPlanInvalid("Kernel directory custody also requires file fs-verity")
 
         source = getattr(handoff, "source", None)
         if not callable(getattr(handoff, "verify", None)) or source is None:
@@ -157,8 +165,11 @@ class FleetPlanStepAttempt:
             raise FleetPlanInvalid("original private attempt root unavailable") from exc
         try:
             root_stat = os.fstat(root_fd)
-            if (not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != os.geteuid()
-                    or root_stat.st_mode & 0o077):
+            if (
+                not stat.S_ISDIR(root_stat.st_mode)
+                or root_stat.st_uid != os.geteuid()
+                or root_stat.st_mode & 0o077
+            ):
                 raise FleetPlanInvalid("Agent source attempt root is not private")
             # O_EXCL-like mkdir: a previous/partial stage can never be reused.
             os.mkdir("agent-source-prework", 0o700, dir_fd=root_fd)
@@ -182,8 +193,14 @@ class FleetPlanStepAttempt:
                                     os.close(parent_fd)
                                     parent_fd = next_fd
                                 file_fd = os.open(
-                                    parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL
-                                    | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent_fd,
+                                    parts[-1],
+                                    os.O_WRONLY
+                                    | os.O_CREAT
+                                    | os.O_EXCL
+                                    | os.O_NOFOLLOW
+                                    | os.O_CLOEXEC,
+                                    0o600,
+                                    dir_fd=parent_fd,
                                 )
                                 try:
                                     with os.fdopen(file_fd, "wb", closefd=False) as stream:
@@ -192,18 +209,28 @@ class FleetPlanStepAttempt:
                                     os.fsync(file_fd)
                                 finally:
                                     os.close(file_fd)
-                                file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW
-                                                  | os.O_CLOEXEC, dir_fd=parent_fd)
+                                file_fd = os.open(
+                                    parts[-1],
+                                    os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                    dir_fd=parent_fd,
+                                )
                                 try:
                                     info = os.fstat(file_fd)
-                                    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                                            or info.st_uid != os.geteuid()):
+                                    if (
+                                        not stat.S_ISREG(info.st_mode)
+                                        or info.st_nlink != 1
+                                        or info.st_uid != os.geteuid()
+                                    ):
                                         raise FleetPlanInvalid("Agent staged file custody invalid")
                                     with os.fdopen(file_fd, "rb", closefd=False) as stream:
                                         actual = stream.read(len(member.data) + 1)
-                                    if (len(actual) != len(member.data) or
-                                            hashlib.sha256(actual).hexdigest() != member.sha256):
-                                        raise FleetPlanInvalid("Agent source stage readback mismatch")
+                                    if (
+                                        len(actual) != len(member.data)
+                                        or hashlib.sha256(actual).hexdigest() != member.sha256
+                                    ):
+                                        raise FleetPlanInvalid(
+                                            "Agent source stage readback mismatch"
+                                        )
                                     # Seal the verified bytes before publishing any
                                     # prework receipt. This is discretionary custody,
                                     # NOT a kernel immutability guarantee.
@@ -213,23 +240,30 @@ class FleetPlanStepAttempt:
                                         from oh_goon.integrations.fleet_plan_agent_fsverity import (  # noqa: PLC0415
                                             enable_original_agent_file_verity,
                                         )
+
                                         enable_original_agent_file_verity(file_fd)
                                     os.fchmod(file_fd, 0o400)
                                     os.fsync(file_fd)
                                 finally:
                                     os.close(file_fd)
-                                readback.append({"kind": tree.kind, "path": member.path,
-                                                 "sha256": member.sha256, "bytes": len(member.data)})
+                                readback.append(
+                                    {
+                                        "kind": tree.kind,
+                                        "path": member.path,
+                                        "sha256": member.sha256,
+                                        "bytes": len(member.data),
+                                    }
+                                )
                                 os.fsync(parent_fd)
                             finally:
                                 os.close(parent_fd)
+
                         # A nested directory stays writable until all of its
                         # members have been materialized. Seal descendants
                         # bottom-up so no writable subdirectory is left behind.
                         def seal_directories(directory_fd: int) -> None:
                             for name in sorted(os.listdir(directory_fd)):
-                                entry = os.stat(name, dir_fd=directory_fd,
-                                                follow_symlinks=False)
+                                entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                                 if stat.S_ISDIR(entry.st_mode):
                                     child = os.open(name, flags, dir_fd=directory_fd)
                                     try:
@@ -237,13 +271,14 @@ class FleetPlanStepAttempt:
                                     finally:
                                         os.close(child)
                                 elif not stat.S_ISREG(entry.st_mode):
-                                    raise FleetPlanInvalid('unsafe Agent stage member before seal')
+                                    raise FleetPlanInvalid("unsafe Agent stage member before seal")
                             os.fchmod(directory_fd, 0o500)
                             os.fsync(directory_fd)
                             if require_kernel_directory_immutable:
                                 from oh_goon.integrations.fleet_plan_agent_dir_immutable import (  # noqa: PLC0415
                                     enable_original_agent_directory_immutable,
                                 )
+
                                 enable_original_agent_directory_immutable(directory_fd)
 
                         seal_directories(tree_fd)
@@ -255,6 +290,7 @@ class FleetPlanStepAttempt:
                     from oh_goon.integrations.fleet_plan_agent_dir_immutable import (  # noqa: PLC0415
                         enable_original_agent_directory_immutable,
                     )
+
                     enable_original_agent_directory_immutable(staging_fd)
                 os.fsync(root_fd)
                 # The opened inode must still be the caller's original attempt
@@ -265,7 +301,9 @@ class FleetPlanStepAttempt:
                 return {
                     "schema": "oh-goon.agent-prework-attempt-stage/v1",
                     "handoff_identity": handoff.handoff_identity,
-                    "stage_identity": digest("oh-goon/agent-prework-stage/v1", canonical_bytes({"members": readback})),
+                    "stage_identity": digest(
+                        "oh-goon/agent-prework-stage/v1", canonical_bytes({"members": readback})
+                    ),
                     "file_count": len(readback),
                     "readback_verified": True,
                     "effect_permission": "NONE",
@@ -279,11 +317,12 @@ class FleetPlanStepAttempt:
                     from oh_goon.integrations.fleet_plan_agent_dir_immutable import (  # noqa: PLC0415
                         rollback_unpublished_agent_immutable_stage,
                     )
+
                     try:
                         rollback_unpublished_agent_immutable_stage(staging_fd)
                     except Exception as rollback_exc:
                         raise FleetPlanInvalid(
-                            'Agent source stage rollback unproven; privileged recovery required'
+                            "Agent source stage rollback unproven; privileged recovery required"
                         ) from rollback_exc
                 raise
             finally:
@@ -292,7 +331,6 @@ class FleetPlanStepAttempt:
             raise FleetPlanInvalid("Agent source prework staging failed closed") from exc
         finally:
             os.close(root_fd)
-
 
     def _inspect_agent_prework_readonly_mount(self, handoff: object, stage: dict[str, object]):
         """AG-02B2B3B: no-effect proposal for the ORIGINAL LACE mount intent.
@@ -327,26 +365,45 @@ class FleetPlanStepAttempt:
                 directories.update("/".join(components[:i]) for i in range(1, len(components)))
         if not expected or len(expected) > 8192:
             raise FleetPlanInvalid("unbounded Agent source mount proposal")
-        manifest = [{"kind": key.split("/", 1)[0], "path": key.split("/", 1)[1],
-                     "sha256": value[1], "bytes": value[0]}
-                    for key, value in sorted(expected.items())]
+        manifest = [
+            {
+                "kind": key.split("/", 1)[0],
+                "path": key.split("/", 1)[1],
+                "sha256": value[1],
+                "bytes": value[0],
+            }
+            for key, value in sorted(expected.items())
+        ]
         # The older staging receipt was produced in repository,skill order,
         # not globally sorted. Preserve that exact signed identity.
-        stage_manifest = [{"kind": tree.kind, "path": m.path,
-                           "sha256": m.sha256, "bytes": len(m.data)}
-                          for tree in trees for m in tree.members]
-        identity = digest("oh-goon/agent-prework-stage/v1",
-                          canonical_bytes({"members": stage_manifest}))
-        if (type(stage) is not dict or set(stage) != {
-                "schema", "handoff_identity", "stage_identity", "file_count",
-                "readback_verified", "effect_permission", "physical_sandbox_proven"}
-                or stage["schema"] != "oh-goon.agent-prework-attempt-stage/v1"
-                or stage["handoff_identity"] != handoff.handoff_identity
-                or stage["stage_identity"] != identity
-                or stage["file_count"] != len(expected)
-                or stage["readback_verified"] is not True
-                or stage["effect_permission"] != "NONE"
-                or stage["physical_sandbox_proven"] is not False):
+        stage_manifest = [
+            {"kind": tree.kind, "path": m.path, "sha256": m.sha256, "bytes": len(m.data)}
+            for tree in trees
+            for m in tree.members
+        ]
+        identity = digest(
+            "oh-goon/agent-prework-stage/v1", canonical_bytes({"members": stage_manifest})
+        )
+        if (
+            type(stage) is not dict
+            or set(stage)
+            != {
+                "schema",
+                "handoff_identity",
+                "stage_identity",
+                "file_count",
+                "readback_verified",
+                "effect_permission",
+                "physical_sandbox_proven",
+            }
+            or stage["schema"] != "oh-goon.agent-prework-attempt-stage/v1"
+            or stage["handoff_identity"] != handoff.handoff_identity
+            or stage["stage_identity"] != identity
+            or stage["file_count"] != len(expected)
+            or stage["readback_verified"] is not True
+            or stage["effect_permission"] != "NONE"
+            or stage["physical_sandbox_proven"] is not False
+        ):
             raise FleetPlanInvalid("untrusted Agent source stage receipt")
 
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -357,9 +414,11 @@ class FleetPlanStepAttempt:
             raise FleetPlanInvalid("Agent source attempt root unavailable") from exc
         try:
             initial_root = os.fstat(root_fd)
-            if (not stat.S_ISDIR(initial_root.st_mode)
-                    or initial_root.st_uid != os.geteuid()
-                    or initial_root.st_mode & 0o077):
+            if (
+                not stat.S_ISDIR(initial_root.st_mode)
+                or initial_root.st_uid != os.geteuid()
+                or initial_root.st_mode & 0o077
+            ):
                 raise FleetPlanInvalid("Agent source attempt root not private")
             stage_fd = os.open("agent-source-prework", flags, dir_fd=root_fd)
             try:
@@ -369,43 +428,65 @@ class FleetPlanStepAttempt:
 
                 def visit(fd: int, prefix: str) -> None:
                     before = os.fstat(fd)
-                    if (not stat.S_ISDIR(before.st_mode) or before.st_uid != os.geteuid()
-                            or stat.S_IMODE(before.st_mode) != 0o500):
+                    if (
+                        not stat.S_ISDIR(before.st_mode)
+                        or before.st_uid != os.geteuid()
+                        or stat.S_IMODE(before.st_mode) != 0o500
+                    ):
                         raise FleetPlanInvalid("Agent source directory seal invalid")
                     for name in sorted(os.listdir(fd)):
                         if name in {"", ".", ".."} or "/" in name or "\x00" in name:
                             raise FleetPlanInvalid("Agent source stage contains unsafe name")
                         rel = prefix + "/" + name if prefix else name
-                        item_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                                          dir_fd=fd)
+                        item_fd = os.open(
+                            name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd
+                        )
                         try:
                             item = os.fstat(item_fd)
                             if stat.S_ISDIR(item.st_mode):
                                 if rel not in directories:
-                                    raise FleetPlanInvalid("unexpected Agent source stage directory")
+                                    raise FleetPlanInvalid(
+                                        "unexpected Agent source stage directory"
+                                    )
                                 found_dirs.add(rel)
                                 visit(item_fd, rel)
                             elif stat.S_ISREG(item.st_mode):
-                                if (rel not in expected or item.st_nlink != 1
-                                        or item.st_uid != os.geteuid()
-                                        or stat.S_IMODE(item.st_mode) != 0o400):
+                                if (
+                                    rel not in expected
+                                    or item.st_nlink != 1
+                                    or item.st_uid != os.geteuid()
+                                    or stat.S_IMODE(item.st_mode) != 0o400
+                                ):
                                     raise FleetPlanInvalid("unexpected or unsafe Agent staged file")
                                 count, sha = expected[rel]
                                 with os.fdopen(item_fd, "rb", closefd=False) as stream:
                                     raw = stream.read(count + 1)
                                 after = os.fstat(item_fd)
-                                if (len(raw) != count or hashlib.sha256(raw).hexdigest() != sha
-                                        or (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
-                                        != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)):
-                                    raise FleetPlanInvalid("Agent staged source changed since commitment")
+                                if (
+                                    len(raw) != count
+                                    or hashlib.sha256(raw).hexdigest() != sha
+                                    or (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
+                                    != (
+                                        after.st_dev,
+                                        after.st_ino,
+                                        after.st_size,
+                                        after.st_mtime_ns,
+                                    )
+                                ):
+                                    raise FleetPlanInvalid(
+                                        "Agent staged source changed since commitment"
+                                    )
                                 seen.add(rel)
                             else:
                                 raise FleetPlanInvalid("nonregular Agent stage member")
                         finally:
                             os.close(item_fd)
                     after_dir = os.fstat(fd)
-                    if ((before.st_dev, before.st_ino, before.st_mtime_ns)
-                            != (after_dir.st_dev, after_dir.st_ino, after_dir.st_mtime_ns)):
+                    if (before.st_dev, before.st_ino, before.st_mtime_ns) != (
+                        after_dir.st_dev,
+                        after_dir.st_ino,
+                        after_dir.st_mtime_ns,
+                    ):
                         raise FleetPlanInvalid("Agent stage directory changed during readback")
 
                 visit(stage_fd, "")
@@ -413,16 +494,25 @@ class FleetPlanStepAttempt:
                     raise FleetPlanInvalid("Agent source stage incomplete or extended")
                 root_now = os.stat(root, follow_symlinks=False)
                 stage_now = os.stat("agent-source-prework", dir_fd=root_fd, follow_symlinks=False)
-                if ((root_now.st_dev, root_now.st_ino) != (initial_root.st_dev, initial_root.st_ino)
-                        or (stage_now.st_dev, stage_now.st_ino)
-                        != (initial_stage.st_dev, initial_stage.st_ino)):
+                if (root_now.st_dev, root_now.st_ino) != (
+                    initial_root.st_dev,
+                    initial_root.st_ino,
+                ) or (stage_now.st_dev, stage_now.st_ino) != (
+                    initial_stage.st_dev,
+                    initial_stage.st_ino,
+                ):
                     raise FleetPlanInvalid("Agent source mount staging ancestry replaced")
                 # An original declared mount, not an executable/signed resource
                 # commitment. Never reinterpret this as physical containment.
-                proposal_digest = hashlib.sha256(canonical_bytes({
-                    "handoff_identity": handoff.handoff_identity,
-                    "stage_identity": identity, "members": manifest,
-                })).hexdigest()
+                proposal_digest = hashlib.sha256(
+                    canonical_bytes(
+                        {
+                            "handoff_identity": handoff.handoff_identity,
+                            "stage_identity": identity,
+                            "members": manifest,
+                        }
+                    )
+                ).hexdigest()
                 return OriginalSandboxMount(
                     source=str(root / "agent-source-prework"),
                     target="/opt/oh-goon/agent-source",
@@ -459,9 +549,15 @@ class PreparedPlanRun:
         # A matching pair must travel to each physical Step request unchanged.
         if (trusted_local_consent is None) != (trusted_local_scope is None):
             raise FleetPlanInvalid("TL-1 prepared Run requires exact consent and scope together")
-        if process_isolation.capabilities.backend_id == "trusted-local" and trusted_local_consent is None:
+        if (
+            process_isolation.capabilities.backend_id == "trusted-local"
+            and trusted_local_consent is None
+        ):
             raise FleetPlanInvalid("TL-1 prepared Run requires original journal consent")
-        if process_isolation.capabilities.backend_id != "trusted-local" and trusted_local_consent is not None:
+        if (
+            process_isolation.capabilities.backend_id != "trusted-local"
+            and trusted_local_consent is not None
+        ):
             raise FleetPlanInvalid("TL-1 consent cannot enter strict backend preparation")
         self.trusted_local_consent = trusted_local_consent
         self.trusted_local_scope = trusted_local_scope
@@ -506,10 +602,7 @@ class PreparedPlanRun:
             self._temporary.cleanup()
             raise
 
-
-    def bind_execution_cancel_requested(
-        self, cancel_requested: Callable[[], bool] | None
-    ) -> None:
+    def bind_execution_cancel_requested(self, cancel_requested: Callable[[], bool] | None) -> None:
         """Bind the live execution callback after preparation observer teardown.
 
         Strict preparation can use a short-lived persistent SQLite observer. That
@@ -644,7 +737,9 @@ class PreparedPlanRun:
                 cancel_requested=self._cancel_requested,
             )
         read_only_cache = self._lineage.read_only_cache_binding(step)
-        sandbox_bindings = binding.sandbox_bindings + ((read_only_cache,) if read_only_cache else ())
+        sandbox_bindings = binding.sandbox_bindings + (
+            (read_only_cache,) if read_only_cache else ()
+        )
         _write_minimal_etc(etc, hosts=binding.hosts)
         _clear_declared_publish_channels(workspace, step)
         host_tools = self._inputs.host_tools_for(step)
@@ -729,7 +824,6 @@ def _seed_uv_prepared_cache(
     return snapshot_identity(cache, cancel_requested=cancel_requested)
 
 
-
 _CACHE_EXECUTION_RUNTIME_MATERIALIZATION_ROOTS: tuple[PurePosixPath, ...] = (
     PurePosixPath("uv-project-environment"),
 )
@@ -772,9 +866,7 @@ def _materialize_generated_runtime_links_under(
         generated_root = host_root / Path(*relative_root.parts)
         if not generated_root.is_dir() or generated_root.is_symlink():
             continue
-        for current, directories, files in os.walk(
-            generated_root, topdown=True, followlinks=False
-        ):
+        for current, directories, files in os.walk(generated_root, topdown=True, followlinks=False):
             directories.sort()
             files.sort()
             current_path = Path(current)
@@ -832,17 +924,13 @@ def _external_sandbox_target(
     return current
 
 
-def _frozen_sandbox_source(
-    attempt: FleetPlanStepAttempt, target: PurePosixPath
-) -> Path | None:
+def _frozen_sandbox_source(attempt: FleetPlanStepAttempt, target: PurePosixPath) -> Path | None:
     """Map one sandbox pathname back to the immutable Fleet input that owned it."""
 
     toolchain = PurePosixPath("/toolchain/bin")
     for binding in attempt.host_tools:
         sandbox_path = toolchain / binding.name
-        if target == sandbox_path or (
-            binding.name == "sh" and target == PurePosixPath("/bin/sh")
-        ):
+        if target == sandbox_path or (binding.name == "sh" and target == PurePosixPath("/bin/sh")):
             return binding.execution_snapshot_path
     for binding in attempt.sandbox_bindings:
         sandbox_root = binding.sandbox_path
@@ -951,7 +1039,11 @@ def _clear_declared_publish_channels(workspace: Path, step: ResolvedPlanStep) ->
     """Declared outputs/artifacts are produced by this attempt, never inherited evidence."""
 
     paths = RepositoryPathSpace.from_root(workspace)
-    declared = [output.path for output in getattr(step, "outputs", ())]
+    declared = [
+        output.path
+        for output in getattr(step, "outputs", ())
+        if not isinstance(output, PlanStreamOutput)
+    ]
     declared.extend(artifact.path for artifact in getattr(step, "artifacts", ()))
     for value in declared:
         candidate = paths.resolve(value, label="Fleet plan publish path")

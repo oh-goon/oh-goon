@@ -1,4 +1,5 @@
 """CO-AG3: repository-scoped Plan preview reuses original read-only evaluation."""
+
 from __future__ import annotations
 
 import json
@@ -25,13 +26,16 @@ def _no_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     import oh_goon.cli as cli
 
     monkeypatch.setattr(
-        cli, "_build_application_runtime",
+        cli,
+        "_build_application_runtime",
         lambda **_kw: pytest.fail("repository preview started application/Fleet runtime"),
     )
 
 
 def test_cli_preview_uses_original_repository_projection_without_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _no_runtime(monkeypatch)
     repo = tmp_path / "repository"
@@ -51,7 +55,9 @@ def test_cli_preview_uses_original_repository_projection_without_runtime(
 
 
 def test_cli_preview_text_keeps_original_readiness_reason_and_identity(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _no_runtime(monkeypatch)
     source = _source()
@@ -65,7 +71,9 @@ def test_cli_preview_text_keeps_original_readiness_reason_and_identity(
 
 
 def test_cli_preview_preserves_canonical_import_applicability(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _no_runtime(monkeypatch)
     source = _source("python/quality")
@@ -79,7 +87,9 @@ def test_cli_preview_preserves_canonical_import_applicability(
 
 
 def test_cli_preview_bad_plan_fails_before_runtime_or_effects(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _no_runtime(monkeypatch)
     plan = tmp_path / "invalid.yml"
@@ -92,13 +102,25 @@ def test_cli_preview_bad_plan_fails_before_runtime_or_effects(
 
 
 def test_cli_preview_rejects_unknown_input_via_original_binder_without_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _no_runtime(monkeypatch)
-    assert main([
-        "plan", "preview", str(_source()), str(tmp_path),
-        "--input", "not_declared=value", "--json",
-    ]) == 2
+    assert (
+        main(
+            [
+                "plan",
+                "preview",
+                str(_source()),
+                str(tmp_path),
+                "--input",
+                "not_declared=value",
+                "--json",
+            ]
+        )
+        == 2
+    )
     assert capsys.readouterr().out
     assert not (tmp_path / "goon.lock").exists()
 
@@ -111,7 +133,8 @@ def test_original_service_preview_delegates_to_one_canonical_resolver(tmp_path: 
 
 
 def test_original_service_preview_delegates_once_without_second_resolution(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     resolver = _resolver()
     service = FleetPlanService(resolver, None, None, None, None)

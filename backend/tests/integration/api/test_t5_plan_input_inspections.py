@@ -1,11 +1,12 @@
 """T5 read-only API contract: one canonical resolver result, no raw exception leaks."""
+
 from contextlib import closing
 from unittest.mock import Mock
 
 import pytest
 
-from oh_goon.api.app import app as api_app
 from oh_goon.api import dependencies
+from oh_goon.api.app import app as api_app
 from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid, FleetPlanSourceStale
 from tests.integration.api.client import authenticated_api_client
 
@@ -17,10 +18,15 @@ def call(service, request=None):
     api_app.dependency_overrides[dependencies.shared_plan_service] = lambda: service
     try:
         with closing(authenticated_api_client(api_app)) as client:
-            return client.post(URL, json=request or {
-                "plan_key": "python-quality", "expected_revision": REV,
-                "inputs": {"coverage_threshold": "85"},
-            })
+            return client.post(
+                URL,
+                json=request
+                or {
+                    "plan_key": "python-quality",
+                    "expected_revision": REV,
+                    "inputs": {"coverage_threshold": "85"},
+                },
+            )
     finally:
         api_app.dependency_overrides.pop(dependencies.shared_plan_service, None)
 
@@ -32,27 +38,58 @@ def test_inspection_accepted_reports_source_identity_but_never_lock_or_run():
     assert response.status_code == 200
     assert response.json() == {
         "schema": "oh-goon.shared-plan-input-inspection/v1",
-        "status": "accepted", "plan_key": "python-quality",
-        "sha256": REV, "plan_id": "plan-1", "diagnostic": None,
+        "status": "accepted",
+        "plan_key": "python-quality",
+        "sha256": REV,
+        "plan_id": "plan-1",
+        "diagnostic": None,
         "execution": "not_started_by_inspection",
     }
     service.inspect_inputs.assert_called_once_with(
-        "python-quality", expected_revision=REV, inputs={"coverage_threshold": "85"},
+        "python-quality",
+        expected_revision=REV,
+        inputs={"coverage_threshold": "85"},
     )
     assert service.mock_calls == [service.inspect_inputs.call_args] or not service.run.called
     service.lock_preview.assert_not_called()
     service.run.assert_not_called()
 
 
-@pytest.mark.parametrize("failure,code,names", [
-    (FleetPlanInputRejected("PRIVATE_SSH_KEY secret", diagnostic_code="INVALID_INPUT_VALUE", input_names=("coverage_threshold",)), "INVALID_INPUT_VALUE", ["coverage_threshold"]),
-    (FleetPlanInputRejected("PRIVATE_SSH_KEY secret", diagnostic_code="UNKNOWN_INPUT", input_names=("nonexistent",)), "UNKNOWN_INPUT", ["nonexistent"]),
-    (FleetPlanInvalid("PRIVATE_SSH_KEY secret /tmp/secret"), "PLAN_RESOLUTION_REJECTED", []),
-])
+@pytest.mark.parametrize(
+    "failure,code,names",
+    [
+        (
+            FleetPlanInputRejected(
+                "PRIVATE_SSH_KEY secret",
+                diagnostic_code="INVALID_INPUT_VALUE",
+                input_names=("coverage_threshold",),
+            ),
+            "INVALID_INPUT_VALUE",
+            ["coverage_threshold"],
+        ),
+        (
+            FleetPlanInputRejected(
+                "PRIVATE_SSH_KEY secret",
+                diagnostic_code="UNKNOWN_INPUT",
+                input_names=("nonexistent",),
+            ),
+            "UNKNOWN_INPUT",
+            ["nonexistent"],
+        ),
+        (FleetPlanInvalid("PRIVATE_SSH_KEY secret /tmp/secret"), "PLAN_RESOLUTION_REJECTED", []),
+    ],
+)
 def test_inspection_rejection_is_exact_t4_safe_projection(failure, code, names):
     service = Mock()
     service.inspect_inputs.side_effect = failure
-    response = call(service, {"plan_key": "python-quality", "expected_revision": REV, "inputs": {"coverage_threshold": "PRIVATE_SSH_KEY"}})
+    response = call(
+        service,
+        {
+            "plan_key": "python-quality",
+            "expected_revision": REV,
+            "inputs": {"coverage_threshold": "PRIVATE_SSH_KEY"},
+        },
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "rejected"
@@ -73,7 +110,14 @@ def test_stale_revision_is_not_downgraded_to_success_or_generic_input_rejection(
 
 
 def test_malformed_body_never_escapes_rejected_secret_via_pydantic_context():
-    response = call(Mock(), {"plan_key": "python-quality", "expected_revision": "PRIVATE_SSH_KEY", "inputs": {"foo": ["PRIVATE_SSH_KEY"]}})
+    response = call(
+        Mock(),
+        {
+            "plan_key": "python-quality",
+            "expected_revision": "PRIVATE_SSH_KEY",
+            "inputs": {"foo": ["PRIVATE_SSH_KEY"]},
+        },
+    )
     assert response.status_code == 422
     assert "PRIVATE_SSH_KEY" not in response.text
     assert response.json()["details"] == {}

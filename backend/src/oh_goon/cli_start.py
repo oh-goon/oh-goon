@@ -9,21 +9,21 @@ from oh_goon.api.ui import built_ui_available
 from oh_goon.cli_local_state import check_local_state_for_startup
 from oh_goon.core.errors import LeaguePreferencesInvalid
 from oh_goon.runtime.league_folders import LeagueFolderStore
+from oh_goon.runtime.local_launch_access import LocalLaunchAccessStore
+from oh_goon.runtime.local_launch_binding import LocalLaunchBindingStore
 from oh_goon.runtime.local_launch_owner import (
     BACKEND_GENERATION,
     BACKEND_SERVICE,
     LocalLaunchOwner,
     built_local_intent,
 )
-from oh_goon.runtime.local_launch_access import LocalLaunchAccessStore
 from oh_goon.runtime.local_launch_plan import built_local_plan
-from oh_goon.runtime.local_launch_supervisor import start_inprocess_readiness_monitor
-from oh_goon.runtime.local_launch_binding import LocalLaunchBindingStore
 from oh_goon.runtime.local_launch_reuse import (
     LocalLaunchReuseAction,
     assess_local_launch_reuse,
 )
 from oh_goon.runtime.local_launch_state import LocalLaunchEventStore
+from oh_goon.runtime.local_launch_supervisor import start_inprocess_readiness_monitor
 
 LOCAL_APP_HOST = "127.0.0.1"
 LOCAL_APP_PORT = 8787
@@ -50,6 +50,7 @@ def _render_reuse_decision(*, workspace: Path, decision) -> int | None:
     else:
         print("Status:         oh-goon status")
     return 0
+
 
 def run_start_command(args: argparse.Namespace) -> int | None:
     if args.command != "start":
@@ -86,6 +87,7 @@ def run_start_command(args: argparse.Namespace) -> int | None:
     )
     return _run_local_server(owner, launch_context, uvicorn)
 
+
 def _load_league_folders() -> tuple[LeagueFolderStore, list] | None:
     if not built_ui_available():
         print("The bundled oh-goon UI is not present in this source checkout/install.")
@@ -100,6 +102,7 @@ def _load_league_folders() -> tuple[LeagueFolderStore, list] | None:
         print(f"League preferences: {folders.path}")
         return None
     return folders, saved
+
 
 def _create_local_launch(*, intent, workspace: Path, events, bindings, folders, saved):
     owner = LocalLaunchOwner.create(
@@ -124,6 +127,7 @@ def _create_local_launch(*, intent, workspace: Path, events, bindings, folders, 
     print("Stop:           Ctrl+C")
     return owner, launch_context
 
+
 def _run_local_server(owner, launch_context, uvicorn) -> int:
     plan = built_local_plan(host=LOCAL_APP_HOST, port=LOCAL_APP_PORT)
     token = LocalLaunchAccessStore.configured().token(
@@ -137,7 +141,9 @@ def _run_local_server(owner, launch_context, uvicorn) -> int:
     monitor = start_inprocess_readiness_monitor(
         owner=owner,
         plan=plan,
-        on_ready=lambda: print(f"Open:           http://{LOCAL_APP_HOST}:{LOCAL_APP_PORT}/#access={token}"),
+        on_ready=lambda: print(
+            f"Open:           http://{LOCAL_APP_HOST}:{LOCAL_APP_PORT}/#access={token}"
+        ),
         on_failure=lambda: setattr(server, "should_exit", True),
     )
     try:

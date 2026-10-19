@@ -1,11 +1,12 @@
 """Pytest plugin that persists one atomic receipt per admitted batch member.
 
 Loaded by ``oh-goon-test-batches`` for exact execution evidence; ``--resume`` controls reuse. The runner's durable unit is its
-member: a whole test file for file granularity, or one top-level test selector for test
+member: a whole test file for file granularity, or one native test selector for test
 granularity. A member receipt is written only after every collected pytest item beneath
 that member completed without a failing setup/call/teardown report. Therefore a host
 kill can lose only the currently incomplete member, not earlier siblings in the batch.
 """
+
 from __future__ import annotations
 
 import json
@@ -14,6 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from oh_goon.repository_tooling.pytest_execution_membership import ExecutionMembershipStore
+from oh_goon.repository_tooling.pytest_member_selection import (
+    collected_item,
+    read_native_collection,
+)
 from oh_goon.repository_tooling.test_batch_receipts import MemberReceiptStore
 
 _STORE: MemberReceiptStore | None = None
@@ -95,6 +100,21 @@ def pytest_collection_finish(session: Any) -> None:
     _STATE.clear()
     _ITEM_STATE.clear()
     _NODE_TO_MEMBER.clear()
+    collection_path = os.environ.get("OH_GOON_PYTEST_RECEIPT_COLLECTION")
+    if collection_path:
+        import pytest
+
+        packet = read_native_collection(Path(collection_path))
+        actual = {collected_item(item, _ADMISSION_ROOT)["selector"] for item in session.items}
+        file_members = {member for member in _EXPECTED_MEMBERS if "::" not in member}
+        node_members = {member for member in _EXPECTED_MEMBERS if "::" in member}
+        expected = {
+            row["selector"]
+            for row in packet["selected"]
+            if row["file"] in file_members or row["selector"] in node_members
+        }
+        if actual != expected:
+            raise pytest.UsageError("Native pytest collection changed after batch admission")
     for item in session.items:
         member = _member_for_item(item)
         if member is None:
@@ -108,11 +128,7 @@ def pytest_collection_finish(session: Any) -> None:
 
 def pytest_runtest_logstart(nodeid: str, location: Any) -> None:
     del location
-    if (
-        _EXECUTION_STORE is None
-        or _ATTEMPT_IDENTITY is None
-        or _BATCH_IDENTITY is None
-    ):
+    if _EXECUTION_STORE is None or _ATTEMPT_IDENTITY is None or _BATCH_IDENTITY is None:
         return
     member = _NODE_TO_MEMBER.get(nodeid)
     if member is None:

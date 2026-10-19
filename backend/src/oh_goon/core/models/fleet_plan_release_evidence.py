@@ -5,8 +5,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, computed_field, model_validator
 
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.product_identity import stable_id
 
 
 class OciPublishReleaseEvidence(ImmutableModel):

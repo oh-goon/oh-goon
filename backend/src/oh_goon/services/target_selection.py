@@ -12,8 +12,8 @@ from oh_goon.core.models.run_admission import (
     FleetRepositoryScope,
 )
 from oh_goon.core.models.target import OperationTarget
-from oh_goon.core.vocabulary import FleetScope
 from oh_goon.core.path_authority import navigation_path
+from oh_goon.core.vocabulary import FleetScope
 from oh_goon.runtime.state import LocalStateReadView
 from oh_goon.services.league import LeagueService
 from oh_goon.services.migration import MigrationService
@@ -59,9 +59,8 @@ class FleetTargetSelector:
         repository_scope: FleetRepositoryScope,
     ) -> list[IncludedRepositoryCatalogEntry]:
         selected = self._selectors[capability.selector](state, target)
-        if (
-            capability.selector is CapabilityTargetSelector.LEAGUE_TEAM
-            and isinstance(repository_scope, ExplicitRepositoryScope)
+        if capability.selector is CapabilityTargetSelector.LEAGUE_TEAM and isinstance(
+            repository_scope, ExplicitRepositoryScope
         ):
             selected = self._include_explicit_configured_roots(
                 selected,

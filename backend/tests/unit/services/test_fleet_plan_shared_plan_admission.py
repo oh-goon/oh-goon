@@ -19,7 +19,9 @@ def _tools(root: Path) -> FleetToolStore:
     return FleetToolStore(root / "tools", path_authority=TEST_PATH_AUTHORITY)
 
 
-def test_plan_run_carries_expected_repository_instances_into_fleet_admission(tmp_path: Path) -> None:
+def test_plan_run_carries_expected_repository_instances_into_fleet_admission(
+    tmp_path: Path,
+) -> None:
     plan_path = tmp_path / "goon.yml"
     plan_path.write_text(
         """version: 1\nexecution:\n  purpose: verification\nsteps:\n  - id: tests\n    run: \"uv run pytest -q\"\n""",

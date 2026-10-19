@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from dataclasses import replace
 
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
@@ -13,7 +12,6 @@ from oh_goon.core.errors import (
     OwnershipLost,
     StateConflict,
 )
-from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.effect_attempt import ClaimedRepositoryEffectAttempt
 from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
@@ -21,7 +19,10 @@ from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
+from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
+from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import EffectBoundaryKind, FleetRunEventType
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
@@ -30,7 +31,6 @@ from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionSession
 from oh_goon.runtime.fault_injection import FaultInjector, FaultPoint, NoFaultInjector
 from oh_goon.runtime.journal import Journal
-from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.services.capability_executor import CapabilityExecutor
 from oh_goon.services.repository_effect_fence import RepositoryEffectFence
 from oh_goon.services.repository_effect_preparation import mutate_pre_effect_attempt
@@ -193,6 +193,7 @@ class RepositoryEffectExecution:
                     + attempt.repository.path.name
                     + "; entering workload"
                 )
+
             def start_effect(connection: sqlite3.Connection):
                 if validate_authority_in is not None:
                     validate_authority_in(connection)
@@ -207,12 +208,11 @@ class RepositoryEffectExecution:
             self._faults.hit(effect_started_fault)
             result = self._executor.execute(prepared, request)
             self._faults.hit(FaultPoint.BEFORE_OPERATION_COMMIT)
+
             def commit_success(connection: sqlite3.Connection) -> None:
                 if validate_authority_in is not None:
                     validate_authority_in(connection)
-                self._settlement.commit_success_in(
-                    connection, result.report, attempt.operation_id
-                )
+                self._settlement.commit_success_in(connection, result.report, attempt.operation_id)
 
             _settle(session, commit_success, close_execution=close_execution)
             self._record_post_settlement_maintenance(prepared, attempt)
@@ -292,9 +292,7 @@ class RepositoryEffectExecution:
             )
         return started
 
-    def _prepare(
-        self, request: CapabilityExecutionRequest, *, session: ExecutionSession
-    ):
+    def _prepare(self, request: CapabilityExecutionRequest, *, session: ExecutionSession):
         """Freeze execution inputs under the one repository-effect lifecycle owner."""
         self._effect_fence.verify(
             request.attempt.repository.path, request.attempt.baseline, session.cancel_requested

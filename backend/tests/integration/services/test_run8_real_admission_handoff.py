@@ -5,6 +5,7 @@ external Hashmarks wheel, unavailable on this host. The test is deliberately NOT
 Plan admission proof or physical LACE certification. Do not substitute an
 invented filesystem digest or software custody permit.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,9 +37,11 @@ class _ResultOperation:
     def run(self, repository: Path, action: OperationAction, **kwargs):
         assert action is OperationAction.INIT
         return OperationExecution(
-            stdout="", stderr="",
+            stdout="",
+            stderr="",
             report=make_operation_report(
-                repository, action,
+                repository,
+                action,
                 verdict=Verdict.FAILED if self.failed else Verdict.READY,
                 reason_code=ReasonCode.OPERATION_FAILED if self.failed else ReasonCode.READY,
                 fleet_run_id=kwargs["fleet_run_id"],
@@ -54,7 +57,9 @@ def _read(runtime, capsys, *argv: str) -> dict:
 
 @pytest.mark.parametrize("failed", [False, True])
 def test_original_fleet_sqlite_terminal_handoff_restarts_without_hashmarks(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], failed: bool,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    failed: bool,
 ) -> None:
     root = tmp_path / "repos"
     repository = root / "sample"
@@ -68,7 +73,9 @@ def test_original_fleet_sqlite_terminal_handoff_restarts_without_hashmarks(
     repository_id = RepositoryIdentity(path=repository).repository_id
     run_id = f"run8a-operation-{int(failed)}"
     try:
-        admitted = owner.start(OperationAction.INIT, repository_ids={repository_id}, fleet_run_id=run_id)
+        admitted = owner.start(
+            OperationAction.INIT, repository_ids={repository_id}, fleet_run_id=run_id
+        )
         assert admitted.fleet_run_id == run_id
         detail = owner.wait_for_terminal(run_id, timeout=10)
         assert (detail.outcome is FleetRunOutcome.SUCCESS) is (not failed)
@@ -91,8 +98,9 @@ def test_original_fleet_sqlite_terminal_handoff_restarts_without_hashmarks(
     steps = _read(runtime, capsys, "steps", run_id)
     outputs = _read(runtime, capsys, "outputs", run_id)
     logs = _read(runtime, capsys, "logs", run_id, "--after", "0")
-    assert all(data["fleet_run_id"] == run_id for data in
-               (status, handoff, tape, steps, outputs, logs))
+    assert all(
+        data["fleet_run_id"] == run_id for data in (status, handoff, tape, steps, outputs, logs)
+    )
     assert handoff["outcome"] == detail.outcome.value
     assert (handoff["outcome"] == "SUCCESS") is (not failed)
     assert handoff["readback"]

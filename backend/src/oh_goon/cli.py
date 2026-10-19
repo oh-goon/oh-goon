@@ -10,32 +10,29 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_developer import run_state_free_developer_command
 from oh_goon.cli_enforcer import run_enforcer_compare_command
 from oh_goon.cli_local_state import check_local_state_for_startup, run_local_state_command
+from oh_goon.cli_logs import run_logs_command
+from oh_goon.cli_open import run_open_command
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime import run_stateful_command
+from oh_goon.cli_self import run_self_command
 from oh_goon.cli_start import run_start_command
 from oh_goon.cli_status import run_status_command
-from oh_goon.cli_storage import run_storage_command
-from oh_goon.cli_open import run_open_command
-from oh_goon.cli_logs import run_logs_command
 from oh_goon.cli_stop import run_stop_command
-from oh_goon.cli_self import run_self_command
-from oh_goon.core.errors import DatabaseSchemaMismatch
+from oh_goon.cli_storage import run_storage_command
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
-from oh_goon.runtime.storage_health import storage_unavailable_reason
+from oh_goon.core.errors import DatabaseSchemaMismatch
 from oh_goon.runtime.database import DatabasePathIdentityLost
-
+from oh_goon.runtime.storage_health import storage_unavailable_reason
 
 
 def _print_runtime_database_identity_lost(reason: str) -> None:
     print("OH-GOON RUNTIME DATABASE IDENTITY LOST")
     print(f"Reason: {reason}")
     print(
-        "The admitted SQLite identity could not be re-proven after bounded "
-        "observation-only checks."
+        "The admitted SQLite identity could not be re-proven after bounded observation-only checks."
     )
     print(
-        "Oh-Goon will not recreate/repair the database or replay a Plan, Step, "
-        "or external effect."
+        "Oh-Goon will not recreate/repair the database or replay a Plan, Step, or external effect."
     )
     print(
         "For isolated certification state, preserve this diagnostic before using "
@@ -46,6 +43,7 @@ def _print_runtime_database_identity_lost(reason: str) -> None:
         "not as disposable-cache damage."
     )
     print("Native package-manager state is outside certification control-state reset authority.")
+
 
 def _print_runtime_storage_unavailable(reason: str) -> None:
     print("OH-GOON RUNTIME STORAGE UNAVAILABLE")
@@ -129,8 +127,9 @@ def _run_serve_command(args) -> int:
 
 
 def _build_application_runtime(
-    *, fleet_provisioner: FleetPreworkProvisioner | None = None,
-    standard_local: bool = False,
+    *,
+    fleet_provisioner: FleetPreworkProvisioner | None = None,
+    standard_local: bool | None = None,
 ) -> ApplicationRuntime | None:
     try:
         if fleet_provisioner is not None:
@@ -174,7 +173,8 @@ def _execute_stateful_command(runtime: ApplicationRuntime, args) -> int:
 
 
 def main(
-    argv: list[str] | None = None, *,
+    argv: list[str] | None = None,
+    *,
     fleet_provisioner: FleetPreworkProvisioner | None = None,
 ) -> int:
     """Run the CLI; only an in-process deployment can transport Fleet authority.
@@ -188,6 +188,7 @@ def main(
     args = parser.parse_args(argv)
     if fleet_provisioner is not None:
         from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
+
         if type(fleet_provisioner) is not FleetPreworkProvisioner:
             raise TrustProtocolError("original deployment FleetPreworkProvisioner required")
         if args.command != "plan" or args.plan_command != "run":
@@ -196,9 +197,28 @@ def main(
         # construction, storage/lease mutation, or any pre-runtime commands.
         fleet_provisioner.require_enrolled_identity(args.fleet_run_id)
 
-    standard_local = bool(getattr(args, "standard_local", False))
-    if standard_local and (fleet_provisioner is not None or not args.wait):
-        parser.error("--standard-local requires --wait and cannot use deployment Fleet enrollment")
+    standard_local = None
+    if args.command == "plan" and args.plan_command == "run":
+        from oh_goon._application_foundation import standard_local_profile
+
+        standard_local = standard_local_profile(
+            args.standard_local, deployment_selected=fleet_provisioner is not None
+        )
+        args.standard_local = standard_local
+        if standard_local and (fleet_provisioner is not None or not args.wait):
+            parser.error(
+                "local execution waits for completion and cannot use deployment enrollment"
+            )
+
+    if args.command == "templates":
+        from oh_goon.cli_templates import run_template_command
+
+        return run_template_command(args)
+
+    if args.command == "agent" and args.agent_command == "providers":
+        from oh_goon.cli_agent_providers import run_provider_command
+
+        return run_provider_command(args)
 
     # Pure authoring commands share the original FleetPlanResolver and do not
     # need a database, journal, executor, or physical native admission.  Runtime
@@ -233,6 +253,7 @@ def main(
     # FleetPlanService lock writer. It must not construct the app/Fleet database.
     if args.command == "agent":
         from oh_goon.cli_agent_patch_apply import run_selected_proposal
+
         return run_selected_proposal(args)
 
     if args.command == "lock":

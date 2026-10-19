@@ -7,10 +7,10 @@ from oh_goon.core.models.run_admission import (
     ExplicitRepositoryScope,
 )
 from oh_goon.runtime.database import LocalDatabase
-from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.league import LeagueService
 from oh_goon.services.migration import MigrationService
 from oh_goon.services.repositories import RepositoryService
+from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.target_selection import FleetTargetSelector
 from tests.factories.local_state import local_state
 
@@ -41,9 +41,7 @@ def test_fleet_plan_selector_consumes_structural_explicit_scope(tmp_path: Path) 
     for repository in (first, second):
         repository.mkdir(parents=True)
         (repository / ".git").mkdir()
-        (repository / "goon.yml").write_text(
-            "version: 1\nsteps: []\n", encoding="utf-8"
-        )
+        (repository / "goon.yml").write_text("version: 1\nsteps: []\n", encoding="utf-8")
     state = local_state(LocalDatabase(tmp_path / "state.db"))
     state.add_location(root)
     discovery = RepositoryDiscoveryService()

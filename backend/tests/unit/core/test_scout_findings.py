@@ -4,14 +4,14 @@ from dataclasses import replace
 from datetime import timedelta
 
 from oh_goon.core.execution_observability import RepositoryRunObservation
-from oh_goon.scout.models import ScoutWindow
+from oh_goon.core.time import utc_now
+from oh_goon.core.vocabulary import GameTapeStatus
 from oh_goon.scout.evidence import (
     ScoutEvidenceSnapshot,
     ScoutStepObservation,
 )
+from oh_goon.scout.models import ScoutWindow
 from oh_goon.scout.projection import project_scout_findings
-from oh_goon.core.time import utc_now
-from oh_goon.core.vocabulary import GameTapeStatus
 
 
 def _window(now, hours: int = 24) -> ScoutWindow:

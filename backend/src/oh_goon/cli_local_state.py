@@ -6,7 +6,6 @@ import sqlite3
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.runtime.database import DATABASE_SCHEMA_VERSION, inspect_local_database
 from oh_goon.runtime.league_folders import LeagueFolderStore
-from oh_goon.runtime.storage_health import probe_sqlite_prelaunch
 from oh_goon.runtime.local_state_maintenance import (
     BUILT_RELEASE_RESET_COMMAND,
     SOURCE_RESET_COMMAND,
@@ -14,6 +13,7 @@ from oh_goon.runtime.local_state_maintenance import (
     reset_local_state,
     sqlite_state_files,
 )
+from oh_goon.runtime.storage_health import probe_sqlite_prelaunch
 
 
 def _local_state_inspection(action: str) -> LocalStateInspection:
@@ -66,9 +66,7 @@ def _local_state_prelaunch_command(
     return 0
 
 
-def _local_state_reset_command(
-    inspection: LocalStateInspection, args: argparse.Namespace
-) -> int:
+def _local_state_reset_command(inspection: LocalStateInspection, args: argparse.Namespace) -> int:
     league_folders = LeagueFolderStore()
     if not args.yes:
         print("This deletes oh-goon's disposable local database and run history.")
@@ -90,10 +88,7 @@ def _local_state_reset_command(
         print(f"Deleted {len(deleted)} SQLite file(s).")
     else:
         print("No local database files existed; startup is already clean.")
-    print(
-        "Start again with the same path: "
-        "make dev (source) or oh-goon start (built release)"
-    )
+    print("Start again with the same path: make dev (source) or oh-goon start (built release)")
     return 0
 
 
@@ -152,4 +147,6 @@ def _print_inspection(inspection: LocalStateInspection) -> None:
 def _print_reset_recovery(*, indent: str = "") -> None:
     print(f"{indent}Source checkout: {SOURCE_RESET_COMMAND}")
     print(f"{indent}Built release:   {BUILT_RELEASE_RESET_COMMAND}")
-    print(f"{indent}Use the command from the same checkout/release that reported the mismatch; do not use an older global binary.")
+    print(
+        f"{indent}Use the command from the same checkout/release that reported the mismatch; do not use an older global binary."
+    )

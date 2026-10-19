@@ -16,7 +16,9 @@ from oh_goon.repository_tooling._repository_understanding_policy_primitives impo
 def _confidence_calibration(state: EvaluationState) -> dict[str, Any]:
     return {
         "grader_judgment": {
-            "critical_judgment_confidence_minimum": state.profile["critical_judgment_confidence_minimum"],
+            "critical_judgment_confidence_minimum": state.profile[
+                "critical_judgment_confidence_minimum"
+            ],
             "adjudication_count": len(state.adjudication_required),
             "policy": "low-confidence fatal grader judgments cannot decide certification",
         },
@@ -32,7 +34,11 @@ def _confidence_calibration(state: EvaluationState) -> dict[str, Any]:
             "brier_score": (
                 None
                 if not state.candidate_calibration_errors
-                else round(sum(state.candidate_calibration_errors) / len(state.candidate_calibration_errors), 4)
+                else round(
+                    sum(state.candidate_calibration_errors)
+                    / len(state.candidate_calibration_errors),
+                    4,
+                )
             ),
             "policy": (
                 "confidence calibration is explicit; abstention never adds semantic credit, and write-authority "

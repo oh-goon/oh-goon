@@ -1,4 +1,5 @@
 """DB3: disposable Scout and explicit original-owner SQLite backup fences."""
+
 from __future__ import annotations
 
 import hashlib
@@ -102,7 +103,9 @@ def test_backup_rejects_active_write_cut_before_creating_directory(tmp_path: Pat
     operational = LocalDatabase(tmp_path / "state.sqlite3")
     directory = tmp_path / "not-created"
     with operational.transaction(write=True) as conn:
-        conn.execute("INSERT INTO locations(path, position, added_at) VALUES ('/db3/held', 1, 'now')")
+        conn.execute(
+            "INSERT INTO locations(path, position, added_at) VALUES ('/db3/held', 1, 'now')"
+        )
         with pytest.raises(RuntimeError, match="independent explicit maintenance cut"):
             operational.export_verified_backup(directory / "snapshot.sqlite3")
         assert not directory.exists()

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import argparse
+
 import hashlib
 import json
 import os
 from pathlib import Path
+from typing import Any
 import subprocess
 import sys
 
@@ -22,8 +25,8 @@ def _host_capability(path: Path, *, interpreter: str | None = None) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _host_capability_payload(*, interpreter: str | None = None) -> dict[str, object]:
-    payload: dict[str, object] = {
+def _host_capability_payload(*, interpreter: str | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "schema": "oh-goon.hosted-dependency-capability/v2",
         "authority": "diagnostic-only",
         "native_authority": False,
@@ -62,10 +65,12 @@ def _host_capability_payload(*, interpreter: str | None = None) -> dict[str, obj
     return payload
 
 
-def _resign(payload: dict[str, object]) -> None:
+def _resign(payload: dict[str, Any]) -> None:
     unsigned = dict(payload)
     unsigned.pop("identity", None)
-    encoded = json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    encoded = json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
     payload["identity"] = "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
@@ -83,7 +88,7 @@ def _batch_report(
     selected_membership_identity: str = "sha256:selected",
 ) -> None:
     members = ["a.py", "b.py"] if members is None else members
-    payload = {
+    payload: dict[str, Any] = {
         "schema": "oh-goon.pytest-batch-execution/v1",
         "status": status,
         "source_identity": source_identity,
@@ -140,7 +145,9 @@ def _invoke_writer(
     if stale_output:
         output.write_text('{"result":"HOSTED-DIAGNOSTIC-PASSED"}\n', encoding="utf-8")
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT / "backend/src") + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        str(ROOT / "backend/src") + os.pathsep + env.get("PYTHONPATH", "")
+    )
     command = [
         sys.executable,
         "-m",
@@ -168,11 +175,15 @@ def _invoke_writer(
     return result, output
 
 
-def _run_writer(tmp_path: Path, report: Path) -> tuple[subprocess.CompletedProcess[str], Path]:
+def _run_writer(
+    tmp_path: Path, report: Path
+) -> tuple[subprocess.CompletedProcess[str], Path]:
     return _invoke_writer(tmp_path, f"backend-unit\t1\t{report}\n")
 
 
-def test_hosted_receipt_is_explicitly_non_authoritative_and_membership_complete(tmp_path: Path) -> None:
+def test_hosted_receipt_is_explicitly_non_authoritative_and_membership_complete(
+    tmp_path: Path,
+) -> None:
     report = tmp_path / "batch.json"
     _batch_report(report)
     result, output = _run_writer(tmp_path, report)
@@ -200,14 +211,16 @@ def test_hosted_receipt_is_explicitly_non_authoritative_and_membership_complete(
     }
 
 
-def test_build_receipt_directly_binds_crypto_capability_to_batch_evidence(tmp_path: Path) -> None:
+def test_build_receipt_directly_binds_crypto_capability_to_batch_evidence(
+    tmp_path: Path,
+) -> None:
     report = tmp_path / "batch.json"
     _batch_report(report)
     manifest = tmp_path / "manifest.tsv"
     manifest.write_text(f"backend-unit\t1\t{report}\n", encoding="utf-8")
     capability = tmp_path / "host-capability.json"
     _host_capability(capability)
-    args = receipt_module.argparse.Namespace(
+    args = argparse.Namespace(
         output=tmp_path / "receipt.json",
         manifest=manifest,
         host_capability=capability,
@@ -225,7 +238,9 @@ def test_build_receipt_directly_binds_crypto_capability_to_batch_evidence(tmp_pa
     assert payload["totals"]["selected"] == payload["totals"]["passed"] == 2
 
 
-def test_hosted_receipt_rejects_tampered_host_capability_identity(tmp_path: Path) -> None:
+def test_hosted_receipt_rejects_tampered_host_capability_identity(
+    tmp_path: Path,
+) -> None:
     report = tmp_path / "batch.json"
     _batch_report(report)
     result, output = _invoke_writer(
@@ -238,7 +253,9 @@ def test_hosted_receipt_rejects_tampered_host_capability_identity(tmp_path: Path
     assert "capability identity does not match payload" in result.stderr
 
 
-def test_hosted_receipt_rejects_capability_from_different_interpreter(tmp_path: Path) -> None:
+def test_hosted_receipt_rejects_capability_from_different_interpreter(
+    tmp_path: Path,
+) -> None:
     report = tmp_path / "batch.json"
     _batch_report(report)
     result, output = _invoke_writer(
@@ -255,8 +272,16 @@ def test_hosted_receipt_rejects_capability_from_different_interpreter(tmp_path: 
     ("field", "value", "message"),
     (
         ("native_authority", True, "attempted to claim native authority"),
-        ("dependency_complete_authority", True, "attempted dependency-complete authority"),
-        ("uv_artifact_cache_evaluated", True, "must not claim uv artifact-cache evaluation"),
+        (
+            "dependency_complete_authority",
+            True,
+            "attempted dependency-complete authority",
+        ),
+        (
+            "uv_artifact_cache_evaluated",
+            True,
+            "must not claim uv artifact-cache evaluation",
+        ),
         ("python_status", "incompatible", "outside project requires-python"),
     ),
 )
@@ -272,15 +297,23 @@ def test_host_capability_validator_rejects_authority_or_runtime_promotion(
         receipt_module._validate_host_capability_header(payload)
 
 
-def test_host_capability_validator_accepts_equivalent_native_only_partition_identity() -> None:
+def test_host_capability_validator_accepts_equivalent_native_only_partition_identity() -> (
+    None
+):
     payload = _host_capability_payload()
-    payload["declared_python_dependencies"] = ["cryptography", "pytest", "native-observer"]
+    payload["declared_python_dependencies"] = [
+        "cryptography",
+        "pytest",
+        "native-observer",
+    ]
     payload["excluded_python_dependencies"] = ["native-observer"]
     _resign(payload)
     receipt_module._validate_host_capability_packages(payload)
 
 
-def test_host_capability_validator_rejects_missing_declared_dependency_partition() -> None:
+def test_host_capability_validator_rejects_missing_declared_dependency_partition() -> (
+    None
+):
     payload = _host_capability_payload()
     payload["excluded_python_dependencies"] = []
     _resign(payload)
@@ -288,7 +321,9 @@ def test_host_capability_validator_rejects_missing_declared_dependency_partition
         receipt_module._validate_host_capability_packages(payload)
 
 
-def test_host_capability_validator_rejects_overlapping_or_incomplete_partition() -> None:
+def test_host_capability_validator_rejects_overlapping_or_incomplete_partition() -> (
+    None
+):
     payload = _host_capability_payload()
     payload["evaluated_python_dependencies"] = ["cryptography", "pytest", "hashmarks"]
     _resign(payload)
@@ -302,11 +337,15 @@ def test_host_capability_validator_rejects_overlapping_or_incomplete_partition()
         receipt_module._validate_host_capability_packages(payload)
 
 
-def test_host_capability_validator_requires_packages_to_match_evaluated_partition() -> None:
+def test_host_capability_validator_requires_packages_to_match_evaluated_partition() -> (
+    None
+):
     payload = _host_capability_payload()
     payload["packages"] = payload["packages"][:-1]
     _resign(payload)
-    with pytest.raises(RuntimeError, match="packages do not exactly cover evaluated dependencies"):
+    with pytest.raises(
+        RuntimeError, match="packages do not exactly cover evaluated dependencies"
+    ):
         receipt_module._validate_host_capability_packages(payload)
 
 
@@ -319,7 +358,9 @@ def test_host_capability_validator_requires_compatible_cryptography_package() ->
     crypto["status"] = "missing"
     _resign(payload)
     receipt_module._validate_host_capability_header(payload)
-    with pytest.raises(RuntimeError, match="no compatible required capability proof for cryptography"):
+    with pytest.raises(
+        RuntimeError, match="no compatible required capability proof for cryptography"
+    ):
         receipt_module._validate_host_capability_packages(payload)
 
 
@@ -332,7 +373,9 @@ def test_hosted_receipt_refuses_nonpassing_batch_evidence(tmp_path: Path) -> Non
     assert "non-passing batch cannot produce hosted success receipt" in result.stderr
 
 
-def test_hosted_receipt_refuses_selector_policy_drift_and_invalidates_stale_output(tmp_path: Path) -> None:
+def test_hosted_receipt_refuses_selector_policy_drift_and_invalidates_stale_output(
+    tmp_path: Path,
+) -> None:
     report = tmp_path / "batch.json"
     _batch_report(report)
     result, output = _invoke_writer(
@@ -346,7 +389,9 @@ def test_hosted_receipt_refuses_selector_policy_drift_and_invalidates_stale_outp
     assert "base marker does not match immutable policy" in result.stderr
 
 
-def test_hosted_receipt_refuses_unsafe_or_mismatched_effective_marker(tmp_path: Path) -> None:
+def test_hosted_receipt_refuses_unsafe_or_mismatched_effective_marker(
+    tmp_path: Path,
+) -> None:
     report = tmp_path / "batch.json"
     _batch_report(report)
     result, output = _invoke_writer(
@@ -375,7 +420,9 @@ def test_hosted_receipt_requires_exact_all_surface_manifest(tmp_path: Path) -> N
 
 def test_hosted_receipt_accepts_exact_all_surface_manifest(tmp_path: Path) -> None:
     rows = []
-    for index, surface in enumerate(("backend-unit", "backend-integration", "repository-tooling"), 1):
+    for index, surface in enumerate(
+        ("backend-unit", "backend-integration", "repository-tooling"), 1
+    ):
         report = tmp_path / f"{surface}.json"
         _batch_report(
             report,
@@ -425,7 +472,9 @@ def test_hosted_receipt_refuses_mixed_source_identity(tmp_path: Path) -> None:
     assert "do not share one source identity" in result.stderr
 
 
-def test_hosted_receipt_refuses_reused_execution_identity_across_distinct_reports(tmp_path: Path) -> None:
+def test_hosted_receipt_refuses_reused_execution_identity_across_distinct_reports(
+    tmp_path: Path,
+) -> None:
     first = tmp_path / "batch-1.json"
     second = tmp_path / "batch-2.json"
     _batch_report(first, selected_membership_identity="sha256:selected-1")
@@ -455,7 +504,9 @@ def test_hosted_receipt_requires_batch_provenance_identities(tmp_path: Path) -> 
     assert "missing required execution_plan_identity" in result.stderr
 
 
-def test_blocked_diagnostic_invalidates_previous_success_receipt(tmp_path: Path) -> None:
+def test_blocked_diagnostic_invalidates_previous_success_receipt(
+    tmp_path: Path,
+) -> None:
     receipt = tmp_path / "old-success.json"
     receipt.write_text('{"result":"HOSTED-DIAGNOSTIC-PASSED"}\n', encoding="utf-8")
     env = os.environ.copy()
@@ -463,7 +514,9 @@ def test_blocked_diagnostic_invalidates_previous_success_receipt(tmp_path: Path)
     env["OH_GOON_HOSTED_DIAGNOSTIC_RECEIPT"] = str(receipt)
     status_file = tmp_path / "diagnostic-exit.status"
     env["OH_GOON_HOSTED_DIAGNOSTIC_STATUS"] = str(status_file)
-    result = subprocess.run(("bash", str(DIAGNOSTIC)), cwd=ROOT, env=env, capture_output=True, text=True)
+    result = subprocess.run(
+        ("bash", str(DIAGNOSTIC)), cwd=ROOT, env=env, capture_output=True, text=True
+    )
     assert result.returncode == 3
     assert status_file.read_text(encoding="utf-8") == "3\n"
     assert not receipt.exists()
@@ -472,4 +525,7 @@ def test_blocked_diagnostic_invalidates_previous_success_receipt(tmp_path: Path)
 
 def test_make_target_binds_hosted_receipt_to_test_run_log_namespace() -> None:
     text = MAKEFILE.read_text(encoding="utf-8")
-    assert 'OH_GOON_HOSTED_DIAGNOSTIC_RECEIPT="$(RUN_LOG_DIR)/test/hosted-diagnostic-receipt.json"' in text
+    assert (
+        'OH_GOON_HOSTED_DIAGNOSTIC_RECEIPT="$(RUN_LOG_DIR)/test/hosted-diagnostic-receipt.json"'
+        in text
+    )

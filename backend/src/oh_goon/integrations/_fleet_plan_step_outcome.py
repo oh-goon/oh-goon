@@ -5,10 +5,10 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
+from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
-from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_observation import FleetObservationEvidence
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,

@@ -485,7 +485,9 @@ def test_validator_generation_omits_noop_walks_and_unused_reference_stack() -> N
 
 def test_generated_typescript_is_sharded_below_the_repository_line_limit() -> None:
     from oh_goon.api.app import create_app
-    from oh_goon.repository_tooling.generation.generated_typescript import MAX_TYPESCRIPT_LINES
+    from oh_goon.repository_tooling.generation.generated_typescript import (
+        MAX_TYPESCRIPT_LINES,
+    )
 
     openapi = create_app().openapi()
     outputs = render_generated_files(openapi)
@@ -504,7 +506,7 @@ def test_generated_typescript_is_sharded_below_the_repository_line_limit() -> No
 
 
 def test_openapi_generation_reads_current_checkout_version_on_each_capture(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.generation import export_openapi
 
@@ -516,6 +518,8 @@ def test_openapi_generation_reads_current_checkout_version_on_each_capture(
     version.write_text("1.2.4\n", encoding="utf-8")
     second = export_openapi.openapi_document()
 
+    assert isinstance(first["info"], dict)
+    assert isinstance(second["info"], dict)
     assert first["info"]["version"] == "1.2.3"
     assert second["info"]["version"] == "1.2.4"
 

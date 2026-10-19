@@ -24,8 +24,8 @@ from oh_goon.integrations._fleet_plan_resource_evidence import (
     write_remote_resource_evidence,
 )
 from oh_goon.integrations.fleet_content_store import FleetContentStore
-from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
 from oh_goon.integrations.fleet_plan_preview import repository_plan_admission_evidence
+from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
 from oh_goon.integrations.fleet_plans import FleetPlanRunner
 from oh_goon.runtime._executor_configuration import (
     ConfiguredFleetExecutor,
@@ -48,11 +48,12 @@ from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
 from oh_goon.services.repository_effect_execution import RepositoryEffectExecution
 from oh_goon.services.repository_effect_fence import RepositoryEffectFence
 from oh_goon.services.repository_effect_settlement import RepositoryEffectSettlement
-from tests.factories.runtime_authority import authorized_command_result
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
+from tests.factories.runtime_authority import authorized_command_result
 
 DEFAULT_ADMITTED_PLAN = """version: 1
+execution: {purpose: cicd}
 steps:
   - id: check
     run: "true"
@@ -118,17 +119,44 @@ class _AdmittedProcessIsolation:
             from oh_goon.engine.command import CommandProcessLifecycleEvent
 
             physical_execution_id = f"admitted-physical-{index + 1}"
-            process_observer(CommandProcessLifecycleEvent(kind="PROCESS_STARTING", physical_execution_id=physical_execution_id))
+            process_observer(
+                CommandProcessLifecycleEvent(
+                    kind="PROCESS_STARTING", physical_execution_id=physical_execution_id
+                )
+            )
             process_identity = f"admitted-process-{index + 1}"
-            process_observer(CommandProcessLifecycleEvent(kind="PROCESS_STARTED", physical_execution_id=physical_execution_id, pid=10_000 + index, process_identity=process_identity))
+            process_observer(
+                CommandProcessLifecycleEvent(
+                    kind="PROCESS_STARTED",
+                    physical_execution_id=physical_execution_id,
+                    pid=10_000 + index,
+                    process_identity=process_identity,
+                )
+            )
         write_remote_resource_evidence(request.attempt.paths.root, request.attempt.resources)
         stdout = f"admitted-attempt-{index + 1}"
         if stream_output is not None:
             stream_output("stdout", stdout)
         returncode = self._returncodes[index]
         if process_observer is not None:
-            process_observer(CommandProcessLifecycleEvent(kind="PROCESS_EXITED", physical_execution_id=physical_execution_id, pid=10_000 + index, process_identity=process_identity, returncode=returncode))
-            process_observer(CommandProcessLifecycleEvent(kind="DESCENDANTS_QUIESCENT", physical_execution_id=physical_execution_id, pid=10_000 + index, process_identity=process_identity, returncode=returncode))
+            process_observer(
+                CommandProcessLifecycleEvent(
+                    kind="PROCESS_EXITED",
+                    physical_execution_id=physical_execution_id,
+                    pid=10_000 + index,
+                    process_identity=process_identity,
+                    returncode=returncode,
+                )
+            )
+            process_observer(
+                CommandProcessLifecycleEvent(
+                    kind="DESCENDANTS_QUIESCENT",
+                    physical_execution_id=physical_execution_id,
+                    pid=10_000 + index,
+                    process_identity=process_identity,
+                    returncode=returncode,
+                )
+            )
         return replace(
             authorized_command_result(
                 argv=request.argv,
@@ -142,7 +170,8 @@ class _AdmittedProcessIsolation:
 
 
 def admitted_fleet_plan_execution(
-    root: Path, *,
+    root: Path,
+    *,
     plan_text: str = DEFAULT_ADMITTED_PLAN,
     returncodes: tuple[int, ...] = (0,),
     fleet_run_id: str = "admitted-fixture-run",

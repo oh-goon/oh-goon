@@ -5,14 +5,13 @@ from typing import Literal
 from pydantic import AwareDatetime, Field, model_validator
 
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.models.fleet_observation import DependencyEvidenceAssessment
 from oh_goon.core.models.repository import RepositoryIdentity
 
-DependencyEvidenceState = Literal["current", "aged", "stale"]
-DependencyRelationshipFilter = Literal["all", "direct", "transitive"]
-DependencyEvidenceFilter = Literal["all", "current", "aged", "stale"]
-DependencyCoveragePopulation = Literal["proven_no_match", "no_current_evidence"]
-DependencyCoverageFilter = Literal["matching", "proven_no_match", "no_current_evidence"]
-DependencySnapshotState = Literal["current", "aged", "stale", "missing"]
+DependencyEvidenceState = Literal["current", "stale", "unknown"]
+DependencyEvidenceFilter = Literal["all", "current", "unknown", "stale"]
+DependencyCoveragePopulation = Literal["absent_from_lock", "no_current_evidence"]
+DependencyCoverageFilter = Literal["matching", "absent_from_lock", "no_current_evidence"]
 
 
 class DependencyVersionBucket(ImmutableModel):
@@ -23,7 +22,7 @@ class DependencyVersionBucket(ImmutableModel):
 class DependencyFreshnessSummary(ImmutableModel):
     current: int = Field(ge=0)
     no_matching_dependency: int = Field(ge=0)
-    aged: int = Field(ge=0)
+    unknown: int = Field(ge=0)
     stale: int = Field(ge=0)
     no_current_evidence: int = Field(ge=0)
 
@@ -31,7 +30,7 @@ class DependencyFreshnessSummary(ImmutableModel):
 class DependencyFleetCoverageOverview(ImmutableModel):
     repository_total: int = Field(ge=0)
     current_dependency_evidence: int = Field(ge=0)
-    aged_dependency_evidence: int = Field(ge=0)
+    unknown_dependency_evidence: int = Field(ge=0)
     stale_dependency_evidence: int = Field(ge=0)
     missing_dependency_evidence: int = Field(ge=0)
     no_current_dependency_evidence: int = Field(ge=0)
@@ -41,8 +40,6 @@ class DependencyPackageOverview(ImmutableModel):
     ecosystem: Literal["pypi"] = "pypi"
     package_name: str = Field(min_length=1)
     observed_repositories: int = Field(ge=0)
-    direct_repositories: int = Field(ge=0)
-    transitive_repositories: int = Field(ge=0)
     versions: tuple[DependencyVersionBucket, ...] = Field(default_factory=tuple, max_length=500)
     freshness: DependencyFreshnessSummary
     latest_observed_at: AwareDatetime | None = None
@@ -67,11 +64,10 @@ class DependencyRepositoryMatch(ImmutableModel):
     repository: RepositoryIdentity
     ecosystem: Literal["pypi"] = "pypi"
     package_name: str = Field(min_length=1)
-    relationship: Literal["direct", "transitive"]
-    declared_ranges: tuple[str, ...] = Field(default_factory=tuple)
+    contexts: tuple[str, ...] = ()
     resolved_versions: tuple[str, ...] = Field(default_factory=tuple)
     sources: tuple[str, ...] = Field(min_length=1)
-    evidence_state: DependencyEvidenceState
+    evidence: DependencyEvidenceAssessment
     observed_at: AwareDatetime
     fleet_run_id: str = Field(min_length=1)
     operation_id: str = Field(min_length=1)
@@ -90,8 +86,8 @@ class DependencyRepositoryPage(ImmutableModel):
 
 class DependencyCoverageRepository(ImmutableModel):
     repository: RepositoryIdentity
-    coverage: Literal["proven_no_match", "no_current_evidence"]
-    evidence_state: DependencySnapshotState
+    coverage: Literal["absent_from_lock", "no_current_evidence"]
+    evidence: DependencyEvidenceAssessment
     sources: tuple[str, ...] = Field(default_factory=tuple, max_length=512)
     observed_at: AwareDatetime | None = None
     fleet_run_id: str | None = Field(default=None, min_length=1)
@@ -103,7 +99,7 @@ class DependencyCoverageRepository(ImmutableModel):
 class DependencyCoverageRepositoryPage(ImmutableModel):
     population_id: str = Field(min_length=1)
     package_name: str = Field(min_length=1)
-    coverage: Literal["proven_no_match", "no_current_evidence"]
+    coverage: Literal["absent_from_lock", "no_current_evidence"]
     total: int = Field(ge=0)
     offset: int = Field(ge=0)
     limit: int = Field(ge=1, le=100)
@@ -124,7 +120,6 @@ class DependencyTargetFilter(ImmutableModel):
     version_prefix: str | None = Field(default=None, min_length=1, max_length=200)
     version_specifier: str | None = Field(default=None, min_length=1, max_length=200)
     advisory_id: str | None = Field(default=None, min_length=1, max_length=200)
-    relationship: DependencyRelationshipFilter = "all"
     evidence: DependencyEvidenceFilter = "all"
     coverage: DependencyCoverageFilter = "matching"
 
@@ -140,10 +135,8 @@ class DependencyTargetFilter(ImmutableModel):
         if self.coverage != "matching":
             if any(version_filters) or self.advisory_id is not None:
                 raise ValueError("Coverage populations cannot combine version/advisory filters")
-            if self.relationship != "all" or self.evidence != "all":
-                raise ValueError(
-                    "Coverage populations cannot combine relationship/evidence filters"
-                )
+            if self.evidence != "all":
+                raise ValueError("Coverage populations cannot combine evidence filters")
         return self
 
 
@@ -155,7 +148,7 @@ class DependencyAdvisoryOverview(ImmutableModel):
     observed_not_affected: int = Field(ge=0)
     version_unclassified: int = Field(ge=0)
     no_matching_dependency: int = Field(ge=0)
-    aged: int = Field(ge=0)
+    unknown: int = Field(ge=0)
     stale: int = Field(ge=0)
     no_current_evidence: int = Field(ge=0)
 
@@ -180,7 +173,9 @@ class DependencyTargetMaterialization(ImmutableModel):
         if self.repo_ids != tuple(sorted(set(self.repo_ids))):
             raise ValueError("Materialized dependency repository IDs must be unique and sorted")
         if set(self.repository_instance_ids) != set(self.repo_ids):
-            raise ValueError("Materialized dependency target instances must exactly match repository IDs")
+            raise ValueError(
+                "Materialized dependency target instances must exactly match repository IDs"
+            )
         if any(not value for value in self.repository_instance_ids.values()):
             raise ValueError("Materialized dependency repository instance IDs must not be empty")
         return self

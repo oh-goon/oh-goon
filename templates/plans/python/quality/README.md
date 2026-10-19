@@ -1,19 +1,44 @@
 # python/quality
 
-**Production template. Production Plan.**
+Run formatting, lint, one selected type checker and tests using native project configuration. Start here for an ordinary local Python workflow.
 
-Runnable strict Python/uv CI example with pre-admission repository requirements, typed configuration, backend-owned native uv cache preparation, and mandatory tests.
+## Before you run
 
-## Contract
+The selected locked project/group must provide the commands used by the chosen Goons.
 
-- Canonical identity: `python/quality`.
-- Effective execution/resource policy is machine-owned and rendered by Plan inspection; this README does not duplicate it.
-- Executable behavior is forbidden here; this file is an ordered Goon roster.
-- Inputs: `coverage_threshold`.
-- Ordered Goons: `python/quality`.
+## Use this Plan
 
-## Safety boundary
+```sh
+oh-goon templates show python/quality --kind plan
+oh-goon plan inputs templates/plans/python/quality/plan.yml
+```
 
-The Plan contains no executable Steps. It only selects ordered Goons; execution/resource policy is resolved by the machine-owned Plan contract and admitted executor capacity, while implementation, requirements, secrets, network authority, and artifacts stay with the owning Goons.
+Copy with `oh-goon templates show python/quality --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
 
-Machine-readable truth is [`plan.yml`](./plan.yml). The README explains intent and safety only; it is never runtime authority.
+## Configure a copy
+
+The default Plan is just:
+
+```yaml
+version: 1
+goons:
+- python/quality
+```
+
+Its public inputs are available automatically; the Plan repeats no input declarations or forwarding. For a fixed override, replace the plain import with `import: python/quality` and `with: {typechecker: ty}`. Fixed bindings are excluded from automatic caller overrides. To choose values per run, keep the plain import and use caller values below.
+
+Save these choices as `values.yml`. Omitted optional inputs keep their Goon defaults; native project configuration still owns test and lint policy.
+
+```yaml
+inputs:
+  typechecker: ty
+```
+
+Validate and lock the same selection:
+
+```sh
+oh-goon plan validate plan.yml --inputs-file values.yml
+oh-goon lock plan.yml --inputs-file values.yml
+```
+
+Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.

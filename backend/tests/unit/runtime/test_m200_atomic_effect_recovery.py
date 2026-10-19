@@ -1,4 +1,5 @@
 """M200: native recovery may not release its SQLite lease cut before settlement."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -9,7 +10,8 @@ from tests.unit.runtime.test_group_a_recovery_ingress_authority import _stack
 
 
 def test_native_observation_and_journal_settlement_share_one_write_cut(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     database, attempts, journal, _execution, _git, attempt, recovery = _stack(tmp_path)
     original_transaction = database.transaction

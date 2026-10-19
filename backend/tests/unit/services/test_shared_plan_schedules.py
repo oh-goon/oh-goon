@@ -21,7 +21,11 @@ def test_create_resolves_shared_plan_in_backend_and_freezes_exact_source(tmp_pat
     document = store.write("python-quality", STARTER.read_text(encoding="utf-8"))
     resolved = scheduled_plan("quality")
     league = SimpleNamespace(
-        repositories=Mock(return_value=(SimpleNamespace(repository_id="repo-a", repository_instance_id="instance-repo-a"),))
+        repositories=Mock(
+            return_value=(
+                SimpleNamespace(repository_id="repo-a", repository_instance_id="instance-repo-a"),
+            )
+        )
     )
     target = structural_fleet_plan_target(
         resolved,
@@ -29,9 +33,7 @@ def test_create_resolves_shared_plan_in_backend_and_freezes_exact_source(tmp_pat
     )
     plans = SimpleNamespace(
         prepare_reviewed_execution_target=Mock(return_value=target),
-        repository_instance_ids_for_target=Mock(
-            return_value={"repo-a": "instance-repo-a"}
-        ),
+        repository_instance_ids_for_target=Mock(return_value={"repo-a": "instance-repo-a"}),
     )
     created = Mock(name="created")
     schedules = SimpleNamespace(create_prepared=Mock(return_value=created))
@@ -45,7 +47,7 @@ def test_create_resolves_shared_plan_in_backend_and_freezes_exact_source(tmp_pat
         plan_key="python-quality",
         expected_plan_revision=document.sha256,
         expected_plan_id="reviewed-plan-id",
-            expected_execution_digest="sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        expected_execution_digest="sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
         interval_minutes=60,
     )
 
@@ -106,7 +108,13 @@ def test_create_rejects_repository_instance_changed_after_schedule_review(tmp_pa
     schedules = SimpleNamespace(create_prepared=Mock())
     service = SharedPlanScheduleService(
         store,
-        SimpleNamespace(repositories=Mock(return_value=(SimpleNamespace(repository_id="repo-a", repository_instance_id="instance-new"),))),
+        SimpleNamespace(
+            repositories=Mock(
+                return_value=(
+                    SimpleNamespace(repository_id="repo-a", repository_instance_id="instance-new"),
+                )
+            )
+        ),
         plans,
         schedules,
     )
@@ -140,7 +148,15 @@ def test_create_rejects_plan_changed_after_schedule_review(tmp_path: Path) -> No
     schedules = SimpleNamespace(create_prepared=Mock())
     service = SharedPlanScheduleService(
         store,
-        SimpleNamespace(repositories=Mock(return_value=(SimpleNamespace(repository_id="repo-a", repository_instance_id="instance-repo-a"),))),
+        SimpleNamespace(
+            repositories=Mock(
+                return_value=(
+                    SimpleNamespace(
+                        repository_id="repo-a", repository_instance_id="instance-repo-a"
+                    ),
+                )
+            )
+        ),
         plans,
         schedules,
     )

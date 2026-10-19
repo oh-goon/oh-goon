@@ -13,16 +13,25 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from oh_goon.core.enforcer_lace_issuer_evidence import (
-    ISSUER_PROTOCOL, SIGNATURE_DOMAIN, IssuerEvidence,
+    ISSUER_PROTOCOL,
+    SIGNATURE_DOMAIN,
+    IssuerEvidence,
 )
-from oh_goon.core.enforcer_lace_trust import AdmittedRunContract, TrustProtocolError, canonical_bytes
+from oh_goon.core.enforcer_lace_trust import (
+    AdmittedRunContract,
+    TrustProtocolError,
+    canonical_bytes,
+)
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 
 SOURCE_FIELD = "source_identity"
 
 
 def issue_observed_source_identity(
-    *, root: Path, contract: AdmittedRunContract, issuer_id: str,
+    *,
+    root: Path,
+    contract: AdmittedRunContract,
+    issuer_id: str,
     signing_key: Ed25519PrivateKey,
 ) -> IssuerEvidence:
     """Attest the observed native source owner only, never a caller's identity.
@@ -34,9 +43,14 @@ def issue_observed_source_identity(
     """
     contract.verify()
     if (
-        not isinstance(root, Path) or not root.is_absolute() or root.is_symlink()
-        or not root.is_dir() or not issuer_id or not isinstance(issuer_id, str)
-        or not issuer_id.isascii() or any(c in issuer_id for c in "\x00\n/")
+        not isinstance(root, Path)
+        or not root.is_absolute()
+        or root.is_symlink()
+        or not root.is_dir()
+        or not issuer_id
+        or not isinstance(issuer_id, str)
+        or not issuer_id.isascii()
+        or any(c in issuer_id for c in "\x00\n/")
         or not isinstance(signing_key, Ed25519PrivateKey)
     ):
         raise TrustProtocolError("explicit source authority and private issuer key required")
@@ -47,14 +61,16 @@ def issue_observed_source_identity(
         raise TrustProtocolError("native source authority observation failed") from exc
     if observed != expected[SOURCE_FIELD]:
         raise TrustProtocolError("admitted source identity differs from native authority")
-    payload = canonical_bytes({
-        "protocol": ISSUER_PROTOCOL,
-        "field": SOURCE_FIELD,
-        "run_id": expected["run_id"],
-        "contract_identity": contract.identity,
-        "identity": observed,
-        "executor_generation": expected["executor_generation"],
-    })
+    payload = canonical_bytes(
+        {
+            "protocol": ISSUER_PROTOCOL,
+            "field": SOURCE_FIELD,
+            "run_id": expected["run_id"],
+            "contract_identity": contract.identity,
+            "identity": observed,
+            "executor_generation": expected["executor_generation"],
+        }
+    )
     # This second native read catches observable mutation while preparing the
     # claim. Post-issuance replacement is handled by freshness/rebinding, not by
     # claiming a signed value permanently pins physical source bytes.

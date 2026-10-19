@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
@@ -11,15 +10,19 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from oh_goon.core import local_access_protocol
+from oh_goon.repository_tooling.acceptance.shared_plan import exercise_shared_plan
+from oh_goon.repository_tooling.local_access_http import (
+    authorized_request,
+    new_certification_access_token,
+)
 from oh_goon.repository_tooling.release.browser_acceptance import run_runtime_browser_acceptance
-from oh_goon.repository_tooling.local_access_http import authorized_request, new_certification_access_token
 from oh_goon.repository_tooling.release.runtime_journey import (
     prepare_acceptance_repository,
     run_acceptance_goon,
 )
-from oh_goon.repository_tooling.acceptance.shared_plan import exercise_shared_plan
 
 ROOT = Path(__file__).resolve().parents[5]
 HOST = "127.0.0.1"
@@ -87,15 +90,11 @@ def exercise_location_lifecycle(
     configured = str(configured_root.resolve())
     initial = _get_json(f"{base_url}/api/locations", access_token=access_token)
     if not isinstance(initial, dict) or configured not in initial.get("locations", []):
-        raise RuntimeError(
-            "acceptance repository root was not persisted as a configured location"
-        )
+        raise RuntimeError("acceptance repository root was not persisted as a configured location")
     moved = configured_root.with_name(f"{configured_root.name}-temporarily-unavailable")
     if moved.exists():
         raise RuntimeError(f"temporary lifecycle path already exists: {moved}")
-    initial_repositories = _get_json(
-        f"{base_url}/api/repositories", access_token=access_token
-    )
+    initial_repositories = _get_json(f"{base_url}/api/repositories", access_token=access_token)
     if not isinstance(initial_repositories, list) or not initial_repositories:
         raise RuntimeError(
             "configured location did not expose repositories before lifecycle exercise"
@@ -106,9 +105,7 @@ def exercise_location_lifecycle(
         if not isinstance(unavailable, dict) or configured not in unavailable.get(
             "unavailable", []
         ):
-            raise RuntimeError(
-                "configured location disappearance was not reported as unavailable"
-            )
+            raise RuntimeError("configured location disappearance was not reported as unavailable")
         repositories = _get_json(f"{base_url}/api/repositories", access_token=access_token)
         if repositories != []:
             raise RuntimeError(
@@ -188,9 +185,7 @@ def _source_runtime_environment(root: Path, state: Path) -> dict[str, str]:
     return env
 
 
-def accept_source_product(
-    root: Path = ROOT, *, include_browser: bool = True
-) -> tuple[str, ...]:
+def accept_source_product(root: Path = ROOT, *, include_browser: bool = True) -> tuple[str, ...]:
     """Run the product journey against the real source runtime, not fixture APIs."""
 
     with tempfile.TemporaryDirectory(prefix="oh-goon-product-accept-") as temporary:

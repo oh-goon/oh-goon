@@ -1,4 +1,5 @@
 """A1e: provenance must bind each entered native owner's raw log bytes."""
+
 from __future__ import annotations
 
 import hashlib
@@ -45,12 +46,27 @@ def test_early_failure_binds_only_entered_owners(tmp_path: Path) -> None:
     assert not (evidence / "08_certify.log").exists()
 
 
-@pytest.mark.parametrize("tamper", [
-    "change_log", "delete_log", "extra_log", "swap_logs", "corrupt_manifest",
-    "delete_manifest", "duplicate_record", "unknown_log", "change_digest",
-    "replace_log_symlink", "old_schema", "fake_log_integrity", "forge_replay",
-    "truncated_manifest", "orphaned_log_manifest", "untracked_extra_log"
-])
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "change_log",
+        "delete_log",
+        "extra_log",
+        "swap_logs",
+        "corrupt_manifest",
+        "delete_manifest",
+        "duplicate_record",
+        "unknown_log",
+        "change_digest",
+        "replace_log_symlink",
+        "old_schema",
+        "fake_log_integrity",
+        "forge_replay",
+        "truncated_manifest",
+        "orphaned_log_manifest",
+        "untracked_extra_log",
+    ],
+)
 def test_log_evidence_tampering_fails_closed(tmp_path: Path, tamper: str) -> None:
     source, sha, evidence = _attempt(tmp_path)
     log = evidence / "08_certify.log"
@@ -76,20 +92,36 @@ def test_log_evidence_tampering_fails_closed(tmp_path: Path, tamper: str) -> Non
     elif tamper == "delete_manifest":
         manifest.unlink()
     elif tamper == "duplicate_record":
-        manifest.write_text(manifest.read_text() + manifest.read_text().splitlines()[0] + "\n")
+        manifest.write_text(
+            manifest.read_text() + manifest.read_text().splitlines()[0] + "\n"
+        )
     elif tamper == "unknown_log":
-        manifest.write_text(manifest.read_text().replace("08_certify.log", "09_unknown.log"))
+        manifest.write_text(
+            manifest.read_text().replace("08_certify.log", "09_unknown.log")
+        )
     elif tamper == "change_digest":
         manifest.write_text("0" * 64 + manifest.read_text()[64:])
     elif tamper == "replace_log_symlink":
         log.unlink()
         log.symlink_to("M209_STEPS.tsv")
     elif tamper == "old_schema":
-        post.write_text(post.read_text().replace("qualification-provenance/v2", "qualification-provenance/v1"))
+        post.write_text(
+            post.read_text().replace(
+                "qualification-provenance/v2", "qualification-provenance/v1"
+            )
+        )
     elif tamper == "fake_log_integrity":
-        post.write_text(post.read_text().replace("command_log_integrity=PASS", "command_log_integrity=UNKNOWN"))
+        post.write_text(
+            post.read_text().replace(
+                "command_log_integrity=PASS", "command_log_integrity=UNKNOWN"
+            )
+        )
     elif tamper == "forge_replay":
-        post.write_text(post.read_text().replace("authenticated_replay=NOT_AUTHORIZED", "authenticated_replay=AUTHORIZED"))
+        post.write_text(
+            post.read_text().replace(
+                "authenticated_replay=NOT_AUTHORIZED", "authenticated_replay=AUTHORIZED"
+            )
+        )
     elif tamper == "truncated_manifest":
         manifest.write_bytes(manifest.read_bytes()[:-1])
     elif tamper == "orphaned_log_manifest":
@@ -99,7 +131,9 @@ def test_log_evidence_tampering_fails_closed(tmp_path: Path, tamper: str) -> Non
         review(source, sha, evidence)
 
 
-def test_log_inventory_is_not_host_attestation_even_when_self_consistent(tmp_path: Path) -> None:
+def test_log_inventory_is_not_host_attestation_even_when_self_consistent(
+    tmp_path: Path,
+) -> None:
     """A self-authored log+hash+provenance chain still cannot establish a trusted host."""
     source, sha, evidence = _attempt(tmp_path)
     path = evidence / "08_certify.log"
@@ -111,8 +145,10 @@ def test_log_inventory_is_not_host_attestation_even_when_self_consistent(tmp_pat
     post = evidence / "M209_POST_RUN_PROVENANCE.txt"
     lines = post.read_text().splitlines()
     lines = [
-        "command_log_receipts_sha256=" + hashlib.sha256(manifest.read_bytes()).hexdigest()
-        if line.startswith("command_log_receipts_sha256=") else line
+        "command_log_receipts_sha256="
+        + hashlib.sha256(manifest.read_bytes()).hexdigest()
+        if line.startswith("command_log_receipts_sha256=")
+        else line
         for line in lines
     ]
     post.write_text("\n".join(lines) + "\n")

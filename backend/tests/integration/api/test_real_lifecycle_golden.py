@@ -4,8 +4,6 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api import dependencies
 from oh_goon.api.app import app as api_app
 from oh_goon.core.models.explanation import ReasonCode
@@ -16,6 +14,7 @@ from oh_goon.runtime.database import LocalDatabase
 from tests.factories.local_state import local_state
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.runtime_stack import fleet_stack
+from tests.integration.api.client import authenticated_api_client
 
 
 class _ReadyRunner:
@@ -137,7 +136,9 @@ def test_completed_run_survives_full_runtime_graph_reconstruction(tmp_path: Path
         _clear(manager2)
 
 
-def test_failed_run_then_rerun_uses_new_runtime_authority_and_preserves_source(tmp_path: Path) -> None:
+def test_failed_run_then_rerun_uses_new_runtime_authority_and_preserves_source(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "repos"
     _seed_repository(root, "alpha")
     database_path = tmp_path / "state.db"
@@ -146,9 +147,12 @@ def test_failed_run_then_rerun_uses_new_runtime_authority_and_preserves_source(t
     state.add_location(root)
     _bind(fleet, manager)
     client = authenticated_api_client(api_app)
-    assert client.post(
-        "/api/fleet/runs", json={"fleet_run_id": "golden-failed", "action": "init"}
-    ).status_code == 202
+    assert (
+        client.post(
+            "/api/fleet/runs", json={"fleet_run_id": "golden-failed", "action": "init"}
+        ).status_code
+        == 202
+    )
     manager.wait_for_terminal("golden-failed", timeout=2)
     failed = client.get("/api/fleet/runs/golden-failed").json()
     assert failed["run"]["status"] == "FAILED"
@@ -193,9 +197,12 @@ def test_cancelled_run_remains_terminal_after_runtime_reconstruction(tmp_path: P
     state.add_location(root)
     _bind(fleet, manager)
     client = authenticated_api_client(api_app)
-    assert client.post(
-        "/api/fleet/runs", json={"fleet_run_id": "golden-cancel", "action": "init"}
-    ).status_code == 202
+    assert (
+        client.post(
+            "/api/fleet/runs", json={"fleet_run_id": "golden-cancel", "action": "init"}
+        ).status_code
+        == 202
+    )
     cancelled = client.post("/api/fleet/runs/golden-cancel/cancel")
     assert cancelled.status_code == 202
     manager.wait_for_terminal("golden-cancel", timeout=2)
@@ -221,7 +228,9 @@ def test_cancelled_run_remains_terminal_after_runtime_reconstruction(tmp_path: P
         _clear(manager2)
 
 
-def test_multi_repository_run_preserves_distinct_operation_identity_after_reload(tmp_path: Path) -> None:
+def test_multi_repository_run_preserves_distinct_operation_identity_after_reload(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "repos"
     alpha = _seed_repository(root, "alpha")
     beta = _seed_repository(root, "beta")
@@ -231,9 +240,12 @@ def test_multi_repository_run_preserves_distinct_operation_identity_after_reload
     state.add_location(root)
     _bind(fleet, manager)
     client = authenticated_api_client(api_app)
-    assert client.post(
-        "/api/fleet/runs", json={"fleet_run_id": "golden-multi", "action": "init"}
-    ).status_code == 202
+    assert (
+        client.post(
+            "/api/fleet/runs", json={"fleet_run_id": "golden-multi", "action": "init"}
+        ).status_code
+        == 202
+    )
     manager.wait_for_terminal("golden-multi", timeout=2)
     before = client.get("/api/fleet/runs/golden-multi").json()
     client.close()
@@ -252,9 +264,7 @@ def test_multi_repository_run_preserves_distinct_operation_identity_after_reload
         client = authenticated_api_client(api_app)
         after = client.get("/api/fleet/runs/golden-multi").json()
         client.close()
-        assert {
-            row["provenance"]["operation_id"] for row in after["operations"]
-        } == operation_ids
+        assert {row["provenance"]["operation_id"] for row in after["operations"]} == operation_ids
         assert {Path(row["repository"]["path"]) for row in after["operations"]} == {alpha, beta}
     finally:
         _clear(manager2)
@@ -297,9 +307,7 @@ def test_explicit_repository_instance_scope_is_enforced_through_public_run_api(
                 "fleet_run_id": "golden-stale-instance",
                 "action": "init",
                 "repository_ids": [repository_id],
-                "repository_instance_ids": {
-                    repository_id: "repo-instance-" + ("0" * 64)
-                },
+                "repository_instance_ids": {repository_id: "repo-instance-" + ("0" * 64)},
             },
         )
         assert stale.status_code == 409

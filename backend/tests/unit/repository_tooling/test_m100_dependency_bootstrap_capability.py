@@ -85,7 +85,11 @@ def test_make_cannot_source_execute_a_module_other_than_the_capability_owner(
     )
 
     messages = _make_bootstrap_messages(root)
-    assert any("pre-environment dependency-policy capability" in message or "only the explicit pre-environment" in message for message in messages)
+    assert any(
+        "pre-environment dependency-policy capability" in message
+        or "only the explicit pre-environment" in message
+        for message in messages
+    )
 
 
 def test_missing_semantic_bootstrap_capability_fails_closed(tmp_path: Path) -> None:

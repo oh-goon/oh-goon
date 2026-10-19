@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from oh_goon.core.file_digest import sha256_file_with_size
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.product_identity import stable_id
-from oh_goon.core.models.fleet_plan import ResolvedPlanStep, ResolvedLocalSearchAgentStep
+from oh_goon.core.file_digest import sha256_file_with_size
+from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep, ResolvedPlanStep
 from oh_goon.core.models.fleet_plan_evidence import (
     MissingPlanArtifact,
     PlanArtifactEvidence,
@@ -16,6 +16,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PresentPlanArtifact,
     PublishedPlanOutputEvidence,
 )
+from oh_goon.core.product_identity import stable_id
 from oh_goon.integrations._fleet_plan_step_dataflow import (
     collect_published_outputs,
     repository_relative_path,
@@ -67,23 +68,29 @@ def publish_strict_attempt_outputs(
     sealed_outputs.prove_for(attempt)
     if outcome.runtime_authority is None:
         return AttemptPublication(
-            outputs={}, output_evidence=(),
+            outputs={},
+            output_evidence=(),
             outcome=output_contract_failure(
-                step, FleetPlanInvalid("Strict output publication requires runtime authority evidence"),
-                outcome.argv, base=outcome,
+                step,
+                FleetPlanInvalid("Strict output publication requires runtime authority evidence"),
+                outcome.argv,
+                base=outcome,
             ),
-            cache_identity=None, retained_cache=None,
+            cache_identity=None,
+            retained_cache=None,
         )
     if outcome.physical_execution_id is None:
         return AttemptPublication(
-            outputs={}, output_evidence=(),
+            outputs={},
+            output_evidence=(),
             outcome=output_contract_failure(
-                step, FleetPlanInvalid(
-                    "Strict output publication requires physical execution identity"
-                ),
-                outcome.argv, base=outcome,
+                step,
+                FleetPlanInvalid("Strict output publication requires physical execution identity"),
+                outcome.argv,
+                base=outcome,
             ),
-            cache_identity=None, retained_cache=None,
+            cache_identity=None,
+            retained_cache=None,
         )
     producer_execution_identity = stable_id(
         "attempt-output",
@@ -96,7 +103,9 @@ def publish_strict_attempt_outputs(
         },
     )
     publication = _published_outputs(
-        step, outcome, repository,
+        step,
+        outcome,
+        repository,
         producer_execution_identity=producer_execution_identity,
     )
     if publication.outcome is not outcome:
@@ -135,7 +144,10 @@ def _published_outputs(
 ) -> AttemptPublication:
     try:
         values, evidence = collect_published_outputs(
-            repository, step, producer_execution_identity=producer_execution_identity
+            repository,
+            step,
+            producer_execution_identity=producer_execution_identity,
+            streams={"stdout": outcome.stdout, "stderr": outcome.stderr},
         )
     except FleetPlanInvalid as exc:
         return AttemptPublication(
@@ -148,24 +160,46 @@ def _published_outputs(
     # A model's validated proposal is data, not an effect grant. Publish it
     # through the SAME successful-attempt output owner as ordinary Step files,
     # with the original producer execution identity on strict attempts.
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.harness == "local-model-proposal":
+    if isinstance(step, ResolvedLocalSearchAgentStep) and step.harness in (
+        "local-model-proposal",
+        "provider-proposal",
+    ):
         try:
             from oh_goon.integrations.agent_patch_apply import proposal_from_step_stdout
-            proposal_text = proposal_from_step_stdout(
-                outcome.stdout, handoff_identity=step.handoff_identity,
-            )
+
+            if step.harness == "provider-proposal":
+                from oh_goon.core.models.agent_review import decode_agent_record
+                from oh_goon.integrations.agent_patch_apply import parse_batch_proposal
+
+                context = decode_agent_record(step.review_context or "{}")
+                record = parse_batch_proposal(
+                    outcome.stdout, candidate_identity=context.get("candidate_identity")
+                )
+                proposal_text = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
+            else:
+                proposal_text = proposal_from_step_stdout(
+                    outcome.stdout,
+                    handoff_identity=step.handoff_identity,
+                )
         except FleetPlanInvalid as exc:
             return AttemptPublication(
-                outputs={}, output_evidence=(),
+                outputs={},
+                output_evidence=(),
                 outcome=output_contract_failure(step, exc, outcome.argv, base=outcome),
-                cache_identity=None, retained_cache=None,
+                cache_identity=None,
+                retained_cache=None,
             )
         values["proposal"] = proposal_text
         payload = proposal_text.encode("utf-8")
-        evidence = (*evidence, PublishedPlanOutputEvidence(
-            name="proposal", sha256=hashlib.sha256(payload).hexdigest(),
-            byte_count=len(payload), producer_execution_identity=producer_execution_identity,
-        ))
+        evidence = (
+            *evidence,
+            PublishedPlanOutputEvidence(
+                name="proposal",
+                sha256=hashlib.sha256(payload).hexdigest(),
+                byte_count=len(payload),
+                producer_execution_identity=producer_execution_identity,
+            ),
+        )
     return AttemptPublication(
         outputs=values,
         output_evidence=evidence,

@@ -25,7 +25,7 @@ def _release_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
 
     version.write_text("1.2.3\n", encoding="utf-8")
     pyproject.write_text('[project]\nname="oh-goon"\nversion="1.2.3"\n', encoding="utf-8")
-    backend_lock.write_text('version = 1\npackage = []\n', encoding="utf-8")
+    backend_lock.write_text("version = 1\npackage = []\n", encoding="utf-8")
     package.write_text('{"name":"oh-goon-frontend","version":"1.2.3"}\n', encoding="utf-8")
     package_lock.write_text(
         '{"lockfileVersion":3,"packages":{"":{"name":"oh-goon-frontend","version":"1.2.3"}}}\n',

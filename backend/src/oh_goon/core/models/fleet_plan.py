@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import hashlib
+import re
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
 from oh_goon.core.fleet_plan_validation import validate_resolved_plan
-from oh_goon.core.product_identity import stable_id
+from oh_goon.core.models.agent_providers import AgentConnection
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan_composition import (
     GoonOutputDefinition,
     PlanInputBinding,
@@ -18,24 +19,50 @@ from oh_goon.core.models.fleet_plan_composition import (
 )
 from oh_goon.core.models.fleet_plan_execution_policy import (
     ExecutionPurpose,
-    ParallelRepositoryExecution as ParallelRepositoryExecution,
     PlanExecutionPolicy,
+)
+from oh_goon.core.models.fleet_plan_execution_policy import (
+    ParallelRepositoryExecution as ParallelRepositoryExecution,
+)
+from oh_goon.core.models.fleet_plan_execution_policy import (
     RepositoryExecutionMode as RepositoryExecutionMode,
+)
+from oh_goon.core.models.fleet_plan_execution_policy import (
     RepositoryExecutionPolicy as RepositoryExecutionPolicy,
+)
+from oh_goon.core.models.fleet_plan_execution_policy import (
     SerialRepositoryExecution as SerialRepositoryExecution,
 )
 from oh_goon.core.models.fleet_plan_git import (
     GitAddAction as GitAddAction,
+)
+from oh_goon.core.models.fleet_plan_git import (
     GitAssertCleanAction as GitAssertCleanAction,
+)
+from oh_goon.core.models.fleet_plan_git import (
     GitCheckoutAction as GitCheckoutAction,
+)
+from oh_goon.core.models.fleet_plan_git import (
     GitCleanIgnoredAction as GitCleanIgnoredAction,
+)
+from oh_goon.core.models.fleet_plan_git import (
     GitCommitAction as GitCommitAction,
+)
+from oh_goon.core.models.fleet_plan_git import (
     GitCreateBranchAction as GitCreateBranchAction,
+)
+from oh_goon.core.models.fleet_plan_git import (
     GitDiffAction as GitDiffAction,
+)
+from oh_goon.core.models.fleet_plan_git import (
     GitNativeAction as GitNativeAction,
+)
+from oh_goon.core.models.fleet_plan_git import (
     GitPlanAction,
-    GitPlanOperation as GitPlanOperation,
     GitResultContract,
+)
+from oh_goon.core.models.fleet_plan_git import (
+    GitPlanOperation as GitPlanOperation,
 )
 from oh_goon.core.models.fleet_plan_kubernetes_steps import (
     KubernetesRolloutVerifyPlanStep,
@@ -60,8 +87,14 @@ from oh_goon.core.models.fleet_plan_oci_tag_steps import (
 from oh_goon.core.models.fleet_plan_requirements import RepositoryRequirement
 from oh_goon.core.models.fleet_plan_resources import (
     ExtensionCatalog as ExtensionCatalog,
+)
+from oh_goon.core.models.fleet_plan_resources import (
     ExtensionDeclaration as ExtensionDeclaration,
+)
+from oh_goon.core.models.fleet_plan_resources import (
     ManagedExtension as ManagedExtension,
+)
+from oh_goon.core.models.fleet_plan_resources import (
     ManagedToolRuntime as ManagedToolRuntime,
 )
 from oh_goon.core.models.fleet_plan_step_contract import (
@@ -70,32 +103,48 @@ from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepWorkspace,
     compile_simple_network_alias,
 )
-from oh_goon.core.vocabulary.result_semantics import FailureImpact
 from oh_goon.core.models.fleet_plan_step_primitives import (
     PLAN_CONTRACT_RETURN_CODE as PLAN_CONTRACT_RETURN_CODE,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
     PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE as PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
     PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE as PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
     PLAN_TIMEOUT_RETURN_CODE as PLAN_TIMEOUT_RETURN_CODE,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
     MissingConfigPolicy,
-    PathExistsCondition as PathExistsCondition,
-    PathMissingCondition as PathMissingCondition,
     PlanArtifactDeclaration,
     PlanPublishedOutput,
+    PlanStreamOutput,
     StepCondition,
     StepFailurePolicy,
     StepLifecycle,
     StepRetryPolicy,
-    StepStatusCondition as StepStatusCondition,
     _validate_published_outputs,
     _validate_success_codes,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    PathExistsCondition as PathExistsCondition,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    PathMissingCondition as PathMissingCondition,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    StepStatusCondition as StepStatusCondition,
 )
 from oh_goon.core.models.fleet_plan_values import (
     PlanEnvDefinition,
     PlanStepImports,
     ResolvedEnvironmentBinding,
 )
+from oh_goon.core.product_identity import stable_id
+from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
-FLEET_PLAN_CONTRACT_VERSION = 43
+FLEET_PLAN_CONTRACT_VERSION = 44
 DEFAULT_PRE_COMMIT_REQUIREMENT = "pre-commit==4.6.2"
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 3600.0
 
@@ -109,7 +158,9 @@ class UvExecutionEnvironment(ImmutableModel):
     """
 
     project: str = Field(default=".", min_length=1, max_length=240)
-    group: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    group: str = Field(
+        pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|\$\{\{\s*inputs\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\})$"
+    )
 
     @field_validator("project")
     @classmethod
@@ -138,7 +189,9 @@ class CommandPlanStep(ImmutableModel):
     when: StepCondition | None = None
     retry: StepRetryPolicy = Field(default_factory=StepRetryPolicy)
     artifacts: tuple[PlanArtifactDeclaration, ...] = Field(default_factory=tuple, max_length=32)
-    outputs: tuple[PlanPublishedOutput, ...] = Field(default_factory=tuple, max_length=16)
+    outputs: tuple[PlanPublishedOutput | PlanStreamOutput, ...] = Field(
+        default_factory=tuple, max_length=16
+    )
 
     _success_codes = field_validator("success_codes")(_validate_success_codes)
 
@@ -168,8 +221,10 @@ class AgentStepRequestedEffects(ImmutableModel):
         if self.recipients != tuple(sorted(set(self.recipients))):
             raise ValueError("Agent model recipients must be unique and sorted")
         for recipient in self.recipients:
-            if (type(recipient) is not str or
-                    re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", recipient) is None):
+            if (
+                type(recipient) is not str
+                or re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", recipient) is None
+            ):
                 raise ValueError("Agent model recipients must be named canonical identities")
         if self.capabilities.egress.mode == "host_unrestricted":
             raise ValueError("Untrusted Agent Steps cannot request unrestricted host network")
@@ -271,6 +326,14 @@ class CompiledGoonImportStep(ImmutableModel):
     """One compiled ordered Goon edge; never an authored Atomic-Goon Step."""
 
     kind: Literal["goon"] = "goon"
+    phase: Literal["review", "adjudicate", "repair", "regression", "verification"] | None = None
+    source_root: str | None = Field(default=None, min_length=1, max_length=240)
+
+    @field_validator("source_root")
+    @classmethod
+    def normalize_source_root(cls, value: str | None) -> str | None:
+        return PurePosixPath(value).as_posix() if value is not None else None
+
     step_id: str = Field(min_length=1, max_length=40)
     goon: str = Field(
         pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*$",
@@ -324,11 +387,13 @@ class CompiledExecutionTemplate(ImmutableModel):
     """
 
     version: Literal[1] = 1
+    authoring_kind: Literal["plan", "goon"] = "goon"
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
     execution: PlanExecutionPolicy | None = None
     inputs: tuple[PlanInputDefinition, ...] = Field(default_factory=tuple, max_length=32)
     projected_inputs: tuple[str, ...] = Field(default_factory=tuple, max_length=32)
+    ambiguous_inputs: tuple[str, ...] = ()
     env: tuple[PlanEnvDefinition, ...] = Field(default_factory=tuple, max_length=64)
     outputs: tuple[GoonOutputDefinition, ...] = Field(default_factory=tuple, max_length=32)
     inclusions: tuple[PlanStepInclusion, ...] = Field(default_factory=tuple, max_length=50)
@@ -346,7 +411,9 @@ class CompiledExecutionTemplate(ImmutableModel):
         if len(self.projected_inputs) != len(set(self.projected_inputs)):
             raise ValueError("Plan projected input names must be unique")
         if self.inputs and self.projected_inputs:
-            raise ValueError("Compiled Plan cannot contain materialized inputs and pending projections")
+            raise ValueError(
+                "Compiled Plan cannot contain materialized inputs and pending projections"
+            )
         env_names = [item.name for item in self.env]
         if len(env_names) != len(set(env_names)):
             raise ValueError("Fleet pipeline env names must be unique")
@@ -366,9 +433,18 @@ class ResolvedCommandStep(CommandPlanStep):
         default_factory=tuple, max_length=64
     )
 
+    @model_validator(mode="after")
+    def validate_uv_selection(self):
+        if self.uv is not None and (
+            "${{" in self.uv.project
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", self.uv.group) is None
+        ):
+            raise ValueError("Resolved uv project and dependency group must be concrete")
+        return self
+
 
 class ResolvedLocalSearchAgentStep(ResolvedCommandStep):
-    """Original Step-shaped, non-model, read-only Agent tool intent.
+    """Resolved read-only Agent intent for a fixed tool or provider harness.
 
     The immutable AG-02 packet is transported *separately* by the original
     attempt. This identity-only plan value never embeds captured repository or
@@ -383,24 +459,60 @@ class ResolvedLocalSearchAgentStep(ResolvedCommandStep):
     feedback_reference: str | None = Field(default=None, max_length=240)
     # Original sequencer alone binds this from a published prior Step, never the model.
     feedback_value: str | None = Field(default=None, max_length=2048)
-    harness: Literal["local-search", "local-model-search", "local-model-review", "local-model-tools", "local-model-files", "local-model-skill-resources", "local-model-skill-loop", "local-model-proposal"] = "local-search"
+    harness: Literal[
+        "local-search",
+        "local-model-search",
+        "local-model-review",
+        "local-model-tools",
+        "local-model-files",
+        "local-model-skill-resources",
+        "local-model-skill-loop",
+        "local-model-proposal",
+        "provider-review",
+        "provider-adjudicate",
+        "provider-proposal",
+    ] = "local-search"
     model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
+    connection: AgentConnection | None = Field(default=None, exclude_if=lambda value: value is None)
+    review_context: str | None = Field(
+        default=None, max_length=65536, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_readonly_tool_shape(self) -> "ResolvedLocalSearchAgentStep":
-        if (self.argv != ("rg",) or self.uv is not None
-                or self.working_directory != "."
-                or self.success_codes != (0, 1)
-                or self.capabilities.egress.mode != "none"
-                or self.capabilities.nested_strict_execution
-                or self.capabilities.tools
-                or self.imports.env
-                or self.workspace.publish):
+        if self.harness.startswith("provider-") != (self.connection is not None):
+            raise ValueError("provider Agent requires a frozen connection")
+        if (
+            self.argv != ("python",)
+            or self.uv is not None
+            or self.working_directory != "."
+            or self.success_codes != (0,)
+            or self.capabilities.egress.mode != "none"
+            or self.capabilities.nested_strict_execution
+            or self.capabilities.tools
+            or self.imports.env
+            or self.workspace.publish
+        ):
             raise ValueError("local-search Agent Step must retain the fixed offline tool contract")
-        if self.feedback_reference is not None and self.harness != "local-model-skill-loop":
-            raise ValueError("only the read-only Skill loop accepts failed-test feedback")
+        if self.feedback_reference is not None and self.harness not in (
+            "local-model-skill-loop",
+            "local-model-proposal",
+        ):
+            raise ValueError(
+                "only the read-only Skill loop and proposal harness accept failed-test feedback"
+            )
         if (self.harness == "local-search" and self.model is not None) or (
-            self.harness in ("local-model-search", "local-model-review", "local-model-tools", "local-model-files", "local-model-skill-resources", "local-model-skill-loop", "local-model-proposal") and self.model is None
+            self.harness
+            in (
+                "local-model-search",
+                "local-model-review",
+                "local-model-tools",
+                "local-model-files",
+                "local-model-skill-resources",
+                "local-model-skill-loop",
+                "local-model-proposal",
+            )
+            and self.model is None
         ):
             raise ValueError("model recipient and selected model must match the Agent harness")
         return self
@@ -561,6 +673,9 @@ class ResolvedImport(ImmutableModel):
     import_id: str = Field(min_length=1, max_length=160)
     parent_import_id: str | None = Field(default=None, min_length=1, max_length=160)
     kind: Literal["goon"] = "goon"
+    phase: Literal["review", "adjudicate", "repair", "regression", "verification"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     name: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*$")
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     step_ids: tuple[str, ...] = Field(min_length=1, max_length=50)
@@ -571,7 +686,8 @@ class ResolvedImport(ImmutableModel):
 class ResolvedFleetPlan(ImmutableModel):
     """Fully bound immutable execution plan.  Runtime never re-reads YAML/TOML."""
 
-    contract_version: Literal[43] = FLEET_PLAN_CONTRACT_VERSION
+    # Retained Runs keep their original execution identity when reopened.
+    contract_version: Literal[43, 44] = FLEET_PLAN_CONTRACT_VERSION
     plan_id: str
     name: str
     description: str = ""
@@ -580,6 +696,9 @@ class ResolvedFleetPlan(ImmutableModel):
     imports: tuple[ResolvedImport, ...] = Field(default_factory=tuple, max_length=100)
     steps: tuple[ResolvedPlanStep, ...] = Field(min_length=1, max_length=50)
     step_sources: tuple[ResolvedStepSource, ...] = Field(default_factory=tuple, max_length=50)
+    skill_sources: tuple[LockedSkillSource, ...] = Field(
+        default_factory=tuple, max_length=128, exclude_if=lambda value: not value
+    )
 
     @classmethod
     def create(
@@ -592,15 +711,25 @@ class ResolvedFleetPlan(ImmutableModel):
         requirements: tuple[RepositoryRequirement, ...] = (),
         imports: tuple[ResolvedImport, ...] = (),
         step_sources: tuple[ResolvedStepSource, ...] = (),
+        skill_sources: tuple[LockedSkillSource, ...] = (),
     ) -> ResolvedFleetPlan:
         payload = {
             "contract_version": FLEET_PLAN_CONTRACT_VERSION,
             "name": name,
             "description": description,
             "execution": execution.model_dump(mode="json", exclude_computed_fields=True),
-            "requirements": [item.model_dump(mode="json", exclude_computed_fields=True) for item in requirements],
-            "imports": [item.model_dump(mode="json", exclude_computed_fields=True) for item in imports],
+            "requirements": [
+                item.model_dump(mode="json", exclude_computed_fields=True) for item in requirements
+            ],
+            "imports": [
+                item.model_dump(mode="json", exclude_computed_fields=True) for item in imports
+            ],
             "steps": [step.model_dump(mode="json", exclude_computed_fields=True) for step in steps],
+            **(
+                {"skill_sources": [item.model_dump(mode="json") for item in skill_sources]}
+                if skill_sources
+                else {}
+            ),
         }
         return cls(
             plan_id=stable_id("fleet-plan", payload),
@@ -611,6 +740,7 @@ class ResolvedFleetPlan(ImmutableModel):
             imports=imports,
             steps=steps,
             step_sources=step_sources,
+            skill_sources=skill_sources,
         )
 
     @model_validator(mode="after")

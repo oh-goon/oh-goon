@@ -16,9 +16,20 @@ from oh_goon.runtime.termination import TerminationSignal
 def test_timeout_records_termination_request_before_process_settlement() -> None:
     observed = []
     with pytest.raises(CommandTimeoutExpired) as raised:
-        run_command(sys.executable, "-S", "-c", "import time; time.sleep(5)", timeout=0.15, process_observer=observed.append)
+        run_command(
+            sys.executable,
+            "-S",
+            "-c",
+            "import time; time.sleep(5)",
+            timeout=0.15,
+            process_observer=observed.append,
+        )
     kinds = [event.kind for event in observed]
-    assert kinds.index("TERMINATION_REQUESTED") < kinds.index("PROCESS_EXITED") < kinds.index("DESCENDANTS_QUIESCENT")
+    assert (
+        kinds.index("TERMINATION_REQUESTED")
+        < kinds.index("PROCESS_EXITED")
+        < kinds.index("DESCENDANTS_QUIESCENT")
+    )
     receipt = raised.value.supervisor.termination_receipt
     assert receipt is not None and receipt.term_requested and receipt.quiescent
 
@@ -26,14 +37,28 @@ def test_timeout_records_termination_request_before_process_settlement() -> None
 def test_cancellation_records_termination_request_before_process_settlement() -> None:
     observed = []
     checks = 0
+
     def cancelled() -> bool:
         nonlocal checks
         checks += 1
         return checks >= 2
+
     with pytest.raises(CommandCancelledError) as raised:
-        run_command(sys.executable, "-S", "-c", "import time; time.sleep(5)", timeout=5, cancel_requested=cancelled, process_observer=observed.append)
+        run_command(
+            sys.executable,
+            "-S",
+            "-c",
+            "import time; time.sleep(5)",
+            timeout=5,
+            cancel_requested=cancelled,
+            process_observer=observed.append,
+        )
     kinds = [event.kind for event in observed]
-    assert kinds.index("TERMINATION_REQUESTED") < kinds.index("PROCESS_EXITED") < kinds.index("DESCENDANTS_QUIESCENT")
+    assert (
+        kinds.index("TERMINATION_REQUESTED")
+        < kinds.index("PROCESS_EXITED")
+        < kinds.index("DESCENDANTS_QUIESCENT")
+    )
     receipt = raised.value.supervisor.termination_receipt
     assert receipt is not None and receipt.term_requested and receipt.quiescent
 

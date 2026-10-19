@@ -76,7 +76,6 @@ class PipelineValueCompiler:
     def describe_env(self, name: str) -> CompiledPipelineValue:
         return self._compile_env(name)
 
-
     def render_authoring_text(self, value: str) -> str:
         """Render inputs/env in command-like strings before admission.
 
@@ -120,7 +119,6 @@ class PipelineValueCompiler:
             "Unsupported Fleet pipeline expression. Use inputs.NAME or env.NAME."
         )
 
-
     def _compile_input(self, name: str) -> CompiledPipelineValue:
         if name not in self._inputs:
             raise FleetPlanInvalid(
@@ -146,7 +144,6 @@ class PipelineValueCompiler:
                 (LiteralEnvironmentPart(value=_scalar_text(source.value)),)
             )
         raise AssertionError(f"Unhandled Fleet env source: {type(source).__name__}")
-
 
     def _compile_template(self, value: str) -> CompiledPipelineValue:
         parts: list[ResolvedEnvironmentPart] = []

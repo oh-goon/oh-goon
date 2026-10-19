@@ -2,6 +2,7 @@
 
 A witness from the local executor, not a certificate of isolation or teardown.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -23,5 +24,6 @@ class LocalLaceAllocationObservation:
 
 
 class LocalLaceAllocationRecorder(Protocol):
-    def observe(self, proof: LocalLaceIntentProof,
-                observation: LocalLaceAllocationObservation) -> None: ...
+    def observe(
+        self, proof: LocalLaceIntentProof, observation: LocalLaceAllocationObservation
+    ) -> None: ...

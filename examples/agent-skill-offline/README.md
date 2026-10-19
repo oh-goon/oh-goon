@@ -7,7 +7,7 @@ and asset are test data. Reusable review/development Skills remain in
 [optional Gitlink recipe](../agent-skill-cookbook/README.md) selects a real upstream
 Skill without adding a cookbook dependency to OH-Goon.
 
-Copy this directory in full, including `.goonskills`, `goon.yml`, and all files
+Copy this directory in full, including `.goonskills.yml`, `goon.yml`, and all files
 under `skills/`. The name `team/review` resolves through the existing registry
 and source-capture owner. The relocation regression in
 [`test_skill02_pinned_gitlink.py`](../../backend/tests/unit/services/test_skill02_pinned_gitlink.py)

@@ -1,9 +1,5 @@
 version: 1
-inputs:
-- kubernetes_api_hostname
-- namespace
-- deployment
-- container
-- image
+execution:
+  purpose: cicd
 goons:
 - kubernetes/set-image

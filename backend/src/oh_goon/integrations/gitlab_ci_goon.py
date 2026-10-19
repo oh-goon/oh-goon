@@ -7,12 +7,12 @@ from typing import Any
 import yaml
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.fleet_plan_source_document import FleetPlanSourceDocument
 from oh_goon.core.models.fleet_plan_migration import (
     GitLabGoonMigration,
     GitLabImportIssue,
     GitLabResolvedComponent,
 )
+from oh_goon.core.models.fleet_plan_source_document import FleetPlanSourceDocument
 from oh_goon.integrations.fleet_plan_source import commit_plan_source
 from oh_goon.integrations.gitlab_ci_compile import compile_native_goon, native_goon_yaml
 from oh_goon.integrations.gitlab_ci_component import GitLabComponentFetcher

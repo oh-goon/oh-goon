@@ -1,31 +1,20 @@
 from __future__ import annotations
 
-from pathlib import Path
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import (
-    ExecutorPlacementLost,
     FleetExtensionInvalid,
-    InvalidRunTransition,
-    OperationNotFound,
-    RepositoryStateChanged,
-    StateConflict,
 )
-from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.models.operation import OperationExecution
-from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
 from oh_goon.core.vocabulary import (
-    EffectAttemptStatus,
     EffectBoundaryKind,
-    FleetRunEventType,
-    FleetRunStatus,
     OperationAction,
 )
-from oh_goon.core.vocabulary.fleet import FleetScope
 from oh_goon.engine.git import GitService
 from oh_goon.runtime.database import DatabasePathIdentityLost, LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
@@ -33,10 +22,9 @@ from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.fault_injection import FaultPoint, RaisingFaultInjector
 from oh_goon.runtime.journal import Journal
 from oh_goon.services.capability_executor import CapabilityExecutor
-from tests.factories.capabilities import admit_test_run, capability_snapshot
-from tests.factories.journal import start_run
+from tests.factories.capabilities import capability_snapshot
 from tests.factories.operation_reports import make_operation_report
-from tests.factories.repository_effect_runtime import effect_execution, effect_recovery
+from tests.factories.repository_effect_runtime import effect_execution
 from tests.factories.repository_state import baseline_for
 from tests.factories.runtime_stack import direct_operation_stack
 from tests.fakes.capability_runners import ExternalRunnerStub, fixed_capability_runners
@@ -206,6 +194,7 @@ def test_database_identity_loss_is_not_masked_by_interruption_settlement(tmp_pat
         GitService(),
         faults=IdentityLossFault(),
     )
+
     class CountingSettlementSession:
         def __init__(self, delegate) -> None:
             self._delegate = delegate

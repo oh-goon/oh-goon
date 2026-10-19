@@ -31,9 +31,7 @@ def _literal_string_argv(
     return tuple(values)
 
 
-def _literal_string_prefix(
-    node: ast.AST, bindings: dict[str, ast.AST]
-) -> tuple[str, ...]:
+def _literal_string_prefix(node: ast.AST, bindings: dict[str, ast.AST]) -> tuple[str, ...]:
     if isinstance(node, ast.Name):
         bound = bindings.get(node.id)
         return _literal_string_prefix(bound, bindings) if bound is not None else ()
@@ -296,7 +294,9 @@ def _check_dependency_privacy(root: Path) -> list[Violation]:
     boundary = root / "backend/src/oh_goon/repository_tooling/public_dependency_privacy.py"
     if not boundary.is_file():
         violations.append(
-            Violation(boundary, "public/private dependency privacy boundary must be machine-enforced")
+            Violation(
+                boundary, "public/private dependency privacy boundary must be machine-enforced"
+            )
         )
         return violations
 
@@ -317,10 +317,7 @@ def _check_dependency_privacy(root: Path) -> list[Violation]:
             continue
         tree = python_ast(consumer)
         consumes_privacy_owner = any(
-            (
-                isinstance(node, ast.ImportFrom)
-                and node.module == privacy_module
-            )
+            (isinstance(node, ast.ImportFrom) and node.module == privacy_module)
             or (
                 isinstance(node, ast.Import)
                 and any(alias.name == privacy_module for alias in node.names)
@@ -399,9 +396,7 @@ class _LockSemanticFlowAnalyzer:
         while changed:
             changed = False
             for target, value in assignments:
-                value_tainted = _contains_lock_identity(
-                    value, lock_names=self.lock_names
-                ) or any(
+                value_tainted = _contains_lock_identity(value, lock_names=self.lock_names) or any(
                     isinstance(child, ast.Name) and taint.get(child.id, False)
                     for child in ast.walk(value)
                 )
@@ -436,10 +431,7 @@ class _LockSemanticFlowAnalyzer:
             return False
         if node.func.attr not in _LOCK_SEMANTIC_PARSER_CALLS:
             return False
-        return (
-            isinstance(node.func.value, ast.Name)
-            and node.func.value.id in self.module_aliases
-        )
+        return isinstance(node.func.value, ast.Name) and node.func.value.id in self.module_aliases
 
     def _expr(self, node: ast.AST | None, env: dict[str, bool]) -> bool:
         if node is None:
@@ -454,9 +446,7 @@ class _LockSemanticFlowAnalyzer:
             argument_taint = [self._expr(argument, env) for argument in node.args]
             argument_taint.extend(self._expr(keyword.value, env) for keyword in node.keywords)
             receiver_taint = (
-                self._expr(node.func.value, env)
-                if isinstance(node.func, ast.Attribute)
-                else False
+                self._expr(node.func.value, env) if isinstance(node.func, ast.Attribute) else False
             )
             if self._is_parser_call(node):
                 if any(argument_taint):
@@ -489,9 +479,7 @@ class _LockSemanticFlowAnalyzer:
             return tainted
         return any(self._expr(child, env) for child in ast.iter_child_nodes(node))
 
-    def _statements(
-        self, statements: list[ast.stmt], env: dict[str, bool]
-    ) -> bool:
+    def _statements(self, statements: list[ast.stmt], env: dict[str, bool]) -> bool:
         returned = False
         for statement in statements:
             if isinstance(statement, ast.Assign):
@@ -501,9 +489,7 @@ class _LockSemanticFlowAnalyzer:
             elif isinstance(statement, ast.AnnAssign):
                 self._bind(statement.target, self._expr(statement.value, env), env)
             elif isinstance(statement, ast.AugAssign):
-                tainted = self._expr(statement.target, env) or self._expr(
-                    statement.value, env
-                )
+                tainted = self._expr(statement.target, env) or self._expr(statement.value, env)
                 self._bind(statement.target, tainted, env)
             elif isinstance(statement, ast.Expr):
                 self._expr(statement.value, env)
@@ -575,9 +561,7 @@ class _LockSemanticFlowAnalyzer:
         try:
             env = dict(self.globals)
             for index, parameter in enumerate(parameters):
-                env[parameter.arg] = (
-                    argument_taint[index] if index < len(argument_taint) else False
-                )
+                env[parameter.arg] = argument_taint[index] if index < len(argument_taint) else False
             result = self._statements(function.body, env)
             self._memo[key] = result
             return result
@@ -590,9 +574,7 @@ class _LockSemanticFlowAnalyzer:
             [
                 node
                 for node in self.tree.body
-                if not isinstance(
-                    node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-                )
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
             ],
             module_env,
         )
@@ -606,9 +588,7 @@ class _LockSemanticFlowAnalyzer:
         return self.violation
 
 
-def _lock_semantic_parser_flow(
-    path: Path, *, lock_names: frozenset[str]
-) -> bool:
+def _lock_semantic_parser_flow(path: Path, *, lock_names: frozenset[str]) -> bool:
     return _LockSemanticFlowAnalyzer(
         python_ast(path),
         lock_names=lock_names,
@@ -731,9 +711,7 @@ class _ProjectCompatibilityDecisionAnalyzer:
             argument_masks = [self._expr(argument, env) for argument in node.args]
             argument_masks.extend(self._expr(keyword.value, env) for keyword in node.keywords)
             receiver_mask = (
-                self._expr(node.func.value, env)
-                if isinstance(node.func, ast.Attribute)
-                else 0
+                self._expr(node.func.value, env) if isinstance(node.func, ast.Attribute) else 0
             )
             if (
                 isinstance(node.func, ast.Attribute)
@@ -748,11 +726,9 @@ class _ProjectCompatibilityDecisionAnalyzer:
             for mask in argument_masks:
                 argument_mask |= mask
             if (
-                receiver_mask & _PROJECT_DECLARATION
-                and argument_mask & _PROJECT_OBSERVED_VERSION
+                receiver_mask & _PROJECT_DECLARATION and argument_mask & _PROJECT_OBSERVED_VERSION
             ) or (
-                receiver_mask & _PROJECT_OBSERVED_VERSION
-                and argument_mask & _PROJECT_DECLARATION
+                receiver_mask & _PROJECT_OBSERVED_VERSION and argument_mask & _PROJECT_DECLARATION
             ):
                 self.violation = True
             return receiver_mask | argument_mask
@@ -770,10 +746,7 @@ class _ProjectCompatibilityDecisionAnalyzer:
             mask = 0
             for value in node.values:
                 mask |= self._expr(value, env)
-            if (
-                mask & _PROJECT_DECLARATION
-                and mask & _PROJECT_OBSERVED_VERSION
-            ):
+            if mask & _PROJECT_DECLARATION and mask & _PROJECT_OBSERVED_VERSION:
                 self.violation = True
             return mask
         if isinstance(node, ast.NamedExpr):
@@ -938,7 +911,9 @@ def _project_capability_redecides_compatibility(path: Path) -> bool:
 
 
 def _check_browser_dependency_identity(root: Path) -> list[Violation]:
-    browser = root / "backend/src/oh_goon/repository_tooling/release/browser_acceptance_container.py"
+    browser = (
+        root / "backend/src/oh_goon/repository_tooling/release/browser_acceptance_container.py"
+    )
     if not browser.is_file():
         return []
     if not _lock_semantic_parser_flow(
@@ -974,13 +949,19 @@ def _check_native_command_policy(root: Path) -> list[Violation]:
     )
     if not inherits_environment:
         violations.append(
-            Violation(native, "native command observer must derive child environment from os.environ without depending on a private local name")
+            Violation(
+                native,
+                "native command observer must derive child environment from os.environ without depending on a private local name",
+            )
         )
 
     for key in ("UV_DEFAULT_INDEX", "UV_INDEX", "UV_CONFIG_FILE"):
         if key not in text:
             violations.append(
-                Violation(native, f"native command observer must preserve operator/native uv environment evidence for {key}")
+                Violation(
+                    native,
+                    f"native command observer must preserve operator/native uv environment evidence for {key}",
+                )
             )
 
     if any(
@@ -994,23 +975,41 @@ def _check_native_command_policy(root: Path) -> list[Violation]:
         violations.append(Violation(native, "Oh-Goon must not implement native-tool retry sleeps"))
 
     forbidden_popped = {
-        "UV_SYSTEM_CERTS", "UV_DEFAULT_INDEX", "UV_INDEX", "UV_CONFIG_FILE",
-        "HOME", "XDG_CONFIG_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR",
+        "UV_SYSTEM_CERTS",
+        "UV_DEFAULT_INDEX",
+        "UV_INDEX",
+        "UV_CONFIG_FILE",
+        "HOME",
+        "XDG_CONFIG_HOME",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
     }
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "pop" and node.args):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "pop"
+            and node.args
+        ):
             continue
         key = node.args[0]
         if isinstance(key, ast.Constant) and key.value in forbidden_popped:
             violations.append(
-                Violation(native, f"certification must inherit operator/native environment instead of removing {key.value}")
+                Violation(
+                    native,
+                    f"certification must inherit operator/native environment instead of removing {key.value}",
+                )
             )
     for token in ("source ~/.bashrc", ". ~/.bashrc"):
         if token in text:
             violations.append(
-                Violation(native, "certification must not source shell startup files to manufacture native uv configuration")
+                Violation(
+                    native,
+                    "certification must not source shell startup files to manufacture native uv configuration",
+                )
             )
     return violations
+
 
 def _certification_goon_network_violation(goon: Path) -> Violation | None:
     if "host_unrestricted" not in goon.read_text(encoding="utf-8"):
@@ -1027,7 +1026,9 @@ def _check_release_stamp_and_goon_network(root: Path) -> list[Violation]:
     if stamp.is_file():
         native_prefixes = _native_command_prefixes(stamp)
         for command_prefix in (("uv", "version", "--frozen"), ("npm", "version")):
-            if not any(prefix[: len(command_prefix)] == command_prefix for prefix in native_prefixes):
+            if not any(
+                prefix[: len(command_prefix)] == command_prefix for prefix in native_prefixes
+            ):
                 violations.append(
                     Violation(
                         stamp,

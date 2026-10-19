@@ -3,6 +3,7 @@
 This is *not* the FleetRun/Enforcer/Game Tape admission or a sandbox test.
 It proves the source -> locked target -> existing Step executor physical cut.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -21,7 +22,6 @@ from oh_goon.integrations.fleet_plan_run_execution import FleetPlanRunExecutor
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plans import prepare_execution_target
 
-
 EXAMPLE = Path(__file__).resolve().parents[3] / "examples" / "standard-atomic"
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Linux/WSL host process integration")
 
@@ -30,13 +30,9 @@ def _ready(tmp_path: Path):
     repo = tmp_path / "repo"
     shutil.copytree(EXAMPLE, repo)
     source = repo / "goon.yml"
-    target = prepare_execution_target(
-        FleetPlanResolver(), source, lock_path=repo / "goon.lock"
-    )
+    target = prepare_execution_target(FleetPlanResolver(), source, lock_path=repo / "goon.lock")
     executor = FleetPlanRunExecutor(GitService(), process_isolation_backends=())
-    executor.prepare_direct_run(
-        RepositoryIdentity(path=repo), target.plan, cancel_requested=None
-    )
+    executor.prepare_direct_run(RepositoryIdentity(path=repo), target.plan, cancel_requested=None)
     return repo, target, executor
 
 
@@ -78,13 +74,12 @@ def test_real_locked_atomic_goon_reports_process_failure(tmp_path: Path) -> None
 
 def test_real_locked_atomic_goon_cancels_owned_process(tmp_path: Path) -> None:
     repo, target, executor = _ready(tmp_path)
-    (repo / "scripts" / "hello.sh").write_text(
-        "#!/bin/sh\nsleep 30\n", encoding="utf-8"
-    )
+    (repo / "scripts" / "hello.sh").write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
     since = time.monotonic()
     with pytest.raises(OperationCancelledError):
         executor.execute_direct_run(
-            repo, target.plan,
+            repo,
+            target.plan,
             cancel_requested=lambda: time.monotonic() - since > 0.3,
         )
 
@@ -110,20 +105,19 @@ def test_original_supervisor_enforces_typed_step_deadline_on_real_process(
     tmp_path: Path,
 ) -> None:
     """Deadline semantics at the real cut; command YAML still owns backend default."""
-    from oh_goon.core.models.fleet_plan import ResolvedCommandStep, PLAN_TIMEOUT_RETURN_CODE
+    from oh_goon.core.models.fleet_plan import PLAN_TIMEOUT_RETURN_CODE, ResolvedCommandStep
     from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, execute_direct_step
 
     repo, _target, _executor = _ready(tmp_path)
-    (repo / "scripts" / "hello.sh").write_text(
-        "#!/bin/sh\nsleep 30\n", encoding="utf-8"
-    )
+    (repo / "scripts" / "hello.sh").write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
     # The original resolved Step model permits backend-supplied deadlines.
     # Authoring does not support overriding normal run timeout_seconds.
     step = ResolvedCommandStep(
         step_id="deadline", argv=("sh", "scripts/hello.sh"), timeout_seconds=0.25
     )
     result = execute_direct_step(
-        repo, step,
+        repo,
+        step,
         StepRuntime(git=GitService(), extensions=None, tools=None, cancel_requested=None),
         step_order=1,
     )

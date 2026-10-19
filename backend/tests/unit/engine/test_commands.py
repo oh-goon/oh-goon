@@ -9,8 +9,8 @@ import pytest
 
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.engine.command import (
-    CommandCancelledError,
     CommandAuthorityTerminatedError,
+    CommandCancelledError,
     CommandOutputLimitExceeded,
     CommandProcessLifecycleEvent,
     _terminate_process_group,
@@ -60,7 +60,12 @@ def test_run_command_reports_process_birth_while_command_is_live() -> None:
     assert not completed.is_set()
     worker.join(timeout=3)
     assert completed.is_set()
-    assert [event.kind for event in observed] == ["PROCESS_STARTING", "PROCESS_STARTED", "PROCESS_EXITED", "DESCENDANTS_QUIESCENT"]
+    assert [event.kind for event in observed] == [
+        "PROCESS_STARTING",
+        "PROCESS_STARTED",
+        "PROCESS_EXITED",
+        "DESCENDANTS_QUIESCENT",
+    ]
     assert observed[0].physical_execution_id == observed[1].physical_execution_id
     assert observed[1].pid is not None
 
@@ -86,6 +91,7 @@ def test_process_started_observer_failure_kills_just_spawned_process() -> None:
 
     assert spawned_pid is not None
     assert not Path(f"/proc/{spawned_pid}").exists()
+
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX descriptor inheritance")
 def test_run_command_passes_only_explicit_file_descriptors() -> None:
@@ -290,8 +296,6 @@ def test_run_command_explicit_capture_limit_fails_closed_without_unbounded_reten
     assert error.supervisor.final_process_group_quiescent is True
 
 
-
-
 def test_command_does_not_inherit_control_plane_authority(monkeypatch) -> None:
     authority = {
         "OH_GOON_DB": "authority.sqlite",
@@ -315,6 +319,7 @@ def test_command_does_not_inherit_control_plane_authority(monkeypatch) -> None:
 
     assert result.returncode == 0
     assert result.stdout == ""
+
 
 def test_command_never_exports_process_local_access_capability(
     monkeypatch,
@@ -388,7 +393,9 @@ def test_live_stdout_marker_cancels_before_child_exits() -> None:
 
     with pytest.raises(CommandCancelledError) as raised:
         run_command(
-            sys.executable, "-S", "-c",
+            sys.executable,
+            "-S",
+            "-c",
             "import time; print('NATIVE_READY', flush=True); time.sleep(20)",
             timeout=3,
             stream_output=on_output,
@@ -410,13 +417,16 @@ def test_live_stdout_marker_revokes_authority_before_timeout() -> None:
 
     with pytest.raises(CommandAuthorityTerminatedError) as raised:
         run_command(
-            sys.executable, "-S", "-c",
+            sys.executable,
+            "-S",
+            "-c",
             "import time; print('NATIVE_READY', flush=True); time.sleep(20)",
             timeout=3,
             stream_output=on_output,
             termination_requested=lambda: (
                 TerminationSignal(cause="trust_revoke", reason="test-revocation")
-                if "NATIVE_READY" in "".join(observed) else None
+                if "NATIVE_READY" in "".join(observed)
+                else None
             ),
         )
     assert raised.value.supervisor.cleanup_reason == "authority"
@@ -535,13 +545,13 @@ def test_cancellation_returns_terminal_cleanup_and_runtime_authority_evidence() 
     assert error.supervisor.recovery_events[0].reason_code == "cancellation_requested"
 
 
-
-
 def test_live_stream_decoding_preserves_split_unicode_and_newline() -> None:
     """Small UTF-8 fragments cannot corrupt the original command transcript."""
     observed: list[str] = []
     result = run_command(
-        sys.executable, "-S", "-c",
+        sys.executable,
+        "-S",
+        "-c",
         "import os,sys,time; fd=sys.stdout.fileno();"
         "os.write(fd,b'caf\\xc3'); time.sleep(0.1);"
         "os.write(fd,b'\\xa9\\r\\n'); time.sleep(0.1);"

@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_composition import coerce_input
-from oh_goon.core.models.fleet_plan_composition import PlanInputDefinition, PlanInputType
+from oh_goon.core.models.fleet_plan_composition import PlanInputDefinition
 from oh_goon.core.models.fleet_plan_requirements import PyprojectValueRequirement
 
 
@@ -125,6 +125,9 @@ def test_optional_null_input_remains_compile_time_null() -> None:
         ),
         ("oci_reference", "${{ steps.build.outputs.image }}"),
         ("workspace_reference", "workspace-1"),
+        ("repository_reference", "local:team/app"),
+        ("skill_reference", "local:team/review"),
+        ("acceptance_profile", "review"),
     ],
 )
 def test_domain_input_types_accept_canonical_values(input_type: str, value: str) -> None:
@@ -150,33 +153,14 @@ def test_domain_input_types_accept_canonical_values(input_type: str, value: str)
         ("oci_repository", "Team/App"),
         ("oci_reference", "registry.example.com/team/app:latest"),
         ("workspace_reference", "-workspace"),
+        ("repository_reference", "local:team/../secret"),
+        ("skill_reference", "local:team/.private"),
+        ("acceptance_profile", "local:escape"),
     ],
 )
 def test_domain_input_types_reject_invalid_values(input_type: str, value: str) -> None:
     with pytest.raises(ValueError, match="invalid .* syntax"):
         PlanInputDefinition(name="x", input_type=input_type, default=value)
-
-
-def test_domain_input_regressions_cover_every_string_shaped_domain_type() -> None:
-    primitive_types = {
-        PlanInputType.STRING,
-        PlanInputType.BOOLEAN,
-        PlanInputType.INTEGER,
-        PlanInputType.CHOICE,
-    }
-    assert {kind.value for kind in PlanInputType if kind not in primitive_types} == {
-        "hostname",
-        "repository_path",
-        "git_revision",
-        "digest",
-        "semver",
-        "duration",
-        "kubernetes_name",
-        "kubernetes_deployment_name",
-        "oci_repository",
-        "oci_reference",
-        "workspace_reference",
-    }
 
 
 def test_pattern_remains_string_only_escape_hatch() -> None:

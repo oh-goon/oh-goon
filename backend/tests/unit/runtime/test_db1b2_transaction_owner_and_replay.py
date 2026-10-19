@@ -1,4 +1,5 @@
 """DB1B2: production has one SQLite owner; replay requires exact durable truth."""
+
 from __future__ import annotations
 
 import multiprocessing
@@ -8,13 +9,19 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.core.enforcer_lace_trust import AdmittedRunContract, TrustProtocolError, admission_receipt
+from oh_goon.core.enforcer_lace_trust import (
+    AdmittedRunContract,
+    TrustProtocolError,
+    admission_receipt,
+)
 from oh_goon.runtime.database import CausalAdmissionCommit, LocalDatabase
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError, CausalRunJournal
-from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustEpochAuthority, SignerTrustGrant
-from tests.unit.core.test_enforcer_lace_trust import authority, authenticator
+from oh_goon.runtime.enforcer_lace_signer_trust_epoch import (
+    SignerTrustEpochAuthority,
+    SignerTrustGrant,
+)
+from tests.unit.core.test_enforcer_lace_trust import authenticator, authority
 from tests.unit.services.test_group_a_verified_ingress_authorities import roots as trusted_roots
-
 
 SNAPSHOT = ((1, 2), (3, 4), b"test-owned-signer-policy")
 
@@ -30,21 +37,39 @@ def _database(path: Path) -> LocalDatabase:
     return LocalDatabase(path)
 
 
-def _publish(db: LocalDatabase, *, contract, auth, epoch=1, lease="lease-one",
-             callback=None, before_commit=None, proof=None):
+def _publish(
+    db: LocalDatabase,
+    *,
+    contract,
+    auth,
+    epoch=1,
+    lease="lease-one",
+    callback=None,
+    before_commit=None,
+    proof=None,
+):
     return db.publish_causal_admission_atomically(
-        contract=contract, receipt=admission_receipt(auth, contract), authenticator=auth,
-        control_epoch=epoch, lease_identity=lease,
-        operational_admission=callback or (lambda conn: conn.execute(
-            "INSERT INTO operational_lease VALUES (?, ?)", (contract.fields["run_id"], lease))),
-        before_commit=before_commit, operational_committed=proof,
+        contract=contract,
+        receipt=admission_receipt(auth, contract),
+        authenticator=auth,
+        control_epoch=epoch,
+        lease_identity=lease,
+        operational_admission=callback
+        or (
+            lambda conn: conn.execute(
+                "INSERT INTO operational_lease VALUES (?, ?)", (contract.fields["run_id"], lease)
+            )
+        ),
+        before_commit=before_commit,
+        operational_committed=proof,
     )
 
 
 def _lease_proof(connection):
-    return tuple(connection.execute(
-        "SELECT lease FROM operational_lease WHERE run_id='run-one'"
-    ).fetchone() or ()) == ("lease-one",)
+    return tuple(
+        connection.execute("SELECT lease FROM operational_lease WHERE run_id='run-one'").fetchone()
+        or ()
+    ) == ("lease-one",)
 
 
 def test_runtime_legacy_transaction_wrappers_fail_without_effects(tmp_path):
@@ -52,9 +77,13 @@ def test_runtime_legacy_transaction_wrappers_fail_without_effects(tmp_path):
     db = _database(path)
     with db.transaction(write=True) as conn:
         with pytest.raises(CausalJournalError, match="standalone causal transaction forbidden"):
-            CausalRunJournal(conn)._transaction(lambda: conn.execute("DELETE FROM operational_lease"))
+            CausalRunJournal(conn)._transaction(
+                lambda: conn.execute("DELETE FROM operational_lease")
+            )
         with pytest.raises(TrustProtocolError, match="standalone signer transaction forbidden"):
-            SignerTrustEpochAuthority(conn)._transaction(lambda: conn.execute("DELETE FROM operational_lease"))
+            SignerTrustEpochAuthority(conn)._transaction(
+                lambda: conn.execute("DELETE FROM operational_lease")
+            )
 
 
 def test_typed_retry_after_reopen_proves_original_commit_without_callback_reexecution(tmp_path):
@@ -78,13 +107,26 @@ def test_typed_retry_after_reopen_proves_original_commit_without_callback_reexec
         assert conn.execute("SELECT COUNT(*) FROM lace_run_events").fetchone()[0] == 1
 
 
-@pytest.mark.parametrize("attack", ["wrong-lease", "wrong-epoch", "wrong-contract", "missing-operational", "proof-mutates", "bad-receipt"])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "wrong-lease",
+        "wrong-epoch",
+        "wrong-contract",
+        "missing-operational",
+        "proof-mutates",
+        "bad-receipt",
+    ],
+)
 def test_typed_replay_rejects_mismatched_or_unverifiable_durable_truth(tmp_path, attack):
     path = tmp_path / "single.sqlite"
     db = _database(path)
     contract, auth = AdmittedRunContract.freeze(authority()), authenticator()
     _publish(db, contract=contract, auth=auth, proof=_lease_proof)
-    callback = lambda _conn: (_ for _ in ()).throw(AssertionError("retry must not call operational writer"))
+
+    def callback(_conn):
+        return (_ for _ in ()).throw(AssertionError("retry must not call operational writer"))
+
     kwargs = {}
     if attack == "wrong-lease":
         kwargs["lease"] = "other-lease"
@@ -97,29 +139,44 @@ def test_typed_replay_rejects_mismatched_or_unverifiable_durable_truth(tmp_path,
     elif attack == "bad-receipt":
         # Same contract but another authenticator whose admission MAC cannot match.
         from oh_goon.core.enforcer_lace_trust import ReceiptAuthenticator
-        kwargs["auth"] = ReceiptAuthenticator(key_id="forged-issuer", secret=b"different-secret-32-byte-secret-longer")
+
+        kwargs["auth"] = ReceiptAuthenticator(
+            key_id="forged-issuer", secret=b"different-secret-32-byte-secret-longer"
+        )
     elif attack == "missing-operational":
         with db.transaction(write=True) as conn:
             conn.execute("DELETE FROM operational_lease")
     else:
+
         def mutate(conn):
             conn.execute("UPDATE operational_lease SET lease='forged'")
             return True
+
         kwargs["proof"] = mutate
     with pytest.raises((CausalJournalError, sqlite3.DatabaseError, TrustProtocolError)):
-        _publish(db, contract=kwargs.pop("contract", contract), auth=kwargs.pop("auth", auth),
-                 callback=callback, proof=kwargs.pop("proof", _lease_proof), **kwargs)
+        _publish(
+            db,
+            contract=kwargs.pop("contract", contract),
+            auth=kwargs.pop("auth", auth),
+            callback=callback,
+            proof=kwargs.pop("proof", _lease_proof),
+            **kwargs,
+        )
     with db.transaction() as conn:
         assert conn.execute("SELECT COUNT(*) FROM lace_run_events").fetchone()[0] == 1
         if attack == "proof-mutates":
-            assert tuple(conn.execute("SELECT lease FROM operational_lease").fetchone()) == ("lease-one",)
+            assert tuple(conn.execute("SELECT lease FROM operational_lease").fetchone()) == (
+                "lease-one",
+            )
 
 
 def test_failed_precommit_is_not_a_replay_success(tmp_path):
     db = _database(tmp_path / "single.sqlite")
     contract, auth = AdmittedRunContract.freeze(authority()), authenticator()
+
     def crash():
         raise RuntimeError("inject precommit crash")
+
     with pytest.raises(RuntimeError, match="precommit crash"):
         _publish(db, contract=contract, auth=auth, proof=_lease_proof, before_commit=crash)
     with db.transaction() as conn:
@@ -128,7 +185,9 @@ def test_failed_precommit_is_not_a_replay_success(tmp_path):
     assert _publish(db, contract=contract, auth=auth, proof=_lease_proof).disposition == "COMMITTED"
 
 
-def _concurrent_signer_operation(path: str, op: str, grant: SignerTrustGrant, start, output) -> None:
+def _concurrent_signer_operation(
+    path: str, op: str, grant: SignerTrustGrant, start, output
+) -> None:
     # Spawned independent process: distinct SQLite connection, OS lock and owner.
     try:
         db = LocalDatabase(Path(path))
@@ -137,9 +196,14 @@ def _concurrent_signer_operation(path: str, op: str, grant: SignerTrustGrant, st
             db.revoke_signer_trust_atomically(expected=grant)
         elif op == "transfer":
             db.transfer_causal_control_atomically(
-                run_id="run-one", epoch=1, lease_identity="lease-one",
-                next_epoch=2, next_lease_identity="lease-next",
-                signer_grant=grant, policy_snapshot=SNAPSHOT, roots=trusted_roots(),
+                run_id="run-one",
+                epoch=1,
+                lease_identity="lease-one",
+                next_epoch=2,
+                next_lease_identity="lease-next",
+                signer_grant=grant,
+                policy_snapshot=SNAPSHOT,
+                roots=trusted_roots(),
             )
         else:
             raise AssertionError("unknown operation")
@@ -162,7 +226,9 @@ def _exit_during_admission(path: str, phase: str) -> None:
 
 @pytest.mark.parametrize("phase,exit_code", [("before-commit", 71), ("after-commit", 72)])
 def test_real_process_exit_before_or_after_commit_is_reconciled_by_durable_reread(
-    tmp_path, phase, exit_code,
+    tmp_path,
+    phase,
+    exit_code,
 ):
     path = tmp_path / "single.sqlite"
     db = _database(path)
@@ -190,9 +256,10 @@ def test_interleaved_signer_revocation_and_causal_transfer_cross_process(tmp_pat
     _publish(db, contract=contract, auth=auth)
     ctx = multiprocessing.get_context("spawn")
     start, output = ctx.Event(), ctx.Queue()
-    processes = [ctx.Process(target=_concurrent_signer_operation,
-                             args=(str(path), op, grant, start, output))
-                 for op in ("revoke", "transfer")]
+    processes = [
+        ctx.Process(target=_concurrent_signer_operation, args=(str(path), op, grant, start, output))
+        for op in ("revoke", "transfer")
+    ]
     for process in processes:
         process.start()
     start.set()
@@ -203,12 +270,21 @@ def test_interleaved_signer_revocation_and_causal_transfer_cross_process(tmp_pat
     assert results["revoke"] == "COMMITTED", results
     assert results["transfer"] == "COMMITTED" or "revoked or superseded" in results["transfer"]
     with LocalDatabase(path).transaction() as conn:
-        assert tuple(conn.execute("SELECT trust_epoch,state FROM lace_signer_trust_epoch").fetchone()) == (2, "REVOKED")
-        row = tuple(conn.execute("SELECT control_epoch,lease_identity FROM lace_run_authority").fetchone())
+        assert tuple(
+            conn.execute("SELECT trust_epoch,state FROM lace_signer_trust_epoch").fetchone()
+        ) == (2, "REVOKED")
+        row = tuple(
+            conn.execute("SELECT control_epoch,lease_identity FROM lace_run_authority").fetchone()
+        )
         assert row in ((1, "lease-one"), (2, "lease-next"))
     with pytest.raises(TrustProtocolError):
         db.transfer_causal_control_atomically(
-            run_id="run-one", epoch=1, lease_identity="lease-one",
-            next_epoch=2, next_lease_identity="lease-next",
-            signer_grant=grant, policy_snapshot=SNAPSHOT, roots=trusted_roots(),
+            run_id="run-one",
+            epoch=1,
+            lease_identity="lease-one",
+            next_epoch=2,
+            next_lease_identity="lease-next",
+            signer_grant=grant,
+            policy_snapshot=SNAPSHOT,
+            roots=trusted_roots(),
         )

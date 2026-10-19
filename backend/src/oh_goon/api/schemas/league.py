@@ -69,13 +69,18 @@ class LeagueLineupSaveRequest(BaseModel):
 
 
 class SafePlanInputDiagnostic(BaseModel):
-    schema_name: Literal["oh-goon.plan-validation-diagnostic/v1"] = Field(default="oh-goon.plan-validation-diagnostic/v1", alias="schema")
+    schema_name: Literal["oh-goon.plan-validation-diagnostic/v1"] = Field(
+        default="oh-goon.plan-validation-diagnostic/v1", alias="schema"
+    )
     status: Literal["rejected"] = "rejected"
     stage: Literal["input_contract", "plan_resolution"]
     code: Literal[
-        "UNKNOWN_INPUT", "MISSING_REQUIRED_INPUT", "INVALID_INPUT_VALUE",
-        "INVALID_INPUT_DEFAULT", "CONFLICTING_INPUT_SOURCES",
-        "UNOWNED_PROJECTED_INPUT", "AMBIGUOUS_PROJECTED_INPUT",
+        "UNKNOWN_INPUT",
+        "MISSING_REQUIRED_INPUT",
+        "INVALID_INPUT_VALUE",
+        "INVALID_INPUT_DEFAULT",
+        "UNOWNED_PROJECTED_INPUT",
+        "AMBIGUOUS_PROJECTED_INPUT",
         "PLAN_RESOLUTION_REJECTED",
     ]
     inputs: list[str]
@@ -84,7 +89,9 @@ class SafePlanInputDiagnostic(BaseModel):
 
 
 class SharedPlanInputInspection(BaseModel):
-    schema_name: Literal["oh-goon.shared-plan-input-inspection/v1"] = Field(default="oh-goon.shared-plan-input-inspection/v1", alias="schema")
+    schema_name: Literal["oh-goon.shared-plan-input-inspection/v1"] = Field(
+        default="oh-goon.shared-plan-input-inspection/v1", alias="schema"
+    )
     status: Literal["accepted", "rejected"]
     plan_key: str | None = None
     sha256: str | None = None
@@ -95,10 +102,19 @@ class SharedPlanInputInspection(BaseModel):
     @model_validator(mode="after")
     def enforce_non_authorizing_inspection_contract(self) -> "SharedPlanInputInspection":
         if self.status == "accepted":
-            if not self.plan_key or not self.sha256 or not self.plan_id or self.diagnostic is not None:
-                raise ValueError("Accepted input inspection requires exact source identity and no rejection")
+            if (
+                not self.plan_key
+                or not self.sha256
+                or not self.plan_id
+                or self.diagnostic is not None
+            ):
+                raise ValueError(
+                    "Accepted input inspection requires exact source identity and no rejection"
+                )
         elif (
-            self.plan_key is not None or self.sha256 is not None or self.plan_id is not None
+            self.plan_key is not None
+            or self.sha256 is not None
+            or self.plan_id is not None
             or self.diagnostic is None
         ):
             raise ValueError("Rejected input inspection must contain only a safe diagnostic")

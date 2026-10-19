@@ -2,6 +2,7 @@
 
 Not a separate publisher: both paths point to the exact same module object.
 """
+
 from importlib import import_module as _import_module
 from sys import modules as _modules
 

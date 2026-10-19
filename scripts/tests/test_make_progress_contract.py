@@ -19,7 +19,16 @@ def test_recursive_make_output_hides_absolute_entering_directory_noise() -> None
 
 def test_step_timer_reports_duration_and_preserves_exit_code() -> None:
     success = subprocess.run(
-        ("sh", "scripts/run_step.sh", "TEST STEP", "Owner: test", "--", "sh", "-c", "true"),
+        (
+            "sh",
+            "scripts/run_step.sh",
+            "TEST STEP",
+            "Owner: test",
+            "--",
+            "sh",
+            "-c",
+            "true",
+        ),
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -29,7 +38,16 @@ def test_step_timer_reports_duration_and_preserves_exit_code() -> None:
     assert "Step completed in" in success.stdout
 
     failure = subprocess.run(
-        ("sh", "scripts/run_step.sh", "TEST STEP", "Owner: test", "--", "sh", "-c", "exit 7"),
+        (
+            "sh",
+            "scripts/run_step.sh",
+            "TEST STEP",
+            "Owner: test",
+            "--",
+            "sh",
+            "-c",
+            "exit 7",
+        ),
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -49,7 +67,16 @@ def test_step_timer_does_not_depend_on_external_date_executable(tmp_path: Path) 
     env = dict(os.environ)
     env["PATH"] = str(tools)
     result = subprocess.run(
-        ("/bin/sh", "scripts/run_step.sh", "TEST STEP", "Owner: test", "--", "/bin/sh", "-c", "exit 0"),
+        (
+            "/bin/sh",
+            "scripts/run_step.sh",
+            "TEST STEP",
+            "Owner: test",
+            "--",
+            "/bin/sh",
+            "-c",
+            "exit 0",
+        ),
         cwd=ROOT,
         env=env,
         check=False,
@@ -92,7 +119,9 @@ def test_no_separate_certification_dependency_setup_target_exists() -> None:
     assert "certification-workspace-setup:" not in makefile
 
 
-def test_init_has_no_storage_admission_before_native_uv_and_doctor_is_separate() -> None:
+def test_init_has_no_storage_admission_before_native_uv_and_doctor_is_separate() -> (
+    None
+):
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     init = _target("init")
     doctor = _target("init-doctor")

@@ -145,10 +145,16 @@ def _execute(args: argparse.Namespace):
         delays_seconds=tuple(args.retry_delay),
     )
     report = execute_shard_plan(
-        plan, cwd=args.repository.resolve(), workers=args.workers,
-        shard_timeout_seconds=args.shard_timeout, suite_timeout_seconds=args.suite_timeout,
-        retry_policy=policy, state_root=args.state_root, resume=not args.no_resume,
-        execution_context=context, timeout_refinement=not args.no_timeout_refinement,
+        plan,
+        cwd=args.repository.resolve(),
+        workers=args.workers,
+        shard_timeout_seconds=args.shard_timeout,
+        suite_timeout_seconds=args.suite_timeout,
+        retry_policy=policy,
+        state_root=args.state_root,
+        resume=not args.no_resume,
+        execution_context=context,
+        timeout_refinement=not args.no_timeout_refinement,
         minimum_execution_window_seconds=args.minimum_execution_window,
     )
     return build_verification_execution_receipt(selection, report), report

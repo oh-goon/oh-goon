@@ -99,3 +99,27 @@ There is deliberately no `HashmarksSchedule`, background polling loop, or second
 The live interoperability surface is the consumer-conformance contract supplied by the selected, loaded Hashmarks dependency. Oh-Goon admits the exact flat membership and then constructs its own `VerificationExecutionGroupingPolicy` and execution plan. Offline proof verification inspects existing terminal evidence only; it is not proof reuse and cannot admit an old proof as a new execution.
 
 Hashmarks selects membership and repository evidence. Oh-Goon chooses whether, when, where, and under what execution/certification policy it runs.
+
+## Local evidence consumers
+
+The data-only dependency Step uses the native uv adapter and dependency qualification
+contract. Its inventory and absence claims describe the supplied lock, not authored
+requirements or an installed environment. See [dependency observations](DEPENDENCY_OBSERVATIONS.md).
+
+Ordinary pytest batches collect through native pytest hooks and retain exact selected
+node IDs. They do not need a Hashmarks relevance nomination. A Hashmarks-selected
+subset still crosses the producer-validated flat membership boundary above.
+
+Built-in Agent repository discovery/search uses named CodeMap owners over the original
+captured bytes. Each local tool session owns one disposable materialization/index;
+source observations retain native bounds and revisions. Index preparation runs inside
+the original supervised tool process, under its timeout and cancellation budget.
+A bounded result cannot prove
+repository-wide absence or replace the complete scope of a provider review. Exact
+reads of captured repository and Skill resources remain byte delivery.
+
+A coherent full-tree identity plus materialization-count observation and complete
+architecture semantic coverage still need equivalent public producer contracts.
+Existing exact syntax guards remain repository policy. Detailed producer implementation
+provenance is unavailable until a supported public diagnostic API exists; the public
+loaded implementation identity remains authoritative.

@@ -3,6 +3,7 @@
 Exercise the original Journal and the original FleetAdmissionPlanner producer.
 No invented signer, receipt, Plan resolver, or alternate admission path.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -33,12 +34,16 @@ def _case(tmp_path: Path, *, kind: str):
     )
     scope = fleet_repository_scope({repo.repository_id for repo in repositories})
     parent = _intent("parent", repositories[0], source=FleetRunSource.CICD)
-    parent = parent.model_copy(update={
-        "repository_admissions": repository_admissions_for(parent.target, repositories)
-    })
+    parent = parent.model_copy(
+        update={"repository_admissions": repository_admissions_for(parent.target, repositories)}
+    )
     admit_run(journal, "parent", parent, scope, list(repositories))
     terminalize_run(journal, "parent", FleetRunTerminalIntent.FAIL, _placement_lost_failure())
-    child = _intent("child", repositories[0], source=(FleetRunSource.CICD if kind == "readmission" else FleetRunSource.MANUAL))
+    child = _intent(
+        "child",
+        repositories[0],
+        source=(FleetRunSource.CICD if kind == "readmission" else FleetRunSource.MANUAL),
+    )
     if kind == "readmission":
         execution = child.execution.model_copy(update={"readmitted_from_run_id": "parent"})
     else:
@@ -46,16 +51,20 @@ def _case(tmp_path: Path, *, kind: str):
         # whether MANUAL strict rerun is eligible.
         execution = child.execution.model_copy(update={"rerun_from_run_id": "parent"})
     assert isinstance(execution, StrictFleetExecutionAdmission)
-    child = child.model_copy(update={
-        "execution": execution,
-        "repository_admissions": repository_admissions_for(child.target, repositories),
-    })
+    child = child.model_copy(
+        update={
+            "execution": execution,
+            "repository_admissions": repository_admissions_for(child.target, repositories),
+        }
+    )
     return database, journal, scope, repositories, child
 
 
 @pytest.mark.parametrize("kind", ["readmission", "rerun"])
 def test_original_native_capture_rejects_replay_before_journal_candidate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
 ) -> None:
     database, journal, scope, repositories, child = _case(tmp_path, kind=kind)
     called = []
@@ -70,9 +79,12 @@ def test_original_native_capture_rejects_replay_before_journal_candidate(
         before = connection.total_changes
         with pytest.raises(TrustProtocolError, match="authenticated replay.*native"):
             FleetAdmissionPlanner.prepare_fleet_prework_capture_in(
-                journal=journal, connection=connection,
-                run_id="child", intent=child,
-                repository_scope=scope, targets=list(repositories),
+                journal=journal,
+                connection=connection,
+                run_id="child",
+                intent=child,
+                repository_scope=scope,
+                targets=list(repositories),
             )
         assert connection.total_changes == before
         assert journal.read_view_from_connection(connection).run_detail("child") is None
@@ -92,15 +104,18 @@ def test_original_native_capture_keeps_ordinary_fleet_candidate(
     )
     scope = fleet_repository_scope({r.repository_id for r in repositories})
     intent = _intent("ordinary", repositories[0], source=FleetRunSource.CICD)
-    intent = intent.model_copy(update={
-        "repository_admissions": repository_admissions_for(intent.target, repositories)
-    })
+    intent = intent.model_copy(
+        update={"repository_admissions": repository_admissions_for(intent.target, repositories)}
+    )
     with database.transaction(write=True) as connection:
         before = connection.total_changes
         candidate = FleetAdmissionPlanner.prepare_fleet_prework_capture_in(
-            journal=journal, connection=connection,
-            run_id="ordinary", intent=intent,
-            repository_scope=scope, targets=list(repositories),
+            journal=journal,
+            connection=connection,
+            run_id="ordinary",
+            intent=intent,
+            repository_scope=scope,
+            targets=list(repositories),
         )
         assert candidate.fleet_run_id == "ordinary"
         assert connection.total_changes == before
@@ -109,7 +124,8 @@ def test_original_native_capture_keeps_ordinary_fleet_candidate(
 
 @pytest.mark.parametrize("kind", ["readmission", "rerun"])
 def test_original_prework_adapter_cannot_smuggle_replay_into_native_capture(
-    tmp_path: Path, kind: str,
+    tmp_path: Path,
+    kind: str,
 ) -> None:
     from oh_goon.repository_tooling.enforcer_lace_prework_capture import PreworkRunCapture
 
@@ -118,8 +134,12 @@ def test_original_prework_adapter_cannot_smuggle_replay_into_native_capture(
         before = connection.total_changes
         with pytest.raises(TrustProtocolError, match="authenticated replay.*native"):
             PreworkRunCapture.capture(
-                journal=journal, connection=connection, run_id="child",
-                intent=child, repository_scope=scope, targets=list(repositories),
+                journal=journal,
+                connection=connection,
+                run_id="child",
+                intent=child,
+                repository_scope=scope,
+                targets=list(repositories),
             )
         assert connection.total_changes == before
         assert journal.read_view_from_connection(connection).run_detail("child") is None

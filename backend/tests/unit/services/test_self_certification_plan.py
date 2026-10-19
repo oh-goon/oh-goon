@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-
 import shutil
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 from oh_goon.repository_tooling.self_certification_plan import (
     record_source_seal,
@@ -26,12 +25,14 @@ def archive_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     metadata = tmp_path / "checkpoint-parent.json"
     metadata.write_text(
-        json.dumps({
-            "schema": 1,
-            "version": "0.9.0",
-            "artifact": "oh-goon-0.9.0.zip",
-            "sha256": "0" * 64,
-        }),
+        json.dumps(
+            {
+                "schema": 1,
+                "version": "0.9.0",
+                "artifact": "oh-goon-0.9.0.zip",
+                "sha256": "0" * 64,
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(self_certification_artifacts, "PARENT_METADATA", metadata)
@@ -78,15 +79,15 @@ def test_shard_plan_exposes_pre_execution_budget_and_commands() -> None:
     assert all(shard["command"] for shard in payload["shards"])
 
 
-def test_plan_has_disjoint_bounded_source_work_and_blocks_seal_until_pass(tmp_path, monkeypatch, archive_checkout) -> None:
+def test_plan_has_disjoint_bounded_source_work_and_blocks_seal_until_pass(
+    tmp_path, monkeypatch, archive_checkout
+) -> None:
     root = archive_checkout
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     payload = self_certification_plan(root)
     names = [unit["unit"] for unit in payload["pending"]]
     assert names == ["goon-static-admission"]
-    blocked_source = [
-        unit["unit"] for unit in payload["blocked"] if unit.get("phase") == "source"
-    ]
+    blocked_source = [unit["unit"] for unit in payload["blocked"] if unit.get("phase") == "source"]
     script_units = [shard.unit_name for shard in scripts_non_certification_shards(root)]
     assert blocked_source == [
         "integration",
@@ -120,7 +121,9 @@ def test_plan_has_disjoint_bounded_source_work_and_blocks_seal_until_pass(tmp_pa
     assert all("parallel_group" not in unit for unit in payload["all_units"])
 
 
-def test_static_goon_admission_unblocks_expensive_source_units(tmp_path, monkeypatch, archive_checkout) -> None:
+def test_static_goon_admission_unblocks_expensive_source_units(
+    tmp_path, monkeypatch, archive_checkout
+) -> None:
     root = archive_checkout
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     first = self_certification_plan(root)
@@ -132,7 +135,12 @@ def test_static_goon_admission_unblocks_expensive_source_units(tmp_path, monkeyp
         static,
     )
     resumed = self_certification_plan(root)
-    assert next(unit for unit in resumed["all_units"] if unit["unit"] == "goon-static-admission")["status"] == "PASS"
+    assert (
+        next(unit for unit in resumed["all_units"] if unit["unit"] == "goon-static-admission")[
+            "status"
+        ]
+        == "PASS"
+    )
     assert [unit["unit"] for unit in resumed["pending"]][:4] == [
         "integration",
         "certification-lifecycle-adversarial",
@@ -146,7 +154,9 @@ def test_static_goon_admission_unblocks_expensive_source_units(tmp_path, monkeyp
     )
 
 
-def test_all_source_pass_evidence_makes_seal_the_only_pending_transition(tmp_path, monkeypatch, archive_checkout) -> None:
+def test_all_source_pass_evidence_makes_seal_the_only_pending_transition(
+    tmp_path, monkeypatch, archive_checkout
+) -> None:
     root = archive_checkout
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     first = self_certification_plan(root)
@@ -176,7 +186,9 @@ def test_all_source_pass_evidence_makes_seal_the_only_pending_transition(tmp_pat
     assert all(gate["status"] == "PASS" for gate in resumed["source_gates"])
 
 
-def test_source_seal_binds_exact_current_evidence_set(tmp_path, monkeypatch, archive_checkout) -> None:
+def test_source_seal_binds_exact_current_evidence_set(
+    tmp_path, monkeypatch, archive_checkout
+) -> None:
     root = archive_checkout
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     first = self_certification_plan(root)
@@ -210,10 +222,14 @@ def test_evidence_reuse_is_identity_bound_not_extraction_path(tmp_path, monkeypa
     (source / "scripts/tests/test_one.py").write_text("def test_one():\n    assert True\n")
     (source / "backend").mkdir()
     (source / "backend/pyproject.toml").write_text("[project]\nname='x'\nversion='1.0.0'\n")
-    (source / "backend/uv.lock").write_text('version = 1\nrequires-python = ">=3.12"\npackage = []\n')
+    (source / "backend/uv.lock").write_text(
+        'version = 1\nrequires-python = ">=3.12"\npackage = []\n'
+    )
     (source / "generated/release").mkdir(parents=True)
     (source / "generated/release/checkpoint-parent.json").write_text(
-        '{"schema":1,"version":"0.9.0","artifact":"oh-goon-0.9.0.zip","sha256":"' + "0" * 64 + '"}\n'
+        '{"schema":1,"version":"0.9.0","artifact":"oh-goon-0.9.0.zip","sha256":"'
+        + "0" * 64
+        + '"}\n'
     )
     (source / "frontend").mkdir()
     (source / "frontend/package-lock.json").write_text("{}\n")
@@ -231,7 +247,9 @@ def test_evidence_reuse_is_identity_bound_not_extraction_path(tmp_path, monkeypa
 
 
 @pytest.mark.slow
-def test_packaging_after_seal_runs_artifact_units_only(tmp_path, monkeypatch, archive_checkout) -> None:
+def test_packaging_after_seal_runs_artifact_units_only(
+    tmp_path, monkeypatch, archive_checkout
+) -> None:
     from oh_goon.repository_tooling import self_certification_plan as module
 
     root = archive_checkout
@@ -261,11 +279,15 @@ def test_packaging_after_seal_runs_artifact_units_only(tmp_path, monkeypatch, ar
     assert waiting["status"] == "WAITING_FOR_INPUT"
     assert waiting["pending"] == []
     assert waiting["required_inputs"][0]["status"] == "MISSING"
-    patch = next(unit for unit in waiting["all_units"] if unit["unit"] == "package/cumulative-patch")
+    patch = next(
+        unit for unit in waiting["all_units"] if unit["unit"] == "package/cumulative-patch"
+    )
     assert patch["status"] == "BLOCKED"
 
 
-def test_artifact_transition_cannot_execute_source_verification_unit(tmp_path: Path, monkeypatch, archive_checkout) -> None:
+def test_artifact_transition_cannot_execute_source_verification_unit(
+    tmp_path: Path, monkeypatch, archive_checkout
+) -> None:
     from oh_goon.repository_tooling import self_certification_plan as module
 
     root = archive_checkout
@@ -286,10 +308,14 @@ def test_source_seal_is_not_source_identity_and_toolchain_drift_invalidates_proo
     (source / "scripts/tests/test_one.py").write_text("def test_one():\n    assert True\n")
     (source / "backend").mkdir()
     (source / "backend/pyproject.toml").write_text("[project]\nname='x'\nversion='1.0.0'\n")
-    (source / "backend/uv.lock").write_text('version = 1\nrequires-python = ">=3.12"\npackage = []\n')
+    (source / "backend/uv.lock").write_text(
+        'version = 1\nrequires-python = ">=3.12"\npackage = []\n'
+    )
     (source / "generated/release").mkdir(parents=True)
     (source / "generated/release/checkpoint-parent.json").write_text(
-        '{"schema":1,"version":"0.9.0","artifact":"oh-goon-0.9.0.zip","sha256":"' + "0" * 64 + '"}\n'
+        '{"schema":1,"version":"0.9.0","artifact":"oh-goon-0.9.0.zip","sha256":"'
+        + "0" * 64
+        + '"}\n'
     )
     (source / "frontend").mkdir()
     (source / "frontend/package-lock.json").write_text("{}\n")
@@ -328,7 +354,9 @@ def test_source_seal_is_not_source_identity_and_toolchain_drift_invalidates_proo
     assert drifted["source_verification_status"] == "INCOMPLETE"
 
 
-def test_resume_reports_prior_pass_as_invalidated_when_toolchain_identity_changes(tmp_path, monkeypatch, archive_checkout) -> None:
+def test_resume_reports_prior_pass_as_invalidated_when_toolchain_identity_changes(
+    tmp_path, monkeypatch, archive_checkout
+) -> None:
     from oh_goon.repository_tooling import _self_certification_plan_units as units
 
     root = archive_checkout
@@ -359,7 +387,9 @@ def test_resume_reports_prior_pass_as_invalidated_when_toolchain_identity_change
     assert resumed["resume_evidence"]["failed"] == []
 
 
-def test_resume_reports_tampered_current_pass_as_invalidated_not_proven(tmp_path, monkeypatch, archive_checkout) -> None:
+def test_resume_reports_tampered_current_pass_as_invalidated_not_proven(
+    tmp_path, monkeypatch, archive_checkout
+) -> None:
     import json
 
     root = archive_checkout
@@ -381,7 +411,9 @@ def test_resume_reports_tampered_current_pass_as_invalidated_not_proven(tmp_path
     assert resumed["resume_evidence"]["proven"] == []
 
 
-def test_certification_realism_gate_requires_l2_l3_l4_evidence(tmp_path, monkeypatch, archive_checkout) -> None:
+def test_certification_realism_gate_requires_l2_l3_l4_evidence(
+    tmp_path, monkeypatch, archive_checkout
+) -> None:
     root = archive_checkout
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     payload = self_certification_plan(root)
@@ -390,7 +422,10 @@ def test_certification_realism_gate_requires_l2_l3_l4_evidence(tmp_path, monkeyp
     assert units["certification-lifecycle-production"]["evidence_level"] == "L3_LIFECYCLE"
     reconstruction = units["certification-lifecycle-reconstruction"]
     assert reconstruction["evidence_level"] == "L4_RECONSTRUCTION"
-    assert "backend/tests/integration/services/test_failure_recovery_resume_closure.py" in reconstruction["command"]
+    assert (
+        "backend/tests/integration/services/test_failure_recovery_resume_closure.py"
+        in reconstruction["command"]
+    )
     gate = next(gate for gate in payload["source_gates"] if gate["gate"] == "certification-realism")
     assert gate["status"] == "PENDING"
     assert gate["evidence_levels"] == ["L2_ADVERSARIAL", "L3_LIFECYCLE", "L4_RECONSTRUCTION"]
@@ -410,7 +445,9 @@ def test_certification_realism_gate_requires_l2_l3_l4_evidence(tmp_path, monkeyp
     assert gate["status"] == "PASS"
 
 
-def test_certification_integration_ownership_is_disjoint(tmp_path, monkeypatch, archive_checkout) -> None:
+def test_certification_integration_ownership_is_disjoint(
+    tmp_path, monkeypatch, archive_checkout
+) -> None:
     root = archive_checkout
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     payload = self_certification_plan(root)
@@ -443,7 +480,8 @@ def test_unit_evidence_records_certification_level(tmp_path, monkeypatch, archiv
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     payload = self_certification_plan(root)
     unit = next(
-        unit for unit in payload["all_units"]
+        unit
+        for unit in payload["all_units"]
         if unit["unit"] == "certification-lifecycle-reconstruction"
     )
     path = record_unit_pass(

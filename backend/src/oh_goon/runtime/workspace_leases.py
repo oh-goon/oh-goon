@@ -15,10 +15,10 @@ from oh_goon.core.errors import (
     WorkspaceStateStale,
     WorkspaceTransitionInvalid,
 )
-from oh_goon.core.product_identity import new_workspace_lease_id
 from oh_goon.core.models.execution_assignment import ExecutionAssignment
 from oh_goon.core.models.workspace import WorkspaceRef, WorkspaceState
 from oh_goon.core.models.workspace_lease import WorkspaceLease, WriterQuiescenceEvidence
+from oh_goon.core.product_identity import new_workspace_lease_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary.workspace import WorkspaceLifecycleState
 from oh_goon.runtime.database import LocalDatabase
@@ -58,7 +58,9 @@ class WorkspaceLeaseStore:
         if durable_assignment != assignment:
             raise ExecutionAssignmentStale("Execution assignment differs from durable authority")
         if assignment.filesystem_authority != "candidate_mutation":
-            raise ExecutionAssignmentStale("Workspace mutation lease requires candidate_mutation authority")
+            raise ExecutionAssignmentStale(
+                "Workspace mutation lease requires candidate_mutation authority"
+            )
         if assignment.workspace_id != workspace.workspace_id:
             raise ExecutionAssignmentStale("Execution assignment names another workspace")
         checkpoint = self._workspaces.current_candidate_checkpoint(workspace, reprove=True)
@@ -171,7 +173,9 @@ class WorkspaceLeaseStore:
         authority_id: str,
     ) -> WorkspaceLease:
         if authority_kind not in {"cgroup", "process_group", "remote_backend"}:
-            raise ValueError("writer authority must be cgroup, process_group, or remote_backend; PID-only fencing is forbidden")
+            raise ValueError(
+                "writer authority must be cgroup, process_group, or remote_backend; PID-only fencing is forbidden"
+            )
         with self._database.transaction(write=True) as connection:
             row = connection.execute(
                 "SELECT * FROM workspace_leases WHERE lease_id=?", (lease.lease_id,)
@@ -200,7 +204,9 @@ class WorkspaceLeaseStore:
                 (authority_kind, authority_id, lease.lease_id),
             )
             if result.rowcount != 1:
-                raise WorkspaceLeaseLost("Workspace writer authority was already bound or lease was lost")
+                raise WorkspaceLeaseLost(
+                    "Workspace writer authority was already bound or lease was lost"
+                )
         return self.lease(lease.lease_id)
 
     def release(
@@ -301,7 +307,9 @@ class WorkspaceLeaseStore:
             or evidence.executor_id != lease.executor_id
             or evidence.executor_generation != lease.executor_generation
         ):
-            raise WorkspaceFenceUnproven("Writer quiescence evidence does not match current lease authority")
+            raise WorkspaceFenceUnproven(
+                "Writer quiescence evidence does not match current lease authority"
+            )
 
     def _finish(
         self,
@@ -352,7 +360,11 @@ class WorkspaceLeaseStore:
                 (
                     status,
                     (
-                        json.dumps(quiescence.model_dump(mode="json", exclude_computed_fields=True), sort_keys=True, separators=(",", ":"))
+                        json.dumps(
+                            quiescence.model_dump(mode="json", exclude_computed_fields=True),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
                         if quiescence is not None
                         else None
                     ),

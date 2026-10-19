@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from oh_goon.core.product_identity import opaque_identity_token, repository_id, stable_id
 from oh_goon.core.models.provenance import OperationProvenance, RepositoryStateFingerprint
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.product_identity import opaque_identity_token, repository_id, stable_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import GitBranchState, WorktreeState
 
@@ -32,6 +32,7 @@ def test_opaque_identity_token_uses_the_full_identity_without_parsing_format() -
     assert len(first) == 8
     assert first != second
     assert first == opaque_identity_token("op-alpha-shared-suffix")
+
 
 def test_opaque_identity_token_rejects_invalid_boundaries() -> None:
     with pytest.raises(ValueError, match="must not be empty"):
@@ -199,4 +200,3 @@ def test_stable_id_rejects_cyclic_payloads() -> None:
     cyclic.append(cyclic)
     with pytest.raises(TypeError, match="must not contain cycles"):
         stable_id("test", cyclic)
-

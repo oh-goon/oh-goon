@@ -74,7 +74,15 @@ def _execution_nodes_with_repetition(
         result.append((node, repeated))
         child_repeated = repeated or isinstance(
             node,
-            (ast.For, ast.AsyncFor, ast.While, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp),
+            (
+                ast.For,
+                ast.AsyncFor,
+                ast.While,
+                ast.ListComp,
+                ast.SetComp,
+                ast.DictComp,
+                ast.GeneratorExp,
+            ),
         )
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
@@ -95,11 +103,7 @@ def _native_process_attempts(function: ast.FunctionDef) -> tuple[tuple[ast.Call,
 
 
 def _top_level_call_graph(tree: ast.Module) -> dict[str, set[str]]:
-    functions = {
-        node.name: node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-    }
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
     return {
         name: {
             call.func.id
@@ -453,6 +457,9 @@ def _run_service_live_output_method(
                 *,
                 seen: frozenset[tuple[str, str]] = frozenset(),
                 owner: str,
+                imported_names=imported_names,
+                functions=functions,
+                methods=methods,
             ) -> bool:
                 key = (owner, function.name)
                 if key in seen:
@@ -501,13 +508,15 @@ def _cli_consumes_run_live_output(root: Path, *, method_name: str) -> bool:
         return False
     tree = python_ast(plan_cli)
     for function in (
-        node
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ):
         runtime_names = {
             argument.arg
-            for argument in (*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs)
+            for argument in (
+                *function.args.posonlyargs,
+                *function.args.args,
+                *function.args.kwonlyargs,
+            )
             if _annotation_leaf_name(argument.annotation) == "ApplicationRuntime"
         }
         if not runtime_names:

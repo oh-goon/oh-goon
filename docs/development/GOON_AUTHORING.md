@@ -73,11 +73,11 @@ Use ordinary scalar types first:
 
 ```yaml
 inputs:
-  coverage_threshold:
-    type: integer
-    min: 70
-    max: 100
-    default: 70
+  typechecker:
+    type: choice
+    choices: [pyright, ty]
+    default: pyright
+    description: Type checker to run using native project configuration
 ```
 
 A few domain types exist so authors do not copy large validation regexes:
@@ -173,13 +173,13 @@ name using `as:`:
 
 ```yaml
 goons:
-- import: python/test
-  as: unit-tests
+- import: python/typecheck
+  as: second-checker
   with:
-    coverage_threshold: 85
+    typechecker: ty
 ```
 
-The package still resolves as `python/test`; `unit-tests` identifies this exact
+The package still resolves as `python/typecheck`; `second-checker` identifies this exact
 occurrence in compiled Steps and provenance. `as:` belongs only on an `import:`
 mapping in `goons:`, never on an Atomic Step or package definition. Names begin
 with a lowercase letter, contain lowercase letters, digits, and internal
@@ -204,19 +204,24 @@ automatic exposure of new child outputs. Any proposed shorthand needs actual
 authoring evidence and the same visibility and permission boundaries; see
 [template UX evaluation](../templates/TEMPLATE_UX_D_EVALUATION.md).
 
+An import may also declare `phase: review`, `adjudicate`, `repair`, `regression`
+or `verification` for a bounded Agent review–repair loop. Label an import or its
+children: every concrete Step must belong to exactly one phase, in that order.
+Phase membership participates in the execution lock. Ordinary imports need no
+phase. See [Agent loop authoring and execution](../AGENT_SKILLS.md#native-agentic-reviewrepair-loop)
+for phase contracts and caller limits.
+
 ## Plans expose; Goons own
 
-A shipped Plan can expose a Goon input without copying its schema:
+A plain Plan import uses the Goon's defaults and automatically exposes its unambiguous public inputs to caller values:
 
 ```yaml
 version: 1
-inputs:
-- coverage_threshold
 goons:
 - python/quality
 ```
 
-The selected Goon owns the input contract. Projection is explicit and must resolve to exactly one directly selected Goon. `with:` is reserved for concrete binding or dataflow between capabilities; it is not schema inheritance and does not rename a Plan-owned schema.
+The selected Goon owns the input contract and internal forwarding. The Plan repeats neither. Use `with: {typechecker: ty}` on the import to fix an intentional override; that bound input is then excluded from automatic caller inputs. An optional Plan `inputs: [name, ...]` narrows its public interface. Shared unbound names retain independent defaults; a caller override requires explicit `pass:`/`with:` recipient selection. References such as `with: {project: '${{ inputs.backend_project }}'}` expose a renamed caller input directly from the child's contract.
 
 ## Typed infrastructure Goons
 
@@ -230,7 +235,7 @@ For shipped catalog changes, run the template/parser/resolver tests before broad
 
 ## Composite inputs expose child contracts
 
-A Composite Goon does not own another copy of a child input schema. It exposes the names it wants callers to see and forwards them explicitly:
+A Composite Goon exposes the names it wants callers to see. Unique names project their child contracts without repeated forwarding:
 
 ```yaml
 version: 1
@@ -240,17 +245,12 @@ inputs:
 - context
 - platform
 goons:
-- import: oci/image
-  with:
-    base_registry_hostname: ${{ inputs.base_registry_hostname }}
-    containerfile: ${{ inputs.containerfile }}
-    context: ${{ inputs.context }}
-    platform: ${{ inputs.platform }}
+- oci/image
 ```
 
-The child Goon remains authority for type, default and validation. If one exposed parent input is forwarded to more than one child, those child contracts must be identical or resolution fails. Exposure never implies forwarding.
+The child Goon remains authority for type, default and validation. If one exposed parent input is forwarded to more than one child, those child contracts must be identical or resolution fails. Explicit bindings select recipients; otherwise a unique matching child input is projected. Multiple matching children require explicit bindings.
 
-On a Composite Goon's recipient import, `pass: [containerfile, context]` is a
+On a Plan or Composite Goon's recipient import, `pass: [containerfile, context]` is a
 shorthand for explicit same-name parent-input `with:` bindings. The existing
 compiler expands it before source-graph materialization. `pass:` and `with:`
 may share an import only when their child targets are disjoint. Producer
@@ -263,12 +263,12 @@ value source, caller-level fan-out, or Step-time resolver. See
 External CI names are boundary names, not reusable Goon input names. Bind them to one canonical child input with `from:` and validate the resolved value against the child contract before any Step runs:
 
 ```yaml
-- import: kubernetes/deploy
+- import: python/typecheck
   with:
-    timeout:
+    typechecker:
       from:
-      - env: HELM_TIMEOUT_OVERRIDE
-      - env: HELM_TIMEOUT
+      - env: PYTHON_TYPECHECKER_OVERRIDE
+      - env: PYTHON_TYPECHECKER
 ```
 
 Sources are tried in order. The first defined value wins. If no source is defined, the child's declared default applies; otherwise a required input fails resolution. This is deliberately only resolution, not an expression language.
@@ -276,38 +276,38 @@ Sources are tried in order. The first defined value wins. If no source is define
 Repository YAML may be read without `yq` or shell code:
 
 ```yaml
-- import: release/metadata
+- import: python/typecheck
   with:
-    version:
+    typechecker:
       from:
         yaml:
           path: project.yml
-          key: project.version
+          key: checks.typechecker
 ```
 
 TOML works the same way, which is useful for values already owned by
 `pyproject.toml`:
 
 ```yaml
-- import: release/metadata
+- import: python/typecheck
   with:
-    version:
+    typechecker:
       from:
         toml:
           path: pyproject.toml
-          key: project.version
+          key: tool.company.typechecker
 ```
 
 For a repository file whose entire contents are one scalar value, use the
 deliberately smaller `text` source:
 
 ```yaml
-- import: release/metadata
+- import: python/typecheck
   with:
-    version:
+    typechecker:
       from:
         text:
-          path: VERSION
+          path: TYPECHECKER
 ```
 
 `text` trims surrounding whitespace and accepts exactly one non-empty line.
@@ -316,7 +316,7 @@ It is not a mechanism for importing scripts or arbitrary text blocks.
 The path is repository-relative and cannot escape the repository boundary. Git identity is read through the backend Git observation boundary:
 
 ```yaml
-- import: release/metadata
+- import: python/release-metadata
   with:
     revision:
       from:
@@ -403,3 +403,11 @@ possible. Do not infer outbound authority from `network: true` shorthand.
 explains the difference between an admitted repository and an explicit upstream
 published source workspace, and why browser transport, engine, harness and runtime
 checks must not be merged merely because native commands share prerequisites.
+
+## Project-owned Goons and caller overrides
+
+Follow [the template developer journey](../../templates/README.md). Import a project package with its exact `category/name` plus `from: ./goons`; that source stays inside the root authoring workspace and never shadows shipped imports. Plans expose unique unbound direct inputs automatically; Composite Goons declare their public interface. Both support explicit recipient `pass:`/`with:` bindings.
+
+`--input` overrides the same name in one `--inputs-file`; `lock`, validation and execution share that collector and canonical binder. Inputs do not alter package selection. A changed execution choice requires an explicitly refreshed lock.
+
+For reusable Python Goons, reference declared inputs from `uv.project` and `uv.group`. Commands default to that project working directory. Native tools own their project configuration, including discovery and coverage policy. Output/artifact paths in uv Goons are authored relative to the command working directory and resolved before execution.

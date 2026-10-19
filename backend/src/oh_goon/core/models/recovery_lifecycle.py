@@ -4,8 +4,8 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.product_identity import stable_id
 
 RecoveryFailureClass = Literal[
     "environment",
@@ -27,7 +27,9 @@ class RecoveryFailureEvidence(ImmutableModel):
 
     @property
     def evidence_id(self) -> str:
-        return stable_id("recovery-failure-evidence", self.model_dump(mode="json", exclude_computed_fields=True))
+        return stable_id(
+            "recovery-failure-evidence", self.model_dump(mode="json", exclude_computed_fields=True)
+        )
 
 
 class RecoveryAdmission(ImmutableModel):
@@ -52,4 +54,6 @@ class RecoveryAdmission(ImmutableModel):
 
     @property
     def admission_id(self) -> str:
-        return stable_id("recovery-admission", self.model_dump(mode="json", exclude_computed_fields=True))
+        return stable_id(
+            "recovery-admission", self.model_dump(mode="json", exclude_computed_fields=True)
+        )

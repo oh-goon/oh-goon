@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.models.fleet import (
     ExcludedFleetRepository,
     FleetRepository,
     IncludedFleetRepository,
 )
 from oh_goon.core.models.repository import RepositoryCatalogEntry
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary import FleetScope, OperationAction
 from oh_goon.runtime.journal_view import JournalReadView
 

@@ -76,7 +76,7 @@ def test_import_gitlab_components_becomes_native_atomic_goon_yaml(tmp_path: Path
     output = tmp_path / "goon.yml"
     migrator.write_goon(output, migration)
     rendered = output.read_text(encoding="utf-8")
-    assert "purpose: cicd" not in rendered
+    assert "purpose: cicd" in rendered
     assert "kind: git_repository" not in rendered
     assert "admission:" not in rendered
     assert "threat_model:" not in rendered
@@ -93,6 +93,7 @@ def test_import_gitlab_components_becomes_native_atomic_goon_yaml(tmp_path: Path
     imported = parse_goon_template(rendered, source=str(output))
     assert imported.execution is not None
     assert imported.execution.purpose is ExecutionPurpose.CICD
+    assert imported.execution == migration.goon.execution
     assert len(imported.steps) == 3
     with pytest.raises(FleetPlanInvalid, match="Plans cannot declare executable work"):
         parse_plan_template(rendered, source=str(output))
@@ -188,7 +189,6 @@ def test_gitlab_import_compiles_exact_single_command_git_artifacts_and_timeout(
     assert tuple(item.path for item in migration.goon.steps[-1].artifacts) == ("dist/*",)
 
 
-
 def test_gitlab_import_blocks_nondefault_command_timeout(tmp_path: Path) -> None:
     source = tmp_path / ".gitlab-ci.yml"
     source.write_text(
@@ -198,9 +198,11 @@ def test_gitlab_import_blocks_nondefault_command_timeout(tmp_path: Path) -> None
     migration = GitLabCiGoonMigrator(GitLabComponentFetcher()).migrate(source)
     assert migration.ready is False
     assert any(
-        issue.field == "timeout" and "cannot be authored on a normal Fleet run: Step" in issue.reason
+        issue.field == "timeout"
+        and "cannot be authored on a normal Fleet run: Step" in issue.reason
         for issue in migration.issues
     )
+
 
 def test_gitlab_import_blocks_shell_context_variables_and_multi_command_jobs(
     tmp_path: Path,

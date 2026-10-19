@@ -135,12 +135,18 @@ def test_pre_commit_lock_check_and_sync_share_one_captured_native_uv_authority(
             # Force the same preparation operation through check -> sync after lock.
             environment = Path(env["UV_PROJECT_ENVIRONMENT"])
             environment.mkdir(parents=True, exist_ok=True)
-            return CommandResult(returncode=0, stdout="", stderr="", argv=tuple(argv), duration_ms=1)
+            return CommandResult(
+                returncode=0, stdout="", stderr="", argv=tuple(argv), duration_ms=1
+            )
         if "--check" in argv:
-            return CommandResult(returncode=1, stdout="", stderr="stale", argv=tuple(argv), duration_ms=1)
+            return CommandResult(
+                returncode=1, stdout="", stderr="stale", argv=tuple(argv), duration_ms=1
+            )
         environment = Path(env["UV_PROJECT_ENVIRONMENT"])
-        executable = environment / ("Scripts" if os.name == "nt" else "bin") / (
-            "pre-commit.exe" if os.name == "nt" else "pre-commit"
+        executable = (
+            environment
+            / ("Scripts" if os.name == "nt" else "bin")
+            / ("pre-commit.exe" if os.name == "nt" else "pre-commit")
         )
         executable.parent.mkdir(parents=True, exist_ok=True)
         executable.write_text("", encoding="utf-8")
@@ -173,17 +179,15 @@ def test_pre_commit_lock_check_and_sync_share_one_captured_native_uv_authority(
             "SSL_CERT_FILE",
         )
     }
-    assert all(
-        {key: env[key] for key in transported} == transported for _argv, env in calls[1:]
-    )
+    assert all({key: env[key] for key in transported} == transported for _argv, env in calls[1:])
 
 
 def test_extension_uv_check_and_sync_consume_same_native_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from oh_goon.core.path_layouts import ManagedPreparationPathLayout
     import oh_goon.engine.fleet_extensions as extensions
+    from oh_goon.core.path_layouts import ManagedPreparationPathLayout
 
     native = capture_native_uv_authority(_native_environment())
     preparation = ManagedPreparationPathLayout.from_root(tmp_path / "extensions")
@@ -235,8 +239,10 @@ def test_pre_commit_python_selection_has_one_owner_native_uv(
             (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
         elif argv[1] == "sync" and "--check" not in argv:
             environment = Path(env["UV_PROJECT_ENVIRONMENT"])
-            executable = environment / ("Scripts" if os.name == "nt" else "bin") / (
-                "pre-commit.exe" if os.name == "nt" else "pre-commit"
+            executable = (
+                environment
+                / ("Scripts" if os.name == "nt" else "bin")
+                / ("pre-commit.exe" if os.name == "nt" else "pre-commit")
             )
             executable.parent.mkdir(parents=True, exist_ok=True)
             executable.write_text("", encoding="utf-8")
@@ -249,7 +255,7 @@ def test_pre_commit_python_selection_has_one_owner_native_uv(
     assert calls
     for _argv, env, project_text in calls:
         assert env["UV_PYTHON"] == "/opt/operator/python3.12"
-        assert 'requires-python' not in project_text
+        assert "requires-python" not in project_text
         assert 'dependencies = ["pre-commit==4.6.2"]' in project_text
     assert "python_version" not in type(runtime).model_fields
     assert "python" not in runtime.runtime_id.lower()

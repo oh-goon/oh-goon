@@ -9,13 +9,13 @@ from tests.factories.local_lifecycle_execution import prepare_local_lifecycle_ex
 def test_live_step_lifecycle_is_durable_and_game_tape_reads_same_journal(tmp_path: Path) -> None:
     execution = prepare_local_lifecycle_execution(
         tmp_path,
-        plan_text='''version: 1
+        plan_text="""version: 1
 execution:
   purpose: verification
 steps:
   - id: observed
     run: "./lifecycle-step.py"
-''',
+""",
         script_body="print('observed')",
         fleet_run_id="canonical-lifecycle-ledger",
     )
@@ -34,15 +34,33 @@ steps:
     assert FleetRunEventType.PROCESS_EXITED in event_types
     assert FleetRunEventType.DESCENDANTS_QUIESCENT in event_types
     assert FleetRunEventType.STEP_SUCCEEDED in event_types
-    assert event_types.index(FleetRunEventType.REPOSITORY_STARTED) < event_types.index(FleetRunEventType.STEP_REACHED)
-    assert event_types.index(FleetRunEventType.STEP_REACHED) < event_types.index(FleetRunEventType.STEP_STARTED)
-    assert event_types.index(FleetRunEventType.STEP_STARTED) < event_types.index(FleetRunEventType.STEP_ATTEMPT_CREATED)
-    assert event_types.index(FleetRunEventType.STEP_ATTEMPT_CREATED) < event_types.index(FleetRunEventType.PROCESS_STARTING)
-    assert event_types.index(FleetRunEventType.PROCESS_STARTING) < event_types.index(FleetRunEventType.PROCESS_STARTED)
-    assert event_types.index(FleetRunEventType.PROCESS_STARTED) < event_types.index(FleetRunEventType.PROCESS_EXITED)
-    assert event_types.index(FleetRunEventType.PROCESS_EXITED) < event_types.index(FleetRunEventType.DESCENDANTS_QUIESCENT)
-    assert event_types.index(FleetRunEventType.DESCENDANTS_QUIESCENT) < event_types.index(FleetRunEventType.STEP_SUCCEEDED)
-    assert event_types.index(FleetRunEventType.STEP_SUCCEEDED) < event_types.index(FleetRunEventType.REPOSITORY_COMPLETED)
+    assert event_types.index(FleetRunEventType.REPOSITORY_STARTED) < event_types.index(
+        FleetRunEventType.STEP_REACHED
+    )
+    assert event_types.index(FleetRunEventType.STEP_REACHED) < event_types.index(
+        FleetRunEventType.STEP_STARTED
+    )
+    assert event_types.index(FleetRunEventType.STEP_STARTED) < event_types.index(
+        FleetRunEventType.STEP_ATTEMPT_CREATED
+    )
+    assert event_types.index(FleetRunEventType.STEP_ATTEMPT_CREATED) < event_types.index(
+        FleetRunEventType.PROCESS_STARTING
+    )
+    assert event_types.index(FleetRunEventType.PROCESS_STARTING) < event_types.index(
+        FleetRunEventType.PROCESS_STARTED
+    )
+    assert event_types.index(FleetRunEventType.PROCESS_STARTED) < event_types.index(
+        FleetRunEventType.PROCESS_EXITED
+    )
+    assert event_types.index(FleetRunEventType.PROCESS_EXITED) < event_types.index(
+        FleetRunEventType.DESCENDANTS_QUIESCENT
+    )
+    assert event_types.index(FleetRunEventType.DESCENDANTS_QUIESCENT) < event_types.index(
+        FleetRunEventType.STEP_SUCCEEDED
+    )
+    assert event_types.index(FleetRunEventType.STEP_SUCCEEDED) < event_types.index(
+        FleetRunEventType.REPOSITORY_COMPLETED
+    )
 
     tape_types = [event.event_type for event in reconstructed.game_tape.play_by_play]
     assert tape_types.count(GameTapeEventType.REPOSITORY_STARTED) == 1
@@ -86,13 +104,13 @@ def test_step_attempt_is_durable_while_step_is_still_running(tmp_path: Path) -> 
 
     execution = prepare_local_lifecycle_execution(
         tmp_path,
-        plan_text='''version: 1
+        plan_text="""version: 1
 execution:
   purpose: verification
 steps:
   - id: interruptible
     run: "./lifecycle-step.py"
-''',
+""",
         script_body="import time; time.sleep(2); print('done')",
         fleet_run_id="live-lifecycle-before-result",
     )
@@ -101,7 +119,10 @@ steps:
         future = pool.submit(execution.execute)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            event_types = [event.event_type for event in execution.journal.run_events(execution.fleet_run_id).events]
+            event_types = [
+                event.event_type
+                for event in execution.journal.run_events(execution.fleet_run_id).events
+            ]
             if FleetRunEventType.PROCESS_STARTED in event_types:
                 break
             time.sleep(0.02)

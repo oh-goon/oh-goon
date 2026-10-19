@@ -5,6 +5,7 @@ as repository identity changes.  This module compares the prior certified exam s
 current snapshot and identifies the smallest declared concept/question surface that needs fresh
 certification evidence.  It never grants or carries forward runtime permissions by itself.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -19,7 +20,9 @@ from oh_goon.repository_tooling.repository_understanding_capability import (
 )
 from oh_goon.repository_tooling.repository_understanding_stability import validated_result
 
-DIFFERENTIAL_RECERTIFICATION_POLICY_VERSION = "repository-understanding-differential-recertification.v1"
+DIFFERENTIAL_RECERTIFICATION_POLICY_VERSION = (
+    "repository-understanding-differential-recertification.v1"
+)
 DIFFERENTIAL_RECERTIFICATION_SCHEMA_VERSION = 1
 
 
@@ -163,7 +166,11 @@ def _declared_evidence_paths(snapshot: dict[str, Any]) -> set[str]:
             continue
         for reference in refs:
             if isinstance(reference, str) and ":" in reference:
-                paths.add(reference.rsplit(":", 1)[0] if reference.rsplit(":", 1)[1].isdigit() else reference.split(":", 1)[0])
+                paths.add(
+                    reference.rsplit(":", 1)[0]
+                    if reference.rsplit(":", 1)[1].isdigit()
+                    else reference.split(":", 1)[0]
+                )
     return paths
 
 
@@ -179,14 +186,20 @@ def differential_recertification_plan(
         raise ValueError("capability certificate policy is not current")
 
     prior_result = validated_result(prior_result_path)
-    if prior_result.get("certificate_identity") not in certificate.get("run_certificate_identities", []):
+    if prior_result.get("certificate_identity") not in certificate.get(
+        "run_certificate_identities", []
+    ):
         raise ValueError("prior result is not one of the capability certificate qualifying runs")
     if prior_result.get("repository_identity") != certificate.get("repository_identity"):
         raise ValueError("prior result repository identity does not match capability certificate")
     if prior_result.get("exam_snapshot_sha256") != certificate.get("exam_snapshot_sha256"):
         raise ValueError("prior result exam snapshot does not match capability certificate")
-    if prior_result.get("candidate_configuration_identity") != certificate.get("candidate_configuration_identity"):
-        raise ValueError("prior result candidate configuration does not match capability certificate")
+    if prior_result.get("candidate_configuration_identity") != certificate.get(
+        "candidate_configuration_identity"
+    ):
+        raise ValueError(
+            "prior result candidate configuration does not match capability certificate"
+        )
 
     bundle = prior_result.get("regrade_bundle")
     if not isinstance(bundle, dict):
@@ -248,7 +261,9 @@ def differential_recertification_plan(
         "current_exam_snapshot_sha256": current["snapshot_sha256"],
         "source_changed": source_changed,
         "status": status,
-        "capability_state": "SUSPENDED_SOURCE_CHANGED" if source_changed else certificate["certificate_status"],
+        "capability_state": "SUSPENDED_SOURCE_CHANGED"
+        if source_changed
+        else certificate["certificate_status"],
         "preserved_concepts": preserved,
         "affected_concepts": affected,
         "new_concepts": added,
@@ -283,13 +298,18 @@ def validate_recertification_plan(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("differential recertification schema mismatch")
     if payload.get("policy_version") != DIFFERENTIAL_RECERTIFICATION_POLICY_VERSION:
         raise ValueError("differential recertification policy mismatch")
-    identity = _identity(payload.get("recertification_plan_identity"), label="recertification_plan_identity")
+    identity = _identity(
+        payload.get("recertification_plan_identity"), label="recertification_plan_identity"
+    )
     base = {key: value for key, value in payload.items() if key != "recertification_plan_identity"}
     if identity != "sha256:" + _canonical_sha256(base):
         raise ValueError("differential recertification identity does not match artifact bytes")
     if payload.get("enforcement_status") != "EVIDENCE_ONLY":
         raise ValueError("differential recertification cannot become runtime authority")
-    if payload.get("source_changed") and payload.get("capability_state") != "SUSPENDED_SOURCE_CHANGED":
+    if (
+        payload.get("source_changed")
+        and payload.get("capability_state") != "SUSPENDED_SOURCE_CHANGED"
+    ):
         raise ValueError("source-changed recertification plan must suspend exact-source capability")
     return payload
 

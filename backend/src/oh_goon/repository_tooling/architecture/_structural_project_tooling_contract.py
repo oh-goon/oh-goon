@@ -144,15 +144,27 @@ def _check_direct_python_surfaces(root: Path) -> list[Violation]:
     for surface in (root / "scripts" / "dev.sh", root / "scripts" / "release" / "build_release.sh"):
         if not surface.is_file():
             continue
-        if any(_is_direct_python(command) for command in shell_semantic_commands(surface.read_text(encoding="utf-8"))):
+        if any(
+            _is_direct_python(command)
+            for command in shell_semantic_commands(surface.read_text(encoding="utf-8"))
+        ):
             violations.append(
-                Violation(surface, "project Python must execute through uv; direct python/python3 execution is forbidden")
+                Violation(
+                    surface,
+                    "project Python must execute through uv; direct python/python3 execution is forbidden",
+                )
             )
 
     for dockerfile in (root / "docker").glob("**/Dockerfile"):
-        if any(_is_direct_python(command) for command in _docker_commands(dockerfile.read_text(encoding="utf-8"))):
+        if any(
+            _is_direct_python(command)
+            for command in _docker_commands(dockerfile.read_text(encoding="utf-8"))
+        ):
             violations.append(
-                Violation(dockerfile, "project Python must execute through uv; direct python/python3 execution is forbidden")
+                Violation(
+                    dockerfile,
+                    "project Python must execute through uv; direct python/python3 execution is forbidden",
+                )
             )
 
     package = root / "frontend" / "package.json"
@@ -166,7 +178,10 @@ def _check_direct_python_surfaces(root: Path) -> list[Violation]:
                     for command in shell_semantic_commands(value, include_function_bodies=False)
                 ):
                     violations.append(
-                        Violation(package, "project Python must execute through uv; direct python/python3 execution is forbidden")
+                        Violation(
+                            package,
+                            "project Python must execute through uv; direct python/python3 execution is forbidden",
+                        )
                     )
                     break
     return violations
@@ -332,7 +347,11 @@ def _check_precommit(root: Path) -> list[Violation]:
             entry_argv = tuple(shlex.split(entry, posix=True))
         except ValueError:
             entry_argv = ()
-        if entry_argv[:1] in {("bash",), ("sh",)} and len(entry_argv) >= 3 and entry_argv[1] in {"-c", "-lc"}:
+        if (
+            entry_argv[:1] in {("bash",), ("sh",)}
+            and len(entry_argv) >= 3
+            and entry_argv[1] in {"-c", "-lc"}
+        ):
             commands.extend(shell_semantic_commands(entry_argv[2], include_function_bodies=False))
         for command in commands:
             argv = _effective_argv(command.argv)
@@ -356,11 +375,7 @@ def _check_precommit(root: Path) -> list[Violation]:
 
 
 def _all_make_commands(facts: MakeSemanticFacts) -> tuple[ShellCommand, ...]:
-    return tuple(
-        command
-        for commands in facts.target_commands.values()
-        for command in commands
-    )
+    return tuple(command for commands in facts.target_commands.values() for command in commands)
 
 
 def _is_dependency_policy_bootstrap(argv: tuple[str, ...], allowed_path: str | None) -> bool:
@@ -419,7 +434,10 @@ def _check_make_command_owners(
         )
 
     if any(
-        (_effective_argv(command.argv)[:1] and Path(_effective_argv(command.argv)[0]).name in {"node", "npx"})
+        (
+            _effective_argv(command.argv)[:1]
+            and Path(_effective_argv(command.argv)[0]).name in {"node", "npx"}
+        )
         for command in commands
     ):
         violations.append(
@@ -436,7 +454,9 @@ def _check_make_command_owners(
     ]
     if not bootstrap_commands:
         violations.append(
-            Violation(makefile, "Make must project the pre-environment dependency-policy capability")
+            Violation(
+                makefile, "Make must project the pre-environment dependency-policy capability"
+            )
         )
 
     for command in commands:
@@ -501,9 +521,7 @@ def _check_make_progress_and_frontend(
         if _effective_argv(command.argv)[:2] == ("npm", "ci")
     ]
     required_flags = {"--prefer-offline", "--ignore-scripts", "--no-audit", "--no-fund"}
-    if frontend_commands and (
-        len(npm_ci) != 1 or not required_flags.issubset(set(npm_ci[0][2:]))
-    ):
+    if frontend_commands and (len(npm_ci) != 1 or not required_flags.issubset(set(npm_ci[0][2:]))):
         violations.append(
             Violation(
                 makefile,
@@ -552,7 +570,6 @@ def _check_operator_uv_environment(makefile: Path, facts: MakeSemanticFacts) -> 
             )
         )
     return violations
-
 
 
 def _check_native_uv_environment_ownership(root: Path) -> list[Violation]:
@@ -606,6 +623,7 @@ def _check_native_uv_environment_ownership(root: Path) -> list[Violation]:
                             )
                         )
     return violations
+
 
 def check_project_tooling_contract(root: Path) -> list[Violation]:
     pyproject = root / "backend" / "pyproject.toml"

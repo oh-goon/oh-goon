@@ -3,23 +3,27 @@ from __future__ import annotations
 import subprocess
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock
 
-from oh_goon.engine.command import RuntimeAuthorityBinding, CommandCancelledError, CommandResult, run_command
-from oh_goon.runtime.execution.environment_failure import has_environment_failure_hint
+from oh_goon.engine.command import (
+    CommandCancelledError,
+    CommandResult,
+    RuntimeAuthorityBinding,
+    run_command,
+)
+from oh_goon.runtime.execution._shard_refinement import refine_children as _refine_children
 from oh_goon.runtime.execution._shard_resume import (
     _persist_pass,
     _persist_refinement,
     _resumable_pass,
     _resumable_refinement,
 )
-from oh_goon.runtime.execution._shard_refinement import refine_children as _refine_children
+from oh_goon.runtime.execution.environment_failure import has_environment_failure_hint
 from oh_goon.runtime.execution.shard_models import (
-    EXECUTION_CONTRACT_VERSION,
-    REPORT_SCHEMA,
+    _LOG_TAIL_LIMIT,
     ExecutionStatus,
     ShardAttemptEvidence,
     ShardExecutionContext,
@@ -28,11 +32,11 @@ from oh_goon.runtime.execution.shard_models import (
     ShardResult,
     ShardRetryPolicy,
     ShardWork,
-    execution_policy_identity,
     _identity,
-    _LOG_TAIL_LIMIT,
     build_execution_report,
+    execution_policy_identity,
 )
+
 
 def _tail(value: str) -> str:
     return value[-_LOG_TAIL_LIMIT:]
@@ -100,7 +104,13 @@ def _attempt(
     except (BlockingIOError, OSError, RuntimeError) as exc:
         rendered = f"{type(exc).__name__}: {exc}"
         if has_environment_failure_hint(rendered):
-            return "ENVIRONMENT_BLOCKED", None, int((time.monotonic() - started) * 1000), "", rendered
+            return (
+                "ENVIRONMENT_BLOCKED",
+                None,
+                int((time.monotonic() - started) * 1000),
+                "",
+                rendered,
+            )
         raise
     rendered = "\n".join(part for part in (result.stdout, result.stderr) if part)
     if result.returncode == 0:
@@ -113,9 +123,18 @@ def _attempt(
 
 
 def _attempt_evidence(
-    *, plan: ShardExecutionPlan, context: ShardExecutionContext, shard: ShardWork,
-    attempt_number: int, status: ExecutionStatus, command: CommandResult | None,
-    duration_ms: int, stdout: str, stderr: str, retry: bool, policy: ShardRetryPolicy,
+    *,
+    plan: ShardExecutionPlan,
+    context: ShardExecutionContext,
+    shard: ShardWork,
+    attempt_number: int,
+    status: ExecutionStatus,
+    command: CommandResult | None,
+    duration_ms: int,
+    stdout: str,
+    stderr: str,
+    retry: bool,
+    policy: ShardRetryPolicy,
 ) -> ShardAttemptEvidence:
     runtime = command.runtime_authority if command is not None else None
     supervisor = command.supervisor if command is not None else None
@@ -146,8 +165,11 @@ def _attempt_evidence(
 
 
 def _shard_result(
-    shard: ShardWork, status: ExecutionStatus, attempts: list[ShardAttemptEvidence],
-    *, reason_code: str | None = None,
+    shard: ShardWork,
+    status: ExecutionStatus,
+    attempts: list[ShardAttemptEvidence],
+    *,
+    reason_code: str | None = None,
 ) -> ShardResult:
     return ShardResult(
         shard_id=shard.shard_id,
@@ -165,8 +187,13 @@ def _shard_result(
 
 
 def _execute_one(
-    shard: ShardWork, *, plan: ShardExecutionPlan, context: ShardExecutionContext,
-    timeout: float, cwd: Path, policy: ShardRetryPolicy,
+    shard: ShardWork,
+    *,
+    plan: ShardExecutionPlan,
+    context: ShardExecutionContext,
+    timeout: float,
+    cwd: Path,
+    policy: ShardRetryPolicy,
     cancel_requested: Callable[[], bool] | None,
 ) -> ShardResult:
     attempts: list[ShardAttemptEvidence] = []
@@ -175,22 +202,37 @@ def _execute_one(
             shard, timeout=timeout, cwd=cwd, cancel_requested=cancel_requested, context=context
         )
         retry = _retry_admitted(
-            policy=policy, status=status,
-            returncode=command.returncode if command is not None else None, attempt=attempt_number,
+            policy=policy,
+            status=status,
+            returncode=command.returncode if command is not None else None,
+            attempt=attempt_number,
         )
-        attempts.append(_attempt_evidence(
-            plan=plan, context=context, shard=shard, attempt_number=attempt_number,
-            status=status, command=command, duration_ms=duration_ms, stdout=stdout, stderr=stderr,
-            retry=retry, policy=policy,
-        ))
+        attempts.append(
+            _attempt_evidence(
+                plan=plan,
+                context=context,
+                shard=shard,
+                attempt_number=attempt_number,
+                status=status,
+                command=command,
+                duration_ms=duration_ms,
+                stdout=stdout,
+                stderr=stderr,
+                retry=retry,
+                policy=policy,
+            )
+        )
         if not retry:
             return _shard_result(shard, status, attempts)
         if _wait_for_retry_delay(policy.delays_seconds[attempt_number - 1], cancel_requested):
             return _shard_result(
-                shard, "CANCELLED", attempts,
+                shard,
+                "CANCELLED",
+                attempts,
                 reason_code="cancellation_requested_during_retry_delay",
             )
     raise AssertionError("unreachable retry loop")
+
 
 def _wait_for_retry_delay(
     delay_seconds: float, cancel_requested: Callable[[], bool] | None
@@ -204,12 +246,14 @@ def _wait_for_retry_delay(
             return False
         time.sleep(min(0.1, remaining))
 
+
 def _nonresumable_context() -> ShardExecutionContext:
     return ShardExecutionContext(
         runner_toolchain_identity=_identity({"nonresumable": "runner"}),
         dependency_identity=_identity({"nonresumable": "dependencies"}),
         environment_identity=_identity({"nonresumable": "environment"}),
     )
+
 
 def _cancelled_result(shard: ShardWork, *, reason_code: str) -> ShardResult:
     return ShardResult(
@@ -221,13 +265,16 @@ def _cancelled_result(shard: ShardWork, *, reason_code: str) -> ShardResult:
         isolated_process=shard.isolated_process,
         parent_work_identity=shard.parent_work_identity,
         refinement_depth=shard.refinement_depth,
-        members=shard.members, pytest_members=shard.pytest_members,
+        members=shard.members,
+        pytest_members=shard.pytest_members,
         reason_code=reason_code,
     )
+
 
 @dataclass
 class _ShardTreeExecution:
     """Execute one immutable shard/refinement tree under a shared suite budget."""
+
     plan: ShardExecutionPlan
     context: ShardExecutionContext
     cwd: Path
@@ -242,10 +289,12 @@ class _ShardTreeExecution:
     deadline: float | None
     state_lock: Lock
     stop: Event
+
     def remaining_budget(self) -> float | None:
         if self.deadline is None:
             return None
         return max(0.0, self.deadline - time.monotonic())
+
     def deadline_reserved_result(self, shard: ShardWork) -> ShardResult:
         return ShardResult(
             shard_id=shard.shard_id,
@@ -260,6 +309,7 @@ class _ShardTreeExecution:
             pytest_members=shard.pytest_members,
             reason_code="minimum_execution_window_unavailable",
         )
+
     def _resumed_refinement(self, shard: ShardWork) -> ShardResult | None:
         if not self.resume or self.state_root is None:
             return None
@@ -289,6 +339,7 @@ class _ShardTreeExecution:
             reason_code="resumed_durable_timeout_refinement",
             children=children,
         )
+
     def _resumed_pass(self, shard: ShardWork) -> ShardResult | None:
         if not self.resume or self.state_root is None:
             return None
@@ -314,6 +365,7 @@ class _ShardTreeExecution:
             pytest_members=shard.pytest_members,
             reason_code="exact_pass_evidence_reused",
         )
+
     def _refined_timeout(self, shard: ShardWork, result: ShardResult) -> ShardResult:
         children = _refine_children(shard)
         if self.state_root is not None:
@@ -335,7 +387,10 @@ class _ShardTreeExecution:
                 continue
             child_results.append(self.execute(child))
             if child_results[-1].status in {
-                "ENVIRONMENT_BLOCKED", "CANCELLED", "DEADLINE_RESERVED", "SUITE_TIMEOUT"
+                "ENVIRONMENT_BLOCKED",
+                "CANCELLED",
+                "DEADLINE_RESERVED",
+                "SUITE_TIMEOUT",
             }:
                 self.stop.set()
         passed = all(child.passed for child in child_results)
@@ -353,6 +408,7 @@ class _ShardTreeExecution:
             reason_code="timeout_refinement",
             children=tuple(child_results),
         )
+
     def execute(self, shard: ShardWork) -> ShardResult:
         if self.cancel_requested is not None and self.cancel_requested():
             self.stop.set()
@@ -364,7 +420,11 @@ class _ShardTreeExecution:
         if remaining is not None and remaining < self.minimum_execution_window_seconds:
             self.stop.set()
             return self.deadline_reserved_result(shard)
-        timeout = self.shard_timeout_seconds if remaining is None else min(self.shard_timeout_seconds, remaining)
+        timeout = (
+            self.shard_timeout_seconds
+            if remaining is None
+            else min(self.shard_timeout_seconds, remaining)
+        )
         suite_limited = remaining is not None and timeout < self.shard_timeout_seconds
         result = _execute_one(
             shard,
@@ -412,8 +472,13 @@ class _ShardTreeExecution:
 
 
 def _validate_execution_request(
-    *, workers: int, shard_timeout_seconds: float, suite_timeout_seconds: float | None,
-    minimum_execution_window_seconds: float, resume: bool, state_root: Path | None,
+    *,
+    workers: int,
+    shard_timeout_seconds: float,
+    suite_timeout_seconds: float | None,
+    minimum_execution_window_seconds: float,
+    resume: bool,
+    state_root: Path | None,
     execution_context: ShardExecutionContext | None,
 ) -> None:
     if workers < 1:
@@ -429,15 +494,24 @@ def _validate_execution_request(
     if resume and state_root is not None and execution_context is None:
         raise ValueError("durable shard resume requires an exact execution_context")
 
+
 def _policy_identity_for_run(
-    workers: int, shard_timeout_seconds: float, suite_timeout_seconds: float | None,
-    minimum_execution_window_seconds: float, policy: ShardRetryPolicy,
-    timeout_refinement: bool, resume: bool,
+    workers: int,
+    shard_timeout_seconds: float,
+    suite_timeout_seconds: float | None,
+    minimum_execution_window_seconds: float,
+    policy: ShardRetryPolicy,
+    timeout_refinement: bool,
+    resume: bool,
 ) -> str:
     return execution_policy_identity(
-        workers=workers, shard_timeout_seconds=shard_timeout_seconds,
-        suite_timeout_seconds=suite_timeout_seconds, minimum_execution_window_seconds=minimum_execution_window_seconds,
-        retry_policy=policy, timeout_refinement=timeout_refinement, resume=resume,
+        workers=workers,
+        shard_timeout_seconds=shard_timeout_seconds,
+        suite_timeout_seconds=suite_timeout_seconds,
+        minimum_execution_window_seconds=minimum_execution_window_seconds,
+        retry_policy=policy,
+        timeout_refinement=timeout_refinement,
+        resume=resume,
     )
 
 
@@ -458,15 +532,24 @@ def execute_shard_plan(
 ) -> ShardExecutionReport:
     """Execute immutable described shards under Oh-Goon execution authority."""
     _validate_execution_request(
-        workers=workers, shard_timeout_seconds=shard_timeout_seconds,
-        suite_timeout_seconds=suite_timeout_seconds, minimum_execution_window_seconds=minimum_execution_window_seconds,
-        resume=resume, state_root=state_root, execution_context=execution_context,
+        workers=workers,
+        shard_timeout_seconds=shard_timeout_seconds,
+        suite_timeout_seconds=suite_timeout_seconds,
+        minimum_execution_window_seconds=minimum_execution_window_seconds,
+        resume=resume,
+        state_root=state_root,
+        execution_context=execution_context,
     )
     context = execution_context or _nonresumable_context()
     policy = retry_policy or ShardRetryPolicy()
     policy_identity = _policy_identity_for_run(
-        workers, shard_timeout_seconds, suite_timeout_seconds, minimum_execution_window_seconds,
-        policy, timeout_refinement, resume,
+        workers,
+        shard_timeout_seconds,
+        suite_timeout_seconds,
+        minimum_execution_window_seconds,
+        policy,
+        timeout_refinement,
+        resume,
     )
     started = time.monotonic()
     deadline = started + suite_timeout_seconds if suite_timeout_seconds is not None else None
@@ -491,6 +574,7 @@ def execute_shard_plan(
     pending: dict[Future[ShardResult], ShardWork] = {}
     max_workers = min(workers, max(1, len(pending_roots)))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
+
         def submit_next() -> bool:
             if tree.stop.is_set() or not pending_roots:
                 return False
@@ -501,6 +585,7 @@ def execute_shard_plan(
             shard = pending_roots.pop(0)
             pending[pool.submit(tree.execute, shard)] = shard
             return True
+
         for _ in range(max_workers):
             submit_next()
         while pending:

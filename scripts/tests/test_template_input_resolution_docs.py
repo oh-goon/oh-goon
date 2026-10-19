@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,12 +32,16 @@ def _issues_for_navigation(path: Path, markdown: str) -> list[str]:
         if reference.startswith(("https://", "http://", "mailto:")):
             continue
         if not (path.parent / reference).resolve().is_file():
-            problems.append(f"broken local documentation link: {path.name}: {reference}")
+            problems.append(
+                f"broken local documentation link: {path.name}: {reference}"
+            )
     return problems
 
 
-def _catalog(path: str) -> dict:
-    return yaml.safe_load((ROOT / path).read_text(encoding="utf-8"))
+def _catalog(path: str) -> dict[str, Any]:
+    payload = yaml.safe_load((ROOT / path).read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
 
 
 def test_m133_navigation_has_no_missing_or_dangling_local_links() -> None:
@@ -48,27 +52,16 @@ def test_m133_navigation_has_no_missing_or_dangling_local_links() -> None:
 
 def test_m133_navigation_negative_malformed_link_and_missing_guide() -> None:
     page = ROOT / "templates/plans/README.md"
-    assert "missing M133 guide navigation" in _issues_for_navigation(page, "# Shipped Plans")[0]
+    assert (
+        "missing M133 guide navigation"
+        in _issues_for_navigation(page, "# Shipped Plans")[0]
+    )
     assert any(
         "broken local documentation link" in problem
-        for problem in _issues_for_navigation(page, f"[{REFERENCE}](missing-contract.md)")
+        for problem in _issues_for_navigation(
+            page, f"[{REFERENCE}](missing-contract.md)"
+        )
     )
-
-
-def test_m133_documented_projection_remains_owned_by_leaf_goon() -> None:
-    plan = _catalog("templates/plans/python/quality/plan.yml")
-    composite = _catalog("templates/goons/python/quality/goon.yml")
-    atomic = _catalog("templates/goons/python/test/goon.yml")
-    assert plan["inputs"] == ["coverage_threshold"]
-    assert "coverage_threshold" in composite["inputs"]
-    assert composite["goons"][-1]["import"] == "python/test"
-    assert composite["goons"][-1]["pass"] == ["coverage_threshold"]
-    assert "coverage_threshold" not in composite["goons"][-1].get("with", {})
-    assert atomic["inputs"]["coverage_threshold"]["type"] == "integer"
-    document = GUIDE.read_text(encoding="utf-8")
-    for name in ("python/quality", "python/test", "coverage_threshold"):
-        assert name in document
-    assert "ambiguous" in document
 
 
 def test_m133_documented_output_and_workspace_edges_match_shipped_catalog() -> None:
@@ -84,26 +77,3 @@ def test_m133_documented_output_and_workspace_edges_match_shipped_catalog() -> N
     assert "oci-publish-image.outputs.OCI_REFERENCE" in guide
     assert "oci-image.workspace" in guide
     assert "actual output value" in guide
-
-
-@pytest.mark.parametrize(
-    "required",
-    (
-        "FleetPlanResolver",
-        "FleetAdmissionPlanner",
-        "RUN_ADMITTED",
-        "_FleetPlanRunInputs",
-        "resolve_input_sources",
-        "bind_inputs",
-        "first defined",
-        "malformed YAML/TOML",
-        "staleness",
-        "NOT_APPLICABLE",
-        "Resolve once",
-        "transport once",
-        "execute once",
-        "report once",
-    ),
-)
-def test_m133_documentation_names_each_real_authority_and_failure_boundary(required: str) -> None:
-    assert required in GUIDE.read_text(encoding="utf-8")

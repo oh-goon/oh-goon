@@ -29,9 +29,9 @@ from oh_goon.engine.command import CommandResult
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations.fleet_plan_run import PreparedPlanRun
-from tests.factories.runtime_authority import authorized_command_result
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import PhysicalFleetPlanExecutorHarness
+from tests.factories.runtime_authority import authorized_command_result
 
 
 class _UnitProcessIsolation:

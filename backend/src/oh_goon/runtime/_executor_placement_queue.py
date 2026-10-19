@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import UTC, datetime
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from oh_goon.core.errors import (
@@ -13,13 +13,13 @@ from oh_goon.core.errors import (
     FleetPlanInvalid,
     StateConflict,
 )
-from oh_goon.core.models.scheduling import PriorityScope, SchedulingEnvelope, SchedulingPriority
 from oh_goon.core.models.fleet_executor_operations import (
     CancellationRequestedPlacementQueueEntry,
     PlacementQueueEntry,
     PlacementQueueSnapshot,
     WaitingPlacementQueueEntry,
 )
+from oh_goon.core.models.scheduling import PriorityScope, SchedulingEnvelope, SchedulingPriority
 from oh_goon.runtime.database import LocalDatabase
 
 
@@ -71,9 +71,9 @@ class ExecutorPlacementQueue:
                     )
                 self._reclaim_dead_in(connection)
                 active_entries = int(
-                    connection.execute(
-                        "SELECT COUNT(*) FROM executor_placement_queue"
-                    ).fetchone()[0]
+                    connection.execute("SELECT COUNT(*) FROM executor_placement_queue").fetchone()[
+                        0
+                    ]
                 )
                 if active_entries >= max_entries:
                     raise ExecutorCapacityBusy(
@@ -94,10 +94,16 @@ class ExecutorPlacementQueue:
                     ) VALUES (?, 'local-default', 'default', ?, ?, ?, ?, 0, 'local-v1', 'local-v1', ?, ?, ?, ?, ?)
                     """,
                     (
-                        fleet_run_id, requested_priority.value, canonical_admitted.value,
-                        PriorityScope.DOMAIN.value, priority_decision_reason,
-                        datetime.now(UTC).isoformat(), self._database.session_id,
-                        os.getpid(), identity, 1 if initially_eligible else 0,
+                        fleet_run_id,
+                        requested_priority.value,
+                        canonical_admitted.value,
+                        PriorityScope.DOMAIN.value,
+                        priority_decision_reason,
+                        datetime.now(UTC).isoformat(),
+                        self._database.session_id,
+                        os.getpid(),
+                        identity,
+                        1 if initially_eligible else 0,
                     ),
                 )
                 return PlacementQueueTicket(
@@ -133,7 +139,13 @@ class ExecutorPlacementQueue:
                 SET owner_session_id = ?, owner_pid = ?, owner_identity = ?
                 WHERE fleet_run_id = ? AND sequence = ?
                 """,
-                (self._database.session_id, os.getpid(), identity, fleet_run_id, int(row["sequence"])),
+                (
+                    self._database.session_id,
+                    os.getpid(),
+                    identity,
+                    fleet_run_id,
+                    int(row["sequence"]),
+                ),
             )
             row = self._row_for_run(connection, fleet_run_id)
             assert row is not None
@@ -169,7 +181,8 @@ class ExecutorPlacementQueue:
             self._require_not_cancelled(current)
             first = connection.execute(
                 "SELECT fleet_run_id FROM executor_placement_queue WHERE eligibility_ready = 1 AND cancellation_requested = 0 ORDER BY "
-                + _QUEUE_ORDER_SQL + " LIMIT 1"
+                + _QUEUE_ORDER_SQL
+                + " LIMIT 1"
             ).fetchone()
             return first is not None and str(first["fleet_run_id"]) == ticket.fleet_run_id
 
@@ -221,9 +234,7 @@ class ExecutorPlacementQueue:
         if not reason.strip():
             raise FleetPlanInvalid("Fleet reprioritization requires a non-empty reason")
         if admitted_priority is SchedulingPriority.CRITICAL:
-            raise FleetPlanInvalid(
-                "CRITICAL priority requires a trusted admission policy"
-            )
+            raise FleetPlanInvalid("CRITICAL priority requires a trusted admission policy")
         with self._database.transaction(write=True, track_revision=False) as connection:
             self._reclaim_dead_in(connection)
             current = self._row_for_run(connection, fleet_run_id)
@@ -265,7 +276,8 @@ class ExecutorPlacementQueue:
         self._require_not_cancelled(current)
         first = connection.execute(
             "SELECT fleet_run_id, sequence FROM executor_placement_queue WHERE eligibility_ready = 1 AND cancellation_requested = 0 ORDER BY "
-            + _QUEUE_ORDER_SQL + " LIMIT 1"
+            + _QUEUE_ORDER_SQL
+            + " LIMIT 1"
         ).fetchone()
         if (
             first is None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 from threading import Barrier, Event, Lock
 
@@ -42,8 +43,8 @@ from tests.fakes.capability_runners import ExternalRunnerStub
 class _HeldReconciler:
     """Observe exactly one native reconciliation under the atomic admission fence."""
 
-    def __init__(self, journal: Journal, entered: Event, release: Event) -> None:
-        self._delegate = RepositoryReconciler(journal, GitService())
+    def __init__(self, entered: Event, release: Event) -> None:
+        self._delegate = RepositoryReconciler(GitService())
         self._entered = entered
         self._release = release
         self._lock = Lock()
@@ -241,9 +242,10 @@ def test_environment_mutation_is_indeterminate_without_canonical_report(tmp_path
     journal = Journal(database)
     repository = _repository(tmp_path)
 
-    result = RepositoryReconciler(journal, GitService()).reconcile(
+    result = RepositoryReconciler(GitService()).reconcile(
         repository,
         "op-environment",
+        report=journal.operation("op-environment"),
         safety=CommandSafety.ENVIRONMENT_MUTATION,
         baseline=baseline_for(repository),
     )
@@ -262,9 +264,10 @@ def test_reconciliation_compare_and_set_rejects_stale_writer(tmp_path: Path) -> 
     (repository / "pyproject.toml").write_text(
         "[project]\nname='changed-before-stale-reconciliation'\n", encoding="utf-8"
     )
-    result = RepositoryReconciler(journal, GitService()).reconcile(
+    result = RepositoryReconciler(GitService()).reconcile(
         repository,
         attempt.operation_id,
+        report=journal.operation(attempt.operation_id),
         safety=attempt.safety,
         baseline=attempt.baseline,
     )
@@ -379,17 +382,19 @@ def test_reconciler_prefers_canonical_report_and_read_only_is_safe(tmp_path: Pat
             operation_id=applied_id,
         ),
     )
-    reconciler = RepositoryReconciler(journal, GitService())
+    reconciler = RepositoryReconciler(GitService())
 
     applied = reconciler.reconcile(
         repository,
         applied_id,
+        report=journal.operation(applied_id),
         safety=CommandSafety.WORKTREE_MUTATION,
         baseline=baseline_for(repository),
     )
     read_only = reconciler.reconcile(
         repository,
         "op-read-only",
+        report=journal.operation("op-read-only"),
         safety=CommandSafety.READ_ONLY,
         baseline=baseline_for(repository),
     )
@@ -544,7 +549,7 @@ def test_concurrent_reconciliation_retries_replay_one_canonical_result(tmp_path:
     repository = _repository(tmp_path)
     attempt = _unknown_attempt(database, attempts, repository)
     entered, release = Event(), Event()
-    observed = _HeldReconciler(journal, entered, release)
+    observed = _HeldReconciler(entered, release)
     recovery = effect_recovery(
         database,
         attempts,

@@ -1,9 +1,11 @@
 """B16: pinned-process namespace inventory is diagnostic, never physical proof."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
+
 from oh_goon.repository_tooling import local_lace_physical_preflight as probe
 
 
@@ -13,10 +15,13 @@ def fixture(tmp_path: Path, *, network: bool = True):
     (root / "cgroup.events").write_text("populated 0\n")
     (root / "cgroup.procs").write_text("")
     raw = {
-        "run_id": "original-run", "subject_identity": "sha256:" + "b" * 64,
-        "cgroup_path": str(root), "cgroup_device": root.stat().st_dev,
+        "run_id": "original-run",
+        "subject_identity": "sha256:" + "b" * 64,
+        "cgroup_path": str(root),
+        "cgroup_device": root.stat().st_dev,
         "cgroup_inode": root.stat().st_ino,
-        "tracked_pid": 817, "tracked_birth": "boot-test:909",
+        "tracked_pid": 817,
+        "tracked_birth": "boot-test:909",
         "mount_targets": ["/private/original mount"],
         "network_namespace": "original-net" if network else None,
         "host_veth": "original-veth" if network else None,
@@ -26,7 +31,9 @@ def fixture(tmp_path: Path, *, network: bool = True):
     (proc / "817/ns").mkdir(parents=True)
     (proc / "sys/kernel/random").mkdir(parents=True)
     (proc / "sys/kernel/random/boot_id").write_text("boot-test\n")
-    (proc / "817/stat").write_text("817 (original worker) " + " ".join(["S"] + ["0"] * 18 + ["909"]))
+    (proc / "817/stat").write_text(
+        "817 (original worker) " + " ".join(["S"] + ["0"] * 18 + ["909"])
+    )
     (proc / "817/ns/mnt").symlink_to("mnt:[4026533001]")
     (proc / "817/ns/net").symlink_to("net:[4026533002]")
     mountinfo = proc / "817/mountinfo"
@@ -71,7 +78,22 @@ def test_tracked_process_disappears_without_proving_handle_absence(tmp_path):
     assert {v["state"] for v in records.values()} == {"NOT_OBSERVED"}
 
 
-@pytest.mark.parametrize("mutation", ["reused-pid", "changed-boot", "missing-mount", "bad-handle", "bad-net-handle", "bad-mountinfo", "duplicate-mount-id", "invalid-escape", "empty-mountinfo", "wrong-stat-pid", "symlink-pid-dir"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "reused-pid",
+        "changed-boot",
+        "missing-mount",
+        "bad-handle",
+        "bad-net-handle",
+        "bad-mountinfo",
+        "duplicate-mount-id",
+        "invalid-escape",
+        "empty-mountinfo",
+        "wrong-stat-pid",
+        "symlink-pid-dir",
+    ],
+)
 def test_incomplete_or_substituted_proc_information_is_unknown(tmp_path, mutation):
     scope, proc, mountinfo = fixture(tmp_path)
     if mutation == "reused-pid":
@@ -89,7 +111,9 @@ def test_incomplete_or_substituted_proc_information_is_unknown(tmp_path, mutatio
     elif mutation == "bad-mountinfo":
         mountinfo.write_text("not mountinfo\n")
     elif mutation == "duplicate-mount-id":
-        mountinfo.write_text("42 2 0:42 / /one rw - tmpfs tmpfs rw\n42 2 0:42 / /two rw - tmpfs tmpfs rw\n")
+        mountinfo.write_text(
+            "42 2 0:42 / /one rw - tmpfs tmpfs rw\n42 2 0:42 / /two rw - tmpfs tmpfs rw\n"
+        )
     elif mutation == "invalid-escape":
         mountinfo.write_text("42 2 0:42 / /private/original\\invalid rw - tmpfs tmpfs rw\n")
     elif mutation == "empty-mountinfo":
@@ -99,7 +123,9 @@ def test_incomplete_or_substituted_proc_information_is_unknown(tmp_path, mutatio
     elif mutation == "symlink-pid-dir":
         (proc / "817").rename(proc / "actual")
         (proc / "817").symlink_to(proc / "actual", target_is_directory=True)
-    assert {r["state"] for r in probe._tracked_namespace_inventory(scope, proc).values()} == {"UNKNOWN"}
+    assert {r["state"] for r in probe._tracked_namespace_inventory(scope, proc).values()} == {
+        "UNKNOWN"
+    }
 
 
 def test_no_network_lease_cannot_bind_process_namespace_to_run(tmp_path):
@@ -113,13 +139,17 @@ def test_double_scan_namespace_identity_change_is_unknown(tmp_path, monkeypatch)
     scope, proc, _ = fixture(tmp_path)
     real = probe._tracked_namespace_inventory
     count = 0
+
     def raced(*args):
         nonlocal count
         count += 1
         result = real(*args)
         if count == 2:
-            result["tracked_mount_namespace"] = probe._component("PRESENT", "replaced mount namespace")
+            result["tracked_mount_namespace"] = probe._component(
+                "PRESENT", "replaced mount namespace"
+            )
         return result
+
     monkeypatch.setattr(probe, "_tracked_namespace_inventory", raced)
     report = probe.observe(scope, proc_root=proc)
     assert report["observations"]["tracked_mount_namespace"]["state"] == "UNKNOWN"
@@ -129,16 +159,21 @@ def test_double_scan_namespace_identity_change_is_unknown(tmp_path, monkeypatch)
 def test_manifest_selection_and_transport_cleanup_preserved():
     root = Path(__file__).resolve().parents[4]
     script = (root / "scripts/qualify_b12_development_wsl.sh").read_text()
-    assert "if [[ -f .checkpoint/B16_SOURCE.sha256 ]]; then embedded='.checkpoint/B16_SOURCE.sha256'; fi" in script
+    assert (
+        "if [[ -f .checkpoint/B16_SOURCE.sha256 ]]; then embedded='.checkpoint/B16_SOURCE.sha256'; fi"
+        in script
+    )
     assert script.index("B15_SOURCE.sha256") < script.index("B16_SOURCE.sha256")
     make = (root / "Makefile").read_text()
     qualification = make.split("qualify-development-wsl:", 1)[1].split("\n\n", 1)[0]
-    assert qualification.index("source-transport-clean") < qualification.index("qualify_b12_development_wsl.sh")
+    assert qualification.index("source-transport-clean") < qualification.index(
+        "qualify_b12_development_wsl.sh"
+    )
 
 
 def test_never_imports_original_authority_or_writes_journal():
     text = Path(probe.__file__).read_text()
     assert "from oh_goon.services" not in text
     assert "from oh_goon.runtime" not in text
-    assert "QUIESCENCE_PROVEN\"" not in text
-    assert "TEARDOWN_PROVEN\"" not in text
+    assert 'QUIESCENCE_PROVEN"' not in text
+    assert 'TEARDOWN_PROVEN"' not in text

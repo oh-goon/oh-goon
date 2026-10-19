@@ -13,14 +13,19 @@ def _target(name: str) -> str:
 
 def test_backend_uv_lock_is_committed_source_authority() -> None:
     ignore = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    policy = (ROOT / "backend/src/oh_goon/core/source_tree_policy.py").read_text(encoding="utf-8")
+    policy = (ROOT / "backend/src/oh_goon/core/source_tree_policy.py").read_text(
+        encoding="utf-8"
+    )
     assert "backend/uv.lock" not in ignore
     assert 'CANONICAL_BACKEND_LOCK = PurePosixPath("backend/uv.lock")' in policy
 
 
 def test_init_is_direct_native_locked_materialization() -> None:
     init = _target("init")
-    assert "uv sync --project backend --locked --group dev --group quality --group build" in init
+    assert (
+        "uv sync --project backend --locked --group dev --group quality --group build"
+        in init
+    )
     assert "npm ci --prefer-offline --ignore-scripts --no-audit --no-fund" in init
     assert "$(DEPENDENCY_RESOLUTION_BOOTSTRAP) init" not in init
     assert "--offline" not in init
@@ -29,7 +34,9 @@ def test_init_is_direct_native_locked_materialization() -> None:
 def test_make_sync_can_author_lock_before_environment_exists() -> None:
     sync = _target("sync")
     assert "$(MAKE) backend-package-build-check" in sync
-    assert sync.index("backend-package-build-check") < sync.index("uv lock --project backend")
+    assert sync.index("backend-package-build-check") < sync.index(
+        "uv lock --project backend"
+    )
     assert "uv lock --project backend" in sync
     assert "$(DEPENDENCY_POLICY) public-lock-check" in sync
     assert "DEPENDENCY_RESOLUTION" not in sync
@@ -62,7 +69,9 @@ def test_transport_cleanup_is_explicit_and_independent_of_build_index() -> None:
     assert "-name '*.patch.sha256'" in script
 
 
-def test_backend_build_preflight_proves_editable_package_without_release_wheel() -> None:
+def test_backend_build_preflight_proves_editable_package_without_release_wheel() -> (
+    None
+):
     build = _target("backend-package-build-check")
     assert "uv venv --project backend --no-python-downloads" in build
     assert "uv pip install" in build
@@ -73,7 +82,9 @@ def test_backend_build_preflight_proves_editable_package_without_release_wheel()
     assert "uv build" not in build
 
 
-def test_backend_build_preflight_invokes_only_editable_native_uv_mode(tmp_path: Path) -> None:
+def test_backend_build_preflight_invokes_only_editable_native_uv_mode(
+    tmp_path: Path,
+) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "uv.log"
@@ -122,12 +133,16 @@ fi
     assert len(calls) == 3
     assert calls[0].startswith("venv --project backend --no-python-downloads ")
     assert "pip install --python " in calls[1]
-    assert " --no-deps --editable backend --no-sources --no-python-downloads" in calls[1]
+    assert (
+        " --no-deps --editable backend --no-sources --no-python-downloads" in calls[1]
+    )
     assert calls[2] == "source-layout check"
     assert all("build --" not in call for call in calls)
 
 
-def test_make_sync_rejects_source_contamination_before_lock_or_npm_mutation(tmp_path: Path) -> None:
+def test_make_sync_rejects_source_contamination_before_lock_or_npm_mutation(
+    tmp_path: Path,
+) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     uv_log = tmp_path / "uv.log"
@@ -192,7 +207,9 @@ exit 99
 
 
 def test_repository_dependency_policy_does_not_own_native_uv_semantics() -> None:
-    pyproject = tomllib.loads((ROOT / "backend/pyproject.toml").read_text(encoding="utf-8"))
+    pyproject = tomllib.loads(
+        (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
+    )
     target = pyproject["project"]["scripts"]["oh-goon-dependency-policy"]
     module = target.partition(":")[0]
     script_path = ROOT / "backend/src" / Path(*module.split(".")).with_suffix(".py")

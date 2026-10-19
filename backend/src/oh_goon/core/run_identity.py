@@ -8,8 +8,8 @@ from oh_goon.core.models.run_admission import (
     fleet_readmission_parent,
     fleet_rerun_parent,
 )
-from oh_goon.core.models.target import OperationTarget
 from oh_goon.core.models.scheduling import SchedulingPriority
+from oh_goon.core.models.target import OperationTarget
 from oh_goon.core.vocabulary import FleetRunSource
 
 
@@ -77,7 +77,9 @@ def require_fleet_run_scheduling_binding(
 ) -> None:
     """Reject idempotent replay that attempts to change the original scheduling request."""
     scheduling = detail.scheduling
-    original = scheduling.requested_priority if scheduling is not None else SchedulingPriority.NORMAL
+    original = (
+        scheduling.requested_priority if scheduling is not None else SchedulingPriority.NORMAL
+    )
     if original is not requested_priority:
         raise JournalConflict(
             f"Fleet run identity {detail.run.fleet_run_id} is already bound to requested priority "

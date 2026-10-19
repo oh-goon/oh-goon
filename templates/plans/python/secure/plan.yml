@@ -1,6 +1,6 @@
 version: 1
-inputs:
-- coverage_threshold
+execution:
+  purpose: cicd
 goons:
 - python/quality
 - security/cve-combined

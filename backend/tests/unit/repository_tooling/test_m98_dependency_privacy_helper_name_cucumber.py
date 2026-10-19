@@ -6,7 +6,6 @@ from oh_goon.repository_tooling.architecture._structural_project_dependency_cont
     _check_dependency_privacy,
 )
 
-
 PRIVACY_MODULE = "oh_goon.repository_tooling.public_dependency_privacy"
 CONSUMERS = (
     "backend/src/oh_goon/repository_tooling/dependency_locks.py",

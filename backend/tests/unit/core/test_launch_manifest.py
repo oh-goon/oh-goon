@@ -122,9 +122,7 @@ def test_intent_does_not_prove_observed_runtime_state() -> None:
                 LaunchServiceIntent(
                     service="frontend",
                     command=("npm", "run", "dev"),
-                    endpoint=LaunchEndpointIntent(
-                        service="frontend", host="127.0.0.1", port=5173
-                    ),
+                    endpoint=LaunchEndpointIntent(service="frontend", host="127.0.0.1", port=5173),
                 ),
             ),
         ),
@@ -229,6 +227,7 @@ def test_service_state_observation_requires_matching_generation_and_owner() -> N
             lifecycle=manifest.lifecycle,
         )
 
+
 @pytest.mark.parametrize(
     ("state", "terminal"),
     [
@@ -262,5 +261,7 @@ def test_launch_lifecycle_is_single_terminality_owner(state, terminal) -> None:
     ],
 )
 def test_launch_lifecycle_rejects_state_timestamp_disagreement(state, terminal_at) -> None:
-    with pytest.raises(ValueError, match="terminal_at must be present exactly when state is terminal"):
+    with pytest.raises(
+        ValueError, match="terminal_at must be present exactly when state is terminal"
+    ):
         LaunchLifecycle(state=state, terminal_at=terminal_at)

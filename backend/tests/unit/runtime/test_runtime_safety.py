@@ -19,13 +19,12 @@ from oh_goon.runtime.execution import ExecutionCoordinator, RunExecutionSupervis
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
-from oh_goon.runtime.lifecycle import RuntimeLifecycle
 from oh_goon.runtime.safety import RuntimeSafetyGate
 from oh_goon.runtime.schedule_scheduler import ScheduleScheduler
+from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
-from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.runtime_safety import RuntimeSafetyService
 from oh_goon.services.schedules import ScheduleService
 from oh_goon.services.system_health import SystemHealthService
@@ -243,7 +242,6 @@ def test_schedule_start_is_blocked_before_engine_admission() -> None:
             expected_record_version=0,
         )
     assert engine.calls == 0
-
 
 
 def test_unsafe_schedule_tick_settles_existing_state_without_scheduling_new_work() -> None:

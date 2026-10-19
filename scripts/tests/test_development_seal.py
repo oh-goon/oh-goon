@@ -43,7 +43,9 @@ def test_development_seal_publish_is_immutable_and_idempotent(tmp_path: Path) ->
     assert json.loads(original)["candidate"]["source_identity"] == "sha256:" + "b" * 64
 
 
-def test_development_seal_refuses_same_version_with_different_identity(tmp_path: Path) -> None:
+def test_development_seal_refuses_same_version_with_different_identity(
+    tmp_path: Path,
+) -> None:
     publish_development_seal(tmp_path, _payload(candidate="b"))
 
     with pytest.raises(DevelopmentSealCollision, match="allocate the next version"):

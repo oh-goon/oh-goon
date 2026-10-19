@@ -10,9 +10,9 @@ import yaml
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import (
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
     CommandPlanStep,
     CompiledExecutionTemplate,
-    DEFAULT_COMMAND_TIMEOUT_SECONDS,
     GitNativeAction,
     GitPlanStep,
     MissingConfigPolicy,
@@ -397,12 +397,16 @@ def _step_id(job: str, index: int) -> str:
 
 def native_goon_yaml(migration: GitLabGoonMigration) -> str:
     goon = migration.goon
-    execution = goon.execution.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
+    if goon.execution is None:
+        raise FleetPlanInvalid("GitLab migration requires its resolved execution policy")
+    execution = {
+        **goon.execution.model_dump(mode="json", exclude_none=True, exclude_defaults=True),
+        "purpose": goon.execution.purpose.value,
+    }
     payload: dict[str, Any] = {
         "version": goon.version,
+        "execution": execution,
     }
-    if execution:
-        payload["execution"] = execution
     if goon.requirements:
         payload["requirements"] = [
             item.model_dump(mode="json", exclude_none=True) for item in goon.requirements

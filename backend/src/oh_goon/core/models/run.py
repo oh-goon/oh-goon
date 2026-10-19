@@ -11,20 +11,23 @@ from oh_goon.core.models.fleet_plan_trust_receipt import RepositoryFleetPlanTrus
 from oh_goon.core.models.game_tape import GameTape, GameTapeProducerImplementationProvenance
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.run_admission import (
     FleetExecutionAdmission,
     FleetRepositoryScope,
     PlanRepositoryAdmissionEvidence,
     _validate_execution_admission,
     _validate_execution_admission_run,
-    _validate_trusted_local_admission,
     _validate_plan_repository_admissions,
+    _validate_trusted_local_admission,
     validate_fleet_repository_capture,
 )
-from oh_goon.core.models.run_launch import ApplicationLaunchReceipt, UnmanagedApplicationLaunchReceipt
+from oh_goon.core.models.run_launch import (
+    ApplicationLaunchReceipt,
+    UnmanagedApplicationLaunchReceipt,
+)
+from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceFact
-from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.vocabulary import (
     FleetRunFailureStage,
     FleetRunOutcome,
@@ -210,14 +213,15 @@ def fleet_run_outcome(run: FleetRunState) -> FleetRunOutcome:
     return FleetRunOutcome.SUCCESS
 
 
-
 class FleetRunDetail(ImmutableModel):
     """Trusted immutable read projection produced by the canonical FleetRun reducer."""
 
     run: FleetRunState
     execution: FleetExecutionAdmission
     repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...]
-    application_launch: ApplicationLaunchReceipt = Field(default_factory=UnmanagedApplicationLaunchReceipt)
+    application_launch: ApplicationLaunchReceipt = Field(
+        default_factory=UnmanagedApplicationLaunchReceipt
+    )
     operations: tuple[OperationReport, ...] = Field(default_factory=tuple)
     lifecycle_events: tuple[object, ...] = Field(default_factory=tuple, exclude=True)
     storage_maintenance: tuple[FleetContentMaintenanceFact, ...] = Field(default_factory=tuple)
@@ -231,9 +235,12 @@ class FleetRunDetail(ImmutableModel):
         _validate_execution_admission(self.run.target, self.execution)
         _validate_execution_admission_run(self.execution, self.run.fleet_run_id)
         _validate_trusted_local_admission(
-            target=self.run.target, execution=self.execution,
-            fleet_run_id=self.run.fleet_run_id, source=self.run.source,
-            repository_scope=self.run.repository_scope, repository_count=len(self.run.targets),
+            target=self.run.target,
+            execution=self.execution,
+            fleet_run_id=self.run.fleet_run_id,
+            source=self.run.source,
+            repository_scope=self.run.repository_scope,
+            repository_count=len(self.run.targets),
         )
         _validate_plan_repository_admissions(self.run.target, self.repository_admissions)
         if self.repository_admissions:
@@ -257,6 +264,11 @@ class FleetRunDetail(ImmutableModel):
         from oh_goon.core.capability_registry import capability_by_id
         from oh_goon.core.errors import CapabilityUnavailable
 
+        if (
+            isinstance(self.run.target, FleetPlanTarget)
+            and self.run.target.agent_repair is not None
+        ):
+            return False
         try:
             return capability_by_id(self.run.capability.capability_id).rerun_supported
         except CapabilityUnavailable:

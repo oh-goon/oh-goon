@@ -11,16 +11,23 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.enforcer_lace_issuer_evidence import (
-    AUTHORITY_FIELDS, ISSUER_PROTOCOL, SIGNATURE_DOMAIN, IssuerEvidence, TrustedIssuerVerifier,
+    AUTHORITY_FIELDS,
+    ISSUER_PROTOCOL,
+    SIGNATURE_DOMAIN,
+    IssuerEvidence,
+    TrustedIssuerVerifier,
 )
 from oh_goon.core.enforcer_lace_trust import (
-    AdmittedRunContract, TrustProtocolError, admission_receipt, canonical_bytes,
+    AdmittedRunContract,
+    TrustProtocolError,
+    admission_receipt,
+    canonical_bytes,
 )
-from tests.fixtures.db1b2_legacy_sqlite import CausalRunJournal
+from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
-from tests.unit.core.test_enforcer_lace_trust import authority, authenticator
+from tests.fixtures.db1b2_legacy_sqlite import CausalRunJournal
+from tests.unit.core.test_enforcer_lace_trust import authenticator, authority
 from tests.unit.services.test_group_a_enforcer_owner_bridge import _environment
 
 FIELDS = tuple(sorted(AUTHORITY_FIELDS))
@@ -30,11 +37,14 @@ def roots():
     return {
         field: (
             f"{field}-authority-v2",
-            _test_private_key(field).public_key().public_bytes(
+            _test_private_key(field)
+            .public_key()
+            .public_bytes(
                 encoding=serialization.Encoding.Raw,
                 format=serialization.PublicFormat.Raw,
             ),
-        ) for field in FIELDS
+        )
+        for field in FIELDS
     }
 
 
@@ -48,14 +58,21 @@ def proof(field, contract, roots_by_field=None):
     roots_by_field = roots() if roots_by_field is None else roots_by_field
     issuer, _public_key = roots_by_field[field]
     values = contract.fields
-    payload = canonical_bytes({
-        "protocol": ISSUER_PROTOCOL, "field": field, "run_id": values["run_id"],
-        "contract_identity": contract.identity, "identity": values[field],
-        "executor_generation": values["executor_generation"],
-    })
-    signature = _test_private_key(field).sign(
-        SIGNATURE_DOMAIN + field.encode("ascii") + b"\x00" + payload
-    ).hex()
+    payload = canonical_bytes(
+        {
+            "protocol": ISSUER_PROTOCOL,
+            "field": field,
+            "run_id": values["run_id"],
+            "contract_identity": contract.identity,
+            "identity": values[field],
+            "executor_generation": values["executor_generation"],
+        }
+    )
+    signature = (
+        _test_private_key(field)
+        .sign(SIGNATURE_DOMAIN + field.encode("ascii") + b"\x00" + payload)
+        .hex()
+    )
     return IssuerEvidence(field, issuer, payload, signature)
 
 
@@ -80,12 +97,18 @@ def setup():
 def publish(db, journal, env, contract, keys, witnesses, *, lease=None, override=None):
     auth = authenticator()
     args = dict(
-        journal=journal, contract=contract, receipt=admission_receipt(auth, contract),
-        authenticator=auth, configured=env, current=env,
-        control_epoch=7, lease_identity="lease-exact",
-        issuer_verifier=TrustedIssuerVerifier(keys), issuer_evidence=witnesses,
-        lease_is_current=lease or (lambda run, epoch, identity: (run, epoch, identity) ==
-                                    ("run-one", 7, "lease-exact")),
+        journal=journal,
+        contract=contract,
+        receipt=admission_receipt(auth, contract),
+        authenticator=auth,
+        configured=env,
+        current=env,
+        control_epoch=7,
+        lease_identity="lease-exact",
+        issuer_verifier=TrustedIssuerVerifier(keys),
+        issuer_evidence=witnesses,
+        lease_is_current=lease
+        or (lambda run, epoch, identity: (run, epoch, identity) == ("run-one", 7, "lease-exact")),
         commit_lease_is_current=lambda c, run, epoch, identity: (
             c.in_transaction
             and (run, epoch, identity) == ("run-one", 7, "lease-exact")
@@ -115,12 +138,28 @@ def test_every_independently_signed_contract_identity_and_current_lease_required
     db.close()
 
 
-@pytest.mark.parametrize("attack", [
-    "missing", "duplicate", "extra", "modified-signature", "incorrect-issuer", "wrong-field",
-    "wrong-contract", "wrong-run", "wrong-identity", "wrong-generation", "noncanonical",
-    "invalid-payload", "unsigned", "stale-lease", "missing-lease-verifier",
-    "bad-epoch", "different-execution-environment",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "missing",
+        "duplicate",
+        "extra",
+        "modified-signature",
+        "incorrect-issuer",
+        "wrong-field",
+        "wrong-contract",
+        "wrong-run",
+        "wrong-identity",
+        "wrong-generation",
+        "noncanonical",
+        "invalid-payload",
+        "unsigned",
+        "stale-lease",
+        "missing-lease-verifier",
+        "bad-epoch",
+        "different-execution-environment",
+    ],
+)
 def test_malformed_missing_stale_or_forged_evidence_never_enters_operational_transaction(attack):
     db, journal, env, contract, keys, witnesses = setup()
     witnesses = list(witnesses)
@@ -140,14 +179,18 @@ def test_malformed_missing_stale_or_forged_evidence_never_enters_operational_tra
         witnesses[0] = replace(first, field="unknown-field")
     elif attack in {"wrong-contract", "wrong-run", "wrong-identity", "wrong-generation"}:
         raw = json.loads(first.payload)
-        key = {"wrong-contract": "contract_identity", "wrong-run": "run_id",
-               "wrong-identity": "identity", "wrong-generation": "executor_generation"}[attack]
+        key = {
+            "wrong-contract": "contract_identity",
+            "wrong-run": "run_id",
+            "wrong-identity": "identity",
+            "wrong-generation": "executor_generation",
+        }[attack]
         raw[key] = "sha256:wrong" if key.endswith("identity") else "other"
         witnesses[0] = replace(first, payload=canonical_bytes(raw))
     elif attack == "noncanonical":
         witnesses[0] = replace(first, payload=b'{ "a": 1 }')
     elif attack == "invalid-payload":
-        witnesses[0] = replace(first, payload=b'{')
+        witnesses[0] = replace(first, payload=b"{")
     elif attack == "unsigned":
         witnesses[0] = replace(first, payload=first.payload, signature_hex="")
     elif attack == "stale-lease":
@@ -185,8 +228,10 @@ def test_untrusted_or_ambiguous_issuer_roots_fail_before_work(attack):
 
 def test_lease_authority_exception_does_not_fall_back_to_cached_or_default_truth():
     db, journal, env, contract, keys, witnesses = setup()
+
     def unavailable(*_):
         raise ConnectionError("lease issuer unavailable")
+
     with pytest.raises(ConnectionError, match="unavailable"):
         publish(db, journal, env, contract, keys, witnesses, lease=unavailable)
     assert_no_effect(db)

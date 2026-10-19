@@ -69,7 +69,9 @@ def _tools(value: Any, *, source: str) -> tuple[str, ...]:
     if value is None:
         return ()
     if not isinstance(value, dict) or set(value) != {"allow"}:
-        raise FleetPlanInvalid(f"Invalid Goon {source}: tools must contain exactly one field: allow")
+        raise FleetPlanInvalid(
+            f"Invalid Goon {source}: tools must contain exactly one field: allow"
+        )
     allow = value.get("allow")
     if not isinstance(allow, list) or not allow or not all(isinstance(item, str) for item in allow):
         raise FleetPlanInvalid(
@@ -84,7 +86,9 @@ def _validate_tool_names(tools: tuple[str, ...], *, source: str) -> None:
     if len(tools) != len(set(tools)):
         raise FleetPlanInvalid(f"Invalid Goon {source}: tools.allow entries must be unique")
     if tools != tuple(sorted(tools)):
-        raise FleetPlanInvalid(f"Invalid Goon {source}: tools.allow must use canonical sorted order")
+        raise FleetPlanInvalid(
+            f"Invalid Goon {source}: tools.allow must use canonical sorted order"
+        )
     invalid = next((tool for tool in tools if _TOOL_NAME.fullmatch(tool) is None), None)
     if invalid is not None:
         raise FleetPlanInvalid(

@@ -28,7 +28,7 @@ def validate_native_consumer_bundle(
     *,
     expected_producer_implementation_identity: str,
 ) -> Mapping[str, object]:
-    from hashmarks.consumer_conformance import validate_native_consumer_bundle as native_validator
+    from hashmarks import validate_native_consumer_bundle as native_validator
 
     return native_validator(
         envelope,
@@ -64,7 +64,9 @@ def _read_object(path: Path, label: str) -> Mapping[str, object]:
 
 def _object(value: object, label: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
-        raise HashmarksVerificationSelectionInputError(f"validated Hashmarks {label} must be an object")
+        raise HashmarksVerificationSelectionInputError(
+            f"validated Hashmarks {label} must be an object"
+        )
     return value
 
 
@@ -93,17 +95,37 @@ def _admit_consumer_boundary(
             "Hashmarks producer implementation identity does not match loaded runtime"
         )
     if conformance.get("execution_authority") != "external":
-        raise HashmarksVerificationSelectionInputError("Hashmarks must leave execution authority external to the producer")
+        raise HashmarksVerificationSelectionInputError(
+            "Hashmarks must leave execution authority external to the producer"
+        )
 
     repository = _object(envelope.get("repository"), "repository identity")
     selection = _object(envelope.get("selection"), "verification membership")
     checks = (
-        (repository.get("repository_identity") == repository_identity, "Hashmarks repository identity does not match admitted repository"),
-        (repository.get("source_identity") == source_identity, "Hashmarks source identity does not match admitted source"),
-        (repository.get("stale") is False, "stale Hashmarks repository evidence cannot be admitted"),
-        (contract.get("authority") == "repository-intelligence-only", "Hashmarks contract may carry repository intelligence only"),
-        (contract.get("execution_layout") == "external", "Hashmarks must leave physical execution layout to Oh-Goon"),
-        (contract.get("hashmarks_identity") == f"hashmarks:{loaded_hashmarks_version()}", "Hashmarks evidence version identity does not match loaded runtime"),
+        (
+            repository.get("repository_identity") == repository_identity,
+            "Hashmarks repository identity does not match admitted repository",
+        ),
+        (
+            repository.get("source_identity") == source_identity,
+            "Hashmarks source identity does not match admitted source",
+        ),
+        (
+            repository.get("stale") is False,
+            "stale Hashmarks repository evidence cannot be admitted",
+        ),
+        (
+            contract.get("authority") == "repository-intelligence-only",
+            "Hashmarks contract may carry repository intelligence only",
+        ),
+        (
+            contract.get("execution_layout") == "external",
+            "Hashmarks must leave physical execution layout to Oh-Goon",
+        ),
+        (
+            contract.get("hashmarks_identity") == f"hashmarks:{loaded_hashmarks_version()}",
+            "Hashmarks evidence version identity does not match loaded runtime",
+        ),
     )
     for accepted, message in checks:
         if not accepted:
@@ -114,21 +136,39 @@ def _admit_consumer_boundary(
 def _project_members(selection: Mapping[str, object]) -> tuple[HashmarksVerificationMember, ...]:
     raw_members = selection.get("members")
     if not isinstance(raw_members, list) or not raw_members:
-        raise HashmarksVerificationSelectionInputError("validated Hashmarks verification selection requires nonempty members")
+        raise HashmarksVerificationSelectionInputError(
+            "validated Hashmarks verification selection requires nonempty members"
+        )
     projected: list[HashmarksVerificationMember] = []
     for raw in raw_members:
         member = _object(raw, "verification member")
-        path, symbol, member_id = member.get("path"), member.get("test_symbol"), member.get("member_id")
-        if not isinstance(path, str) or not path.strip() or (symbol is not None and not isinstance(symbol, str)):
-            raise HashmarksVerificationSelectionInputError("validated Hashmarks verification member cannot be projected")
+        path, symbol, member_id = (
+            member.get("path"),
+            member.get("test_symbol"),
+            member.get("member_id"),
+        )
+        if (
+            not isinstance(path, str)
+            or not path.strip()
+            or (symbol is not None and not isinstance(symbol, str))
+        ):
+            raise HashmarksVerificationSelectionInputError(
+                "validated Hashmarks verification member cannot be projected"
+            )
         try:
-            projected.append(StructuredPytestMember(path, symbol, _identity(member_id, "verification member")))
+            projected.append(
+                StructuredPytestMember(path, symbol, _identity(member_id, "verification member"))
+            )
         except StructuredPytestMemberError as exc:
-            raise HashmarksVerificationSelectionInputError(f"verification member cannot be projected safely: {exc}") from exc
+            raise HashmarksVerificationSelectionInputError(
+                f"verification member cannot be projected safely: {exc}"
+            ) from exc
     members = tuple(projected)
     selectors = tuple(member.executable_selector for member in members)
     if len(selectors) != len(set(selectors)):
-        raise HashmarksVerificationSelectionInputError("Hashmarks exact executable membership contains duplicate selectors")
+        raise HashmarksVerificationSelectionInputError(
+            "Hashmarks exact executable membership contains duplicate selectors"
+        )
     return members
 
 
@@ -141,7 +181,9 @@ def validate_native_selection(
     artifact_identity: str,
 ) -> NativeSelectionProjection:
     if not repository_identity.strip() or not source_identity.strip():
-        raise HashmarksVerificationSelectionInputError("admitted repository/source identities must be nonblank")
+        raise HashmarksVerificationSelectionInputError(
+            "admitted repository/source identities must be nonblank"
+        )
     if not artifact_identity.strip():
         raise HashmarksVerificationSelectionInputError(
             "producer artifact provenance identity must be nonblank"
@@ -161,8 +203,12 @@ def validate_native_selection(
     producer, selection = _admit_consumer_boundary(
         contract, envelope, conformance, repository_identity, source_identity
     )
-    if producer.get("implementation_identity") != conformance.get("producer_implementation_identity"):
-        raise HashmarksVerificationSelectionInputError("validated Hashmarks producer identity changed after native validation")
+    if producer.get("implementation_identity") != conformance.get(
+        "producer_implementation_identity"
+    ):
+        raise HashmarksVerificationSelectionInputError(
+            "validated Hashmarks producer identity changed after native validation"
+        )
     repository = _object(envelope.get("repository"), "repository identity")
     codemap_generation = repository.get("codemap_generation")
     identity_generation = repository.get("identity_generation")
@@ -197,6 +243,11 @@ def validate_native_selection(
         _identity(contract.get("contract_identity"), "consumer contract"),
         codemap_generation,
         identity_generation,
-        tuple(sorted((str(key), _identity(value, "evidence hash")) for key, value in evidence_hashes.items())),
+        tuple(
+            sorted(
+                (str(key), _identity(value, "evidence hash"))
+                for key, value in evidence_hashes.items()
+            )
+        ),
         _project_members(selection),
     )

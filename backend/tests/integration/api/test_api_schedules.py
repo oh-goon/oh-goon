@@ -2,11 +2,10 @@ from contextlib import closing
 
 from fastapi.testclient import TestClient
 
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api.app import app as api_app
 from oh_goon.core.models.schedule import ScheduleDeleteRequest
 from tests.factories.schedules import schedule_create
+from tests.integration.api.client import authenticated_api_client
 
 
 def test_schedule_api_exposes_saved_plan_creation_and_metadata_only_replace() -> None:
@@ -84,7 +83,9 @@ def test_schedule_api_exposes_saved_plan_creation_and_metadata_only_replace() ->
     finally:
         current = service.catalog()
         matching = [
-            item.definition for item in current.schedules if item.definition.schedule_id == schedule_id
+            item.definition
+            for item in current.schedules
+            if item.definition.schedule_id == schedule_id
         ]
         if matching:
             definition = matching[0]

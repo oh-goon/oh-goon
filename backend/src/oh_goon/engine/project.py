@@ -6,8 +6,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from oh_goon.core.models.policy import PolicySnapshot, PolicySources, PolicyValues
 from oh_goon.core.engine_policy_defaults import DEFAULT_ENGINE_ENV
+from oh_goon.core.models.policy import PolicySnapshot, PolicySources, PolicyValues
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import PolicySource, WorkspaceMode, WorkspaceScope
 

@@ -5,8 +5,8 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from oh_goon.core.models.base import ImmutableModel
-from oh_goon.core.models.fleet_plan_requirements import RequirementCount
 from oh_goon.core.models.fleet_plan_release_evidence import KubernetesRolloutVerificationOutcome
+from oh_goon.core.models.fleet_plan_requirements import RequirementCount
 
 
 class FleetPlanAdmissionTrustReceipt(ImmutableModel):

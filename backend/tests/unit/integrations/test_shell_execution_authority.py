@@ -6,7 +6,6 @@ import pytest
 
 from oh_goon.integrations.make_execution_authority import derive_make_target_authority
 from oh_goon.integrations.shell_execution_authority import derive_shell_fragment_authority
-from oh_goon.integrations.workload_execution_requirements import load_workload_execution_requirements
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -64,9 +63,9 @@ set -eu
         ('command "$tool"', "unresolved executable variable"),
         ('env "$tool"', "unresolved executable variable"),
         ('"${TOOL}"', "unresolved executable parameter expansion"),
-        ('$(printf tool)', "unresolved executable command substitution"),
+        ("$(printf tool)", "unresolved executable command substitution"),
         ('eval "$tool"', "dynamic eval execution is unprovable"),
-        ('`printf tool`', "unresolved executable token"),
+        ("`printf tool`", "unresolved executable token"),
     ],
 )
 def test_dynamic_executable_forms_fail_closed(
@@ -119,8 +118,6 @@ shift
     assert set(authority.tools) == {"env", "rm", "sh"}
 
 
-
-
 def test_authority_identity_inputs_change_when_owned_script_bytes_change(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / "Makefile").write_text("target:\n\tsh scripts/task.sh\n", encoding="utf-8")
@@ -133,8 +130,6 @@ def test_authority_identity_inputs_change_when_owned_script_bytes_change(tmp_pat
 
     assert before.tools == after.tools == ("sh",)
     assert before.source_identities != after.source_identities
-
-
 
 
 def test_single_quoted_command_substitution_does_not_expand_authority(tmp_path: Path) -> None:
@@ -161,6 +156,7 @@ def test_double_quoted_command_substitution_is_part_of_authority(tmp_path: Path)
 
     assert authority.unresolved == ()
     assert authority.tools == ("rm",)
+
 
 def test_materialized_venv_console_wrapper_cannot_change_static_authority(tmp_path: Path) -> None:
     root = tmp_path / "repo"
@@ -189,9 +185,7 @@ def test_materialized_venv_console_wrapper_cannot_change_static_authority(tmp_pa
     assert "from" not in after.tools
     assert "raise" not in after.tools
     assert "python3" not in after.tools
-    assert after.materialized_executables == (
-        "backend/.venv/bin/oh-goon-test-batches",
-    )
+    assert after.materialized_executables == ("backend/.venv/bin/oh-goon-test-batches",)
 
 
 def test_materialized_executable_identity_is_canonical_across_shell_cwd_aliases(
@@ -272,9 +266,7 @@ def test_materialized_executable_identity_uses_initial_step_working_directory(
         working_directory="backend",
     )
 
-    assert authority.materialized_executables == (
-        "backend/.venv/bin/private-tool",
-    )
+    assert authority.materialized_executables == ("backend/.venv/bin/private-tool",)
 
 
 def test_materialized_executable_identity_tracks_literal_cd_from_step_working_directory(
@@ -289,10 +281,7 @@ def test_materialized_executable_identity_tracks_literal_cd_from_step_working_di
         working_directory="backend",
     )
 
-    assert authority.materialized_executables == (
-        "backend/.venv/bin/private-tool",
-    )
-
+    assert authority.materialized_executables == ("backend/.venv/bin/private-tool",)
 
 
 @pytest.mark.parametrize(
@@ -403,6 +392,4 @@ def test_multiple_find_exec_children_share_materialization_traversal(tmp_path: P
 
     assert authority.unresolved == ()
     assert authority.tools == ("find",)
-    assert authority.materialized_executables == (
-        "frontend/node_modules/.bin/private-tool",
-    )
+    assert authority.materialized_executables == ("frontend/node_modules/.bin/private-tool",)

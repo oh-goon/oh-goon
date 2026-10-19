@@ -14,7 +14,6 @@ from oh_goon.integrations import fleet_plan_environment
 from oh_goon.repository_tooling.release.accept_container import _acceptance_environment
 from oh_goon.repository_tooling.release.accept_release import _installed_runtime_environment
 
-
 ROOT = Path(__file__).resolve().parents[4]
 SOURCE_ROOT = ROOT / "backend/src/oh_goon"
 OWNER_PATH = SOURCE_ROOT / "core/local_access_protocol.py"
@@ -35,14 +34,18 @@ def test_owner_key_mutation_moves_api_and_stripping_end_to_end(
 
     child = sanitized_child_environment(
         ("tool",),
-        {moved_key: "secret", old_key: "ordinary-after-owner-move", "PATH": os.environ.get("PATH", "")},
+        {
+            moved_key: "secret",
+            old_key: "ordinary-after-owner-move",
+            "PATH": os.environ.get("PATH", ""),
+        },
     )
     assert moved_key not in child
     assert child[old_key] == "ordinary-after-owner-move"
 
     with pytest.raises(FleetPlanInvalid, match="process-local control-plane"):
-        fleet_plan_environment._require_exportable_host_environment_name(moved_key)
-    fleet_plan_environment._require_exportable_host_environment_name(old_key)
+        fleet_plan_environment.require_exportable_host_environment_name(moved_key)
+    fleet_plan_environment.require_exportable_host_environment_name(old_key)
 
 
 def test_acceptance_launchers_inject_through_owner(
@@ -128,9 +131,7 @@ def test_local_access_secret_stays_out_of_durable_launch_evidence(tmp_path: Path
                 LaunchServiceIntent(
                     service="backend",
                     command=("uvicorn", "oh_goon.api.app:app"),
-                    endpoint=LaunchEndpointIntent(
-                        service="backend", host="127.0.0.1", port=8787
-                    ),
+                    endpoint=LaunchEndpointIntent(service="backend", host="127.0.0.1", port=8787),
                 ),
             ),
         ),

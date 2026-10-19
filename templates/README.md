@@ -1,358 +1,236 @@
-# Plans and Goons
+# Run, configure and extend a Plan
 
-Oh Goon has one deliberately small authoring model:
+Start with [python/quality](plans/python/quality/README.md): format checking, linting, one selected type checker and pytest. Keep project policy in native tool configuration; use a Plan to choose and order reusable work.
 
 ```text
-Repository
-  → Plan
-  → Goon
-  → Step
-  → Execution / Verification / Evidence
-
-Atomic Goon    → Steps
-Composite Goon → Goons
+Plan → Goons → Steps → native tools → Run and Game Tape
 ```
 
-A Goon contains `steps:` or `goons:`, never both. Plans select Goons and never contain Steps. Execution stays ordered and linear: there is no DAG, inheritance, YAML macro system, patch/override model, or second dependency model.
+An Atomic Goon contains `steps:`. A Composite Goon contains `goons:`. A Plan contains an ordered `goons:` list. Add work to a Plan by importing a Goon; add commands inside an Atomic Goon. Written order and repeated imports are preserved.
 
-## Goon Simple Contract
+For bounded agentic work, use [agents/agentic-review-repair-loop](plans/agents/agentic-review-repair-loop/README.md).
+Its imports declare `phase:` beside each Goon. The existing repair owner runs
+linked native phase Runs with explicit review, write-scope and deadline budgets.
+See the [setup and customization example](../examples/agentic-review-repair-loop/README.md).
 
-Normal Goon authoring should answer only three questions:
+## First local Python run
 
-1. Which inputs are genuinely user-controlled?
-2. Which locked execution environment is needed?
-3. Which understandable command should run?
+Use an initialized Oh-Goon installation. Source-checkout users should use the prepared CLI described in the [backend guide](../backend/README.md). Run the following commands from your workload repository root.
 
-A normal Python Goon is intentionally this small:
+Use an existing Git repository. Your project needs a committed `pyproject.toml` and native `uv.lock`. Its selected dependency group must provide pytest, Ruff and the chosen type checker. Choose `pyright` or `ty`; the template does not require both. Prepare that group with native uv:
+
+```sh
+uv sync --locked --group dev
+oh-goon templates list --kind plan
+oh-goon templates show python/quality --kind plan > plan.yml
+```
+
+Plans default to local verification on your host. The CLI waits for completion. Use trusted repositories for this ordinary path. Explicit strict CI/CD and untrusted-code isolation are described in the [execution contract](../docs/CI_CD_CONTRACT.md); workflows that require strict snapshots or retained content declare that policy in their YAML.
+
+Inspect the available inputs, then validate and author the execution lock:
+
+```sh
+oh-goon plan inputs plan.yml
+oh-goon plan validate plan.yml
+oh-goon lock plan.yml
+```
+
+Register the folder containing your repository and read its repository ID from `teams[].repository.repository_id` in the scan:
+
+```sh
+oh-goon league add-folder ..
+oh-goon league scan --json
+oh-goon plan run plan.yml --repository-id REPOSITORY_ID
+```
+
+Replace `REPOSITORY_ID` with the exact ID returned for this repository. A separate Plan does not require a repository-owned `goon.yml`.
+
+A successful run executes the checks and writes `junit.xml` in the selected Python project. A failed native command remains a failed Step with its exit code and logs. Use the returned Run ID to inspect it:
+
+```sh
+oh-goon plan status RUN_ID
+oh-goon plan steps RUN_ID
+oh-goon plan outputs RUN_ID
+```
+
+## Change values without editing the Goon
+
+Use a reusable Goon with its defaults by importing it directly. The Plan does not repeat its input declarations or internal forwarding:
 
 ```yaml
 version: 1
+goons:
+- python/quality
+```
+
+For a fixed Plan-level override, make the change visible at the import:
+
+```yaml
+version: 1
+goons:
+- import: python/quality
+  with:
+    typechecker: ty
+```
+
+That binding fixes `typechecker` to `ty` for this Plan. A CLI or values-file entry cannot replace it. For a per-run choice, keep the plain import or bind the child input to a named caller input as shown below.
+
+Atomic Goons own input types, descriptions, defaults and validation. Plans automatically expose unambiguous, unbound public inputs from their direct imports to `--input` and `--inputs-file`. A fixed `with:` binding is already selected and is not exposed automatically. Composite Goons keep their own public interface and internal forwarding. `plan inputs` shows the effective caller contract. For a project under `backend`, create a `values/` directory and save this as `values/dev.yml`:
+
+```yaml
+inputs:
+  project: backend
+  dependency_group: dev
+  typechecker: pyright
+```
+
+Select one values file and optionally override individual values on the command line:
+
+```sh
+oh-goon plan validate plan.yml --inputs-file values/dev.yml --input typechecker=ty
+oh-goon lock plan.yml --inputs-file values/dev.yml --input typechecker=ty
+oh-goon plan run plan.yml --inputs-file values/dev.yml --input typechecker=ty \
+  --repository-id REPOSITORY_ID
+```
+
+The explicit CLI value wins over the same name in the file. Unspecified inputs keep the Goon's defaults. Duplicate keys or repeated CLI names are errors. Files contain scalar values under one `inputs:` mapping; keep credentials in explicitly declared secret/environment bindings. There are no layered values files, inheritance or implicit environment overrides.
+
+Use the same input selection when locking and running. Changed execution choices require an explicitly refreshed lock; execution never silently rewrites it. `plan explain plan.yml --inputs-file values/dev.yml --routes` shows recipient routing without exposing supplied values.
+
+Pytest discovery and coverage policy belong in project configuration. For example, with pytest-cov installed:
+
+```toml
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=my_package --cov-fail-under=85"
+```
+
+Ruff, Pyright and ty likewise consume their native project configuration. The Goon does not duplicate their settings.
+
+## Append an existing capability
+
+Append an import to the copied Plan's `goons:` list. To use both Goons' defaults:
+
+```yaml
+version: 1
+goons:
+- python/quality
+- python/profile
+```
+
+Both Goons expose `project` and `dependency_group`. Their defaults remain independent, so those shared names require explicit routing before a caller can override them. To select one project/group for both:
+
+```yaml
+version: 1
+goons:
+- import: python/quality
+  pass: [project, dependency_group]
+- import: python/profile
+  pass: [project, dependency_group]
+```
+
+`pass:` selects recipients for same-name caller values; it is unnecessary for a unique input. Use `with:` for a renamed caller input, a fixed value or a producer output. The Goon keeps its schema and internal bindings. Optional Plan `inputs: [name, ...]` restricts the public interface when needed.
+
+`oh-goon plan inputs plan.yml` lists any shared inputs that still need routing separately from the accepted caller inputs. `plan explain plan.yml --routes` shows the resolved recipients after you select the required values.
+
+## Give repeated imports independent values
+
+`as:` names one occurrence. Bind its child inputs to distinct caller names when each occurrence needs a different per-run choice:
+
+```yaml
+version: 1
+goons:
+- import: python/typecheck
+  as: api
+  with:
+    project: backend
+    typechecker: ${{ inputs.api_checker }}
+- import: python/typecheck
+  as: tooling
+  with:
+    project: tools
+    typechecker: ${{ inputs.tooling_checker }}
+```
+
+The projects are fixed; `api_checker` and `tooling_checker` inherit their contracts and defaults from the Goon. Select them independently without repeating input schemas:
+
+```sh
+oh-goon plan validate plan.yml --input api_checker=ty --input tooling_checker=pyright
+oh-goon lock plan.yml --input api_checker=ty --input tooling_checker=pyright
+```
+
+Both imports use the native default dependency group. Route `dependency_group` explicitly if callers should change it. Use the same input flags when running. Moving an aliased import keeps its name and bindings together.
+
+## Change the order of work
+
+Move entries in `goons:` to change their execution order. To customize the internal order of a Composite such as `python/quality`, select its Atomic Goons directly. This Plan runs tests before formatting, linting and type checking, with one shared project/group selection:
+
+```yaml
+version: 1
+goons:
+- import: python/test
+  pass: [project, dependency_group]
+- import: python/ruff
+  pass: [project, dependency_group]
+- import: python/typecheck
+  pass: [project, dependency_group]
+```
+
+```sh
+oh-goon plan validate plan.yml --input project=backend --input typechecker=ty
+oh-goon lock plan.yml --input project=backend --input typechecker=ty
+```
+
+The unique `typechecker` input needs no forwarding. For different fixed projects or tool choices, set `with:` on the corresponding import instead of routing that input with `pass:`. Keep each producer before consumers of its outputs or workspace; an invalid order fails validation. Oh-Goon preserves the order you wrote.
+
+Append another import wherever it should run. Validate the new order, inspect routing, refresh the lock and run with the same inputs. The imported packages keep their own definitions.
+
+## Append your own capability
+
+Create `goons/general/project-check/goon.yml` and a sibling `README.md` headed `# general/project-check`. The executable file can be:
+
+```yaml
+version: 1
+inputs:
+  project:
+    type: string
+    non_empty: true
+    default: .
 uv:
+  project: ${{ inputs.project }}
   group: dev
 steps:
-- run: uv run pytest
+- run: uv run python -m compileall -q src
 ```
 
-`uv:` means Oh Goon prepares a locked UV project environment. `uv.lock` remains the dependency authority; the Goon does not repeat package names, lock hashes, cache keys, warmup steps, or manual `uv lock --check` commands. `group:` selects how the same lock is used; it does not redefine dependencies.
-
-`run:` is parsed into argv and executed directly without a shell. Shell operators, redirects, command substitution, multiline shell, and inline interpreter programs such as `python -c` or `sh -c` are not normal authoring. If an operation needs real program logic, expose it as a project command such as `uv run verify-release`. If generic reusable logic is needed, build a real tool or backend-owned typed capability rather than a scripts subsystem in the template catalog.
-
-Step ids are optional. Oh Goon derives stable resolved ids for ordinary Steps. Declare `id:` only when later dataflow refers to the Step or a semantic name materially improves the Game Tape.
-
-Do not put execution bookkeeping in normal Goon YAML. In particular, avoid declarations for facts the backend already owns: repository identity, default timeout/resources, UV cache lineage, command exit status, stdout/stderr, tool invocation evidence, or duplicate status JSON. Declare artifacts only when the command creates a real result worth retaining.
-
-## Template path grammar
-
-Every shipped template is exactly one package:
-
-```text
-templates/goons/<category>/<name>/
-├── goon.yml
-└── README.md
-
-templates/plans/<category>/<name>/
-├── plan.yml
-└── README.md
-```
-
-Shipped Plan/Goon packages omit `name:` and `description:` from YAML. The logical
-path is their identity (`python/test`); human description belongs in `README.md`.
-The general Goon compiler accepts optional readable metadata, but that does not
-change the shipped catalog policy. `version:` identifies the file contract.
-
-Shipped catalog classification is derived from that same canonical category path and exposed by the backend catalog; it is not authored into execution YAML or inferred from README prose. `python/`, `security/`, `oci/`, and `kubernetes/` are production templates; `advanced/`, `general/`, and `ml/` are teaching examples; `oh-goon/` is internal self-hosting. A new shipped category must first receive an explicit classification. Production templates cannot depend on teaching or internal Goons.
-
-Imports use the logical path directly:
+Append its explicit source and fixed project selection to the Plan:
 
 ```yaml
-version: 1
-goons:
-- python/ruff
-- python/test
-```
-
-A binding is explicit only when needed:
-
-```yaml
-- import: python/test
+- import: general/project-check
+  from: ./goons
   with:
-    coverage_threshold: ${{ inputs.coverage_threshold }}
+    project: backend
 ```
 
-There is no recursive lookup, package alias, extension guessing, inheritance,
-merge, patch, overlay, implicit parent-input propagation, or deduplication.
-An optional `as:` on a Plan/Composite `import:` mapping names that one compiled
-occurrence; it never changes package lookup. See
-[import occurrences](../docs/development/GOON_AUTHORING.md#import-occurrences).
+`from:` selects the exact catalog directory relative to the declaring file. It stays inside the root authoring workspace, which defaults to the root Plan’s directory. Unqualified imports continue to select shipped Goons; project packages do not shadow them. Local packages use the same two-file layout and compiler. Shared Plan storage currently saves only `plan.yml`, so use a file-backed Plan for project-local imports.
 
-## Atomic and Composite Goons
+Inside an Atomic Goon, append another `run:` entry to `steps:`. Commands execute as argv without an implicit shell. Put program logic in a real project command; do not embed shell or Python programs in YAML.
 
-Atomic Goons own executable Steps. Small capabilities are the reference model: `python/ruff`, `python/typecheck`, `python/test`, and `python/uv-audit`.
+## Choose the next existing workflow
 
-Composite Goons only compose Goons:
+- [Python standard](plans/python/standard/README.md): explicit project release metadata and quality.
+- [Python release candidate](plans/python/release-candidate/README.md): quality and retained distribution artifacts.
+- [Combined vulnerability scan](plans/security/cve-combined/README.md): locked Python dependencies and repository vulnerabilities.
+- [OCI release/deploy](plans/oci/release-deploy/README.md): quality, immutable image publication and exact Kubernetes rollout verification.
+- [Isolated dataflow](plans/advanced/isolated-dataflow/README.md): teaching example for outputs and explicit environment imports.
+- [Iris training](plans/ml/iris-training/README.md): a parameterized native project command and model results.
 
-```yaml
-version: 1
-goons:
-- python/ruff
-- python/typecheck
-- python/test
-```
+The [Goon guide](goons/README.md) describes capabilities; the [Plan guide](plans/README.md) describes composition. `oh-goon/` packages are this repository's internal verification and release workloads.
 
-Written order and duplicates are preserved. Explicit input bindings remain explicit across composition boundaries.
+## Package and execution contracts
 
-Typed infrastructure Goons such as OCI or Kubernetes may need more detail because they represent credentials, mutation, registries, or other security boundaries. Their necessary detail must not become ceremony imposed on ordinary command Goons.
+Each package contains exactly `README.md` plus `goon.yml` or `plan.yml`, under `<kind>/<category>/<name>/`. Its identity is `category/name`; README owns the explanation, YAML owns machine facts. No helper scripts or sidecars belong in shipped packages.
 
-## Plan
+See [Goon authoring](../docs/development/GOON_AUTHORING.md), [input resolution](../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md), [input inspection](../docs/development/TEMPLATE_INPUT_INSPECTION.md), [artifact retention](../docs/development/TEMPLATE_ARTIFACT_RETENTION.md), [network settings](../docs/development/TEMPLATE_NETWORK_AUTHORITY.md) and the [CI/CD contract](../docs/CI_CD_CONTRACT.md) for their owning contracts. Native tools retain dependency resolution, configuration and result authority.
 
-A shipped Plan can be as small as:
-
-```yaml
-version: 1
-goons:
-- python/quality
-- security/cve-combined
-```
-
-The catalog path supplies identity and the normal shipped execution purpose is CI/CD. One-Goon Plans are valid when Plan is the useful execution/admission boundary; they should be removed only when they have no architectural purpose, not merely because they are short.
-
-Plans cannot import Plans. Goons cannot import Plans. Reusable capability groups belong in Composite Goons.
-
-## Resolution and evidence
-
-Authoring remains hierarchical, execution remains sequential, and provenance remains hierarchical. The resolver validates the composition graph once and produces the resolved execution model used by preview, execution, receipts, diagnostics, and Game Tape.
-
-`argv`, generated Step identity, lock enforcement, cache lineage, default runtime limits, and execution evidence may exist in that resolved/backend model without becoming normal authoring syntax.
-
-GitLab migration guidance lives in `docs/development/GITLAB_MIGRATION.md`; migration artifacts do not belong in the template tree.
-
-## Review rule
-
-When reviewing a Goon, ask: **does this YAML declare something the execution boundary already knows?** If yes, remove it from authoring unless it is an explicit security or domain boundary.
-
-For a shipped Goon or Plan change, run the focused template tests first, then architecture/backend checks. Do not add compatibility lookup, sidecars, helper DSLs, Plan Steps, or another execution path to make authoring shorter.
-
-## Minimal Plan input projection
-
-A Plan may explicitly expose a directly selected Goon input without copying its schema:
-
-```yaml
-version: 1
-inputs: [coverage_threshold]
-goons:
-- python/quality
-```
-
-The selected Goon remains the authority for type, choices, defaults, ranges, and validation. Projection is not parent-input inheritance: the name must belong to exactly one directly selected Goon or resolution fails. Use the explicit `with:` form only for a real binding, such as feeding a prior Goon output or a concrete Plan value into a selected Goon input.
-
-## Composite input projection
-
-Composite Goons expose child-owned input contracts without copying their schemas:
-
-```yaml
-version: 1
-inputs: [containerfile, context, platform]
-goons:
-- import: oci/image
-  pass: [containerfile, context, platform]
-```
-
-`pass: [containerfile, context, platform]` is exactly equivalent to the three
-legacy `with:` bindings `containerfile: ${{ inputs.containerfile }}` and so on.
-It is legal **only on one Composite Goon import mapping**. The parent must
-declare each name in its `inputs:` list and the selected child must own the
-matching typed input. It never broadcasts to sibling Goons or inherits inputs.
-
-For example, an imported Goon may also receive an explicit producer value:
-
-```yaml
-version: 1
-inputs: [publish_registry_hostname, publish_repository]
-goons:
-- import: oci/publish
-  pass: [publish_registry_hostname, publish_repository]
-  with:
-    source_workspace: ${{ goons.oci-image.workspace }}
-```
-
-This fragment shows the two binding forms; a runnable Composite also needs
-the preceding `oci/image` producer (as in the shipped `oci/publish-image`).
-`pass:` and `with:` must bind disjoint child names; collisions, duplicates,
-unknown names and non-list `pass:` are errors **before work**. Renamed inputs,
-external `from:` sources, workspace and output references stay in `with:`.
-There is no Plan-level `pass:`, wildcard, `all`, implicit matching, or Step-level
-`pass:`. The child remains the schema/default/validation owner. Compatible
-child contracts may share an explicit parent input; incompatible contracts
-fail the existing source-graph resolution. See
-[input resolution and transport](../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md).
-
-## Safe input resolution
-
-A caller may normalize external names into one canonical Goon input before execution:
-
-```yaml
-- import: kubernetes/deploy
-  with:
-    timeout:
-      from:
-      - env: HELM_TIMEOUT_OVERRIDE
-      - env: HELM_TIMEOUT
-```
-
-The first defined source wins, then the child's visible default applies.
-Repository YAML, TOML, one-line text files, and verified Git metadata are also
-supported:
-
-```yaml
-version:
-  from:
-    yaml:
-      path: project.yml
-      key: project.version
-pyproject_version:
-  from:
-    toml:
-      path: pyproject.toml
-      key: project.version
-version_file:
-  from:
-    text:
-      path: VERSION
-revision:
-  from:
-    git: commit_short_sha
-```
-
-`text` accepts exactly one non-empty trimmed line. Structured file sources use
-simple dotted keys and stay repository-contained. Resolution never runs shell,
-jq, yq, or user expressions. It produces one value and then the child Goon's
-normal input contract validates it. Secret bytes do not belong in this
-mechanism; keep credentials on explicit secret/environment authority.
-
-Readable contracts can use small constraints and semantic types:
-
-```yaml
-image_name:
-  type: string
-  starts_with: my-image-storage/
-platform:
-  type: choice
-  choices: [linux/amd64, linux/arm64]
-  default: linux/amd64
-timeout:
-  type: duration
-  default: 5m
-```
-
-If values must be combined, branched, formatted, or otherwise computed, put that logic in normal project code and expose a real command such as `uv run resolve-helm-release`. **Validation/resolution can be declarative. Business/project computation belongs in project code.**
-
-## Resolution versus transport authority
-
-The one [template input resolution and transport guide](../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md)
-explains exactly when external values, projected input contracts, producer output
-references, and execution-time frozen resources become authoritative. `README.md` is
-not a second source schema: refer to the declared Goon inputs and the canonical
-resolver. Inputs are resolved before work; Step outputs are consumed only after their
-own producer reports them. No Step may perform a fallback resolution pass.
-
-For file artifact retention in shipped Goons, see the
-[artifact retention authoring contract](../docs/development/TEMPLATE_ARTIFACT_RETENTION.md).
-
-For deliberate outbound network requirements, follow the
-[canonical template network authority](../docs/development/TEMPLATE_NETWORK_AUTHORITY.md),
-which keeps native scanner network needs separate from implicit tool permission.
-
-## Self-hosting evidence boundaries
-
-See the [canonical self-hosting boundary guide](../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md)
-for the integration source-workspace distinction and browser preflight ownership.
-
-For the single canonical discovery owner, stable catalog ordering and byte-exact
-Plan/Goon source digests, see
-[template catalog determinism](../docs/development/TEMPLATE_CATALOG_DETERMINISM.md).
-
-For read-only contract provenance in the shipped catalog, see
-[template input inspection](../docs/development/TEMPLATE_INPUT_INSPECTION.md).
-This is not an authoring schema or a second input resolver.
-
-## Inspect and configure inputs
-
-Before configuring a Plan, inspect the exact canonical typed inputs and owners:
-
-```bash
-uv run --offline --frozen --no-sync --project backend oh-goon plan inputs templates/plans/python/quality/plan.yml
-uv run --offline --frozen --no-sync --project backend oh-goon plan inputs templates/plans/python/quality/plan.yml --json
-```
-
-This is read-only **contract inspection**. It displays the existing child-owned
-type, default, constraints and explicit owner paths; it neither selects a value
-nor validates or admits a Run. `pass:` remains a shorthand for an explicit
-Composite import binding. No host secrets or runtime producer outputs are read.
-The JSON `root_source_sha256` is the root file digest, **not** an imported-graph
-closure identity. Details: [canonical input inspection](../docs/development/TEMPLATE_INPUT_INSPECTION.md).
-
-### Caller values files
-
-Use `oh-goon plan inputs <plan.yml>` to discover the canonical input interface;
-then `oh-goon plan validate <plan.yml> --inputs-file values/staging.yml` or
-`plan explain` to validate explicit scalar caller values in a strict bounded
-`inputs:` mapping. A value file is **not** a Composite `pass:` replacement or a
-host secret file. `--input` may coexist only for different names. `plan run`
-uses the original Run ingress preflight and queued source-freshness checks.
-`plan schedule` and `reschedule` store immutable resolved values and source
-provenance in the original Schedule. A manual Run checks the live file; a
-scheduled occurrence never reloads it. See
-[caller-file custody](../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md#caller-selected-input-files).
-
-### Scheduled caller configuration files
-
-Schedule creation and replacement may use the same strict `--inputs-file`
-syntax as Plan validation. A Schedule saves the **resolved** values and an
-immutable source SHA-256 receipt at creation time. Later edits to the YAML
-file do not change a Schedule automatically: use `plan reschedule` to select
-new values. A scheduled occurrence never needs the creator's file to remain
-mounted. The [scheduled values contract](../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md#scheduled-values-and-provenance)
-describes the receipt and generation boundaries.
-
-### Explain recipients and validation failures
-
-```bash
-uv run --offline --frozen --no-sync --project backend oh-goon plan explain templates/plans/python/quality/plan.yml --routes --json --input coverage_threshold=85
-```
-
-`--routes` shows exactly which imported Goon occurrence receives each
-normalized parameter, including intermediate Composite forwarding. It also
-names producer **reference identities** for workspace and output edges without
-pretending the producer has executed. Report schema:
-`oh-goon.plan-input-routing/v1` with status `resolved_not_executed`.
-Existing `plan explain --json` is unchanged. The root SHA-256 is the root file
-only; no new admission authority or secret/value transport is introduced.
-Details: [resolved recipient routing](../docs/development/TEMPLATE_INPUT_INSPECTION.md#resolved-recipient-routing).
-
-When a selected value or contract is invalid, use `oh-goon plan validate
-<plan.yml> --diagnostics --json` or `oh-goon plan explain <plan.yml>
---routes --diagnostics --json` to get a typed, redacted repair hint rather
-than the legacy exception text. Valid Plans produce the exact existing success
-report. This is a view of the canonical input owner, **not** another compiler,
-second source of values, execution admission or readiness claim. See
-[safe rejection diagnostics](../docs/development/TEMPLATE_INPUT_INSPECTION.md#safe-rejection-diagnostics).
-
-## Authoring guides and evaluation
-
-See [canonical-source input journeys](../docs/development/TEMPLATE_INPUT_INSPECTION.md#evaluation-and-proof-scope)
-for the frozen real-source HTTP correction journeys and separate browser
-presentation coverage. Neither an accepted inspection nor evaluation results
-is an execution admission or deployment qualification.
-
-For concise Atomic/Composite/Plan input examples, exact `pass`/`with`/`from`
-ownership, team values-file custody and original import-occurrence IDs, see
-[Goon authoring](../docs/development/GOON_AUTHORING.md) and
-[input resolution and transport](../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md).
-No wildcard output forwarding or additional execution path is introduced.
-
-The [UX-D authoring and evidence guide](../docs/templates/TEMPLATE_UX_D_EVALUATION.md)
-explains the existing single-compiler discovery, draft, input and source
-inspection workflow, the reproducible 41-Goon/24-Plan catalog check, and the
-explicit difference between scripted contract evidence and **unmeasured**
-human/agent authoring improvements. Read-only authoring is not an alternate
-admission or execution path.
+The [catalog identity guide](../docs/development/TEMPLATE_CATALOG_DETERMINISM.md) explains how native discovery binds template contents and catalogue identity.

@@ -5,7 +5,9 @@ from pathlib import Path
 
 from oh_goon.integrations.make_execution_authority import derive_make_target_authority
 from oh_goon.integrations.package_script_execution_authority import derive_npm_run_authority
-from oh_goon.integrations.workload_execution_requirements import load_workload_execution_requirements
+from oh_goon.integrations.workload_execution_requirements import (
+    load_workload_execution_requirements,
+)
 
 
 def _write_package(
@@ -77,7 +79,9 @@ def test_ambiguous_package_bin_requires_explicit_direct_provider(tmp_path: Path)
     )
 
     unresolved = derive_npm_run_authority(tmp_path, "test", chain=("target",))
-    assert any("ambiguous package-local executable runner" in item for item in unresolved.unresolved)
+    assert any(
+        "ambiguous package-local executable runner" in item for item in unresolved.unresolved
+    )
 
     payload = json.loads((package / "package.json").read_text(encoding="utf-8"))
     payload["ohGoonExecutionAuthority"] = {"packageBinProviders": {"runner": "runner-a"}}
@@ -112,7 +116,9 @@ def test_dynamic_package_script_executable_fails_closed(tmp_path: Path) -> None:
 
     authority = derive_npm_run_authority(tmp_path, "test", chain=("target",))
 
-    assert any("unresolved package-script executable variable" in item for item in authority.unresolved)
+    assert any(
+        "unresolved package-script executable variable" in item for item in authority.unresolved
+    )
 
 
 def test_make_authority_binds_package_sources_and_package_executables(tmp_path: Path) -> None:

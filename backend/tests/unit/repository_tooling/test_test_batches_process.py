@@ -11,10 +11,9 @@ from oh_goon.repository_tooling.test_batches import _run_command
 
 pytestmark = pytest.mark.process
 
+
 def test_batch_command_returns_output_and_status() -> None:
-    rc, output, elapsed = _run_command(
-        [sys.executable, "-c", "print('batch-ok')"], timeout=5
-    )
+    rc, output, elapsed = _run_command([sys.executable, "-c", "print('batch-ok')"], timeout=5)
     assert rc == 0
     assert output.rstrip().endswith("batch-ok")
     assert elapsed < 5
@@ -69,9 +68,10 @@ def test_batch_runner_accepts_pytest_skip_as_terminal_non_failure(tmp_path: Path
     assert membership["non_passed"] == [str(test_file)]
     assert membership["passed"] == []
 
+
 @pytest.mark.skipif(os.name != "posix", reason="process-group timeout ownership is POSIX-specific")
 def test_batch_timeout_kills_descendants_holding_output_pipe() -> None:
-    script = r'''
+    script = r"""
 import os
 import signal
 import subprocess
@@ -86,7 +86,7 @@ child = subprocess.Popen([
 print(f"CHILD={child.pid}", flush=True)
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 time.sleep(60)
-'''
+"""
     started = time.monotonic()
     rc, output, elapsed = _run_command([sys.executable, "-c", script], timeout=3)
     wall = time.monotonic() - started
@@ -113,9 +113,12 @@ time.sleep(60)
         state = proc_stat.read_text().split()[2]
         assert state == "Z", "timed-out pytest descendant is still running"
 
-@pytest.mark.skipif(os.name != "posix", reason="process-group completion ownership is POSIX-specific")
+
+@pytest.mark.skipif(
+    os.name != "posix", reason="process-group completion ownership is POSIX-specific"
+)
 def test_batch_completion_cleans_descendant_after_direct_parent_already_exited() -> None:
-    script = r'''
+    script = r"""
 import subprocess
 import sys
 
@@ -126,7 +129,7 @@ child = subprocess.Popen([
 ])
 print(f"ORPHAN_CHILD={child.pid}", flush=True)
 # Exit immediately. The descendant inherits stdout and keeps the pipe open.
-'''
+"""
     started = time.monotonic()
     rc, output, elapsed = _run_command([sys.executable, "-c", script], timeout=5)
     wall = time.monotonic() - started
@@ -151,15 +154,14 @@ print(f"ORPHAN_CHILD={child.pid}", flush=True)
     if proc_stat.exists():
         assert proc_stat.read_text().split()[2] == "Z"
 
+
 @pytest.mark.skipif(os.name != "posix", reason="suite wall-clock timeout is POSIX-tested")
 def test_suite_timeout_bounds_complete_batch_run(tmp_path: Path) -> None:
     import subprocess
 
     test_file = tmp_path / "test_suite_budget.py"
     test_file.write_text(
-        "import time\n"
-        "def test_one(): time.sleep(1.5)\n"
-        "def test_two(): time.sleep(30)\n",
+        "import time\ndef test_one(): time.sleep(1.5)\ndef test_two(): time.sleep(30)\n",
         encoding="utf-8",
     )
     started = time.monotonic()
@@ -193,6 +195,7 @@ def test_suite_timeout_bounds_complete_batch_run(tmp_path: Path) -> None:
     assert "PYTEST SUITE TIMEOUT" in result.stdout
     assert wall < 8
 
+
 def test_batch_child_does_not_inherit_progress_descriptor(monkeypatch) -> None:
     read_fd, write_fd = os.pipe()
     try:
@@ -211,6 +214,7 @@ def test_batch_child_does_not_inherit_progress_descriptor(monkeypatch) -> None:
         os.close(write_fd)
         os.close(read_fd)
 
+
 def test_batch_execution_report_is_atomic_and_records_timeout_refinement(tmp_path: Path) -> None:
     import json
     import subprocess
@@ -223,12 +227,18 @@ def test_batch_execution_report_is_atomic_and_records_timeout_refinement(tmp_pat
             sys.executable,
             "backend/src/oh_goon/repository_tooling/test_batches.py",
             str(test_file),
-            "--batch-size", "1",
-            "--workers", "1",
-            "--batch-timeout", "10",
-            "--marker", "",
-            "--report-path", str(report),
-            "--resume-state-root", str(tmp_path / "state"),
+            "--batch-size",
+            "1",
+            "--workers",
+            "1",
+            "--batch-timeout",
+            "10",
+            "--marker",
+            "",
+            "--report-path",
+            str(report),
+            "--resume-state-root",
+            str(tmp_path / "state"),
         ],
         cwd=Path(__file__).resolve().parents[4],
         text=True,
@@ -256,6 +266,7 @@ def test_batch_execution_report_is_atomic_and_records_timeout_refinement(tmp_pat
     assert membership["terminal_membership_identity"] == membership["selected_membership_identity"]
     assert Path(payload["membership_receipt_path"]).exists()
     assert not list(report.parent.glob("*.tmp"))
+
 
 def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparable(
     tmp_path: Path,
@@ -306,9 +317,9 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
 
     regrouped_command = list(command)
     regrouped_command[regrouped_command.index("1", regrouped_command.index("--batch-size"))] = "8"
-    regrouped_command[
-        regrouped_command.index("10", regrouped_command.index("--batch-timeout"))
-    ] = "20"
+    regrouped_command[regrouped_command.index("10", regrouped_command.index("--batch-timeout"))] = (
+        "20"
+    )
     second = subprocess.run(
         regrouped_command,
         cwd=root,
@@ -332,7 +343,6 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
     assert membership["attempted"] == [] and membership["resumed"] == [str(test_file)]
     assert membership["completed"] == [str(test_file)]
     assert membership["terminal_success"] is True
-
 
 
 @pytest.mark.skipif(os.name != "posix", reason="process-group cleanup is POSIX-specific")
@@ -408,6 +418,7 @@ def test_repeated_batch_commands_leave_no_reader_threads_or_fd_growth() -> None:
         after_fds = len(tuple(fd_root.iterdir()))
         assert after_fds <= before_fds + 1
 
+
 @pytest.mark.skipif(os.name != "posix", reason="timeout refinement uses POSIX process groups")
 def test_timeout_bisection_reuses_completed_member_without_duplicate_coverage(
     tmp_path: Path,
@@ -439,14 +450,22 @@ def test_timeout_bisection_reuses_completed_member_without_duplicate_coverage(
             sys.executable,
             "backend/src/oh_goon/repository_tooling/test_batches.py",
             str(test_file),
-            "--granularity", "tests",
-            "--batch-size", "2",
-            "--workers", "1",
-            "--batch-timeout", "8",
-            "--suite-timeout", "24",
-            "--marker", "",
-            "--resume-state-root", str(tmp_path / "state"),
-            "--report-path", str(report),
+            "--granularity",
+            "tests",
+            "--batch-size",
+            "2",
+            "--workers",
+            "1",
+            "--batch-timeout",
+            "8",
+            "--suite-timeout",
+            "24",
+            "--marker",
+            "",
+            "--resume-state-root",
+            str(tmp_path / "state"),
+            "--report-path",
+            str(report),
         ],
         cwd=root,
         text=True,

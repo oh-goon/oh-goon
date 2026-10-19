@@ -13,7 +13,9 @@ PRODUCT = ROOT / "backend" / "src" / "oh_goon"
 FORBIDDEN = {
     "digest from whole-file read": re.compile(r"hashlib\.sha256\([^\n]*read_bytes\(\)"),
     "digest update from whole-file read": re.compile(r"\.update\([^\n]*read_bytes\(\)"),
-    "base64 from whole-file read": re.compile(r"base64\.b64encode\([^\n]*read_bytes\(\)"),
+    "base64 from whole-file read": re.compile(
+        r"base64\.b64encode\([^\n]*read_bytes\(\)"
+    ),
     "prefix after whole-file read": re.compile(r"read_bytes\(\)\s*\[:"),
     "zip write from whole-file read": re.compile(r"writestr\([^\n]*read_bytes\(\)"),
 }

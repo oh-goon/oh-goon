@@ -5,6 +5,7 @@ execution report.  It does not launch work, infer repository semantics, or make
 proof reusable.  Quiescence and runtime authority are supplied by their native
 Oh-Goon owners and are integrity-bound here for offline inspection.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -14,7 +15,6 @@ from dataclasses import asdict, dataclass
 from oh_goon.engine.command import CommandSupervisorReceipt, RuntimeAuthorityReceipt
 from oh_goon.runtime.execution.offline_proof import verify_completed_shard_proof
 from oh_goon.runtime.execution.shard_models import ShardExecutionReport
-
 
 TERMINAL_EXECUTION_ATTESTATION_SCHEMA_FAMILY = "oh-goon.terminal-execution-attestation"
 TERMINAL_EXECUTION_ATTESTATION_SCHEMA_VERSION = 1
@@ -37,7 +37,9 @@ def terminal_execution_attestation_schema() -> str:
 
 
 def _identity(payload: object) -> str:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
@@ -66,8 +68,6 @@ class ProcessQuiescenceReceipt:
     @property
     def receipt_identity(self) -> str:
         return _identity({"schema": "oh-goon.process-quiescence-receipt/v1", **asdict(self)})
-
-
 
 
 def process_quiescence_receipt_from_supervisor(
@@ -137,14 +137,18 @@ def build_terminal_execution_attestation(
     """Bind valid terminal proof + runtime authority + quiescence into one receipt."""
     proof = verify_completed_shard_proof(report)
     if not proof.valid:
-        raise ValueError("cannot attest invalid terminal execution proof: " + "; ".join(proof.reasons))
+        raise ValueError(
+            "cannot attest invalid terminal execution proof: " + "; ".join(proof.reasons)
+        )
     if not process_quiescence.quiescent:
         raise ValueError("cannot attest terminal execution before process-tree quiescence")
     if runtime_authority.execution_materialization_identity is None:
         raise ValueError(
             "cannot attest terminal execution without exact runtime execution materialization"
         )
-    payload = _attestation_payload(report, runtime_authority, process_quiescence, proof.proof_identity)
+    payload = _attestation_payload(
+        report, runtime_authority, process_quiescence, proof.proof_identity
+    )
     return TerminalExecutionAttestation(
         schema=terminal_execution_attestation_schema(),
         report=report,
@@ -169,20 +173,28 @@ def verify_terminal_execution_attestation(
         reasons.extend(f"execution proof: {reason}" for reason in proof.reasons)
     if attestation.offline_proof_identity != proof.proof_identity:
         reasons.append("offline proof identity mismatch")
-    if attestation.runtime_authority_receipt_identity != attestation.runtime_authority.receipt_identity:
+    if (
+        attestation.runtime_authority_receipt_identity
+        != attestation.runtime_authority.receipt_identity
+    ):
         reasons.append("runtime authority receipt identity mismatch")
     if attestation.runtime_authority.execution_materialization_identity is None:
         reasons.append("runtime authority lacks exact execution materialization")
-    if attestation.process_quiescence_receipt_identity != attestation.process_quiescence.receipt_identity:
+    if (
+        attestation.process_quiescence_receipt_identity
+        != attestation.process_quiescence.receipt_identity
+    ):
         reasons.append("process quiescence receipt identity mismatch")
     if not attestation.process_quiescence.quiescent:
         reasons.append("process tree is not quiescent")
-    expected = _identity(_attestation_payload(
-        attestation.report,
-        attestation.runtime_authority,
-        attestation.process_quiescence,
-        attestation.offline_proof_identity,
-    ))
+    expected = _identity(
+        _attestation_payload(
+            attestation.report,
+            attestation.runtime_authority,
+            attestation.process_quiescence,
+            attestation.offline_proof_identity,
+        )
+    )
     if attestation.attestation_identity != expected:
         reasons.append("terminal attestation identity mismatch")
     verification_payload = {
@@ -191,4 +203,6 @@ def verify_terminal_execution_attestation(
         "valid": not reasons,
         "reasons": reasons,
     }
-    return TerminalAttestationVerification(not reasons, tuple(reasons), _identity(verification_payload))
+    return TerminalAttestationVerification(
+        not reasons, tuple(reasons), _identity(verification_payload)
+    )

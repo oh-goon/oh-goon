@@ -4,6 +4,7 @@ The B3B native WSL witness (2026-10-14) failed before bwrap launched because
 CPython 3.14.7 did not expose fcntl.F_ADD_SEALS. Keep one production-defined
 seal operation contract, even for mechanical test fixture creation.
 """
+
 from __future__ import annotations
 
 import fcntl
@@ -16,8 +17,17 @@ from tests.native.test_p1b27b2b3b2b3a_effectful_mount import _AtomicMechanicalFi
 
 
 @pytest.mark.skipif(not hasattr(os, "memfd_create"), reason="Linux memfd required")
-def test_effectful_witness_seals_with_missing_python_uapi_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    for attr in ("F_ADD_SEALS", "F_GET_SEALS", "F_SEAL_WRITE", "F_SEAL_GROW", "F_SEAL_SHRINK", "F_SEAL_SEAL"):
+def test_effectful_witness_seals_with_missing_python_uapi_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for attr in (
+        "F_ADD_SEALS",
+        "F_GET_SEALS",
+        "F_SEAL_WRITE",
+        "F_SEAL_GROW",
+        "F_SEAL_SHRINK",
+        "F_SEAL_SEAL",
+    ):
         monkeypatch.delattr(fcntl, attr, raising=False)
     add, get, required = _linux_seal_operations()
     assert (add, get, required) == (1033, 1034, 0x000F)

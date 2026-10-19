@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import re
 
-from oh_goon.core.errors import FleetPlanInvalid, FleetPlanInputRejected
+from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid
+from oh_goon.core.fleet_plan_output_refs import (
+    goon_output_reference,
+    replace_step_output_references,
+    step_output_reference,
+)
 from oh_goon.core.models.fleet_plan import (
     CommandPlanStep,
     CompiledExecutionTemplate,
     PlanStep,
     ResolvedPlanStep,
     StepStatusCondition,
-)
-from oh_goon.core.fleet_plan_output_refs import (
-    goon_output_reference,
-    replace_step_output_references,
-    step_output_reference,
 )
 from oh_goon.core.models.fleet_plan_composition import (
     PlanInputDefinition,
@@ -27,6 +27,12 @@ from oh_goon.core.models.fleet_plan_step_contract import StepPlanCacheSource, St
 _INPUT_PATTERN = re.compile(r"\$\{\{\s*inputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}")
 
 
+def input_reference(value: object) -> str | None:
+    """Recognize one complete input reference using the renderer's grammar."""
+    match = _INPUT_PATTERN.fullmatch(value) if isinstance(value, str) else None
+    return match.group(1) if match is not None else None
+
+
 def bind_inputs(
     compiled: CompiledExecutionTemplate,
     supplied: dict[str, PlanInputValue],
@@ -34,11 +40,20 @@ def bind_inputs(
     context: str,
 ) -> dict[str, PlanInputValue]:
     definitions = {item.name: item for item in compiled.inputs}
+    ambiguous = sorted(set(supplied).intersection(compiled.ambiguous_inputs))
+    if ambiguous:
+        raise FleetPlanInputRejected(
+            f"Fleet plan {context} inputs are shared by several Goons: {', '.join(ambiguous)}; "
+            "route each input explicitly with pass: or with:",
+            diagnostic_code="AMBIGUOUS_PROJECTED_INPUT",
+            input_names=tuple(ambiguous),
+        )
     unknown = sorted(set(supplied) - set(definitions))
     if unknown:
         raise FleetPlanInputRejected(
             f"Fleet plan {context} received unknown inputs: {', '.join(unknown)}",
-            diagnostic_code="UNKNOWN_INPUT", input_names=tuple(unknown),
+            diagnostic_code="UNKNOWN_INPUT",
+            input_names=tuple(unknown),
         )
     values: dict[str, PlanInputValue] = {}
     missing: list[str] = []
@@ -64,7 +79,8 @@ def bind_inputs(
     if missing:
         raise FleetPlanInputRejected(
             f"Fleet plan {context} requires inputs: {', '.join(sorted(missing))}",
-            diagnostic_code="MISSING_REQUIRED_INPUT", input_names=tuple(sorted(missing)),
+            diagnostic_code="MISSING_REQUIRED_INPUT",
+            input_names=tuple(sorted(missing)),
         )
     return values
 
@@ -110,7 +126,9 @@ def coerce_input(
         try:
             validate_domain_input_value(definition, value, label="value")
         except ValueError as exc:
-            raise FleetPlanInvalid(f"{prefix} has invalid {definition.input_type.value} syntax") from exc
+            raise FleetPlanInvalid(
+                f"{prefix} has invalid {definition.input_type.value} syntax"
+            ) from exc
         return value
     if definition.input_type is PlanInputType.BOOLEAN:
         if type(value) is bool:
@@ -173,9 +191,9 @@ def render_step(step: PlanStep, values: dict[str, PlanInputValue]) -> PlanStep:
 
 def _render_value(value, inputs: dict[str, PlanInputValue]):
     if isinstance(value, str):
-        direct = _INPUT_PATTERN.fullmatch(value)
+        direct = input_reference(value)
         if direct is not None:
-            name = direct.group(1)
+            name = direct
             if name not in inputs:
                 raise FleetPlanInvalid(f"Fleet plan references unresolved input {name!r}")
             return inputs[name]
@@ -326,6 +344,11 @@ def _resolve_output_reference(
     goon_reference = goon_output_reference(value)
     if goon_reference is not None:
         goon_id, output = goon_reference
+        if goon_id not in goon_aliases:
+            raise FleetPlanInvalid(
+                f"Goon output {goon_id}.{output} is unavailable from earlier imports; "
+                "place the producer before this consumer and check the import ID and published output"
+            )
         concrete = goon_aliases.get(goon_id, {}).get(output)
         if concrete is None:
             raise FleetPlanInvalid(f"Goon import {goon_id} does not publish output {output!r}")
@@ -337,9 +360,7 @@ def _resolve_output_reference(
         if step_id in goon_aliases:
             concrete = goon_aliases[step_id].get(output)
             if concrete is None:
-                raise FleetPlanInvalid(
-                    f"Goon import {step_id} does not publish output {output!r}"
-                )
+                raise FleetPlanInvalid(f"Goon import {step_id} does not publish output {output!r}")
             return concrete
         qualified = _qualified_step_id(prefix, step_id)
         return f"${{{{ steps.{qualified}.outputs.{output} }}}}"

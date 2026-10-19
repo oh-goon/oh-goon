@@ -2,6 +2,7 @@
 
 No test in this module provisions native effect rights or simulates TL-1 admission.
 """
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -10,18 +11,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry
-from oh_goon.core.models.run_admission import StrictFleetExecutionAdmission
-from oh_goon.core.models.run_admission import fleet_repository_scope
+from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.models.run_admission import StrictFleetExecutionAdmission, fleet_repository_scope
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.vocabulary import FleetScope, OperationAction
 from oh_goon.integrations.fleet_plan_run_execution import FleetPlanRunExecutor
-from oh_goon.services.fleet_run_lifecycle import FleetExecutionAuthority, _execution_authority_in
-from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.journal import Journal
+from oh_goon.services.fleet_run_lifecycle import FleetExecutionAuthority, _execution_authority_in
+from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
 from tests.factories.capabilities import capability_request
 from tests.unit.runtime.test_lace_wf03c_durable_consent import RUN, _admission, _admitted
 
@@ -33,6 +33,7 @@ def admitted_detail(tmp_path: Path) -> FleetRunDetail:
 class _Session:
     def execution_connection_scope(self):
         from contextlib import nullcontext
+
         return nullcontext()
 
 
@@ -42,8 +43,11 @@ def test_original_lifecycle_authority_carries_same_sqlite_run_detail(tmp_path: P
     journal = Journal(database)
     with database.transaction() as connection:
         journal.admit_run_in(
-            connection, RUN, intent,
-            fleet_repository_scope({repository.repository_id}), [repository],
+            connection,
+            RUN,
+            intent,
+            fleet_repository_scope({repository.repository_id}),
+            [repository],
         )
     # Executor inventory remains the original placement-validation owner.
     # This test does not fake a capacity PASS; it only observes which binding
@@ -68,22 +72,39 @@ def test_scheduler_forwards_one_original_detail_and_single_repository(tmp_path: 
 
     class Effects:
         def execute_fleet_target(
-            self, _intent, _capability, entry, _session, _isolation_backend=None,
-            *, repository_admission=None, admitted_run=None,
+            self,
+            _intent,
+            _capability,
+            entry,
+            _session,
+            _isolation_backend=None,
+            *,
+            repository_admission=None,
+            admitted_run=None,
         ):
             seen.append((entry.repository.repository_id, admitted_run, repository_admission))
 
     FleetTargetScheduler(Effects()).execute(
-        SimpleNamespace(), SimpleNamespace(),
-        [IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=detail.run.targets[0])],
-        _Session(), parallel_safe=False,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        [
+            IncludedRepositoryCatalogEntry(
+                scope=FleetScope.INCLUDED, repository=detail.run.targets[0]
+            )
+        ],
+        _Session(),
+        parallel_safe=False,
         isolation_backend=detail.execution.placement.isolation_backend,
         repository_admissions=detail.repository_admissions,
         admitted_run=detail,
     )
-    assert seen == [(
-        detail.run.targets[0].repository_id, detail, detail.repository_admissions[0],
-    )]
+    assert seen == [
+        (
+            detail.run.targets[0].repository_id,
+            detail,
+            detail.repository_admissions[0],
+        )
+    ]
     assert seen[0][1] is detail  # no independently reconstructed source/consent
 
 
@@ -95,13 +116,19 @@ def test_scheduler_does_not_invent_admitted_run_when_absent(tmp_path: Path) -> N
             keys.extend(kwargs.keys())
 
     from oh_goon.core.models.repository import RepositoryIdentity
+
     FleetTargetScheduler(Effects()).execute(
-        SimpleNamespace(), SimpleNamespace(),
-        [IncludedRepositoryCatalogEntry(
-            scope=FleetScope.INCLUDED,
-            repository=RepositoryIdentity(name="direct", path=tmp_path / "repo"),
-        )],
-        _Session(), parallel_safe=False, repository_admissions=(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        [
+            IncludedRepositoryCatalogEntry(
+                scope=FleetScope.INCLUDED,
+                repository=RepositoryIdentity(name="direct", path=tmp_path / "repo"),
+            )
+        ],
+        _Session(),
+        parallel_safe=False,
+        repository_admissions=(),
     )
     assert "admitted_run" not in keys
 
@@ -111,13 +138,19 @@ def test_execution_request_requires_exact_original_run_and_target(tmp_path: Path
     repository = detail.run.targets[0]
     repository.path.mkdir()
     original = capability_request(
-        repository.path, OperationAction.EXECUTE_PLAN, detail.run.target, fleet_run_id=RUN,
+        repository.path,
+        OperationAction.EXECUTE_PLAN,
+        detail.run.target,
+        fleet_run_id=RUN,
     )
     bound = replace(original, admitted_run=detail)
     assert bound.admitted_run is detail
 
     wrong_run = capability_request(
-        repository.path, OperationAction.EXECUTE_PLAN, detail.run.target, fleet_run_id="other-run",
+        repository.path,
+        OperationAction.EXECUTE_PLAN,
+        detail.run.target,
+        fleet_run_id="other-run",
     )
     with pytest.raises(ValueError, match="Run identity"):
         replace(wrong_run, admitted_run=detail)
@@ -125,7 +158,9 @@ def test_execution_request_requires_exact_original_run_and_target(tmp_path: Path
     alternative = detail.run.target.model_copy(update={"identity": object()})
     # A stale target is impossible to construct through normal Plan validation;
     # inject one at the claimed-effect boundary to prove the transport guard.
-    wrong_target = replace(original, attempt=original.attempt.model_copy(update={"target": alternative}))
+    wrong_target = replace(
+        original, attempt=original.attempt.model_copy(update={"target": alternative})
+    )
     with pytest.raises(ValueError, match="Plan target"):
         replace(wrong_target, admitted_run=detail)
 
@@ -149,7 +184,8 @@ def test_run_detail_is_not_a_mutable_lease_equality_dimension(tmp_path: Path) ->
 
 
 def test_original_preparation_selector_receives_admitted_run_without_native_effect(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     detail = admitted_detail(tmp_path)
     admitted: PlanIsolationBackendEvidence = detail.execution.placement.isolation_backend
@@ -165,14 +201,17 @@ def test_original_preparation_selector_receives_admitted_run_without_native_effe
         selection,
     )
     worker = FleetPlanRunExecutor(
-        None, process_isolation_backends=(), path_authority=None,
+        None,
+        process_isolation_backends=(),
+        path_authority=None,
     )
     # The strict preparation path requires original path authority prior to
     # selection. A non-None sentinel is sufficient: selection aborts first.
     worker._path_authority = object()
     with pytest.raises(RuntimeError, match="selection-cut-observed"):
         worker.prepare_strict_run(
-            detail.run.targets[0], detail.run.target.plan,
+            detail.run.targets[0],
+            detail.run.target.plan,
             cancel_requested=None,
             admitted_source_authority=detail.repository_admissions[0].source_authority,
             admitted_isolation_backend=admitted,

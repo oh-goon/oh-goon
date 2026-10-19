@@ -1,4 +1,5 @@
 """RUN-2: original Fleet projections, not a second status/log/journal owner."""
+
 from __future__ import annotations
 
 import json
@@ -34,12 +35,16 @@ class _OriginalRuns:
         return SimpleNamespace(
             run=SimpleNamespace(
                 fleet_run_id=run_id,
-                target=(SimpleNamespace(kind="recipe") if self.non_plan_target
-                        else SimpleNamespace(plan=SimpleNamespace(plan_id="p"))),
+                target=(
+                    SimpleNamespace(kind="recipe")
+                    if self.non_plan_target
+                    else SimpleNamespace(plan=SimpleNamespace(plan_id="p"))
+                ),
                 status=FleetRunStatus.COMPLETED,
                 progress=SimpleNamespace(
                     model_dump=lambda *, mode: {"total": 2, "succeeded": 2},
-                    completed=2, total=2,
+                    completed=2,
+                    total=2,
                 ),
             ),
             outcome=FleetRunOutcome.SUCCESS,
@@ -49,23 +54,34 @@ class _OriginalRuns:
         self.calls.append(("events", run_id, after, limit))
         return SimpleNamespace(
             run=SimpleNamespace(fleet_run_id=run_id),
-            events=(SimpleNamespace(sequence=7, event_type=SimpleNamespace(value="RUN_COMPLETED")),),
+            events=(
+                SimpleNamespace(sequence=7, event_type=SimpleNamespace(value="RUN_COMPLETED")),
+            ),
             next_sequence=7,
             journal_revision=80,
             has_more=False,
             model_dump=lambda *, mode: {
-                "run": {"fleet_run_id": run_id}, "events": [{"sequence": 7}],
-                "next_sequence": 7, "journal_revision": 80, "has_more": False,
+                "run": {"fleet_run_id": run_id},
+                "events": [{"sequence": 7}],
+                "next_sequence": 7,
+                "journal_revision": 80,
+                "has_more": False,
             },
         )
 
     def game_tape_live_output(self, run_id, *, after):
         self.calls.append(("live-output", run_id, after))
         return SimpleNamespace(
-            fleet_run_id=run_id, state="UNAVAILABLE", available=False,
-            chunks=(), next_sequence=after, model_dump=lambda *, mode: {
-                "fleet_run_id": run_id, "state": "UNAVAILABLE",
-                "available": False, "next_sequence": after,
+            fleet_run_id=run_id,
+            state="UNAVAILABLE",
+            available=False,
+            chunks=(),
+            next_sequence=after,
+            model_dump=lambda *, mode: {
+                "fleet_run_id": run_id,
+                "state": "UNAVAILABLE",
+                "available": False,
+                "next_sequence": after,
             },
         )
 
@@ -80,8 +96,11 @@ def test_status_projects_existing_owner_outcome_and_identity(capsys):
     assert _invoke(runs, "status", "run-x", "--json") == 0
     data = json.loads(capsys.readouterr().out)
     assert data == {
-        "schema": "oh-goon.plan-run-status/v1", "fleet_run_id": "run-x",
-        "plan_id": "p", "status": "COMPLETED", "outcome": "SUCCESS",
+        "schema": "oh-goon.plan-run-status/v1",
+        "fleet_run_id": "run-x",
+        "plan_id": "p",
+        "status": "COMPLETED",
+        "outcome": "SUCCESS",
         "progress": {"total": 2, "succeeded": 2},
     }
     assert runs.calls == [("get", "run-x")]

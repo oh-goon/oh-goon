@@ -1,18 +1,22 @@
 """DB2: X0 rejects removal of the original owner's durability admission."""
+
 from pathlib import Path
 
 import pytest
+from tests.unit.repository_tooling.test_db1b2_database_owner_architecture import _source
 
 from oh_goon.repository_tooling.architecture.canonical_database_owner_contract import (
     check_canonical_database_owner,
 )
-from tests.unit.repository_tooling.test_db1b2_database_owner_architecture import _source
 
 
 @pytest.mark.parametrize(
     "old, replacement",
     [
-        ("self._require_durable_connection_policy(connection)", "pass  # weakened connection policy"),
+        (
+            "self._require_durable_connection_policy(connection)",
+            "pass  # weakened connection policy",
+        ),
         ('connection.execute("PRAGMA synchronous")', 'connection.execute("SELECT 2")'),
         ('connection.execute("PRAGMA foreign_keys")', 'connection.execute("SELECT 1")'),
     ],

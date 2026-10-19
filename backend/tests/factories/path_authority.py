@@ -11,16 +11,13 @@ from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.path_authority import StrictHostPathAuthority
 from oh_goon.repository_tooling.goon_static_admission import canonical_step_required_tools
 
-
 _ROOT = Path(__file__).resolve().parents[3]
 _P0_AUTHORITY_TOOLS = canonical_step_required_tools(
     _ROOT,
     goon="oh-goon/backend-p0",
     step_id="make",
 )
-_P0_RUNTIME_TOOLS = tuple(
-    sorted(set(_P0_AUTHORITY_TOOLS) | set(SHELL_RUNTIME_SUPPORT_TOOLS))
-)
+_P0_RUNTIME_TOOLS = tuple(sorted(set(_P0_AUTHORITY_TOOLS) | set(SHELL_RUNTIME_SUPPORT_TOOLS)))
 _TOOLCHAIN_TEMPS: list[tempfile.TemporaryDirectory[str]] = []
 _HOST_TOOL_PATH = os.environ.get("PATH", os.defpath)
 

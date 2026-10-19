@@ -1,9 +1,8 @@
 import subprocess
 from pathlib import Path
 
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api.app import app as api_app
+from tests.integration.api.client import authenticated_api_client
 
 
 def test_browser_exclusion_is_shared_local_policy(tmp_path: Path) -> None:

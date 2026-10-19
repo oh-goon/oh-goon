@@ -1,8 +1,11 @@
 """CLI presentation of canonical redacted Plan-owner diagnostics."""
+
 from __future__ import annotations
 
 import json
+
 from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
+
 
 def print_safe_plan_diagnostic(exc: Exception, *, as_json: bool) -> None:
     report = safe_plan_diagnostic(exc)

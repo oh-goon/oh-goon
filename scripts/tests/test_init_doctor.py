@@ -13,16 +13,25 @@ def _run(*, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[st
     if env:
         merged.update(env)
     return subprocess.run(
-        ["sh", str(SCRIPT)], cwd=ROOT, env=merged, text=True, capture_output=True, check=False
+        ["sh", str(SCRIPT)],
+        cwd=ROOT,
+        env=merged,
+        text=True,
+        capture_output=True,
+        check=False,
     )
 
 
-def test_doctor_succeeds_on_current_writable_paths_and_leaves_no_probe_bytes(tmp_path: Path) -> None:
+def test_doctor_succeeds_on_current_writable_paths_and_leaves_no_probe_bytes(
+    tmp_path: Path,
+) -> None:
     uv_cache = tmp_path / "uv"
     npm_cache = tmp_path / "npm"
     uv_cache.mkdir()
     npm_cache.mkdir()
-    result = _run(env={"UV_CACHE_DIR": str(uv_cache), "npm_config_cache": str(npm_cache)})
+    result = _run(
+        env={"UV_CACHE_DIR": str(uv_cache), "npm_config_cache": str(npm_cache)}
+    )
     assert result.returncode == 0, result.stderr
     assert "OH-GOON INIT DOCTOR" in result.stdout
     assert "diagnostic only" in result.stdout.lower()

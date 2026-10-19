@@ -10,12 +10,23 @@ from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from tests.unit.services.test_group_a_verified_ingress_authorities import publish, setup
 
 
-@pytest.mark.parametrize("attack", (
-    "missing", "false", "none", "exception", "revoked_after_precheck", "wrong_lease", "wrong_epoch",
-))
+@pytest.mark.parametrize(
+    "attack",
+    (
+        "missing",
+        "false",
+        "none",
+        "exception",
+        "revoked_after_precheck",
+        "wrong_lease",
+        "wrong_epoch",
+    ),
+)
 def test_commit_time_fence_rejects_and_rolls_back_both_journals(attack: str) -> None:
     db, journal, env, contract, keys, witnesses = setup()
-    db.execute("CREATE TABLE durable_lease (run_id TEXT PRIMARY KEY, epoch INTEGER, identity TEXT, active INTEGER)")
+    db.execute(
+        "CREATE TABLE durable_lease (run_id TEXT PRIMARY KEY, epoch INTEGER, identity TEXT, active INTEGER)"
+    )
     db.execute("INSERT INTO durable_lease VALUES ('run-one', 7, 'lease-exact', 1)")
     seen: list[bool] = []
 

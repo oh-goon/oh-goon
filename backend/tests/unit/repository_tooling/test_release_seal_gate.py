@@ -8,7 +8,6 @@ import pytest
 from oh_goon.repository_tooling.release import seal_gate
 
 
-
 def test_module_environment_rejects_ambient_pythonpath_authority(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -20,6 +19,7 @@ def test_module_environment_rejects_ambient_pythonpath_authority(
     assert environment["PYTHONPATH"] == str(tmp_path / "backend" / "src")
     assert "/ambient/host/source" not in environment["PYTHONPATH"]
     assert environment["PYTHONDONTWRITEBYTECODE"] == "1"
+
 
 def test_source_seal_gate_runs_complete_authorities_in_order(tmp_path: Path, monkeypatch) -> None:
     observed: list[tuple[Path, str, tuple[str, ...]]] = []

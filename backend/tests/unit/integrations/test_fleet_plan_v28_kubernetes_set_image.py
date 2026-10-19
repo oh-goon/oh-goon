@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from functools import cache
 import json
+from functools import cache
 from pathlib import Path
 
 import pytest
 
-import oh_goon.integrations._fleet_plan_host_resources as host_resources
 import oh_goon.integrations.fleet_plan_kubernetes_transport as kubernetes_transport
 from oh_goon.cli_plan_summary import resolved_plan_summary
 from oh_goon.core.errors import ExternalEffectOutcomeUnknown, FleetPlanInvalid
@@ -17,7 +16,6 @@ from oh_goon.core.fleet_plan_tool_requirements import (
 )
 from oh_goon.core.models.fleet_plan import ResolvedKubernetesSetImageStep
 from oh_goon.core.path_layouts import AttemptPathLayout
-from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.engine.command import CommandResult
 from oh_goon.integrations._fleet_plan_host_resources import (
     capture_host_environment,
@@ -29,7 +27,6 @@ from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
 from oh_goon.integrations.fleet_plan_kubernetes_execution import execute_kubernetes_set_image
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.shipped_templates import GOON_TEMPLATES, PLAN_TEMPLATES
-
 
 
 def _resolver() -> FleetPlanResolver:
@@ -79,7 +76,6 @@ def _deployment(*, image: str, resource_version: str, generation: int) -> dict:
     }
 
 
-
 def test_kubernetes_credentials_fail_malformed_cheap_preflight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -96,7 +92,7 @@ def test_kubernetes_credentials_fail_malformed_cheap_preflight(
 
 def test_kubernetes_template_resolves_to_v28_exact_api_authority() -> None:
     plan = _plan()
-    assert plan.contract_version == 43
+    assert plan.contract_version == 44
     assert len(plan.steps) == 1
     step = plan.steps[0]
     assert isinstance(step, ResolvedKubernetesSetImageStep)

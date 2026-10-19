@@ -8,19 +8,19 @@ from oh_goon.core.models.shared_plan import (
     GoonTemplateSummary,
 )
 from oh_goon.core.template_identity import template_classification
-from oh_goon.integrations.fleet_plan_source_snapshot import (
-    FleetPlanSourceSnapshot,
-    read_fleet_plan_source,
-)
 from oh_goon.integrations.canonical_goon_tool_authority import (
     apply_canonical_goon_tool_authority,
     load_canonical_goon_tool_authority,
 )
+from oh_goon.integrations.fleet_plan_source_snapshot import (
+    FleetPlanSourceSnapshot,
+    read_fleet_plan_source,
+)
 from oh_goon.runtime.template_discovery import (
     discover_template_packages,
     template_package,
-    validate_template_package,
     template_readme_description,
+    validate_template_package,
 )
 
 

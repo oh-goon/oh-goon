@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import shutil
 import subprocess
@@ -9,6 +8,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+from oh_goon.core.file_digest import sha256_file
+from oh_goon.integrations.exact_file_write import (
+    publish_text_file,
+    replace_prepared_file,
+    sync_prepared_path,
+)
 from oh_goon.repository_tooling.release.package_slim import (
     ROOT,
     archive_source_identity,
@@ -18,11 +23,6 @@ from oh_goon.repository_tooling.release.package_slim import (
 from oh_goon.repository_tooling.release.seal_gate import (
     require_source_seal_gate,
 )
-from oh_goon.integrations.exact_file_write import (
-    publish_text_file,
-    replace_prepared_file,
-    sync_prepared_path,
-)
 
 OUTPUT_DIR = ROOT / "release-artifacts"
 ARCHIVE = OUTPUT_DIR / "source.zip"
@@ -31,8 +31,6 @@ SHA_OUTPUT = OUTPUT_DIR / "archive-sha256.txt"
 MANIFEST = OUTPUT_DIR / "source-manifest.json"
 _SEAL_GATE_MODULE = "oh_goon.repository_tooling.release.seal_gate"
 
-
-from oh_goon.core.file_digest import sha256_file
 
 def _sha256(path: Path) -> str:
     return sha256_file(path)

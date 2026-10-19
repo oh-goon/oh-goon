@@ -1,10 +1,15 @@
 import pytest
 
 from oh_goon.core.game_tape_runtime_authority import project_runtime_authority_evidence
-from oh_goon.core.models.game_tape_runtime_authority import RuntimeAuthorityEvidence, RuntimeAuthorityEvidenceKind
+from oh_goon.core.models.game_tape_runtime_authority import (
+    RuntimeAuthorityEvidence,
+    RuntimeAuthorityEvidenceKind,
+)
 
 
-def _row(index: int, kind: RuntimeAuthorityEvidenceKind = RuntimeAuthorityEvidenceKind.WATCHDOG) -> RuntimeAuthorityEvidence:
+def _row(
+    index: int, kind: RuntimeAuthorityEvidenceKind = RuntimeAuthorityEvidenceKind.WATCHDOG
+) -> RuntimeAuthorityEvidence:
     return RuntimeAuthorityEvidence(
         kind=kind,
         authority_identity=f"sha256:{index:064x}",
@@ -23,7 +28,9 @@ def test_projection_is_diagnostic_and_cannot_be_execution_authority() -> None:
 
 def test_projection_covers_runtime_authority_fact_families_without_merging_them() -> None:
     kinds = tuple(RuntimeAuthorityEvidenceKind)
-    receipt = project_runtime_authority_evidence([_row(i + 1, kind) for i, kind in enumerate(kinds)])
+    receipt = project_runtime_authority_evidence(
+        [_row(i + 1, kind) for i, kind in enumerate(kinds)]
+    )
     assert tuple(row.kind for row in receipt.evidence) == kinds
 
 

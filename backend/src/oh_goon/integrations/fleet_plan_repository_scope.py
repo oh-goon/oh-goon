@@ -7,12 +7,12 @@ from types import MappingProxyType
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedOciBuildStep
-from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.models.fleet_plan_evidence import (
     CicdRepositoryAdmissionEvidence,
     PlanImportApplicabilityEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
+from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.integrations.fleet_plan_admission import validate_cicd_snapshot_requirements
 from oh_goon.integrations.fleet_plan_containerfile_policy import (
     validate_oci_build_repository_policy,
@@ -53,7 +53,9 @@ def bind_repository_scope(
             admission=None,
             import_applicability=applicability,
             import_skips=import_skips,
-            active_step_ids=tuple(step.step_id for step in plan.steps if step.step_id not in import_skips),
+            active_step_ids=tuple(
+                step.step_id for step in plan.steps if step.step_id not in import_skips
+            ),
         )
 
     admission = validate_cicd_snapshot_requirements(repository, plan.requirements)
@@ -62,7 +64,9 @@ def bind_repository_scope(
         admission=admission,
         import_applicability=applicability,
         import_skips=import_skips,
-        active_step_ids=tuple(step.step_id for step in plan.steps if step.step_id not in import_skips),
+        active_step_ids=tuple(
+            step.step_id for step in plan.steps if step.step_id not in import_skips
+        ),
     )
 
 

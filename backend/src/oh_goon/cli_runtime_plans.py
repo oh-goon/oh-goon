@@ -9,18 +9,20 @@ from collections.abc import Callable
 from contextvars import ContextVar
 
 from oh_goon.application import ApplicationRuntime
-from oh_goon.cli_plan_inputs import plan_inputs
-from oh_goon.cli_plan_run_readback import run_plan_readback
+from oh_goon.cli_agent_providers import agent_connection_from_args
 from oh_goon.cli_plan_definition_commands import (
     _check,
-    _inputs,
     _diff,
     _explain,
+    _inputs,
     _prepare,
     _preview,
     _validate,
 )
-from oh_goon.core.errors import FleetDomainError
+from oh_goon.cli_plan_inputs import plan_inputs
+from oh_goon.cli_plan_run_readback import run_plan_readback
+from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
+from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
     FailedPlanStepTeardownEvidence,
@@ -63,8 +65,9 @@ _RUN_RESULT_SCHEMA = "oh-goon.plan-run-result/v1"
 _RUN_JSON_PROGRESS: ContextVar[bool] = ContextVar("oh_goon_run_json_progress", default=False)
 
 
-def _run_result(*, fleet_run_id: str, plan_id: str | None, status: str,
-                outcome: str | None = None) -> dict[str, str | None]:
+def _run_result(
+    *, fleet_run_id: str, plan_id: str | None, status: str, outcome: str | None = None
+) -> dict[str, str | None]:
     """Presentation of original Fleet facts; never a second terminal classifier."""
     return {
         "schema": _RUN_RESULT_SCHEMA,
@@ -77,10 +80,17 @@ def _run_result(*, fleet_run_id: str, plan_id: str | None, status: str,
 
 def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     if getattr(args, "as_json", False) and args.repair_handoff:
-        print(json.dumps({"schema": _RUN_RESULT_SCHEMA, "status": "error",
-                          "fleet_run_id": None,
-                          "message": "--json and --repair-handoff cannot be combined"},
-                         sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    "schema": _RUN_RESULT_SCHEMA,
+                    "status": "error",
+                    "fleet_run_id": None,
+                    "message": "--json and --repair-handoff cannot be combined",
+                },
+                sort_keys=True,
+            )
+        )
         return 2
     admitted = None
     as_json = bool(getattr(args, "as_json", False))
@@ -92,31 +102,63 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         # Only after the exact enrolled-Run preflight may caller bytes be read.
         # The frozen target transports the identity; the original Fleet owners
         # reprove it before admission and again on the worker before any work.
+        repair_budget = _selected_repair_budget(args)
         selected_inputs = plan_inputs(args)
         snapshot = getattr(args, "_caller_input_file_snapshot", None)
         source_identity = (
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
+        if repair_budget is not None:
+            review = getattr(args, "review_passes", None) is not None
+            review_options = {}
+            if review:
+                review_options = dict(
+                    review_write_roots=tuple(args.repair_write_root),
+                    agent_connection=agent_connection_from_args(args),
+                )
+            result = runtime.plans.repair(
+                args.plan,
+                budget=repair_budget,
+                repository_id=args.repository_ids[0],
+                inputs=selected_inputs,
+                agent_repository_root=args.agent_repository_root,
+                agent_skill_root=args.agent_skill_root,
+                allowed_agent_acceptance=tuple(args.allow_agent_acceptance),
+                fleet_run_id=args.fleet_run_id,
+                lock_path=args.lock_file,
+                extensions_path=args.extensions,
+                requested_priority=args.priority,
+                **review_options,
+            )
+            return _print_agent_repair_result(result, as_json=as_json)
         admitted = runtime.plans.run(
             args.plan,
             extensions_path=args.extensions,
             repository_ids=set(args.repository_ids) if args.repository_ids else None,
             all_repositories=args.all_repositories,
-            fleet_run_id=args.fleet_run_id, requested_priority=args.priority,
+            fleet_run_id=args.fleet_run_id,
+            requested_priority=args.priority,
             inputs=selected_inputs,
             **source_identity,
             lock_path=args.lock_file,
             agent_repository_root=args.agent_repository_root,
             agent_skill_root=args.agent_skill_root,
             allowed_agent_acceptance=tuple(args.allow_agent_acceptance or ()),
+            agent_connection=lambda: agent_connection_from_args(args),
         )
         plan_id = admitted.target.plan.plan_id if admitted.target is not None else None
         if not args.wait:
             if as_json:
-                print(json.dumps(_run_result(
-                    fleet_run_id=admitted.fleet_run_id, plan_id=plan_id,
-                    status=admitted.status.value,
-                ), sort_keys=True))
+                print(
+                    json.dumps(
+                        _run_result(
+                            fleet_run_id=admitted.fleet_run_id,
+                            plan_id=plan_id,
+                            status=admitted.status.value,
+                        ),
+                        sort_keys=True,
+                    )
+                )
             else:
                 print(f"Fleet Run ID: {admitted.fleet_run_id}")
                 print(f"Plan ID: {plan_id or 'unknown'}")
@@ -132,12 +174,14 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             token = _RUN_JSON_PROGRESS.set(True)
             try:
                 detail = _wait_for_terminal_with_progress(
-                    runtime, admitted.fleet_run_id, admitted_run=admitted)
+                    runtime, admitted.fleet_run_id, admitted_run=admitted
+                )
             finally:
                 _RUN_JSON_PROGRESS.reset(token)
         else:
             detail = _wait_for_terminal_with_progress(
-                runtime, admitted.fleet_run_id, admitted_run=admitted)
+                runtime, admitted.fleet_run_id, admitted_run=admitted
+            )
     except KeyboardInterrupt:
         if admitted is not None:
             try:
@@ -145,31 +189,48 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             except FleetDomainError:
                 pass
         if as_json:
-            print(json.dumps({
-                "schema": _RUN_RESULT_SCHEMA, "status": "interrupted",
-                "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
-            }, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "schema": _RUN_RESULT_SCHEMA,
+                        "status": "interrupted",
+                        "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
+                    },
+                    sort_keys=True,
+                )
+            )
         else:
             print("Plan run interrupted.")
         return 130
     except (FleetDomainError, ValueError) as exc:
         if as_json:
             # Do not assert no effects: a failure can occur after Run creation.
-            print(json.dumps({
-                "schema": _RUN_RESULT_SCHEMA, "status": "error",
-                "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
-                "message": str(exc),
-            }, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "schema": _RUN_RESULT_SCHEMA,
+                        "status": "error",
+                        "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
+                        "message": str(exc),
+                    },
+                    sort_keys=True,
+                )
+            )
         else:
             print(str(exc))
         return 2
     if as_json:
-        print(json.dumps(_run_result(
-            fleet_run_id=admitted.fleet_run_id,
-            plan_id=admitted.target.plan.plan_id if admitted.target is not None else None,
-            status=detail.run.status.value,
-            outcome=detail.outcome.value,
-        ), sort_keys=True))
+        print(
+            json.dumps(
+                _run_result(
+                    fleet_run_id=admitted.fleet_run_id,
+                    plan_id=admitted.target.plan.plan_id if admitted.target is not None else None,
+                    status=detail.run.status.value,
+                    outcome=detail.outcome.value,
+                ),
+                sort_keys=True,
+            )
+        )
     else:
         print(f"Execution status: {detail.run.status.value}")
         print(f"Outcome: {detail.outcome.value}")
@@ -178,6 +239,94 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     if args.repair_handoff:
         _print_repair_handoff(runtime, detail)
     return 1
+
+
+def _selected_repair_budget(args) -> AgentRepairBudget | None:
+    review_passes = getattr(args, "review_passes", None)
+    if review_passes is not None and getattr(args, "repair_attempts", None) is not None:
+        raise FleetPlanInvalid("choose --review-passes or --repair-attempts")
+    if review_passes is not None and not getattr(args, "repair_write_root", None):
+        raise FleetPlanInvalid("review-repair requires at least one explicit --repair-write-root")
+    if review_passes is not None:
+        from oh_goon.integrations.agent_patch_apply import validate_write_roots
+
+        validate_write_roots(tuple(args.repair_write_root))
+    if review_passes is None and getattr(args, "repair_write_root", None):
+        raise FleetPlanInvalid("repair write roots require --review-passes")
+    if getattr(args, "agent_model_profile", None) or getattr(args, "agent_providers_file", None):
+        if (
+            not args.standard_local
+            or not args.wait
+            or args.agent_repository_root is None
+            or args.agent_skill_root is None
+            or not args.allow_agent_acceptance
+            or args.repair_attempts is not None
+        ):
+            raise FleetPlanInvalid("provider selection requires a standard-local Agent invocation")
+    limits = (
+        review_passes if review_passes is not None else getattr(args, "repair_attempts", None),
+        getattr(args, "repair_timeout", None),
+        getattr(args, "repair_step_timeout", None),
+    )
+    if all(value is None for value in limits):
+        return None
+    if (
+        any(value is None for value in limits)
+        or not args.standard_local
+        or not args.wait
+        or args.all_repositories
+        or len(args.repository_ids or ()) != 1
+        or getattr(args, "inputs_file", None) is not None
+        or args.repair_handoff
+        or args.agent_repository_root is None
+        or args.agent_skill_root is None
+        or not args.allow_agent_acceptance
+    ):
+        raise FleetPlanInvalid(
+            "repair requires all three limits, --standard-local --wait, one repository, "
+            "Agent roots and acceptance; inputs-file and repair-handoff are unavailable"
+        )
+    return AgentRepairBudget(
+        max_attempts=limits[0], timeout_seconds=limits[1], step_timeout_seconds=limits[2]
+    )
+
+
+def _print_agent_repair_result(result, *, as_json: bool) -> int:
+    receipt = {
+        "schema": "oh-goon.agent-repair-result/v1",
+        "repair_id": result.repair_id,
+        "stop_reason": result.stop_reason.value,
+        "test_passed": result.test_passed,
+        "converged": result.converged,
+        "budget": result.budget.model_dump(mode="json"),
+        "message": result.message,
+        "admitted_run_ids": list(result.admitted_run_ids),
+        "unresolved_run_ids": list(result.unresolved_run_ids),
+        "attempts": [
+            {
+                "fleet_run_id": detail.run.fleet_run_id,
+                "status": detail.run.status.value,
+                "outcome": detail.outcome.value,
+                "game_tape_status": detail.game_tape.status.value,
+                "execution_digest": detail.run.target.execution_digest,
+            }
+            for detail in result.attempts
+        ],
+    }
+    if as_json:
+        print(json.dumps(receipt, sort_keys=True))
+    else:
+        print(f"Repair: {result.repair_id}")
+        print(f"Stop reason: {result.stop_reason.value}")
+        for attempt in receipt["attempts"]:
+            print(f"Run {attempt['fleet_run_id']}: {attempt['status']} / {attempt['outcome']}")
+    return (
+        0
+        if result.test_passed or result.converged
+        else 130
+        if result.stop_reason.value == "cancelled"
+        else 1
+    )
 
 
 _PROGRESS_WAIT_SLICE_SECONDS = 1.0
@@ -271,9 +420,9 @@ def _plan_step_owner_labels(detail) -> dict[str, tuple[int, int, str]]:
 def _activity_markers(text: str) -> tuple[str, ...]:
     prefix = "OH-GOON ACTIVITY:"
     return tuple(
-        line[len(prefix):].strip()
+        line[len(prefix) :].strip()
         for line in text.splitlines()
-        if line.startswith(prefix) and line[len(prefix):].strip()
+        if line.startswith(prefix) and line[len(prefix) :].strip()
     )
 
 
@@ -326,8 +475,7 @@ def _emit_observed_step_activity(
             else:
                 index, total, goon_name = owner
                 _progress_print(
-                    f"Activity detail: Goon {index}/{total} — {goon_name} | "
-                    f"{marker}{attempt}"
+                    f"Activity detail: Goon {index}/{total} — {goon_name} | {marker}{attempt}"
                 )
             emitted = True
     return max(after, batch.next_sequence), emitted, current_activity
@@ -602,7 +750,9 @@ def _print_repair_workflow(
     print("1. Give this failure block to your coding agent.")
     print("2. Fix only the observed failure; do not weaken tests, locks, coverage, or timeouts.")
     if teardown_only:
-        print("3. Inspect the durable teardown reason above; do not treat the successful step command as the failing operation.")
+        print(
+            "3. Inspect the durable teardown reason above; do not treat the successful step command as the failing operation."
+        )
         print("4. Normal recovery and final proof: make certify")
         return
     print(f"3. Focused diagnostic command: {command}")
@@ -649,7 +799,9 @@ def _schedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     try:
         selected_inputs = plan_inputs(args)
         snapshot = getattr(args, "_caller_input_file_snapshot", None)
-        source_identity = ({"caller_input_file": snapshot.authority()} if snapshot is not None else {})
+        source_identity = (
+            {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
+        )
         definition = runtime.plans.schedule(
             args.plan,
             schedule_id=args.schedule_id,
@@ -674,7 +826,9 @@ def _reschedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     try:
         selected_inputs = plan_inputs(args)
         snapshot = getattr(args, "_caller_input_file_snapshot", None)
-        source_identity = ({"caller_input_file": snapshot.authority()} if snapshot is not None else {})
+        source_identity = (
+            {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
+        )
         definition = runtime.plans.reschedule(
             args.plan,
             schedule_id=args.schedule_id,

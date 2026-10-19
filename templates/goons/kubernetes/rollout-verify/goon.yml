@@ -2,16 +2,22 @@ version: 1
 inputs:
   kubernetes_api_hostname:
     type: hostname
+    description: Hostname of the selected Kubernetes API endpoint
   namespace:
     type: kubernetes_name
+    description: Namespace containing the selected workload
   deployment:
     type: kubernetes_deployment_name
+    description: Exact Kubernetes Deployment name
   container:
     type: kubernetes_name
+    description: Named Deployment container to update or verify
   expected_generation:
     type: string
+    description: Exact Deployment generation returned by the preceding update
   expected_image:
     type: string
+    description: Exact image reference returned by the preceding update
 env:
   KUBERNETES_TOKEN:
     from: host

@@ -7,9 +7,7 @@ from oh_goon.repository_tooling.architecture.common import Violation
 
 def _check_multitab_schedule_uniqueness(root: Path) -> list[Violation]:
     """Protect the durable database uniqueness boundary for Schedule starts."""
-    database_schema = (
-        root / "backend" / "src" / "oh_goon" / "runtime" / "_database_schema.py"
-    )
+    database_schema = root / "backend" / "src" / "oh_goon" / "runtime" / "_database_schema.py"
     if not database_schema.is_file():
         return [
             Violation(

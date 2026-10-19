@@ -19,7 +19,6 @@ from oh_goon.core.models.run_admission import (
     DirectFleetExecutionAdmission,
     fleet_repository_scope,
 )
-from oh_goon.core.projections.fleet_snapshot_provenance import snapshot_payload
 from oh_goon.core.projections import (
     FleetProjectionContext,
     build_fleet_snapshot,
@@ -27,6 +26,7 @@ from oh_goon.core.projections import (
     explain_operation,
     explain_repository_guidance,
 )
+from oh_goon.core.projections.fleet_snapshot_provenance import snapshot_payload
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
     FleetRunStatus,

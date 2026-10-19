@@ -8,15 +8,14 @@ import pytest
 
 from oh_goon.core.errors import (
     CandidateCheckpointStale,
-    ExecutionAssignmentStale,
     WorkspaceFenceUnproven,
     WorkspaceLeaseBusy,
     WorkspaceLeaseExpired,
     WorkspaceLeaseLost,
 )
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.recovery_lifecycle import RecoveryFailureEvidence
 from oh_goon.core.models.workspace_lease import WriterQuiescenceEvidence
+from oh_goon.core.product_identity import stable_id
 from oh_goon.core.recovery_lifecycle import RecoveryLifecycle
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
@@ -27,7 +26,9 @@ from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
 
 def _git(*args: str, cwd: Path) -> str:
-    return subprocess.run(("git", *args), cwd=cwd, text=True, capture_output=True, check=True).stdout.strip()
+    return subprocess.run(
+        ("git", *args), cwd=cwd, text=True, capture_output=True, check=True
+    ).stdout.strip()
 
 
 def _candidate(tmp_path: Path):
@@ -42,12 +43,16 @@ def _candidate(tmp_path: Path):
     revision = _git("rev-parse", "HEAD", cwd=repository)
     database = LocalDatabase(tmp_path / "state" / "oh-goon.db", journal_mode="DELETE")
     manager = RepositoryWorkspaceAuthority(database)
-    read = manager.request(repository_id="repo", base_revision=revision, kind=WorkspaceKind.READ_SNAPSHOT)
+    read = manager.request(
+        repository_id="repo", base_revision=revision, kind=WorkspaceKind.READ_SNAPSHOT
+    )
     read_allocated = manager.allocate(read.workspace_id, expected_state_version=0)
     _read_ready, binding = manager.materialize_read_snapshot(
         read, repository, expected_state_version=read_allocated.state_version
     )
-    worktree = manager.request(repository_id="repo", base_revision=revision, kind=WorkspaceKind.WORKTREE)
+    worktree = manager.request(
+        repository_id="repo", base_revision=revision, kind=WorkspaceKind.WORKTREE
+    )
     allocated = manager.allocate(worktree.workspace_id, expected_state_version=0)
     ready, checkpoint = manager.materialize_worktree(
         worktree, repository, binding, expected_state_version=allocated.state_version
@@ -80,7 +85,9 @@ def _quiescent(lease):
         executor_generation=lease.executor_generation,
         quiescent=True,
         observed_at=now,
-        evidence_id=stable_id("writer-quiescence", {"lease": lease.lease_id, "at": now.isoformat()}),
+        evidence_id=stable_id(
+            "writer-quiescence", {"lease": lease.lease_id, "at": now.isoformat()}
+        ),
     )
 
 
@@ -131,7 +138,9 @@ def test_one_mutation_lease_is_current_and_state_is_fenced_by_generation(tmp_pat
         )
 
 
-def test_writer_authority_rejects_pid_only_and_release_requires_matching_quiescence(tmp_path: Path) -> None:
+def test_writer_authority_rejects_pid_only_and_release_requires_matching_quiescence(
+    tmp_path: Path,
+) -> None:
     database, manager, workspace, ready, checkpoint = _candidate(tmp_path)
     _authority, assignment = _assignment(database, manager, workspace, checkpoint)
     leases = WorkspaceLeaseStore(database, workspaces=manager)
@@ -164,7 +173,6 @@ def test_writer_authority_rejects_pid_only_and_release_requires_matching_quiesce
         leases.assert_current(writer_lease)
 
 
-
 def test_writer_start_rechecks_expiry_in_same_write_transaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -179,9 +187,7 @@ def test_writer_start_rechecks_expiry_in_same_write_transaction(
         expected_state_version=ready.state_version,
         ttl_seconds=1,
     )
-    monkeypatch.setattr(
-        "oh_goon.runtime.workspace_leases.utc_now", lambda: lease.expires_at
-    )
+    monkeypatch.setattr("oh_goon.runtime.workspace_leases.utc_now", lambda: lease.expires_at)
 
     with pytest.raises(WorkspaceLeaseExpired, match="expired before writer authority"):
         leases.mark_writer_started(
@@ -193,7 +199,9 @@ def test_writer_start_rechecks_expiry_in_same_write_transaction(
     assert observed.writer_authority_id is None
 
 
-def test_expired_writer_is_quarantined_when_revocation_cannot_be_proven(tmp_path: Path, monkeypatch) -> None:
+def test_expired_writer_is_quarantined_when_revocation_cannot_be_proven(
+    tmp_path: Path, monkeypatch
+) -> None:
     database, manager, workspace, ready, checkpoint = _candidate(tmp_path)
     _authority, assignment = _assignment(database, manager, workspace, checkpoint)
     leases = WorkspaceLeaseStore(database, workspaces=manager)
@@ -224,9 +232,13 @@ def test_expired_writer_is_quarantined_when_revocation_cannot_be_proven(tmp_path
     assert quarantined.current_lease_id is None
 
 
-def test_proven_release_allows_new_assignment_and_monotonic_lease_generation(tmp_path: Path) -> None:
+def test_proven_release_allows_new_assignment_and_monotonic_lease_generation(
+    tmp_path: Path,
+) -> None:
     database, manager, workspace, ready, checkpoint = _candidate(tmp_path)
-    authority, first_assignment = _assignment(database, manager, workspace, checkpoint, attempt="attempt-1")
+    authority, first_assignment = _assignment(
+        database, manager, workspace, checkpoint, attempt="attempt-1"
+    )
     leases = WorkspaceLeaseStore(database, workspaces=manager, assignments=authority)
     state, first = leases.acquire(
         workspace,
@@ -254,17 +266,26 @@ def test_proven_release_allows_new_assignment_and_monotonic_lease_generation(tmp
     assert second.lease_id != first.lease_id
 
 
-def test_admitted_recovery_gets_fresh_assignment_with_same_bounded_authority(tmp_path: Path) -> None:
+def test_admitted_recovery_gets_fresh_assignment_with_same_bounded_authority(
+    tmp_path: Path,
+) -> None:
     database, manager, workspace, _ready, checkpoint = _candidate(tmp_path)
     authority, first = _assignment(database, manager, workspace, checkpoint)
     work_identity = "sha256:" + "b" * 64
     failure = RecoveryFailureEvidence(
-        failure_class="environment", reason_code="executor-pressure",
-        work_identity=work_identity, detail_identity="sha256:" + "c" * 64,
+        failure_class="environment",
+        reason_code="executor-pressure",
+        work_identity=work_identity,
+        detail_identity="sha256:" + "c" * 64,
     )
     recovery = RecoveryLifecycle().admit(
-        previous_assignment=first, checkpoint=checkpoint, failure=failure,
-        lineage_id="lineage-1", attempt_ordinal=2, max_attempts=3, exact_work_identity=work_identity,
+        previous_assignment=first,
+        checkpoint=checkpoint,
+        failure=failure,
+        lineage_id="lineage-1",
+        attempt_ordinal=2,
+        max_attempts=3,
+        exact_work_identity=work_identity,
     )
 
     second = authority.issue_recovery_candidate_mutation(
@@ -285,12 +306,19 @@ def test_blocked_recovery_cannot_receive_assignment(tmp_path: Path) -> None:
     authority, first = _assignment(database, manager, workspace, checkpoint)
     work_identity = "sha256:" + "b" * 64
     failure = RecoveryFailureEvidence(
-        failure_class="product_assertion", reason_code="test-failed",
-        work_identity=work_identity, detail_identity="sha256:" + "c" * 64,
+        failure_class="product_assertion",
+        reason_code="test-failed",
+        work_identity=work_identity,
+        detail_identity="sha256:" + "c" * 64,
     )
     recovery = RecoveryLifecycle().admit(
-        previous_assignment=first, checkpoint=checkpoint, failure=failure,
-        lineage_id="lineage-1", attempt_ordinal=2, max_attempts=3, exact_work_identity=work_identity,
+        previous_assignment=first,
+        checkpoint=checkpoint,
+        failure=failure,
+        lineage_id="lineage-1",
+        attempt_ordinal=2,
+        max_attempts=3,
+        exact_work_identity=work_identity,
     )
     with pytest.raises(ValueError, match="Blocked recovery"):
         authority.issue_recovery_candidate_mutation(

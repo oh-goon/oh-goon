@@ -3,6 +3,7 @@
 The real original SQLite owner provides all transactions and backup verification.
 No fixture can promote offline evidence into live execution admission.
 """
+
 from __future__ import annotations
 
 import multiprocessing
@@ -99,12 +100,16 @@ def test_offline_snapshot_rejects_path_alias_and_mutated_bytes(tmp_path: Path) -
     assert db.durable_revision() == 0
 
 
-def test_source_cookie_mismatch_never_publishes_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_source_cookie_mismatch_never_publishes_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db = LocalDatabase(tmp_path / "operational.sqlite3")
     real_verify = LocalDatabase.verify_offline_backup
 
     def observe_wrong_cookie(receipt):
-        return real_verify(replace(receipt, database_identity_cookie=receipt.database_identity_cookie + 1))
+        return real_verify(
+            replace(receipt, database_identity_cookie=receipt.database_identity_cookie + 1)
+        )
 
     monkeypatch.setattr(LocalDatabase, "verify_offline_backup", staticmethod(observe_wrong_cookie))
     target = tmp_path / "snapshots" / "snapshot.sqlite3"
@@ -130,12 +135,18 @@ def test_original_fleet_atomic_ingress_survives_offline_snapshot_reopen(
         LocalDatabase.verify_offline_backup(receipt)
         offline = LocalDatabase(receipt.path)
         with offline.transaction() as connection:
-            assert connection.execute(
-                "SELECT COUNT(*) FROM lace_run_authority WHERE run_id='durable-run'"
-            ).fetchone()[0] == 1
-            kinds = [row[0] for row in connection.execute(
-                "SELECT event_kind FROM lace_run_events WHERE run_id='durable-run' ORDER BY run_seq"
-            )]
+            assert (
+                connection.execute(
+                    "SELECT COUNT(*) FROM lace_run_authority WHERE run_id='durable-run'"
+                ).fetchone()[0]
+                == 1
+            )
+            kinds = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT event_kind FROM lace_run_events WHERE run_id='durable-run' ORDER BY run_seq"
+                )
+            ]
             assert kinds == ["RUN_ADMITTED", "RUN_SIGNER_EPOCH_BOUND"]
             assert read_durable_revision(connection) == receipt.durable_revision
     finally:

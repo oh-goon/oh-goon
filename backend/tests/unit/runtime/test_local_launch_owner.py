@@ -18,7 +18,8 @@ def _store(tmp_path: Path) -> LocalLaunchEventStore:
 
 
 def test_owner_records_positive_runtime_facts_without_absorbing_native_runtime_authority(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     monkeypatch.setattr(
         "oh_goon.runtime.local_launch_owner.observe_process_birth",
@@ -67,5 +68,3 @@ def test_finish_before_ready_is_aborted_not_fake_stopped(tmp_path: Path, monkeyp
     owner.spawned(BACKEND_SERVICE, BACKEND_GENERATION, 99)
     manifest = owner.finish_owned_launch()
     assert manifest.lifecycle.state is LaunchLifecycleState.ABORTED
-
-

@@ -108,6 +108,7 @@ def test_stale_cancel_cannot_target_replacement_queue_entry(tmp_path: Path) -> N
     replacement = queue.enter("run-reused", max_entries=64)
 
     from oh_goon.core.errors import StateConflict
+
     with pytest.raises(StateConflict, match="queue entry changed"):
         queue.cancel("run-reused", expected_sequence=first.sequence)
 

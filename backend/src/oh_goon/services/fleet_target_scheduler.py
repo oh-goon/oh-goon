@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
@@ -11,6 +10,7 @@ from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
+from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.runtime.execution import ExecutionSession
 from oh_goon.services.repository_effect_execution import RepositoryEffectExecution
 

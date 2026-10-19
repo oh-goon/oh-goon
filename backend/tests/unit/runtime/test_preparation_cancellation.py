@@ -1,5 +1,5 @@
-from pathlib import Path
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -88,7 +88,10 @@ def test_repository_preparation_uses_bounded_callback_only_for_hot_prepare_loop(
         return False
 
     request = _request(repository, exact_cancel)
-    bounded = lambda: False
+
+    def bounded():
+        return False
+
     session = _PreparationSession(exact_cancel, bounded)
     executor = _PreparationExecutor()
     fence = _Fence()
@@ -153,6 +156,7 @@ def test_preparation_observer_reuses_one_native_handle_across_bounded_intervals(
 
     monkeypatch.setattr(database, "_open_admitted_observer_connection", original_observer_open)
     session.finish(lambda _connection: None)
+
 
 def test_persistent_preparation_observer_sees_external_fleet_cancellation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

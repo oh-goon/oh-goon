@@ -6,8 +6,8 @@ from pydantic import Field, model_validator
 
 from oh_goon.core.capability_model import operation_evidence_kind
 from oh_goon.core.models.base import ImmutableModel
-from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.canonical_result_semantics import CanonicalPlanResult
+from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet_plan_evidence import (
     FleetPlanResult,

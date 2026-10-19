@@ -11,20 +11,18 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import (
     PathExistsCondition,
     PathMissingCondition,
+    PlanStreamOutput,
     ResolvedExtensionStep,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
+    ResolvedLocalSearchAgentStep,
     ResolvedOciTagAssertStep,
     ResolvedPlanStep,
-    ResolvedLocalSearchAgentStep,
     StepStatusCondition,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanStepExecution,
     PublishedPlanOutputEvidence,
-)
-from oh_goon.core.models.fleet_plan_values import (
-    LiteralEnvironmentPart,
 )
 from oh_goon.core.path_authority import RepositoryPathSpace, repository_relative_parts
 
@@ -77,6 +75,8 @@ def validate_step_declared_paths(repository: Path, step: ResolvedPlanStep) -> No
     for artifact in getattr(step, "artifacts", ()):
         repository_relative_path(repository, artifact.path, kind=f"artifact for {step.step_id}")
     for output in getattr(step, "outputs", ()):
+        if isinstance(output, PlanStreamOutput):
+            continue
         repository_relative_path(
             repository, output.path, kind=f"published output for {step.step_id}"
         )
@@ -91,17 +91,27 @@ def collect_published_outputs(
     step: ResolvedPlanStep,
     *,
     producer_execution_identity: str | None = None,
+    streams: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, str], tuple[PublishedPlanOutputEvidence, ...]]:
     values: dict[str, str] = {}
     evidence: list[PublishedPlanOutputEvidence] = []
     for output in getattr(step, "outputs", ()):
-        payload = _read_published_output(
-            repository,
-            output.path,
-            step_id=step.step_id,
-            output_name=output.name,
-            max_bytes=output.max_bytes,
-        )
+        if isinstance(output, PlanStreamOutput):
+            if streams is None or output.stream not in streams:
+                raise FleetPlanInvalid("Native attempt output is unavailable for publication")
+            payload = streams[output.stream].encode("utf-8")
+            if len(payload) > output.max_bytes:
+                raise FleetPlanInvalid(
+                    f"Fleet plan step {step.step_id} output {output.name} exceeds {output.max_bytes} bytes"
+                )
+        else:
+            payload = _read_published_output(
+                repository,
+                output.path,
+                step_id=step.step_id,
+                output_name=output.name,
+                max_bytes=output.max_bytes,
+            )
         try:
             value = payload.decode("utf-8").strip()
         except UnicodeDecodeError as exc:
@@ -123,6 +133,7 @@ def collect_published_outputs(
             )
         )
     return values, tuple(evidence)
+
 
 def _read_published_output(
     repository: Path,
@@ -159,8 +170,7 @@ def _read_published_output(
         descriptor = os.open(path, flags)
     except FileNotFoundError as exc:
         raise FleetPlanInvalid(
-            f"Fleet plan step {step_id} did not publish required output "
-            f"{output_name}: {value}"
+            f"Fleet plan step {step_id} did not publish required output {output_name}: {value}"
         ) from exc
     except OSError as exc:
         raise FleetPlanInvalid(
@@ -171,8 +181,7 @@ def _read_published_output(
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
             raise FleetPlanInvalid(
-                f"Fleet plan step {step_id} did not publish required output "
-                f"{output_name}: {value}"
+                f"Fleet plan step {step_id} did not publish required output {output_name}: {value}"
             )
         chunks: list[bytes] = []
         remaining = max_bytes + 1
@@ -219,7 +228,9 @@ def bind_step_outputs(
     if isinstance(step, ResolvedLocalSearchAgentStep) and step.feedback_reference is not None:
         value = bind(step.feedback_reference)
         if not value.strip() or len(value.encode("utf-8")) > 2048:
-            raise FleetPlanInvalid("Agent failed-test feedback must be nonempty and at most 2048 UTF-8 bytes")
+            raise FleetPlanInvalid(
+                "Agent failed-test feedback must be nonempty and at most 2048 UTF-8 bytes"
+            )
         updates["feedback_value"] = value
     if hasattr(step, "argv"):
         updates["argv"] = tuple(bind(item) for item in step.argv)

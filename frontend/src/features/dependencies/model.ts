@@ -1,3 +1,4 @@
-export type DependencyRelationship = "all" | "direct" | "transitive";
-export type DependencyEvidence = "all" | "current" | "aged" | "stale";
-export type DependencyCoverage = "matching" | "proven_no_match" | "no_current_evidence";
+import type { DependencyTargetFilter } from "@generated/models";
+
+export type DependencyEvidence = NonNullable<DependencyTargetFilter["evidence"]>;
+export type DependencyCoverage = NonNullable<DependencyTargetFilter["coverage"]>;

@@ -47,6 +47,7 @@ steps:
     cicd_path.write_text(
         """version: 1
 execution:
+  purpose: cicd
   resources:
     cpu_millis: 2000
     memory_mib: 4096

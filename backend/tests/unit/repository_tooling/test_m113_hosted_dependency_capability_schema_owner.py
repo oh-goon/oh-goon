@@ -10,7 +10,6 @@ import pytest
 from oh_goon.repository_tooling import hosted_dependency_capability as capability
 from oh_goon.repository_tooling import hosted_diagnostic_receipt as receipt
 
-
 ROOT = Path(__file__).resolve().parents[4]
 SOURCE_ROOT = ROOT / "backend/src/oh_goon"
 OWNER_PATH = SOURCE_ROOT / "repository_tooling/hosted_dependency_capability.py"
@@ -120,7 +119,9 @@ def test_capability_evidence_tampering_remains_independently_rejected() -> None:
     _resign(payload)
 
     receipt._validate_host_capability_header(payload)
-    with pytest.raises(RuntimeError, match="no compatible required capability proof for cryptography"):
+    with pytest.raises(
+        RuntimeError, match="no compatible required capability proof for cryptography"
+    ):
         receipt._validate_host_capability_packages(payload)
 
 

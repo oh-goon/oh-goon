@@ -1,11 +1,18 @@
 from __future__ import annotations
+
 from oh_goon.core.capability_registry import resolve_bound_capability_intent
 from oh_goon.core.errors import JournalConflict
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.run_admission import FleetRepositoryScope, FleetRunAdmissionIntent, fleet_readmission_parent, fleet_rerun_parent
+from oh_goon.core.models.run_admission import (
+    FleetRepositoryScope,
+    FleetRunAdmissionIntent,
+    fleet_readmission_parent,
+    fleet_rerun_parent,
+)
 from oh_goon.core.run_identity import require_fleet_run_binding
 from oh_goon.core.vocabulary import FleetRunSource, FleetRunStatus
 from oh_goon.runtime.journal_view import JournalReadView
+
 
 def _require_valid_readmission(
     view: JournalReadView,
@@ -93,5 +100,3 @@ def _require_valid_rerun(
         raise JournalConflict(
             "Fleet rerun may only select exact repository identities captured by its parent"
         )
-
-

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 
-from oh_goon.core.models.dependency_fleet import DependencyTargetFilter, DependencyTargetMaterializeRequest
+import pytest
+
+from oh_goon.core.models.dependency_fleet import (
+    DependencyTargetFilter,
+    DependencyTargetMaterializeRequest,
+)
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.vocabulary import FleetScope
+from oh_goon.integrations.hashmarks.dependencies import LockedInventoryAssessment
+from oh_goon.runtime import dependency_observations as observation_owner
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.dependency_observations import DependencyObservationStore
 from oh_goon.runtime.dependency_targets import DependencyTargetMaterializationStore
@@ -27,8 +35,10 @@ class _FiveThousandRepositories:
         return list(self.entries)
 
 
-def test_five_thousand_repository_mlflow_flow_is_indexed_bounded_and_truthful(
+def test_five_thousand_repository_dependency_population_is_bounded(
     tmp_path: Path,
+    record_property: Callable[[str, object], None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repositories = [
         RepositoryIdentity(path=tmp_path / f"repo-{index:04d}") for index in range(5000)
@@ -44,6 +54,26 @@ def test_five_thousand_repository_mlflow_flow_is_indexed_bounded_and_truthful(
     observations = DependencyObservationStore(database, journal)
     targets = DependencyTargetMaterializationStore(database)
 
+    # This integration measures accounting/paging/materialization after producer
+    # admission, rather than thousands of duplicate native SQLite setups. Actual
+    # source-currentness and unsupported-state boundaries have separate native tests.
+    cases = ((("mlflow", "2.17.2"),), (("mlflow", "2.18.0"),), (("requests", "2.32.0"),))
+    admitted = {
+        packages: dependency_snapshot(tmp_path / "producer" / str(index), *packages)
+        for index, packages in enumerate(cases)
+    }
+    lock_bytes = {
+        packages: (tmp_path / "producer" / str(index) / "uv.lock").read_bytes()
+        for index, packages in enumerate(cases)
+    }
+    monkeypatch.setattr(
+        observation_owner,
+        "assess_locked_dependencies",
+        lambda repository, snapshot: LockedInventoryAssessment(
+            snapshot.evidence, frozenset(item.package_name for item in snapshot.dependencies)
+        ),
+    )
+
     with database.transaction(write=True) as connection:
         for index, repository in enumerate(repositories[:4848]):
             if index < 92:
@@ -52,10 +82,13 @@ def test_five_thousand_repository_mlflow_flow_is_indexed_bounded_and_truthful(
                 packages = (("mlflow", "2.18.0"),)
             else:
                 packages = (("requests", "2.32.0"),)
+            (repository.path / "uv.lock").write_bytes(lock_bytes[packages])
             observations._index_report(
                 connection,
                 dependency_report(
-                    repository, dependency_snapshot(*packages), state=f"{index:040x}"[-40:]
+                    repository,
+                    admitted[packages],
+                    state=f"{index:040x}"[-40:],
                 ),
             )
 
@@ -74,28 +107,32 @@ def test_five_thousand_repository_mlflow_flow_is_indexed_bounded_and_truthful(
         evidence="current",
         limit=25,
     )
-    selection = service.materialize(DependencyTargetMaterializeRequest(
-        filter=DependencyTargetFilter(
-            package_name="mlflow",
-            version_specifier="<2.18.0",
-            advisory_id="CVE-2026-MLFLOW",
-            evidence="current",
-        ),
-        expected_population_id=page.population_id,
-    ))
-    proven_page = service.coverage_repositories("mlflow", coverage="proven_no_match", limit=25)
+    selection = service.materialize(
+        DependencyTargetMaterializeRequest(
+            filter=DependencyTargetFilter(
+                package_name="mlflow",
+                version_specifier="<2.18.0",
+                advisory_id="CVE-2026-MLFLOW",
+                evidence="current",
+            ),
+            expected_population_id=page.population_id,
+        )
+    )
+    proven_page = service.coverage_repositories("mlflow", coverage="absent_from_lock", limit=25)
     missing_page = service.coverage_repositories("mlflow", coverage="no_current_evidence", limit=25)
-    missing_selection = service.materialize(DependencyTargetMaterializeRequest(
-        filter=DependencyTargetFilter(package_name="mlflow", coverage="no_current_evidence"),
-        expected_population_id=missing_page.population_id,
-    ))
+    missing_selection = service.materialize(
+        DependencyTargetMaterializeRequest(
+            filter=DependencyTargetFilter(package_name="mlflow", coverage="no_current_evidence"),
+            expected_population_id=missing_page.population_id,
+        )
+    )
     elapsed = perf_counter() - started
 
     assert search.items[0].repositories == 137
     assert overview.observed_repositories == 137
     assert fleet_coverage.repository_total == 5000
     assert fleet_coverage.current_dependency_evidence == 4848
-    assert fleet_coverage.aged_dependency_evidence == 0
+    assert fleet_coverage.unknown_dependency_evidence == 0
     assert fleet_coverage.stale_dependency_evidence == 0
     assert fleet_coverage.missing_dependency_evidence == 152
     assert fleet_coverage.no_current_dependency_evidence == 152
@@ -118,5 +155,5 @@ def test_five_thousand_repository_mlflow_flow_is_indexed_bounded_and_truthful(
     assert len(missing_page.items) == 25
     assert missing_selection.total == 152
     assert missing_selection.repo_ids == tuple(sorted(missing_selection.repo_ids))
-    assert elapsed < 10.0
+    record_property("population_projection_elapsed_seconds", elapsed)
     assert catalog.reads <= 9

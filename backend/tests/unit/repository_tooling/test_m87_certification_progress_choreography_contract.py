@@ -11,8 +11,7 @@ def _write_progress_contract_fixture(root: Path, *, progress_protocol: str) -> N
     application = root / "backend/src/oh_goon/application.py"
     application.parent.mkdir(parents=True, exist_ok=True)
     application.write_text(
-        "class ApplicationRuntime:\n"
-        "    runs: FleetRunControlPlane\n",
+        "class ApplicationRuntime:\n    runs: FleetRunControlPlane\n",
         encoding="utf-8",
     )
     projection = root / "backend/src/oh_goon/services/live_projection.py"

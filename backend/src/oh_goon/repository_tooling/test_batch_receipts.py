@@ -10,6 +10,7 @@ Correctness reuse is deliberately task-level.  Batch grouping, worker count, and
 budgets are execution/performance facts and therefore do not invalidate an already-proven
 deterministic task.  Resumed timing is still non-comparable with a clean run.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -23,8 +24,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
-
-
 
 RECEIPT_SCHEMA = "oh-goon.pytest-member-receipt/v2"
 RESUME_SCHEMA = "oh-goon.pytest-resume-context/v2"

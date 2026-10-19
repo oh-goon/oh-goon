@@ -4,6 +4,7 @@ Development-only evidence, in the ORIGINAL QENV1 CORE ring. No synthetic errno,
 new backup owner, runtime restore, fsync/EIO claim or independent certification.
 Never fill a shared/host root: the user supplies an empty private mountpoint.
 """
+
 from __future__ import annotations
 
 import errno
@@ -23,8 +24,10 @@ _MAX_FREE = 16 * 1024 * 1024
 
 def _mountinfo_fstype(root: Path, mountinfo: str) -> str:
     """Require an EXACT dedicated mountpoint, not a path on a host/shared FS."""
+
     def decode(value: str) -> str:
         import re
+
         return re.sub(r"\\([0-7]{3})", lambda match: chr(int(match.group(1), 8)), value)
 
     matching = []
@@ -43,7 +46,11 @@ def _require_disposable_mount(root: Path, mountinfo: str) -> dict[str, int | str
     if not root.is_absolute() or root == Path("/") or root.is_symlink() or root.resolve() != root:
         raise RuntimeError("DB6 mount root must be an absolute canonical nonsymlink path")
     metadata = root.lstat()
-    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid() or metadata.st_mode & 0o077:
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or metadata.st_mode & 0o077
+    ):
         raise RuntimeError("DB6 mount must be user-owned, private (0700) directory")
     fstype = _mountinfo_fstype(root, mountinfo)
     if any(root.iterdir()):
@@ -61,7 +68,9 @@ def _require_disposable_mount(root: Path, mountinfo: str) -> dict[str, int | str
 def _kernel_enospc_probe(root: Path, max_bytes: int) -> int:
     """Observe errno.ENOSPC from real write(2), bounded to the provisioned mount."""
     probe = root / f".kernel-enospc-{uuid4().hex}"
-    descriptor = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    descriptor = os.open(
+        probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
     written = 0
     try:
         while written <= max_bytes + 1024 * 1024:
@@ -84,7 +93,9 @@ def test_db6_real_kernel_enospc_original_sqlite_backup(tmp_path: Path) -> None:
     observed = _require_disposable_mount(root, Path("/proc/self/mountinfo").read_text())
     # SQLite source remains on the regular pytest filesystem, NEVER on the
     # capacity-limited disposable host mount. That mount contains only backup effects.
-    assert root.stat().st_dev != tmp_path.stat().st_dev, "DB6 source and fault target share filesystem"
+    assert root.stat().st_dev != tmp_path.stat().st_dev, (
+        "DB6 source and fault target share filesystem"
+    )
     owner = LocalDatabase(tmp_path / "original.sqlite3", journal_mode="DELETE")
     with owner.transaction(write=True) as connection:
         # Use a schema-authorized original domain table (not a new SQL owner).
@@ -100,21 +111,37 @@ def test_db6_real_kernel_enospc_original_sqlite_backup(tmp_path: Path) -> None:
     try:
         owner.export_verified_backup(destination)
     except sqlite3.OperationalError as exc:
-        assert exc.sqlite_errorcode == sqlite3.SQLITE_FULL, f"DB6 expected SQLite FULL from kernel mount: {exc}"
+        assert exc.sqlite_errorcode == sqlite3.SQLITE_FULL, (
+            f"DB6 expected SQLite FULL from kernel mount: {exc}"
+        )
     else:
         raise AssertionError("DB6 capacity-limited mount unexpectedly published backup")
-    assert not destination.exists(), "DB6 cannot acknowledge or leave a published backup on full mount"
+    assert not destination.exists(), (
+        "DB6 cannot acknowledge or leave a published backup on full mount"
+    )
     assert not list(root.iterdir()), "DB6 original owner failed to clean temporary snapshot"
     written = _kernel_enospc_probe(root, int(observed["total_bytes"]))
     assert not list(root.iterdir()), "DB6 probe did not clean dedicated mount"
     with owner.transaction() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM locations WHERE path LIKE '/db6/%'").fetchone()[0] == 24
-    print("DB6_REAL_KERNEL_ENOSPC=" + json.dumps({
-        **observed,
-        "source_database_bytes": owner.path.stat().st_size,
-        "kernel_errno": errno.ENOSPC,
-        "probe_bytes": written,
-        "original_owner_reopened": True,
-        "backup_published": False,
-        "evidence_class": "NATIVE_DEVELOPMENT_KERNEL_ENOSPC_ONLY_NOT_FSYNCH_EIO_OR_GATE",
-    }, sort_keys=True), flush=True)
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM locations WHERE path LIKE '/db6/%'"
+            ).fetchone()[0]
+            == 24
+        )
+    print(
+        "DB6_REAL_KERNEL_ENOSPC="
+        + json.dumps(
+            {
+                **observed,
+                "source_database_bytes": owner.path.stat().st_size,
+                "kernel_errno": errno.ENOSPC,
+                "probe_bytes": written,
+                "original_owner_reopened": True,
+                "backup_published": False,
+                "evidence_class": "NATIVE_DEVELOPMENT_KERNEL_ENOSPC_ONLY_NOT_FSYNCH_EIO_OR_GATE",
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )

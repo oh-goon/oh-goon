@@ -4,6 +4,7 @@ This module owns only the semantic identity formula shared by durable correctnes
 receipts and run-local execution-membership evidence.  Those stores retain separate
 lifecycle and durability responsibilities.
 """
+
 from __future__ import annotations
 
 import hashlib

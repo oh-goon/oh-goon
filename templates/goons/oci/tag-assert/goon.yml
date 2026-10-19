@@ -2,13 +2,17 @@ version: 1
 inputs:
   registry_hostname:
     type: hostname
+    description: Registry hostname to inspect
   repository:
     type: oci_repository
+    description: Exact repository inside the registry
   tag:
     type: string
     pattern: '[a-z0-9_][a-z0-9_.-]{0,127}'
+    description: Explicit tag or project release label to inspect or prepare
   expected_digest:
     type: digest
+    description: Exact digest required for the selected registry tag
 env:
   OCI_REGISTRY_USERNAME:
     from: host

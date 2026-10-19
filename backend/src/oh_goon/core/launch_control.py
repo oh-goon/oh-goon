@@ -72,7 +72,9 @@ def signal_launch_stop(
         # If the PID changed before pidfd_open, this re-observation fails. If it exits
         # after pidfd_open, the pidfd can never retarget a subsequently reused PID.
         if process_observer(expected.pid) != expected:
-            raise ValueError("launch owner changed before stable stop handle was proven; stop refused")
+            raise ValueError(
+                "launch owner changed before stable stop handle was proven; stop refused"
+            )
         try:
             send_pidfd_signal(pidfd, signal.SIGTERM, None, 0)
         except OSError as exc:

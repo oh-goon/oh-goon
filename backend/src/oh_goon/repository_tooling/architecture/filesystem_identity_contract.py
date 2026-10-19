@@ -26,10 +26,7 @@ def _hashmarks_public_api_references(path: Path) -> set[str]:
         for public_name in ("RepositoryIdentity", "hash_file")
         if f"hashmarks.{public_name}" in facts.imports
         or f"hashmarks.{public_name}" in references
-        or any(
-            reference.startswith(f"hashmarks.{public_name}.")
-            for reference in references
-        )
+        or any(reference.startswith(f"hashmarks.{public_name}.") for reference in references)
     }
 
 
@@ -51,11 +48,17 @@ def check_filesystem_identity_contract() -> list[Violation]:
     for required in ("RepositoryIdentity", "hash_file"):
         if required not in imported:
             violations.append(
-                Violation(ADAPTER, f"Hashmarks identity adapter must import public Hashmarks API {required!r}")
+                Violation(
+                    ADAPTER,
+                    f"Hashmarks identity adapter must import public Hashmarks API {required!r}",
+                )
             )
     if not _has_verified_snapshot_call(ADAPTER):
         violations.append(
-            Violation(ADAPTER, "Hashmarks identity adapter must request verification from the public snapshot API")
+            Violation(
+                ADAPTER,
+                "Hashmarks identity adapter must request verification from the public snapshot API",
+            )
         )
 
     for path in IDENTITY_MODULES:

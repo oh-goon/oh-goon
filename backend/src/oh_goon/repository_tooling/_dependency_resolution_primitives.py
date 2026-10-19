@@ -3,6 +3,7 @@
 Native uv owns dependency graph and lock semantics.  Nothing in this module
 normalizes, mirrors, or compares uv.lock package rows.
 """
+
 from __future__ import annotations
 
 import re

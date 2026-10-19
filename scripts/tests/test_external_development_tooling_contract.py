@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from oh_goon.repository_tooling.architecture import external_development_tooling_contract as contract
+from oh_goon.repository_tooling.architecture import (
+    external_development_tooling_contract as contract,
+)
 
 
 def _fixture_root(tmp_path: Path) -> Path:
@@ -10,10 +12,18 @@ def _fixture_root(tmp_path: Path) -> Path:
     (root / "frontend/src").mkdir(parents=True)
     (root / "docs/development").mkdir(parents=True)
     (root / "vendor").mkdir()
-    (root / "backend/pyproject.toml").write_text("[project]\ndependencies = []\n", encoding="utf-8")
-    (root / "frontend/package.json").write_text('{"dependencies": {}}\n', encoding="utf-8")
-    (root / "frontend/package-lock.json").write_text('{"packages": {}}\n', encoding="utf-8")
-    (root / ".gitignore").write_text(".agents-cookbook/\n.agent-economics/\n", encoding="utf-8")
+    (root / "backend/pyproject.toml").write_text(
+        "[project]\ndependencies = []\n", encoding="utf-8"
+    )
+    (root / "frontend/package.json").write_text(
+        '{"dependencies": {}}\n', encoding="utf-8"
+    )
+    (root / "frontend/package-lock.json").write_text(
+        '{"packages": {}}\n', encoding="utf-8"
+    )
+    (root / ".gitignore").write_text(
+        ".agents-cookbook/\n.agent-economics/\n", encoding="utf-8"
+    )
     (root / contract._SOURCE_RECORD).write_text(
         json.dumps(
             {
@@ -47,7 +57,10 @@ def test_rejects_product_dependency(tmp_path: Path) -> None:
         '[project]\ndependencies = ["agentsCookbook"]\n', encoding="utf-8"
     )
     violations = contract.check_external_development_tooling_contract(root)
-    assert any("must not be a product or package dependency" in item.message for item in violations)
+    assert any(
+        "must not be a product or package dependency" in item.message
+        for item in violations
+    )
 
 
 def test_manifest_comment_is_not_dependency_leak(tmp_path: Path) -> None:
@@ -59,12 +72,32 @@ def test_manifest_comment_is_not_dependency_leak(tmp_path: Path) -> None:
     assert contract.check_external_development_tooling_contract(root) == []
 
 
+def test_template_documentation_may_explain_optional_skills_without_runtime_dependency(
+    tmp_path: Path,
+) -> None:
+    root = _fixture_root(tmp_path)
+    package = root / "templates/goons/agents/review"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text(
+        "# agents/review\nSelect optional agentsCookbook Skills in the caller's registry.\n"
+    )
+    assert contract.check_external_development_tooling_contract(root) == []
+    runtime = package / "goon.yml"
+    runtime.write_text("steps:\n- run: agentsCookbook execute\n")
+    assert any(
+        item.path == runtime
+        for item in contract.check_external_development_tooling_contract(root)
+    )
+
+
 def test_rejects_runtime_import(tmp_path: Path) -> None:
     root = _fixture_root(tmp_path)
     runtime = root / "backend/src/oh_goon/runtime.py"
     runtime.write_text("import agent_economics\n", encoding="utf-8")
     violations = contract.check_external_development_tooling_contract(root)
-    assert any(item.path == runtime and "developer-only" in item.message for item in violations)
+    assert any(
+        item.path == runtime and "developer-only" in item.message for item in violations
+    )
 
 
 def test_rejects_dynamic_runtime_import(tmp_path: Path) -> None:
@@ -75,7 +108,9 @@ def test_rejects_dynamic_runtime_import(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     violations = contract.check_external_development_tooling_contract(root)
-    assert any(item.path == runtime and "developer-only" in item.message for item in violations)
+    assert any(
+        item.path == runtime and "developer-only" in item.message for item in violations
+    )
 
 
 def test_runtime_comment_and_docstring_are_not_leaks(tmp_path: Path) -> None:
@@ -90,7 +125,9 @@ def test_runtime_comment_and_docstring_are_not_leaks(tmp_path: Path) -> None:
     assert contract.check_external_development_tooling_contract(root) == []
 
 
-def test_repository_tooling_forbidden_capability_reference_is_not_runtime_leak(tmp_path: Path) -> None:
+def test_repository_tooling_forbidden_capability_reference_is_not_runtime_leak(
+    tmp_path: Path,
+) -> None:
     root = _fixture_root(tmp_path)
     tooling = root / "backend/src/oh_goon/repository_tooling/check.py"
     tooling.parent.mkdir(parents=True)
@@ -103,11 +140,16 @@ def test_repository_tooling_forbidden_capability_reference_is_not_runtime_leak(t
 def test_frontend_comment_is_not_leak_but_import_is(tmp_path: Path) -> None:
     root = _fixture_root(tmp_path)
     frontend = root / "frontend/src/runtime.ts"
-    frontend.write_text('// import("agent-economics") is forbidden here\n', encoding="utf-8")
+    frontend.write_text(
+        '// import("agent-economics") is forbidden here\n', encoding="utf-8"
+    )
     assert contract.check_external_development_tooling_contract(root) == []
     frontend.write_text('const probe = import("agent-economics");\n', encoding="utf-8")
     violations = contract.check_external_development_tooling_contract(root)
-    assert any(item.path == frontend and "developer-only" in item.message for item in violations)
+    assert any(
+        item.path == frontend and "developer-only" in item.message
+        for item in violations
+    )
 
 
 def test_rejects_promoted_tool_authority(tmp_path: Path) -> None:
@@ -117,7 +159,10 @@ def test_rejects_promoted_tool_authority(tmp_path: Path) -> None:
     payload["certification_authority"] = True
     record.write_text(json.dumps(payload), encoding="utf-8")
     violations = contract.check_external_development_tooling_contract(root)
-    assert any("certification_authority must remain explicitly false" in item.message for item in violations)
+    assert any(
+        "certification_authority must remain explicitly false" in item.message
+        for item in violations
+    )
 
 
 def test_requires_disposable_checkout_ignores(tmp_path: Path) -> None:

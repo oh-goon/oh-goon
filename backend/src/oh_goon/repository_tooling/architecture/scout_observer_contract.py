@@ -38,7 +38,14 @@ def _scout_dependency_violations(path: Path, imports: set[str]) -> list[Violatio
     for module in sorted(imports):
         if module == "oh_goon.scout" or module.startswith("oh_goon.scout."):
             continue
-        forbidden = module.startswith(("oh_goon.api", "oh_goon.integrations", "oh_goon.repository_tooling", "oh_goon.services"))
+        forbidden = module.startswith(
+            (
+                "oh_goon.api",
+                "oh_goon.integrations",
+                "oh_goon.repository_tooling",
+                "oh_goon.services",
+            )
+        )
         if module.startswith("oh_goon.runtime.") and module not in _ALLOWED_EXTERNAL_RUNTIME:
             forbidden = True
         if forbidden:
@@ -51,16 +58,21 @@ def check_scout_observer_contract(package_root: Path = BACKEND_PACKAGE_ROOT) -> 
     violations: list[Violation] = []
     scout_root = package_root / _SCOUT_PACKAGE
     if not scout_root.is_dir():
-        return [Violation(scout_root, "Scout must have one explicit oh_goon.scout package boundary")]
+        return [
+            Violation(scout_root, "Scout must have one explicit oh_goon.scout package boundary")
+        ]
     for path in package_root.rglob("*.py"):
         relative = path.relative_to(package_root)
         if relative.parts and relative.parts[0] == "repository_tooling":
             continue
         imports = _imports(path)
         if _is_scout_owner(relative):
-            violations.extend(_scout_dependency_violations(path, imports)); continue
+            violations.extend(_scout_dependency_violations(path, imports))
+            continue
         if _is_composition_consumer(relative):
             continue
-        if any(module == "oh_goon.scout" or module.startswith("oh_goon.scout.") for module in imports):
+        if any(
+            module == "oh_goon.scout" or module.startswith("oh_goon.scout.") for module in imports
+        ):
             violations.append(Violation(path, "execution owners must not depend on Scout"))
     return violations

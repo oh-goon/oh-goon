@@ -4,7 +4,11 @@ import json
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from oh_goon.repository_tooling.generation.api_schema_generation import openapi_digest, ref_name, ts_type
+from oh_goon.repository_tooling.generation.api_schema_generation import (
+    openapi_digest,
+    ref_name,
+    ts_type,
+)
 from oh_goon.repository_tooling.generation.generated_typescript import pack_blocks
 
 HTTP_METHODS = ("delete", "get", "patch", "post", "put")
@@ -34,22 +38,16 @@ class ApiOperation:
     @property
     def frontend_path(self) -> str:
         if not self.path.startswith(API_PREFIX):
-            raise ValueError(
-                f"Frontend operation path must start with {API_PREFIX!r}: {self.path}"
-            )
+            raise ValueError(f"Frontend operation path must start with {API_PREFIX!r}: {self.path}")
         return self.path[len(API_PREFIX) :] or "/"
 
     @property
     def path_parameters(self) -> tuple[ApiParameter, ...]:
-        return tuple(
-            parameter for parameter in self.parameters if parameter.location == "path"
-        )
+        return tuple(parameter for parameter in self.parameters if parameter.location == "path")
 
     @property
     def query_parameters(self) -> tuple[ApiParameter, ...]:
-        return tuple(
-            parameter for parameter in self.parameters if parameter.location == "query"
-        )
+        return tuple(parameter for parameter in self.parameters if parameter.location == "query")
 
 
 def _json_schema(content: Any, *, owner: str) -> dict[str, Any] | None:
@@ -65,9 +63,7 @@ def _json_schema(content: Any, *, owner: str) -> dict[str, Any] | None:
     return media["schema"]
 
 
-def _extract_parameters(
-    operation_id: str, raw_parameters: list[Any]
-) -> tuple[ApiParameter, ...]:
+def _extract_parameters(operation_id: str, raw_parameters: list[Any]) -> tuple[ApiParameter, ...]:
     parameters: list[ApiParameter] = []
     seen: set[tuple[str, str]] = set()
     for parameter in raw_parameters:
@@ -88,9 +84,7 @@ def _extract_parameters(
             raise ValueError(f"Parameter schema missing for {operation_id}.{name}")
         key = (location, name)
         if key in seen:
-            raise ValueError(
-                f"Duplicate parameter {location}.{name} for {operation_id}"
-            )
+            raise ValueError(f"Duplicate parameter {location}.{name} for {operation_id}")
         seen.add(key)
         required = bool(parameter.get("required", False))
         if location == "path" and not required:
@@ -99,9 +93,7 @@ def _extract_parameters(
     return tuple(parameters)
 
 
-def _extract_request(
-    operation_id: str, raw: dict[str, Any]
-) -> tuple[dict[str, Any] | None, bool]:
+def _extract_request(operation_id: str, raw: dict[str, Any]) -> tuple[dict[str, Any] | None, bool]:
     request_body = raw.get("requestBody")
     if request_body is None:
         return None, False
@@ -109,9 +101,7 @@ def _extract_request(
         raise ValueError(f"requestBody must be an object for {operation_id}")
     schema = _json_schema(request_body.get("content"), owner=f"{operation_id} request")
     if schema is None:
-        raise ValueError(
-            f"Only application/json request bodies are supported: {operation_id}"
-        )
+        raise ValueError(f"Only application/json request bodies are supported: {operation_id}")
     return schema, bool(request_body.get("required", False))
 
 
@@ -129,9 +119,7 @@ def _extract_success(
             continue
         if 200 <= status < 300:
             if not isinstance(response, dict):
-                raise ValueError(
-                    f"Response {code} must be an object for {operation_id}"
-                )
+                raise ValueError(f"Response {code} must be an object for {operation_id}")
             successful.append((status, response))
     if len(successful) != 1:
         raise ValueError(
@@ -141,9 +129,7 @@ def _extract_success(
     schema = _json_schema(response.get("content"), owner=f"{operation_id} response")
     if status == 204:
         if schema is not None:
-            raise ValueError(
-                f"204 response must not declare JSON schema: {operation_id}"
-            )
+            raise ValueError(f"204 response must not declare JSON schema: {operation_id}")
         return status, None, "void"
     return status, schema, "json" if schema is not None else "raw"
 
@@ -153,9 +139,7 @@ def _extract_operation(
 ) -> ApiOperation:
     operation_id = raw.get("operationId")
     if not isinstance(operation_id, str) or not operation_id.strip():
-        raise ValueError(
-            f"Operation is missing stable operationId: {method.upper()} {path}"
-        )
+        raise ValueError(f"Operation is missing stable operationId: {method.upper()} {path}")
     own_parameters = raw.get("parameters", [])
     if not isinstance(own_parameters, list):
         raise ValueError(f"Operation parameters must be a list for {operation_id}")
@@ -195,14 +179,10 @@ def extract_operations(openapi: dict[str, Any]) -> tuple[ApiOperation, ...]:
             if raw is None:
                 continue
             if not isinstance(raw, dict):
-                raise ValueError(
-                    f"Operation must be an object: {method.upper()} {path}"
-                )
+                raise ValueError(f"Operation must be an object: {method.upper()} {path}")
             operation = _extract_operation(path, method, raw, inherited)
             if operation.operation_id in seen_ids:
-                raise ValueError(
-                    f"Duplicate OpenAPI operationId: {operation.operation_id}"
-                )
+                raise ValueError(f"Duplicate OpenAPI operationId: {operation.operation_id}")
             seen_ids.add(operation.operation_id)
             operations.append(operation)
     return tuple(sorted(operations, key=lambda operation: operation.operation_id))
@@ -232,13 +212,9 @@ def _operation_call_type(operation: ApiOperation) -> str:
             )
         )
     if operation.request_schema is not None:
-        fields.append(
-            ("body", ts_type(operation.request_schema), operation.request_required)
-        )
+        fields.append(("body", ts_type(operation.request_schema), operation.request_required))
     if not fields:
-        return (
-            "{ readonly path?: never; readonly query?: never; readonly body?: never }"
-        )
+        return "{ readonly path?: never; readonly query?: never; readonly body?: never }"
     lines = ["{"]
     for name, rendered, required in fields:
         optional = "" if required else "?"
@@ -269,18 +245,10 @@ def _schema_fact(schema: dict[str, Any] | None) -> str | None:
 
 
 def _metadata_lines(operation: ApiOperation) -> list[str]:
-    path_parameters = json.dumps(
-        [parameter.name for parameter in operation.path_parameters]
-    )
-    query_parameters = json.dumps(
-        [parameter.name for parameter in operation.query_parameters]
-    )
+    path_parameters = json.dumps([parameter.name for parameter in operation.path_parameters])
+    query_parameters = json.dumps([parameter.name for parameter in operation.query_parameters])
     required_query_parameters = json.dumps(
-        [
-            parameter.name
-            for parameter in operation.query_parameters
-            if parameter.required
-        ]
+        [parameter.name for parameter in operation.query_parameters if parameter.required]
     )
     request_schema = (
         json.dumps(_schema_fact(operation.request_schema))
@@ -408,7 +376,9 @@ def render_operation_files(openapi: dict[str, Any]) -> dict[str, str]:
         type_lines.append(
             f'import type {{ {part_name} }} from "./operationTypeParts/operationTypePart{index:03d}";'
         )
-    type_lines.extend(["", f"export interface operationTypes extends {', '.join(type_part_names)} {{}}", ""])
+    type_lines.extend(
+        ["", f"export interface operationTypes extends {', '.join(type_part_names)} {{}}", ""]
+    )
 
     root_lines = [
         f"// OPENAPI_SHA256: {digest}",

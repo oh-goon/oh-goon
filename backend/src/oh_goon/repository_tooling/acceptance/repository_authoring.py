@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
@@ -12,7 +12,6 @@ from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.execution_lock_persistence import render_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
-
 
 PROBE_GOON = """version: 1
 inputs:
@@ -140,9 +139,7 @@ def certify_repository_authoring() -> None:
             raise RuntimeError(f"canonical resolved inputs differ: {step.argv!r}")
 
         subprocess.run(step.argv, cwd=repository, check=True, env=os.environ.copy())
-        observed = (repository / "verified-values.txt").read_text(
-            encoding="utf-8"
-        ).splitlines()
+        observed = (repository / "verified-values.txt").read_text(encoding="utf-8").splitlines()
         if observed != [
             "2.4.1",
             "my-image-storage/portable-verification",

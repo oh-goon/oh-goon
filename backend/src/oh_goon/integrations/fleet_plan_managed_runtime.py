@@ -33,7 +33,6 @@ from oh_goon.integrations._fleet_plan_step_local_execution import (
 from oh_goon.integrations.content_snapshot import SnapshotBinding, snapshot_identity
 from oh_goon.integrations.uv_python_runtime import find_uv_system_python
 
-
 _UV_PREPARATION_OWNED_ENVIRONMENT = frozenset(
     {
         "UV_CACHE_DIR",
@@ -145,9 +144,7 @@ def prepare_uv_project_runtimes(
     """
 
     steps = tuple(
-        step
-        for step in plan.steps
-        if isinstance(step, ResolvedCommandStep) and step.uv is not None
+        step for step in plan.steps if isinstance(step, ResolvedCommandStep) and step.uv is not None
     )
     if not steps:
         return {}

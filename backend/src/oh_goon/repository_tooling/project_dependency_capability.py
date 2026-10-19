@@ -6,6 +6,7 @@ version constraints or independently decide dependency compatibility. It only bi
 runtime observations that uv cannot prove by resolution alone: installed distribution
 identity, importability, and package-specific runtime probes.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -138,8 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     for row in payload["packages"]:
         assert isinstance(row, dict)
         print(
-            f"{row['distribution']}: {row.get('observed_version') or 'MISSING'} "
-            f"-> {row['status']}"
+            f"{row['distribution']}: {row.get('observed_version') or 'MISSING'} -> {row['status']}"
         )
     print(f"PROJECT_RUNTIME_CAPABILITY_IDENTITY={payload['identity']}")
     print("Compatibility: NATIVE UV AUTHORITY; registry/cache: NOT EVALUATED")

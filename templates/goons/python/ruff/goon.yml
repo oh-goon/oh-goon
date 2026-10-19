@@ -1,9 +1,18 @@
 version: 1
+inputs:
+  project:
+    type: string
+    non_empty: true
+    default: .
+    description: Repository-relative directory containing pyproject.toml and uv.lock
+  dependency_group:
+    type: string
+    non_empty: true
+    default: dev
+    description: Locked uv dependency group containing the selected tools
 uv:
-  group: dev
+  project: ${{ inputs.project }}
+  group: ${{ inputs.dependency_group }}
 steps:
-- run: uv run ruff format --check --diff .
-- run: uv run ruff check . --output-format=gitlab --output-file=ruff-code-quality.json
-  artifacts:
-  - path: ruff-code-quality.json
-    retention: evidence
+- run: uv run ruff format --check --diff
+- run: uv run ruff check

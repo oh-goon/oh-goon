@@ -1,22 +1,24 @@
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from oh_goon.core.errors import InvalidRunTransition, JournalConflict, RunNotFound
-from oh_goon.core.product_identity import fleet_step_attempt_id, repository_attempt_operation_id
+from oh_goon.core.errors import InvalidRunTransition, RunNotFound
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunFailure
-from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, FleetRunAdmissionIntent, fleet_repository_scope
+from oh_goon.core.models.run_admission import (
+    DirectFleetExecutionAdmission,
+    FleetRunAdmissionIntent,
+    fleet_repository_scope,
+)
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
     FleetRunSource,
     FleetRunStatus,
     FleetRunTerminalIntent,
     OperationAction,
-    ResultFreshness,
     Verdict,
 )
 from oh_goon.runtime.database import LocalDatabase
@@ -82,7 +84,6 @@ def _complete_run(
     start_repository(journal, run_id, identity)
     commit_operation(journal, operation(identity, action, run_id, operation_id, verdict))
     terminalize_run(journal, run_id, FleetRunTerminalIntent.COMPLETE)
-
 
 
 def test_run_history_is_compact_newest_first_and_cursor_paged(tmp_path: Path) -> None:
@@ -312,7 +313,10 @@ def test_run_history_preserves_source_after_lifecycle_transitions(tmp_path: Path
     page = journal.read_view().run_history(source=FleetRunSource.CICD)
     assert [item.run.fleet_run_id for item in page.items] == ["cicd-history"]
     assert page.items[0].run.source is FleetRunSource.CICD
-    assert journal.read_view().required_run_detail("cicd-history").game_tape.run_source is FleetRunSource.CICD
+    assert (
+        journal.read_view().required_run_detail("cicd-history").game_tape.run_source
+        is FleetRunSource.CICD
+    )
 
 
 def test_failed_terminalization_requires_structured_failure(tmp_path: Path) -> None:

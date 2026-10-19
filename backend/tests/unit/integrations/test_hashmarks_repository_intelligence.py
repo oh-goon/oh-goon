@@ -6,20 +6,20 @@ from pathlib import Path
 
 import pytest
 
-
 pytest.importorskip("hashmarks")
-pytestmark = pytest.mark.dependency_complete
 
-from tests.hashmarks_test_support import (
-    TEST_HASHMARKS_ARTIFACT_IDENTITY,
-    TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY,
-)
 from oh_goon.integrations.hashmarks.repository_intelligence import (
     HashmarksEvidenceKind,
     HashmarksRepositoryIntelligenceInputError,
     bind_hashmarks_repository_evidence,
     load_hashmarks_repository_evidence,
 )
+from tests.hashmarks_test_support import (
+    TEST_HASHMARKS_ARTIFACT_IDENTITY,
+    TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY,
+)
+
+pytestmark = pytest.mark.dependency_complete
 
 SOURCE = "sha256:" + "1" * 64
 ARTIFACT = TEST_HASHMARKS_ARTIFACT_IDENTITY
@@ -32,12 +32,15 @@ def _decision_packet() -> dict[str, object]:
         "schema": "hashmarks.task-decision-packet.v2",
         "task": "fix bounded retry",
         "canonical_generation": 17,
+        "authority": "repository-observation-only",
+        "discrimination": {"needed": False},
         "identity": {
             "schema": "hashmarks.worker-packet-identity.v1",
             "repository_identity": "git-tree:" + "a" * 40,
             "codemap_generation": 17,
             "identity_generation": 17,
             "stale": False,
+            "codemap_complete": True,
             "task_identity": "sha256:" + "4" * 64,
             "decision_generation": "sha256:" + "5" * 64,
             "context_digest": "sha256:" + "6" * 64,
@@ -58,7 +61,9 @@ def test_decision_packet_binds_producer_contract_source_and_payload_identity() -
     assert verified.contract_schema == "hashmarks.task-decision-packet.v2"
     assert verified.producer_name == "hashmarks"
     assert verified.producer_artifact_identity == ARTIFACT
-    assert verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    assert (
+        verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    )
     assert verified.repository_generation_identity == SOURCE
     assert verified.input_provenance_identity == PROVENANCE
     assert verified.producer_repository_identity == "git-tree:" + "a" * 40
@@ -101,7 +106,9 @@ def test_stale_decision_packet_is_input_failure_not_repository_failure() -> None
 def test_decision_packet_rejects_inconsistent_native_generation() -> None:
     payload = _decision_packet()
     payload["canonical_generation"] = 18
-    with pytest.raises(HashmarksRepositoryIntelligenceInputError, match="generation metadata"):
+    with pytest.raises(
+        HashmarksRepositoryIntelligenceInputError, match="canonical-generation-mismatch"
+    ):
         bind_hashmarks_repository_evidence(
             payload,
             repository_generation_identity=SOURCE,
@@ -119,7 +126,9 @@ def test_artifact_identity_is_recorded_as_provenance_not_copied_release_authorit
         input_provenance_identity=PROVENANCE,
     )
     assert verified.producer_artifact_identity == observed
-    assert verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    assert (
+        verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    )
 
 
 def test_unknown_contract_fails_closed() -> None:
@@ -162,9 +171,18 @@ def test_current_impact_schema_is_supported_without_legacy_aliases() -> None:
 
 
 def test_exact_contract_mismatch_fails_closed() -> None:
-    with pytest.raises(HashmarksRepositoryIntelligenceInputError, match="does not match admitted"):
+    with pytest.raises(
+        HashmarksRepositoryIntelligenceInputError, match="unexpected-evidence-schema"
+    ):
         bind_hashmarks_repository_evidence(
-            {"schema": "hashmarks.task-context-plan.v1", "task": "x"},
+            {
+                "schema": "hashmarks.task-context-plan.v1",
+                "query": "inspect",
+                "ranking_effect": "none",
+                "token_budget": 512,
+                "limit": 5,
+                "task": "x",
+            },
             repository_generation_identity=SOURCE,
             producer_artifact_identity=ARTIFACT,
             input_provenance_identity=PROVENANCE,
@@ -173,7 +191,11 @@ def test_exact_contract_mismatch_fails_closed() -> None:
 
 
 def test_non_identity_provenance_or_source_is_rejected() -> None:
-    for field in ("repository_generation_identity", "producer_artifact_identity", "input_provenance_identity"):
+    for field in (
+        "repository_generation_identity",
+        "producer_artifact_identity",
+        "input_provenance_identity",
+    ):
         kwargs = {
             "repository_generation_identity": SOURCE,
             "producer_artifact_identity": ARTIFACT,
@@ -182,20 +204,39 @@ def test_non_identity_provenance_or_source_is_rejected() -> None:
         kwargs[field] = "not-an-identity"
         with pytest.raises(HashmarksRepositoryIntelligenceInputError, match=field):
             bind_hashmarks_repository_evidence(
-                {"schema": "hashmarks.task-context-plan.v1", "task": "x"},
+                {
+                    "schema": "hashmarks.task-context-plan.v1",
+                    "query": "inspect",
+                    "ranking_effect": "none",
+                    "token_budget": 512,
+                    "limit": 5,
+                    "task": "x",
+                },
                 **kwargs,
             )
 
 
 def test_verified_evidence_is_non_executable_and_payload_projection_is_read_only() -> None:
     verified = bind_hashmarks_repository_evidence(
-        {"schema": "hashmarks.verification-plan.v1", "available": True, "argv": ["pytest", "x"]},
+        {
+            "schema": "hashmarks.verification-plan.v1",
+            "path": "tests/test_sample.py",
+            "working_directory": ".",
+            "available": True,
+            "argv": ["pytest", "x"],
+        },
         repository_generation_identity=SOURCE,
         producer_artifact_identity=ARTIFACT,
         input_provenance_identity=PROVENANCE,
     )
     assert verified.kind is HashmarksEvidenceKind.VERIFICATION
-    for forbidden in ("argv", "capabilities", "publish_authority", "network_authority", "timeout_seconds"):
+    for forbidden in (
+        "argv",
+        "capabilities",
+        "publish_authority",
+        "network_authority",
+        "timeout_seconds",
+    ):
         assert not hasattr(verified, forbidden)
     projection = verified.payload()
     assert projection["argv"] == ["pytest", "x"]
@@ -204,7 +245,14 @@ def test_verified_evidence_is_non_executable_and_payload_projection_is_read_only
 
 
 def test_file_loader_canonicalizes_same_json_identity(tmp_path: Path) -> None:
-    payload = {"schema": "hashmarks.task-context-plan.v1", "task": "x", "token_budget": 512}
+    payload = {
+        "schema": "hashmarks.task-context-plan.v1",
+        "query": "inspect",
+        "ranking_effect": "none",
+        "token_budget": 512,
+        "limit": 5,
+        "task": "x",
+    }
     path = tmp_path / "fact.json"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     loaded = load_hashmarks_repository_evidence(
@@ -225,6 +273,10 @@ def test_context_disclosure_is_identity_only_and_never_leaks_payload() -> None:
     verified = bind_hashmarks_repository_evidence(
         {
             "schema": "hashmarks.task-context-plan.v1",
+            "query": "inspect",
+            "ranking_effect": "none",
+            "token_budget": 512,
+            "limit": 5,
             "task": "inspect",
             "repository_context": secret,
             "authorization": "Bearer hidden-token",
@@ -242,7 +294,6 @@ def test_context_disclosure_is_identity_only_and_never_leaks_payload() -> None:
     assert not hasattr(disclosure, "canonical_payload_json")
 
 
-
 def _repository_snapshot(identity: str = "4") -> dict[str, object]:
     return {
         "schema": "hashmarks.repository-intelligence-snapshot.v1",
@@ -250,7 +301,11 @@ def _repository_snapshot(identity: str = "4") -> dict[str, object]:
             "schema": "hashmarks.repository-observer.v1",
             "identity": "sha256:" + "a" * 64,
         },
-        "repository": {"repository_identity": "sha256:" + "b" * 64 + ":1", "codemap_generation": 9},
+        "repository": {
+            "repository_identity": "sha256:" + "b" * 64 + ":1",
+            "codemap_generation": 9,
+            "stale": False,
+        },
         "snapshot_identity": "sha256:" + identity * 64,
         "authority": "repository-intelligence-only",
         "execution_effect": "none",
@@ -270,7 +325,7 @@ def test_hashmarks_owns_repository_snapshot_and_delta_identity() -> None:
         "schema": "hashmarks.repository-intelligence-delta.v1",
         "repository_identity": "sha256:" + "b" * 64 + ":1",
         "from": {"snapshot_identity": "sha256:" + "4" * 64, "codemap_generation": 8},
-        "to": {"snapshot_identity": "sha256:" + "5" * 64, "codemap_generation": 9},
+        "to": {"snapshot_identity": "sha256:" + "5" * 64, "codemap_generation": 9, "stale": False},
         "changes": [{"path": ["ownership"], "value": {"status": "changed"}}],
         "changed_sections": ["ownership"],
         "semantic": {"ownership_changed": True},
@@ -296,7 +351,7 @@ def test_repository_delta_without_hashmarks_identity_fails_closed() -> None:
         "authority": "repository-intelligence-only",
         "execution_effect": "none",
     }
-    with pytest.raises(HashmarksRepositoryIntelligenceInputError, match="delta_identity"):
+    with pytest.raises(HashmarksRepositoryIntelligenceInputError, match="snapshot|delta"):
         bind_hashmarks_repository_evidence(
             payload,
             repository_generation_identity=SOURCE,
@@ -308,7 +363,7 @@ def test_repository_delta_without_hashmarks_identity_fails_closed() -> None:
 def test_hashmarks_observer_evidence_can_never_gain_execution_effect() -> None:
     payload = _repository_snapshot()
     payload["execution_effect"] = "run-tests"
-    with pytest.raises(HashmarksRepositoryIntelligenceInputError, match="execution effect"):
+    with pytest.raises(HashmarksRepositoryIntelligenceInputError, match="execution-effect"):
         bind_hashmarks_repository_evidence(
             payload,
             repository_generation_identity=SOURCE,
@@ -321,7 +376,8 @@ def test_hashmarks_owns_external_observation_freshness() -> None:
     verified = bind_hashmarks_repository_evidence(
         {
             "schema": "hashmarks.external-observation-freshness.v1",
-            "state": "fresh",
+            "state": "current",
+            "change_set_completeness": "caller-claimed-complete",
             "reason": "changed-paths-proven-outside-observation-scope",
             "authority": "observation-freshness-only",
             "execution_effect": "none",
@@ -345,3 +401,53 @@ def test_oh_goon_does_not_reimplement_hashmarks_repository_delta() -> None:
         "def diagnostic_observation_delta(",
     ):
         assert forbidden_owner not in source
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"schema": "hashmarks.task-context-plan.v1"},
+        {"schema": "hashmarks.verification-plan.v1", "available": True, "argv": ["pytest"]},
+        {
+            "schema": "hashmarks.ownership-relation-graph.v1",
+            "completeness": "incomplete",
+            "negative_evidence": {"admissible": True},
+            "unique": True,
+        },
+        {
+            "schema": "hashmarks.task-context-plan.v1",
+            "task": "inspect",
+            "query": "inspect",
+            "ranking_effect": "none",
+            "token_budget": 512,
+            "limit": 5,
+            "value": float("nan"),
+        },
+    ],
+)
+def test_producer_rejects_incomplete_or_nonportable_evidence(payload):
+    with pytest.raises(HashmarksRepositoryIntelligenceInputError):
+        bind_hashmarks_repository_evidence(
+            payload,
+            repository_generation_identity=SOURCE,
+            producer_artifact_identity=ARTIFACT,
+            input_provenance_identity=PROVENANCE,
+        )
+
+
+@pytest.mark.parametrize(
+    "expected",
+    [
+        {"expected_repository_identity": "wrong-repository"},
+        {"expected_codemap_generation": 999},
+    ],
+)
+def test_qualified_evidence_must_match_explicit_admission_binding(expected):
+    with pytest.raises(HashmarksRepositoryIntelligenceInputError, match="admitted source"):
+        bind_hashmarks_repository_evidence(
+            _decision_packet(),
+            repository_generation_identity=SOURCE,
+            producer_artifact_identity=ARTIFACT,
+            input_provenance_identity=PROVENANCE,
+            **expected,
+        )

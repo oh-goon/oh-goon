@@ -11,13 +11,17 @@ def _zip(
 ) -> None:
     with zipfile.ZipFile(path, "w") as archive:
         for relative, (payload, mode) in sorted(files.items()):
-            info = zipfile.ZipInfo(f"{root_name}/{relative}", date_time=(2020, 2, 2, 0, 0, 0))
+            info = zipfile.ZipInfo(
+                f"{root_name}/{relative}", date_time=(2020, 2, 2, 0, 0, 0)
+            )
             info.external_attr = (mode & 0xFFFF) << 16
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, payload)
 
 
-def test_exact_patch_detects_same_size_same_timestamp_content_change(tmp_path: Path) -> None:
+def test_exact_patch_detects_same_size_same_timestamp_content_change(
+    tmp_path: Path,
+) -> None:
     parent = tmp_path / "parent.zip"
     child = tmp_path / "child.zip"
     patch = tmp_path / "change.patch"
@@ -40,7 +44,9 @@ def test_exact_patch_replays_add_delete_and_executable_mode(tmp_path: Path) -> N
     assert patch.with_name(patch.name + ".sha256").is_file()
 
 
-def test_exact_patch_normalizes_different_archive_top_level_roots(tmp_path: Path) -> None:
+def test_exact_patch_normalizes_different_archive_top_level_roots(
+    tmp_path: Path,
+) -> None:
     parent = tmp_path / "parent.zip"
     child = tmp_path / "child.zip"
     patch = tmp_path / "change.patch"

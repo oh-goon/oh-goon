@@ -16,8 +16,11 @@ def test_local_yaml_stores_share_one_exact_file_store_owner() -> None:
 
 
 def test_revision_proof_accepts_only_unfenced_create_or_exact_match() -> None:
-    changed = lambda current, expected: RuntimeError(f"changed:{current}:{expected}")
-    removed = lambda: RuntimeError("removed")
+    def changed(current, expected):
+        return RuntimeError(f"changed:{current}:{expected}")
+
+    def removed():
+        return RuntimeError("removed")
 
     require_expected_revision(None, None, changed_error=changed, removed_error=removed)
     require_expected_revision("a" * 64, "a" * 64, changed_error=changed, removed_error=removed)

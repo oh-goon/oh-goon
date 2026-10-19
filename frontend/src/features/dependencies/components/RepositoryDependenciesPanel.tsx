@@ -24,9 +24,9 @@ export function RepositoryDependenciesPanel({ repositoryId, resource, onBack, on
       {resource.status === "read-loading" ? <p className="muted loading-state" role="status">{t("dependencies.loading")}</p> : null}
       {resource.status === "read-error" ? <p className="notice notice--warning" role="alert">{resource.failure?.message}</p> : null}
       {data && items.length === 0 ? <p className="dependency-empty">{t("dependencies.noRepositoryEvidence")}</p> : null}
-      {data ? <div className="dependency-repository-facts">{items.map((item) => <article className="dependency-repository-fact" key={`${item.package_name}:${item.relationship}`}>
-        <header><button className="text-button" type="button" onClick={() => onOpenPackage(item.package_name)}>{item.package_name}</button><StatusBadge label={t(`dependencies.evidenceStates.${item.evidence_state}`)} tone={item.evidence_state === "current" ? "success" : "warning"} /></header>
-        <div><span><b>{t("dependencies.resolved")}</b>{(item.resolved_versions ?? []).join(", ") || "—"}</span><span><b>{t("dependencies.declared")}</b>{(item.declared_ranges ?? []).join(", ") || "—"}</span><span><b>{t("dependencies.sources")}</b>{(item.sources ?? []).join(", ")}</span></div>
+      {data ? <div className="dependency-repository-facts">{items.map((item) => <article className="dependency-repository-fact" key={item.package_name}>
+        <header><button className="text-button" type="button" onClick={() => onOpenPackage(item.package_name)}>{item.package_name}</button><StatusBadge label={t(`dependencies.evidenceStates.${item.evidence.freshness}`)} tone={item.evidence.freshness === "current" ? "success" : "warning"} /></header>
+        <div><span><b>{t("dependencies.resolved")}</b>{(item.resolved_versions ?? []).join(", ") || "—"}</span><span><b>{t("dependencies.contexts")}</b>{(item.contexts ?? []).join(", ")}</span><span><b>{t("dependencies.sources")}</b>{(item.sources ?? []).join(", ")}</span></div>
         <button className="button button--secondary button--small" type="button" onClick={() => onOpenEvidence(item.fleet_run_id, item.step_id)}>{t("dependencies.openEvidence")}</button>
       </article>)}</div> : null}
       {data && data.total > data.limit ? <nav className="dependency-pagination" aria-label={t("dependencies.repositoryPaginationLabel")}>

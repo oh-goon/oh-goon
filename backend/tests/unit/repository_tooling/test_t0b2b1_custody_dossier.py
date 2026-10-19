@@ -1,4 +1,5 @@
 """T0B2B1: complete signed review coverage is NOT independent custody proof."""
+
 from __future__ import annotations
 
 import hashlib
@@ -11,15 +12,21 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.offline_custody_review_contract import (
-    _SOURCE, check_offline_custody_review_contract,
+    _SOURCE,
+    check_offline_custody_review_contract,
 )
+from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.trust_custody_evidence_contract import (
-    _REGISTRY, _REVIEW_FIELDS, expected_subjects,
+    _REGISTRY,
+    _REVIEW_FIELDS,
+    expected_subjects,
 )
 from oh_goon.repository_tooling.offline_custody_review import (
-    _DOMAIN, _canonical, ReviewRejected, inspect_dossier,
+    _DOMAIN,
+    ReviewRejected,
+    _canonical,
+    inspect_dossier,
 )
 
 
@@ -43,7 +50,9 @@ def _fixture(tmp_path: Path):
         payload = {
             "schema": "oh-goon/offline-custody-review/v1",
             "policy_sha256": hashlib.sha256((ROOT / _REGISTRY).read_bytes()).hexdigest(),
-            "custody_register_sha256": hashlib.sha256((ROOT / "backend/trust-custody-evidence.json").read_bytes()).hexdigest(),
+            "custody_register_sha256": hashlib.sha256(
+                (ROOT / "backend/trust-custody-evidence.json").read_bytes()
+            ).hexdigest(),
             "subject": subject,
             "disposition": "KEEP",
             "reviewer_id": "synthetic-reviewer-unit-test",
@@ -70,14 +79,28 @@ def test_complete_signed_census_does_not_grant_trust(tmp_path: Path) -> None:
     assert len(result["review_dossier_sha256"]) == 64
 
 
-@pytest.mark.parametrize("attack", [
-    "missing_subject", "unexpected_subject", "subject_substitution", "unsigned_evidence",
-    "extra_evidence", "symlink_subject", "symlink_subjects_root", "changed_signature",
-    "wrong_external_pin", "policy_identity_swap", "hardlink_packet", "reviewer_key_swap",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "missing_subject",
+        "unexpected_subject",
+        "subject_substitution",
+        "unsigned_evidence",
+        "extra_evidence",
+        "symlink_subject",
+        "symlink_subjects_root",
+        "changed_signature",
+        "wrong_external_pin",
+        "policy_identity_swap",
+        "hardlink_packet",
+        "reviewer_key_swap",
+    ],
+)
 def test_dossier_rejects_incomplete_forged_or_aliased_sources(tmp_path: Path, attack: str) -> None:
     dossier, key, pin, subjects = _fixture(tmp_path)
-    folders = [dossier / "subjects" / hashlib.sha256(subject.encode()).hexdigest() for subject in subjects]
+    folders = [
+        dossier / "subjects" / hashlib.sha256(subject.encode()).hexdigest() for subject in subjects
+    ]
     first, second = folders[:2]
     if attack == "missing_subject":
         shutil.rmtree(first)
@@ -113,34 +136,55 @@ def test_dossier_rejects_incomplete_forged_or_aliased_sources(tmp_path: Path, at
 
 
 def _architecture_fixture(tmp_path: Path) -> Path:
-    for name in (_SOURCE, "backend/pyproject.toml", "scripts/qualify_b12_development_wsl.sh",
-                 "backend/tests/unit/repository_tooling/test_t0b2_offline_custody_review.py",
-                 "backend/tests/unit/repository_tooling/test_t0b2b1_custody_dossier.py"):
+    for name in (
+        _SOURCE,
+        "backend/pyproject.toml",
+        "scripts/qualify_b12_development_wsl.sh",
+        "backend/tests/unit/repository_tooling/test_t0b2_offline_custody_review.py",
+        "backend/tests/unit/repository_tooling/test_t0b2b1_custody_dossier.py",
+    ):
         target = tmp_path / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, target)
     return tmp_path
 
 
-@pytest.mark.parametrize("mutation", [
-    "remove_original_verifier", "allow_incomplete_subjects", "allow_unlisted_evidence",
-    "promote_custody", "remove_qualifier", "remove_dossier_tests",
-])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "remove_original_verifier",
+        "allow_incomplete_subjects",
+        "allow_unlisted_evidence",
+        "promote_custody",
+        "remove_qualifier",
+        "remove_dossier_tests",
+    ],
+)
 def test_x0_blocks_dossier_policy_drift(tmp_path: Path, mutation: str) -> None:
     root = _architecture_fixture(tmp_path)
     assert not check_offline_custody_review_contract(root)
     source = root / _SOURCE
     if mutation == "remove_original_verifier":
-        source.write_text(source.read_text().replace('verified = inspect_packet(', 'verified = bypass_review('))
+        source.write_text(
+            source.read_text().replace("verified = inspect_packet(", "verified = bypass_review(")
+        )
     elif mutation == "allow_incomplete_subjects":
-        source.write_text(source.read_text().replace('set(os.listdir(subjects_fd)) != set(names)', 'False'))
+        source.write_text(
+            source.read_text().replace("set(os.listdir(subjects_fd)) != set(names)", "False")
+        )
     elif mutation == "allow_unlisted_evidence":
-        source.write_text(source.read_text().replace('set(os.listdir(fd)) != members', 'False'))
+        source.write_text(source.read_text().replace("set(os.listdir(fd)) != members", "False"))
     elif mutation == "promote_custody":
-        source.write_text(source.read_text().replace('"independent_custody_verified": False', '"independent_custody_verified": True'))
+        source.write_text(
+            source.read_text().replace(
+                '"independent_custody_verified": False', '"independent_custody_verified": True'
+            )
+        )
     elif mutation == "remove_qualifier":
         shell = root / "scripts/qualify_b12_development_wsl.sh"
-        shell.write_text(shell.read_text().replace("--require-module test_t0b2b1_custody_dossier", ""))
+        shell.write_text(
+            shell.read_text().replace("--require-module test_t0b2b1_custody_dossier", "")
+        )
     elif mutation == "remove_dossier_tests":
         (root / "backend/tests/unit/repository_tooling/test_t0b2b1_custody_dossier.py").unlink()
     assert check_offline_custody_review_contract(root)
@@ -149,11 +193,14 @@ def test_x0_blocks_dossier_policy_drift(tmp_path: Path, mutation: str) -> None:
 def _resign_dossier(dossier: Path, key: Ed25519PrivateKey, subjects: tuple[str, ...]) -> None:
     for subject in subjects:
         folder = dossier / "subjects" / hashlib.sha256(subject.encode()).hexdigest()
-        (folder / "review.sig").write_text(key.sign(_DOMAIN + (folder / "review.json").read_bytes()).hex() + "\n")
+        (folder / "review.sig").write_text(
+            key.sign(_DOMAIN + (folder / "review.json").read_bytes()).hex() + "\n"
+        )
 
 
 def test_comparison_of_distinct_signed_sets_still_never_proves_custody(tmp_path: Path) -> None:
     from oh_goon.repository_tooling.offline_custody_review import compare_review_dossiers
+
     a = tmp_path / "a"
     b = tmp_path / "b"
     a.mkdir()
@@ -171,6 +218,7 @@ def test_comparison_of_distinct_signed_sets_still_never_proves_custody(tmp_path:
 
 def test_conflicting_fully_signed_review_sets_fail_closed(tmp_path: Path) -> None:
     from oh_goon.repository_tooling.offline_custody_review import compare_review_dossiers
+
     a, b = tmp_path / "a", tmp_path / "b"
     a.mkdir()
     b.mkdir()

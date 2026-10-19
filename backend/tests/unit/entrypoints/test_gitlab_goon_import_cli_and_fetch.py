@@ -114,7 +114,9 @@ def test_component_fetcher_uses_first_or_fallback_template_and_token() -> None:
 
 
 def test_component_fetcher_reports_http_and_transport_failures() -> None:
-    responses = iter([GitLabComponentTransportError("offline"), SimpleNamespace(status_code=500, text="boom")])
+    responses = iter(
+        [GitLabComponentTransportError("offline"), SimpleNamespace(status_code=500, text="boom")]
+    )
 
     class Transport:
         def get(self, *args, **kwargs):

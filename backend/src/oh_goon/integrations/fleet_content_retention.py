@@ -7,11 +7,11 @@ from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.path_layouts import ContentStorePathLayout
+from oh_goon.integrations.fleet_content_crash_reconciliation import complete_deletion_locked
 from oh_goon.integrations.fleet_content_object_lifecycle import (
     FleetContentObjectLifecycle,
     read_object_lifecycle,
 )
-from oh_goon.integrations.fleet_content_crash_reconciliation import complete_deletion_locked
 from oh_goon.integrations.fleet_content_store_lifecycle import (
     is_object_id,
     reconcile_leases,

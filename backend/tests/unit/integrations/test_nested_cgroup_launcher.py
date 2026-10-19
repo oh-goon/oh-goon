@@ -4,6 +4,9 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
+from oh_goon.integrations import _fleet_plan_cgroup_resources as cgroup
 from oh_goon.integrations import _fleet_plan_nested_cgroup_launcher as launcher
 
 
@@ -31,7 +34,9 @@ class _FakeProcess:
 
 def test_nested_launcher_empties_delegated_root_before_releasing_command(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(cgroup, "require_independent_native_parent_custody", lambda **_kw: None)
     nested = tmp_path / "nested-execution"
     monitor = tmp_path / "nested-monitor"
     nested.mkdir()

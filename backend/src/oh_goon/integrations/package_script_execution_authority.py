@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -157,9 +156,7 @@ def _bin_rows(
     for package_path, raw in packages.items():
         if not isinstance(package_path, str):
             continue
-        for row in _package_bin_entries(
-            package_path, raw, package_directory=package_directory
-        ):
+        for row in _package_bin_entries(package_path, raw, package_directory=package_directory):
             index.setdefault(row.bin_name, []).append(row)
     return {name: tuple(sorted(rows)) for name, rows in sorted(index.items())}
 
@@ -192,8 +189,15 @@ def _bin_provider_contract(package_payload: dict[str, object]) -> dict[str, str]
         raise ValueError("ohGoonExecutionAuthority.packageBinProviders must be an object")
     result: dict[str, str] = {}
     for bin_name, provider in providers.items():
-        if not isinstance(bin_name, str) or not bin_name or not isinstance(provider, str) or not provider:
-            raise ValueError("packageBinProviders entries must map non-empty strings to package names")
+        if (
+            not isinstance(bin_name, str)
+            or not bin_name
+            or not isinstance(provider, str)
+            or not provider
+        ):
+            raise ValueError(
+                "packageBinProviders entries must map non-empty strings to package names"
+            )
         result[bin_name] = provider
     return result
 
@@ -204,7 +208,9 @@ def _load_context(root: Path, directory: Path) -> _PackageContext:
     if not package_json.is_file():
         raise ValueError(f"package script owner has no package.json: {_relative(root, directory)}")
     if not package_lock.is_file():
-        raise ValueError(f"package script owner has no package-lock.json: {_relative(root, directory)}")
+        raise ValueError(
+            f"package script owner has no package-lock.json: {_relative(root, directory)}"
+        )
     try:
         package_payload = json.loads(package_json.read_text(encoding="utf-8"))
         lock_payload = json.loads(package_lock.read_text(encoding="utf-8"))
@@ -223,9 +229,7 @@ def _load_context(root: Path, directory: Path) -> _PackageContext:
         package_json=package_json.resolve(),
         package_lock=package_lock.resolve(),
         scripts=scripts,
-        bins=_bin_rows(
-            lock_payload, package_directory=_relative(root, directory)
-        ),
+        bins=_bin_rows(lock_payload, package_directory=_relative(root, directory)),
         direct_packages=_direct_packages(package_payload),
         bin_providers=_bin_provider_contract(package_payload),
     )
@@ -327,7 +331,9 @@ def _scan_special_command(
         _scan_nested_npm(builder, words, index, chain)
         return True
     if command == "npx":
-        builder.reject("npx execution is not package-script authority; use a locked npm script", chain)
+        builder.reject(
+            "npx execution is not package-script authority; use a locked npm script", chain
+        )
         return True
     return _scan_package_bin(builder, command, chain)
 
@@ -398,7 +404,9 @@ def derive_npm_run_authority(
     try:
         context = _select_context(root, script, package_dir)
     except ValueError as exc:
-        return PackageScriptAuthority((), (), (), (), (" -> ".join(chain) + ": " + str(exc),), (), ())
+        return PackageScriptAuthority(
+            (), (), (), (), (" -> ".join(chain) + ": " + str(exc),), (), ()
+        )
     builder = _Builder(root=root, context=context)
     _visit_script(builder, script, chain)
     return PackageScriptAuthority(

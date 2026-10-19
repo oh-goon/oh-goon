@@ -11,7 +11,6 @@ from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.operation import (
     AvailableToolVersion,
     ComparedGitRemote,
-    ReadyUvTool,
     DependenciesUpdated,
     GitMutationResult,
     NamedGitPosition,
@@ -19,6 +18,7 @@ from oh_goon.core.models.operation import (
     PythonRuntimeResult,
     ReadinessChecks,
     ReadinessOperationEvidence,
+    ReadyUvTool,
     RepositoryValidationCompleted,
     ToolchainResult,
     UpdateOperationEvidence,

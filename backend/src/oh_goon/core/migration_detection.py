@@ -4,9 +4,10 @@ import tomllib
 from pathlib import Path
 
 from oh_goon.core.models.migration import MigrationCandidate
-from oh_goon.core.product_identity import repository_instance_id
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.product_identity import repository_instance_id
 from oh_goon.core.vocabulary import MigrationReadiness, MigrationSource
+
 
 def detect_migration_candidate(repository: Path) -> MigrationCandidate:
     repository = repository.expanduser().resolve()

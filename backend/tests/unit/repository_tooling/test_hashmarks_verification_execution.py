@@ -6,14 +6,11 @@ pytest.importorskip("hashmarks")
 
 from hashmarks.producer_identity import native_producer_implementation_identity
 from hashmarks.verification_selection import verification_member, verification_membership
-
-
-pytestmark = pytest.mark.dependency_complete
-
 from tests.hashmarks_test_support import (
     TEST_HASHMARKS_ARTIFACT_IDENTITY,
     TEST_HASHMARKS_VERSION,
 )
+
 from oh_goon.integrations.hashmarks.verification_selection import (
     HashmarksVerificationMember,
     VerifiedHashmarksVerificationSelection,
@@ -32,6 +29,8 @@ from oh_goon.runtime.execution.shard_models import (
     execution_policy_identity,
 )
 
+pytestmark = pytest.mark.dependency_complete
+
 
 def _sha(char: str) -> str:
     return "sha256:" + char * 64
@@ -39,7 +38,10 @@ def _sha(char: str) -> str:
 
 def _selection(count: int = 5) -> VerifiedHashmarksVerificationSelection:
     native = verification_membership(
-        [verification_member("tests/test_x.py", test_symbol=f"test_{index}") for index in range(count)]
+        [
+            verification_member("tests/test_x.py", test_symbol=f"test_{index}")
+            for index in range(count)
+        ]
     )
     members = tuple(
         HashmarksVerificationMember(
@@ -86,7 +88,11 @@ def _attempt(work_identity: str, number: int = 1, *, retry: bool = False) -> Sha
 
 def test_oh_goon_owns_batch_grouping_not_hashmarks() -> None:
     selection = _selection(5)
-    plan = build_verification_execution_plan(selection, command_prefix=("pytest",), grouping_policy=VerificationExecutionGroupingPolicy(2))
+    plan = build_verification_execution_plan(
+        selection,
+        command_prefix=("pytest",),
+        grouping_policy=VerificationExecutionGroupingPolicy(2),
+    )
     assert [shard.members for shard in plan.shards] == [
         selection.selected_test_nodes[:2],
         selection.selected_test_nodes[2:4],
@@ -119,7 +125,11 @@ def test_execution_plan_references_admitted_repository_provenance_without_recomp
 
 def test_terminal_receipt_proves_exact_original_hashmarks_coverage_with_retry_lineage() -> None:
     selection = _selection(2)
-    plan = build_verification_execution_plan(selection, command_prefix=("pytest",), grouping_policy=VerificationExecutionGroupingPolicy(1))
+    plan = build_verification_execution_plan(
+        selection,
+        command_prefix=("pytest",),
+        grouping_policy=VerificationExecutionGroupingPolicy(1),
+    )
     results = tuple(
         ShardResult(
             shard_id=shard.shard_id,
@@ -129,7 +139,9 @@ def test_terminal_receipt_proves_exact_original_hashmarks_coverage_with_retry_li
             attempts=(
                 _attempt(shard.work_identity, 1, retry=True),
                 _attempt(shard.work_identity, 2),
-            ) if index == 0 else (_attempt(shard.work_identity),),
+            )
+            if index == 0
+            else (_attempt(shard.work_identity),),
             members=shard.members,
         )
         for index, shard in enumerate(plan.shards)
@@ -170,7 +182,11 @@ def test_terminal_receipt_proves_exact_original_hashmarks_coverage_with_retry_li
 
 def test_bisection_children_preserve_terminal_membership_without_duplicate_coverage() -> None:
     selection = _selection(2)
-    plan = build_verification_execution_plan(selection, command_prefix=("pytest",), grouping_policy=VerificationExecutionGroupingPolicy(2))
+    plan = build_verification_execution_plan(
+        selection,
+        command_prefix=("pytest",),
+        grouping_policy=VerificationExecutionGroupingPolicy(2),
+    )
     parent = plan.shards[0]
     children = tuple(
         ShardResult(
@@ -219,9 +235,15 @@ def test_bisection_children_preserve_terminal_membership_without_duplicate_cover
     assert len(receipt.retry_bisection_lineage) == 3
 
 
-def test_incomplete_terminal_receipt_names_missing_member_and_never_claims_hashmarks_identity() -> None:
+def test_incomplete_terminal_receipt_names_missing_member_and_never_claims_hashmarks_identity() -> (
+    None
+):
     selection = _selection(2)
-    plan = build_verification_execution_plan(selection, command_prefix=("pytest",), grouping_policy=VerificationExecutionGroupingPolicy(1))
+    plan = build_verification_execution_plan(
+        selection,
+        command_prefix=("pytest",),
+        grouping_policy=VerificationExecutionGroupingPolicy(1),
+    )
     passed = ShardResult(
         shard_id=plan.shards[0].shard_id,
         described_work_identity=plan.shards[0].work_identity,
@@ -261,7 +283,6 @@ def test_incomplete_terminal_receipt_names_missing_member_and_never_claims_hashm
     assert receipt.terminal_success is False
     assert receipt.terminal_membership_identity is None
     assert receipt.missing == plan.shards[1].members
-
 
 
 def test_resumed_terminal_member_is_completed_without_being_attempted() -> None:
@@ -441,6 +462,7 @@ def test_two_terminal_pass_coverages_are_explicit_duplicates() -> None:
     assert receipt.terminal_membership_identity is None
     assert receipt.terminal_success is False
 
+
 def test_grouping_policy_is_oh_goon_identity_bound_and_conserves_admitted_order() -> None:
     selection = _selection(5)
     policy = VerificationExecutionGroupingPolicy(2)
@@ -464,9 +486,19 @@ def test_physical_grouping_changes_plan_identity_not_hashmarks_membership_identi
         grouping_policy=VerificationExecutionGroupingPolicy(3),
     )
     assert one.plan_identity != three.plan_identity
-    assert one.selected_membership_identity == three.selected_membership_identity == selection.membership_identity
-    assert tuple(member for shard in one.shards for member in shard.members) == selection.selected_test_nodes
-    assert tuple(member for shard in three.shards for member in shard.members) == selection.selected_test_nodes
+    assert (
+        one.selected_membership_identity
+        == three.selected_membership_identity
+        == selection.membership_identity
+    )
+    assert (
+        tuple(member for shard in one.shards for member in shard.members)
+        == selection.selected_test_nodes
+    )
+    assert (
+        tuple(member for shard in three.shards for member in shard.members)
+        == selection.selected_test_nodes
+    )
 
 
 def test_grouping_policy_rejects_nonpositive_group_capacity() -> None:

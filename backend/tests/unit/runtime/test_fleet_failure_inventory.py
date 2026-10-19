@@ -32,7 +32,10 @@ def test_current_failure_inventory_projects_canonical_failed_execution(tmp_path:
     repositories = view.failure_repositories(group.group_id)
     assert repositories.total == 1
     assert repositories.items[0].fleet_run_id == "failure-run"
-    assert repositories.items[0].repository.repository_id == execution.operation.repository.repository_id
+    assert (
+        repositories.items[0].repository.repository_id
+        == execution.operation.repository.repository_id
+    )
     assert repositories.items[0].signature_id is not None
 
 
@@ -46,12 +49,10 @@ def test_later_success_for_same_plan_slot_clears_current_failure(tmp_path: Path)
     assert inventory.failure_groups == 0
 
 
-
 def test_success_for_different_plan_slot_does_not_hide_current_failure(tmp_path: Path) -> None:
-    failed = admitted_fleet_plan_execution(
-        tmp_path, returncodes=(5,), fleet_run_id="failure-run"
-    )
+    failed = admitted_fleet_plan_execution(tmp_path, returncodes=(5,), fleet_run_id="failure-run")
     different_plan = """version: 1
+execution: {purpose: cicd}
 steps:
   - id: other-check
     run: "true"
@@ -80,7 +81,10 @@ def test_failure_group_and_repository_reads_are_searchable(tmp_path: Path) -> No
     group = view.failure_groups(query="check").items[0]
 
     assert view.failure_groups(query="not-present").total == 0
-    assert view.failure_repositories(group.group_id, query=execution.operation.repository.name).total == 1
+    assert (
+        view.failure_repositories(group.group_id, query=execution.operation.repository.name).total
+        == 1
+    )
     assert view.failure_repositories(group.group_id, query="not-present").total == 0
     signature = view.failure_repositories(group.group_id).items[0].signature_id
     assert signature is not None

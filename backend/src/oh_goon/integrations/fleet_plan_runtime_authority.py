@@ -19,7 +19,6 @@ from oh_goon.integrations._fleet_plan_sandbox_launch import (
 )
 from oh_goon.integrations.content_snapshot import (
     SnapshotBinding,
-    snapshot_identity,
     verify_snapshot,
 )
 from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
@@ -84,9 +83,7 @@ def expected_runtime_authority_sources(
         launch.env,
         launch.cwd,
     )
-    interpreter_path, interpreter = _expected_interpreter(
-        request, executable.host_path
-    )
+    interpreter_path, interpreter = _expected_interpreter(request, executable.host_path)
     expected_files = (executable,) + ((interpreter,) if interpreter is not None else ())
     reused = tuple(item for item in expected_files if item.reused)
     recomputed = tuple(item for item in expected_files if not item.reused)
@@ -281,7 +278,9 @@ def _map_admitted_executable(
             _receipt_sha(managed_binding.identity.sha256),
         )
 
-    raise _divergence(f"runtime selected executable outside admitted execution roots: {sandbox_path}")
+    raise _divergence(
+        f"runtime selected executable outside admitted execution roots: {sandbox_path}"
+    )
 
 
 def _toolchain_binding(request: IsolatedProcessRequest, sandbox_path: PurePosixPath):
@@ -327,6 +326,7 @@ def _workspace_executable(
         ),
         receipt.sha256,
     )
+
 
 def _map_managed_binding(
     bindings: tuple[SnapshotBinding, ...], sandbox_path: PurePosixPath
@@ -389,9 +389,7 @@ def _map_interpreter(
     if relative is not None and len(relative.parts) == 1:
         binding = next((item for item in attempt.host_tools if item.name == relative.name), None)
         if binding is None:
-            raise _divergence(
-                f"runtime shebang selected undeclared interpreter: {interpreter}"
-            )
+            raise _divergence(f"runtime shebang selected undeclared interpreter: {interpreter}")
         _verify_host_tool_binding(binding)
         host_path = binding.execution_snapshot_path
         reused = bool(binding.execution_sha256)
@@ -401,9 +399,7 @@ def _map_interpreter(
             byte_count=host_path.stat().st_size,
             reused=reused,
             provenance=f"prepared-host-tool:{relative.name}",
-            recompute_reason=(
-                None if reused else f"missing-prepared-raw-sha:{relative.name}"
-            ),
+            recompute_reason=(None if reused else f"missing-prepared-raw-sha:{relative.name}"),
         )
 
     runtime_path = attempt.runtime_root.root.joinpath(*interpreter.relative_to("/").parts)
@@ -468,10 +464,11 @@ def _file_identity(path: Path) -> str:
 def _receipt_sha(value: str) -> str:
     return value if value.startswith("sha256:") else "sha256:" + value
 
+
 def _identity(payload: object) -> str:
-    raw = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 

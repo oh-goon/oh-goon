@@ -7,7 +7,9 @@ from oh_goon.repository_tooling.architecture.common import Violation, python_ast
 from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT
 
 _SELECTION = BACKEND_PACKAGE_ROOT / "integrations/hashmarks/verification_selection.py"
-_SELECTION_PRIMITIVES = BACKEND_PACKAGE_ROOT / "integrations/hashmarks/verification_selection_primitives.py"
+_SELECTION_PRIMITIVES = (
+    BACKEND_PACKAGE_ROOT / "integrations/hashmarks/verification_selection_primitives.py"
+)
 _BUILDER = BACKEND_PACKAGE_ROOT / "repository_tooling/hashmarks_verification_execution.py"
 _SHARD_MODEL = BACKEND_PACKAGE_ROOT / "runtime/execution/shard_models.py"
 _PYTEST_MEMBER = BACKEND_PACKAGE_ROOT / "core/models/pytest_selection.py"
@@ -46,16 +48,23 @@ def _dataclass_field_sets(path: Path) -> tuple[set[str], ...]:
             continue
         if not any(
             (isinstance(decorator, ast.Name) and decorator.id == "dataclass")
-            or (isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Name) and decorator.func.id == "dataclass")
+            or (
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Name)
+                and decorator.func.id == "dataclass"
+            )
             for decorator in node.decorator_list
         ):
             continue
-        field_sets.append({
-            item.target.id
-            for item in node.body
-            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
-        })
+        field_sets.append(
+            {
+                item.target.id
+                for item in node.body
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+            }
+        )
     return tuple(field_sets)
+
 
 def _assigned_names(path: Path) -> set[str]:
     tree = python_ast(path)
@@ -82,7 +91,9 @@ def _referenced_external_layout_name(path: Path, name: str) -> bool:
 def _selection_violations() -> list[Violation]:
     violations: list[Violation] = []
     if not _SELECTION.is_file() or not _SELECTION_PRIMITIVES.is_file():
-        return [Violation(_SELECTION, "Hashmarks verification-selection adapter/primitives are missing")]
+        return [
+            Violation(_SELECTION, "Hashmarks verification-selection adapter/primitives are missing")
+        ]
 
     forbidden_native_schema_mirrors = {
         "DOWNSTREAM_CONTRACT_SCHEMA",
@@ -100,7 +111,10 @@ def _selection_violations() -> list[Violation]:
         )
 
     for marker in ("preferred_granularity", "may_regroup", "owner_units", "isolated_process"):
-        if any(_referenced_external_layout_name(path, marker) for path in (_SELECTION, _SELECTION_PRIMITIVES)):
+        if any(
+            _referenced_external_layout_name(path, marker)
+            for path in (_SELECTION, _SELECTION_PRIMITIVES)
+        ):
             violations.append(
                 Violation(
                     _SELECTION,
@@ -128,9 +142,7 @@ def _selection_violations() -> list[Violation]:
             )
         )
 
-    imported_validator = _imported_names(
-        _SELECTION_PRIMITIVES, "hashmarks.consumer_conformance"
-    )
+    imported_validator = _imported_names(_SELECTION_PRIMITIVES, "hashmarks")
     if "validate_native_consumer_bundle" not in imported_validator:
         violations.append(
             Violation(
@@ -266,7 +278,8 @@ def _structured_pytest_projection_violations() -> list[Violation]:
             violations.append(
                 Violation(
                     _REFINEMENT,
-                    "shard refinement must retain the structured pytest projection boundary: " + module,
+                    "shard refinement must retain the structured pytest projection boundary: "
+                    + module,
                 )
             )
     return violations

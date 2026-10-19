@@ -6,7 +6,7 @@ Reusable review and development Skills are owned by
 [agentsCookbook](https://github.com/Hugloss/agentsCookbook); see the
 [optional pinned-source recipe](../agent-skill-cookbook/README.md).
 
-Commit `.goonskills`, `goon.yml`, and the entire `skills/` resource tree together.
+Commit `.goonskills.yml`, `goon.yml`, and the entire `skills/` resource tree together.
 The registry path is relative to the explicitly supplied `--skill-root`, which
 is this example directory. `--repository-root` selects a separate directory
 containing the repository the caller authorizes for inspection.

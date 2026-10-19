@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.projections.explanation import explain_repository_guidance

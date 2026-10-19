@@ -52,9 +52,7 @@ def _current(area: str) -> dict[str, dict[str, float]]:
     missing = [paths[name] for name in requested if not paths[name].exists()]
     if missing:
         names = ", ".join(str(path.relative_to(ROOT)) for path in missing)
-        raise SystemExit(
-            f"Missing coverage artifacts: {names}. Run the coverage commands first."
-        )
+        raise SystemExit(f"Missing coverage artifacts: {names}. Run the coverage commands first.")
     result: dict[str, dict[str, float]] = {}
     if "python" in requested:
         result["python"] = _python_metrics()
@@ -87,9 +85,7 @@ def _minimum_floor_failures(floors: dict[str, object]) -> list[str]:
 def _require_minimum_floors(floors: dict[str, object]) -> None:
     failures = _minimum_floor_failures(floors)
     if failures:
-        raise SystemExit(
-            "Quality floors violate the backend minimum:\n- " + "\n- ".join(failures)
-        )
+        raise SystemExit("Quality floors violate the backend minimum:\n- " + "\n- ".join(failures))
 
 
 def _check(area: str) -> None:
@@ -110,8 +106,7 @@ def _check(area: str) -> None:
     print("Quality ratchet passed")
     for area, metrics in current.items():
         print(
-            f"  {area}: "
-            + ", ".join(f"{metric}={value:.2f}%" for metric, value in metrics.items())
+            f"  {area}: " + ", ".join(f"{metric}={value:.2f}%" for metric, value in metrics.items())
         )
 
 
@@ -130,9 +125,7 @@ def _raise_floors(area: str) -> None:
             )
             for metric, value in metrics.items()
         }
-    FLOORS_PATH.write_text(
-        json.dumps(updated, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    FLOORS_PATH.write_text(json.dumps(updated, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Raised quality floors in {FLOORS_PATH.relative_to(ROOT)}")
 
 
@@ -167,21 +160,16 @@ def _guard_floor_history() -> None:
         for metric, value in metrics.items():
             current_value = current_area.get(metric)
             if current_value is None or float(current_value) + 1e-9 < float(value):
-                failures.append(
-                    f"{area}.{metric}: floor decreased from {float(value):.2f}%"
-                )
+                failures.append(f"{area}.{metric}: floor decreased from {float(value):.2f}%")
     if failures:
         raise SystemExit(
-            "Quality floors are one-way and cannot decrease:\n- "
-            + "\n- ".join(failures)
+            "Quality floors are one-way and cannot decrease:\n- " + "\n- ".join(failures)
         )
     print(f"Quality floor history guard passed against {base_ref}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Enforce or raise one-way coverage quality floors"
-    )
+    parser = argparse.ArgumentParser(description="Enforce or raise one-way coverage quality floors")
     parser.add_argument("mode", choices=("check", "raise", "guard"))
     parser.add_argument("--area", choices=("all", "python", "frontend"), default="all")
     args = parser.parse_args()

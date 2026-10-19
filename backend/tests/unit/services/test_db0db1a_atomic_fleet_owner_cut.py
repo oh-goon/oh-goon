@@ -1,12 +1,14 @@
 """One SQLite DB owner: the live original Fleet cut cannot be spoofed by BEGIN."""
+
 from __future__ import annotations
 
 import pytest
 
-from tests.fixtures.db1b2_legacy_sqlite import CausalRunJournal
-from tests.fixtures.db1b2_legacy_sqlite import SignerTrustEpochAuthority
+from tests.fixtures.db1b2_legacy_sqlite import CausalRunJournal, SignerTrustEpochAuthority
 from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import (
-    facts, prepared, publish,
+    facts,
+    prepared,
+    publish,
 )
 
 
@@ -38,10 +40,13 @@ def test_original_localdatabase_cut_commits_both_journals_once(tmp_path, monkeyp
         outside.close()
 
 
-def test_original_database_owner_rolls_back_both_journals_on_post_admission_fault(tmp_path, monkeypatch):
+def test_original_database_owner_rolls_back_both_journals_on_post_admission_fault(
+    tmp_path, monkeypatch
+):
     args, outside, _ = prepared(tmp_path, monkeypatch)
     owner = args["journal"]._database
     from oh_goon.runtime.enforcer_lace_journal import CausalRunJournal as RuntimeCausalRunJournal
+
     original = RuntimeCausalRunJournal._append_locked
 
     def append_then_crash(self, run_id, kind, payload):

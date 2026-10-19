@@ -8,9 +8,9 @@ import pytest
 from oh_goon.core import capability_registry
 from oh_goon.core.capability_registry import CapabilityRegistry, resolve_bound_capability_intent
 from oh_goon.core.errors import CapabilityUnavailable
-from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.target import UvRecipeTarget
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import (
     CommandSafety,
     EffectBoundaryKind,

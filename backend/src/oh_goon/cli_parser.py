@@ -14,6 +14,7 @@ from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.vocabulary import CommandSafety, OperationAction
 from oh_goon.repository_tooling import _self_certification_plan_units as self_certification_units
 
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="oh-goon", description="oh-goon local fleet maintenance and strict CI/CD"
@@ -21,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     subparsers = parser.add_subparsers(dest="command")
 
-    _add_agent_apply_commands(subparsers)
+    _add_agent_commands(subparsers)
     _add_local_app_commands(subparsers)
     _add_local_state_commands(subparsers)
     _add_storage_commands(subparsers)
@@ -35,19 +36,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-
-def _add_agent_apply_commands(subparsers):
-    """One native effect consumer inside the existing oh-goon executable.
-
-    Authored Plan Steps still own the selection and effect authorization;
-    this CLI never starts an Agent run or treats model output as a grant.
-    """
-    agent = subparsers.add_parser("agent", help="Consume Agent data from an explicitly authorized Step")
+def _add_agent_commands(subparsers):
+    """Agent data operations and separately configured model connections."""
+    agent = subparsers.add_parser(
+        "agent", help="Agent data operations and model provider connections"
+    )
     commands = agent.add_subparsers(dest="agent_command", required=True)
-    apply = commands.add_parser("apply", help="Apply one frozen source-bound replacement to the selected workspace")
-    apply.add_argument("--proposal", required=True)
-    apply.add_argument("--expected-path", required=True)
-    apply.add_argument("--expected-handoff-identity")
+    from oh_goon.cli_agent_providers import add_provider_commands
+
+    add_provider_commands(commands)
+    apply = commands.add_parser(
+        "apply", help="Apply one frozen source-bound replacement to the selected workspace"
+    )
+    from oh_goon.integrations.agent_patch_apply import add_apply_arguments
+
+    add_apply_arguments(apply)
 
 
 def _add_local_app_commands(
@@ -99,7 +102,9 @@ def _add_local_state_commands(
     reset = commands.add_parser(
         "reset", help="Delete only the configured local database and its SQLite sidecars"
     )
-    reset.add_argument("--yes", action="store_true", help="Confirm deletion without an interactive prompt")
+    reset.add_argument(
+        "--yes", action="store_true", help="Confirm deletion without an interactive prompt"
+    )
 
 
 def _add_storage_commands(
@@ -119,7 +124,9 @@ def _add_storage_commands(
     prune = commands.add_parser(
         "prune", help="Prune only storage whose canonical owner proves disposal is safe"
     )
-    prune.add_argument("--yes", action="store_true", help="Confirm the bounded owner-driven cleanup")
+    prune.add_argument(
+        "--yes", action="store_true", help="Confirm the bounded owner-driven cleanup"
+    )
     prune.add_argument("--json", action="store_true", dest="as_json")
 
 
@@ -131,9 +138,17 @@ def _add_direct_repository_commands(
     )
     lock.add_argument("plan", type=Path, help="Plan/Goon entrypoint to resolve")
     lock.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
+    lock.add_argument("--inputs-file", type=Path)
     lock.add_argument("--agent-repository-root", type=Path)
     lock.add_argument("--agent-skill-root", type=Path)
     lock.add_argument("--allow-agent-acceptance", action="append")
+    lock.add_argument("--agent-model-profile")
+    lock.add_argument("--agent-providers-file", type=Path)
+    lock.add_argument(
+        "--update-skills",
+        action="store_true",
+        help="Resolve declared Skill branches/tags again and replace their locked commits",
+    )
     lock.add_argument(
         "--output", type=Path, help="Output path; defaults to goon.lock beside the entrypoint"
     )
@@ -163,7 +178,9 @@ def _add_direct_repository_commands(
     exclude.add_argument("repository", type=Path)
     exclude.add_argument("--reason", default=policy_defaults.default_exclusion_reason())
 
-    include = subparsers.add_parser("include", help="Include a previously excluded repository again")
+    include = subparsers.add_parser(
+        "include", help="Include a previously excluded repository again"
+    )
     include.add_argument("repository", type=Path)
     subparsers.add_parser("excluded", help="List persistently excluded repositories")
 
@@ -364,14 +381,20 @@ def _add_developer_certification_commands(
 def _add_developer_capability_commands(
     commands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    capability = commands.add_parser("capability", help="Trace or scaffold the capability golden path")
+    capability = commands.add_parser(
+        "capability", help="Trace or scaffold the capability golden path"
+    )
     actions = capability.add_subparsers(dest="capability_action")
     show = actions.add_parser("show", help="Show every owner for one registered capability")
     show.add_argument("capability_id")
     scaffold = actions.add_parser("scaffold", help="Generate a capability implementation packet")
     scaffold.add_argument("--id", required=True, dest="capability_id")
-    scaffold.add_argument("--action", required=True, choices=[action.value for action in OperationAction])
-    scaffold.add_argument("--runner", required=True, choices=[kind.value for kind in CapabilityRunnerKind])
+    scaffold.add_argument(
+        "--action", required=True, choices=[action.value for action in OperationAction]
+    )
+    scaffold.add_argument(
+        "--runner", required=True, choices=[kind.value for kind in CapabilityRunnerKind]
+    )
     scaffold.add_argument(
         "--target-kind",
         default=CapabilityTargetKind.NONE.value,
@@ -419,11 +442,25 @@ def _add_self_commands(
     self_parser = subparsers.add_parser("self", help="Verify and certify this Oh-Goon source")
     commands = self_parser.add_subparsers(dest="self_command", required=True)
     setup = commands.add_parser("setup", help="Prepare self-verification prerequisites")
-    setup.add_argument("--parent-zip", type=Path, help="Stage the exact canonical parent checkpoint ZIP required for cumulative patch proof")
-    verify = commands.add_parser("verify", help="Run or inspect the canonical fast self-verification Plan")
-    verify.add_argument("--plan", action="store_true", help="Show the canonical bounded verification/checkpoint Plan without executing it")
+    setup.add_argument(
+        "--parent-zip",
+        type=Path,
+        help="Stage the exact canonical parent checkpoint ZIP required for cumulative patch proof",
+    )
+    verify = commands.add_parser(
+        "verify", help="Run or inspect the canonical fast self-verification Plan"
+    )
+    verify.add_argument(
+        "--plan",
+        action="store_true",
+        help="Show the canonical bounded verification/checkpoint Plan without executing it",
+    )
     verify.add_argument("--json", action="store_true", dest="as_json")
-    verify.add_argument("--verbose", action="store_true", help="Include commands, identities, evidence and blocked transitions")
+    verify.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Include commands, identities, evidence and blocked transitions",
+    )
     certify = commands.add_parser("certify", help="Run the canonical self-certification Plan")
     certify.add_argument("--plan", action="store_true", help=argparse.SUPPRESS)
     certify.add_argument("--json", action="store_true", dest="as_json", help=argparse.SUPPRESS)

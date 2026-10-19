@@ -15,7 +15,7 @@ from oh_goon.core.models.fleet_plan_step_contract import (
     StepWorkspaceSource,
 )
 from oh_goon.core.path_authority import RepositoryScopedPath
-from oh_goon.core.path_layouts import RunPathLayout, SANDBOX_PATHS
+from oh_goon.core.path_layouts import SANDBOX_PATHS, RunPathLayout
 from oh_goon.integrations._fleet_plan_run_resources import _FleetPlanRunInputs
 from oh_goon.integrations.content_snapshot import (
     SnapshotBinding,
@@ -97,9 +97,7 @@ class _RunLineage:
         """Drop preparation-only cancellation authority before it can escape."""
         self._cancel_requested = None
 
-    def bind_execution_cancel_requested(
-        self, cancel_requested: Callable[[], bool] | None
-    ) -> None:
+    def bind_execution_cancel_requested(self, cancel_requested: Callable[[], bool] | None) -> None:
         """Bind the callback valid for the workload/execution lifetime."""
         self._cancel_requested = cancel_requested
 

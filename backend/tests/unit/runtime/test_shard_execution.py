@@ -11,24 +11,34 @@ import pytest
 from oh_goon.engine.command import CommandResult
 from oh_goon.runtime.execution import shards as subject
 
-
 from ._shard_execution_support import (
     context as _context,
+)
+from ._shard_execution_support import (
     exact_command_result as _exact_command_result,
+)
+from ._shard_execution_support import (
     plan as _plan,
+)
+from ._shard_execution_support import (
     work as _work,
 )
+
 
 def test_retry_policy_requires_explicit_reason_condition_and_delays() -> None:
     with pytest.raises(ValueError, match="condition"):
         subject.ShardRetryPolicy(max_attempts=2, reason="retry", delays_seconds=(0,))
     with pytest.raises(ValueError, match="reason"):
-        subject.ShardRetryPolicy(max_attempts=2, retry_environment_failures=True, delays_seconds=(0,))
+        subject.ShardRetryPolicy(
+            max_attempts=2, retry_environment_failures=True, delays_seconds=(0,)
+        )
     with pytest.raises(ValueError, match="delay"):
         subject.ShardRetryPolicy(max_attempts=2, retry_environment_failures=True, reason="pressure")
 
 
-def test_explicit_retry_relaunches_only_admitted_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_explicit_retry_relaunches_only_admitted_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     calls = 0
 
     def fake_run(*args: str, **kwargs: object) -> CommandResult:
@@ -54,7 +64,9 @@ def test_explicit_retry_relaunches_only_admitted_failure(monkeypatch: pytest.Mon
     assert report.results[0].attempts[0].retry_admitted is True
 
 
-def test_environment_failure_stops_new_launches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_environment_failure_stops_new_launches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     calls: list[str] = []
 
     def fake_run(*args: str, **kwargs: object) -> CommandResult:
@@ -82,7 +94,9 @@ def test_environment_failure_stops_new_launches(monkeypatch: pytest.MonkeyPatch,
     assert [result.status for result in report.results[1:]] == ["CANCELLED", "CANCELLED"]
 
 
-def test_pass_resume_is_bound_to_generation_plan_and_work(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_pass_resume_is_bound_to_generation_plan_and_work(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     calls = 0
 
     def fake_run(*args: str, **kwargs: object) -> CommandResult:
@@ -93,10 +107,20 @@ def test_pass_resume_is_bound_to_generation_plan_and_work(monkeypatch: pytest.Mo
     monkeypatch.setattr(subject, "run_command", fake_run)
     state = tmp_path / "state"
     first = subject.execute_shard_plan(
-        _plan(_work()), cwd=tmp_path, workers=1, shard_timeout_seconds=1, state_root=state, execution_context=_context()
+        _plan(_work()),
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=1,
+        state_root=state,
+        execution_context=_context(),
     )
     second = subject.execute_shard_plan(
-        _plan(_work()), cwd=tmp_path, workers=1, shard_timeout_seconds=1, state_root=state, execution_context=_context()
+        _plan(_work()),
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=1,
+        state_root=state,
+        execution_context=_context(),
     )
     third = subject.execute_shard_plan(
         _plan(_work(), generation="2"),
@@ -112,7 +136,9 @@ def test_pass_resume_is_bound_to_generation_plan_and_work(monkeypatch: pytest.Mo
     assert calls == 2
 
 
-def test_tampered_pass_evidence_is_not_resumed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_tampered_pass_evidence_is_not_resumed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     calls = 0
 
     def fake_run(*args: str, **kwargs: object) -> CommandResult:
@@ -123,16 +149,31 @@ def test_tampered_pass_evidence_is_not_resumed(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr(subject, "run_command", fake_run)
     state = tmp_path / "state"
     plan = _plan(_work())
-    subject.execute_shard_plan(plan, cwd=tmp_path, workers=1, shard_timeout_seconds=1, state_root=state, execution_context=_context())
+    subject.execute_shard_plan(
+        plan,
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=1,
+        state_root=state,
+        execution_context=_context(),
+    )
     evidence = next(state.rglob("*.json"))
     evidence.write_text(evidence.read_text().replace('"status":"PASS"', '"status":"FAIL"'))
-    report = subject.execute_shard_plan(plan, cwd=tmp_path, workers=1, shard_timeout_seconds=1, state_root=state, execution_context=_context())
+    report = subject.execute_shard_plan(
+        plan,
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=1,
+        state_root=state,
+        execution_context=_context(),
+    )
     assert report.results[0].status == "PASS"
     assert calls == 2
 
 
-
-def test_worker_limit_bounds_concurrent_launches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_worker_limit_bounds_concurrent_launches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     active = 0
     maximum = 0
     launches = 0
@@ -180,7 +221,9 @@ def test_real_subprocess_timeout_uses_oh_goon_command_owner(tmp_path: Path) -> N
     assert report.results[0].status == "TIMEOUT"
 
 
-def test_suite_deadline_marks_unstarted_work(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_suite_deadline_marks_unstarted_work(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     def fake_run(*args: str, **kwargs: object) -> CommandResult:
         timeout = float(kwargs["timeout"])
         time.sleep(timeout + 0.02)
@@ -268,23 +311,72 @@ def test_pass_resume_is_bound_to_repository_evidence_and_producer_artifact(
         producer_contract_identity="sha256:" + "7" * 64,
     )
 
-    assert subject.execute_shard_plan(
-        first_plan, cwd=tmp_path, workers=1, shard_timeout_seconds=1, state_root=state, execution_context=_context()
-    ).results[0].status == "PASS"
-    assert subject.execute_shard_plan(
-        same_plan, cwd=tmp_path, workers=1, shard_timeout_seconds=1, state_root=state, execution_context=_context()
-    ).results[0].status == "RESUMED_PASS"
-    assert subject.execute_shard_plan(
-        different_envelope, cwd=tmp_path, workers=1, shard_timeout_seconds=1, state_root=state, execution_context=_context()
-    ).results[0].status == "PASS"
-    assert subject.execute_shard_plan(
-        different_producer, cwd=tmp_path, workers=1, shard_timeout_seconds=1, state_root=state, execution_context=_context()
-    ).results[0].status == "PASS"
-    assert subject.execute_shard_plan(
-        different_contract, cwd=tmp_path, workers=1, shard_timeout_seconds=1, state_root=state, execution_context=_context()
-    ).results[0].status == "PASS"
+    assert (
+        subject.execute_shard_plan(
+            first_plan,
+            cwd=tmp_path,
+            workers=1,
+            shard_timeout_seconds=1,
+            state_root=state,
+            execution_context=_context(),
+        )
+        .results[0]
+        .status
+        == "PASS"
+    )
+    assert (
+        subject.execute_shard_plan(
+            same_plan,
+            cwd=tmp_path,
+            workers=1,
+            shard_timeout_seconds=1,
+            state_root=state,
+            execution_context=_context(),
+        )
+        .results[0]
+        .status
+        == "RESUMED_PASS"
+    )
+    assert (
+        subject.execute_shard_plan(
+            different_envelope,
+            cwd=tmp_path,
+            workers=1,
+            shard_timeout_seconds=1,
+            state_root=state,
+            execution_context=_context(),
+        )
+        .results[0]
+        .status
+        == "PASS"
+    )
+    assert (
+        subject.execute_shard_plan(
+            different_producer,
+            cwd=tmp_path,
+            workers=1,
+            shard_timeout_seconds=1,
+            state_root=state,
+            execution_context=_context(),
+        )
+        .results[0]
+        .status
+        == "PASS"
+    )
+    assert (
+        subject.execute_shard_plan(
+            different_contract,
+            cwd=tmp_path,
+            workers=1,
+            shard_timeout_seconds=1,
+            state_root=state,
+            execution_context=_context(),
+        )
+        .results[0]
+        .status
+        == "PASS"
+    )
     assert calls == 4
-
 
 
 def _refinable_work() -> subject.ShardWork:
@@ -553,7 +645,6 @@ def test_deadline_becoming_unsafe_between_units_does_not_start_next_physical_wor
     assert len(calls) == 1
     assert report.results[1].status == "DEADLINE_RESERVED"
     assert report.results[1].reason_code == "minimum_execution_window_unavailable"
-
 
 
 def test_canonical_evidence_separates_described_work_from_physical_attempt_identity(

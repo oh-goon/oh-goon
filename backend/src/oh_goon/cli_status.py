@@ -27,7 +27,13 @@ def run_status_command(args: argparse.Namespace) -> int | None:
         status = safe_launch_status(manifest)
     except (OSError, ValueError) as exc:
         if args.as_json:
-            print(json.dumps({"error": "launch_status_unavailable", "schema": LAUNCH_STATUS_ERROR_SCHEMA}, sort_keys=True, separators=(",", ":")))
+            print(
+                json.dumps(
+                    {"error": "launch_status_unavailable", "schema": LAUNCH_STATUS_ERROR_SCHEMA},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
         else:
             print("OH-GOON LAUNCH STATUS UNAVAILABLE")
             print(f"Workspace: {workspace}")

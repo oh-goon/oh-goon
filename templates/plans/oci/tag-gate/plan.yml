@@ -1,8 +1,5 @@
 version: 1
-inputs:
-- registry_hostname
-- repository
-- tag
-- expected_digest
+execution:
+  purpose: cicd
 goons:
 - oci/tag-assert

@@ -10,7 +10,6 @@ from collections import defaultdict
 from math import isfinite
 from typing import Any
 
-
 CLAIM_STATES = (
     "SUPPORTED",
     "PARTIAL",
@@ -224,8 +223,12 @@ def _validated_assertion(raw: Any, question_id: str, index: int) -> dict[str, st
         raise ValueError(f"{question_id} assertion {index} subject is required")
     if not isinstance(object_, str) or not object_.strip():
         raise ValueError(f"{question_id} assertion {index} object is required")
-    relation = _require_choice(raw.get("relation"), ASSERTION_RELATIONS, f"{question_id} assertion relation")
-    polarity = _require_choice(raw.get("polarity"), ASSERTION_POLARITIES, f"{question_id} assertion polarity")
+    relation = _require_choice(
+        raw.get("relation"), ASSERTION_RELATIONS, f"{question_id} assertion relation"
+    )
+    polarity = _require_choice(
+        raw.get("polarity"), ASSERTION_POLARITIES, f"{question_id} assertion polarity"
+    )
     return {
         "question_id": question_id,
         "subject": subject.strip(),
@@ -239,9 +242,7 @@ def consistency_findings(assertions: list[dict[str, str]]) -> list[dict[str, Any
     """Detect only conservative, mechanically defensible cross-answer contradictions."""
 
     findings: list[dict[str, Any]] = []
-    exact: dict[tuple[str, str, str], dict[str, list[str]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
+    exact: dict[tuple[str, str, str], dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     owner_by_object: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     precedence: dict[tuple[str, str], list[str]] = defaultdict(list)
 
@@ -249,7 +250,9 @@ def consistency_findings(assertions: list[dict[str, str]]) -> list[dict[str, Any
         key = (assertion["subject"], assertion["relation"], assertion["object"])
         exact[key][assertion["polarity"]].append(assertion["question_id"])
         if assertion["relation"] in SINGLE_OWNER_RELATIONS and assertion["polarity"] == "AFFIRMED":
-            owner_by_object[assertion["object"]][assertion["subject"]].append(assertion["question_id"])
+            owner_by_object[assertion["object"]][assertion["subject"]].append(
+                assertion["question_id"]
+            )
         if assertion["relation"] == "must_precede" and assertion["polarity"] == "AFFIRMED":
             precedence[(assertion["subject"], assertion["object"])].append(assertion["question_id"])
 
@@ -296,9 +299,15 @@ def consistency_findings(assertions: list[dict[str, str]]) -> list[dict[str, Any
 
 
 def _evidence_score(existence: str, raw: dict[str, Any], label: str) -> float:
-    relevance = _require_choice(raw.get("relevance"), EVIDENCE_RELEVANCE_STATES, f"{label} evidence relevance")
-    support = _require_choice(raw.get("support"), EVIDENCE_SUPPORT_STATES, f"{label} evidence support")
-    authority = _require_choice(raw.get("authority"), EVIDENCE_AUTHORITY_STATES, f"{label} evidence authority")
+    relevance = _require_choice(
+        raw.get("relevance"), EVIDENCE_RELEVANCE_STATES, f"{label} evidence relevance"
+    )
+    support = _require_choice(
+        raw.get("support"), EVIDENCE_SUPPORT_STATES, f"{label} evidence support"
+    )
+    authority = _require_choice(
+        raw.get("authority"), EVIDENCE_AUTHORITY_STATES, f"{label} evidence authority"
+    )
     if existence != "VALID":
         return 0.0
     return _percentage(
@@ -311,6 +320,7 @@ def _evidence_score(existence: str, raw: dict[str, Any], label: str) -> float:
         )
         / 4.0
     )
+
 
 def qualification_policy_manifest() -> dict[str, Any]:
     return {
@@ -332,4 +342,3 @@ def qualification_policy_manifest() -> dict[str, Any]:
             "select by agent authority/risk class; model identity and candidate self-description do not change thresholds"
         ),
     }
-

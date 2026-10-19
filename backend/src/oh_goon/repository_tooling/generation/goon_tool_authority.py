@@ -41,17 +41,20 @@ def render_goon_tool_authority(root: Path) -> str:
             "independent workload permission has no canonical Make consumer: "
             + ", ".join(projection.stale_permission_owners)
         )
-    return json.dumps(
-        {
-            "schema": SCHEMA,
-            "goons": {
-                key: {step_id: list(tools) for step_id, tools in sorted(steps.items())}
-                for key, steps in sorted(projection.tools_by_goon.items())
+    return (
+        json.dumps(
+            {
+                "schema": SCHEMA,
+                "goons": {
+                    key: {step_id: list(tools) for step_id, tools in sorted(steps.items())}
+                    for key, steps in sorted(projection.tools_by_goon.items())
+                },
             },
-        },
-        indent=2,
-        sort_keys=True,
-    ) + "\n"
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def write_goon_tool_authority(*, root: Path = ROOT, output: Path = OUTPUT) -> Path:

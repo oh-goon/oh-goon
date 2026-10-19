@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.core.launch_control import LaunchStopTarget, safe_launch_stop_target, signal_launch_stop
+from oh_goon.core.launch_control import (
+    LaunchStopTarget,
+    safe_launch_stop_target,
+    signal_launch_stop,
+)
 from oh_goon.core.process_birth import ProcessBirthIdentity
 from oh_goon.runtime.local_launch_binding import LocalLaunchBindingStore
 from oh_goon.runtime.local_launch_owner import LocalLaunchOwner, built_local_intent
@@ -52,7 +56,9 @@ def test_signal_stop_uses_pidfd_and_reproves_birth_after_handle_acquisition() ->
         target,
         process_observer=lambda _pid: expected,
         pidfd_open=lambda pid, flags: calls.append(("open", pid, flags)) or 77,
-        pidfd_send_signal=lambda fd, sig, info, flags: calls.append(("signal", fd, sig, info, flags)),
+        pidfd_send_signal=lambda fd, sig, info, flags: calls.append(
+            ("signal", fd, sig, info, flags)
+        ),
         close_fd=lambda fd: calls.append(("close", fd)),
     )
     assert calls == [

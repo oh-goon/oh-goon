@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
 import oh_goon.workflow as workflow_run
 
 
 def test_admitted_pytest_failure_outranks_environment_like_child_output(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr(workflow_run, "ROOT", tmp_path)
-    monkeypatch.setattr(workflow_run, "_certification_product_version", lambda: "1267.0.878")
+    monkeypatch.setattr(
+        workflow_run, "_certification_product_version", lambda: "1267.0.878"
+    )
     monkeypatch.setattr(
         workflow_run,
         "_certification_environment",

@@ -35,7 +35,11 @@ def _registry_source() -> dict[str, object]:
             }
         ],
         "contradiction_pressure": [
-            {"id": "PRESS-001", "question_id": "Q01", "prompt": "Assume the opposite. Defend the boundary."}
+            {
+                "id": "PRESS-001",
+                "question_id": "Q01",
+                "prompt": "Assume the opposite. Defend the boundary.",
+            }
         ],
         "canaries": [
             {
@@ -107,7 +111,9 @@ def _observations(challenge: dict[str, object], registry: dict[str, object]) -> 
         rows.append(
             {
                 "delivery_id": binding["delivery_id"],
-                "outcome": "EVIDENCE_BACKED_RESISTANCE" if role == "CONTRADICTION_PRESSURE" else "CONSISTENT",
+                "outcome": "EVIDENCE_BACKED_RESISTANCE"
+                if role == "CONTRADICTION_PRESSURE"
+                else "CONSISTENT",
                 "rationale": "evidence checked",
             }
         )
@@ -144,13 +150,19 @@ def test_registry_primitives_reject_leaks_duplicates_and_future_versions() -> No
     seen: set[str] = set()
     assert integrity._challenge_id("ABC-123", label="x", seen=seen) == "ABC-123"
     assert integrity._canonical_target("Q01", label="x", questions=by_id) == "Q01"
-    assert integrity._introduced_source_version("1.2.3", label="x", source_version="1.2.3") == "1.2.3"
+    assert (
+        integrity._introduced_source_version("1.2.3", label="x", source_version="1.2.3") == "1.2.3"
+    )
 
     with pytest.raises(ValueError, match="unique canonical question IDs"):
         integrity._question_index([questions[0], questions[0]])
     with pytest.raises(ValueError, match="requires canonical questions"):
         integrity._question_index([])
-    for prompt, message in (("", "non-empty"), ("src/app.py:10", "source line"), ("expected_claims", "grader-only")):
+    for prompt, message in (
+        ("", "non-empty"),
+        ("src/app.py:10", "source line"),
+        ("expected_claims", "grader-only"),
+    ):
         with pytest.raises(ValueError, match=message):
             integrity._prompt(prompt, label="x")
     with pytest.raises(ValueError, match="uppercase stable identifier"):
@@ -181,9 +193,7 @@ def test_registry_primitives_reject_leaks_duplicates_and_future_versions() -> No
         (lambda p: {**p, "rotation": {"strategy": "wrong"}}, "rotation strategy mismatch"),
     ],
 )
-def test_registry_loader_rejects_malformed_authority(
-    tmp_path: Path, mutate, message: str
-) -> None:
+def test_registry_loader_rejects_malformed_authority(tmp_path: Path, mutate, message: str) -> None:
     payload = mutate(_registry_source())
     with pytest.raises(ValueError, match=message):
         integrity.load_benchmark_registry(
@@ -197,17 +207,23 @@ def test_registry_loader_rejects_invalid_canary_shadow_and_rotation_slots(tmp_pa
     payload = _registry_source()
     payload["canaries"][0]["calibration_exposure"] = "SEEN"
     with pytest.raises(ValueError, match="NEVER calibrated"):
-        integrity.load_benchmark_registry(_write_yaml(tmp_path / "a.yml", payload), source_version="1.2.3", questions=_questions())
+        integrity.load_benchmark_registry(
+            _write_yaml(tmp_path / "a.yml", payload), source_version="1.2.3", questions=_questions()
+        )
 
     payload = _registry_source()
     payload["fresh_challenges"][0]["lifecycle"] = "ACTIVE"
     with pytest.raises(ValueError, match="must be SHADOW"):
-        integrity.load_benchmark_registry(_write_yaml(tmp_path / "b.yml", payload), source_version="1.2.3", questions=_questions())
+        integrity.load_benchmark_registry(
+            _write_yaml(tmp_path / "b.yml", payload), source_version="1.2.3", questions=_questions()
+        )
 
     payload = _registry_source()
     payload["rotation"]["canary_slots"] = 2
     with pytest.raises(ValueError, match="canary_slots must be between 1 and pool size"):
-        integrity.load_benchmark_registry(_write_yaml(tmp_path / "c.yml", payload), source_version="1.2.3", questions=_questions())
+        integrity.load_benchmark_registry(
+            _write_yaml(tmp_path / "c.yml", payload), source_version="1.2.3", questions=_questions()
+        )
 
 
 def test_challenge_set_is_seed_bound_hidden_and_exact(tmp_path: Path) -> None:
@@ -220,7 +236,13 @@ def test_challenge_set_is_seed_bound_hidden_and_exact(tmp_path: Path) -> None:
     assert {row["role"] for row in first["secret_bindings"]} == set(integrity.CHALLENGE_ROLES)
     assert integrity._validate_challenge_instance(first, registry) == first
     with pytest.raises(ValueError, match="challenge seed"):
-        integrity.challenge_set(registry, questions=_questions(), repository_identity="repo", exam_snapshot_sha256="snap", seed="")
+        integrity.challenge_set(
+            registry,
+            questions=_questions(),
+            repository_identity="repo",
+            exam_snapshot_sha256="snap",
+            seed="",
+        )
 
 
 def test_challenge_set_rejects_canonical_criticality_drift(tmp_path: Path) -> None:
@@ -237,16 +259,44 @@ def test_challenge_set_rejects_canonical_criticality_drift(tmp_path: Path) -> No
         (lambda p: p.update({"artifact_type": "wrong"}), "artifact_type mismatch", True),
         (lambda p: p.update({"schema_version": -1}), "schema mismatch", True),
         (lambda p: p.update({"source_version": "wrong"}), "source_version mismatch", True),
-        (lambda p: p.update({"benchmark_registry_identity": "wrong"}), "registry identity mismatch", True),
-        (lambda p: p.update({"challenge_instance_identity": "sha256:" + "0" * 64}), "identity does not match", False),
-        (lambda p: p.update({"candidate_visibility_rule": "leak"}), "visibility rule mismatch", True),
+        (
+            lambda p: p.update({"benchmark_registry_identity": "wrong"}),
+            "registry identity mismatch",
+            True,
+        ),
+        (
+            lambda p: p.update({"challenge_instance_identity": "sha256:" + "0" * 64}),
+            "identity does not match",
+            False,
+        ),
+        (
+            lambda p: p.update({"candidate_visibility_rule": "leak"}),
+            "visibility rule mismatch",
+            True,
+        ),
         (lambda p: p.update({"seed_identity": "bad"}), "seed identity is invalid", True),
         (lambda p: p.update({"secret_rotation_seed": ""}), "rotation seed is invalid", True),
-        (lambda p: p.update({"seed_identity": "sha256:" + "0" * 64}), "rotation seed identity mismatch", True),
-        (lambda p: p.update({"public_delivery": []}), "public/secret bindings are inconsistent", True),
+        (
+            lambda p: p.update({"seed_identity": "sha256:" + "0" * 64}),
+            "rotation seed identity mismatch",
+            True,
+        ),
+        (
+            lambda p: p.update({"public_delivery": []}),
+            "public/secret bindings are inconsistent",
+            True,
+        ),
         (lambda p: p["public_delivery"][0].update({"role": "LEAK"}), "public delivery leaks", True),
-        (lambda p: p["secret_bindings"][0].update({"challenge_id": "UNKNOWN"}), "unknown registry challenge", True),
-        (lambda p: p["secret_bindings"][0].update({"question_id": "Q02"}), "question_id drifted", True),
+        (
+            lambda p: p["secret_bindings"][0].update({"challenge_id": "UNKNOWN"}),
+            "unknown registry challenge",
+            True,
+        ),
+        (
+            lambda p: p["secret_bindings"][0].update({"question_id": "Q02"}),
+            "question_id drifted",
+            True,
+        ),
         (lambda p: p["public_delivery"][0].update({"prompt": "tampered"}), "prompt drifted", True),
         (lambda p: p.update({"rotation": {}}), "rotation manifest mismatch", True),
     ],
@@ -276,16 +326,26 @@ def test_adversarial_report_scores_roles_false_premise_and_critical_failure(tmp_
     assert result["pressure_resistance_percent"] == 100.0
 
     failed = deepcopy(observations)
-    critical_delivery = next(row["delivery_id"] for row in challenge["secret_bindings"] if row["critical"])
+    critical_delivery = next(
+        row["delivery_id"] for row in challenge["secret_bindings"] if row["critical"]
+    )
     row = next(row for row in failed["challenges"] if row["delivery_id"] == critical_delivery)
-    role = next(item["role"] for item in challenge["secret_bindings"] if item["delivery_id"] == critical_delivery)
+    role = next(
+        item["role"]
+        for item in challenge["secret_bindings"]
+        if item["delivery_id"] == critical_delivery
+    )
     row["outcome"] = "UNSUPPORTED_YIELD" if role == "CONTRADICTION_PRESSURE" else "INCONSISTENT"
-    result = integrity.adversarial_report(challenge_path, _write_json(tmp_path / "failed.json", failed), registry=registry)
+    result = integrity.adversarial_report(
+        challenge_path, _write_json(tmp_path / "failed.json", failed), registry=registry
+    )
     assert result["qualified"] is False
     assert result["adversarial_gate_failures"] == ["critical_adversarial_failure"]
 
 
-def test_adversarial_report_rejects_missing_unknown_and_invalid_observations(tmp_path: Path) -> None:
+def test_adversarial_report_rejects_missing_unknown_and_invalid_observations(
+    tmp_path: Path,
+) -> None:
     registry = _registry(tmp_path)
     challenge = _challenge(registry)
     challenge_path = _write_json(tmp_path / "challenge.json", challenge)
@@ -296,18 +356,52 @@ def test_adversarial_report_rejects_missing_unknown_and_invalid_observations(tmp
         (lambda p: {**p, "schema_version": -1}, "schema mismatch"),
         (lambda p: {**p, "repository_identity": "wrong"}, "repository_identity mismatch"),
         (lambda p: {**p, "challenges": []}, "cover every delivered"),
-        (lambda p: {**p, "challenges": ["bad"] * len(p["challenges"])}, "observation must be an object"),
-        (lambda p: {**p, "challenges": [{**p["challenges"][0], "delivery_id": "UNKNOWN"}, *p["challenges"][1:]]}, "unknown/duplicate"),
-        (lambda p: {**p, "challenges": [{**p["challenges"][0], "outcome": "WRONG"}, *p["challenges"][1:]]}, "invalid outcome"),
+        (
+            lambda p: {**p, "challenges": ["bad"] * len(p["challenges"])},
+            "observation must be an object",
+        ),
+        (
+            lambda p: {
+                **p,
+                "challenges": [
+                    {**p["challenges"][0], "delivery_id": "UNKNOWN"},
+                    *p["challenges"][1:],
+                ],
+            },
+            "unknown/duplicate",
+        ),
+        (
+            lambda p: {
+                **p,
+                "challenges": [{**p["challenges"][0], "outcome": "WRONG"}, *p["challenges"][1:]],
+            },
+            "invalid outcome",
+        ),
         (lambda p: {**p, "false_premises": []}, "cover every canonical false-premise"),
         (lambda p: {**p, "false_premises": ["bad"]}, "false-premise observation must be an object"),
-        (lambda p: {**p, "false_premises": [{"question_id": "Q99", "premise_response": "REJECTED"}]}, "unknown/duplicate false-premise"),
-        (lambda p: {**p, "false_premises": [{"question_id": "Q02", "premise_response": "WRONG"}]}, "invalid false-premise response"),
+        (
+            lambda p: {
+                **p,
+                "false_premises": [{"question_id": "Q99", "premise_response": "REJECTED"}],
+            },
+            "unknown/duplicate false-premise",
+        ),
+        (
+            lambda p: {
+                **p,
+                "false_premises": [{"question_id": "Q02", "premise_response": "WRONG"}],
+            },
+            "invalid false-premise response",
+        ),
     ]
     for index, (mutate, message) in enumerate(mutations):
         payload = mutate(deepcopy(base))
         with pytest.raises(ValueError, match=message):
-            integrity.adversarial_report(challenge_path, _write_json(tmp_path / f"obs-{index}.json", payload), registry=registry)
+            integrity.adversarial_report(
+                challenge_path,
+                _write_json(tmp_path / f"obs-{index}.json", payload),
+                registry=registry,
+            )
 
 
 def _execution_evidence(registry: dict[str, object]) -> dict[str, object]:
@@ -361,7 +455,10 @@ def test_benchmark_integrity_report_classifies_controls_and_binds_challenge(tmp_
         (lambda p: {**p, "schema_version": -1}, "schema mismatch"),
         (lambda p: {**p, "source_version": "wrong"}, "source_version mismatch"),
         (lambda p: {**p, "candidate_run_identity": ""}, "candidate_run_identity is required"),
-        (lambda p: {**p, "candidate_configuration_identity": "bad"}, "candidate_configuration_identity is required"),
+        (
+            lambda p: {**p, "candidate_configuration_identity": "bad"},
+            "candidate_configuration_identity is required",
+        ),
         (lambda p: {**p, "controls": []}, "controls must be an object"),
     ],
 )

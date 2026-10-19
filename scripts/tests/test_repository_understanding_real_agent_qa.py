@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+from oh_goon.repository_tooling.repository_understanding_material import (
+    load_exam,
+)
+
 from oh_goon.repository_tooling import repository_understanding_exam
 
 
-def test_real_agent_audit_misconceptions_enter_as_non_scoring_shadow_questions() -> None:
-    lifecycle = {row["id"]: row for row in repository_understanding_exam.question_lifecycle()["questions"]}
-    audit = {row["id"]: row for row in repository_understanding_exam.question_audit()["questions"]}
-    questions = {question.id: question for question in repository_understanding_exam.load_exam()}
+def test_real_agent_audit_misconceptions_enter_as_non_scoring_shadow_questions() -> (
+    None
+):
+    lifecycle = {
+        row["id"]: row
+        for row in repository_understanding_exam.question_lifecycle()["questions"]
+    }
+    audit = {
+        row["id"]: row
+        for row in repository_understanding_exam.question_audit()["questions"]
+    }
+    questions = {question.id: question for question in load_exam()}
     expected = {f"Q{index}" for index in range(213, 220)}
 
     assert expected <= questions.keys()

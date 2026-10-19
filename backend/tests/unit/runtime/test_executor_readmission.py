@@ -16,8 +16,8 @@ from oh_goon.core.models.fleet_plan_isolation import (
     CicdResourcePolicy,
 )
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepCapabilities
-from oh_goon.core.models.run_admission import ExplicitRepositoryScope, StrictFleetExecutionAdmission
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.run_admission import ExplicitRepositoryScope, StrictFleetExecutionAdmission
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import FleetRunSource, FleetRunStatus, OperationAction
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
@@ -82,8 +82,10 @@ def _detail(*, failure_code: str) -> SimpleNamespace:
             progress=SimpleNamespace(completed=0),
             source=FleetRunSource.CICD,
             action=OperationAction.EXECUTE_PLAN,
-            targets=(RepositoryIdentity(path=Path("/repos/repo-a")),
-                     RepositoryIdentity(path=Path("/repos/repo-b"))),
+            targets=(
+                RepositoryIdentity(path=Path("/repos/repo-a")),
+                RepositoryIdentity(path=Path("/repos/repo-b")),
+            ),
         )
     )
 

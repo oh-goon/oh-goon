@@ -5,7 +5,10 @@ from enum import StrEnum
 from pydantic import Field, model_validator
 
 from oh_goon.core.models.base import ImmutableModel
-from oh_goon.core.models.game_tape_runtime_authority import RuntimeAuthorityEvidence, RuntimeAuthorityEvidenceKind
+from oh_goon.core.models.game_tape_runtime_authority import (
+    RuntimeAuthorityEvidence,
+    RuntimeAuthorityEvidenceKind,
+)
 
 
 class RuntimeFault(StrEnum):
@@ -30,16 +33,24 @@ class FaultCampaignDisposition(StrEnum):
 
 _EXPECTED_EVIDENCE_KINDS: dict[RuntimeFault, frozenset[RuntimeAuthorityEvidenceKind]] = {
     RuntimeFault.CLAIM_CANCEL_RACE: frozenset({RuntimeAuthorityEvidenceKind.RACE}),
-    RuntimeFault.COMPLETION_TIMEOUT_RACE: frozenset({RuntimeAuthorityEvidenceKind.RACE, RuntimeAuthorityEvidenceKind.WATCHDOG}),
-    RuntimeFault.CHECKPOINT_LEASE_EXPIRY: frozenset({RuntimeAuthorityEvidenceKind.RACE, RuntimeAuthorityEvidenceKind.RECOVERY}),
+    RuntimeFault.COMPLETION_TIMEOUT_RACE: frozenset(
+        {RuntimeAuthorityEvidenceKind.RACE, RuntimeAuthorityEvidenceKind.WATCHDOG}
+    ),
+    RuntimeFault.CHECKPOINT_LEASE_EXPIRY: frozenset(
+        {RuntimeAuthorityEvidenceKind.RACE, RuntimeAuthorityEvidenceKind.RECOVERY}
+    ),
     RuntimeFault.CONTROLLER_RESTART: frozenset({RuntimeAuthorityEvidenceKind.RECOVERY}),
     RuntimeFault.CONTROLLER_SUSPEND: frozenset({RuntimeAuthorityEvidenceKind.RECOVERY}),
     RuntimeFault.SQLITE_FAILURE: frozenset({RuntimeAuthorityEvidenceKind.RECOVERY}),
     RuntimeFault.STUBBORN_PROCESS_TREE: frozenset({RuntimeAuthorityEvidenceKind.TERMINATION}),
     RuntimeFault.OUT_OF_MEMORY: frozenset({RuntimeAuthorityEvidenceKind.TERMINATION}),
     RuntimeFault.PAGINATION_MUTATION: frozenset({RuntimeAuthorityEvidenceKind.RECOVERY}),
-    RuntimeFault.OLD_MESSAGE_REDELIVERY: frozenset({RuntimeAuthorityEvidenceKind.RACE, RuntimeAuthorityEvidenceKind.RECOVERY}),
-    RuntimeFault.EXTERNAL_SIDE_EFFECT_UNCERTAIN: frozenset({RuntimeAuthorityEvidenceKind.SIDE_EFFECT, RuntimeAuthorityEvidenceKind.RECOVERY}),
+    RuntimeFault.OLD_MESSAGE_REDELIVERY: frozenset(
+        {RuntimeAuthorityEvidenceKind.RACE, RuntimeAuthorityEvidenceKind.RECOVERY}
+    ),
+    RuntimeFault.EXTERNAL_SIDE_EFFECT_UNCERTAIN: frozenset(
+        {RuntimeAuthorityEvidenceKind.SIDE_EFFECT, RuntimeAuthorityEvidenceKind.RECOVERY}
+    ),
 }
 
 
@@ -57,14 +68,19 @@ class FaultCampaignResult(ImmutableModel):
 
     @model_validator(mode="after")
     def _validate_observed_result(self) -> "FaultCampaignResult":
-        if any(row.execution_id != self.execution_id or row.generation != self.generation for row in self.evidence):
+        if any(
+            row.execution_id != self.execution_id or row.generation != self.generation
+            for row in self.evidence
+        ):
             raise ValueError("fault evidence belongs to another execution generation")
         if self.evidence_proven and not self.evidence:
             raise ValueError("evidence_proven requires concrete bounded authority evidence")
         if self.evidence_proven:
             expected = _EXPECTED_EVIDENCE_KINDS[self.fault]
             if not any(row.kind in expected for row in self.evidence):
-                raise ValueError("fault evidence does not contain an authority kind relevant to this fault")
+                raise ValueError(
+                    "fault evidence does not contain an authority kind relevant to this fault"
+                )
         proofs_complete = self.semantics_proven and self.evidence_proven
         if self.disposition is FaultCampaignDisposition.PASS and not proofs_complete:
             raise ValueError("PASS requires both semantic and evidence proof")
@@ -97,7 +113,9 @@ class SchedulerRuntimeFaultCampaign(ImmutableModel):
     def disposition(self) -> FaultCampaignDisposition:
         if any(result.disposition is FaultCampaignDisposition.FAIL for result in self.results):
             return FaultCampaignDisposition.FAIL
-        if any(result.disposition is FaultCampaignDisposition.INCOMPLETE for result in self.results):
+        if any(
+            result.disposition is FaultCampaignDisposition.INCOMPLETE for result in self.results
+        ):
             return FaultCampaignDisposition.INCOMPLETE
         return FaultCampaignDisposition.PASS
 

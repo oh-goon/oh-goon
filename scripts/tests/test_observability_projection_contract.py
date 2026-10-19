@@ -1,6 +1,9 @@
+import pytest
 from pathlib import Path
 
-from oh_goon.repository_tooling.architecture import observability_projection_contract as contract
+from oh_goon.repository_tooling.architecture import (
+    observability_projection_contract as contract,
+)
 
 
 def test_observability_projection_contract() -> None:
@@ -13,7 +16,9 @@ def _semantic_fixture(root: Path, *, handler_name: str = "anything_private") -> 
     (package / "api/routes").mkdir(parents=True)
     (package / "scout").mkdir(parents=True)
     (package / "core/execution_observability.py").write_text("", encoding="utf-8")
-    (package / "core/models/execution_observability.py").write_text("", encoding="utf-8")
+    (package / "core/models/execution_observability.py").write_text(
+        "", encoding="utf-8"
+    )
     (package / "scout/evidence.py").write_text(
         "from dataclasses import dataclass\n"
         "from oh_goon.core.execution_observability import RepositoryRunObservation\n"
@@ -33,24 +38,29 @@ def _semantic_fixture(root: Path, *, handler_name: str = "anything_private") -> 
 
 
 def test_private_observability_handler_rename_does_not_change_architecture(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     package = _semantic_fixture(tmp_path, handler_name="execution_timeline_route")
     monkeypatch.setattr(contract, "BACKEND_PACKAGE_ROOT", package)
     assert contract.check_observability_projection_contract() == []
 
 
-def test_public_observability_route_mutation_fails_architecture(monkeypatch, tmp_path: Path) -> None:
+def test_public_observability_route_mutation_fails_architecture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     package = _semantic_fixture(tmp_path)
     route = package / "api/routes/fleet_runs.py"
-    route.write_text(route.read_text(encoding="utf-8").replace("router.get", "router.post"), encoding="utf-8")
+    route.write_text(
+        route.read_text(encoding="utf-8").replace("router.get", "router.post"),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(contract, "BACKEND_PACKAGE_ROOT", package)
     violations = contract.check_observability_projection_contract()
     assert any("GET /observations" in item.message for item in violations)
 
 
 def test_arbitrarily_named_duplicate_scout_run_model_fails_ownership(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     package = _semantic_fixture(tmp_path)
     duplicate = package / "scout/duplicate.py"
@@ -66,4 +76,7 @@ def test_arbitrarily_named_duplicate_scout_run_model_fails_ownership(
     )
     monkeypatch.setattr(contract, "BACKEND_PACKAGE_ROOT", package)
     violations = contract.check_observability_projection_contract()
-    assert any("second Run identity/status representation" in item.message for item in violations)
+    assert any(
+        "second Run identity/status representation" in item.message
+        for item in violations
+    )

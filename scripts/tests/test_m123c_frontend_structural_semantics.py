@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
-from oh_goon.repository_tooling.architecture import frontend_base_contract as frontend_base
+from oh_goon.repository_tooling.architecture import (
+    frontend_base_contract as frontend_base,
+)
 from oh_goon.repository_tooling.architecture._structural_authority_frontend import (
     _check_browser_persistence_boundary,
     _check_frontend_transport_ownership,
@@ -19,14 +23,14 @@ def _write(root: Path, relative: str, text: str) -> Path:
     return path
 
 
-def _local_only(root: Path, monkeypatch) -> list[str]:
+def _local_only(root: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
     source = root / "frontend/src"
     monkeypatch.setattr(frontend_base, "FRONTEND_SOURCE_ROOT", source)
     return [item.message for item in frontend_base.check_frontend_local_only()]
 
 
 def test_frontend_comments_and_strings_do_not_create_transport_or_storage_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(
         tmp_path,
@@ -98,7 +102,9 @@ def test_create_api_client_import_alias_is_still_rejected(tmp_path: Path) -> Non
     )
 
 
-def test_computed_browser_storage_access_is_rejected(tmp_path: Path, monkeypatch) -> None:
+def test_computed_browser_storage_access_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = _write(
         tmp_path,
         "frontend/src/features/status.ts",
@@ -117,7 +123,9 @@ def test_computed_browser_storage_access_is_rejected(tmp_path: Path, monkeypatch
     assert "localStorage is owned only by app/preferences.ts" in local_only
 
 
-def test_computed_session_storage_access_is_rejected(tmp_path: Path, monkeypatch) -> None:
+def test_computed_session_storage_access_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write(
         tmp_path,
         "frontend/src/features/status.ts",
@@ -130,10 +138,14 @@ def test_computed_session_storage_access_is_rejected(tmp_path: Path, monkeypatch
         "must not gain browser persistence" in item.message
         for item in _check_browser_persistence_boundary(tmp_path)
     )
-    assert "unsupported browser persistence/telemetry: sessionStorage" in _local_only(tmp_path, monkeypatch)
+    assert "unsupported browser persistence/telemetry: sessionStorage" in _local_only(
+        tmp_path, monkeypatch
+    )
 
 
-def test_computed_document_cookie_access_is_rejected(tmp_path: Path, monkeypatch) -> None:
+def test_computed_document_cookie_access_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write(
         tmp_path,
         "frontend/src/features/status.ts",
@@ -142,10 +154,14 @@ def test_computed_document_cookie_access_is_rejected(tmp_path: Path, monkeypatch
         "documentAlias[cookieName] = 'a=b';\n",
     )
 
-    assert "unsupported browser persistence/telemetry: document.cookie" in _local_only(tmp_path, monkeypatch)
+    assert "unsupported browser persistence/telemetry: document.cookie" in _local_only(
+        tmp_path, monkeypatch
+    )
 
 
-def test_fetch_alias_through_computed_global_access_is_rejected(tmp_path: Path, monkeypatch) -> None:
+def test_fetch_alias_through_computed_global_access_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write(
         tmp_path,
         "frontend/src/features/status.ts",
@@ -155,20 +171,28 @@ def test_fetch_alias_through_computed_global_access_is_rejected(tmp_path: Path, 
         "export async function load() { return request('/api/runs'); }\n",
     )
 
-    assert "raw fetch is owned only by app/api/httpTransport.ts" in _local_only(tmp_path, monkeypatch)
+    assert "raw fetch is owned only by app/api/httpTransport.ts" in _local_only(
+        tmp_path, monkeypatch
+    )
 
 
-def test_split_external_url_literal_is_rejected(tmp_path: Path, monkeypatch) -> None:
+def test_split_external_url_literal_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write(
         tmp_path,
         "frontend/src/features/status.ts",
         "const remote = 'https:' + '//example.test/api';\n",
     )
 
-    assert "frontend source must not contain an external URL" in _local_only(tmp_path, monkeypatch)
+    assert "frontend source must not contain an external URL" in _local_only(
+        tmp_path, monkeypatch
+    )
 
 
-def test_allowed_storage_owner_accepts_computed_local_storage(tmp_path: Path, monkeypatch) -> None:
+def test_allowed_storage_owner_accepts_computed_local_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write(
         tmp_path,
         "frontend/src/app/preferences.ts",
@@ -182,7 +206,9 @@ def test_allowed_storage_owner_accepts_computed_local_storage(tmp_path: Path, mo
     assert _local_only(tmp_path, monkeypatch) == []
 
 
-def test_allowed_http_transport_accepts_computed_fetch_alias(tmp_path: Path, monkeypatch) -> None:
+def test_allowed_http_transport_accepts_computed_fetch_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write(
         tmp_path,
         "frontend/src/app/api/httpTransport.ts",
@@ -196,7 +222,7 @@ def test_allowed_http_transport_accepts_computed_fetch_alias(tmp_path: Path, mon
 
 
 def test_type_only_fetch_reference_does_not_create_network_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write(
         tmp_path,

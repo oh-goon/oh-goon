@@ -112,8 +112,18 @@ def test_opensandbox_resource_translation_is_exact_and_pid_limit_is_not_claimed(
             api_key="test",
             image="registry.internal/oh-goon-runner@sha256:" + "1" * 64,
             cli_executable=sys.executable,
-            runtime_attestation_file=str(Path(__file__).resolve().parents[2] / "fixtures" / "opensandbox" / "kata-runtime-attestation.json"),
-            runtime_attestation_public_key_file=str(Path(__file__).resolve().parents[2] / "fixtures" / "opensandbox" / "runtime-attestation-ed25519.pub.pem"),
+            runtime_attestation_file=str(
+                Path(__file__).resolve().parents[2]
+                / "fixtures"
+                / "opensandbox"
+                / "kata-runtime-attestation.json"
+            ),
+            runtime_attestation_public_key_file=str(
+                Path(__file__).resolve().parents[2]
+                / "fixtures"
+                / "opensandbox"
+                / "runtime-attestation-ed25519.pub.pem"
+            ),
             runtime=OpenSandboxRuntimeKind.KATA,
             protocol="https",
         ),
@@ -131,8 +141,18 @@ def test_opensandbox_cannot_satisfy_requested_pid_limit() -> None:
             api_key="test",
             image="registry.internal/oh-goon-runner@sha256:" + "1" * 64,
             cli_executable=sys.executable,
-            runtime_attestation_file=str(Path(__file__).resolve().parents[2] / "fixtures" / "opensandbox" / "kata-runtime-attestation.json"),
-            runtime_attestation_public_key_file=str(Path(__file__).resolve().parents[2] / "fixtures" / "opensandbox" / "runtime-attestation-ed25519.pub.pem"),
+            runtime_attestation_file=str(
+                Path(__file__).resolve().parents[2]
+                / "fixtures"
+                / "opensandbox"
+                / "kata-runtime-attestation.json"
+            ),
+            runtime_attestation_public_key_file=str(
+                Path(__file__).resolve().parents[2]
+                / "fixtures"
+                / "opensandbox"
+                / "runtime-attestation-ed25519.pub.pem"
+            ),
             runtime=OpenSandboxRuntimeKind.KATA,
             protocol="https",
         ),
@@ -176,7 +196,8 @@ def test_cgroup_bootstrap_refuses_unqualified_process_attachment(tmp_path: Path)
         "-c",
         cgroup_resources._CGROUP_EXEC,
         str(tmp_path),
-        str(tmp_path.stat().st_dev), str(tmp_path.stat().st_ino),
+        str(tmp_path.stat().st_dev),
+        str(tmp_path.stat().st_ino),
         sys.executable,
         "-S",
         "-c",
@@ -254,8 +275,15 @@ def test_cgroup_stale_owner_reconciliation_is_fail_closed_and_owner_aware(
     (cgroup / "cgroup.procs").write_text("", encoding="ascii")
     lease = state / "dead.json"
     lease.write_text(
-        json.dumps({"pid": 424242, "process_identity": "old", "cgroup": name,
-                    "cgroup_dev": cgroup.stat().st_dev, "cgroup_ino": cgroup.stat().st_ino}),
+        json.dumps(
+            {
+                "pid": 424242,
+                "process_identity": "old",
+                "cgroup": name,
+                "cgroup_dev": cgroup.stat().st_dev,
+                "cgroup_ino": cgroup.stat().st_ino,
+            }
+        ),
         encoding="utf-8",
     )
     killed: list[Path] = []
@@ -269,10 +297,12 @@ def test_cgroup_stale_owner_reconciliation_is_fail_closed_and_owner_aware(
 
     monkeypatch.setattr(cgroup_resources, "_process_identity", lambda _pid: None)
     monkeypatch.setattr(cgroup_resources, "_kill_cgroup", lambda path, **_kw: killed.append(path))
-    monkeypatch.setattr(cgroup_resources, "_remove_cgroup", lambda path, **_kw: removed.append(path))
+    monkeypatch.setattr(
+        cgroup_resources, "_remove_cgroup", lambda path, **_kw: removed.append(path)
+    )
     monkeypatch.setattr(cgroup_resources, "remove_file_durably", remove_durably)
 
-    with pytest.raises(FleetPlanInvalid, match='physical custody'):
+    with pytest.raises(FleetPlanInvalid, match="physical custody"):
         cgroup_resources._reconcile_stale_cgroups(root, state)
 
     assert killed == [] and removed == [] and retired == []
@@ -289,8 +319,10 @@ def test_attempt_cgroup_limit_values_and_metrics_are_recorded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A fixture-backed cgroup is not a real native custody grant.
-    monkeypatch.setattr(cgroup_resources, "require_independent_native_parent_custody",
-                        lambda **_kwargs: None)
+    monkeypatch.setattr(
+        cgroup_resources, "require_independent_native_parent_custody", lambda **_kwargs: None
+    )
+
     class Host:
         cgroup_root = tmp_path / "delegated"
         cgroup_lock = tmp_path / "lock"
@@ -326,11 +358,22 @@ def test_attempt_cgroup_limit_values_and_metrics_are_recorded(
 
     monkeypatch.setattr(cgroup_resources, "_write_limit", write_limit)
     native_mkdir = Path.mkdir
+
     def materialize(group: Path, *args: object, **kwargs: object) -> None:
         native_mkdir(group, *args, **kwargs)
         if group.name.startswith("attempt-"):
-            for name in ("cgroup.kill", "cgroup.events", "cgroup.procs", "cpu.max", "memory.max", "pids.max"):
-                (group / name).write_text("populated 0\n" if name == "cgroup.events" else "", encoding="ascii")
+            for name in (
+                "cgroup.kill",
+                "cgroup.events",
+                "cgroup.procs",
+                "cpu.max",
+                "memory.max",
+                "pids.max",
+            ):
+                (group / name).write_text(
+                    "populated 0\n" if name == "cgroup.events" else "", encoding="ascii"
+                )
+
     monkeypatch.setattr(Path, "mkdir", materialize)
     policy = CicdResourcePolicy(cpu_millis=1500, memory_mib=1024, max_processes=64)
     attempt = tmp_path / "attempt"
@@ -427,9 +470,12 @@ def test_delegated_cgroup_validation_does_not_require_global_sys_cgroup_visibili
 
     monkeypatch.setattr(Path, "exists", isolated_exists)
 
-    assert cgroup_resources.require_delegated_cgroup_v2_root(
-        root, required_controllers={"cpu", "memory", "pids"}
-    ) == root.resolve()
+    assert (
+        cgroup_resources.require_delegated_cgroup_v2_root(
+            root, required_controllers={"cpu", "memory", "pids"}
+        )
+        == root.resolve()
+    )
 
 
 def test_cgroup_preflight_rejects_fake_non_cgroup_directory(
@@ -488,8 +534,9 @@ def test_restricted_egress_close_durably_retires_recovery_lease(
     import oh_goon.integrations._fleet_plan_restricted_egress as restricted_egress
 
     # Simulate a future provisioned host solely to test post-custody retirement.
-    monkeypatch.setattr(restricted_egress, "require_independent_native_parent_custody",
-                        lambda **_kwargs: None)
+    monkeypatch.setattr(
+        restricted_egress, "require_independent_native_parent_custody", lambda **_kwargs: None
+    )
     state = tmp_path / "egress-state" / "aaaaaaaaaa.json"
     state.parent.mkdir()
     state.write_text("{}", encoding="utf-8")
@@ -552,15 +599,16 @@ def test_certification_can_enable_missing_controllers_only_inside_a_delegated_ro
 
     def enable(candidate: Path, controllers: set[str]) -> None:
         writes.append(controllers)
-        (candidate / "cgroup.subtree_control").write_text(
-            "cpu memory pids", encoding="ascii"
-        )
+        (candidate / "cgroup.subtree_control").write_text("cpu memory pids", encoding="ascii")
 
     monkeypatch.setattr(cgroup_resources, "_write_subtree_controllers", enable)
 
-    assert cgroup_resources.enable_delegated_cgroup_v2_controllers(
-        root, required_controllers={"cpu", "memory", "pids"}
-    ) == root.resolve()
+    assert (
+        cgroup_resources.enable_delegated_cgroup_v2_controllers(
+            root, required_controllers={"cpu", "memory", "pids"}
+        )
+        == root.resolve()
+    )
     assert writes == [{"memory", "pids"}]
 
 
@@ -568,8 +616,9 @@ def test_delegated_process_subgroup_moves_only_the_current_process_below_owned_r
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Mocking the kernel gate only for simulated post-custody cgroup mechanics.
-    monkeypatch.setattr(cgroup_resources, "require_independent_native_parent_custody",
-                        lambda **_kwargs: None)
+    monkeypatch.setattr(
+        cgroup_resources, "require_independent_native_parent_custody", lambda **_kwargs: None
+    )
     root = tmp_path / "delegated"
     root.mkdir()
     for name in (

@@ -28,8 +28,10 @@ from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import CompletedFleetRun, FleetRunDetail, FleetRunProgress
 from oh_goon.core.models.run_admission import StrictFleetExecutionAdmission, fleet_repository_scope
-from oh_goon.scout.models import ScoutWindow
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.time import utc_now
+from oh_goon.core.vocabulary import FleetRunStatus, GameTapeStatus, OperationAction, Verdict
+from oh_goon.scout.models import ScoutWindow
 from oh_goon.scout.projection import (
     ScoutEvidenceSnapshot,
     ScoutStepObservation,
@@ -39,8 +41,6 @@ from oh_goon.scout.projection import (
     project_scout_plan,
     project_scout_repository,
 )
-from oh_goon.core.time import utc_now
-from oh_goon.core.vocabulary import FleetRunStatus, GameTapeStatus, OperationAction, Verdict
 from tests.factories.capabilities import capability_snapshot
 from tests.factories.fleet_plan_targets import structural_execution_identity
 from tests.factories.operation_reports import make_operation_report

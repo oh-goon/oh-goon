@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.source_tree_policy import is_transient_source_path
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
-from oh_goon.core.source_tree_policy import is_transient_source_path
 
 Cancel = Callable[[], bool] | None
 _COPY_CHUNK_BYTES = 1024 * 1024
@@ -23,9 +23,7 @@ class SourceSnapshotBinding:
     identity: SnapshotIdentity
 
 
-def source_snapshot_identity(
-    source: Path, *, cancel_requested: Cancel = None
-) -> SnapshotIdentity:
+def source_snapshot_identity(source: Path, *, cancel_requested: Cancel = None) -> SnapshotIdentity:
     """Identify certifiable source with Hashmarks after Oh-Goon policy exclusions."""
 
     from oh_goon.integrations.hashmarks.identity import identify_path
@@ -153,14 +151,11 @@ def _copy_source_tree(
             raise FleetPlanInvalid(f"{label} contains unsupported filesystem entry: {relative}")
 
 
-
 def _validated_symlink_target(root: Path, entry: Path, relative: Path) -> str:
     raw = os.readlink(entry)
     target = Path(raw)
     if target.is_absolute():
-        raise FleetPlanInvalid(
-            f"Repository source contains escaping symlink: {relative} -> {raw}"
-        )
+        raise FleetPlanInvalid(f"Repository source contains escaping symlink: {relative} -> {raw}")
     resolved = (entry.parent / target).resolve(strict=False)
     try:
         target_relative = resolved.relative_to(root.resolve())
@@ -173,6 +168,7 @@ def _validated_symlink_target(root: Path, entry: Path, relative: Path) -> str:
             f"Repository source symlink targets generated/operational state: {relative} -> {raw}"
         )
     return raw
+
 
 def _copy_file(source: Path, destination: Path, cancel_requested: Cancel, label: str) -> None:
     source_fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))

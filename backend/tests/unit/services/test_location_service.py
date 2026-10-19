@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from oh_goon.core.errors import StateConflict
-
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.vocabulary import OperationAction
 from oh_goon.runtime.database import LocalDatabase

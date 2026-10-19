@@ -11,6 +11,7 @@ import pytest
 
 from oh_goon.core.errors import ExecutionAuthorityDivergence, FleetPlanInvalid
 from oh_goon.core.path_layouts import AttemptPathLayout
+from oh_goon.integrations import fleet_plan_runtime_authority
 from oh_goon.integrations._fleet_plan_host_resources import HostToolBinding
 from oh_goon.integrations._fleet_plan_runtime_root import RuntimeRootBinding
 from oh_goon.integrations._fleet_plan_sandbox_launch import sandbox_process_launch
@@ -21,7 +22,6 @@ from oh_goon.integrations.executable_materialization_authority import (
 from oh_goon.integrations.fleet_plan_atomic_runtime_authority import (
     bind_atomic_runtime_authority,
 )
-from oh_goon.integrations import fleet_plan_runtime_authority
 from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
 
 
@@ -51,7 +51,9 @@ def _attempt(tmp_path: Path, tools: tuple[HostToolBinding, ...]):
         paths=paths,
         host_tools=tools,
         sandbox_bindings=(),
-        runtime_root=RuntimeRootBinding(root=runtime_root, identity=snapshot_identity(runtime_root)),
+        runtime_root=RuntimeRootBinding(
+            root=runtime_root, identity=snapshot_identity(runtime_root)
+        ),
         executable_materialization=StepExecutableMaterializationReceipt(),
     )
 
@@ -70,7 +72,9 @@ def _fd_bytes(descriptor: int) -> bytes:
     return os.pread(descriptor, size, 0)
 
 
-def test_atomic_binding_seals_exact_executable_bytes_against_source_replacement(tmp_path: Path) -> None:
+def test_atomic_binding_seals_exact_executable_bytes_against_source_replacement(
+    tmp_path: Path,
+) -> None:
     original = b"\x7fELFatomic-original"
     tool = _host_tool(tmp_path, "true", original)
     attempt = _attempt(tmp_path, (tool,))

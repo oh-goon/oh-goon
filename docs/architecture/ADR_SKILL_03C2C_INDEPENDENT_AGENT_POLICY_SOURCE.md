@@ -16,7 +16,7 @@ SKILL-3C2B stops step-envelope self-authorized Agent effects but deliberately ac
 
 ## Security and compatibility boundaries
 
-- There is no Plan-driven, AG-02-driven, environment-derived or default deployment policy document selection. Deployment control configures the exact path and administrator UID explicitly; no project-local `.goonskills` or Git checkout may supply authority.
+- There is no Plan-driven, AG-02-driven, environment-derived or default deployment policy document selection. Deployment control configures the exact path and administrator UID explicitly; no project-local `.goonskills.yml` or Git checkout may supply authority.
 - Command-only Plans keep their original behavior. An Agent Plan with a bare typed ceiling but no independently observed deployment source refuses; this is an intentional fail-closed compatibility change to development-only Agent policy compilation.
 - Production OS custody **is not certified by unit tests**. Tests emulate the foreign-user owner split while exercising the real fd byte/metadata recheck; a separate test proves unsafe real temp-directory ancestry is refused. Native Linux/WSL observations, mount topology, restart/failover, full issuer paths, APP PASS and release remain outstanding.
 - All source observations are inside the existing preparation/compilation path; source tamper before or during preparation aborts with no Run publication. Native admin-controlled concurrent replacement remains a host qualification concern, not a basis for weakening refusal.

@@ -5,20 +5,27 @@ import pytest
 
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import JournalConflict, StateConflict
+from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.run import FleetRunFailure
 from oh_goon.core.models.run_admission import (
     DirectFleetExecutionAdmission,
     FleetRunAdmissionIntent,
     fleet_repository_scope,
 )
-from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.run import FleetRunFailure
-from oh_goon.core.vocabulary import FleetRunFailureStage, FleetRunSource, FleetRunTerminalIntent, OperationAction
+from oh_goon.core.vocabulary import (
+    FleetRunFailureStage,
+    FleetRunSource,
+    FleetRunTerminalIntent,
+    OperationAction,
+)
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.journal import Journal
 from tests.factories.journal import admit_run, start_run, terminalize_run
 
 
-def _intent(*, rerun_from_run_id: str | None = None, source: FleetRunSource = FleetRunSource.MANUAL):
+def _intent(
+    *, rerun_from_run_id: str | None = None, source: FleetRunSource = FleetRunSource.MANUAL
+):
     resolved = resolve_capability_intent(OperationAction.INIT, None)
     return FleetRunAdmissionIntent(
         source=source,
@@ -94,6 +101,7 @@ def test_journal_rejects_rerun_that_reuses_parent_run_identity(tmp_path: Path) -
     with pytest.raises(JournalConflict, match="cannot reuse its parent run identity"):
         admit_run(journal, "same", _intent(rerun_from_run_id="same"), scope, [repository])
 
+
 def test_journal_rerun_follows_current_capability_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -120,4 +128,3 @@ def test_journal_rerun_follows_current_capability_policy(
 
     with pytest.raises(JournalConflict, match="not repeatable through Run history"):
         admit_run(journal, "child", _intent(rerun_from_run_id="parent"), scope, [repository])
-

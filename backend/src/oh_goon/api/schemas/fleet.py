@@ -28,7 +28,9 @@ class FleetRunRequest(BaseModel):
         ):
             raise ValueError("repository_ids must be unique")
         if self.repository_ids is not None:
-            if self.repository_instance_ids is None or set(self.repository_instance_ids) != set(self.repository_ids):
+            if self.repository_instance_ids is None or set(self.repository_instance_ids) != set(
+                self.repository_ids
+            ):
                 raise ValueError("repository_instance_ids must exactly match repository_ids")
         elif self.repository_instance_ids is not None:
             raise ValueError("repository_instance_ids requires explicit repository_ids")

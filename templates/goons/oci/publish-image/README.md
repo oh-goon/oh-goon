@@ -1,8 +1,17 @@
 # oci/publish-image
 
-**Production template. Production Composite Goon.**
-
 Build one OCI archive, publish that workspace explicitly, then copy the archive to a digest-qualified registry reference through Fleet's typed publisher. Credentials are named host-backed env sources used only to create an attempt-private auth file. No mutable tag is created.
+
+## Use this Goon
+
+```sh
+oh-goon templates show oci/publish-image --kind goon
+oh-goon plan inputs templates/goons/oci/publish-image/goon.yml
+```
+
+Use `goons: [oci/publish-image]` in a Plan to keep the Goon defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed values, renamed inputs or producer references; route shared names explicitly with `pass:`/`with:`. A Composite Goon declares which child inputs it exposes. The [authoring guide](../../../README.md) shows values files, explicit local sources and how to append Steps to your own Atomic Goon.
+
+Prepare the selected OCI execution provider and registry access before execution. Base-image pull and destination publication registries are independent inputs. Credentials use the declared host-backed environment sources, never values files. Inspect digest/workspace outputs through the Run; publishing and retained bytes require their configured owners.
 
 ## Contract
 
@@ -24,17 +33,15 @@ See the [shipped OCI input authority audit](../../../../docs/development/TEMPLAT
 The base-image pull registry and destination publication registry are not aliases;
 only the inputs consumed by this Goon have machine-contract authority here.
 
-## Explicit recipient forwarding
+## Compose and bind dataflow
 
 ```yaml
-- import: oci/image
-  pass: [base_registry_hostname, containerfile, context, platform]
+- oci/image
 - import: oci/publish
-  pass: [publish_registry_hostname, publish_repository]
   with:
     source_workspace: ${{ goons.oci-image.workspace }}
 ```
 
-The six public scalar inputs use exactly six explicit same-name recipient
-bindings. `source_workspace` remains a producer-workspace `with:` reference;
-publication outputs and native credentials are unchanged.
+Each public scalar input has one direct owner, so the Composite's `inputs:` list
+needs no repeated forwarding. `source_workspace` is an explicit producer-workspace
+`with:` reference. Public outputs and native credentials keep their own declarations.

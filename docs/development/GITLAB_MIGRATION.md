@@ -15,7 +15,7 @@ oh-goon goon import-gitlab .gitlab-ci.yml \
 
 For private GitLab components, `--token-env GITLAB_TOKEN` is read only while source components are fetched and is never written into generated YAML.
 
-The generated file is a repository/root Goon with explicit execution policy, requirements, and Steps. It must parse as a Goon and must be rejected as a Plan because it contains executable behavior.
+The generated file is a repository/root Goon with explicit `execution: {purpose: cicd}`, requirements, and Steps. The emitted purpose preserves the imported CI policy when ordinary authored Goons default to local verification. It must parse as a Goon and must be rejected as a Plan because it contains executable behavior.
 
 ## Exact destination updates
 

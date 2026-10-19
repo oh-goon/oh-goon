@@ -3,6 +3,7 @@
 Development-level object custody only; does not certify namespace mounts or
 post-teardown absence, and deliberately does not enable Agent Step effects.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -14,15 +15,19 @@ import pytest
 
 from oh_goon.core.errors import ExecutionAuthorityDivergence
 from oh_goon.engine.atomic_execution_bytes import (
-    SealedExecutionBytes, seal_execution_bytes, verify_sealed_execution_descriptor,
+    SealedExecutionBytes,
+    seal_execution_bytes,
+    verify_sealed_execution_descriptor,
 )
 from oh_goon.integrations.fleet_plan_atomic_runtime_authority import (
-    AtomicRuntimeAuthorityLease, AtomicRuntimeFile,
+    AtomicRuntimeAuthorityLease,
+    AtomicRuntimeFile,
 )
+from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     _check_p1b27b2b1_kernel_fd_custody,
 )
-from oh_goon.repository_tooling.architecture.repository_layout import ROOT
+from tests.factories.x0_architecture import replace_python_syntax
 
 PACKAGE = ROOT / "backend/src/oh_goon"
 
@@ -30,24 +35,34 @@ PACKAGE = ROOT / "backend/src/oh_goon"
 def _sealed(path: Path, contents: bytes) -> SealedExecutionBytes:
     path.write_bytes(contents)
     path.chmod(0o755)
-    return seal_execution_bytes(path, label="test-source", expected_identity=(
-        "sha256:" + hashlib.sha256(contents).hexdigest()
-    ))
+    return seal_execution_bytes(
+        path,
+        label="test-source",
+        expected_identity=("sha256:" + hashlib.sha256(contents).hexdigest()),
+    )
 
 
 def _lease(fd: SealedExecutionBytes, interpreter: SealedExecutionBytes | None = None):
     def runtime_file(value: SealedExecutionBytes, target: str) -> AtomicRuntimeFile:
         return AtomicRuntimeFile(
-            value.descriptor, PurePosixPath(target), value.identity, value.byte_count,
-            value.mode, value.kernel_device, value.kernel_inode,
+            value.descriptor,
+            PurePosixPath(target),
+            value.identity,
+            value.byte_count,
+            value.mode,
+            value.kernel_device,
+            value.kernel_inode,
         )
+
     return AtomicRuntimeAuthorityLease(
         receipt=SimpleNamespace(
             executable_identity=fd.identity,
             interpreter_identity=interpreter.identity if interpreter else None,
         ),
         executable=runtime_file(fd, "/toolchain/bin/executable"),
-        interpreter=runtime_file(interpreter, "/toolchain/bin/interpreter") if interpreter else None,
+        interpreter=runtime_file(interpreter, "/toolchain/bin/interpreter")
+        if interpreter
+        else None,
     )
 
 
@@ -94,6 +109,7 @@ def test_unsealed_fd_replacement_fails_closed(tmp_path):
 
 def test_corrupted_identity_size_mode_or_inode_rejected(tmp_path):
     from dataclasses import replace
+
     sealed = _sealed(tmp_path / "file", b"sample")
     try:
         for variant in (
@@ -124,8 +140,13 @@ def test_overlapping_file_descriptors_rejected(tmp_path):
     original = _sealed(tmp_path / "payload", b"sample")
     with _lease(original) as lease:
         lease.interpreter = AtomicRuntimeFile(
-            original.descriptor, PurePosixPath("/interpreter"), original.identity,
-            original.byte_count, original.mode, original.kernel_device, original.kernel_inode,
+            original.descriptor,
+            PurePosixPath("/interpreter"),
+            original.identity,
+            original.byte_count,
+            original.mode,
+            original.kernel_device,
+            original.kernel_inode,
         )
         lease.receipt.interpreter_identity = original.identity
         with pytest.raises(ExecutionAuthorityDivergence, match="overlap"):
@@ -140,43 +161,77 @@ def test_canonical_wsl_qualification_enrolls_kernel_fd_custody():
     qualifier = (ROOT / "scripts/qualify_b12_development_wsl.sh").read_text()
     selector = "if [[ -f .checkpoint/P1B27B2B1_SOURCE.sha256 ]]; then embedded='.checkpoint/P1B27B2B1_SOURCE.sha256'; fi"
     assert qualifier.count(selector) == 1
-    assert qualifier.index(selector) < qualifier.index("if [[ -f .checkpoint/P1B27B2B2A_SOURCE.sha256 ]]")
+    assert qualifier.index(selector) < qualifier.index(
+        "if [[ -f .checkpoint/P1B27B2B2A_SOURCE.sha256 ]]"
+    )
     assert "--require-module test_p1b27b2b1_kernel_fd_custody" in qualifier
     assert "observer_tests+=(tests/unit/runtime/test_p1b27b2b1_kernel_fd_custody.py)" in qualifier
     assert "uv run --locked --group dev" not in qualifier
 
 
-@pytest.mark.parametrize("mutation", [
-    "remove-seals", "remove-inode", "remove-digest", "remove-prelaunch",
-    "remove-rewind-check", "remove-preargv", "dead-branch",
-])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "remove-seals",
+        "remove-inode",
+        "remove-digest",
+        "remove-prelaunch",
+        "remove-rewind-check",
+        "remove-preargv",
+        "dead-branch",
+    ],
+)
 def test_x0_rejects_kernel_fd_custody_drift(tmp_path, mutation):
     targets = {
         "engine/atomic_execution_bytes.py": PACKAGE / "engine/atomic_execution_bytes.py",
-        "integrations/fleet_plan_atomic_runtime_authority.py": PACKAGE / "integrations/fleet_plan_atomic_runtime_authority.py",
-        "integrations/fleet_plan_bubblewrap_isolation.py": PACKAGE / "integrations/fleet_plan_bubblewrap_isolation.py",
+        "integrations/fleet_plan_atomic_runtime_authority.py": PACKAGE
+        / "integrations/fleet_plan_atomic_runtime_authority.py",
+        "integrations/fleet_plan_bubblewrap_isolation.py": PACKAGE
+        / "integrations/fleet_plan_bubblewrap_isolation.py",
     }
     for name, source in targets.items():
         dest = tmp_path / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         contents = source.read_text()
         if mutation == "remove-seals" and name.startswith("engine/"):
-            contents = contents.replace("fcntl.fcntl(sealed.descriptor, get_seals)", "required_seals")
+            contents = replace_python_syntax(
+                contents, "fcntl.fcntl(sealed.descriptor, get_seals)", "required_seals"
+            )
         elif mutation == "remove-inode" and name.startswith("engine/"):
-            contents = contents.replace("(sealed.kernel_device, sealed.kernel_inode)", "(info.st_dev, info.st_ino)", 1)
+            contents = replace_python_syntax(
+                contents,
+                "(sealed.kernel_device, sealed.kernel_inode)",
+                "(info.st_dev, info.st_ino)",
+            )
         elif mutation == "remove-digest" and name.startswith("engine/"):
-            contents = contents.replace('"sha256:" + hasher.hexdigest() != sealed.identity', "False")
+            contents = replace_python_syntax(
+                contents, '"sha256:" + hasher.hexdigest() != sealed.identity', "False"
+            )
         elif mutation == "remove-prelaunch" and name.endswith("fleet_plan_bubblewrap_isolation.py"):
             before = "                    inherited_fds = _require_original_native_fd_handoff("
-            assert before in contents
-            contents = contents.replace(before, "                    inherited_fds = tuple(", 1)
-        elif mutation == "remove-rewind-check" and name.endswith("fleet_plan_atomic_runtime_authority.py"):
-            contents = contents.replace("        self.verify_kernel_custody()\n        for runtime_file", "        for runtime_file")
+            contents = replace_python_syntax(
+                contents, before, "                    inherited_fds = tuple("
+            )
+        elif mutation == "remove-rewind-check" and name.endswith(
+            "fleet_plan_atomic_runtime_authority.py"
+        ):
+            contents = replace_python_syntax(
+                contents,
+                "        self.verify_kernel_custody()\n        for runtime_file",
+                "        for runtime_file",
+            )
         elif mutation == "remove-preargv" and name.endswith("fleet_plan_bubblewrap_isolation.py"):
-            contents = contents.replace("                    atomic_authority.verify_kernel_custody()\n                    argv, env", "                argv, env")
+            contents = replace_python_syntax(
+                contents,
+                "                    atomic_authority.verify_kernel_custody()\n                    argv, env",
+                "                argv, env",
+            )
         elif mutation == "dead-branch" and name.endswith("fleet_plan_bubblewrap_isolation.py"):
             before = "                    inherited_fds = _require_original_native_fd_handoff(\n                        argv, atomic_authority, mount_source_lease,\n                    )"
-            assert before in contents
-            contents = contents.replace(before, "                    if False:\n                        inherited_fds = _require_original_native_fd_handoff(\n                            argv, atomic_authority, mount_source_lease,\n                        )", 1)
+            contents = replace_python_syntax(
+                contents,
+                before,
+                "                    if False:\n                        inherited_fds = _require_original_native_fd_handoff(\n                            argv, atomic_authority, mount_source_lease,\n                        )",
+            )
         dest.write_text(contents)
     assert _check_p1b27b2b1_kernel_fd_custody(tmp_path)

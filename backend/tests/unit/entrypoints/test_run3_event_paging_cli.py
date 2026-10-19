@@ -1,4 +1,5 @@
 """RUN-3: CLI/API are presentation-only clients of the same bounded journal owner."""
+
 from __future__ import annotations
 
 import json
@@ -19,12 +20,19 @@ class _JournalOwner:
         self.calls.append((run_id, after, limit))
         return SimpleNamespace(
             run=SimpleNamespace(fleet_run_id=run_id),
-            events=(SimpleNamespace(sequence=after + 1,
-                                    event_type=SimpleNamespace(value="RUN_STARTED")),),
-            next_sequence=after + 1, has_more=True, journal_revision=12,
+            events=(
+                SimpleNamespace(
+                    sequence=after + 1, event_type=SimpleNamespace(value="RUN_STARTED")
+                ),
+            ),
+            next_sequence=after + 1,
+            has_more=True,
+            journal_revision=12,
             model_dump=lambda *, mode: {
-                "events": [{"sequence": after + 1}], "next_sequence": after + 1,
-                "has_more": True, "journal_revision": 12,
+                "events": [{"sequence": after + 1}],
+                "next_sequence": after + 1,
+                "has_more": True,
+                "journal_revision": 12,
             },
         )
 

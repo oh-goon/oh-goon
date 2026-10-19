@@ -4,10 +4,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from oh_goon.core.errors import FleetPlanInvalid
 
 _CGROUP_V2_ROOT = Path("/sys/fs/cgroup")
-
-from oh_goon.core.errors import FleetPlanInvalid
 
 
 @dataclass(frozen=True, slots=True)

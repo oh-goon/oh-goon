@@ -5,15 +5,16 @@ own developer environment exists. The extracted source tree then owns its normal
 bootstrap/certification commands directly; this helper neither resolves dependencies
 nor manufactures Git metadata as a prerequisite.
 """
+
 from __future__ import annotations
 
 import argparse
 import hashlib
-from pathlib import Path
 import re
 import subprocess
 import tempfile
 import zipfile
+from pathlib import Path
 
 
 def _sha256(path: Path) -> str:
@@ -54,7 +55,6 @@ def _run_deep_public_dogfood(root: Path) -> None:
         )
     _run(root, str(cli), "dev", "explain-run", run_ids[0])
     _run(root, str(cli), "self", "certify")
-
 
 
 def _single_root(extract_dir: Path) -> Path:
@@ -99,7 +99,9 @@ def main() -> int:
     if args.deep_dogfood:
         expected = (args.expected_sha256 or "").strip().lower()
         if not re.fullmatch(r"[0-9a-f]{64}", expected):
-            parser.error("--deep-dogfood requires --expected-sha256 <64-hex retained artifact digest>")
+            parser.error(
+                "--deep-dogfood requires --expected-sha256 <64-hex retained artifact digest>"
+            )
         observed = _sha256(artifact)
         if observed != expected:
             parser.error(

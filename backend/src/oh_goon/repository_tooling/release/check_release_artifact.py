@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import configparser
 import hashlib
-from email.parser import BytesParser
 import os
-from pathlib import Path
 import re
 import stat
 import tomllib
 import zipfile
+from email.parser import BytesParser
+from pathlib import Path
 
 from oh_goon.core.file_digest import sha256_file_with_size
 
@@ -33,19 +33,13 @@ def _expected_payload(root: Path) -> tuple[dict[str, tuple[str, int]], tuple[str
         (root / "templates" / "plans", "oh_goon/templates/plans"),
     )
     for source, prefix in sources:
-        if (
-            source.is_symlink()
-            or not source.is_dir()
-            or not _contained_in_root(source, root)
-        ):
+        if source.is_symlink() or not source.is_dir() or not _contained_in_root(source, root):
             issues.append(
                 "managed release source must be a contained regular non-symlink directory: "
                 f"{source.relative_to(root)}"
             )
             continue
-        for current, dirnames, filenames in os.walk(
-            source, topdown=True, followlinks=False
-        ):
+        for current, dirnames, filenames in os.walk(source, topdown=True, followlinks=False):
             current_path = Path(current)
             kept_dirs: list[str] = []
             for dirname in dirnames:
@@ -73,8 +67,8 @@ def _expected_payload(root: Path) -> tuple[dict[str, tuple[str, int]], tuple[str
                         f"managed release source contains non-regular file: {path.relative_to(root)}"
                     )
                     continue
-                expected[f"{prefix}/{path.relative_to(source).as_posix()}"] = (
-                    sha256_file_with_size(path)
+                expected[f"{prefix}/{path.relative_to(source).as_posix()}"] = sha256_file_with_size(
+                    path
                 )
     return expected, tuple(issues)
 
@@ -82,27 +76,20 @@ def _expected_payload(root: Path) -> tuple[dict[str, tuple[str, int]], tuple[str
 def _project_scripts(root: Path) -> dict[str, str]:
     path = root / "backend" / "pyproject.toml"
     if path.is_symlink() or not path.is_file() or not _contained_in_root(path, root):
-        raise ValueError(
-            "backend/pyproject.toml must be a contained regular non-symlink file"
-        )
+        raise ValueError("backend/pyproject.toml must be a contained regular non-symlink file")
     payload = tomllib.loads(path.read_text(encoding="utf-8"))
     project = payload.get("project")
     if not isinstance(project, dict):
         raise ValueError("backend/pyproject.toml is missing [project]")
     scripts = project.get("scripts", {})
     if not isinstance(scripts, dict) or not all(
-        isinstance(name, str) and isinstance(target, str)
-        for name, target in scripts.items()
+        isinstance(name, str) and isinstance(target, str) for name, target in scripts.items()
     ):
-        raise ValueError(
-            "backend/pyproject.toml project.scripts must be a string table"
-        )
+        raise ValueError("backend/pyproject.toml project.scripts must be a string table")
     return dict(sorted(scripts.items()))
 
 
-def _entry_point_issues(
-    archive: zipfile.ZipFile, entry_path: str, root: Path
-) -> list[str]:
+def _entry_point_issues(archive: zipfile.ZipFile, entry_path: str, root: Path) -> list[str]:
     parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read_string(archive.read(entry_path).decode("utf-8"))
@@ -149,15 +136,9 @@ def _archive_issues(archive: zipfile.ZipFile, root: Path, version: str) -> list[
         if name not in names:
             issues.append(f"release wheel is missing managed payload: {name}")
         elif _archive_member_identity(archive, name) != identity:
-            issues.append(
-                f"release wheel managed payload differs from staged source: {name}"
-            )
+            issues.append(f"release wheel managed payload differs from staged source: {name}")
     for name in names:
-        if (
-            name.startswith("oh_goon/")
-            and not name.endswith("/")
-            and name not in expected
-        ):
+        if name.startswith("oh_goon/") and not name.endswith("/") and name not in expected:
             issues.append(f"release wheel contains stale managed payload: {name}")
 
     dist_info = f"oh_goon-{version}.dist-info"
@@ -191,9 +172,7 @@ def release_artifact_issues(root: Path = ROOT) -> tuple[str, ...]:
     except (OSError, UnicodeDecodeError) as exc:
         return (f"VERSION cannot be read: {exc}",)
     if re.fullmatch(r"\d+\.\d+\.\d+", version) is None:
-        return (
-            f"VERSION must contain canonical x.y.z release identity, got {version!r}",
-        )
+        return (f"VERSION must contain canonical x.y.z release identity, got {version!r}",)
 
     dist = root / "generated" / "release" / "dist"
     if dist.is_symlink() or not dist.is_dir() or not _contained_in_root(dist, root):
@@ -211,9 +190,7 @@ def release_artifact_issues(root: Path = ROOT) -> tuple[str, ...]:
     expected_name = f"oh_goon-{version}-py3-none-any.whl"
     issues: list[str] = []
     if wheel.name != expected_name:
-        issues.append(
-            f"release wheel filename is {wheel.name!r}, expected {expected_name!r}"
-        )
+        issues.append(f"release wheel filename is {wheel.name!r}, expected {expected_name!r}")
     try:
         with zipfile.ZipFile(wheel) as archive:
             issues.extend(_archive_issues(archive, root, version))
@@ -229,9 +206,7 @@ def main() -> int:
         for issue in issues:
             print(f"  - {issue}")
         return 1
-    print(
-        "Release wheel identity, entry point and managed Oh Goon payload are verified"
-    )
+    print("Release wheel identity, entry point and managed Oh Goon payload are verified")
     return 0
 
 

@@ -1,14 +1,23 @@
 # security/trivy-audit
 
-**Production template. Production Plan.**
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
 Runs the reusable `security/trivy-audit` Goon as one strict Plan.
 
-## Contract
+## Use this Plan
 
-- Canonical identity: `security/trivy-audit`.
-- Effective execution/resource policy is machine-owned and rendered by Plan inspection; this README does not duplicate it.
-- Ordered Goons: `security/trivy-audit`.
-- Executable behavior and repository requirements remain owned by the Goon.
+```sh
+oh-goon templates show security/trivy-audit --kind plan
+oh-goon plan inputs templates/plans/security/trivy-audit/plan.yml
+```
 
-Machine-readable truth is [`plan.yml`](./plan.yml). The README is human documentation only.
+Copy with `oh-goon templates show security/trivy-audit --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
+
+Install the selected native scanner and configure its declared online access. A nonzero vulnerability result remains a failure. Trivy’s retained report requires configured strict content-store publication; the package’s retention contract explains what can be retrieved.
+
+## Validate your copy
+
+```sh
+oh-goon plan validate plan.yml
+oh-goon lock plan.yml
+```

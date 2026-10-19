@@ -9,7 +9,6 @@ from oh_goon.core.errors import (
     ScheduleNotFound,
     StateConflict,
 )
-from oh_goon.core.product_identity import new_schedule_generation_id
 from oh_goon.core.models.schedule import (
     ScheduleCreate,
     ScheduleDefinition,
@@ -17,6 +16,7 @@ from oh_goon.core.models.schedule import (
     ScheduleReplace,
 )
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.product_identity import new_schedule_generation_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import ScheduleState
 from oh_goon.runtime.database import LocalDatabase

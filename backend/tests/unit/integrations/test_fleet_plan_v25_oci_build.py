@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from functools import cache
 import json
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -26,9 +26,8 @@ from oh_goon.integrations.fleet_plan_containerfile_policy import (
 from oh_goon.integrations.fleet_plan_oci_execution import execute_oci_build
 from oh_goon.integrations.fleet_plan_repository_scope import bind_repository_scope
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
-from tests.factories.shipped_templates import GOON_TEMPLATES, PLAN_TEMPLATES
 from tests.factories.cicd_repository import seed_cicd_repository
-
+from tests.factories.shipped_templates import GOON_TEMPLATES, PLAN_TEMPLATES
 
 
 def _resolver() -> FleetPlanResolver:
@@ -56,7 +55,7 @@ def _repository(tmp_path: Path, dockerfile: str) -> Path:
 def test_oci_template_resolves_to_explicit_v25_authority() -> None:
     step, plan = _plan()
 
-    assert plan.contract_version == 43
+    assert plan.contract_version == 44
     assert step_execution_tool(step) == "buildah"
     assert step.capabilities.egress.mode == "hostname_allowlist"
     assert step.capabilities.egress.rules[0].hostname == "registry.example.com"

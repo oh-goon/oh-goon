@@ -57,9 +57,7 @@ def derive_canonical_goon_tool_projection(
     """
 
     template_root = root.resolve() / "templates/goons"
-    packages = discover_template_packages(
-        template_root, source_name="goon.yml", kind="Goon"
-    )
+    packages = discover_template_packages(template_root, source_name="goon.yml", kind="Goon")
     tools_by_goon: dict[str, dict[str, tuple[str, ...]]] = {}
     owner_by_step: dict[tuple[str, str], str] = {}
     used_permission_owners: set[str] = set()
@@ -67,9 +65,7 @@ def derive_canonical_goon_tool_projection(
     permission_violations: list[WorkloadToolPermissionViolation] = []
 
     for key, directory in packages.items():
-        source_path = validate_template_package(
-            directory, source_name="goon.yml", kind="Goon"
-        )
+        source_path = validate_template_package(directory, source_name="goon.yml", kind="Goon")
         compiled = read_fleet_plan_source(
             source_path,
             kind="goon",

@@ -166,14 +166,20 @@ class _LaunchStreamState:
         if LaunchEventKind.SERVICE_FAILED in state:
             raise ValueError("service generation cannot transition after service.failed")
         if event.event in state:
-            raise ValueError(f"{event.event.value} may only be asserted once per service generation")
+            raise ValueError(
+                f"{event.event.value} may only be asserted once per service generation"
+            )
         self._accept_current_service_fact(event.event, state)
 
-    def _accept_spawn(self, event: LaunchEvent, current: int | None, state: set[LaunchEventKind]) -> None:
+    def _accept_spawn(
+        self, event: LaunchEvent, current: int | None, state: set[LaunchEventKind]
+    ) -> None:
         assert event.service is not None and event.service_generation is not None
         if self.launch_ready_seen:
             raise ValueError("service.spawned cannot create a new generation after launch.ready")
-        if current is not None and not ({LaunchEventKind.SERVICE_READY, LaunchEventKind.SERVICE_FAILED} & state):
+        if current is not None and not (
+            {LaunchEventKind.SERVICE_READY, LaunchEventKind.SERVICE_FAILED} & state
+        ):
             raise ValueError("service.spawned cannot replace a service generation still starting")
         expected = 1 if current is None else current + 1
         if event.service_generation != expected:
@@ -279,7 +285,6 @@ def project_launch_lifecycle(events: Iterable[LaunchEvent]) -> LaunchLifecycle:
     )
 
 
-
 def _validate_event_payload(event: LaunchEventKind, payload: Mapping[str, object]) -> None:
     if event is LaunchEventKind.LAUNCH_OWNER_OBSERVED:
         _validate_process_payload(event.value, payload, birth_required=True)
@@ -304,7 +309,9 @@ def _validate_event_payload(event: LaunchEventKind, payload: Mapping[str, object
             raise ValueError(f"{event.value} payload next_action must be a non-empty string")
 
 
-def _validate_process_payload(name: str, payload: Mapping[str, object], *, birth_required: bool) -> None:
+def _validate_process_payload(
+    name: str, payload: Mapping[str, object], *, birth_required: bool
+) -> None:
     pid = payload.get("pid")
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         raise ValueError(f"{name} requires positive integer payload pid")
@@ -316,6 +323,7 @@ def _validate_process_payload(name: str, payload: Mapping[str, object], *, birth
     birth = ProcessBirthIdentity.from_payload(birth_payload)
     if birth.pid != pid:
         raise ValueError(f"{name} birth identity pid must match payload pid")
+
 
 def _json_compatible(value):
     if isinstance(value, datetime):

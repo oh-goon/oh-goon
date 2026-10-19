@@ -3,13 +3,13 @@
 This is a post-install observation, never admission, provisioning, signing or a
 substitute for the WSL certification ladder. Run it in an isolated interpreter.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 from importlib import import_module, metadata
 from pathlib import Path
-
 
 ISSUER_MODULES = (
     "enforcer_lace_backend_capability_issuer",
@@ -30,7 +30,9 @@ class WheelAuthorityFailure(RuntimeError):
 
 
 def prove_wheel_owner(
-    *, distribution: metadata.Distribution, expected_version: str,
+    *,
+    distribution: metadata.Distribution,
+    expected_version: str,
 ) -> dict[str, object]:
     """Require installed RECORD membership, exact origin, and one alias module object."""
     if not expected_version or distribution.version != expected_version:

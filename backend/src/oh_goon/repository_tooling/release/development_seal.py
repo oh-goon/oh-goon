@@ -6,6 +6,7 @@ seal directory. This module then provides the race-safe version/source collision
 one version may map to one exact lineage manifest, and historical seal bytes are never
 overwritten.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -90,7 +91,7 @@ def publish_development_seal(seal_directory: Path, payload: Mapping[str, object]
     try:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
         fd = os.open(path, flags, 0o644)
-    except FileExistsError:
+    except FileExistsError as collision:
         try:
             existing = path.read_bytes()
         except OSError as exc:
@@ -101,7 +102,7 @@ def publish_development_seal(seal_directory: Path, payload: Mapping[str, object]
             raise DevelopmentSealCollision(
                 f"development version {version} already has a different sealed identity; "
                 "allocate the next version"
-            )
+            ) from collision
         return path
     try:
         with os.fdopen(fd, "wb", closefd=True) as handle:

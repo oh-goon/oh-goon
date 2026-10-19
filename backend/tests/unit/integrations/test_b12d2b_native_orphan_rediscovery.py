@@ -1,4 +1,5 @@
 """B12D2B read-only native correlation, not teardown or native absence."""
+
 from __future__ import annotations
 
 import json
@@ -9,8 +10,8 @@ from pathlib import Path
 import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.ports.local_lace_orphan_inventory import LocalLaceOrphanSubject
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentProof
+from oh_goon.core.ports.local_lace_orphan_inventory import LocalLaceOrphanSubject
 from oh_goon.integrations import fleet_plan_local_lace_allocation as live
 from oh_goon.integrations import fleet_plan_local_lace_orphan_inventory as orphan
 from oh_goon.integrations.fleet_plan_local_lace_recovery import lace_resource_binding
@@ -25,15 +26,30 @@ def _fixture(tmp_path: Path, monkeypatch):
     cgroup.state_file.write_text(json.dumps(native_record))
     cgroup.state_file.chmod(0o600)
     observed = live.observe_local_allocation(cgroup, None, _observed_request(tmp_path), proof=proof)
-    subject = LocalLaceOrphanSubject("run-one", 2, 4, 1, "step-1", proof.attempt_identity,
-                                    {}, observed.__dict__ if hasattr(observed, "__dict__") else
-                                    {name: getattr(observed, name) for name in observed.__dataclass_fields__},
-                                    "sha256:" + "f" * 64)
+    subject = LocalLaceOrphanSubject(
+        "run-one",
+        2,
+        4,
+        1,
+        "step-1",
+        proof.attempt_identity,
+        {},
+        observed.__dict__
+        if hasattr(observed, "__dict__")
+        else {name: getattr(observed, name) for name in observed.__dataclass_fields__},
+        "sha256:" + "f" * 64,
+    )
     monkeypatch.setattr(orphan, "_is_cgroup2_path", lambda _: True)
     monkeypatch.setattr(orphan, "_process_identity", lambda pid: "boot:42")
-    state_network = tmp_path / "net-state"; state_network.mkdir()
-    options = dict(cgroup_root=cgroup.cgroup.parent, cgroup_state_dir=cgroup.state_file.parent,
-                   network_state_dir=state_network, ip="ip", nft="nft")
+    state_network = tmp_path / "net-state"
+    state_network.mkdir()
+    options = dict(
+        cgroup_root=cgroup.cgroup.parent,
+        cgroup_state_dir=cgroup.state_file.parent,
+        network_state_dir=state_network,
+        ip="ip",
+        nft="nft",
+    )
     return cgroup, subject, options
 
 
@@ -48,9 +64,22 @@ def test_native_cgroup_inode_and_original_label_survive_reader_restart(tmp_path,
     assert orphan.rediscover_local_orphan(subject, **options) == result
 
 
-@pytest.mark.parametrize("attack", ["missing", "symlink", "foreign-intent", "missing-cgroup",
-                                     "changed-inode", "bad-permissions", "wrong-events", "bad-procs"])
-def test_native_orphan_substitutions_deny_inventory_and_preserve_resources(tmp_path, monkeypatch, attack):
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "missing",
+        "symlink",
+        "foreign-intent",
+        "missing-cgroup",
+        "changed-inode",
+        "bad-permissions",
+        "wrong-events",
+        "bad-procs",
+    ],
+)
+def test_native_orphan_substitutions_deny_inventory_and_preserve_resources(
+    tmp_path, monkeypatch, attack
+):
     cgroup, subject, options = _fixture(tmp_path, monkeypatch)
     if attack == "missing":
         cgroup.state_file.unlink()
@@ -63,7 +92,8 @@ def test_native_orphan_substitutions_deny_inventory_and_preserve_resources(tmp_p
         record["lace_intent"]["run_id"] = "foreign"
         cgroup.state_file.write_text(json.dumps(record))
     elif attack == "missing-cgroup":
-        for child in cgroup.cgroup.iterdir(): child.unlink()
+        for child in cgroup.cgroup.iterdir():
+            child.unlink()
         cgroup.cgroup.rmdir()
     elif attack == "changed-inode":
         new = cgroup.cgroup.with_name("new")
@@ -82,7 +112,9 @@ def test_native_orphan_substitutions_deny_inventory_and_preserve_resources(tmp_p
     assert cgroup.state_file.exists() if attack != "missing" else not cgroup.state_file.exists()
 
 
-def test_recovered_process_birth_and_mount_namespace_are_observed_but_not_quiescent(tmp_path, monkeypatch):
+def test_recovered_process_birth_and_mount_namespace_are_observed_but_not_quiescent(
+    tmp_path, monkeypatch
+):
     cgroup, subject, options = _fixture(tmp_path, monkeypatch)
     (cgroup.cgroup / "cgroup.procs").write_text("4567\n")
     (cgroup.cgroup / "cgroup.events").write_text("populated 1\n")
@@ -102,10 +134,17 @@ def test_recovered_process_birth_and_mount_namespace_are_observed_but_not_quiesc
 
 
 def test_intent_only_crash_never_converts_missing_resources_to_absence(tmp_path):
-    subject = LocalLaceOrphanSubject("run-one", 2, 3, 1, "step-1", "sha256:" + "d" * 64,
-                                    {}, None, "sha256:" + "f" * 64)
-    inventory = orphan.rediscover_local_orphan(subject, cgroup_root=tmp_path / "nonexistent",
-        cgroup_state_dir=tmp_path / "none", network_state_dir=tmp_path / "none", ip="ip", nft="nft")
+    subject = LocalLaceOrphanSubject(
+        "run-one", 2, 3, 1, "step-1", "sha256:" + "d" * 64, {}, None, "sha256:" + "f" * 64
+    )
+    inventory = orphan.rediscover_local_orphan(
+        subject,
+        cgroup_root=tmp_path / "nonexistent",
+        cgroup_state_dir=tmp_path / "none",
+        network_state_dir=tmp_path / "none",
+        ip="ip",
+        nft="nft",
+    )
     assert inventory.state == "INTENT_ONLY_UNKNOWN"
     assert inventory.native_absence_proven is False
     assert inventory.cgroup_identity is None
@@ -121,30 +160,53 @@ def test_native_owner_pid_reuse_does_not_authorize_orphan_recovery(tmp_path, mon
 
 def test_orphan_netns_veth_nft_presence_fenced_to_original_native_record(tmp_path, monkeypatch):
     cgroup, subject, options = _fixture(tmp_path, monkeypatch)
-    record = {"pid": os.getpid(), "process_identity": "boot:42",
-              "namespace": "uvf0123456789", "host_veth": "ufh0123456789", "table": "uvf_0123456789",
-              "lace_intent": lace_resource_binding(LocalLaceIntentProof(
-                  "run-one", "step-1", 1, 2, "sha256:" + "d" * 64))}
+    record = {
+        "pid": os.getpid(),
+        "process_identity": "boot:42",
+        "namespace": "uvf0123456789",
+        "host_veth": "ufh0123456789",
+        "table": "uvf_0123456789",
+        "lace_intent": lace_resource_binding(
+            LocalLaceIntentProof("run-one", "step-1", 1, 2, "sha256:" + "d" * 64)
+        ),
+    }
     net_file = options["network_state_dir"] / "net.json"
-    net_file.write_text(json.dumps(record)); net_file.chmod(0o600)
+    net_file.write_text(json.dumps(record))
+    net_file.chmod(0o600)
     from oh_goon.integrations.fleet_plan_local_lace_intent import _identity
+
     net_identity = _identity("observed-host-network", {"owner_record": record})
-    subject = replace(subject, observation={**subject.observation,
-        "network_kind": "host-netns", "network_namespace": record["namespace"],
-        "host_veth": record["host_veth"], "nft_table": record["table"],
-        "network_identity": net_identity})
+    subject = replace(
+        subject,
+        observation={
+            **subject.observation,
+            "network_kind": "host-netns",
+            "network_namespace": record["namespace"],
+            "host_veth": record["host_veth"],
+            "nft_table": record["table"],
+            "network_identity": net_identity,
+        },
+    )
+
     def native(_tool, args, *, kind):
-        if kind == "netns": return [{"name": record["namespace"]}]
-        if kind == "link": return [{"ifname": record["host_veth"]}]
+        if kind == "netns":
+            return [{"name": record["namespace"]}]
+        if kind == "link":
+            return [{"ifname": record["host_veth"]}]
         return [{"table": {"family": "inet", "name": record["table"]}}]
+
     monkeypatch.setattr(orphan, "_native_list", native)
     result = orphan.rediscover_local_orphan(subject, **options)
     assert result.network_identity == net_identity
     for kind in ("netns", "link", "nft"):
+
         def drift(_tool, args, *, kind=kind):
-            if kind == "netns": return [{"name": "foreign"}]
-            if kind == "link": return [{"ifname": "foreign"}]
+            if kind == "netns":
+                return [{"name": "foreign"}]
+            if kind == "link":
+                return [{"ifname": "foreign"}]
             return [{"table": {"family": "inet", "name": "foreign"}}]
+
         monkeypatch.setattr(orphan, "_native_list", drift)
         with pytest.raises(FleetPlanInvalid, match="unresolved"):
             orphan.rediscover_local_orphan(subject, **options)
@@ -163,10 +225,13 @@ def test_native_mount_namespace_pid_birth_race_is_not_accepted(tmp_path, monkeyp
     (proc / "mountinfo").write_text("sample\n")
     options["proc_root"] = tmp_path / "proc"
     count = [0]
+
     def pid_birth(pid):
-        if pid == os.getpid(): return "boot:42"
+        if pid == os.getpid():
+            return "boot:42"
         count[0] += 1
         return "boot:42" if count[0] == 1 else "boot:43"
+
     monkeypatch.setattr(orphan, "_process_identity", pid_birth)
     with pytest.raises(FleetPlanInvalid, match="changed during observation"):
         orphan.rediscover_local_orphan(subject, **options)

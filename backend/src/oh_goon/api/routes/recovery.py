@@ -34,9 +34,7 @@ def reconcile_effect(
     request: RecoveryReconcileRequest,
     service: RecoveryService = Depends(recovery_service),
 ) -> RecoveryStatus:
-    return service.reconcile(
-        operation_id, expected_record_version=request.expected_record_version
-    )
+    return service.reconcile(operation_id, expected_record_version=request.expected_record_version)
 
 
 @router.post(

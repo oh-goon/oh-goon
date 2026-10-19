@@ -4,8 +4,10 @@ from dataclasses import replace
 from typing import get_args
 
 from oh_goon.core.execution_observability import RepositoryRunObservation
-from oh_goon.scout.models import ScoutMetricName
+from oh_goon.core.time import utc_now
+from oh_goon.core.vocabulary import GameTapeStatus
 from oh_goon.scout.evidence import ScoutEvidenceSnapshot
+from oh_goon.scout.models import ScoutMetricName
 from oh_goon.scout.projection import (
     project_scout_findings,
     project_scout_goon,
@@ -13,8 +15,6 @@ from oh_goon.scout.projection import (
     project_scout_repository,
     scout_metric_dictionary,
 )
-from oh_goon.core.time import utc_now
-from oh_goon.core.vocabulary import GameTapeStatus
 from tests.unit.core.test_scout_projection import _observation, _window
 
 

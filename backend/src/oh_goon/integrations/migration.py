@@ -11,9 +11,7 @@ from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.migration import MigrationCandidate
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.target import MigrationTarget, OperationTarget
-from oh_goon.core.ports.capability_runner import (
-    CapabilityExecutionRequest
-)
+from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import EffectBoundaryKind, MigrationReadiness, MigrationSource, Verdict
 from oh_goon.engine.git import GitService

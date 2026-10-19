@@ -3,6 +3,7 @@
 These fixtures are explicit owner transport witnesses, not a second reducer,
 executor, trust authority, retry decision, or simulated kernel containment.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,36 +34,57 @@ class _Tape:
         self.receipt = _Facts({"validation": "canonical-receipt"})
         self.summary = _Facts({"failed_steps": 1})
         self.observability = _Facts({"raw_output_survives_process_restart": False})
-        self.issue_focus = (_Facts({"scope": "STEP", "step_execution_id": "step-one",
-                                    "repository_execution_id": "repo-one",
-                                    "code": "CANONICAL_FAILURE"}),)
+        self.issue_focus = (
+            _Facts(
+                {
+                    "scope": "STEP",
+                    "step_execution_id": "step-one",
+                    "repository_execution_id": "repo-one",
+                    "code": "CANONICAL_FAILURE",
+                }
+            ),
+        )
         self.issue_count = 1
         self.hidden_issue_count = 0
-        self.why_not = _Facts({"stage": stage, "retryable": False,
-                               "safe_next_action": "Inspect original authorization receipt"})
+        self.why_not = _Facts(
+            {
+                "stage": stage,
+                "retryable": False,
+                "safe_next_action": "Inspect original authorization receipt",
+            }
+        )
         self.enforcer_receipt_available = False
         step = SimpleNamespace(
-            step_id="verify", order=1, step_execution_id="step-one",
-            status=SimpleNamespace(value="FAILED"), output_names=("receipt",),
+            step_id="verify",
+            order=1,
+            step_execution_id="step-one",
+            status=SimpleNamespace(value="FAILED"),
+            output_names=("receipt",),
             outputs=(_Facts({"name": "receipt", "sha256": "a" * 64}),),
-            artifacts=(), stdout_evidence=_Facts({"sha256": "b" * 64}),
+            artifacts=(),
+            stdout_evidence=_Facts({"sha256": "b" * 64}),
             stderr_evidence=None,
-            model_dump=lambda *, mode: {"step_execution_id": "step-one",
-                                        "status": "FAILED", "failure": "original"},
+            model_dump=lambda *, mode: {
+                "step_execution_id": "step-one",
+                "status": "FAILED",
+                "failure": "original",
+            },
         )
         repo = SimpleNamespace(
             repository_execution_id="repo-one",
-            repository=SimpleNamespace(
-                name="repo", model_dump=lambda *, mode: {"name": "repo"}),
-            status=SimpleNamespace(value="FAILED"), steps=(step,),
+            repository=SimpleNamespace(name="repo", model_dump=lambda *, mode: {"name": "repo"}),
+            status=SimpleNamespace(value="FAILED"),
+            steps=(step,),
         )
         self.repositories = (repo,)
 
     def model_dump(self, *, mode):
         assert mode == "json"
-        return {"fleet_run_id": self.fleet_run_id,
-                "repositories": [{"repository_execution_id": "repo-one"}],
-                "status": self.status.value}
+        return {
+            "fleet_run_id": self.fleet_run_id,
+            "repositories": [{"repository_execution_id": "repo-one"}],
+            "status": self.status.value,
+        }
 
 
 class _CanonicalRuns:
@@ -83,8 +105,8 @@ class _CanonicalRuns:
                 target=SimpleNamespace(plan=SimpleNamespace(plan_id="plan-one")),
                 status=FleetRunStatus.FAILED,
                 progress=SimpleNamespace(
-                    completed=1, total=1,
-                    model_dump=lambda *, mode: {"completed": 1, "total": 1}),
+                    completed=1, total=1, model_dump=lambda *, mode: {"completed": 1, "total": 1}
+                ),
             ),
             outcome=FleetRunOutcome.FAILED,
             game_tape=self.tape,
@@ -99,12 +121,18 @@ class _CanonicalRuns:
         has_more = after == 0
         return SimpleNamespace(
             run=SimpleNamespace(fleet_run_id=run_id),
-            events=(SimpleNamespace(sequence=next_sequence,
-                                    event_type=SimpleNamespace(value="ORIGINAL_EVENT")),),
-            next_sequence=next_sequence, has_more=has_more, journal_revision=100,
+            events=(
+                SimpleNamespace(
+                    sequence=next_sequence, event_type=SimpleNamespace(value="ORIGINAL_EVENT")
+                ),
+            ),
+            next_sequence=next_sequence,
+            has_more=has_more,
+            journal_revision=100,
             model_dump=lambda *, mode: {
                 "events": [{"sequence": next_sequence, "code": "ORIGINAL_EVENT"}],
-                "next_sequence": next_sequence, "has_more": has_more,
+                "next_sequence": next_sequence,
+                "has_more": has_more,
                 "journal_revision": 100,
             },
         )
@@ -113,10 +141,17 @@ class _CanonicalRuns:
         self.calls.append(("live-output", run_id, after))
         assert run_id == self.run_id
         return SimpleNamespace(
-            fleet_run_id=run_id, state="UNAVAILABLE", chunks=(),
-            available=False, next_sequence=after,
-            model_dump=lambda *, mode: {"fleet_run_id": run_id, "available": False,
-                                        "state": "UNAVAILABLE", "next_sequence": after},
+            fleet_run_id=run_id,
+            state="UNAVAILABLE",
+            chunks=(),
+            available=False,
+            next_sequence=after,
+            model_dump=lambda *, mode: {
+                "fleet_run_id": run_id,
+                "available": False,
+                "state": "UNAVAILABLE",
+                "next_sequence": after,
+            },
         )
 
     def __getattr__(self, name):
@@ -136,7 +171,8 @@ class _CanonicalPlans:
         self.calls.append(("run", str(path)))
         assert kwargs["fleet_run_id"] == self.run_id
         return SimpleNamespace(
-            fleet_run_id=self.run_id, status=FleetRunStatus.QUEUED,
+            fleet_run_id=self.run_id,
+            status=FleetRunStatus.QUEUED,
             target=SimpleNamespace(plan=SimpleNamespace(plan_id="plan-one")),
         )
 
@@ -159,10 +195,21 @@ def test_full_agent_run_id_resume_and_existing_evidence_views(capsys):
     plans = _CanonicalPlans(run_id)
     runs = _CanonicalRuns(run_id)
     runtime = SimpleNamespace(plans=plans, runs=runs)
-    code, accepted = _invoke(runtime, capsys, [
-        "plan", "run", "plan.yml", "--repository-id", "repo-1",
-        "--fleet-run-id", run_id, "--json",
-    ])
+    code, accepted = _invoke(
+        runtime,
+        capsys,
+        [
+            "plan",
+            "run",
+            "plan.yml",
+            "--repository-id",
+            "repo-1",
+            "--fleet-run-id",
+            run_id,
+            "--json",
+            "--no-wait",
+        ],
+    )
     assert code == 0
     assert accepted["fleet_run_id"] == run_id
     assert accepted["status"] == "QUEUED" and accepted["outcome"] is None
@@ -213,9 +260,13 @@ def test_full_agent_run_id_resume_and_existing_evidence_views(capsys):
     assert len(plans.calls) == 2  # all following views are read only
     assert runs.calls == [
         ("get", run_id),  # handoff
-        ("events", run_id, 0, 100), ("events", run_id, 4, 100),
+        ("events", run_id, 0, 100),
+        ("events", run_id, 4, 100),
         ("live-output", run_id, 0),
-        ("get", run_id), ("get", run_id), ("get", run_id), ("get", run_id),
+        ("get", run_id),
+        ("get", run_id),
+        ("get", run_id),
+        ("get", run_id),
     ]
 
 
@@ -223,13 +274,13 @@ def test_full_agent_run_id_resume_and_existing_evidence_views(capsys):
 def test_no_repair_policy_or_retry_permission_in_readback_references(capsys, stage):
     run_id = "run-failure"
     runs = _CanonicalRuns(run_id, stage=stage)
-    code, handoff = _invoke(SimpleNamespace(runs=runs), capsys,
-                            ["plan", "handoff", run_id, "--json"])
+    code, handoff = _invoke(
+        SimpleNamespace(runs=runs), capsys, ["plan", "handoff", run_id, "--json"]
+    )
     assert code == 0
     assert handoff["why_not"]["stage"] == stage
     assert handoff["why_not"]["retryable"] is False
-    assert handoff["why_not"]["safe_next_action"] == (
-        "Inspect original authorization receipt")
+    assert handoff["why_not"]["safe_next_action"] == ("Inspect original authorization receipt")
     nav = json.dumps(handoff["readback"])
     assert "retryable" not in nav and "safe_next_action" not in nav
     assert "repair" not in nav
@@ -240,8 +291,7 @@ def test_no_repair_policy_or_retry_permission_in_readback_references(capsys, sta
 def test_argv_is_not_a_shell_command_even_with_shell_sensitive_run_identity(capsys):
     run_id = "run; echo SHOULD_NOT_EXECUTE"
     runs = _CanonicalRuns(run_id)
-    _, handoff = _invoke(SimpleNamespace(runs=runs), capsys,
-                         ["plan", "handoff", run_id, "--json"])
+    _, handoff = _invoke(SimpleNamespace(runs=runs), capsys, ["plan", "handoff", run_id, "--json"])
     for view in handoff["readback"].values():
         assert view["argv"][3] == run_id
         assert isinstance(view["argv"], list)
@@ -253,8 +303,9 @@ def test_argv_is_not_a_shell_command_even_with_shell_sensitive_run_identity(caps
 def test_unknown_run_does_not_offer_unverified_navigation(capsys):
     runs = _CanonicalRuns("unknown")
     runs.reject = True
-    code, result = _invoke(SimpleNamespace(runs=runs), capsys,
-                           ["plan", "handoff", "unknown", "--json"])
+    code, result = _invoke(
+        SimpleNamespace(runs=runs), capsys, ["plan", "handoff", "unknown", "--json"]
+    )
     assert code == 2
     assert result["status"] == "error"
     assert "readback" not in result

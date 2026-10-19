@@ -12,9 +12,9 @@ from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepCapabilities
 from oh_goon.integrations import _fleet_plan_cgroup_resources as cgroup_resources
+from oh_goon.integrations import fleet_plan_bubblewrap_isolation as bubblewrap_isolation
 from oh_goon.integrations._fleet_plan_cgroup_resources import CgroupV2AttemptLease
 from oh_goon.integrations._fleet_plan_runtime_root import _create_mount_scaffold
-from oh_goon.integrations import fleet_plan_bubblewrap_isolation as bubblewrap_isolation
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import (
     BubblewrapProcessIsolation,
     _bubblewrap_prefix,
@@ -65,7 +65,8 @@ def test_nested_attempt_delegates_only_an_attempt_bounded_child(
     # to exercise nested argument/limit logic. It is NOT independent Linux
     # custody, native admission proof, or an authorization path in production.
     monkeypatch.setattr(
-        cgroup_resources, 'require_independent_native_parent_custody',
+        cgroup_resources,
+        "require_independent_native_parent_custody",
         lambda **_kwargs: None,
     )
 
@@ -86,17 +87,24 @@ def test_nested_attempt_delegates_only_an_attempt_bounded_child(
 
     enabled: list[tuple[Path, set[str]]] = []
 
-    def enable(root: Path, *, required_controllers: set[str], expected_identity: tuple[int, int] | None = None) -> Path:
+    def enable(
+        root: Path,
+        *,
+        required_controllers: set[str],
+        expected_identity: tuple[int, int] | None = None,
+    ) -> Path:
         enabled.append((root, required_controllers))
         return root
 
     # Real cgroupfs materializes controller files as soon as mkdir succeeds.
     native_mkdir = Path.mkdir
+
     def materialize(group: Path, *args: object, **kwargs: object) -> None:
         native_mkdir(group, *args, **kwargs)
         if group.name.startswith("attempt-"):
             for name in ("cpu.max", "memory.max", "memory.swap.max", "pids.max"):
                 (group / name).write_text("", encoding="ascii")
+
     monkeypatch.setattr(Path, "mkdir", materialize)
     monkeypatch.setattr(cgroup_resources, "_write_limit", write_limit)
     monkeypatch.setattr(cgroup_resources, "enable_delegated_cgroup_v2_controllers", enable)
@@ -117,8 +125,10 @@ def test_nested_attempt_delegates_only_an_attempt_bounded_child(
     assert lease.nested_monitor.is_dir()
     assert enabled == [(lease.cgroup, {"cpu", "memory", "pids"})]
     assert lease.command_prefix()[-7:] == (
-        str(lease.nested_delegation), str(lease.nested_monitor),
-        *(str(v) for v in (*lease.nested_identity, *lease.monitor_identity)), "--",
+        str(lease.nested_delegation),
+        str(lease.nested_monitor),
+        *(str(v) for v in (*lease.nested_identity, *lease.monitor_identity)),
+        "--",
     )
 
 
@@ -134,7 +144,8 @@ def test_nested_strict_execution_delegates_controller_authority_without_imposing
     # to exercise nested argument/limit logic. It is NOT independent Linux
     # custody, native admission proof, or an authorization path in production.
     monkeypatch.setattr(
-        cgroup_resources, 'require_independent_native_parent_custody',
+        cgroup_resources,
+        "require_independent_native_parent_custody",
         lambda **_kwargs: None,
     )
 
@@ -146,7 +157,12 @@ def test_nested_strict_execution_delegates_controller_authority_without_imposing
     def require_host(_backend, _policy, *, required_controllers: set[str] | None = None):
         required_at_host.append(set(required_controllers or set()))
 
-    def enable(_root: Path, *, required_controllers: set[str], expected_identity: tuple[int, int] | None = None) -> Path:
+    def enable(
+        _root: Path,
+        *,
+        required_controllers: set[str],
+        expected_identity: tuple[int, int] | None = None,
+    ) -> Path:
         enabled.append(set(required_controllers))
         return _root
 
@@ -174,9 +190,13 @@ def test_nested_strict_execution_delegates_controller_authority_without_imposing
     assert writes == []
 
 
-def test_nested_attempt_cleanup_removes_descendant_cgroups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_nested_attempt_cleanup_removes_descendant_cgroups(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Fixture-only post-custody cleanup simulation; never an actual kernel permit.
-    monkeypatch.setattr(cgroup_resources, 'require_independent_native_parent_custody', lambda **_kw: None)
+    monkeypatch.setattr(
+        cgroup_resources, "require_independent_native_parent_custody", lambda **_kw: None
+    )
     root = tmp_path / "attempt"
     (root / "nested-execution" / "oh-goon-nested-process").mkdir(parents=True)
 
@@ -199,9 +219,7 @@ def test_runtime_root_scaffolds_only_an_empty_cgroup_mountpoint(tmp_path: Path) 
 
 def test_nested_bubblewrap_requires_a_real_cgroup_namespace() -> None:
     ordinary = _bubblewrap_prefix("/usr/bin/bwrap", egress_mode="none")
-    nested = _bubblewrap_prefix(
-        "/usr/bin/bwrap", egress_mode="none", require_cgroup_namespace=True
-    )
+    nested = _bubblewrap_prefix("/usr/bin/bwrap", egress_mode="none", require_cgroup_namespace=True)
 
     assert "--unshare-cgroup-try" in ordinary
     assert "--unshare-cgroup" not in ordinary
@@ -238,11 +256,14 @@ def test_nested_bubblewrap_projects_only_the_delegated_cgroup_mount(
             host_tools=(),
         ),
         read_only_workspace=None,
+        local_resource_intent=None,
     )
     monkeypatch.setattr(bubblewrap_isolation, "verify_runtime_root", lambda _root: None)
     monkeypatch.setattr(bubblewrap_isolation, "_append_managed_inputs", lambda *_args: None)
     monkeypatch.setattr(bubblewrap_isolation, "_append_toolchain", lambda *_args: None)
-    monkeypatch.setattr(bubblewrap_isolation, "_append_atomic_execution_mounts", lambda *_args: None)
+    monkeypatch.setattr(
+        bubblewrap_isolation, "_append_atomic_execution_mounts", lambda *_args: None
+    )
 
     args = bubblewrap_isolation._prepare_mounts(
         "/usr/bin/bwrap",
@@ -253,7 +274,7 @@ def test_nested_bubblewrap_projects_only_the_delegated_cgroup_mount(
     )
 
     mount = ("--bind", str(nested), "/sys/fs/cgroup")
-    assert tuple(args[args.index("--bind", args.index("--ro-bind") + 1):][:3]) == mount
+    assert tuple(args[args.index("--bind", args.index("--ro-bind") + 1) :][:3]) == mount
     assert "--unshare-cgroup" in args
     assert "--unshare-cgroup-try" not in args
 
@@ -265,7 +286,9 @@ def test_nested_bubblewrap_marks_only_the_inner_delegation_environment(
     request = SimpleNamespace()
     launch = SimpleNamespace(cwd="/workspace", argv=("make", "check"), env={"BASE": "1"})
     delegated = Path("/delegated/nested-execution")
-    monkeypatch.setattr(bubblewrap_isolation, "_prepare_mounts", lambda *_args, **_kwargs: ["bwrap"])
+    monkeypatch.setattr(
+        bubblewrap_isolation, "_prepare_mounts", lambda *_args, **_kwargs: ["bwrap"]
+    )
 
     argv, env = backend._command(
         request,

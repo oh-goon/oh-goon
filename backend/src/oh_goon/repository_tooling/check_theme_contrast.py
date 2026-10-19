@@ -12,29 +12,21 @@ def _section(text: str, name: str) -> dict[str, str]:
     match = re.search(rf"\n  {re.escape(name)}: \{{(.*?)\n  \}},", text, re.DOTALL)
     if match is None:
         raise ValueError(f"theme section {name!r} not found")
-    return dict(
-        re.findall(r'^\s*(\w+):\s*"(#[0-9a-fA-F]{6})",?$', match.group(1), re.MULTILINE)
-    )
+    return dict(re.findall(r'^\s*(\w+):\s*"(#[0-9a-fA-F]{6})",?$', match.group(1), re.MULTILINE))
 
 
 def _luminance(value: str) -> float:
     channels = [int(value[index : index + 2], 16) / 255 for index in (1, 3, 5)]
 
     def linear(channel: float) -> float:
-        return (
-            channel / 12.92
-            if channel <= 0.04045
-            else ((channel + 0.055) / 1.055) ** 2.4
-        )
+        return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
 
     red, green, blue = (linear(channel) for channel in channels)
     return 0.2126 * red + 0.7152 * green + 0.0722 * blue
 
 
 def contrast_ratio(foreground: str, background: str) -> float:
-    lighter, darker = sorted(
-        (_luminance(foreground), _luminance(background)), reverse=True
-    )
+    lighter, darker = sorted((_luminance(foreground), _luminance(background)), reverse=True)
     return (lighter + 0.05) / (darker + 0.05)
 
 
@@ -53,9 +45,7 @@ def _required_pairs(text: str) -> list[tuple[str, str, str]]:
                     surface[surface_name],
                 )
             )
-    pairs.append(
-        ("text.inverse on action.primary", foreground["inverse"], action["primary"])
-    )
+    pairs.append(("text.inverse on action.primary", foreground["inverse"], action["primary"]))
     for text_name in ("primary", "secondary", "muted", "link"):
         pairs.append(
             (

@@ -11,26 +11,22 @@ from oh_goon.core.errors import (
     ExecutorReadmissionNotAllowed,
     InvalidRunTransition,
     JournalConflict,
-    RunNotFound,
     StateConflict,
 )
 from oh_goon.core.game_tape_comparison import compare_game_tapes
 from oh_goon.core.game_tape_failure_history import project_game_tape_failure_history
 from oh_goon.core.game_tape_performance import project_game_tape_performance
-from oh_goon.core.product_identity import new_fleet_run_id
-from oh_goon.core.run_identity import require_fleet_run_detail_binding, require_fleet_run_scheduling_binding
-from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.capability import CapabilitySnapshot
-from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
-from oh_goon.core.models.game_tape import GameTape, GameTapeRunDiff
-from oh_goon.core.models.game_tape_failure_history import GameTapeFailureHistory
-from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
 from oh_goon.core.models.fleet_failures import (
     FleetFailureGroupPage,
     FleetFailureInventory,
     FleetFailureRepositoryPage,
 )
+from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
+from oh_goon.core.models.game_tape import GameTape, GameTapeRunDiff
+from oh_goon.core.models.game_tape_failure_history import GameTapeFailureHistory
+from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
 from oh_goon.core.models.game_tape_performance import GameTapePerformanceReport
 from oh_goon.core.models.run import (
     FleetRunDetail,
@@ -46,8 +42,14 @@ from oh_goon.core.models.run_admission import (
     requested_fleet_repository_scope,
 )
 from oh_goon.core.models.run_events import FleetRunEventBatch
+from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
+from oh_goon.core.product_identity import new_fleet_run_id
+from oh_goon.core.run_identity import (
+    require_fleet_run_detail_binding,
+    require_fleet_run_scheduling_binding,
+)
 from oh_goon.core.vocabulary import (
     FleetRunFailureStage,
     FleetRunOutcome,
@@ -62,8 +64,8 @@ from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
 from oh_goon.services.fleet_caller_file_freshness import require_target_caller_file_fresh
-from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_rerun_scope import rerun_repository_scope
+from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.game_tape_live_output import read_game_tape_live_output
 
@@ -100,16 +102,22 @@ class FleetRunControlPlane:
         return self._lifecycle.existing_owned_local_lace_ticket(run_id)
 
     def transfer_original_dead_fleet_recovery(
-        self, *, run_id: str, predecessor_token: str, expected_epoch: int,
+        self,
+        *,
+        run_id: str,
+        predecessor_token: str,
+        expected_epoch: int,
     ) -> ExecutionTicket:
         """Delegate explicit custody transfer to original lifecycle; no new ingress."""
         return self._lifecycle.transfer_original_dead_fleet_recovery(
-            run_id=run_id, predecessor_token=predecessor_token,
+            run_id=run_id,
+            predecessor_token=predecessor_token,
             expected_epoch=expected_epoch,
         )
 
-    def resume_local_lace_takeover(self, ticket: ExecutionTicket, coordinator, *,
-                                   intent_run_seq: int) -> tuple[int, int]:
+    def resume_local_lace_takeover(
+        self, ticket: ExecutionTicket, coordinator, *, intent_run_seq: int
+    ) -> tuple[int, int]:
         """Delegate explicit worker recovery; this does NOT mint a takeover ticket.
 
         It is deliberately not an HTTP/CLI ingress and not called by the
@@ -117,7 +125,8 @@ class FleetRunControlPlane:
         Fleet worker's live ExecutionTicket may reach native observation.
         """
         return self._run_execution.resume_local_lace_takeover(
-            ticket, coordinator, intent_run_seq=intent_run_seq)
+            ticket, coordinator, intent_run_seq=intent_run_seq
+        )
 
     def require_plan_ingress_preparation(self, fleet_run_id: str | None) -> None:
         """Delegate CLI/HTTP identity membership to one original lifecycle owner."""
@@ -249,6 +258,7 @@ class FleetRunControlPlane:
         # Fail before repository planning or lease attempts when deployment
         # explicitly requires signed Fleet admission but has no trust binding.
         fleet_run_id = fleet_run_id or new_fleet_run_id()
+
         def require_scheduled_child() -> None:
             if source is not FleetRunSource.SCHEDULED:
                 if schedule_run_id is not None:
@@ -256,11 +266,18 @@ class FleetRunControlPlane:
                 return
             store = self._schedule_executions
             if store is None or schedule_run_id is None or fleet_run_id is None:
-                raise StateConflict("Scheduled Fleet admission requires durable occurrence authority")
-            if not isinstance(repository_scope, ExplicitRepositoryScope) or len(repository_scope.repository_ids) != 1:
+                raise StateConflict(
+                    "Scheduled Fleet admission requires durable occurrence authority"
+                )
+            if (
+                not isinstance(repository_scope, ExplicitRepositoryScope)
+                or len(repository_scope.repository_ids) != 1
+            ):
                 raise StateConflict("Scheduled Fleet admission requires exactly one repository")
             if not isinstance(intent.target, FleetPlanTarget):
-                raise StateConflict("Scheduled Fleet admission requires frozen Fleet Plan authority")
+                raise StateConflict(
+                    "Scheduled Fleet admission requires frozen Fleet Plan authority"
+                )
             store.require_pending_child_binding(
                 schedule_run_id=schedule_run_id,
                 repository_id=repository_scope.repository_ids[0],
@@ -275,7 +292,8 @@ class FleetRunControlPlane:
         # planning may occur on an unbound/forged scheduled child.
         require_scheduled_child()
         self._lifecycle.require_fleet_prework_available(
-            intent.target, fleet_run_id,
+            intent.target,
+            fleet_run_id,
             readmitted_from_run_id=readmitted_from_run_id,
             rerun_from_run_id=rerun_from_run_id,
         )
@@ -405,9 +423,7 @@ class FleetRunControlPlane:
     def failure_groups(
         self, *, query: str | None = None, offset: int = 0, limit: int = 50
     ) -> FleetFailureGroupPage:
-        return self._journal.read_view().failure_groups(
-            query=query, offset=offset, limit=limit
-        )
+        return self._journal.read_view().failure_groups(query=query, offset=offset, limit=limit)
 
     def failure_repositories(
         self,
@@ -433,7 +449,9 @@ class FleetRunControlPlane:
     def game_tape_performance(
         self, fleet_run_id: str, *, sample_limit: int = 10
     ) -> GameTapePerformanceReport:
-        current, prior = _game_tape_history_cut(self._journal, fleet_run_id, sample_limit=sample_limit)
+        current, prior = _game_tape_history_cut(
+            self._journal, fleet_run_id, sample_limit=sample_limit
+        )
         return project_game_tape_performance(current, prior, sample_limit=sample_limit)
 
     def game_tape_failure_history(
@@ -444,7 +462,9 @@ class FleetRunControlPlane:
         step_id: str,
         sample_limit: int = 10,
     ) -> GameTapeFailureHistory:
-        current, prior, later = _game_tape_history_window(self._journal, fleet_run_id, sample_limit=sample_limit)
+        current, prior, later = _game_tape_history_window(
+            self._journal, fleet_run_id, sample_limit=sample_limit
+        )
         return project_game_tape_failure_history(
             current,
             prior,

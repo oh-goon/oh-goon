@@ -12,9 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run_logged.sh"
 
 
-def _run(
-    env: dict[str, str], marker: str
-) -> subprocess.CompletedProcess[str]:
+def _run(env: dict[str, str], marker: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ("bash", str(RUNNER), "test", "bash", "-c", f"printf '{marker}\\n'"),
         cwd=ROOT,
@@ -42,10 +40,10 @@ def test_latest_log_is_exactly_the_newest_sequential_invocation(tmp_path: Path) 
     assert "second-only" in latest
     assert latest.count("OH-GOON RUN LOG") == 1
 
-    completed = [
-        path for path in log_dir.glob("*.log") if path.name != "latest.log"
-    ]
-    newest = next(path for path in completed if "second-only" in path.read_text(encoding="utf-8"))
+    completed = [path for path in log_dir.glob("*.log") if path.name != "latest.log"]
+    newest = next(
+        path for path in completed if "second-only" in path.read_text(encoding="utf-8")
+    )
     assert newest.read_bytes() == (log_dir / "latest.log").read_bytes()
 
 

@@ -80,3 +80,13 @@ test("dependency filters survive proof drill-down and browser history", async ({
   await page.goForward();
   await expect(page).toHaveURL(/repository=/);
 });
+
+
+test("dependency absence stays scoped to the lock inventory", async ({ page }: { page: Page }) => {
+  await openMlflow(page);
+  await page.getByRole("button", { name: /Absent from lock/ }).first().click();
+  await expect(page).toHaveURL(/coverage=absent_from_lock/);
+  await expect(page.getByRole("heading", { name: "Repositories without this package in the lock" })).toBeVisible();
+  await expect(page.getByText("Dependency facts describe the supplied lock inventory.", { exact: false })).toBeVisible();
+  await expect(page.locator(".dependency-filter-chips").getByRole("button", { name: "Direct", exact: true })).toHaveCount(0);
+});

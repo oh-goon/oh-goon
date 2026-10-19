@@ -1,9 +1,8 @@
 """T3 command selection: versioned new presentation; legacy explain untouched."""
+
 from __future__ import annotations
 
 import json
-from argparse import Namespace
-from pathlib import Path
 from types import SimpleNamespace
 
 from oh_goon.cli_parser import build_parser
@@ -28,12 +27,20 @@ def test_routes_cli_json_uses_single_service_report_and_stays_redacted(capsys):
     plan = PlanTemplateStore().source("python/quality").path
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     runtime = SimpleNamespace(plans=SimpleNamespace(explain_routing=resolver.explain_routing))
-    assert run_plan_command(runtime, _args(str(plan), "--routes", "--json", "--input", "coverage_threshold=85")) == 0
+    assert (
+        run_plan_command(
+            runtime, _args(str(plan), "--routes", "--json", "--input", "typechecker=ty")
+        )
+        == 0
+    )
     output = capsys.readouterr().out
     parsed = json.loads(output)
     assert parsed["schema"] == "oh-goon.plan-input-routing/v1"
     assert parsed["status"] == "resolved_not_executed"
-    assert parsed["inputs"][0]["origin"]["kind"] == "supplied"
+    assert (
+        next(item for item in parsed["inputs"] if item["name"] == "typechecker")["origin"]["kind"]
+        == "supplied"
+    )
     assert all("value" not in item for item in parsed["bindings"])
 
 
@@ -52,24 +59,44 @@ def test_routes_invalid_input_is_nonzero_and_cannot_report_readiness(capsys):
     plan = PlanTemplateStore().source("python/quality").path
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     runtime = SimpleNamespace(plans=SimpleNamespace(explain_routing=resolver.explain_routing))
-    assert run_plan_command(runtime, _args(str(plan), "--routes", "--json", "--input", "coverage_threshold=101")) == 2
+    assert (
+        run_plan_command(
+            runtime, _args(str(plan), "--routes", "--json", "--input", "typechecker=invalid")
+        )
+        == 2
+    )
     assert "resolved_not_executed" not in capsys.readouterr().out
 
 
-def test_routes_cli_file_identity_is_from_collector_not_undocumented_read(tmp_path, monkeypatch, capsys):
+def test_routes_cli_file_identity_is_from_collector_not_undocumented_read(
+    tmp_path, monkeypatch, capsys
+):
     plan = PlanTemplateStore().source("python/quality").path
-    (tmp_path / "values.yml").write_text("inputs:\n  coverage_threshold: 85\n", encoding="utf-8")
+    (tmp_path / "values.yml").write_text("inputs:\n  typechecker: ty\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     runtime = SimpleNamespace(plans=SimpleNamespace(explain_routing=resolver.explain_routing))
     args = _args(str(plan), "--routes", "--json", "--inputs-file", "values.yml")
     assert run_plan_command(runtime, args) == 0
     first = json.loads(capsys.readouterr().out)
-    assert first["inputs"][0]["origin"]["kind"] == "inputs_file"
-    assert first["inputs"][0]["origin"]["path"] == "values.yml"
-    assert len(first["inputs"][0]["origin"]["sha256"]) == 64
+    assert (
+        next(item for item in first["inputs"] if item["name"] == "typechecker")["origin"]["kind"]
+        == "inputs_file"
+    )
+    assert (
+        next(item for item in first["inputs"] if item["name"] == "typechecker")["origin"]["path"]
+        == "values.yml"
+    )
+    assert (
+        len(
+            next(item for item in first["inputs"] if item["name"] == "typechecker")["origin"][
+                "sha256"
+            ]
+        )
+        == 64
+    )
     # Bound Namespace repeats use one file snapshot, never silently refresh it.
-    (tmp_path / "values.yml").write_text("inputs:\n  coverage_threshold: 99\n", encoding="utf-8")
+    (tmp_path / "values.yml").write_text("inputs:\n  typechecker: 99\n", encoding="utf-8")
     assert run_plan_command(runtime, args) == 0
     again = json.loads(capsys.readouterr().out)
     assert first == again

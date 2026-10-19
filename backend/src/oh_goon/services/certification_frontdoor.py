@@ -7,27 +7,26 @@ import shutil
 import stat
 import sys
 import tempfile
-from collections.abc import Mapping, Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from oh_goon.engine.command import run_command
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.source_layout_policy import assert_canonical_source_layout
+from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_DELETE, SQLITE_JOURNAL_MODE_ENV
 from oh_goon.core.strict_executor_authority import (
     CERTIFICATION_CGROUP_ROOT_ENV,
     EXECUTORS_FILE_ENV,
-    STRICT_EXECUTOR_AUTHORITY_ENVIRONMENT,
     strip_strict_executor_authority,
 )
-from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_DELETE, SQLITE_JOURNAL_MODE_ENV
+from oh_goon.engine.command import run_command
 from oh_goon.services.certification_bootstrap import (
-    CertificationEnvironmentError,
-    CertificationStateBusy,
     SYSTEMD_DELEGATED_ENV,
     SYSTEMD_SUBGROUP_ENV,
+    CertificationEnvironmentError,
+    CertificationStateBusy,
+    certification_executor_unavailable,
     certification_state_lease,
     certification_state_root,
-    certification_executor_unavailable,
     preflight_certification_database_under_lease,
     reconcile_certification_run_workspaces,
     resolve_certification_cgroup_root,
@@ -96,8 +95,8 @@ def _require_deployment_source_root() -> None:
     state lease use the current directory. An embedded deployment may change
     cwd without changing the imported workflow authority. Never mix those.
     """
-    from oh_goon.core.enforcer_lace_trust import TrustProtocolError
     from oh_goon import workflow
+    from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 
     if Path.cwd().resolve() != workflow.ROOT:
         raise TrustProtocolError("deployment source root differs from imported workflow authority")
@@ -119,7 +118,9 @@ def _require_deployment_process_owner(*, fleet_provisioner: object, fleet_run_id
     if os.environ.get(EXECUTORS_FILE_ENV) != str(fleet_provisioner.executor_inventory_file):
         raise TrustProtocolError("deployment executor inventory differs from original Fleet owner")
     if os.environ.get(SQLITE_JOURNAL_MODE_ENV) != SQLITE_JOURNAL_DELETE:
-        raise TrustProtocolError("deployment must select canonical certification SQLite journal mode")
+        raise TrustProtocolError(
+            "deployment must select canonical certification SQLite journal mode"
+        )
     return fleet_provisioner
 
 
@@ -146,7 +147,9 @@ def _require_deployment_control_state() -> None:
 
 
 def inspect_deployment_certification_readiness(
-    *, fleet_provisioner: object, fleet_run_id: str,
+    *,
+    fleet_provisioner: object,
+    fleet_run_id: str,
 ) -> Mapping[str, str | int]:
     """M211: public, read-only same-process preflight for deployment integrators.
 
@@ -156,7 +159,8 @@ def inspect_deployment_certification_readiness(
     independently persisted proof after final native Run admission.
     """
     owner = _require_deployment_process_owner(
-        fleet_provisioner=fleet_provisioner, fleet_run_id=fleet_run_id,
+        fleet_provisioner=fleet_provisioner,
+        fleet_run_id=fleet_run_id,
     )
     return owner.inspect_deployment_readiness(fleet_run_id)
 
@@ -170,7 +174,8 @@ def certify_deployment_run(*, fleet_provisioner: object, fleet_run_id: str) -> i
     canonical certification state lease still own the execution frontdoor.
     """
     original_owner = _require_deployment_process_owner(
-        fleet_provisioner=fleet_provisioner, fleet_run_id=fleet_run_id,
+        fleet_provisioner=fleet_provisioner,
+        fleet_run_id=fleet_run_id,
     )
     if not _static_source_admission():
         return 2
@@ -191,17 +196,25 @@ def certify_deployment_run(*, fleet_provisioner: object, fleet_run_id: str) -> i
         workflow_runner=lambda _args: run_app_for_deployment(
             fleet_run_id=fleet_run_id,
             deployment_context_guard=lambda env: _deployment_context_mismatch(
-                env, fleet_provisioner=original_owner, fleet_run_id=fleet_run_id,
+                env,
+                fleet_provisioner=original_owner,
+                fleet_run_id=fleet_run_id,
             ),
             deployment_plan_run=lambda args, env: _run_deployment_plan(
-                args, env, fleet_provisioner=original_owner, fleet_run_id=fleet_run_id,
+                args,
+                env,
+                fleet_provisioner=original_owner,
+                fleet_run_id=fleet_run_id,
             ),
         ),
     )
 
 
 def _deployment_context_mismatch(
-    env: dict[str, str], *, fleet_provisioner: object, fleet_run_id: str,
+    env: dict[str, str],
+    *,
+    fleet_provisioner: object,
+    fleet_run_id: str,
 ) -> str | None:
     """Recheck original process custody before any League/lock bootstrap work.
 
@@ -212,13 +225,16 @@ def _deployment_context_mismatch(
     # A late cwd mutation cannot redirect certification bootstrap or state
     # while workflow keeps using the earlier import-pinned source root.
     from oh_goon import workflow
+
     if Path.cwd().resolve() != workflow.ROOT:
         return "Deployment source root differs from imported workflow authority"
     required = ("OH_GOON_DB", "OH_GOON_LEAGUE_FILE")
     if any(not env.get(key) or os.environ.get(key) != env[key] for key in required):
         return "Deployment certification control state differs from canonical bootstrap"
-    if (os.environ.get(SQLITE_JOURNAL_MODE_ENV) != SQLITE_JOURNAL_DELETE
-            or env.get(SQLITE_JOURNAL_MODE_ENV) != SQLITE_JOURNAL_DELETE):
+    if (
+        os.environ.get(SQLITE_JOURNAL_MODE_ENV) != SQLITE_JOURNAL_DELETE
+        or env.get(SQLITE_JOURNAL_MODE_ENV) != SQLITE_JOURNAL_DELETE
+    ):
         return "Deployment certification journal mode changed after original selection"
     if os.environ.get(EXECUTORS_FILE_ENV) != str(fleet_provisioner.executor_inventory_file):
         return "Deployment executor inventory differs from original Fleet owner"
@@ -234,9 +250,13 @@ def _canonical_app_handoff_args(args: list[str]) -> bool:
     No caller-provided options, duplicate Run IDs, extra inputs or an alternate
     Plan/lock can replace the precise M205 in-process handoff.
     """
-    if (type(args) is not list or len(args) != 9
-            or args[:4] != ["plan", "run", APP_PLAN, "--repository-id"]
-            or args[5] != "--lock-file" or args[7:] != ["--wait", "--repair-handoff"]):
+    if (
+        type(args) is not list
+        or len(args) != 9
+        or args[:4] != ["plan", "run", APP_PLAN, "--repository-id"]
+        or args[5] != "--lock-file"
+        or args[7:] != ["--wait", "--repair-handoff"]
+    ):
         return False
     if any(type(arg) is not str for arg in args):
         return False
@@ -247,8 +267,11 @@ def _canonical_app_handoff_args(args: list[str]) -> bool:
 
 
 def _run_deployment_plan(
-    args: list[str], env: dict[str, str], *,
-    fleet_provisioner: object, fleet_run_id: str,
+    args: list[str],
+    env: dict[str, str],
+    *,
+    fleet_provisioner: object,
+    fleet_run_id: str,
 ) -> tuple[int, str]:
     """Transport original Fleet custody into the *same* process's Plan CLI.
 
@@ -259,7 +282,9 @@ def _run_deployment_plan(
     if not _canonical_app_handoff_args(args):
         return 2, "Deployment Fleet handoff requires canonical APP certification arguments"
     failure = _deployment_context_mismatch(
-        env, fleet_provisioner=fleet_provisioner, fleet_run_id=fleet_run_id,
+        env,
+        fleet_provisioner=fleet_provisioner,
+        fleet_run_id=fleet_run_id,
     )
     if failure is not None:
         return 2, failure
@@ -273,12 +298,10 @@ def _run_deployment_plan(
     return result, ""
 
 
-
 def _requires_strict_executor(args: list[str]) -> bool:
     """Return whether this frontdoor command can create strict CI/CD workload attempts."""
 
     return workflow_intent(args) == "release"
-
 
 
 def _static_source_admission() -> bool:
@@ -342,7 +365,9 @@ def _workflow_main(args: list[str]) -> int:
 
 
 def _workflow_main_with_state_lease(
-    args: list[str], *, workflow_runner: Callable[[list[str]], int] | None = None,
+    args: list[str],
+    *,
+    workflow_runner: Callable[[list[str]], int] | None = None,
 ) -> int:
     state_home = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
     source_root = Path.cwd()
@@ -394,9 +419,7 @@ def _enter_systemd_delegation(args: list[str], *, current_reason: str) -> int:
         return 2
 
     env_file = _write_reentry_environment(os.environ)
-    ready_file = env_file.with_name(
-        f"{env_file.name}.{secrets.token_hex(6)}.{_SYSTEMD_READY}"
-    )
+    ready_file = env_file.with_name(f"{env_file.name}.{secrets.token_hex(6)}.{_SYSTEMD_READY}")
     command = _systemd_reentry_command(
         systemd_run=Path(systemd_run),
         env_file=env_file,
@@ -415,8 +438,7 @@ def _enter_systemd_delegation(args: list[str], *, current_reason: str) -> int:
                     "Current process cgroup is not usable:\n"
                     + current_reason
                     + "\n\nsystemd-run --user could not establish the delegated "
-                    "certification unit:\n"
-                    + _systemd_failure_diagnosis(os.environ, detail)
+                    "certification unit:\n" + _systemd_failure_diagnosis(os.environ, detail)
                 )
             )
             print("\nNo certification Goon ran.")
@@ -424,7 +446,6 @@ def _enter_systemd_delegation(args: list[str], *, current_reason: str) -> int:
     finally:
         env_file.unlink(missing_ok=True)
         ready_file.unlink(missing_ok=True)
-
 
 
 def _certification_process_environment(
@@ -472,10 +493,7 @@ def _systemd_failure_diagnosis(environment: Mapping[str, str], detail: str) -> s
     else:
         lines.append("- XDG_RUNTIME_DIR: not set")
         lines.append("- systemd user bus: cannot be derived")
-    lines.append(
-        "- DBUS_SESSION_BUS_ADDRESS: "
-        + ("set" if bus_address_present else "not set")
-    )
+    lines.append("- DBUS_SESSION_BUS_ADDRESS: " + ("set" if bus_address_present else "not set"))
 
     if is_wsl and pid1 != "systemd":
         lines.extend(
@@ -543,6 +561,7 @@ def _socket_status(path: Path) -> str:
         return f"unreadable ({exc})"
     return "socket present" if stat.S_ISSOCK(mode) else "present but not a socket"
 
+
 def _systemd_reentry_command(
     *,
     systemd_run: Path,
@@ -590,7 +609,9 @@ def _run_delegated_reentry(args: list[str]) -> int:
     try:
         restored = _read_secure_environment(env_file)
     except (OSError, ValueError) as exc:
-        print(certification_executor_unavailable(f"cannot restore certification environment: {exc}"))
+        print(
+            certification_executor_unavailable(f"cannot restore certification environment: {exc}")
+        )
         print("\nNo certification Goon ran.")
         return 2
 
@@ -654,11 +675,7 @@ def _read_secure_environment(path: Path) -> dict[str, str]:
     fd = os.open(path, flags)
     try:
         info = os.fstat(fd)
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or info.st_mode & 0o077
-        ):
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise ValueError(
                 f"re-entry environment file is not private regular user-owned state: {path}"
             )
@@ -670,8 +687,7 @@ def _read_secure_environment(path: Path) -> dict[str, str]:
             os.close(fd)
         path.unlink(missing_ok=True)
     if not isinstance(payload, dict) or any(
-        not isinstance(key, str) or not isinstance(value, str)
-        for key, value in payload.items()
+        not isinstance(key, str) or not isinstance(value, str) for key, value in payload.items()
     ):
         raise ValueError("re-entry environment payload is not a string environment mapping")
     return payload

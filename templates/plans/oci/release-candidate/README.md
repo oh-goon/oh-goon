@@ -1,22 +1,42 @@
 # oci/release-candidate
 
-**Production template. Production Plan.**
+This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
 Quality-gated OCI release candidate: run the strict Python quality pipeline, then build one retained OCI archive through the typed image-builder boundary. The plan never pushes to a registry and imports no registry credentials.
 
-## Contract
+## Use this Plan
 
-- Canonical identity: `oci/release-candidate`.
-- Effective execution/resource policy is machine-owned and rendered by Plan inspection; this README does not duplicate it.
-- Executable behavior is forbidden here; this file is an ordered Goon roster.
-- Inputs: `base_registry_hostname`, `containerfile`, `context`, `platform`, `coverage_threshold`.
-- Ordered Goons: `python/quality`, `oci/image`.
+```sh
+oh-goon templates show oci/release-candidate --kind plan
+oh-goon plan inputs templates/plans/oci/release-candidate/plan.yml
+```
 
-## Safety boundary
+Copy with `oh-goon templates show oci/release-candidate --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
 
-The Plan contains no executable Steps. It only selects ordered Goons; execution/resource policy is resolved by the machine-owned Plan contract and admitted executor capacity, while implementation, requirements, secrets, network authority, and artifacts stay with the owning Goons.
+Prepare the selected OCI execution provider and registry access before execution. Base-image pull and destination publication registries are independent inputs. Credentials use the declared host-backed environment sources, never values files. Inspect digest/workspace outputs through the Run; publishing and retained bytes require their configured owners.
 
-Machine-readable truth is [`plan.yml`](./plan.yml). The README explains intent and safety only; it is never runtime authority.
+## Configure a copy
+
+Save the following illustrative values as `values.yml`. Replace example infrastructure addresses and targets with your own before submitting work. Credentials remain in the declared environment bindings.
+
+```yaml
+inputs:
+  base_registry_hostname: registry.example.com
+  containerfile: Dockerfile
+  context: .
+  platform: linux/amd64
+  typechecker: ty
+```
+
+Validate and lock the same selection:
+
+```sh
+oh-goon plan validate plan.yml --inputs-file values.yml
+oh-goon lock plan.yml --inputs-file values.yml
+```
+
+Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.
+
 
 ## OCI registry and caller-choice contract
 

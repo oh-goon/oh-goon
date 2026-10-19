@@ -1,24 +1,23 @@
 from __future__ import annotations
 
 from bisect import bisect_right
-from dataclasses import dataclass
 from collections.abc import Iterator
-from pathlib import Path
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from oh_goon.core.errors import InvalidRequest, InvalidRunTransition, OperationNotFound, RunNotFound
-from oh_goon.core.product_identity import repository_id
 from oh_goon.core.fleet_plan_projection import atomic_goon_by_step
-from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
-from oh_goon.core.models.game_tape import GameTapeRepositoryExecution
-from oh_goon.core.models.operation import OperationReport
+from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.fleet_failures import (
     FleetFailureGroup,
     FleetFailureGroupPage,
     FleetFailureInventory,
     FleetFailureRepositoryPage,
 )
+from oh_goon.core.models.game_tape import GameTapeRepositoryExecution
+from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.reconciliation import (
     RepositoryEffectAcknowledgementEvidence,
     RepositoryEffectReconciliationEvidence,
@@ -34,6 +33,7 @@ from oh_goon.core.models.run import (
 )
 from oh_goon.core.models.run_events import FleetRunEventBatch
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
+from oh_goon.core.product_identity import repository_id
 from oh_goon.core.vocabulary import (
     FleetRunOutcome,
     FleetRunSource,
@@ -44,11 +44,10 @@ from oh_goon.runtime._journal_failure_projection import (
     CurrentFleetFailure,
     FailureGroupAccumulator,
     current_failure,
-    group_from_failures,
 )
-from oh_goon.runtime.journal_facts import JournalEntry
-from oh_goon.runtime.journal_index import CurrentFleetPlanOperation, JournalIndex
 from oh_goon.runtime.execution_timeline_read import project_bounded_execution_timeline
+from oh_goon.runtime.journal_facts import JournalEntry
+from oh_goon.runtime.journal_index import JournalIndex
 
 
 def _fleet_run_failure_identity(detail: FleetRunDetail | None) -> FleetRunFailureIdentity | None:
@@ -296,9 +295,15 @@ class JournalReadView:
         if limit < 1 or limit > 100:
             raise InvalidRequest("Execution observation limit must be between 1 and 100")
         return project_bounded_execution_timeline(
-            self._index, journal_revision=self.revision, from_at=from_at, to_at=to_at,
-            bucket=bucket, plan_query=plan_query, repository_query=repository_query,
-            offset=offset, limit=limit,
+            self._index,
+            journal_revision=self.revision,
+            from_at=from_at,
+            to_at=to_at,
+            bucket=bucket,
+            plan_query=plan_query,
+            repository_query=repository_query,
+            offset=offset,
+            limit=limit,
         )
 
     def run_history(
@@ -333,8 +338,10 @@ class JournalReadView:
                 target.repository_id != repository_id for target in run.targets
             ):
                 continue
-            if from_at is not None and to_at is not None and not (
-                from_at <= run.accepted_at < to_at
+            if (
+                from_at is not None
+                and to_at is not None
+                and not (from_at <= run.accepted_at < to_at)
             ):
                 continue
             if normalized_plan:
@@ -448,7 +455,12 @@ class JournalReadView:
                 continue
             total += 1
             candidates.append(failure)
-            candidates.sort(key=lambda item: (item.item.repository.name.casefold(), item.item.repository.repository_id))
+            candidates.sort(
+                key=lambda item: (
+                    item.item.repository.name.casefold(),
+                    item.item.repository.repository_id,
+                )
+            )
             if len(candidates) > page_bound:
                 candidates.pop()
         if group_accumulator is None:

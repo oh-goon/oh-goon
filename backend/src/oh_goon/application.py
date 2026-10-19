@@ -11,13 +11,15 @@ if TYPE_CHECKING:
     from oh_goon.runtime.executor_pool import FleetExecutorPool
     from oh_goon.runtime.lifecycle import RuntimeLifecycle
     from oh_goon.runtime.schedule_scheduler import ScheduleScheduler
+    from oh_goon.scout.service import ScoutService
     from oh_goon.services.command_center import CommandCenterService
-    from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
     from oh_goon.services.dependencies import DependencyFleetService
     from oh_goon.services.direct_effect_admission import DirectEffectAdmission
     from oh_goon.services.filesystem import FilesystemService
     from oh_goon.services.fleet import FleetService
     from oh_goon.services.fleet_plans import FleetPlanService
+    from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
+    from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
     from oh_goon.services.goon import GoonService
     from oh_goon.services.journal_diagnostics import JournalDiagnosticsService
     from oh_goon.services.league import LeagueService
@@ -26,9 +28,7 @@ if TYPE_CHECKING:
     from oh_goon.services.migration import MigrationService
     from oh_goon.services.recovery import RecoveryService
     from oh_goon.services.repositories import RepositoryService
-    from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
     from oh_goon.services.schedules import ScheduleService
-    from oh_goon.scout.service import ScoutService
     from oh_goon.services.security import SecurityService
     from oh_goon.services.shared_plan_schedules import SharedPlanScheduleService
     from oh_goon.services.shared_plans import SharedPlanService
@@ -67,17 +67,22 @@ class ApplicationRuntime:
 
     @classmethod
     def build(
-        cls, *, fleet_provisioner: FleetPreworkProvisioner | None = None,
-        standard_local: bool = False,
+        cls,
+        *,
+        fleet_provisioner: FleetPreworkProvisioner | None = None,
+        standard_local: bool | None = None,
     ) -> ApplicationRuntime:
         # Concrete dependencies remain statically visible in the private application wiring
         # modules, but are materialized only when a process runtime is actually built.
-        from oh_goon._application_foundation import build_runtime_foundation
+        from oh_goon._application_foundation import build_runtime_foundation, standard_local_profile
         from oh_goon._application_services import build_product_services
 
         return build_product_services(
             build_runtime_foundation(
-                fleet_provisioner=fleet_provisioner, standard_local=standard_local
+                fleet_provisioner=fleet_provisioner,
+                standard_local=standard_local_profile(
+                    standard_local, deployment_selected=fleet_provisioner is not None
+                ),
             )
         )
 

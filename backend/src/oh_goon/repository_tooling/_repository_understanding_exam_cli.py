@@ -4,6 +4,7 @@ The public exam module retains authority by passing its live globals mapping int
 ``dispatch``. This keeps monkeypatch/authority seams stable while moving parser and
 serialization mechanics out of the public owner.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,41 +24,146 @@ def build_parser(*, description: str | None = None) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=description)
     subparsers = parser.add_subparsers(dest="command", required=True)
     prepare_parser = subparsers.add_parser("prepare", help="create an answer-free exam checkout")
-    prepare_parser.add_argument("destination", type=Path); prepare_parser.add_argument("--force", action="store_true")
-    verify_parser = subparsers.add_parser("verify", help="validate PUBLIC/EVIDENCE/SECRET exam material"); verify_parser.add_argument("--manifest", type=Path); verify_parser.add_argument("--quiet", action="store_true", help="emit only a concise success summary")
-    template_parser = subparsers.add_parser("grade-template", help="write semantic grader observations after candidate answers are frozen")
-    template_parser.add_argument("--submission", type=Path, required=True); template_parser.add_argument("--candidate"); template_parser.add_argument("--mode")
-    template_parser.add_argument("--candidate-configuration", type=Path, help="frozen candidate/model/harness configuration JSON; required for repeated-run stability")
-    template_parser.add_argument("--candidate-run-identity", help="opaque harness run identity; required and unique across repeated-run stability inputs")
-    template_parser.add_argument("--profile", choices=tuple(sorted(QUALIFICATION_PROFILES)), default=DEFAULT_QUALIFICATION_PROFILE, help="authority/risk qualification profile; never selected from candidate content")
+    prepare_parser.add_argument("destination", type=Path)
+    prepare_parser.add_argument("--force", action="store_true")
+    verify_parser = subparsers.add_parser(
+        "verify", help="validate PUBLIC/EVIDENCE/SECRET exam material"
+    )
+    verify_parser.add_argument("--manifest", type=Path)
+    verify_parser.add_argument(
+        "--quiet", action="store_true", help="emit only a concise success summary"
+    )
+    template_parser = subparsers.add_parser(
+        "grade-template",
+        help="write semantic grader observations after candidate answers are frozen",
+    )
+    template_parser.add_argument("--submission", type=Path, required=True)
+    template_parser.add_argument("--candidate")
+    template_parser.add_argument("--mode")
+    template_parser.add_argument(
+        "--candidate-configuration",
+        type=Path,
+        help="frozen candidate/model/harness configuration JSON; required for repeated-run stability",
+    )
+    template_parser.add_argument(
+        "--candidate-run-identity",
+        help="opaque harness run identity; required and unique across repeated-run stability inputs",
+    )
+    template_parser.add_argument(
+        "--profile",
+        choices=tuple(sorted(QUALIFICATION_PROFILES)),
+        default=DEFAULT_QUALIFICATION_PROFILE,
+        help="authority/risk qualification profile; never selected from candidate content",
+    )
     template_parser.add_argument("--output", type=Path, required=True)
-    calibrate_parser = subparsers.add_parser("calibrate", help="compute empirical question telemetry without changing grading policy"); calibrate_parser.add_argument("observations", type=Path); calibrate_parser.add_argument("--output", type=Path)
-    human_baseline_parser = subparsers.add_parser("human-baseline", help="compute expert timing/disagreement evidence without changing bank policy"); human_baseline_parser.add_argument("observations", type=Path); human_baseline_parser.add_argument("--output", type=Path)
-    lifecycle_parser = subparsers.add_parser("lifecycle-transition", help="authorize one explicit SECRET question lifecycle transition without mutating the bank")
-    lifecycle_parser.add_argument("request", type=Path); lifecycle_parser.add_argument("--calibration-report", type=Path); lifecycle_parser.add_argument("--human-baseline-report", type=Path); lifecycle_parser.add_argument("--output", type=Path)
-    stability_parser = subparsers.add_parser("stability", help="combine exactly three identity-bound scored runs into stability qualification evidence"); stability_parser.add_argument("results", type=Path, nargs="+"); stability_parser.add_argument("--output", type=Path)
-    capability_parser = subparsers.add_parser("capability-certificate", help="derive a capability-scoped certificate from three stable, comparable, adversarial-clean runs")
-    capability_parser.add_argument("results", type=Path, nargs=3); capability_parser.add_argument("--integrity", type=Path, nargs=3, required=True); capability_parser.add_argument("--adversarial", type=Path, nargs=3, required=True); capability_parser.add_argument("--issued-at"); capability_parser.add_argument("--output", type=Path)
-    capability_check_parser = subparsers.add_parser("capability-check", help="evaluate one certificate against exact repository/candidate identity and requested capability")
-    capability_check_parser.add_argument("certificate", type=Path); capability_check_parser.add_argument("--repository-identity", required=True); capability_check_parser.add_argument("--candidate-configuration-identity", required=True); capability_check_parser.add_argument("--requested-capability", choices=CAPABILITY_ACTIONS, required=True); capability_check_parser.add_argument("--output", type=Path)
-    recertification_parser = subparsers.add_parser("recertification-plan", help="compare one prior capability/result snapshot with current source and emit concept-bound retest scope")
-    recertification_parser.add_argument("certificate", type=Path); recertification_parser.add_argument("prior_result", type=Path); recertification_parser.add_argument("--output", type=Path)
-    challenge_parser = subparsers.add_parser("challenge-set", help="assemble one identity-bound SECRET adversarial/canary challenge set"); challenge_parser.add_argument("--seed", required=True); challenge_parser.add_argument("--output", type=Path)
-    adversarial_parser = subparsers.add_parser("adversarial", help="score structured adversarial/paraphrase observations without changing semantic truth"); adversarial_parser.add_argument("challenge_set", type=Path); adversarial_parser.add_argument("observations", type=Path); adversarial_parser.add_argument("--output", type=Path)
-    integrity_parser = subparsers.add_parser("integrity", help="validate harness/control-plane evidence required for benchmark comparability"); integrity_parser.add_argument("execution_evidence", type=Path); integrity_parser.add_argument("--challenge-set", type=Path); integrity_parser.add_argument("--output", type=Path)
-    score_parser = subparsers.add_parser("score", help="apply deterministic scoring/qualification policy to grader observations"); score_parser.add_argument("grades", type=Path); score_parser.add_argument("--submission", type=Path); score_parser.add_argument("--output", type=Path)
-    regrade_parser = subparsers.add_parser("regrade", help="recompute a persisted result from its offline regrade bundle"); regrade_parser.add_argument("result", type=Path); regrade_parser.add_argument("--output", type=Path)
-    game_tape_parser = subparsers.add_parser("game-tape", help="project stable/capability evidence into one read-only QA investigation artifact")
-    game_tape_parser.add_argument("results", type=Path, nargs=3); game_tape_parser.add_argument("--integrity", type=Path, nargs=3, required=True); game_tape_parser.add_argument("--adversarial", type=Path, nargs=3, required=True); game_tape_parser.add_argument("--certificate", type=Path, required=True); game_tape_parser.add_argument("--recertification", type=Path); game_tape_parser.add_argument("--output", type=Path)
-    game_tape_report_parser = subparsers.add_parser("game-tape-report", help="render a concise human summary from a QA Game Tape artifact"); game_tape_report_parser.add_argument("game_tape", type=Path)
-    report_parser = subparsers.add_parser("report", help="render a concise human report from a scored result artifact"); report_parser.add_argument("result", type=Path)
+    calibrate_parser = subparsers.add_parser(
+        "calibrate", help="compute empirical question telemetry without changing grading policy"
+    )
+    calibrate_parser.add_argument("observations", type=Path)
+    calibrate_parser.add_argument("--output", type=Path)
+    human_baseline_parser = subparsers.add_parser(
+        "human-baseline",
+        help="compute expert timing/disagreement evidence without changing bank policy",
+    )
+    human_baseline_parser.add_argument("observations", type=Path)
+    human_baseline_parser.add_argument("--output", type=Path)
+    lifecycle_parser = subparsers.add_parser(
+        "lifecycle-transition",
+        help="authorize one explicit SECRET question lifecycle transition without mutating the bank",
+    )
+    lifecycle_parser.add_argument("request", type=Path)
+    lifecycle_parser.add_argument("--calibration-report", type=Path)
+    lifecycle_parser.add_argument("--human-baseline-report", type=Path)
+    lifecycle_parser.add_argument("--output", type=Path)
+    stability_parser = subparsers.add_parser(
+        "stability",
+        help="combine exactly three identity-bound scored runs into stability qualification evidence",
+    )
+    stability_parser.add_argument("results", type=Path, nargs="+")
+    stability_parser.add_argument("--output", type=Path)
+    capability_parser = subparsers.add_parser(
+        "capability-certificate",
+        help="derive a capability-scoped certificate from three stable, comparable, adversarial-clean runs",
+    )
+    capability_parser.add_argument("results", type=Path, nargs=3)
+    capability_parser.add_argument("--integrity", type=Path, nargs=3, required=True)
+    capability_parser.add_argument("--adversarial", type=Path, nargs=3, required=True)
+    capability_parser.add_argument("--issued-at")
+    capability_parser.add_argument("--output", type=Path)
+    capability_check_parser = subparsers.add_parser(
+        "capability-check",
+        help="evaluate one certificate against exact repository/candidate identity and requested capability",
+    )
+    capability_check_parser.add_argument("certificate", type=Path)
+    capability_check_parser.add_argument("--repository-identity", required=True)
+    capability_check_parser.add_argument("--candidate-configuration-identity", required=True)
+    capability_check_parser.add_argument(
+        "--requested-capability", choices=CAPABILITY_ACTIONS, required=True
+    )
+    capability_check_parser.add_argument("--output", type=Path)
+    recertification_parser = subparsers.add_parser(
+        "recertification-plan",
+        help="compare one prior capability/result snapshot with current source and emit concept-bound retest scope",
+    )
+    recertification_parser.add_argument("certificate", type=Path)
+    recertification_parser.add_argument("prior_result", type=Path)
+    recertification_parser.add_argument("--output", type=Path)
+    challenge_parser = subparsers.add_parser(
+        "challenge-set", help="assemble one identity-bound SECRET adversarial/canary challenge set"
+    )
+    challenge_parser.add_argument("--seed", required=True)
+    challenge_parser.add_argument("--output", type=Path)
+    adversarial_parser = subparsers.add_parser(
+        "adversarial",
+        help="score structured adversarial/paraphrase observations without changing semantic truth",
+    )
+    adversarial_parser.add_argument("challenge_set", type=Path)
+    adversarial_parser.add_argument("observations", type=Path)
+    adversarial_parser.add_argument("--output", type=Path)
+    integrity_parser = subparsers.add_parser(
+        "integrity",
+        help="validate harness/control-plane evidence required for benchmark comparability",
+    )
+    integrity_parser.add_argument("execution_evidence", type=Path)
+    integrity_parser.add_argument("--challenge-set", type=Path)
+    integrity_parser.add_argument("--output", type=Path)
+    score_parser = subparsers.add_parser(
+        "score", help="apply deterministic scoring/qualification policy to grader observations"
+    )
+    score_parser.add_argument("grades", type=Path)
+    score_parser.add_argument("--submission", type=Path)
+    score_parser.add_argument("--output", type=Path)
+    regrade_parser = subparsers.add_parser(
+        "regrade", help="recompute a persisted result from its offline regrade bundle"
+    )
+    regrade_parser.add_argument("result", type=Path)
+    regrade_parser.add_argument("--output", type=Path)
+    game_tape_parser = subparsers.add_parser(
+        "game-tape",
+        help="project stable/capability evidence into one read-only QA investigation artifact",
+    )
+    game_tape_parser.add_argument("results", type=Path, nargs=3)
+    game_tape_parser.add_argument("--integrity", type=Path, nargs=3, required=True)
+    game_tape_parser.add_argument("--adversarial", type=Path, nargs=3, required=True)
+    game_tape_parser.add_argument("--certificate", type=Path, required=True)
+    game_tape_parser.add_argument("--recertification", type=Path)
+    game_tape_parser.add_argument("--output", type=Path)
+    game_tape_report_parser = subparsers.add_parser(
+        "game-tape-report", help="render a concise human summary from a QA Game Tape artifact"
+    )
+    game_tape_report_parser.add_argument("game_tape", type=Path)
+    report_parser = subparsers.add_parser(
+        "report", help="render a concise human report from a scored result artifact"
+    )
+    report_parser.add_argument("result", type=Path)
     return parser
 
 
 def _emit(payload: object, output: Path | None) -> None:
     body = json.dumps(payload, indent=2) + "\n"
     if output is not None:
-        output.parent.mkdir(parents=True, exist_ok=True); output.write_text(body, encoding="utf-8")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(body, encoding="utf-8")
     print(body, end="")
 
 

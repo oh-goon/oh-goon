@@ -11,7 +11,6 @@ from oh_goon.api.schemas.repositories import ExcludeRepositoryRequest
 from oh_goon.core import engine_policy_defaults as exclusion_policy
 from oh_goon.runtime.exclusions import ensure_exclusion_schema, write_exclusion
 
-
 ROOT = Path(__file__).resolve().parents[4]
 OWNER_PATH = ROOT / "backend/src/oh_goon/core/engine_policy_defaults.py"
 

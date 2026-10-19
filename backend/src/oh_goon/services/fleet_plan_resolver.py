@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import nullcontext
+from dataclasses import replace
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -9,7 +12,9 @@ from pydantic import ValidationError
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_composition import bind_inputs, validate_condition_dependencies
+from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan import (
+    AgentPlanStep,
     CompiledExecutionTemplate,
     ResolvedCommandStep,
     ResolvedFleetPlan,
@@ -30,6 +35,7 @@ from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepCache,
 )
 from oh_goon.core.path_authority import RepositoryPathSpace, navigation_path
+from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.integrations.fleet_plan_compilation import (
@@ -38,7 +44,11 @@ from oh_goon.integrations.fleet_plan_compilation import (
 )
 from oh_goon.integrations.fleet_plan_preview import preview_plan
 from oh_goon.services.fleet_plan_compiled_resolution import resolve_compiled_steps
-from oh_goon.services.fleet_plan_input_inspection import InputInspection
+from oh_goon.services.fleet_plan_input_inspection import (
+    InputInspection,
+    InputInterfaceInspection,
+    inspect_input_interface,
+)
 from oh_goon.services.fleet_plan_input_resolution import (
     InputResolutionContext,
     materialize_projected_inputs,
@@ -52,7 +62,15 @@ from oh_goon.services.fleet_plan_source_graph import (
 )
 
 if TYPE_CHECKING:
-    from oh_goon.core.models.agent_source import FrozenAgentSourceCapture, FrozenAgentStepHandoff
+    from oh_goon.core.models.agent_source import (
+        FrozenAgentSourceCapture,
+        FrozenAgentStepHandoff,
+        FrozenSourceTree,
+    )
+    from oh_goon.services.fleet_plan_resolution_context import (
+        AgentCapture,
+        AgentConnectionSelection,
+    )
 
 
 class FleetPlanResolver:
@@ -105,6 +123,120 @@ class FleetPlanResolver:
         )
         return plan
 
+    def resolve_frozen_agents(
+        self,
+        plan_path: Path,
+        *,
+        inputs: dict[str, PlanInputValue],
+        repository_root: Path,
+        skill_root: Path,
+        allowed_acceptance: tuple[str, ...],
+        extensions_path: Path | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+        previous: dict[str, "FrozenAgentStepHandoff"] | None = None,
+        connection: AgentConnectionSelection | None = None,
+        locked_skills: tuple[LockedSkillSource, ...] | None = None,
+        update_skills: bool = False,
+    ) -> tuple[ResolvedFleetPlan, dict[str, FrozenAgentStepHandoff], str]:
+        """Freeze each occurrence while the canonical compiler binds its inputs.
+
+        One repository capture is shared by every delivery in this candidate.
+        Repeated imports keep their occurrence identities and may select different Skills.
+        """
+        from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+        from oh_goon.services.agent_authoring_sources import capture_agent_sources
+        from oh_goon.services.agent_skill_registry import (
+            FrozenSkillRegistry,
+            original_skill_aliases,
+        )
+        from oh_goon.services.fleet_plan_step_resolution import require_agent_step_handoff
+
+        graph = self.analyze_source(plan_path)
+        source_sha = graph.root.source_sha256
+        if source_sha is None:
+            raise FleetPlanInvalid("Agent Plan source fingerprint is unavailable")
+        graph_identity = graph.immutable_source_closure_identity()
+        aliases_context = original_skill_aliases(
+            graph.root.path,
+            None,
+            locked_sources=locked_skills,
+            update_sources=update_skills,
+            cancel_requested=cancel_requested,
+        )
+        with aliases_context as aliases:
+            if callable(connection):
+                connection = cache(connection)
+            deliveries: dict[str, FrozenAgentStepHandoff] = {}
+            trees: dict[tuple[str, str], FrozenSourceTree] = {}
+            repository_reference: str | None = None
+
+            def capture(
+                owner: Path,
+                step: AgentPlanStep,
+                occurrence: str,
+                definitions: tuple[PlanInputDefinition, ...],
+                values: dict[str, PlanInputValue],
+            ) -> FrozenAgentStepHandoff:
+                nonlocal repository_reference
+                if cancel_requested is not None and cancel_requested():
+                    raise OperationCancelledError("Agent source capture cancelled")
+                old = previous.get(occurrence) if previous is not None else None
+                if previous is not None and old is None:
+                    raise FleetPlanInvalid("Agent continuation changed its occurrence membership")
+                if old is not None:
+                    if (
+                        old.source.plan_source_sha256 != source_sha
+                        or old.source.plan_graph_identity != graph_identity
+                    ):
+                        raise FleetPlanInvalid("Agent continuation changed Plan/Goon sources")
+                    require_agent_step_handoff(
+                        step, old, owner_source_sha256=graph.node(owner).source_sha256
+                    )
+                source = capture_agent_sources(
+                    definitions,
+                    values,
+                    repository_root=repository_root,
+                    skill_root=skill_root,
+                    allowed_acceptance=allowed_acceptance,
+                    plan_source_sha256=source_sha,
+                    plan_graph_identity=graph_identity,
+                    skill_aliases=aliases,
+                    previous_source=old.source if old else None,
+                    cancel_requested=cancel_requested,
+                    tree_cache=trees,
+                )
+                if (
+                    repository_reference is not None
+                    and source.repository_reference != repository_reference
+                ):
+                    raise FleetPlanInvalid("Agent occurrences must share one candidate repository")
+                repository_reference = source.repository_reference
+                handoff = FrozenAgentStepHandoff(
+                    source=source,
+                    owner_source_sha256=graph.node(owner).source_sha256 or "",
+                    step_id=step.step_id,
+                    harness=step.harness,
+                    task=step.task,
+                    timeout_seconds=step.timeout_seconds,
+                    requested_effects=step.requested_effects,
+                )
+                handoff.verify()
+                deliveries[occurrence] = handoff
+                return handoff
+
+            plan, _, _ = self._resolve_graph(
+                graph,
+                extensions_path=extensions_path,
+                inputs=inputs,
+                trace=None,
+                agent_capture=capture,
+                agent_connection=connection,
+                skill_sources=aliases.pins if isinstance(aliases, FrozenSkillRegistry) else (),
+            )
+            if not deliveries or (previous is not None and deliveries.keys() != previous.keys()):
+                raise FleetPlanInvalid("Agent delivery membership is incomplete")
+            return plan, deliveries, source_sha
+
     def resolve_frozen_local_search_agent(
         self,
         plan_path: Path,
@@ -114,6 +246,9 @@ class FleetPlanResolver:
         skill_root: Path,
         allowed_acceptance: tuple[str, ...],
         extensions_path: Path | None = None,
+        handoff: "FrozenAgentStepHandoff | None" = None,
+        cancel_requested: Callable[[], bool] | None = None,
+        locked_skills: tuple[LockedSkillSource, ...] | None = None,
     ) -> tuple[ResolvedFleetPlan, "FrozenAgentStepHandoff", str]:
         """One original source graph, immutable packet, original typed pipeline.
 
@@ -123,36 +258,163 @@ class FleetPlanResolver:
         from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
         from oh_goon.core.models.fleet_plan import AgentPlanStep
 
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Agent source capture cancelled")
         graph = self.analyze_source(plan_path)
         matches = graph.agent_step_sources()
         if len(matches) != 1 or graph.root.source_sha256 is None:
             raise FleetPlanInvalid("standard-local Agent requires exactly one original Agent Step")
         owner, raw_id = matches[0]
         authored = next(
-            (item for item in graph.node(owner).compiled.steps
-             if isinstance(item, AgentPlanStep) and item.step_id == raw_id), None
+            (
+                item
+                for item in graph.node(owner).compiled.steps
+                if isinstance(item, AgentPlanStep) and item.step_id == raw_id
+            ),
+            None,
         )
         if authored is None:
             raise FleetPlanInvalid("original Agent Step source owner is missing")
+        from oh_goon.services.agent_skill_registry import (
+            FrozenSkillRegistry,
+            original_skill_aliases,
+        )
+
+        aliases_context = (
+            nullcontext(None)
+            if handoff is not None
+            else original_skill_aliases(
+                graph.root.path,
+                None,
+                locked_sources=locked_skills,
+                cancel_requested=cancel_requested,
+            )
+        )
+        with aliases_context as aliases:
+            if handoff is None:
+                source = self._capture_agent_source_graph(
+                    graph,
+                    inputs=inputs,
+                    repository_root=repository_root,
+                    skill_root=skill_root,
+                    allowed_acceptance=allowed_acceptance,
+                    expected_source_sha256=graph.root.source_sha256,
+                    skill_aliases=aliases,
+                    cancel_requested=cancel_requested,
+                )
+                handoff = FrozenAgentStepHandoff(
+                    source=source,
+                    owner_source_sha256=graph.node(owner).source_sha256 or "",
+                    step_id=raw_id,
+                    harness=authored.harness,
+                    task=authored.task,
+                    timeout_seconds=authored.timeout_seconds,
+                    requested_effects=authored.requested_effects,
+                )
+            elif type(handoff) is not FrozenAgentStepHandoff:
+                raise FleetPlanInvalid("Agent source requires an original immutable handoff")
+            handoff.verify()
+            if (
+                handoff.source.resolved_skill_reference.startswith("git:")
+                and not locked_skills
+                and aliases is None
+            ):
+                raise FleetPlanInvalid(
+                    "Remote Skill handoff requires its resolved Skill source pins"
+                )
+            if handoff.source.acceptance_profile not in allowed_acceptance or len(
+                set(allowed_acceptance)
+            ) != len(allowed_acceptance):
+                raise FleetPlanInvalid("Agent acceptance profile is not explicitly authorized")
+            plan, _, _ = self._resolve_graph(
+                graph,
+                extensions_path=extensions_path,
+                inputs=inputs,
+                trace=None,
+                agent_handoff=handoff,
+                agent_owner_path=owner,
+                skill_sources=aliases.pins
+                if isinstance(aliases, FrozenSkillRegistry)
+                else (locked_skills or ()),
+            )
+            resolved = [
+                item for item in plan.steps if isinstance(item, ResolvedLocalSearchAgentStep)
+            ]
+            if len(resolved) != 1:
+                raise FleetPlanInvalid("Agent Step did not resolve through the original pipeline")
+            return plan, handoff, graph.root.source_sha256
+
+    def recapture_agent_step_handoff(
+        self,
+        plan_path: Path,
+        *,
+        previous_handoff: "FrozenAgentStepHandoff",
+        expected_previous_handoff_identity: str,
+        inputs: dict[str, PlanInputValue],
+        repository_root: Path,
+        skill_root: Path,
+        allowed_acceptance: tuple[str, ...],
+        cancel_requested: Callable[[], bool] | None = None,
+        locked_skills: tuple[LockedSkillSource, ...] | None = None,
+    ) -> "FrozenAgentStepHandoff":
+        """Explicitly capture a repaired repository for a separately admitted attempt.
+
+        The previous delivery remains immutable. Plan, Step, source selection and
+        Skill changes require a new authorization rather than repair continuation.
+        This creates prework only; Fleet still owns admission and cancellation.
+        """
+        from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+        from oh_goon.core.models.fleet_plan import AgentPlanStep
+        from oh_goon.services.fleet_plan_step_resolution import require_agent_step_handoff
+
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Agent repair capture cancelled")
+        if (
+            type(previous_handoff) is not FrozenAgentStepHandoff
+            or type(expected_previous_handoff_identity) is not str
+            or previous_handoff.handoff_identity != expected_previous_handoff_identity
+        ):
+            raise FleetPlanInvalid("Agent repair previous handoff identity mismatch")
+        graph = self.analyze_source(plan_path)
+        if (
+            graph.root.source_sha256 != previous_handoff.source.plan_source_sha256
+            or graph.immutable_source_closure_identity()
+            != previous_handoff.source.plan_graph_identity
+        ):
+            raise FleetPlanInvalid(
+                "Agent repair Plan/Step source changed; new authorization required"
+            )
+        matches = graph.agent_step_sources()
+        if len(matches) != 1:
+            raise FleetPlanInvalid("Agent repair requires exactly one original Agent Step")
+        owner, step_id = matches[0]
+        authored = next(
+            step
+            for step in graph.node(owner).compiled.steps
+            if isinstance(step, AgentPlanStep) and step.step_id == step_id
+        )
+        require_agent_step_handoff(
+            authored,
+            previous_handoff,
+            owner_source_sha256=graph.node(owner).source_sha256,
+        )
         source = self._capture_agent_source_graph(
-            graph, inputs=inputs, repository_root=repository_root,
-            skill_root=skill_root, allowed_acceptance=allowed_acceptance,
-            expected_source_sha256=graph.root.source_sha256, skill_aliases=None,
+            graph,
+            inputs=inputs,
+            repository_root=repository_root,
+            skill_root=skill_root,
+            allowed_acceptance=allowed_acceptance,
+            expected_source_sha256=previous_handoff.source.plan_source_sha256,
+            skill_aliases=None,
+            previous_source=previous_handoff.source,
+            cancel_requested=cancel_requested,
+            locked_skills=locked_skills,
         )
-        handoff = FrozenAgentStepHandoff(
-            source=source, owner_source_sha256=graph.node(owner).source_sha256 or "",
-            step_id=raw_id, harness=authored.harness, task=authored.task,
-            timeout_seconds=authored.timeout_seconds, requested_effects=authored.requested_effects,
-        )
+        handoff = replace(previous_handoff, source=source)
         handoff.verify()
-        plan, _, _ = self._resolve_graph(
-            graph, extensions_path=extensions_path, inputs=inputs, trace=None,
-            agent_handoff=handoff, agent_owner_path=owner,
-        )
-        resolved = [item for item in plan.steps if isinstance(item, ResolvedLocalSearchAgentStep)]
-        if len(resolved) != 1:
-            raise FleetPlanInvalid("Agent Step did not resolve through the original pipeline")
-        return plan, handoff, graph.root.source_sha256
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Agent repair capture cancelled")
+        return handoff
 
     def input_definitions(
         self,
@@ -188,7 +450,6 @@ class FleetPlanResolver:
             materialize_projected_inputs(
                 source_graph,
                 source_graph.root.path,
-                plan_root=source_graph.root.path.name != "goon.yml",
             ).inputs,
             source_sha256,
         )
@@ -200,12 +461,25 @@ class FleetPlanResolver:
         containment_root: Path | None = None,
         root_expected_name: str | None = None,
     ) -> tuple[tuple["InputInspection", ...], str]:
+        """Preserve the definition-only view of the canonical input interface."""
+        inspection, digest = self.inspect_input_interface_with_source(
+            plan_path,
+            containment_root=containment_root,
+            root_expected_name=root_expected_name,
+        )
+        return inspection.inputs, digest
+
+    def inspect_input_interface_with_source(
+        self,
+        plan_path: Path,
+        *,
+        containment_root: Path | None = None,
+        root_expected_name: str | None = None,
+    ) -> tuple[InputInterfaceInspection, str]:
         """Inspect one canonical source cut and report only the *root-file* digest.
 
         Never label this root SHA-256 as a full imported-Goon closure identity.
         """
-        from oh_goon.services.fleet_plan_input_inspection import inspect_projected_inputs
-
         graph = self.analyze_source(
             plan_path,
             containment_root=containment_root,
@@ -214,7 +488,7 @@ class FleetPlanResolver:
         digest = graph.root.source_sha256
         if digest is None:
             raise FleetPlanInvalid("Fleet plan source fingerprint is unavailable")
-        return inspect_projected_inputs(graph), digest
+        return inspect_input_interface(graph), digest
 
     def inspect_inputs(
         self,
@@ -319,9 +593,11 @@ class FleetPlanResolver:
         try:
             self.resolve(root, extensions_path=extensions_path, inputs=inputs)
         except (FleetDomainError, ValueError) as exc:
-            return report.model_copy(update={
-                "issues": (*report.issues, PlanCheckIssue(path=root.name, message=str(exc)))
-            })
+            return report.model_copy(
+                update={
+                    "issues": (*report.issues, PlanCheckIssue(path=root.name, message=str(exc)))
+                }
+            )
         return report
 
     def diff(
@@ -412,12 +688,19 @@ class FleetPlanResolver:
         graph = self.analyze_source(plan_path, containment_root=containment_root)
         values: list[PlanValueResolutionEntry] = []
         plan, _, _ = self._resolve_graph(
-            graph, extensions_path=extensions_path, inputs=inputs,
-            trace=None, value_trace=values, repository=repository,
+            graph,
+            extensions_path=extensions_path,
+            inputs=inputs,
+            trace=None,
+            value_trace=values,
+            repository=repository,
             environment=environment,
         )
         return project_input_routing(
-            graph, plan, tuple(values), caller_file=caller_file,
+            graph,
+            plan,
+            tuple(values),
+            caller_file=caller_file,
         )
 
     def explain_agent_sources(
@@ -445,18 +728,18 @@ class FleetPlanResolver:
         compiled = materialize_projected_inputs(
             source_graph,
             source_graph.root.path,
-            plan_root=source_graph.root.path.name != "goon.yml",
         )
         values = bind_inputs(compiled, inputs, context=str(plan_path))
-        return explain_agent_sources(
-            compiled.inputs,
-            values,
-            repository_root=repository_root,
-            skill_root=skill_root,
-            allowed_acceptance=allowed_acceptance,
-            plan_source_sha256=expected_source_sha256,
-            skill_aliases=original_skill_aliases(source_graph.root.path, skill_aliases),
-        )
+        with original_skill_aliases(source_graph.root.path, skill_aliases) as aliases:
+            return explain_agent_sources(
+                compiled.inputs,
+                values,
+                repository_root=repository_root,
+                skill_root=skill_root,
+                allowed_acceptance=allowed_acceptance,
+                plan_source_sha256=expected_source_sha256,
+                skill_aliases=aliases,
+            )
 
     def capture_agent_sources(
         self,
@@ -477,9 +760,13 @@ class FleetPlanResolver:
         """
         source_graph = self.analyze_source(plan_path)
         return self._capture_agent_source_graph(
-            source_graph, inputs=inputs, repository_root=repository_root,
-            skill_root=skill_root, allowed_acceptance=allowed_acceptance,
-            expected_source_sha256=expected_source_sha256, skill_aliases=skill_aliases,
+            source_graph,
+            inputs=inputs,
+            repository_root=repository_root,
+            skill_root=skill_root,
+            allowed_acceptance=allowed_acceptance,
+            expected_source_sha256=expected_source_sha256,
+            skill_aliases=skill_aliases,
         )
 
     def _capture_agent_source_graph(
@@ -492,6 +779,9 @@ class FleetPlanResolver:
         allowed_acceptance: tuple[str, ...],
         expected_source_sha256: str,
         skill_aliases: Mapping[str, str] | None,
+        previous_source: "FrozenAgentSourceCapture | None" = None,
+        cancel_requested: Callable[[], bool] | None = None,
+        locked_skills: tuple[LockedSkillSource, ...] | None = None,
     ) -> "FrozenAgentSourceCapture":
         """One graph cut reused by AG-02A capture and AG-02B Step binding."""
         from oh_goon.services.agent_authoring_sources import capture_agent_sources
@@ -502,17 +792,26 @@ class FleetPlanResolver:
         compiled = materialize_projected_inputs(
             source_graph,
             source_graph.root.path,
-            plan_root=source_graph.root.path.name != "goon.yml",
         )
         values = bind_inputs(compiled, inputs, context=str(source_graph.root.path))
-        return capture_agent_sources(
-            compiled.inputs, values,
-            repository_root=repository_root, skill_root=skill_root,
-            allowed_acceptance=allowed_acceptance,
-            plan_source_sha256=expected_source_sha256,
-            plan_graph_identity=source_graph.immutable_source_closure_identity(),
-            skill_aliases=original_skill_aliases(source_graph.root.path, skill_aliases),
-        )
+        with original_skill_aliases(
+            source_graph.root.path,
+            skill_aliases,
+            locked_sources=locked_skills,
+            cancel_requested=cancel_requested,
+        ) as aliases:
+            return capture_agent_sources(
+                compiled.inputs,
+                values,
+                repository_root=repository_root,
+                skill_root=skill_root,
+                allowed_acceptance=allowed_acceptance,
+                plan_source_sha256=expected_source_sha256,
+                plan_graph_identity=source_graph.immutable_source_closure_identity(),
+                skill_aliases=aliases,
+                previous_source=previous_source,
+                cancel_requested=cancel_requested,
+            )
 
     def prepare_agent_step_handoff(
         self,
@@ -540,18 +839,27 @@ class FleetPlanResolver:
             raise FleetPlanInvalid("AG-02B handoff requires exactly one typed agent Step")
         owner, step_id = agents[0]
         step = next(
-            step for step in source_graph.node(owner).compiled.steps
+            step
+            for step in source_graph.node(owner).compiled.steps
             if isinstance(step, AgentPlanStep) and step.step_id == step_id
         )
         captured = self._capture_agent_source_graph(
-            source_graph, inputs=inputs, repository_root=repository_root,
-            skill_root=skill_root, allowed_acceptance=allowed_acceptance,
-            expected_source_sha256=expected_source_sha256, skill_aliases=skill_aliases,
+            source_graph,
+            inputs=inputs,
+            repository_root=repository_root,
+            skill_root=skill_root,
+            allowed_acceptance=allowed_acceptance,
+            expected_source_sha256=expected_source_sha256,
+            skill_aliases=skill_aliases,
         )
         handoff = FrozenAgentStepHandoff(
-            source=captured, owner_source_sha256=source_graph.node(owner).source_sha256 or "",
-            step_id=step.step_id, harness=step.harness, task=step.task,
-            timeout_seconds=step.timeout_seconds, requested_effects=step.requested_effects,
+            source=captured,
+            owner_source_sha256=source_graph.node(owner).source_sha256 or "",
+            step_id=step.step_id,
+            harness=step.harness,
+            task=step.task,
+            timeout_seconds=step.timeout_seconds,
+            requested_effects=step.requested_effects,
         )
         handoff.verify()
         return handoff
@@ -566,8 +874,11 @@ class FleetPlanResolver:
         value_trace: list[PlanValueResolutionEntry] | None = None,
         repository: Path | None = None,
         environment: Mapping[str, str] | None = None,
-        agent_handoff: object | None = None,
+        agent_handoff: FrozenAgentStepHandoff | None = None,
         agent_owner_path: Path | None = None,
+        agent_capture: AgentCapture | None = None,
+        agent_connection: AgentConnectionSelection | None = None,
+        skill_sources: tuple[LockedSkillSource, ...] = (),
     ) -> tuple[ResolvedFleetPlan, Path, str | None]:
         plan_path = source_graph.root.path
         plan_root = source_graph.containment_root
@@ -579,9 +890,10 @@ class FleetPlanResolver:
         compiled = materialize_projected_inputs(
             source_graph,
             source_graph.root.path,
-            plan_root=source_graph.root.path.name != "goon.yml",
         )
         source_sha256 = source_graph.root.source_sha256
+        if compiled.execution is None:
+            raise FleetPlanInvalid("Resolved execution policy is unavailable")
         catalog = load_extension_catalog(extensions_path) if extensions_path is not None else None
         extension_root = navigation_path(extensions_path).parent if extensions_path else None
         context = FleetPlanResolutionContext(
@@ -597,6 +909,8 @@ class FleetPlanResolver:
             source_graph=source_graph,
             agent_handoff=agent_handoff,
             agent_owner_path=agent_owner_path,
+            agent_capture=agent_capture,
+            agent_connection=agent_connection,
             input_resolution=InputResolutionContext(
                 repository=repository,
                 environment=(os.environ if environment is None else environment),
@@ -605,12 +919,27 @@ class FleetPlanResolver:
         # AG-01 is only a prework source inspection contract. Enabling typed
         # Agent Step effects belongs exclusively to AG-02's original admission.
         if source_graph.has_agent_source_contract() or source_graph.agent_step_sources():
-            if agent_handoff is None or agent_owner_path is None:
+            if agent_capture is None and (agent_handoff is None or agent_owner_path is None):
                 raise FleetPlanInvalid(
                     "AG-02B typed agent sources/Steps are preview-only: original "
                     "Run/Step admission, LACE and disclosure gates are not qualified"
                 )
         input_values = bind_inputs(compiled, inputs or {}, context=str(plan_path))
+        if agent_handoff is not None:
+            from oh_goon.services.agent_authoring_sources import agent_source_references
+
+            captured = agent_handoff.source
+            if (
+                captured.plan_source_sha256 != source_sha256
+                or captured.plan_graph_identity != source_graph.immutable_source_closure_identity()
+                or agent_source_references(compiled.inputs, input_values)
+                != (
+                    captured.repository_reference,
+                    captured.authored_skill_reference,
+                    captured.acceptance_profile,
+                )
+            ):
+                raise FleetPlanInvalid("Agent handoff source selection differs from resolved Plan")
         scope = resolve_compiled_steps(
             context,
             plan_path,
@@ -633,6 +962,7 @@ class FleetPlanResolver:
                 imports=scope.imports,
                 steps=steps,
                 step_sources=scope.step_sources,
+                skill_sources=skill_sources,
             )
         except ValidationError as exc:
             raise FleetPlanInvalid(f"Invalid resolved Fleet Plan: {exc}") from exc
@@ -662,8 +992,6 @@ def _validate_backend_uv_cache_authority(
                 f"Fleet UV step {step.step_id} cannot author cache lineage; it is backend-owned"
             )
     return steps
-
-
 
 
 def _containment_root(plan_path: Path, containment_root: Path | None) -> Path:

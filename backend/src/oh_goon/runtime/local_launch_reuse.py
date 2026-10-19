@@ -128,4 +128,3 @@ def assess_local_launch_reuse(
         manifest=manifest,
         status=status,
     )
-

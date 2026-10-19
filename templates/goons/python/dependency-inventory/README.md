@@ -1,9 +1,24 @@
 # python/dependency-inventory
 
-**Production template.**
+Observe qualified `uv.lock` inventory through Hashmarks. This read-only Step does not run uv, parse declarations or inspect installed packages.
 
-Read-only Python dependency observation for fleet discovery.
+## Before you run
 
-The Goon parses repository dependency files as data and publishes one **complete typed dependency snapshot** into canonical Run/Step evidence. It does not modify dependencies, contact package indexes, execute repository code, classify repository health, or decide which maintenance Plan should run next.
+Select the repository whose manifests you want to inspect. This observation is repository-wide rather than a Python environment installation.
 
-A successful snapshot covers the root `pyproject.toml`, `uv.lock`, and discovered uv workspace member `pyproject.toml` files. Resolved lock versions remain distinct from declared dependency ranges. If required sources cannot be parsed, the Step fails and no replacement observation snapshot becomes current.
+## Configure and compose
+
+Inspect the current contract and copy the source when authoring your own capability:
+
+```sh
+oh-goon templates show python/dependency-inventory --kind goon
+oh-goon plan inputs templates/goons/python/dependency-inventory/goon.yml
+```
+
+Add `python/dependency-inventory` to a Plan’s ordered `goons:` list with a plain import to keep its defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed choices or dataflow; use `pass:` when shared names need explicit recipients. Refresh the lock with the same values before running.
+
+## Result and extension
+
+Inspect the recorded dependency evidence in the Run. Inventory is an observation; it does not install dependencies or make a vulnerability or test-success claim.
+
+Append another Goon to the Plan to add a capability. To change this command sequence, create a project-owned Atomic Goon and import it with an explicit `from:` source. See [authoring and local imports](../../../README.md#append-your-own-capability).

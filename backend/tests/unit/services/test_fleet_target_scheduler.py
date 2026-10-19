@@ -15,8 +15,6 @@ from oh_goon.core.vocabulary import FleetScope
 from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
 
 
-
-
 class _Session:
     @contextmanager
     def execution_connection_scope(self):
@@ -30,7 +28,14 @@ class _Effects:
         self._second_failed = threading.Event()
 
     def execute_fleet_target(
-        self, _intent, _capability, entry, _session, _isolation_backend=None, *, repository_admission=None
+        self,
+        _intent,
+        _capability,
+        entry,
+        _session,
+        _isolation_backend=None,
+        *,
+        repository_admission=None,
     ):
         if entry.repository.name == "first":
             assert self._second_failed.wait(timeout=1)
@@ -71,7 +76,14 @@ def test_parallel_scheduler_honors_resolved_max_parallel(tmp_path: Path) -> None
 
     class Effects:
         def execute_fleet_target(
-            self, _intent, _capability, _entry, _session, _isolation_backend=None, *, repository_admission=None
+            self,
+            _intent,
+            _capability,
+            _entry,
+            _session,
+            _isolation_backend=None,
+            *,
+            repository_admission=None,
         ):
             with lock:
                 calls["count"] += 1
@@ -137,7 +149,14 @@ def test_parallel_failure_stops_unstarted_targets(tmp_path: Path) -> None:
 
     class Effects:
         def execute_fleet_target(
-            self, _intent, _capability, entry, _session, _isolation_backend=None, *, repository_admission=None
+            self,
+            _intent,
+            _capability,
+            entry,
+            _session,
+            _isolation_backend=None,
+            *,
+            repository_admission=None,
         ):
             with lock:
                 observed.append(entry.repository.name)

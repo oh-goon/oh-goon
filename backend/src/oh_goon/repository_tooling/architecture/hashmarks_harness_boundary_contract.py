@@ -67,9 +67,7 @@ def _package_source_state(package_root: Path) -> tuple[tuple[str, int, int, int]
     return tuple(rows)
 
 
-def _hashmarks_integration_violations(
-    path: Path, path_imports: set[str]
-) -> list[Violation]:
+def _hashmarks_integration_violations(path: Path, path_imports: set[str]) -> list[Violation]:
     violations: list[Violation] = []
     ambient = sorted(
         module for module in path_imports if module in _HASHMARKS_AMBIENT_CONTROL_PLANE_IMPORTS
@@ -83,9 +81,7 @@ def _hashmarks_integration_violations(
             )
         )
     execution = sorted(
-        module
-        for module in path_imports
-        if module.startswith(_HASHMARKS_EXECUTION_IMPORT_PREFIXES)
+        module for module in path_imports if module.startswith(_HASHMARKS_EXECUTION_IMPORT_PREFIXES)
     )
     if execution:
         violations.append(
@@ -111,7 +107,9 @@ def _package_boundary_violations_cached(
             violations.extend(_hashmarks_integration_violations(path, path_imports))
             continue
         direct_hashmarks = sorted(
-            module for module in path_imports if module == "hashmarks" or module.startswith("hashmarks.")
+            module
+            for module in path_imports
+            if module == "hashmarks" or module.startswith("hashmarks.")
         )
         if direct_hashmarks:
             violations.append(
@@ -161,8 +159,7 @@ def _hashmarks_integration_owner_violations(package_root: Path) -> list[Violatio
         path
         for path in sorted(integration_root.rglob("*.py"))
         if any(
-            module == "hashmarks" or module.startswith("hashmarks.")
-            for module in _imports(path)
+            module == "hashmarks" or module.startswith("hashmarks.") for module in _imports(path)
         )
     ]
     if not structural_consumers:

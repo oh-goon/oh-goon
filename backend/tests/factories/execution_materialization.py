@@ -12,7 +12,9 @@ from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
 
 def _git(*args: str, cwd: Path) -> str:
-    return subprocess.run(("git", *args), cwd=cwd, text=True, capture_output=True, check=True).stdout.strip()
+    return subprocess.run(
+        ("git", *args), cwd=cwd, text=True, capture_output=True, check=True
+    ).stdout.strip()
 
 
 def ready_execution_materialization_candidate(tmp_path: Path):

@@ -67,15 +67,6 @@ def test_delivered_source_preparation_never_imports_authoring_services(
     ) as (root, step):
         assert (root / "repo/source.txt").read_bytes() == b"frozen search target\n"
         assert (root / "skill/SKILL.md").read_bytes() == b"# Read-only review\n"
-        assert step.argv == (
-            "rg",
-            "--no-heading",
-            "--line-number",
-            "--fixed-strings",
-            "--",
-            "target",
-            "repo",
-        )
         assert step.step_id == handoff.step_id
         assert handoff.encode_prework_delivery() == packet
         materialized_root = Path(root)

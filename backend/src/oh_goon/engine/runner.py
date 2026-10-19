@@ -3,12 +3,10 @@ from __future__ import annotations
 from oh_goon.core.errors import CapabilityUnavailable
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.target import OperationTarget
-from oh_goon.core.ports.capability_runner import (
-    CapabilityExecutionRequest
-)
+from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
 from oh_goon.core.vocabulary import EffectBoundaryKind, OperationAction
-from oh_goon.engine.operation_execution_context import OperationContext
 from oh_goon.engine.git import GitService
+from oh_goon.engine.operation_execution_context import OperationContext
 from oh_goon.engine.operations import init, plan, review, update, verify
 
 DEFAULT_OPERATION_TIMEOUT_SECONDS = 3600.0

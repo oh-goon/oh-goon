@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-import sys
 
 from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.capability_registry import resolve_capability_intent

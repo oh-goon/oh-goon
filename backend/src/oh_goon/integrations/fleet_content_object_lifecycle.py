@@ -105,12 +105,15 @@ def _parse_lifecycle(path: Path, payload: dict[str, object]) -> FleetContentObje
         created_at_ns = int(payload["created_at_ns"])
         last_used_at_ns = int(payload["last_used_at_ns"])
     except (KeyError, TypeError, ValueError) as exc:
-        raise FleetPlanInvalid(
-            f"Fleet content lifecycle metadata is invalid: {path.name}"
-        ) from exc
+        raise FleetPlanInvalid(f"Fleet content lifecycle metadata is invalid: {path.name}") from exc
     if schema != OBJECT_LIFECYCLE_SCHEMA or not is_object_id(object_id):
         raise FleetPlanInvalid(f"Fleet content lifecycle metadata is invalid: {path.name}")
-    if state != OBJECT_READY or byte_count < 0 or created_at_ns < 0 or last_used_at_ns < created_at_ns:
+    if (
+        state != OBJECT_READY
+        or byte_count < 0
+        or created_at_ns < 0
+        or last_used_at_ns < created_at_ns
+    ):
         raise FleetPlanInvalid(f"Fleet content lifecycle metadata is invalid: {path.name}")
     return FleetContentObjectLifecycle(
         object_id=object_id,

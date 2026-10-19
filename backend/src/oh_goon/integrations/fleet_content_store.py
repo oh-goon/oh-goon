@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import stat
 import os
+import stat
 import time
 import uuid
 from collections.abc import Callable
@@ -35,7 +35,6 @@ from oh_goon.integrations.fleet_content_store_lifecycle import (
     prune_orphan_staging,
     release_reference,
     remove_owned_stage,
-    remove_path,
     store_lock,
     validate_repository_id,
 )
@@ -43,8 +42,6 @@ from oh_goon.integrations.fleet_content_store_lifecycle import (
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_content_store_lifecycle import FleetContentLease
 
-
-from oh_goon.integrations.content_snapshot_proof import StrongTreeProof
 
 from oh_goon.integrations.content_snapshot import (
     SnapshotIdentity,
@@ -54,6 +51,7 @@ from oh_goon.integrations.content_snapshot import (
     snapshot_identity,
     verify_snapshot,
 )
+from oh_goon.integrations.content_snapshot_proof import StrongTreeProof
 
 ContentObjectKind = Literal["tree", "file"]
 
@@ -179,8 +177,12 @@ class FleetContentStore:
         started = time.perf_counter()
         _require_repository_scoped_path(source, label="Fleet verified retained tree source")
         source.prove_owned()
-        if source.path.resolve() != source_proof.source_path or not source_proof.proves_current(source.path):
-            raise FleetPlanInvalid("Fleet verified retained tree strong proof is stale or belongs to another source")
+        if source.path.resolve() != source_proof.source_path or not source_proof.proves_current(
+            source.path
+        ):
+            raise FleetPlanInvalid(
+                "Fleet verified retained tree strong proof is stale or belongs to another source"
+            )
         expected_identity = source_proof.identity
         source_root_mode = stat.S_IMODE(source.path.stat(follow_symlinks=False).st_mode)
         reused = self._reuse_verified_tree(
@@ -217,7 +219,9 @@ class FleetContentStore:
                 observed,
                 owner_repository_id=source.owner_repository_id,
             )
-            _emit_verified_tree_economics(economics, expected_identity=expected_identity, reused=False, started=started)
+            _emit_verified_tree_economics(
+                economics, expected_identity=expected_identity, reused=False, started=started
+            )
             return retained
         finally:
             remove_owned_stage(stage)
@@ -255,16 +259,12 @@ class FleetContentStore:
                 label=f"existing {object_id}",
                 cancel_requested=cancel_requested,
             )
-            retained_mode = stat.S_IMODE(
-                destination.stat(follow_symlinks=False).st_mode
-            )
+            retained_mode = stat.S_IMODE(destination.stat(follow_symlinks=False).st_mode)
             if retained_mode != source_root_mode:
                 raise FleetPlanInvalid(
                     f"existing {object_id} root mode differs from prepared immutable tree"
                 )
-            touch_object_used_locked(
-                self.root, object_id, byte_count=expected_identity.byte_count
-            )
+            touch_object_used_locked(self.root, object_id, byte_count=expected_identity.byte_count)
             reference_id = create_reference_locked(
                 self.root, object_id, owner_repository_id=source.owner_repository_id
             )
@@ -294,7 +294,10 @@ class FleetContentStore:
                 os.fsync(sink.fileno())
             identity = snapshot_identity(stage)
             return self._commit_retained_stage(
-                "file", stage, identity, owner_repository_id=owner_repository_id,
+                "file",
+                stage,
+                identity,
+                owner_repository_id=owner_repository_id,
             )
         finally:
             remove_owned_stage(stage)
@@ -357,9 +360,7 @@ class FleetContentStore:
                     f"Fleet content object changed while materializing reference: {reference_id}"
                 )
             with store_lock(self._lock_path):
-                touch_object_used_locked(
-                    self.root, lease.object_id, byte_count=observed.byte_count
-                )
+                touch_object_used_locked(self.root, lease.object_id, byte_count=observed.byte_count)
             return observed
 
     def get(
@@ -493,11 +494,15 @@ class FleetContentStore:
         )
 
     def reconcile_interrupted_maintenance(self):
-        from oh_goon.integrations.fleet_content_crash_reconciliation import reconcile_interrupted_maintenance
+        from oh_goon.integrations.fleet_content_crash_reconciliation import (
+            reconcile_interrupted_maintenance,
+        )
+
         return reconcile_interrupted_maintenance(self.root, self._layout, self._lock_path)
 
     def maintain_retained_content(self, policy=None, *, now_ns: int | None = None):
         from oh_goon.integrations.fleet_content_maintenance import run_content_maintenance
+
         return run_content_maintenance(self, policy, now_ns=now_ns)
 
     def _commit_retained_stage(
@@ -513,9 +518,7 @@ class FleetContentStore:
         with store_lock(self._lock_path):
             validate_repository_id(owner_repository_id)
             _commit_stage(stage, destination, identity, label=object_id)
-            record_object_ready_locked(
-                self.root, object_id, byte_count=identity.byte_count
-            )
+            record_object_ready_locked(self.root, object_id, byte_count=identity.byte_count)
             reference_id = create_reference_locked(
                 self.root, object_id, owner_repository_id=owner_repository_id
             )
@@ -565,9 +568,7 @@ def _verify_existing_stage(
         prepared_mode = stat.S_IMODE(stage.stat(follow_symlinks=False).st_mode)
         retained_mode = stat.S_IMODE(destination.stat(follow_symlinks=False).st_mode)
         if retained_mode != prepared_mode:
-            raise FleetPlanInvalid(
-                f"{label} root mode differs from prepared immutable tree"
-            )
+            raise FleetPlanInvalid(f"{label} root mode differs from prepared immutable tree")
 
 
 def _object_id(kind: ContentObjectKind, sha256: str) -> str:

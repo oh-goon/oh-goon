@@ -11,9 +11,7 @@ def check_release_boundary_contract() -> list[Violation]:
     violations: list[Violation] = []
     version_path = ROOT / "VERSION"
     version = version_path.read_text(encoding="utf-8").strip()
-    openapi = json.loads(
-        (ROOT / "generated/openapi/openapi.json").read_text(encoding="utf-8")
-    )
+    openapi = json.loads((ROOT / "generated/openapi/openapi.json").read_text(encoding="utf-8"))
     openapi_version = str(openapi.get("info", {}).get("version"))
     if openapi_version != version:
         violations.append(

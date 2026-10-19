@@ -18,7 +18,6 @@ from oh_goon.core.game_tape_timing import repository_time_bounds
 from oh_goon.core.models.fleet_plan_evidence import FleetPlanResult
 from oh_goon.core.models.game_tape import (
     GameTape,
-    GameTapeProducerImplementationInput,
     GameTapeProducerImplementationProvenance,
     GameTapeRepositoryExecution,
     GameTapeRuntimeProgress,
@@ -30,6 +29,7 @@ from oh_goon.core.models.game_tape import (
 from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.models.run_admission import StrictFleetExecutionAdmission
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     ProcessExitedEvent,
@@ -42,7 +42,6 @@ from oh_goon.core.models.run_events import (
     StepStartedEvent,
     TerminationRequestedEvent,
 )
-from oh_goon.core.models.run_admission import StrictFleetExecutionAdmission
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import GameTapeStatus
 
@@ -105,8 +104,21 @@ def _repository_execution(
     plan = target.plan if target is not None else None
     planned_steps = plan.steps if plan is not None else ()
     if report is None:
-        repository_start = next((event.generated_at for event in detail.lifecycle_events if isinstance(event, RepositoryStartedEvent) and event.repository_id == repository.repository_id), None)
-        live_steps = {event.step_id: event.generated_at for event in detail.lifecycle_events if isinstance(event, StepStartedEvent) and event.repository_id == repository.repository_id}
+        repository_start = next(
+            (
+                event.generated_at
+                for event in detail.lifecycle_events
+                if isinstance(event, RepositoryStartedEvent)
+                and event.repository_id == repository.repository_id
+            ),
+            None,
+        )
+        live_steps = {
+            event.step_id: event.generated_at
+            for event in detail.lifecycle_events
+            if isinstance(event, StepStartedEvent)
+            and event.repository_id == repository.repository_id
+        }
         steps = project_steps(
             detail.run.fleet_run_id,
             repository.repository_id,
@@ -121,7 +133,9 @@ def _repository_execution(
         return GameTapeRepositoryExecution(
             repository_execution_id=execution_id,
             repository=repository,
-            status=GameTapeStatus.RUNNING if repository_start is not None else repository_status(None, terminal=detail.run.status.terminal),
+            status=GameTapeStatus.RUNNING
+            if repository_start is not None
+            else repository_status(None, terminal=detail.run.status.terminal),
             started_at=repository_start,
             fingerprint=environment_fingerprint(target, None, None),
             steps=steps,
@@ -159,16 +173,25 @@ def _repository_execution(
     )
 
 
-
 def _runtime_progress(detail: FleetRunDetail, repository_id: str) -> GameTapeRuntimeProgress | None:
     relevant = [
-        event for event in detail.lifecycle_events
+        event
+        for event in detail.lifecycle_events
         if getattr(event, "repository_id", None) == repository_id
-        and isinstance(event, (
-            StepReachedEvent, StepStartedEvent, StepAttemptCreatedEvent, ProcessStartingEvent,
-            ProcessStartedEvent, ProcessStateUnknownEvent, ProcessExitedEvent,
-            DescendantsQuiescentEvent, TerminationRequestedEvent,
-        ))
+        and isinstance(
+            event,
+            (
+                StepReachedEvent,
+                StepStartedEvent,
+                StepAttemptCreatedEvent,
+                ProcessStartingEvent,
+                ProcessStartedEvent,
+                ProcessStateUnknownEvent,
+                ProcessExitedEvent,
+                DescendantsQuiescentEvent,
+                TerminationRequestedEvent,
+            ),
+        )
     ]
     if not relevant:
         return None
@@ -194,7 +217,9 @@ def _runtime_progress(detail: FleetRunDetail, repository_id: str) -> GameTapeRun
         physical_execution_id=getattr(latest, "physical_execution_id", None),
         process_state=process_state,
         pid=getattr(latest, "pid", None),
-        termination_reason=(latest.reason if isinstance(latest, TerminationRequestedEvent) else None),
+        termination_reason=(
+            latest.reason if isinstance(latest, TerminationRequestedEvent) else None
+        ),
     )
 
 
@@ -225,7 +250,8 @@ def _verification_execution_boundary(
         producer_implementation_provenance=(
             producer_provenance
             if producer_provenance is not None
-            and producer_provenance.implementation_identity == evidence.producer_implementation_identity
+            and producer_provenance.implementation_identity
+            == evidence.producer_implementation_identity
             else None
         ),
         producer_contract_identity=evidence.producer_contract_identity,
@@ -246,6 +272,7 @@ def _verification_execution_boundary(
         membership_complete=evidence.membership_complete,
         unproven_owner_members=evidence.unproven_owner_members,
     )
+
 
 def _shard_lineage(result: FleetPlanResult | None) -> tuple[GameTapeShardLineage, ...]:
     if result is None or result.shard_execution is None:
@@ -312,7 +339,9 @@ def _why_not(detail: FleetRunDetail) -> GameTapeWhyNotDiagnostic | None:
             "admission. Do not reuse the diverged materialization."
         )
     elif failure.code == "EXECUTOR_PLACEMENT_LOST":
-        action = "Restore the admitted executor or start a fresh run so placement can be admitted again."
+        action = (
+            "Restore the admitted executor or start a fresh run so placement can be admitted again."
+        )
     elif failure.retryable:
         action = "Retry only after the reported blocking condition has changed."
     else:

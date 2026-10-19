@@ -42,9 +42,7 @@ def test_uv_preparation_consumes_run_root_from_canonical_run_layout_owner(
             entry_count=identity.entry_count,
         ),
     )
-    plan = strict_test_plan(
-        ResolvedCommandStep(timeout_seconds=60, step_id="noop", argv=("true",))
-    )
+    plan = strict_test_plan(ResolvedCommandStep(timeout_seconds=60, step_id="noop", argv=("true",)))
     observed: dict[str, Path] = {}
 
     monkeypatch.setattr(

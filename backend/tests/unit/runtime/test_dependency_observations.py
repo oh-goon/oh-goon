@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import timedelta
+import json
 from pathlib import Path
 
+from oh_goon.core.models.fleet_observation import ObservationSourceEvidence
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.dependency_observations import DependencyObservationStore
@@ -17,11 +18,11 @@ def test_complete_snapshot_atomically_replaces_removed_dependency(tmp_path: Path
 
     first = dependency_report(
         repository,
-        dependency_snapshot(("mlflow", "2.17.2"), ("requests", "2.32.0")),
+        dependency_snapshot(repository.path, ("mlflow", "2.17.2"), ("requests", "2.32.0")),
         state="a" * 40,
     )
     second = dependency_report(
-        repository, dependency_snapshot(("requests", "2.32.1")), state="b" * 40
+        repository, dependency_snapshot(repository.path, ("requests", "2.32.1")), state="b" * 40
     )
 
     with database.transaction(write=True) as connection:
@@ -33,38 +34,39 @@ def test_complete_snapshot_atomically_replaces_removed_dependency(tmp_path: Path
     assert store.package_rows("mlflow") == []
     assert [row["resolved_version"] for row in store.package_rows("requests")] == ["2.32.1"]
     assert repository.repository_id in store.observed_repository_ids()
+    reopened_database = LocalDatabase(database.path)
+    reopened = DependencyObservationStore(reopened_database, Journal(reopened_database))
+    persisted = reopened.snapshot_rows()[0]["snapshot_json"]
+    assert tuple(
+        ObservationSourceEvidence.model_validate(item) for item in json.loads(persisted)["sources"]
+    ) == (second.evidence.plan.steps[0].observations[0].sources[0],)
 
 
-def test_newer_repository_state_marks_dependency_evidence_stale(tmp_path: Path) -> None:
+def test_lock_edit_invalidates_evidence_without_another_git_observation(tmp_path: Path) -> None:
     database = LocalDatabase(tmp_path / "observations.db")
     store = DependencyObservationStore(database, Journal(database))
     repository = RepositoryIdentity(path=tmp_path / "repo")
-    observed = dependency_report(
-        repository, dependency_snapshot(("mlflow", "2.17.2")), state="a" * 40
-    )
-
+    snapshot = dependency_snapshot(repository.path, ("mlflow", "2.17.2"))
+    observed = dependency_report(repository, snapshot, state="a" * 40)
     with database.transaction(write=True) as connection:
         store._index_report(connection, observed)
-        connection.execute(
-            "UPDATE repository_observation_heads SET repository_state_id=? WHERE repository_id=?",
-            ("state-newer", repository.repository_id),
-        )
-
-    row = store.package_rows("mlflow")[0]
-    assert store.evidence_state(row) == "stale"
+    assert store.evidence_state(store.package_rows("mlflow")[0]) == "current"
+    lock = repository.path / "uv.lock"
+    lock.write_text(lock.read_text().replace("2.17.2", "2.17.3"))
+    assert store.evidence_state(store.package_rows("mlflow")[0]) == "stale"
 
 
-def test_old_matching_snapshot_is_aged_not_silently_current(tmp_path: Path) -> None:
+def test_manifest_edits_do_not_expand_lock_inventory_claims(tmp_path: Path) -> None:
     database = LocalDatabase(tmp_path / "observations.db")
     store = DependencyObservationStore(database, Journal(database))
     repository = RepositoryIdentity(path=tmp_path / "repo")
-    observed = dependency_report(
-        repository, dependency_snapshot(("mlflow", "2.17.2")), state="a" * 40
-    )
-
+    snapshot = dependency_snapshot(repository.path, ("mlflow", "2.17.2"))
+    observed = dependency_report(repository, snapshot, state="a" * 40)
     with database.transaction(write=True) as connection:
         store._index_report(connection, observed)
-    row = store.package_rows("mlflow")[0]
-    assert (
-        store.evidence_state(row, now=observed.provenance.finished_at + timedelta(days=8)) == "aged"
-    )
+    (repository.path / "pyproject.toml").write_text('[project]\ndependencies=["new-package"]\n')
+    assessment = store.assessment(store.package_rows("mlflow")[0])
+    assert assessment.freshness == "current"
+    assert assessment.scope == "locked-inventory"
+    (repository.path / "uv.lock").unlink()
+    assert not store.assessment(store.package_rows("mlflow")[0]).absence_admissible

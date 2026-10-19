@@ -1,10 +1,11 @@
 """Run pytest surfaces as deterministic bounded batches with live heartbeats.
 
 The runner is the repository-owned timeout firewall for known-large pytest surfaces.
-It can shard by test file or by top-level test node and executes bounded batches in
+It can shard by test file or by native collected test node and executes bounded batches in
 parallel.  A caller therefore never needs to first try one monolithic pytest command
 and discover an agent/tool timeout after wasting the full execution window.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,27 +17,25 @@ import time
 from pathlib import Path
 
 from oh_goon.engine.command import run_command
-from oh_goon.runtime.recovery_evidence import ExecutionRecoveryEvent, recovery_work_identity
-from oh_goon.repository_tooling.test_batch_receipts import (
-    batch_identity as receipt_batch_identity,
-)
 from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
+from oh_goon.repository_tooling.pytest_batch_execution_policy import (
+    admitted_execution_timeout,
+)
 from oh_goon.repository_tooling.pytest_batch_orchestration import (
     Batch,
     BatchCallbacks,
     RefinementHistory,
     run_batch_cli,
 )
-from oh_goon.repository_tooling.pytest_process_environment import isolated_pytest_environment
-from oh_goon.repository_tooling.pytest_batch_execution_policy import (
-    admitted_execution_timeout,
-    refinement_probe_timeout as _refinement_probe_timeout,
-)
 from oh_goon.repository_tooling.pytest_execution_membership import (
     PytestExecutionMembershipContext,
     PytestExecutionMembershipSession,
 )
-
+from oh_goon.repository_tooling.pytest_process_environment import isolated_pytest_environment
+from oh_goon.repository_tooling.test_batch_receipts import (
+    batch_identity as receipt_batch_identity,
+)
+from oh_goon.runtime.recovery_evidence import ExecutionRecoveryEvent, recovery_work_identity
 
 
 def _run_command(
@@ -57,6 +56,7 @@ def _run_command(
     except subprocess.TimeoutExpired as exc:
         output = exc.output or ""
         return 124, str(output) + f"\nBATCH TIMEOUT after {timeout}s\n", time.monotonic() - started
+
 
 def _progress_fd() -> int | None:
     raw = os.environ.get("OH_GOON_PROGRESS_FD")
@@ -112,7 +112,6 @@ def _bounded_failure_output(output: str, *, max_lines: int = 120) -> str:
     return "\n".join(visible) + "\n"
 
 
-
 _RESOURCE_PRESSURE_PATTERNS = (
     "BlockingIOError: [Errno 11] Resource temporarily unavailable",
     "RuntimeError: can't start new thread",
@@ -138,6 +137,7 @@ def _suite_budget_stop(returncode: int, output: str) -> bool:
         return False
     return any(prefix in output for prefix in _SUITE_BUDGET_STOP_PREFIXES)
 
+
 def _run_members(
     members: tuple[str, ...],
     *,
@@ -154,21 +154,26 @@ def _run_members(
     if receipt_directory is not None and receipt_suite_identity:
         physical_batch_identity = receipt_batch_identity(members)
         command += ["-p", "oh_goon.repository_tooling.pytest_batch_receipts"]
-        env.update({
-            "OH_GOON_PYTEST_RECEIPT_DIRECTORY": str(receipt_directory),
-            "OH_GOON_PYTEST_RECEIPT_SUITE_IDENTITY": receipt_suite_identity,
-            "OH_GOON_PYTEST_RECEIPT_BATCH_IDENTITY": physical_batch_identity,
-            "OH_GOON_PYTEST_RECEIPT_EXECUTION_PLAN_IDENTITY": receipt_execution_plan_identity or "",
-            "OH_GOON_PYTEST_RECEIPT_RUN_IDENTITY": receipt_run_identity or "",
-            "OH_GOON_PYTEST_RECEIPT_ATTEMPT_IDENTITY": receipt_attempt_identity or "",
-            "OH_GOON_PYTEST_RECEIPT_MEMBERS": json.dumps(list(members), separators=(",", ":")),
-            "OH_GOON_PYTEST_RECEIPT_ROOT": str(Path.cwd().resolve()),
-        })
+        collection_path = receipt_directory / "collection.json"
+        if collection_path.is_file():
+            env["OH_GOON_PYTEST_RECEIPT_COLLECTION"] = str(collection_path)
+        env.update(
+            {
+                "OH_GOON_PYTEST_RECEIPT_DIRECTORY": str(receipt_directory),
+                "OH_GOON_PYTEST_RECEIPT_SUITE_IDENTITY": receipt_suite_identity,
+                "OH_GOON_PYTEST_RECEIPT_BATCH_IDENTITY": physical_batch_identity,
+                "OH_GOON_PYTEST_RECEIPT_EXECUTION_PLAN_IDENTITY": receipt_execution_plan_identity
+                or "",
+                "OH_GOON_PYTEST_RECEIPT_RUN_IDENTITY": receipt_run_identity or "",
+                "OH_GOON_PYTEST_RECEIPT_ATTEMPT_IDENTITY": receipt_attempt_identity or "",
+                "OH_GOON_PYTEST_RECEIPT_MEMBERS": json.dumps(list(members), separators=(",", ":")),
+                "OH_GOON_PYTEST_RECEIPT_ROOT": str(Path.cwd().resolve()),
+            }
+        )
     if marker:
         command += ["-m", marker]
     command += list(members)
     return _run_command(command, timeout=timeout, env=env)
-
 
 
 def _run(
@@ -189,8 +194,12 @@ def _run(
     recovery_events: list[ExecutionRecoveryEvent] = []
     membership_session = PytestExecutionMembershipSession(
         PytestExecutionMembershipContext(
-            receipt_directory, receipt_suite_identity, receipt_execution_plan_identity,
-            receipt_run_identity, recovery_work_identity(batch.members), root_attempt
+            receipt_directory,
+            receipt_suite_identity,
+            receipt_execution_plan_identity,
+            receipt_run_identity,
+            recovery_work_identity(batch.members),
+            root_attempt,
         )
     )
 
@@ -238,8 +247,11 @@ def _run(
             return 0, prepared.reused_prefix
         members = prepared.members
         effective_timeout, budget_stop = admitted_execution_timeout(
-            leaf_timeout=timeout, member_count=len(members), is_refinement=is_refinement,
-            timeout_bisection=timeout_bisection, deadline=deadline
+            leaf_timeout=timeout,
+            member_count=len(members),
+            is_refinement=is_refinement,
+            timeout_bisection=timeout_bisection,
+            deadline=deadline,
         )
         if budget_stop is not None:
             return 124, prepared.reused_prefix + budget_stop
@@ -287,59 +299,12 @@ def _run(
             return 0, "".join(recovered_output)
         if all(code == 5 for code in child_codes):
             return 5, "".join(recovered_output)
-        return next((code for code in child_codes if code not in (0, 5)), 1), "".join(recovered_output)
+        return next((code for code in child_codes if code not in (0, 5)), 1), "".join(
+            recovered_output
+        )
 
     rc, output = run_group(batch.members, is_refinement=False)
     return rc, output, time.monotonic() - started, tuple(recovery_events)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def main() -> int:
@@ -353,7 +318,6 @@ def main() -> int:
         suite_budget_stop=_suite_budget_stop,
     )
     return run_batch_cli(parser, args, callbacks)
-
 
 
 if __name__ == "__main__":

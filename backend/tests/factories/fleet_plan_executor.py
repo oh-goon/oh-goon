@@ -4,6 +4,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedPlanStep
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanIsolationBackendEvidence,
@@ -38,6 +40,15 @@ TEST_ISOLATION_BACKEND = PlanIsolationBackendEvidence(
     remote_execution=False,
     experimental=False,
 )
+
+
+@pytest.fixture
+def simulated_cgroup_custody(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise descriptor/rollback behavior on temp files, without native custody claims."""
+    monkeypatch.setattr(
+        "oh_goon.integrations._fleet_plan_cgroup_resources.require_independent_native_parent_custody",
+        lambda **_kwargs: None,
+    )
 
 
 class _PreparedRunProcessIsolation:
@@ -125,7 +136,6 @@ class PhysicalFleetPlanExecutorHarness(ProductionFleetPlanRunExecutor):
             process_isolation_backends=process_isolation_backends,
             **kwargs,
         )
-
 
     def prepare_strict_run(
         self,

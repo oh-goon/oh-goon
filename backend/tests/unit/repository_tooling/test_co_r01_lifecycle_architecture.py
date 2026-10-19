@@ -108,8 +108,8 @@ def test_original_co_r01_owner_edges_pass(tmp_path: Path) -> None:
         ),
         (
             _SCHEDULE_STORE,
-            "self._update(\n            connection, _with_record_version",
-            "self._wrong_update(\n            connection, _with_record_version",
+            "self._update(\n            connection,\n            _with_record_version",
+            "self._wrong_update(\n            connection,\n            _with_record_version",
         ),
         (
             _LIFECYCLE,

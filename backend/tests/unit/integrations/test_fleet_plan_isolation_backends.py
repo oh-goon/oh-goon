@@ -38,12 +38,10 @@ from oh_goon.core.models.run_admission import (
     fleet_repository_scope,
 )
 from oh_goon.core.vocabulary import OperationAction
-from oh_goon.engine.command import CommandCancelledError, CommandResult
+from oh_goon.engine.command import CommandResult
 from oh_goon.integrations import _fleet_plan_opensandbox_transport as opensandbox_transport
 from oh_goon.integrations._fleet_plan_opensandbox_transport import (
-    OpenSandboxCliTransport,
     _create_sandbox,
-    _osb_environment,
     _run_osb,
 )
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
@@ -52,13 +50,12 @@ from oh_goon.integrations.fleet_plan_opensandbox_isolation import (
     OpenSandboxRuntimeKind,
     OpenSandboxSettings,
 )
+from oh_goon.integrations.fleet_plan_preview import repository_plan_admission_evidence
 from oh_goon.integrations.fleet_plan_process_isolation import (
     IsolatedProcessRequest,
     isolation_backend_evidence,
     select_bound_process_isolation_backend,
 )
-from oh_goon.integrations.fleet_plan_preview import repository_plan_admission_evidence
-from oh_goon.integrations.fleet_plan_runtime_authority import reconcile_runtime_authority
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.journal import Journal
 from tests.factories.cicd_repository import seed_cicd_repository
@@ -104,7 +101,13 @@ class _OpenSandboxTransport:
     def execute(self, settings, request, *, expected_runtime_authority, timeout, cancel_requested):
         del settings, timeout, cancel_requested
         self.requests.append(request)
-        return CommandResult(argv=request.argv, returncode=0, stdout="", stderr="", runtime_authority=expected_runtime_authority)
+        return CommandResult(
+            argv=request.argv,
+            returncode=0,
+            stdout="",
+            stderr="",
+            runtime_authority=expected_runtime_authority,
+        )
 
 
 def _plan(
@@ -154,7 +157,11 @@ def _capabilities(
 
 
 def _settings(runtime: str) -> OpenSandboxSettings:
-    attestation = "firecracker-runtime-attestation.json" if runtime == OpenSandboxRuntimeKind.FIRECRACKER else "kata-runtime-attestation.json"
+    attestation = (
+        "firecracker-runtime-attestation.json"
+        if runtime == OpenSandboxRuntimeKind.FIRECRACKER
+        else "kata-runtime-attestation.json"
+    )
     return OpenSandboxSettings(
         domain="sandbox.internal",
         api_key="test-key",
@@ -295,7 +302,9 @@ def test_opensandbox_configuration_identity_excludes_api_key_but_binds_runner_im
             image=first.settings.image,
             cli_executable=first.settings.cli_executable,
             runtime_attestation_file=first.settings.runtime_attestation_file,
-            runtime_attestation_public_key_file=str(_FIXTURES / "runtime-attestation-ed25519.pub.pem"),
+            runtime_attestation_public_key_file=str(
+                _FIXTURES / "runtime-attestation-ed25519.pub.pem"
+            ),
             runtime=first.settings.runtime,
             protocol=first.settings.protocol,
         ),
@@ -308,7 +317,9 @@ def test_opensandbox_configuration_identity_excludes_api_key_but_binds_runner_im
             image="registry.internal/oh-goon-runner@sha256:" + "2" * 64,
             cli_executable=first.settings.cli_executable,
             runtime_attestation_file=first.settings.runtime_attestation_file,
-            runtime_attestation_public_key_file=str(_FIXTURES / "runtime-attestation-ed25519.pub.pem"),
+            runtime_attestation_public_key_file=str(
+                _FIXTURES / "runtime-attestation-ed25519.pub.pem"
+            ),
             runtime=first.settings.runtime,
             protocol=first.settings.protocol,
         ),
@@ -492,10 +503,14 @@ def test_opensandbox_runtime_attestation_rejects_forged_signature(tmp_path: Path
     attestation.write_text(__import__("json").dumps(payload), encoding="utf-8")
     settings = _settings(OpenSandboxRuntimeKind.KATA)
     settings = settings.__class__(
-        domain=settings.domain, api_key=settings.api_key, image=settings.image,
-        cli_executable=settings.cli_executable, runtime_attestation_file=str(attestation),
+        domain=settings.domain,
+        api_key=settings.api_key,
+        image=settings.image,
+        cli_executable=settings.cli_executable,
+        runtime_attestation_file=str(attestation),
         runtime_attestation_public_key_file=settings.runtime_attestation_public_key_file,
-        runtime=settings.runtime, protocol=settings.protocol,
+        runtime=settings.runtime,
+        protocol=settings.protocol,
     )
     with pytest.raises(FleetPlanInvalid, match="signature verification failed"):
         settings.validate()
@@ -506,14 +521,21 @@ def test_opensandbox_runtime_attestation_rejects_wrong_trust_anchor(tmp_path: Pa
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     wrong = tmp_path / "wrong.pub.pem"
-    wrong.write_bytes(Ed25519PrivateKey.generate().public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
-    ))
+    wrong.write_bytes(
+        Ed25519PrivateKey.generate()
+        .public_key()
+        .public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+    )
     settings = _settings(OpenSandboxRuntimeKind.KATA)
     settings = settings.__class__(
-        domain=settings.domain, api_key=settings.api_key, image=settings.image,
-        cli_executable=settings.cli_executable, runtime_attestation_file=settings.runtime_attestation_file,
-        runtime_attestation_public_key_file=str(wrong), runtime=settings.runtime, protocol=settings.protocol,
+        domain=settings.domain,
+        api_key=settings.api_key,
+        image=settings.image,
+        cli_executable=settings.cli_executable,
+        runtime_attestation_file=settings.runtime_attestation_file,
+        runtime_attestation_public_key_file=str(wrong),
+        runtime=settings.runtime,
+        protocol=settings.protocol,
     )
     with pytest.raises(FleetPlanInvalid, match="signature verification failed"):
         settings.validate()
@@ -525,6 +547,7 @@ def test_opensandbox_create_payload_preserves_resource_and_deny_all_policy(monke
 
     class Response:
         status_code = 202
+
         def json(self):
             return {"id": "sbx-1"}
 
@@ -544,18 +567,23 @@ def test_opensandbox_create_payload_preserves_resource_and_deny_all_policy(monke
     assert sandbox_id == "sbx-1"
     assert observed["json"]["resourceLimits"] == {"cpu": "1500m", "memory": "3072Mi"}
     assert observed["json"]["networkPolicy"] == {"defaultAction": "deny", "egress": []}
-    assert observed["json"]["metadata"]["runtime-attestation"] == settings.runtime_attestation_sha256
+    assert (
+        observed["json"]["metadata"]["runtime-attestation"] == settings.runtime_attestation_sha256
+    )
     assert observed["headers"]["OPEN-SANDBOX-API-KEY"] == settings.api_key
 
 
 def test_opensandbox_plain_runc_is_rejected_even_with_attestation(tmp_path: Path) -> None:
     attestation = tmp_path / "attestation.json"
     attestation.write_text(
-        '{"schema":"oh-goon.opensandbox-runtime-attestation.v1","domain":"sandbox.internal","protocol":"https","secure_runtime":"runc","server_configuration_sha256":"' + 'a' * 64 + '"}',
+        '{"schema":"oh-goon.opensandbox-runtime-attestation.v1","domain":"sandbox.internal","protocol":"https","secure_runtime":"runc","server_configuration_sha256":"'
+        + "a" * 64
+        + '"}',
         encoding="utf-8",
     )
     settings = OpenSandboxSettings(
-        domain="sandbox.internal", api_key="secret",
+        domain="sandbox.internal",
+        api_key="secret",
         image="registry/image@sha256:" + "1" * 64,
         cli_executable=sys.executable,
         runtime_attestation_file=str(attestation),

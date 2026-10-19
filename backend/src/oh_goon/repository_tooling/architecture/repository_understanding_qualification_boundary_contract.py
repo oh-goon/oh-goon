@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture.common import Violation, python_ast
-from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT, ROOT
+from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT
 
 HASHMARKS_INTEGRATION_ROOT = BACKEND_PACKAGE_ROOT / "integrations" / "hashmarks"
 REPOSITORY_TOOLING_ROOT = BACKEND_PACKAGE_ROOT / "repository_tooling"
@@ -59,7 +59,6 @@ def _qualification_modules() -> list[Path]:
     return sorted(REPOSITORY_TOOLING_ROOT.glob("repository_understanding*.py"))
 
 
-
 def check_repository_understanding_qualification_boundary_contract() -> list[Violation]:
     """Keep repository retrieval/intelligence separate from qualification authority."""
 
@@ -81,7 +80,9 @@ def check_repository_understanding_qualification_boundary_contract() -> list[Vio
                 )
             )
 
-        secret_literals = sorted(value for value in _string_literals(path) if SECRET_ANSWER_PATH in value)
+        secret_literals = sorted(
+            value for value in _string_literals(path) if SECRET_ANSWER_PATH in value
+        )
         if secret_literals:
             violations.append(
                 Violation(

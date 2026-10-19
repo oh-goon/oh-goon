@@ -1,6 +1,5 @@
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api.app import app as api_app
+from tests.integration.api.client import authenticated_api_client
 
 
 def test_privacy_endpoint_reports_durable_local_state() -> None:

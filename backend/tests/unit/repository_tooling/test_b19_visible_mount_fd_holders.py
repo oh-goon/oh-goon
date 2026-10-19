@@ -1,4 +1,5 @@
 """B19: visible mount FD evidence never elevates to physical teardown proof."""
+
 from pathlib import Path
 
 import pytest
@@ -24,13 +25,21 @@ def fixture(tmp_path):
     (proc / "sys/kernel/random/boot_id").write_text("boot19\n")
     cg = tmp_path / "cgroup"
     cg.mkdir()
-    scope = probe.parse_scope({
-        "run_id": "run19", "subject_identity": "sha256:" + "d" * 64,
-        "cgroup_path": str(cg), "cgroup_device": cg.stat().st_dev,
-        "cgroup_inode": cg.stat().st_ino, "tracked_pid": 619,
-        "tracked_birth": "boot19:81", "mount_targets": ["/mnt/original"],
-        "network_namespace": "net19", "host_veth": "veth19", "nft_table": "nft19",
-    })
+    scope = probe.parse_scope(
+        {
+            "run_id": "run19",
+            "subject_identity": "sha256:" + "d" * 64,
+            "cgroup_path": str(cg),
+            "cgroup_device": cg.stat().st_dev,
+            "cgroup_inode": cg.stat().st_ino,
+            "tracked_pid": 619,
+            "tracked_birth": "boot19:81",
+            "mount_targets": ["/mnt/original"],
+            "network_namespace": "net19",
+            "host_veth": "veth19",
+            "nft_table": "nft19",
+        }
+    )
     _pid(proc, 619, 81, target="/mnt/original")
     return scope, proc
 
@@ -73,12 +82,26 @@ def test_unrelated_mount_fd_is_local_negative_only(tmp_path):
     assert "matching_mount_fds=0" in result["detail"]
 
 
-@pytest.mark.parametrize("mutation", [
-    "original-gone", "original-reused", "boot-drift", "no-target-id",
-    "bad-original-mountinfo", "duplicate-mount", "foreign-reused", "fdinfo-missing",
-    "fdinfo-bad", "fdinfo-duplicate", "fdinfo-symlink", "fd-root-symlink",
-    "foreign-pid-symlink", "over-pid-budget", "over-fd-budget",
-])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "original-gone",
+        "original-reused",
+        "boot-drift",
+        "no-target-id",
+        "bad-original-mountinfo",
+        "duplicate-mount",
+        "foreign-reused",
+        "fdinfo-missing",
+        "fdinfo-bad",
+        "fdinfo-duplicate",
+        "fdinfo-symlink",
+        "fd-root-symlink",
+        "foreign-pid-symlink",
+        "over-pid-budget",
+        "over-fd-budget",
+    ],
+)
 def test_unverifiable_mount_fd_census_is_unknown(tmp_path, mutation):
     scope, proc = fixture(tmp_path)
     other = _pid(proc, 620, 82)
@@ -138,7 +161,10 @@ def test_fd_change_between_scans_rejected(tmp_path, monkeypatch):
         return real(*args)
 
     monkeypatch.setattr(probe, "_visible_mount_fd_holders", raced)
-    assert probe.observe(scope, proc_root=proc)["observations"]["visible_mount_fd_holders"]["state"] == "UNKNOWN"
+    assert (
+        probe.observe(scope, proc_root=proc)["observations"]["visible_mount_fd_holders"]["state"]
+        == "UNKNOWN"
+    )
 
 
 def test_no_production_authority_and_source_selection():
@@ -146,7 +172,12 @@ def test_no_production_authority_and_source_selection():
     assert "from oh_goon.services" not in source and "from oh_goon.runtime" not in source
     root = Path(__file__).resolve().parents[4]
     script = (root / "scripts/qualify_b12_development_wsl.sh").read_text()
-    assert "if [[ -f .checkpoint/B19_SOURCE.sha256 ]]; then embedded='.checkpoint/B19_SOURCE.sha256'; fi" in script
+    assert (
+        "if [[ -f .checkpoint/B19_SOURCE.sha256 ]]; then embedded='.checkpoint/B19_SOURCE.sha256'; fi"
+        in script
+    )
     assert script.index("B18_SOURCE.sha256") < script.index("B19_SOURCE.sha256")
-    recipe = (root / "Makefile").read_text().split("qualify-development-wsl:", 1)[1].split("\n\n", 1)[0]
+    recipe = (
+        (root / "Makefile").read_text().split("qualify-development-wsl:", 1)[1].split("\n\n", 1)[0]
+    )
     assert recipe.index("source-transport-clean") < recipe.index("qualify_b12_development_wsl.sh")

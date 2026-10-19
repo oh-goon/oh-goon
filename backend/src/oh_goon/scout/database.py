@@ -101,8 +101,10 @@ class ScoutAnalyticalDatabase:
         """
         operational = (
             self.operational_path,
-            *(Path(f"{self.operational_path}{extension}")
-              for extension in ("-wal", "-shm", "-journal")),
+            *(
+                Path(f"{self.operational_path}{extension}")
+                for extension in ("-wal", "-shm", "-journal")
+            ),
         )
         identities: set[tuple[int, int]] = set()
         for path in operational:
@@ -195,8 +197,11 @@ def _reject_unsafe_existing_file(path: Path) -> None:
         metadata = path.lstat()
     except FileNotFoundError:
         return
-    if (stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_nlink != 1):
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+    ):
         raise RuntimeError(
             f"Scout analytical database path must be a regular non-symlink, single-link file: {path}"
         )
@@ -209,4 +214,3 @@ def _is_corruption(error: sqlite3.DatabaseError) -> bool:
         return True
     message = str(error).lower()
     return "malformed" in message or "not a database" in message
-

@@ -14,11 +14,11 @@ from oh_goon.core.models.operation import (
     NoGitRemote,
     PythonRuntimeResult,
     ReadinessChecks,
+    ReadyUvTool,
+    RejectedUvProject,
     ToolchainResult,
     ToolVersionResult,
-    ReadyUvTool,
     UnavailableToolVersion,
-    RejectedUvProject,
 )
 from oh_goon.core.models.policy import PolicySnapshot
 from oh_goon.core.vocabulary import (

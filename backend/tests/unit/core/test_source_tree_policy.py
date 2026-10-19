@@ -9,17 +9,26 @@ from oh_goon.core.source_tree_policy import (
 
 
 def test_canonical_repository_relative_path_binds_working_directory_lexically() -> None:
-    assert canonical_repository_relative_path(
-        ".venv/bin/tool",
-        working_directory="backend",
-    ).as_posix() == "backend/.venv/bin/tool"
-    assert canonical_repository_relative_path(
-        "../frontend/node_modules/.bin/tool",
-        working_directory="backend",
-    ).as_posix() == "frontend/node_modules/.bin/tool"
-    assert canonical_repository_relative_path(
-        "backend/./.venv/bin/tool",
-    ).as_posix() == "backend/.venv/bin/tool"
+    assert (
+        canonical_repository_relative_path(
+            ".venv/bin/tool",
+            working_directory="backend",
+        ).as_posix()
+        == "backend/.venv/bin/tool"
+    )
+    assert (
+        canonical_repository_relative_path(
+            "../frontend/node_modules/.bin/tool",
+            working_directory="backend",
+        ).as_posix()
+        == "frontend/node_modules/.bin/tool"
+    )
+    assert (
+        canonical_repository_relative_path(
+            "backend/./.venv/bin/tool",
+        ).as_posix()
+        == "backend/.venv/bin/tool"
+    )
 
 
 def test_canonical_repository_relative_path_rejects_repository_escape() -> None:

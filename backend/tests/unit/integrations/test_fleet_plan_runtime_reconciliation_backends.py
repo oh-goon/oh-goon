@@ -8,20 +8,19 @@ import pytest
 from oh_goon.core.errors import ExecutionAuthorityDivergence
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
-from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy, IsolationThreatModel
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.engine.command import CommandResult
+from oh_goon.integrations import fleet_plan_opensandbox_isolation
 from oh_goon.integrations.fleet_plan_opensandbox_isolation import (
     OpenSandboxProcessIsolation,
     OpenSandboxRuntimeKind,
     OpenSandboxSettings,
 )
-from oh_goon.integrations import fleet_plan_opensandbox_isolation
 from oh_goon.integrations.fleet_plan_process_isolation import (
     IsolatedProcessRequest,
     isolation_backend_evidence,
 )
-from oh_goon.integrations.fleet_plan_runtime_authority import reconcile_runtime_authority
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import prepare_physical_test_run
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
@@ -84,14 +83,10 @@ def _plan() -> ResolvedFleetPlan:
         description="",
         execution=CicdExecutionPolicy(
             trust_repository_code=False,
-            resources=CicdResourcePolicy(
-                cpu_millis=2000, memory_mib=4096, max_processes=256
-            ),
+            resources=CicdResourcePolicy(cpu_millis=2000, memory_mib=4096, max_processes=256),
         ),
         requirements=(),
-        steps=(
-            ResolvedCommandStep(timeout_seconds=3600, step_id="check", argv=("true",)),
-        ),
+        steps=(ResolvedCommandStep(timeout_seconds=3600, step_id="check", argv=("true",)),),
     )
 
 
@@ -100,12 +95,16 @@ def _request(tmp_path: Path, backend: OpenSandboxProcessIsolation, argv: tuple[s
     seed_cicd_repository(repository)
     plan = _plan()
     step = plan.steps[0]
-    return prepare_physical_test_run(
-        RepositoryIdentity(path=repository),
-        plan,
-        isolation_backend=isolation_backend_evidence(backend),
-        path_authority=TEST_PATH_AUTHORITY,
-    ), step, argv
+    return (
+        prepare_physical_test_run(
+            RepositoryIdentity(path=repository),
+            plan,
+            isolation_backend=isolation_backend_evidence(backend),
+            path_authority=TEST_PATH_AUTHORITY,
+        ),
+        step,
+        argv,
+    )
 
 
 def test_runtime_divergence_refuses_before_remote_workload_launch(tmp_path: Path) -> None:

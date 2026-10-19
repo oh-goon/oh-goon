@@ -15,17 +15,16 @@ from hashmarks.verification_selection import (
     verification_selection_envelope,
 )
 
-
-pytestmark = pytest.mark.dependency_complete
-
-from tests.hashmarks_test_support import (
-    TEST_HASHMARKS_ARTIFACT_IDENTITY,
-    TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY,
-)
 from oh_goon.integrations.hashmarks.verification_selection import (
     HashmarksVerificationSelectionInputError,
     load_hashmarks_verification_selection,
 )
+from tests.hashmarks_test_support import (
+    TEST_HASHMARKS_ARTIFACT_IDENTITY,
+    TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY,
+)
+
+pytestmark = pytest.mark.dependency_complete
 
 _REPOSITORY = "git-tree:abc"
 _SOURCE = "sha256:" + "1" * 64
@@ -108,7 +107,9 @@ def test_each_native_downstream_tamper_is_rejected_by_hashmarks_first(
 ) -> None:
     contract, envelope = _native_payloads()
     contract[field] = value
-    with pytest.raises(HashmarksVerificationSelectionInputError, match="native consumer bundle is invalid"):
+    with pytest.raises(
+        HashmarksVerificationSelectionInputError, match="native consumer bundle is invalid"
+    ):
         _load(tmp_path, contract, envelope)
 
 
@@ -129,19 +130,25 @@ def test_artifact_identity_is_provenance_not_loaded_runtime_authority(tmp_path: 
     observed = "sha256:" + "9" * 64
     verified = _load(tmp_path, contract, envelope, artifact=observed)
     assert verified.producer_artifact_identity == observed
-    assert verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    assert (
+        verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    )
 
 
 def test_blank_artifact_provenance_is_rejected(tmp_path: Path) -> None:
     contract, envelope = _native_payloads()
-    with pytest.raises(HashmarksVerificationSelectionInputError, match="artifact provenance identity"):
+    with pytest.raises(
+        HashmarksVerificationSelectionInputError, match="artifact provenance identity"
+    ):
         _load(tmp_path, contract, envelope, artifact="")
 
 
 def test_missing_member_cannot_hide_behind_original_contract_digest(tmp_path: Path) -> None:
     contract, envelope = _native_payloads()
     envelope["selection"]["members"].pop()  # type: ignore[index]
-    with pytest.raises(HashmarksVerificationSelectionInputError, match="native consumer bundle is invalid"):
+    with pytest.raises(
+        HashmarksVerificationSelectionInputError, match="native consumer bundle is invalid"
+    ):
         _load(tmp_path, contract, envelope)
 
 
@@ -149,7 +156,9 @@ def test_duplicate_member_fails_closed(tmp_path: Path) -> None:
     contract, envelope = _native_payloads()
     members = envelope["selection"]["members"]  # type: ignore[index]
     members.append(deepcopy(members[0]))  # type: ignore[union-attr]
-    with pytest.raises(HashmarksVerificationSelectionInputError, match="native consumer bundle is invalid"):
+    with pytest.raises(
+        HashmarksVerificationSelectionInputError, match="native consumer bundle is invalid"
+    ):
         _load(tmp_path, contract, envelope)
 
 
@@ -175,7 +184,9 @@ def test_native_reordering_is_accepted_and_preserves_membership_identity(tmp_pat
     assert verified.membership_identity == original_identity
 
 
-def test_member_id_tamper_is_rejected_by_native_hashmarks_before_oh_goon_admission(tmp_path: Path) -> None:
+def test_member_id_tamper_is_rejected_by_native_hashmarks_before_oh_goon_admission(
+    tmp_path: Path,
+) -> None:
     _, envelope = _native_payloads()
     raw_member = envelope["selection"]["members"][0]  # type: ignore[index]
     raw_member["member_id"] = "sha256:" + "f" * 64  # type: ignore[index]
@@ -183,19 +194,26 @@ def test_member_id_tamper_is_rejected_by_native_hashmarks_before_oh_goon_admissi
         downstream_consumption_contract(envelope)
 
 
-def test_producer_implementation_identity_is_cross_bound_to_retained_artifact(tmp_path: Path) -> None:
+def test_producer_implementation_identity_is_cross_bound_to_retained_artifact(
+    tmp_path: Path,
+) -> None:
     contract, envelope = _native_payloads()
     verified = _load(tmp_path, contract, envelope)
     assert verified.producer_implementation_identity == contract["producer_implementation_identity"]
-    assert verified.producer_implementation_identity == envelope["producer"]["implementation_identity"]  # type: ignore[index]
+    assert (
+        verified.producer_implementation_identity == envelope["producer"]["implementation_identity"]
+    )  # type: ignore[index]
 
 
 def test_same_version_different_producer_identity_fails_closed(tmp_path: Path) -> None:
     contract, envelope = _native_payloads()
     foreign = "sha256:" + "a" * 64
     envelope["producer"]["implementation_identity"] = foreign  # type: ignore[index]
-    with pytest.raises(HashmarksVerificationSelectionInputError, match="native consumer bundle is invalid"):
+    with pytest.raises(
+        HashmarksVerificationSelectionInputError, match="native consumer bundle is invalid"
+    ):
         _load(tmp_path, contract, envelope)
+
 
 def test_stale_selection_fails_closed(tmp_path: Path) -> None:
     _, envelope = _native_payloads()
@@ -229,7 +247,9 @@ def test_oh_goon_consumer_boundary_rejects_forbidden_authority_after_native_vali
             "execution_authority": "external",
         },
     )
-    with pytest.raises(HashmarksVerificationSelectionInputError, match="repository intelligence only"):
+    with pytest.raises(
+        HashmarksVerificationSelectionInputError, match="repository intelligence only"
+    ):
         _load(tmp_path, contract, envelope)
 
 
@@ -262,8 +282,11 @@ def test_oh_goon_consumer_boundary_rejects_nonexternal_execution_authority(
             "execution_authority": "producer",
         },
     )
-    with pytest.raises(HashmarksVerificationSelectionInputError, match="execution authority external"):
+    with pytest.raises(
+        HashmarksVerificationSelectionInputError, match="execution authority external"
+    ):
         _load(tmp_path, contract, envelope)
+
 
 @pytest.mark.parametrize(
     "field",
@@ -282,8 +305,12 @@ def test_oh_goon_consumer_boundary_rejects_nonexternal_execution_authority(
         "physical_shards",
     ],
 )
-def test_future_hashmarks_execution_policy_fields_cannot_gain_authority(tmp_path: Path, field: str) -> None:
+def test_future_hashmarks_execution_policy_fields_cannot_gain_authority(
+    tmp_path: Path, field: str
+) -> None:
     contract, envelope = _native_payloads()
     contract[field] = 900 if field == "timeout" else "attacker-controlled"
-    with pytest.raises(HashmarksVerificationSelectionInputError, match="native consumer bundle is invalid"):
+    with pytest.raises(
+        HashmarksVerificationSelectionInputError, match="native consumer bundle is invalid"
+    ):
         _load(tmp_path, contract, envelope)

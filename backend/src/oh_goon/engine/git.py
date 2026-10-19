@@ -181,9 +181,7 @@ def _porcelain_path(record: str) -> tuple[str | None, bool]:
     return None, False
 
 
-def _unavailable_observation(
-    repository: Path, *, tool_available: bool = True
-) -> GitObservation:
+def _unavailable_observation(repository: Path, *, tool_available: bool = True) -> GitObservation:
     fingerprint = _fingerprint(
         repository,
         head_sha=None,

@@ -52,7 +52,9 @@ def _is_optional_node_guard(node: ast.AST, *, before_line: int) -> bool:
     if not isinstance(node, ast.If) or node.lineno >= before_line:
         return False
     test = ast.unparse(node.test)
-    return "shutil.which('node') is None" in test or 'shutil.which("node") is None' in test
+    return (
+        "shutil.which('node') is None" in test or 'shutil.which("node") is None' in test
+    )
 
 
 def _contains_optional_node_skip(
@@ -82,11 +84,13 @@ def _unguarded_literal_children(path: Path) -> tuple[tuple[int, str], ...]:
             continue
         if executable == "node":
             owner: ast.AST | None = node
-            while owner is not None and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                owner = parent.get(owner)
-            if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)) and _contains_optional_node_skip(
-                owner, before_line=node.lineno
+            while owner is not None and not isinstance(
+                owner, (ast.FunctionDef, ast.AsyncFunctionDef)
             ):
+                owner = parent.get(owner)
+            if isinstance(
+                owner, (ast.FunctionDef, ast.AsyncFunctionDef)
+            ) and _contains_optional_node_skip(owner, before_line=node.lineno):
                 continue
         children.append((node.lineno, executable))
     return tuple(children)
@@ -94,7 +98,11 @@ def _unguarded_literal_children(path: Path) -> tuple[tuple[int, str], ...]:
 
 def test_tooling_literal_subprocess_children_fit_strict_workload_authority() -> None:
     requirements = load_workload_execution_requirements(ROOT)
-    allowed = {*required_tools_for_owner(requirements, _TOOLING_OWNER), "make", "/bin/sh"}
+    allowed = {
+        *required_tools_for_owner(requirements, _TOOLING_OWNER),
+        "make",
+        "/bin/sh",
+    }
     offenders: list[str] = []
     for path in sorted((ROOT / "scripts/tests").glob("test_*.py")):
         for line, executable in _unguarded_literal_children(path):
@@ -103,7 +111,9 @@ def test_tooling_literal_subprocess_children_fit_strict_workload_authority() -> 
     assert offenders == []
 
 
-def test_tooling_literal_child_scanner_rejects_new_unowned_child(tmp_path: Path) -> None:
+def test_tooling_literal_child_scanner_rejects_new_unowned_child(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "test_unowned_child.py"
     source.write_text(
         "import subprocess\n"

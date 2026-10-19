@@ -9,10 +9,17 @@ from oh_goon.repository_tooling.architecture._structural_authority_execution imp
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/backend_core_test_diagnostic.sh"
 SELECTOR = ROOT / "scripts/host_python.sh"
-CAPABILITY = ROOT / "backend/src/oh_goon/repository_tooling/hosted_dependency_capability.py"
+CAPABILITY = (
+    ROOT / "backend/src/oh_goon/repository_tooling/hosted_dependency_capability.py"
+)
 
 
-def _fixture(tmp_path: Path, text: str, *, capability_name: str = "hosted_dependency_capability.py") -> Path:
+def _fixture(
+    tmp_path: Path,
+    text: str,
+    *,
+    capability_name: str = "hosted_dependency_capability.py",
+) -> Path:
     script = tmp_path / "scripts/backend_core_test_diagnostic.sh"
     script.parent.mkdir(parents=True)
     script.write_text(text, encoding="utf-8")
@@ -47,30 +54,39 @@ def test_command_arrays_and_aliases_are_representation_only(tmp_path: Path) -> N
     assert _messages(_fixture(tmp_path, text)) == []
 
 
-def test_private_capability_script_name_and_helper_extraction_are_representation_only(tmp_path: Path) -> None:
+def test_private_capability_script_name_and_helper_extraction_are_representation_only(
+    tmp_path: Path,
+) -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     text = text.replace(
         'PYTHONNOUSERSITE=1 \\\n  "$PYTHON_BIN" -I "$ROOT/backend/src/oh_goon/repository_tooling/hosted_dependency_capability.py" \\\n  --output "$CAPABILITY_PATH"',
         'CAPABILITY_SCRIPT="$ROOT/backend/src/oh_goon/repository_tooling/host_capability_probe.py"\n'
-        'classify_host() {\n'
+        "classify_host() {\n"
         '  local runner=("$PYTHON_BIN" -I "$CAPABILITY_SCRIPT")\n'
         '  PYTHONNOUSERSITE=1 "${runner[@]}" --output "$CAPABILITY_PATH"\n'
-        '}\n'
-        'classify_host',
+        "}\n"
+        "classify_host",
     )
-    assert _messages(_fixture(tmp_path, text, capability_name="host_capability_probe.py")) == []
+    assert (
+        _messages(_fixture(tmp_path, text, capability_name="host_capability_probe.py"))
+        == []
+    )
 
 
 def test_capability_classification_must_precede_workload(tmp_path: Path) -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     block = (
-        'PYTHONNOUSERSITE=1 \\\n'
+        "PYTHONNOUSERSITE=1 \\\n"
         '  "$PYTHON_BIN" -I "$ROOT/backend/src/oh_goon/repository_tooling/hosted_dependency_capability.py" \\\n'
         '  --output "$CAPABILITY_PATH"\n'
     )
     assert block in text
     text = text.replace(block, "")
-    text = text.replace('if [[ -n "$RECEIPT_PATH" ]]; then\n  "$PYTHON_BIN" -P -m oh_goon.repository_tooling.hosted_diagnostic_receipt', block + '\nif [[ -n "$RECEIPT_PATH" ]]; then\n  "$PYTHON_BIN" -P -m oh_goon.repository_tooling.hosted_diagnostic_receipt')
+    text = text.replace(
+        'if [[ -n "$RECEIPT_PATH" ]]; then\n  "$PYTHON_BIN" -P -m oh_goon.repository_tooling.hosted_diagnostic_receipt',
+        block
+        + '\nif [[ -n "$RECEIPT_PATH" ]]; then\n  "$PYTHON_BIN" -P -m oh_goon.repository_tooling.hosted_diagnostic_receipt',
+    )
     messages = _messages(_fixture(tmp_path, text))
     assert any("before hosted workload" in message for message in messages)
 
@@ -82,7 +98,9 @@ def test_workers_must_remain_bounded(tmp_path: Path) -> None:
 
 
 def test_batch_timeout_must_remain_bounded(tmp_path: Path) -> None:
-    text = SCRIPT.read_text(encoding="utf-8").replace("--batch-timeout 60", "--batch-timeout 600")
+    text = SCRIPT.read_text(encoding="utf-8").replace(
+        "--batch-timeout 60", "--batch-timeout 600"
+    )
     messages = _messages(_fixture(tmp_path, text))
     assert any("timeout bound" in message for message in messages)
 
@@ -93,7 +111,10 @@ def test_dead_surface_comment_cannot_replace_real_surface(tmp_path: Path) -> Non
         "backend-integration) printf '%s\\t%s\\n' backend/tests/unit 6 ;; # backend/tests/integration",
     )
     messages = _messages(_fixture(tmp_path, text))
-    assert any("backend-integration" in message and "surface" in message for message in messages)
+    assert any(
+        "backend-integration" in message and "surface" in message
+        for message in messages
+    )
 
 
 def test_dead_marker_comment_cannot_restore_missing_exclusion(tmp_path: Path) -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from oh_goon.core.process_birth import ProcessBirthIdentity
 from oh_goon.core.launch_events import LaunchEvent, LaunchEventKind
 from oh_goon.core.launch_manifest import LaunchIdentity, LaunchIntent, LaunchServiceIntent
 from oh_goon.core.launch_projection import project_launch_manifest
@@ -11,6 +10,7 @@ from oh_goon.core.launch_status import (
     LaunchOwnerProof,
     safe_launch_status,
 )
+from oh_goon.core.process_birth import ProcessBirthIdentity
 
 T0 = datetime(2026, 9, 4, 4, 0, tzinfo=UTC)
 IDENTITY = LaunchIdentity(
@@ -28,9 +28,18 @@ INTENT = LaunchIntent(
 def _event(sequence: int, event: LaunchEventKind, **kwargs) -> LaunchEvent:
     if event is LaunchEventKind.SERVICE_SPAWNED:
         payload = kwargs.get("payload")
-        if isinstance(payload, dict) and isinstance(payload.get("pid"), int) and "birth_identity" not in payload:
+        if (
+            isinstance(payload, dict)
+            and isinstance(payload.get("pid"), int)
+            and "birth_identity" not in payload
+        ):
             pid = payload["pid"]
-            kwargs["payload"] = {**payload, "birth_identity": ProcessBirthIdentity(pid=pid, boot_id="test-boot", start_ticks=sequence).to_payload()}
+            kwargs["payload"] = {
+                **payload,
+                "birth_identity": ProcessBirthIdentity(
+                    pid=pid, boot_id="test-boot", start_ticks=sequence
+                ).to_payload(),
+            }
     return LaunchEvent(
         launch_id="launch-a",
         sequence=sequence,
@@ -114,7 +123,9 @@ def test_matching_owner_birth_makes_nonterminal_status_current() -> None:
             ),
         ),
     )
-    status = safe_launch_status(manifest, process_observer=lambda pid: birth if pid == 123 else None)
+    status = safe_launch_status(
+        manifest, process_observer=lambda pid: birth if pid == 123 else None
+    )
     assert status.lifecycle.value == "resolving"
     assert status.observation_freshness is LaunchObservationFreshness.CURRENT
     assert status.owner_proof is LaunchOwnerProof.AVAILABLE

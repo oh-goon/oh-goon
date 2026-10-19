@@ -1,4 +1,5 @@
 """T1: one inspected source cut and no duplicated input-schema owner."""
+
 from __future__ import annotations
 
 import hashlib
@@ -25,7 +26,11 @@ def test_inspection_and_root_fingerprint_share_one_source_graph(monkeypatch):
     assert len(graphs) == 1
     assert digest == graphs[0].root.source_sha256
     assert digest == hashlib.sha256(source.path.read_bytes()).hexdigest()
-    assert inspected[0].owner_paths == (("python/quality", "python/test"),)
+    assert inspected[0].owner_paths == (
+        ("python/quality", "python/ruff"),
+        ("python/quality", "python/typecheck"),
+        ("python/quality", "python/test"),
+    )
 
 
 def test_service_adapter_forwards_to_canonical_resolver_without_duplicate_read():

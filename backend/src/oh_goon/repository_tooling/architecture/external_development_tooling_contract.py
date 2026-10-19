@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import json
-import re
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
@@ -64,10 +63,7 @@ def _python_imports_external_tool(text: str) -> bool:
 
 
 def _frontend_imports_external_tool(text: str) -> bool:
-    return any(
-        _contains_tool_marker(name)
-        for name in project_typescript(text).module_imports
-    )
+    return any(_contains_tool_marker(name) for name in project_typescript(text).module_imports)
 
 
 def _active_text_references_tool(text: str) -> bool:
@@ -85,8 +81,12 @@ def _runtime_file_leaks(path: Path, kind: str, text: str) -> bool:
     if kind == "python":
         return path.suffix == ".py" and _python_imports_external_tool(text)
     if kind == "frontend":
-        return path.suffix in {".js", ".jsx", ".ts", ".tsx"} and _frontend_imports_external_tool(text)
-    return kind == "config" and _active_text_references_tool(text)
+        return path.suffix in {".js", ".jsx", ".ts", ".tsx"} and _frontend_imports_external_tool(
+            text
+        )
+    # Package READMEs may explain caller-selected external Skills. Prose is
+    # not an executable dependency; runtime imports and configuration still are.
+    return kind == "config" and path.suffix != ".md" and _active_text_references_tool(text)
 
 
 def _runtime_files(tree: Path, *, skip_repository_tooling: bool) -> Iterable[Path]:
@@ -98,7 +98,9 @@ def _runtime_files(tree: Path, *, skip_repository_tooling: bool) -> Iterable[Pat
         yield path
 
 
-def _scan_one_runtime_tree(tree: Path, kind: str, *, skip_repository_tooling: bool = False) -> list[Violation]:
+def _scan_one_runtime_tree(
+    tree: Path, kind: str, *, skip_repository_tooling: bool = False
+) -> list[Violation]:
     if not tree.is_dir():
         return []
     violations: list[Violation] = []
@@ -119,7 +121,9 @@ def _scan_one_runtime_tree(tree: Path, kind: str, *, skip_repository_tooling: bo
 
 def _scan_runtime_tree(root: Path) -> list[Violation]:
     return [
-        *_scan_one_runtime_tree(root / "backend/src/oh_goon", "python", skip_repository_tooling=True),
+        *_scan_one_runtime_tree(
+            root / "backend/src/oh_goon", "python", skip_repository_tooling=True
+        ),
         *_scan_one_runtime_tree(root / "frontend/src", "frontend"),
         *_scan_one_runtime_tree(root / "templates", "config"),
         *_scan_one_runtime_tree(root / "docker", "config"),
@@ -145,7 +149,11 @@ def _iter_dependency_strings(value: Any) -> Iterable[str]:
 
 
 def _contains_dependency_reference(*surfaces: Any) -> bool:
-    return any(_contains_tool_marker(item) for surface in surfaces for item in _iter_dependency_strings(surface))
+    return any(
+        _contains_tool_marker(item)
+        for surface in surfaces
+        for item in _iter_dependency_strings(surface)
+    )
 
 
 def _pyproject_dependency_references(path: Path) -> bool:
@@ -162,7 +170,15 @@ def _pyproject_dependency_references(path: Path) -> bool:
 def _package_json_dependency_references(path: Path) -> bool:
     payload = json.loads(path.read_text(encoding="utf-8"))
     return _contains_dependency_reference(
-        *(payload.get(name, {}) for name in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"))
+        *(
+            payload.get(name, {})
+            for name in (
+                "dependencies",
+                "devDependencies",
+                "peerDependencies",
+                "optionalDependencies",
+            )
+        )
     )
 
 
@@ -177,7 +193,12 @@ def _package_lock_dependency_references(path: Path) -> bool:
             package.get(name, {})
             for package in packages.values()
             if isinstance(package, dict)
-            for name in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
+            for name in (
+                "dependencies",
+                "devDependencies",
+                "peerDependencies",
+                "optionalDependencies",
+            )
         ]
     return _contains_dependency_reference(payload.get("dependencies", {}), package_dependency_maps)
 
@@ -199,7 +220,10 @@ def _scan_dependency_manifests(root: Path) -> list[Violation]:
             continue
         if leaked:
             violations.append(
-                Violation(path, "agentsCookbook/Agent Economics must not be a product or package dependency")
+                Violation(
+                    path,
+                    "agentsCookbook/Agent Economics must not be a product or package dependency",
+                )
             )
     return violations
 
@@ -214,8 +238,14 @@ def _check_source_record(root: Path) -> list[Violation]:
         return [Violation(path, f"external developer-tool source record must be valid JSON: {exc}")]
     violations: list[Violation] = []
     commit = payload.get("commit")
-    if not isinstance(commit, str) or len(commit) != 40 or any(ch not in "0123456789abcdef" for ch in commit):
-        violations.append(Violation(path, "agentsCookbook source must bind one full lowercase Git commit SHA"))
+    if (
+        not isinstance(commit, str)
+        or len(commit) != 40
+        or any(ch not in "0123456789abcdef" for ch in commit)
+    ):
+        violations.append(
+            Violation(path, "agentsCookbook source must bind one full lowercase Git commit SHA")
+        )
     for field in (
         "production_dependency",
         "runtime_authority",

@@ -1,30 +1,53 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
 from oh_goon.core.dependency_identity import normalize_package_name
+from oh_goon.core.models.agent_review import AgentAdjudicationRecord, AgentReviewRecord
 from oh_goon.core.models.base import ImmutableModel
 
 
 class ObservationSourceEvidence(ImmutableModel):
-    """Exact repository source bytes covered by one complete observation snapshot."""
+    """Producer member revisions retained with one observation."""
 
     path: str = Field(min_length=1, max_length=240)
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    member_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class DependencyEvidenceAssessment(ImmutableModel):
+    """Repository facts about the supplied lock, independent of observation age."""
+
+    scope: Literal["locked-inventory"] = "locked-inventory"
+    freshness: Literal["current", "stale", "unknown"] = "unknown"
+    completeness: Literal["complete", "incomplete", "unknown"] = "unknown"
+    availability: Literal["available", "unsupported", "unavailable", "missing"] = "unavailable"
+    absence_admissible: bool = False
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def validate_absence(self) -> DependencyEvidenceAssessment:
+        if self.absence_admissible and (
+            self.freshness != "current"
+            or self.completeness != "complete"
+            or self.availability != "available"
+        ):
+            raise ValueError("Lock absence requires current complete available evidence")
+        return self
 
 
 class DependencyObservation(ImmutableModel):
-    """One typed Python-package fact inside a complete dependency snapshot."""
+    """One producer-selected package in a resolved lock inventory."""
 
     ecosystem: Literal["pypi"] = "pypi"
     package_name: str = Field(min_length=1, max_length=200)
-    relationship: Literal["direct", "transitive"]
-    declared_range: str | None = Field(default=None, max_length=500)
-    resolved_version: str | None = Field(default=None, min_length=1, max_length=200)
-    declared_source: str | None = Field(default=None, min_length=1, max_length=240)
-    resolved_source: str | None = Field(default=None, min_length=1, max_length=240)
+    node_id: str = Field(min_length=1)
+    resolved_version: str = Field(min_length=1, max_length=200)
+    resolved_source: Literal["uv.lock"] = "uv.lock"
+    package_source: str = Field(min_length=1)
+    contexts: tuple[str, ...] = Field(min_length=1)
+    relationships: tuple[dict[str, Any], ...] = ()
 
     @field_validator("package_name")
     @classmethod
@@ -34,56 +57,49 @@ class DependencyObservation(ImmutableModel):
             raise ValueError("Dependency observation package name must be non-empty")
         return normalized
 
-    @model_validator(mode="after")
-    def validate_evidence(self) -> DependencyObservation:
-        if self.declared_range is None and self.resolved_version is None:
-            raise ValueError("Dependency observation requires declared or resolved evidence")
-        if (self.declared_range is None) != (self.declared_source is None):
-            raise ValueError("Declared dependency value/source must be present together")
-        if (self.resolved_version is None) != (self.resolved_source is None):
-            raise ValueError("Resolved dependency value/source must be present together")
-        if self.relationship == "transitive" and self.declared_range is not None:
-            raise ValueError(
-                "Transitive dependency observations cannot claim direct declaration evidence"
-            )
-        return self
-
 
 class DependencyObservationSnapshot(ImmutableModel):
-    """Complete replacement snapshot for one repository's PyPI dependency scope.
+    """Retained producer observation plus its searchable locked-package projection.
 
-    This object is Step evidence. Repository/Run/Goon identity is supplied by the
-    canonical OperationReport and resolved Plan provenance that contains it.
+    Declarations and installed environments are outside this scope. Raw adapter
+    evidence is retained so the producer can requalify its original source claims.
     """
 
     kind: Literal["dependency"] = "dependency"
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     ecosystem: Literal["pypi"] = "pypi"
-    coverage: Literal["complete"] = "complete"
-    sources: tuple[ObservationSourceEvidence, ...] = Field(min_length=1, max_length=512)
-    dependencies: tuple[DependencyObservation, ...] = Field(
-        default_factory=tuple, max_length=100_000
-    )
+    sources: tuple[ObservationSourceEvidence, ...] = Field(default=(), max_length=512)
+    evidence: DependencyEvidenceAssessment
+    producer_implementation_identity: str | None = None
+    adapter_observation: dict[str, Any] = Field(default_factory=dict)
+    producer_observation: dict[str, Any] = Field(default_factory=dict)
+    dependencies: tuple[DependencyObservation, ...] = Field(default=(), max_length=100_000)
 
     @model_validator(mode="after")
     def validate_snapshot(self) -> DependencyObservationSnapshot:
         paths = [item.path for item in self.sources]
         if len(paths) != len(set(paths)):
-            raise ValueError("Observation snapshot source paths must be unique")
-        identities = [
-            (
-                item.package_name,
-                item.relationship,
-                item.declared_range,
-                item.resolved_version,
-                item.declared_source,
-                item.resolved_source,
-            )
-            for item in self.dependencies
-        ]
-        if len(identities) != len(set(identities)):
-            raise ValueError("Dependency observation snapshot entries must be unique")
+            raise ValueError("Observation source paths must be unique")
+        identifiers = [item.node_id for item in self.dependencies]
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("Dependency observation selections must be unique")
+        if self.evidence.availability == "available" and (
+            not self.sources
+            or not self.adapter_observation
+            or not self.producer_observation
+            or not self.producer_implementation_identity
+        ):
+            raise ValueError("Available dependency observations require producer evidence")
+        if self.evidence.availability != "available" and self.dependencies:
+            raise ValueError("Unavailable dependency evidence cannot publish packages")
         return self
 
 
-FleetObservationEvidence = Annotated[DependencyObservationSnapshot, Field(discriminator="kind")]
+class AgentReviewObservation(ImmutableModel):
+    kind: Literal["agent_review"] = "agent_review"
+    record: AgentReviewRecord | AgentAdjudicationRecord
+
+
+FleetObservationEvidence = Annotated[
+    DependencyObservationSnapshot | AgentReviewObservation, Field(discriminator="kind")
+]

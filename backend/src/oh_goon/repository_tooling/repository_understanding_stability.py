@@ -34,7 +34,10 @@ def _percentage(numerator: int, denominator: int) -> float:
 
 def _load_result(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("artifact_type") != "repository-understanding-result":
+    if (
+        not isinstance(payload, dict)
+        or payload.get("artifact_type") != "repository-understanding-result"
+    ):
         raise ValueError(f"stability input is not a repository-understanding result: {path}")
     identity = payload.get("certificate_identity")
     expected_identity = "sha256:" + _canonical_sha256(
@@ -45,7 +48,9 @@ def _load_result(path: Path) -> dict[str, Any]:
         }
     )
     if identity != expected_identity:
-        raise ValueError(f"stability input certificate identity does not match result bytes: {path}")
+        raise ValueError(
+            f"stability input certificate identity does not match result bytes: {path}"
+        )
     run_identity = payload.get("candidate_run_identity")
     if not isinstance(run_identity, str) or not run_identity.strip():
         raise ValueError(f"stability input is missing candidate run identity: {path}")
@@ -54,8 +59,12 @@ def _load_result(path: Path) -> dict[str, Any]:
         raise ValueError(f"stability input is missing regrade bundle: {path}")
     if bundle.get("candidate_run_identity") != run_identity:
         raise ValueError(f"stability input candidate run identity is inconsistent: {path}")
-    if bundle.get("candidate_configuration_identity") != payload.get("candidate_configuration_identity"):
-        raise ValueError(f"stability input candidate configuration identity is inconsistent: {path}")
+    if bundle.get("candidate_configuration_identity") != payload.get(
+        "candidate_configuration_identity"
+    ):
+        raise ValueError(
+            f"stability input candidate configuration identity is inconsistent: {path}"
+        )
     return payload
 
 
@@ -169,9 +178,7 @@ def stability_report(result_paths: Iterable[Path]) -> dict[str, Any]:
                 changed_claims.append(
                     {"question_id": rows[0][0], "claim_id": rows[0][1], "states": states}
                 )
-        critical_oscillations.append(
-            {"concept_family": concept, "changed_claims": changed_claims}
-        )
+        critical_oscillations.append({"concept_family": concept, "changed_claims": changed_claims})
 
     agreeing_concepts = sum(
         1

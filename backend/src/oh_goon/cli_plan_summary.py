@@ -47,14 +47,15 @@ def _execution_policy_summary(plan: ResolvedFleetPlan) -> tuple[str, ...]:
     resources = plan.execution.resources
     cpu = str(resources.cpu_millis) if resources.cpu_millis is not None else "executor-available"
     memory = str(resources.memory_mib) if resources.memory_mib is not None else "executor-available"
-    process_limit = str(resources.max_processes) if resources.max_processes is not None else "executor-available"
+    process_limit = (
+        str(resources.max_processes)
+        if resources.max_processes is not None
+        else "executor-available"
+    )
     return (
         "Repository admission: requirements",
         "Trust repository code: " + ("yes" if plan.execution.trust_repository_code else "no"),
-        "Resources: "
-        f"cpu_millis={cpu} "
-        f"memory_mib={memory} "
-        f"max_processes={process_limit}",
+        f"Resources: cpu_millis={cpu} memory_mib={memory} max_processes={process_limit}",
     )
 
 

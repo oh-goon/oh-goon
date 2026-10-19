@@ -58,9 +58,7 @@ def test_stop_reports_worker_that_survives_bounded_shutdown(
     stuck = StuckThread()
     scheduler._thread = stuck  # type: ignore[assignment]
 
-    with pytest.raises(
-        RuntimeError, match="did not stop before the bounded shutdown deadline"
-    ):
+    with pytest.raises(RuntimeError, match="did not stop before the bounded shutdown deadline"):
         scheduler.stop()
 
     snapshot = scheduler.snapshot()
@@ -94,9 +92,7 @@ def test_stop_timeout_failure_survives_older_successful_tick(monkeypatch) -> Non
 
     clock = iter((10.0, 10.2, 11.1))
     monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))
-    with pytest.raises(
-        RuntimeError, match="did not stop before the bounded shutdown deadline"
-    ):
+    with pytest.raises(RuntimeError, match="did not stop before the bounded shutdown deadline"):
         scheduler.stop()
 
     stop_failure = scheduler.snapshot().last_failure
@@ -143,9 +139,7 @@ def test_stop_timeout_failure_survives_older_failing_tick(monkeypatch) -> None:
 
     clock = iter((20.0, 20.2, 21.1))
     monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))
-    with pytest.raises(
-        RuntimeError, match="did not stop before the bounded shutdown deadline"
-    ):
+    with pytest.raises(RuntimeError, match="did not stop before the bounded shutdown deadline"):
         scheduler.stop()
 
     stop_failure = scheduler.snapshot().last_failure
@@ -191,9 +185,7 @@ def test_stop_timeout_keeps_runtime_quiescing_and_fleet_open() -> None:
     object.__setattr__(runtime, "_schedule_scheduler", SchedulerStub())
     object.__setattr__(runtime, "runs", runs)
 
-    with pytest.raises(
-        RuntimeError, match="did not stop before the bounded shutdown deadline"
-    ):
+    with pytest.raises(RuntimeError, match="did not stop before the bounded shutdown deadline"):
         runtime.shutdown(wait_for_runs=False)
 
     assert lifecycle.state is RuntimeLifecycleState.QUIESCING
@@ -266,9 +258,7 @@ def test_runtime_cannot_close_while_scheduler_tick_retains_mutation_lease(
 
     clock = iter((30.0, 30.2, 31.1))
     monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))
-    with pytest.raises(
-        RuntimeError, match="did not stop before the bounded shutdown deadline"
-    ):
+    with pytest.raises(RuntimeError, match="did not stop before the bounded shutdown deadline"):
         runtime.shutdown(wait_for_runs=False)
 
     assert lifecycle.state is RuntimeLifecycleState.QUIESCING

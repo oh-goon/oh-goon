@@ -1,4 +1,5 @@
 """UX-D quality gates: no alternate compiler, no made-up human trial, no work."""
+
 from __future__ import annotations
 
 import json
@@ -6,15 +7,17 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
+from tests.factories.shipped_templates import GOON_TEMPLATES, PLAN_TEMPLATES
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.repository_tooling.template_ux_d_evidence import (
-    GUIDES, collect, guide_links, source_archive_closure,
+    GUIDES,
+    collect,
+    guide_links,
+    source_archive_closure,
 )
-from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.template_plan_drafts import propose_plan
-
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -22,9 +25,9 @@ ROOT = Path(__file__).resolve().parents[4]
 def test_real_catalog_compile_and_draft_equivalence_without_execution():
     proof = collect(ROOT)
     assert proof["status"] == "PASS", proof["missing_or_bad_guide_links"]
-    assert proof["catalog"]["goons"] == 41
-    assert proof["catalog"]["plans"] == 24
-    assert len(proof["plan_drafts"]) == 24
+    assert proof["catalog"]["goons"] == len(GOON_TEMPLATES.keys())
+    assert proof["catalog"]["plans"] == len(PLAN_TEMPLATES.keys())
+    assert len(proof["plan_drafts"]) == len(PLAN_TEMPLATES.keys())
     assert all(r["status"] == "PASS" for r in proof["plan_drafts"])
     assert all(r["comparison_is_execution"] is False for r in proof["plan_drafts"])
     assert proof["evaluation"]["human_median_authoring_time"] == "NOT_MEASURED"
@@ -40,7 +43,9 @@ def test_real_canonical_stores_are_unchanged_across_full_catalog_evaluation():
     assert after == before
 
 
-@pytest.mark.parametrize("key", ["python/standard", "oci/image", "kubernetes/set-image", "oh-goon/self-verification"])
+@pytest.mark.parametrize(
+    "key", ["python/standard", "oci/image", "kubernetes/set-image", "oh-goon/self-verification"]
+)
 def test_real_golden_domain_drafts_are_unadmitted(key):
     source = PlanTemplateStore().source(key)
     result = propose_plan(key=key, expected_sha256=source.sha256)
@@ -50,16 +55,19 @@ def test_real_golden_domain_drafts_are_unadmitted(key):
     assert result.report["before"] == result.report["after"]
 
 
-@pytest.mark.parametrize("edits", [
-    [{"op": "add", "at": 1, "import": "general/hello-world"}],
-    [{"op": "add", "at": 1, "import": "missing/unknown"}],
-    [{"op": "remove", "at": 100}],
-    [{"op": "move", "from": 99, "to": 0}],
-    [{"op": "add", "at": 0, "import": {"import": "python/ruff", "as": "python-quality"}}],
-    [{"op": "add", "at": 0, "import": {"import": "python/ruff", "run": "sh -c evil"}}],
-    [{"op": "add", "at": 0, "import": {"import": "python/ruff", "as": "bad*name"}}],
-    [{"op": "remove", "at": 0}],
-])
+@pytest.mark.parametrize(
+    "edits",
+    [
+        [{"op": "add", "at": 1, "import": "general/hello-world"}],
+        [{"op": "add", "at": 1, "import": "missing/unknown"}],
+        [{"op": "remove", "at": 100}],
+        [{"op": "move", "from": 99, "to": 0}],
+        [{"op": "add", "at": 0, "import": {"import": "python/ruff", "as": "python-quality"}}],
+        [{"op": "add", "at": 0, "import": {"import": "python/ruff", "run": "sh -c evil"}}],
+        [{"op": "add", "at": 0, "import": {"import": "python/ruff", "as": "bad*name"}}],
+        [{"op": "remove", "at": 0}, {"op": "remove", "at": 0}],
+    ],
+)
 def test_hostile_authoring_never_mutates_original_source(edits):
     source = PlanTemplateStore().source("python/standard")
     with pytest.raises(FleetPlanInvalid):
@@ -67,14 +75,17 @@ def test_hostile_authoring_never_mutates_original_source(edits):
     assert PlanTemplateStore().source("python/standard").sha256 == source.sha256
 
 
-@pytest.mark.parametrize("values", [
-    {"unknown_value": "x"},
-    {"release_channel": "all"},
-    {"release_channel": "${{ env.SECRET }}"},
-    {"revision": ["not-a-scalar"]},
-    {"coverage_threshold": True},
-    {"coverage_threshold": 99999},
-])
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"unknown_value": "x"},
+        {"release_channel": "all"},
+        {"release_channel": "${{ env.SECRET }}"},
+        {"revision": ["not-a-scalar"]},
+        {"typechecker": True},
+        {"typechecker": 99999},
+    ],
+)
 def test_hostile_values_fail_before_any_work(values):
     source = PlanTemplateStore().source("python/standard")
     with pytest.raises(FleetPlanInvalid):
@@ -83,8 +94,11 @@ def test_hostile_values_fail_before_any_work(values):
 
 def test_stale_source_revision_rejected():
     with pytest.raises(FleetPlanInvalid, match="stale"):
-        propose_plan(key="python/standard", expected_sha256="0" * 64,
-                     edits=[{"op": "move", "from": 0, "to": 1}])
+        propose_plan(
+            key="python/standard",
+            expected_sha256="0" * 64,
+            edits=[{"op": "move", "from": 0, "to": 1}],
+        )
 
 
 def test_distribution_links_present_and_resolve():
@@ -124,36 +138,47 @@ def test_development_qualifier_selects_ux_d_exact_manifest_after_ux_c():
     assert source.count(c) == source.count(d) == 1
     assert source.index(c) < source.index(d) < source.index('if [[ -f "$embedded" ]]')
     make = (ROOT / "Makefile").read_text()
-    assert 'qualify-development-wsl' in make
-    assert 'source-transport-clean' in make
+    assert "qualify-development-wsl" in make
+    assert "source-transport-clean" in make
 
 
 def test_ux_d_evaluator_never_creates_a_second_authority():
     source = (ROOT / "backend/src/oh_goon/repository_tooling/template_ux_d_evidence.py").read_text()
     assert "propose_plan(" in source and "PlanTemplateStore(" in source
     assert "source_archive_closure" in source
-    for banned in ("FleetRunLifecycle", "RUN_ADMITTED", "RESOURCE_INTENT",
-                   "start_run(", "yaml.safe_load", "subprocess.run", "os.system"):
+    for banned in (
+        "FleetRunLifecycle",
+        "RUN_ADMITTED",
+        "RESOURCE_INTENT",
+        "start_run(",
+        "yaml.safe_load",
+        "subprocess.run",
+        "os.system",
+    ):
         assert banned not in source
 
 
-def test_frozen_ux_d_corpus_uses_exact_current_sources():
-    expected = json.loads((ROOT / "backend/tests/fixtures/template_authoring/draft_evaluation.json").read_text())
+def test_current_draft_evidence_accounts_for_every_current_plan_source():
     actual = collect(ROOT)
-    assert actual == expected
-    assert len(actual["plan_drafts"]) == 24
+    drafts = actual["plan_drafts"]
+    keys = [row["key"] for row in drafts]
+    assert len(keys) == len(set(keys))
+    assert set(keys) == set(PLAN_TEMPLATES.keys())
+    for row in drafts:
+        assert row["source_sha256"] == PLAN_TEMPLATES.source(row["key"]).sha256
     assert actual["ux_d_final_exit_gate"] == "BLOCKED_PENDING_PAIRED_AND_NATIVE_EVIDENCE"
 
 
 def test_archive_closure_rejects_symlink_entry(tmp_path):
     from zipfile import ZipInfo
+
     path = tmp_path / "symlink.zip"
     with ZipFile(path, "w") as archive:
         for name in GUIDES:
             archive.writestr(name, "doc")
         link = ZipInfo("docs/ESCAPE")
         link.create_system = 3
-        link.external_attr = (0o120777 << 16)
+        link.external_attr = 0o120777 << 16
         archive.writestr(link, "../../../../tmp")
     result = source_archive_closure(path)
     assert result["status"] == "FAIL"

@@ -4,7 +4,10 @@ import argparse
 from pathlib import Path
 
 from oh_goon.core.launch_activity import safe_launch_log
-from oh_goon.runtime.local_launch_binding import LocalLaunchBindingStore, require_binding_matches_manifest
+from oh_goon.runtime.local_launch_binding import (
+    LocalLaunchBindingStore,
+    require_binding_matches_manifest,
+)
 from oh_goon.runtime.local_launch_state import LocalLaunchEventStore
 
 

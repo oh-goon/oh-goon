@@ -64,15 +64,11 @@ def _print_storage_prune_report(report, certification) -> None:
     print(f"Removed run logs: {report.removed_run_logs}")
     print(f"Removed run workspaces: {len(report.removed_run_workspaces)}")
     print(f"Refused run workspaces: {len(report.refused_run_workspaces)}")
-    print(
-        "Cleanup-incomplete run workspaces: "
-        f"{len(report.cleanup_incomplete_run_workspaces)}"
-    )
+    print(f"Cleanup-incomplete run workspaces: {len(report.cleanup_incomplete_run_workspaces)}")
     print(f"Removed certification run workspaces: {len(certification.removed)}")
     print(f"Refused certification run workspaces: {len(certification.refused)}")
     print(
-        "Cleanup-incomplete certification run workspaces: "
-        f"{len(certification.cleanup_incomplete)}"
+        f"Cleanup-incomplete certification run workspaces: {len(certification.cleanup_incomplete)}"
     )
     for workspace in certification.refused:
         print(f"  Refused certification workspace: {workspace}")
@@ -83,7 +79,6 @@ def _print_storage_prune_report(report, certification) -> None:
     print(f"Removed retained objects: {len(report.removed_content_objects)}")
     print(f"Removed terminal launch capabilities: {len(report.removed_launch_access)}")
     print(f"Refused launch capabilities: {len(report.refused_launch_access)}")
-
 
 
 def _measurement_payload(path, *, enabled: bool) -> dict[str, int] | None:
@@ -149,15 +144,15 @@ def _print_unclassified(census, *, measure: bool) -> None:
     print("  Reporting only: these paths have no automatic cleanup authority.")
     for item in census.unclassified:
         measured = measure_storage(item.path) if measure else None
-        suffix = "" if measured is None else f" — {measured.entries} entries / {measured.bytes} bytes"
+        suffix = (
+            "" if measured is None else f" — {measured.entries} entries / {measured.bytes} bytes"
+        )
         print(f"  {item.path} [{item.root_kind}]{suffix}")
 
 
 def _capacity_status(environment: dict[str, str]) -> dict[str, object]:
     state_value = environment.get("XDG_STATE_HOME", "").strip()
-    state_home = (
-        Path(state_value).expanduser() if state_value else Path.home() / ".local/state"
-    )
+    state_home = Path(state_value).expanduser() if state_value else Path.home() / ".local/state"
     probe = state_home
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent

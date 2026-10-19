@@ -1,4 +1,5 @@
 """M162: backend-owner manifest authentication, not simulated physical enforcement."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,7 +11,9 @@ from oh_goon.repository_tooling import enforcer_lace_execution_environment_issue
 from tests.factories.journal import start_run
 from tests.unit.services.test_group_a_execution_environment_issuer import fixture
 from tests.unit.services.test_group_a_verified_ingress_authorities import (
-    _test_private_key, proof, roots,
+    _test_private_key,
+    proof,
+    roots,
 )
 
 
@@ -24,24 +27,34 @@ def prepared(tmp_path, monkeypatch):
 
 def sign(journal, contract, **kw):
     return issuer.issue_observed_captured_run_backend_capability_manifest_identity(
-        journal=journal, contract=contract,
+        journal=journal,
+        contract=contract,
         issuer_id=roots()[issuer.CAPABILITY_FIELD][0],
-        signing_key=_test_private_key(issuer.CAPABILITY_FIELD), **kw,
+        signing_key=_test_private_key(issuer.CAPABILITY_FIELD),
+        **kw,
     )
 
 
 def test_native_backend_manifest_signed_by_independent_key(tmp_path, monkeypatch):
     journal, contract, _, _ = prepared(tmp_path, monkeypatch)
     signed = sign(journal, contract)
-    witnesses = [proof(f, contract) if f != issuer.CAPABILITY_FIELD else signed
-                 for f in sorted(roots())]
+    witnesses = [
+        proof(f, contract) if f != issuer.CAPABILITY_FIELD else signed for f in sorted(roots())
+    ]
     TrustedIssuerVerifier(roots()).verify(
-        contract, evidence=witnesses, control_epoch=1,
-        lease_identity="exact", lease_is_current=lambda *_: True,
+        contract,
+        evidence=witnesses,
+        control_epoch=1,
+        lease_identity="exact",
+        lease_is_current=lambda *_: True,
     )
-    assert issuer.observed_admitted_run_backend_capability_manifest_identity(
-        journal=journal, run_id="durable-run",
-    ) == contract.fields[issuer.CAPABILITY_FIELD]
+    assert (
+        issuer.observed_admitted_run_backend_capability_manifest_identity(
+            journal=journal,
+            run_id="durable-run",
+        )
+        == contract.fields[issuer.CAPABILITY_FIELD]
+    )
 
 
 def test_wrong_manifest_or_environment_cannot_be_signed(tmp_path, monkeypatch):
@@ -83,7 +96,8 @@ def test_lifecycle_and_invalid_signer_rejected(tmp_path, monkeypatch):
     journal, contract, _, _ = prepared(tmp_path, monkeypatch)
     with pytest.raises(TrustProtocolError, match="signing authority"):
         issuer.issue_observed_captured_run_backend_capability_manifest_identity(
-            journal=journal, contract=contract, issuer_id="x", signing_key=None)
+            journal=journal, contract=contract, issuer_id="x", signing_key=None
+        )
     start_run(journal, "durable-run")
     with pytest.raises(TrustProtocolError, match="sole committed admission"):
         sign(journal, contract)
@@ -93,6 +107,7 @@ def test_race_inventory_replacement_between_observations(tmp_path, monkeypatch):
     journal, contract, inventory, _ = prepared(tmp_path, monkeypatch)
     original = issuer._observe
     calls = 0
+
     def race(*args, **kwargs):
         nonlocal calls
         calls += 1
@@ -100,6 +115,7 @@ def test_race_inventory_replacement_between_observations(tmp_path, monkeypatch):
         if calls == 1:
             inventory.write_text(inventory.read_text() + "\n# capability race\n")
         return result
+
     monkeypatch.setattr(issuer, "_observe", race)
     with pytest.raises(TrustProtocolError, match="changed during signing"):
         sign(journal, contract)
@@ -109,6 +125,7 @@ def test_race_run_start_between_observations(tmp_path, monkeypatch):
     journal, contract, _, _ = prepared(tmp_path, monkeypatch)
     original = issuer._observe
     calls = 0
+
     def race(*args, **kwargs):
         nonlocal calls
         calls += 1
@@ -116,6 +133,7 @@ def test_race_run_start_between_observations(tmp_path, monkeypatch):
         if calls == 1:
             start_run(journal, "durable-run")
         return result
+
     monkeypatch.setattr(issuer, "_observe", race)
     with pytest.raises(TrustProtocolError, match="sole committed admission"):
         sign(journal, contract)
@@ -124,9 +142,13 @@ def test_race_run_start_between_observations(tmp_path, monkeypatch):
 def test_native_capability_declaration_change_rejected(tmp_path, monkeypatch):
     journal, contract, _, _ = prepared(tmp_path, monkeypatch)
     from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+
     current = BubblewrapProcessIsolation.capabilities
-    monkeypatch.setattr(BubblewrapProcessIsolation, "capabilities", current.model_copy(
-        update={"enforced_network_policy": False}))
+    monkeypatch.setattr(
+        BubblewrapProcessIsolation,
+        "capabilities",
+        current.model_copy(update={"enforced_network_policy": False}),
+    )
     with pytest.raises(TrustProtocolError, match="contract capability manifest"):
         sign(journal, contract)
 
@@ -134,12 +156,14 @@ def test_native_capability_declaration_change_rejected(tmp_path, monkeypatch):
 def test_same_inventory_file_replaced_during_resolution_fails(tmp_path, monkeypatch):
     journal, contract, inventory, _ = prepared(tmp_path, monkeypatch)
     original = issuer.configured_executor_pool
+
     def replaced(*args, **kwargs):
         result = original(*args, **kwargs)
         replacement = inventory.with_suffix(".new")
         replacement.write_bytes(inventory.read_bytes())
         replacement.replace(inventory)
         return result
+
     monkeypatch.setattr(issuer, "configured_executor_pool", replaced)
     with pytest.raises(TrustProtocolError, match="executor inventory changed"):
         sign(journal, contract)

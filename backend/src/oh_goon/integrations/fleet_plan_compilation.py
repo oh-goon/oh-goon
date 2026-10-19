@@ -19,7 +19,10 @@ from oh_goon.core.models.fleet_plan import (
 )
 from oh_goon.core.path_authority import ContainedPathSpace, navigation_path
 from oh_goon.core.template_identity import canonical_template_key, import_step_id
-from oh_goon.integrations.fleet_plan_goon_authoring import apply_goon_tool_authority, normalize_goon_authoring_header
+from oh_goon.integrations.fleet_plan_goon_authoring import (
+    apply_goon_tool_authority,
+    normalize_goon_authoring_header,
+)
 
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_source_snapshot import FleetPlanSourceSnapshot
@@ -121,29 +124,22 @@ def parse_goon_template(
     )
 
 
-def _reject_default_execution_ceremony(payload: dict[str, Any], *, source: str, kind: str) -> None:
-    execution = payload.get("execution")
-    if isinstance(execution, dict) and execution.get("purpose") == "cicd":
-        raise FleetPlanInvalid(
-            f"Invalid {kind} {source}: omit execution.purpose: cicd; CI/CD is the backend default"
-        )
-
-
 def _compile_goon_payload(
     payload: dict[str, Any], *, source: str, expected_name: str | None = None
 ) -> CompiledExecutionTemplate:
     """Compile an already-parsed Goon mapping without reinterpreting YAML syntax."""
 
     payload = dict(payload)
-    authored_name, authored_description, authored_tools = normalize_goon_authoring_header(payload, source=source, expected_name=expected_name)
-    _reject_default_execution_ceremony(payload, source=source, kind="Goon")
+    authored_name, authored_description, authored_tools = normalize_goon_authoring_header(
+        payload, source=source, expected_name=expected_name
+    )
     if expected_name is None:
         execution = payload.get("execution")
         if execution is None:
-            payload["execution"] = {"purpose": "cicd"}
+            payload["execution"] = {"purpose": "verification"}
         elif isinstance(execution, dict):
             execution = dict(execution)
-            execution.setdefault("purpose", "cicd")
+            execution.setdefault("purpose", "verification")
             payload["execution"] = execution
     if payload.get("requirements") == []:
         raise FleetPlanInvalid(
@@ -179,8 +175,10 @@ def _compile_goon_payload(
             f"Invalid Goon {source}: Atomic Goon inputs own their schema and must be a mapping"
         )
     if forms[0] == "goons" and raw_inputs is not None:
-        if not isinstance(raw_inputs, list) or not raw_inputs or not all(
-            isinstance(item, str) and item for item in raw_inputs
+        if (
+            not isinstance(raw_inputs, list)
+            or not raw_inputs
+            or not all(isinstance(item, str) and item for item in raw_inputs)
         ):
             raise FleetPlanInvalid(
                 f"Invalid Goon {source}: Composite Goon inputs must be a non-empty list of exposed child input names; "
@@ -239,13 +237,12 @@ def _compile_plan_payload(
     """Compile an already-parsed Plan mapping without reinterpreting YAML syntax."""
 
     payload = dict(payload)
-    _reject_default_execution_ceremony(payload, source=source, kind="Plan")
     execution = payload.get("execution")
     if execution is None:
-        payload["execution"] = {"purpose": "cicd"}
+        payload["execution"] = {"purpose": "verification"}
     elif isinstance(execution, dict):
         execution = dict(execution)
-        execution.setdefault("purpose", "cicd")
+        execution.setdefault("purpose", "verification")
         payload["execution"] = execution
     forbidden = [key for key in ("steps", "run", "command", "script", "imports") if key in payload]
     if forbidden:
@@ -262,12 +259,15 @@ def _compile_plan_payload(
             f"Invalid Plan {source}: Plans select and order Goons with a non-empty goons list"
         )
     normalized = dict(payload)
+    normalized["authoring_kind"] = "plan"
     normalized["name"] = expected_name or "plan"
     normalized["description"] = ""
     raw_inputs = normalized.get("inputs")
     if raw_inputs is not None:
-        if not isinstance(raw_inputs, list) or not raw_inputs or not all(
-            isinstance(item, str) and item for item in raw_inputs
+        if (
+            not isinstance(raw_inputs, list)
+            or not raw_inputs
+            or not all(isinstance(item, str) and item for item in raw_inputs)
         ):
             raise FleetPlanInvalid(
                 f"Invalid Plan {source}: inputs must be a non-empty list of projected Goon input names; "
@@ -276,12 +276,14 @@ def _compile_plan_payload(
         normalized["projected_inputs"] = raw_inputs
         normalized.pop("inputs")
     normalized["steps"] = _compile_goon_imports(
-        normalized.pop("goons"), source=source, owner="Plan"
+        normalized.pop("goons"),
+        source=source,
+        owner="Plan",
+        projected_inputs=tuple(normalized.get("projected_inputs", ())),
     )
     normalized["requirements"] = []
     _normalize_template_fields(normalized)
     return _compile_execution_template(normalized, source=source, kind="Plan")
-
 
 
 def _reject_unknown_fields(
@@ -296,7 +298,22 @@ _PASS_INPUT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,63}\Z")
 # The alias names one exact import occurrence, not a package key or another resolver.
 # Match the existing 40-character compiled import Step ID contract.
 _IMPORT_ALIAS_NAME = re.compile(r"[a-z](?:[a-z0-9]|-[a-z0-9])*\Z")
-_IMPORT_ALIAS_RESERVED = frozenset({"goons", "steps", "inputs", "outputs", "self", "true", "false", "null", "yes", "no", "on", "off"})
+_IMPORT_ALIAS_RESERVED = frozenset(
+    {
+        "goons",
+        "steps",
+        "inputs",
+        "outputs",
+        "self",
+        "true",
+        "false",
+        "null",
+        "yes",
+        "no",
+        "on",
+        "off",
+    }
+)
 
 
 def _compile_goon_imports(
@@ -310,19 +327,13 @@ def _compile_goon_imports(
     for index, item in enumerate(raw, start=1):
         if isinstance(item, str):
             raw_key = item
+            source_root = None
             bindings: Any = {}
             pass_names: tuple[str, ...] = ()
             failure_impact = "blocking"
             authored_alias: str | None = None
         elif isinstance(item, dict) and "import" in item:
-            if "pass" in item and owner != "Goon":
-                raise FleetPlanInvalid(
-                    f"Invalid {owner} {source}: Goon import {index} pass: belongs only on "
-                    "Composite Goon imports; use Plan inputs projection or with: instead"
-                )
-            allowed = {"import", "with", "failure_impact", "as"}
-            if owner == "Goon":
-                allowed.add("pass")
+            allowed = {"import", "with", "failure_impact", "as", "pass", "from", "phase"}
             unknown = sorted(set(item) - allowed)
             if unknown:
                 raise FleetPlanInvalid(
@@ -348,6 +359,19 @@ def _compile_goon_imports(
                     )
                 authored_aliases[authored_alias] = index
             raw_key = item.get("import")
+            source_root = item.get("from")
+            if "from" in item and (
+                not isinstance(source_root, str)
+                or not source_root.strip()
+                or len(source_root) > 240
+                or "${{" in source_root
+                or "\x00" in source_root
+                or "\\" in source_root
+                or PurePosixPath(source_root).is_absolute()
+            ):
+                raise FleetPlanInvalid(
+                    "Goon import from: must be a static relative catalog directory"
+                )
             bindings = item.get("with", {})
             failure_impact = item.get("failure_impact", "blocking")
             pass_names = ()
@@ -372,13 +396,15 @@ def _compile_goon_imports(
             seen: set[str] = set()
             for ordinal, name in enumerate(raw_pass, start=1):
                 if type(name) is not str or _PASS_INPUT_NAME.fullmatch(name) is None:
-                    raise FleetPlanInvalid(f"{label}: pass item {ordinal} is not a valid input name")
+                    raise FleetPlanInvalid(
+                        f"{label}: pass item {ordinal} is not a valid input name"
+                    )
                 if name in seen:
                     raise FleetPlanInvalid(f"{label}: duplicate pass input {name!r}; remove one")
                 seen.add(name)
-                if name not in projected_inputs:
+                if name not in projected_inputs and (owner != "Plan" or projected_inputs):
                     raise FleetPlanInvalid(
-                        f"{label}: Composite inputs does not declare {name!r}; "
+                        f"{label}: inputs does not declare {name!r}; "
                         "expose it in inputs: or remove this pass"
                     )
                 if name in bindings:
@@ -394,9 +420,17 @@ def _compile_goon_imports(
             _input_binding_payload(name, value) for name, value in bindings.items()
         )
         occurrences[key] = occurrences.get(key, 0) + 1
-        compiled_id = authored_alias if authored_alias is not None else import_step_id(key, occurrences[key])
-        collision = next((ordinal for ordinal, prior in enumerate(result, start=1)
-                          if prior["step_id"] == compiled_id), None)
+        compiled_id = (
+            authored_alias if authored_alias is not None else import_step_id(key, occurrences[key])
+        )
+        collision = next(
+            (
+                ordinal
+                for ordinal, prior in enumerate(result, start=1)
+                if prior["step_id"] == compiled_id
+            ),
+            None,
+        )
         if collision is not None:
             raise FleetPlanInvalid(
                 f"Invalid {owner} {source}: Goon import {index} occurrence ID {compiled_id!r} "
@@ -408,11 +442,14 @@ def _compile_goon_imports(
                 "kind": "goon",
                 "step_id": compiled_id,
                 "goon": key,
+                "source_root": source_root,
+                "phase": item.get("phase") if isinstance(item, dict) else None,
                 "failure_impact": failure_impact,
                 "inputs": compiled_bindings,
             }
         )
     return result
+
 
 def _normalize_template_fields(normalized: dict[str, Any]) -> None:
     raw_inputs = normalized.get("inputs")
@@ -493,6 +530,7 @@ def _published_output_payload(value: Any) -> dict[str, Any]:
         return dict(value)
     raise FleetPlanInvalid("Fleet plan output declarations must be a path string or mapping")
 
+
 def _input_definition_payload(value: Any) -> dict[str, Any]:
     if value is None:
         return {"required": True}
@@ -572,6 +610,7 @@ def _input_source_payload(value: Any, *, name: str) -> dict[str, Any]:
         f"Fleet Goon input {name!r} source must use env, yaml, toml, text, or git"
     )
 
+
 def _env_source_payload(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise FleetPlanInvalid("Fleet env definitions must be mappings")
@@ -580,9 +619,7 @@ def _env_source_payload(value: Any) -> dict[str, Any]:
         return {"kind": "host"}
     if set(payload) == {"value"} and type(payload.get("value")) in (str, bool, int):
         return {"kind": "literal", "value": payload["value"]}
-    raise FleetPlanInvalid(
-        "Fleet env definitions must use {from: host} or {value: ...}"
-    )
+    raise FleetPlanInvalid("Fleet env definitions must use {from: host} or {value: ...}")
 
 
 def _module_output_source(value: Any) -> str:
@@ -675,7 +712,7 @@ def _generated_step_id(step: dict[str, Any], *, index: int, used: set[str]) -> s
     occurrence = 2
     while candidate in used:
         suffix = f"-{occurrence}"
-        candidate = f"{base[:80-len(suffix)]}{suffix}"
+        candidate = f"{base[: 80 - len(suffix)]}{suffix}"
         occurrence += 1
     return candidate
 
@@ -710,9 +747,10 @@ def _parse_run_argv(value: Any) -> list[str]:
         raise FleetPlanInvalid("Fleet run cannot contain shell command substitution")
 
     expressions: list[str] = []
+
     def replace_expression(match: re.Match[str]) -> str:
         expressions.append(match.group(0))
-        return f"__OH_GOON_EXPR_{len(expressions)-1}__"
+        return f"__OH_GOON_EXPR_{len(expressions) - 1}__"
 
     protected = _RUN_EXPRESSION.sub(replace_expression, value)
     lexer = shlex.shlex(protected, posix=True, punctuation_chars="|&;<>")
@@ -732,7 +770,11 @@ def _parse_run_argv(value: Any) -> list[str]:
         placeholder = f"__OH_GOON_EXPR_{index}__"
         argv = [token.replace(placeholder, expression) for token in argv]
     executable = argv[0].rsplit("/", 1)[-1].lower()
-    if len(argv) >= 2 and executable in {"python", "python3", "bash", "sh", "zsh"} and argv[1] == "-c":
+    if (
+        len(argv) >= 2
+        and executable in {"python", "python3", "bash", "sh", "zsh"}
+        and argv[1] == "-c"
+    ):
         raise FleetPlanInvalid(
             "Fleet run cannot embed a shell/Python program with -c; expose complex logic as a real project command"
         )
@@ -749,11 +791,22 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
     raw_uv = normalized.pop("uv", None)
     if raw_uv is None:
         return
-    if not isinstance(raw_uv, dict) or not set(raw_uv) <= {"group", "project"} or "group" not in raw_uv:
+    if (
+        not isinstance(raw_uv, dict)
+        or not set(raw_uv) <= {"group", "project"}
+        or "group" not in raw_uv
+    ):
         raise FleetPlanInvalid("Goon uv must contain group and may contain project")
     group = raw_uv.get("group")
     project = raw_uv.get("project", ".")
-    if not isinstance(group, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", group) is None:
+    if (
+        not isinstance(group, str)
+        or re.fullmatch(
+            r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|\$\{\{\s*inputs\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\})",
+            group,
+        )
+        is None
+    ):
         raise FleetPlanInvalid("Goon uv.group has an invalid dependency-group name")
     if not isinstance(project, str) or not project.strip():
         raise FleetPlanInvalid("Goon uv.project must be a non-empty repository-relative path")
@@ -766,9 +819,13 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
         raise FleetPlanInvalid("Goon uv requires Atomic Goon command steps")
     for step in steps:
         if not isinstance(step, dict) or step.get("kind") != "command":
-            raise FleetPlanInvalid("Goon uv can own only command Steps; typed executors keep their own model")
+            raise FleetPlanInvalid(
+                "Goon uv can own only command Steps; typed executors keep their own model"
+            )
         if "cache" in step:
-            raise FleetPlanInvalid("Goon uv cache lineage is backend-owned; remove authored Step cache")
+            raise FleetPlanInvalid(
+                "Goon uv cache lineage is backend-owned; remove authored Step cache"
+            )
         argv = step.get("argv")
         if not isinstance(argv, list) or len(argv) < 3 or argv[:2] != ["uv", "run"]:
             raise FleetPlanInvalid("Goon uv Steps must use run: uv run <command>")
@@ -788,9 +845,7 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
             *argv[2:],
         ]
         step["uv"] = {"project": project, "group": group}
-    requirements = normalized.setdefault("requirements", [])
-    requirements.append({"kind": "uv_project", "project": project, "group": group})
-
+        step.setdefault("working_directory", project)
 
 
 def _normalize_step_mapping(value: Any) -> Any:
@@ -804,9 +859,7 @@ def _normalize_step_mapping(value: Any) -> Any:
     if run is not None:
         conflicting = sorted(key for key in ("uses", "kind", "argv") if key in normalized)
         if conflicting:
-            raise FleetPlanInvalid(
-                "Fleet run cannot be combined with " + ", ".join(conflicting)
-            )
+            raise FleetPlanInvalid("Fleet run cannot be combined with " + ", ".join(conflicting))
         normalized["kind"] = "command"
         normalized["argv"] = _parse_run_argv(run)
     uses = normalized.pop("uses", None)

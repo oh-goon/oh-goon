@@ -46,7 +46,7 @@ def test_m138_browser_preflight_carries_exact_required_producer_source(key: str)
 
 def test_m138_missing_explicit_step_reference_rejected_at_canonical_compile() -> None:
     with pytest.raises(FleetPlanInvalid, match="non-empty step name"):
-        parse_goon_template('''version: 1
+        parse_goon_template("""version: 1
 inputs:
   source_workspace:
     type: workspace_reference
@@ -55,7 +55,7 @@ steps:
   workspace:
     from: step
     step: ""
-''')
+""")
 
 
 def test_m138_plain_make_command_does_not_implicitly_acquire_a_producer() -> None:

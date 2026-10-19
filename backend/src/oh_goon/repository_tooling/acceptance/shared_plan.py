@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import time
 import urllib.error
 import urllib.request
+import uuid
+from pathlib import Path
 
 from oh_goon.repository_tooling.acceptance.shared_plan_evidence import (
     require_preview_counts,
@@ -16,7 +17,6 @@ from oh_goon.repository_tooling.acceptance.uv_fixture import (
     editable_uv_lock,
 )
 from oh_goon.repository_tooling.local_access_http import authorized_request
-import uuid
 
 SHARED_PLAN = """version: 1
 inputs:
@@ -39,7 +39,7 @@ steps:
 - run: python must_not_run.py
 """
 
-_BASIC_RELEASE_METADATA_RUNTIME = r'''from __future__ import annotations
+_BASIC_RELEASE_METADATA_RUNTIME = r"""from __future__ import annotations
 
 import argparse
 from pathlib import Path
@@ -57,8 +57,7 @@ def main() -> None:
     output.joinpath("RELEASE_VERSION").write_text(
         f"{version}-{{args.channel}}.{{args.revision[:7]}}\n", encoding="utf-8"
     )
-'''
-
+"""
 
 
 def _request_json(
@@ -116,7 +115,8 @@ def _repository(
     )
     (path / "pyproject.toml").write_text("\n".join(project) + "\n", encoding="utf-8")
     (path / "uv.lock").write_text(
-        editable_uv_lock("oh-goon-shared-acceptance", version, include_dev_group=include_dev_group), encoding="utf-8"
+        editable_uv_lock("oh-goon-shared-acceptance", version, include_dev_group=include_dev_group),
+        encoding="utf-8",
     )
     (path / "acceptance_release_metadata.py").write_text(
         _BASIC_RELEASE_METADATA_RUNTIME.format(version=version), encoding="utf-8"
@@ -135,7 +135,9 @@ def _repository(
         (path / "must_not_run.py").write_text("raise SystemExit(99)\n", encoding="utf-8")
 
 
-def _team_ids(base_url: str, repositories: tuple[Path, ...], *, access_token: str) -> dict[Path, str]:
+def _team_ids(
+    base_url: str, repositories: tuple[Path, ...], *, access_token: str
+) -> dict[Path, str]:
     league = _request_json("GET", f"{base_url}/api/league", access_token=access_token)
     teams = league.get("teams")
     if not isinstance(teams, list):
@@ -169,9 +171,9 @@ def _assert_invalid_shared_plan_is_rejected_before_persistence(
     request = authorized_request(
         plan_url,
         access_token=access_token,
-        data=json.dumps(
-            {"content": INVALID_SHARED_PLAN, "expected_revision": None}
-        ).encode("utf-8"),
+        data=json.dumps({"content": INVALID_SHARED_PLAN, "expected_revision": None}).encode(
+            "utf-8"
+        ),
         method="PUT",
         headers={"Content-Type": "application/json"},
     )
@@ -186,7 +188,7 @@ def _assert_invalid_shared_plan_is_rejected_before_persistence(
         if "Plans do not own input schemas" not in str(payload.get("message")):
             raise RuntimeError(
                 f"invalid Shared Plan save lost domain explanation: {payload!r}"
-            )
+            ) from exc
     else:
         raise RuntimeError("invalid Shared Plan save unexpectedly succeeded")
 
@@ -214,7 +216,9 @@ def _wait_run(
     deadline = time.monotonic() + timeout_seconds
     last: dict[str, object] | None = None
     while time.monotonic() < deadline:
-        last = _request_json("GET", f"{base_url}/api/fleet/runs/{run_id}", access_token=access_token)
+        last = _request_json(
+            "GET", f"{base_url}/api/fleet/runs/{run_id}", access_token=access_token
+        )
         run = last.get("run")
         status = run.get("status") if isinstance(run, dict) else None
         if status in {"COMPLETED", "FAILED", "CANCELLED"}:
@@ -230,9 +234,7 @@ def _assert_preview(
     ready_without_repo_goon: Path,
     not_applicable: Path,
 ) -> None:
-    teams = require_preview_counts(
-        preview, ready=3, blocked=0, label="Shared Plan preview"
-    )
+    teams = require_preview_counts(preview, ready=3, blocked=0, label="Shared Plan preview")
     by_path = {
         team["repository"]["path"]: team
         for team in teams
@@ -242,7 +244,9 @@ def _assert_preview(
     for repository in (ready_with_repo_goon, ready_without_repo_goon, not_applicable):
         team = by_path.get(str(repository.resolve()))
         if not isinstance(team, dict) or team.get("state") != "READY":
-            raise RuntimeError(f"Shared Plan did not keep {repository.name} as a valid Team preview")
+            raise RuntimeError(
+                f"Shared Plan did not keep {repository.name} as a valid Team preview"
+            )
 
     for repository in (ready_with_repo_goon, ready_without_repo_goon):
         require_preview_work(
@@ -306,39 +310,31 @@ def _run_ready_shared_plan(
         },
     )
     if response.get("fleet_run_id") != run_id:
-        raise RuntimeError(
-            "Shared Plan run did not preserve requested Fleet Run identity"
-        )
+        raise RuntimeError("Shared Plan run did not preserve requested Fleet Run identity")
     detail = _wait_run(base_url, run_id, access_token=access_token)
     run = detail.get("run")
     status = run.get("status") if isinstance(run, dict) else None
     if status != "COMPLETED" or detail.get("outcome") != "SUCCESS":
         failure = run.get("failure") if isinstance(run, dict) else None
         game_tape = detail.get("game_tape")
-        issue_focus = (
-            game_tape.get("issue_focus") if isinstance(game_tape, dict) else None
-        )
-        repositories = (
-            game_tape.get("repositories") if isinstance(game_tape, dict) else None
-        )
+        issue_focus = game_tape.get("issue_focus") if isinstance(game_tape, dict) else None
+        repositories = game_tape.get("repositories") if isinstance(game_tape, dict) else None
         raise RuntimeError(
             "Shared Plan acceptance failed: "
             f"status={status!r} outcome={detail.get('outcome')!r} "
             f"failure={failure!r} issue_focus={issue_focus!r} "
             f"repositories={repositories!r}"
         )
-    require_successful_repository_execution(
-        detail, repository_ids, label="Shared Plan Game Tape"
-    )
+    require_successful_repository_execution(detail, repository_ids, label="Shared Plan Game Tape")
     rendered = json.dumps(detail)
     if "repository-goon-must-not-run" in rendered:
-        raise RuntimeError(
-            "Shared Plan execution merged repository-owned goon.yml work"
-        )
+        raise RuntimeError("Shared Plan execution merged repository-owned goon.yml work")
     return run_id
 
 
-def exercise_shared_plan(base_url: str, repositories_root: Path, *, access_token: str) -> str | None:
+def exercise_shared_plan(
+    base_url: str, repositories_root: Path, *, access_token: str
+) -> str | None:
     """Exercise Shared Plan preview/run against heterogeneous real repositories."""
 
     ready_with_repo_goon = repositories_root / "shared-ready-owned-goon"
@@ -369,9 +365,7 @@ def exercise_shared_plan(base_url: str, repositories_root: Path, *, access_token
         raise RuntimeError("Shared Plan save did not return source revision authority")
     inputs = {"release_channel": "beta", "revision": "abcdef1"}
     selected_ids = list(team_ids.values())
-    _assert_invalid_shared_plan_is_rejected_before_persistence(
-        base_url, access_token=access_token
-    )
+    _assert_invalid_shared_plan_is_rejected_before_persistence(base_url, access_token=access_token)
     preview = _request_json(
         "POST",
         f"{base_url}/api/league/shared-plan-previews",

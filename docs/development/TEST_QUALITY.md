@@ -26,3 +26,18 @@ Reusable test-review methods live in agentsCookbook: [coverage design review](ht
 - Tests exercise code; coverage measures which code ran; native qualification observes supported hosts; certification belongs to the product's explicit certification owner. Cookbook review results do not substitute for any of these outcomes.
 
 Use [Real lifecycle QA](REAL_LIFECYCLE_QA.md) for Oh-Goon's critical process, persistence, release-artifact and restart journeys. Use [Development](../DEVELOPMENT.md) for the current source commands and [Generated files](GENERATED_FILES.md) when a backend contract changes.
+
+## Python coverage ownership
+
+`make coverage-python` reports coverage for the Python package using both
+`backend/tests` and `scripts/tests`, the explicit backend pytest configuration,
+and native subprocess coverage. Privileged/model certification probes remain
+explicitly selected. Repository tooling belongs in the measurement because it
+is part of the same Python package.
+
+`backend-check` runs lint, formatting and ordinary behavior tests. Coverage
+percentages remain diagnostics, as required by `AGENTS.md`; they do not decide
+repository correctness or APP certification. `make quality-check` explicitly
+compares a complete coverage measurement to the existing committed floors.
+`quality-raise` reuses that same measurement before authoring floors. The floors
+are retained and cannot be lowered by the authoring command.

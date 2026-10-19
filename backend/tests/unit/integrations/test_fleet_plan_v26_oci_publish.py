@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from functools import cache
 import hashlib
 import io
 import json
 import subprocess
 import tarfile
+from functools import cache
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-import oh_goon.integrations._fleet_plan_host_resources as host_resources
 import oh_goon.integrations.fleet_plan_oci_registry_execution as registry_execution
 from oh_goon.cli_plan_summary import resolved_plan_summary
 from oh_goon.core.errors import ExternalEffectOutcomeUnknown, FleetPlanInvalid
@@ -19,7 +18,6 @@ from oh_goon.core.fleet_plan_tool_requirements import required_execution_tool_na
 from oh_goon.core.models.fleet_plan import ResolvedOciBuildStep, ResolvedOciPublishStep
 from oh_goon.core.models.fleet_plan_evidence import PlanResourceEvidence
 from oh_goon.core.path_layouts import AttemptPathLayout
-from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_host_resources import (
@@ -29,8 +27,10 @@ from oh_goon.integrations._fleet_plan_host_resources import (
 )
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
+from oh_goon.integrations.executable_materialization_authority import (
+    StepExecutableMaterializationReceipt,
+)
 from oh_goon.integrations.fleet_plan_attempt_evidence import build_strict_attempt_evidence
-from oh_goon.integrations.executable_materialization_authority import StepExecutableMaterializationReceipt
 from oh_goon.integrations.fleet_plan_oci_publish_execution import execute_oci_publish
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.shipped_templates import GOON_TEMPLATES, PLAN_TEMPLATES
@@ -105,7 +105,6 @@ def _write_oci_archive(path: Path) -> str:
     return digest
 
 
-
 def test_oci_credentials_fail_cheap_preflight_before_secret_capture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -129,7 +128,7 @@ def test_oci_credentials_fail_cheap_preflight_before_secret_capture(
 def test_publish_template_resolves_to_v26_content_addressed_authority() -> None:
     plan = _plan()
 
-    assert plan.contract_version == 43
+    assert plan.contract_version == 44
     assert [step.kind for step in plan.steps] == ["oci_build", "oci_publish"]
     build, publish = plan.steps
     assert isinstance(build, ResolvedOciBuildStep)
@@ -422,7 +421,6 @@ def test_committed_publish_reports_private_cleanup_failure_and_preserves_release
     assert not (repository / "oci/image-publish.json").exists()
 
 
-
 def test_publish_nonzero_after_copy_start_is_outcome_unknown(tmp_path: Path) -> None:
     step = _plan().steps[1]
     assert isinstance(step, ResolvedOciPublishStep)
@@ -439,7 +437,9 @@ def test_publish_nonzero_after_copy_start_is_outcome_unknown(tmp_path: Path) -> 
             duration_ms=7,
         )
 
-    with pytest.raises(ExternalEffectOutcomeUnknown, match="remote publication outcome may be unknown"):
+    with pytest.raises(
+        ExternalEffectOutcomeUnknown, match="remote publication outcome may be unknown"
+    ):
         execute_oci_publish(
             repository,
             step,
@@ -477,6 +477,7 @@ def test_publish_timeout_after_copy_start_is_outcome_unknown(tmp_path: Path) -> 
             command_runner=runner,
             cancel_requested=None,
         )
+
 
 def test_invalid_archive_fails_before_network_command(tmp_path: Path) -> None:
     plan = _plan()

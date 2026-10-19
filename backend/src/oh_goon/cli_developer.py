@@ -19,8 +19,8 @@ from oh_goon.services.certification_bootstrap import (
     CertificationEnvironmentError,
     CertificationSourceError,
     CertificationStateBusy,
-    prepare_certification_bootstrap,
     preflight_certification_database,
+    prepare_certification_bootstrap,
     reset_certification_control_state,
 )
 
@@ -84,10 +84,7 @@ def _preflight_certification_database_command(args: argparse.Namespace) -> int:
     except (CertificationEnvironmentError, CertificationStateBusy) as exc:
         print("OH_GOON_CERTIFICATION_DATABASE_PREFLIGHT_ERROR=" + str(exc))
         return 2
-    print(
-        "OH_GOON_CERTIFICATION_DATABASE_PREFLIGHT="
-        + json.dumps(payload, sort_keys=True)
-    )
+    print("OH_GOON_CERTIFICATION_DATABASE_PREFLIGHT=" + json.dumps(payload, sort_keys=True))
     return 0
 
 

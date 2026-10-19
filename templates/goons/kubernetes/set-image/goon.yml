@@ -2,14 +2,19 @@ version: 1
 inputs:
   kubernetes_api_hostname:
     type: hostname
+    description: Hostname of the selected Kubernetes API endpoint
   namespace:
     type: kubernetes_name
+    description: Namespace containing the selected workload
   deployment:
     type: kubernetes_deployment_name
+    description: Exact Kubernetes Deployment name
   container:
     type: kubernetes_name
+    description: Named Deployment container to update or verify
   image:
     type: oci_reference
+    description: Digest-qualified image reference to commit
 env:
   KUBERNETES_TOKEN:
     from: host

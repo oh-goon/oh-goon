@@ -38,7 +38,6 @@ def _run_module(root: Path, module: str, *args: str) -> None:
     raise RuntimeError(f"checkpoint seal gate failed in {module}: {detail}")
 
 
-
 def require_checkpoint_version_freshness(root: Path) -> None:
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
     try:
@@ -70,6 +69,7 @@ def require_checkpoint_version_freshness(root: Path) -> None:
             f"VERSION={version!r} status_lines={status_lines!r}"
         )
 
+
 def require_source_seal_gate(root: Path) -> None:
     """Run every source-side authority required immediately before packaging."""
 
@@ -89,7 +89,11 @@ def _archive_root(archive_path: Path, destination: Path) -> Path:
         roots: set[str] = set()
         for name in names:
             member = PurePosixPath(name)
-            if member.is_absolute() or not member.parts or any(part in {"", ".", ".."} for part in member.parts):
+            if (
+                member.is_absolute()
+                or not member.parts
+                or any(part in {"", ".", ".."} for part in member.parts)
+            ):
                 raise ValueError(f"unsafe source archive member: {name}")
             roots.add(member.parts[0])
         if len(roots) != 1:

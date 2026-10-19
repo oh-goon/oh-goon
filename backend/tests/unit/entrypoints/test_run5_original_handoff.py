@@ -1,4 +1,5 @@
 """RUN-5: a compact handoff transporting only existing Fleet/Game Tape facts."""
+
 from __future__ import annotations
 
 import json
@@ -28,10 +29,12 @@ class _Tape:
         self.plan_id = "canonical-plan"
         self.summary = _Model({"failed_steps": 1, "executed_steps": 2})
         self.receipt = _Model({"validation": "PASSED", "finished_at": "canonical-time"})
-        self.observability = _Model({
-            "failure_navigation_source": "durable_failure_evidence",
-            "raw_output_survives_process_restart": False,
-        })
+        self.observability = _Model(
+            {
+                "failure_navigation_source": "durable_failure_evidence",
+                "raw_output_survives_process_restart": False,
+            }
+        )
         self.issue_count = count
         self.issue_focus = focus
         self.hidden_issue_count = count - len(focus)
@@ -40,8 +43,7 @@ class _Tape:
 
 
 class _RunOwner:
-    def __init__(self, *, status=FleetRunStatus.FAILED,
-                 outcome=FleetRunOutcome.FAILED, tape=None):
+    def __init__(self, *, status=FleetRunStatus.FAILED, outcome=FleetRunOutcome.FAILED, tape=None):
         self.calls = []
         self.status = status
         self.outcome = outcome
@@ -54,7 +56,8 @@ class _RunOwner:
             raise InvalidRequest("unknown Fleet Run")
         return SimpleNamespace(
             run=SimpleNamespace(
-                fleet_run_id=run_id, status=self.status,
+                fleet_run_id=run_id,
+                status=self.status,
                 progress=_Model({"total": 2, "failed": 1}),
             ),
             outcome=self.outcome,
@@ -71,14 +74,23 @@ def _invoke(owner, *args):
 
 
 def test_handoff_preserves_exact_original_failure_guidance_and_focus(capsys):
-    focus = GameTapeIssueFocus(scope="STEP", repository_execution_id="repo-exec",
-                               repository_id="repo-1", repository_name="one",
-                               step_execution_id="step-exec", step_id="verify",
-                               code="STEP_FAIL", message="canonical explanation",
-                               signature_id="sig-one")
+    focus = GameTapeIssueFocus(
+        scope="STEP",
+        repository_execution_id="repo-exec",
+        repository_id="repo-1",
+        repository_name="one",
+        step_execution_id="step-exec",
+        step_id="verify",
+        code="STEP_FAIL",
+        message="canonical explanation",
+        signature_id="sig-one",
+    )
     why = GameTapeWhyNotDiagnostic(
-        code="DENIED", stage="ADMISSION", retryable=False,
-        authority_owner="execution_authority", message="Original rejection",
+        code="DENIED",
+        stage="ADMISSION",
+        retryable=False,
+        authority_owner="execution_authority",
+        message="Original rejection",
         safe_next_action="Inspect the original authenticated admission receipt",
     )
     # A genuine Game Tape exposes all five focus slots when other issues are hidden.
@@ -102,14 +114,19 @@ def test_handoff_preserves_exact_original_failure_guidance_and_focus(capsys):
     assert "raw_stdout" not in json.dumps(result)
 
 
-@pytest.mark.parametrize("status,outcome", [
-    (FleetRunStatus.COMPLETED, FleetRunOutcome.SUCCESS),
-    (FleetRunStatus.COMPLETED, FleetRunOutcome.ATTENTION_REQUIRED),
-    (FleetRunStatus.CANCELLED, FleetRunOutcome.CANCELLED),
-    (FleetRunStatus.RUNNING, FleetRunOutcome.IN_PROGRESS),
-])
+@pytest.mark.parametrize(
+    "status,outcome",
+    [
+        (FleetRunStatus.COMPLETED, FleetRunOutcome.SUCCESS),
+        (FleetRunStatus.COMPLETED, FleetRunOutcome.ATTENTION_REQUIRED),
+        (FleetRunStatus.CANCELLED, FleetRunOutcome.CANCELLED),
+        (FleetRunStatus.RUNNING, FleetRunOutcome.IN_PROGRESS),
+    ],
+)
 def test_handoff_does_not_derive_outcome_or_invent_missing_failure_facts(
-    capsys, status, outcome,
+    capsys,
+    status,
+    outcome,
 ):
     tape = _Tape(status=GameTapeStatus.RUNNING, count=0)
     tape.plan_id = None  # Non-Plan Fleet Run has no Plan identity.
@@ -127,13 +144,21 @@ def test_handoff_does_not_derive_outcome_or_invent_missing_failure_facts(
 
 
 def test_text_handoff_preserves_execution_anchor_and_original_guidance(capsys):
-    focus = GameTapeIssueFocus(scope="STEP", repository_execution_id="repo-exec",
-                               repository_id="repo-1", repository_name="repo",
-                               step_execution_id="step-exec", step_id="build",
-                               code="BUILD_FAILED")
+    focus = GameTapeIssueFocus(
+        scope="STEP",
+        repository_execution_id="repo-exec",
+        repository_id="repo-1",
+        repository_name="repo",
+        step_execution_id="step-exec",
+        step_id="build",
+        code="BUILD_FAILED",
+    )
     why = GameTapeWhyNotDiagnostic(
-        code="NO_RETRY", stage="EXECUTION", retryable=False,
-        authority_owner="fleet_run", message="No retry",
+        code="NO_RETRY",
+        stage="EXECUTION",
+        retryable=False,
+        authority_owner="fleet_run",
+        message="No retry",
         safe_next_action="Original safe action",
     )
     owner = _RunOwner(tape=_Tape(focus=(focus,), why_not=why, count=1))
@@ -163,7 +188,10 @@ def test_handoff_transports_actual_fleet_detail_game_tape(tmp_path, capsys):
     from oh_goon.core.models.goon_plan_source import PlanFileSource
     from oh_goon.core.models.repository import RepositoryIdentity
     from oh_goon.core.models.run import CompletedFleetRun, FleetRunDetail, FleetRunProgress
-    from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, fleet_repository_scope
+    from oh_goon.core.models.run_admission import (
+        DirectFleetExecutionAdmission,
+        fleet_repository_scope,
+    )
     from oh_goon.core.models.target import FleetPlanTarget
     from oh_goon.core.time import utc_now
     from oh_goon.core.vocabulary import OperationAction
@@ -172,24 +200,34 @@ def test_handoff_transports_actual_fleet_detail_game_tape(tmp_path, capsys):
     from tests.factories.run_admission import repository_admissions_for
 
     plan = ResolvedFleetPlan.create(
-        name="run5-handoff", description="", execution=MaintenanceExecutionPolicy(),
+        name="run5-handoff",
+        description="",
+        execution=MaintenanceExecutionPolicy(),
         steps=(ResolvedCommandStep(step_id="check", argv=("true",), timeout_seconds=30),),
     )
     target = FleetPlanTarget(
-        kind="fleet_plan", plan=plan, source=PlanFileSource(sha256="1" * 64),
+        kind="fleet_plan",
+        plan=plan,
+        source=PlanFileSource(sha256="1" * 64),
         identity=structural_execution_identity(plan),
     )
     repository = RepositoryIdentity(path=tmp_path / "repo")
     now = utc_now()
     run = CompletedFleetRun(
-        status=FleetRunStatus.COMPLETED, fleet_run_id="run-5", target=target,
+        status=FleetRunStatus.COMPLETED,
+        fleet_run_id="run-5",
+        target=target,
         capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
-        repository_scope=fleet_repository_scope(None), targets=(repository,),
-        accepted_at=now, started_at=now, finished_at=now,
+        repository_scope=fleet_repository_scope(None),
+        targets=(repository,),
+        accepted_at=now,
+        started_at=now,
+        finished_at=now,
         progress=FleetRunProgress(total=1, succeeded=1, failed=0, needs_attention=0),
     )
     detail = FleetRunDetail(
-        run=run, execution=DirectFleetExecutionAdmission(),
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
         repository_admissions=repository_admissions_for(run.target, run.targets),
     )
     owner = SimpleNamespace(get=lambda run_id: detail)

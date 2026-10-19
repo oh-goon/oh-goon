@@ -1,5 +1,3 @@
 version: 1
-inputs:
-- coverage_threshold
 goons:
 - python/quality

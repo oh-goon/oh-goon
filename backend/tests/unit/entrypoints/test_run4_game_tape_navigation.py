@@ -1,4 +1,5 @@
 """RUN-4: all navigation is transport of one original archived Game Tape."""
+
 from __future__ import annotations
 
 import json
@@ -27,30 +28,43 @@ class _Tape:
         self.fleet_run_id = run_id
         self.status = SimpleNamespace(value="ATTENTION_REQUIRED")
         self.issue_focus = (
-            _Fact(scope="STEP", repository_execution_id="repo-run-a",
-                  step_execution_id="step-run-a", code="FAILED_AUTHORITY"),
+            _Fact(
+                scope="STEP",
+                repository_execution_id="repo-run-a",
+                step_execution_id="step-run-a",
+                code="FAILED_AUTHORITY",
+            ),
         )
         step = SimpleNamespace(
-            step_execution_id="step-run-a", step_id="verify", order=2,
-            status=SimpleNamespace(value="FAILED"), output_names=("build",),
+            step_execution_id="step-run-a",
+            step_id="verify",
+            order=2,
+            status=SimpleNamespace(value="FAILED"),
+            output_names=("build",),
             outputs=(_Fact(name="build", sha256="a" * 64, byte_count=18),),
             artifacts=(_Fact(status="PRESENT", path="build/receipt.txt"),),
             stdout_evidence=_Fact(sha256="b" * 64, byte_count=200, line_count=3),
             stderr_evidence=None,
             model_dump=lambda *, mode: {
-                "step_execution_id": "step-run-a", "step_id": "verify",
-                "status": "FAILED", "why": {"reached": True},
+                "step_execution_id": "step-run-a",
+                "step_id": "verify",
+                "status": "FAILED",
+                "why": {"reached": True},
                 "outputs": [{"name": "build", "sha256": "a" * 64}],
                 "failure": {"signature_id": "signed-canonical"},
             },
         )
         untouched = SimpleNamespace(
-            step_execution_id="step-run-b", step_id="package", order=3,
-            status=SimpleNamespace(value="NOT_RUN"), output_names=(),
-            outputs=(), artifacts=(), stdout_evidence=None, stderr_evidence=None,
-            model_dump=lambda *, mode: {
-                "step_execution_id": "step-run-b", "status": "NOT_RUN"
-            },
+            step_execution_id="step-run-b",
+            step_id="package",
+            order=3,
+            status=SimpleNamespace(value="NOT_RUN"),
+            output_names=(),
+            outputs=(),
+            artifacts=(),
+            stdout_evidence=None,
+            stderr_evidence=None,
+            model_dump=lambda *, mode: {"step_execution_id": "step-run-b", "status": "NOT_RUN"},
         )
         self.repositories = (
             SimpleNamespace(
@@ -64,7 +78,8 @@ class _Tape:
     def model_dump(self, *, mode):
         assert mode == "json"
         return {
-            "fleet_run_id": self.fleet_run_id, "status": "ATTENTION_REQUIRED",
+            "fleet_run_id": self.fleet_run_id,
+            "status": "ATTENTION_REQUIRED",
             "repositories": [{"repository_execution_id": "repo-run-a"}],
             "issue_focus": [{"code": "FAILED_AUTHORITY"}],
             "storage": {"retention": "canonical"},
@@ -116,7 +131,8 @@ def test_outputs_preserves_canonical_evidence_but_never_invents_raw_log_bytes(ca
     result = json.loads(capsys.readouterr().out)
     one, two = result["repositories"][0]["steps"]
     assert one == {
-        "step_execution_id": "step-run-a", "step_id": "verify",
+        "step_execution_id": "step-run-a",
+        "step_id": "verify",
         "output_names": ["build"],
         "outputs": [{"name": "build", "sha256": "a" * 64, "byte_count": 18}],
         "artifacts": [{"status": "PRESENT", "path": "build/receipt.txt"}],

@@ -1,8 +1,8 @@
 """Hostile T0B2A offline review tests; never actual independent custody evidence."""
+
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import shutil
 from pathlib import Path
@@ -11,15 +11,20 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.offline_custody_review_contract import (
-    _SOURCE, check_offline_custody_review_contract,
+    _SOURCE,
+    check_offline_custody_review_contract,
 )
+from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.trust_custody_evidence_contract import (
-    _REGISTRY, _REVIEW_FIELDS,
+    _REGISTRY,
+    _REVIEW_FIELDS,
 )
 from oh_goon.repository_tooling.offline_custody_review import (
-    ReviewRejected, _DOMAIN, _canonical, inspect_packet,
+    _DOMAIN,
+    ReviewRejected,
+    _canonical,
+    inspect_packet,
 )
 
 
@@ -36,9 +41,12 @@ def _packet(tmp_path: Path):
     payload = {
         "schema": "oh-goon/offline-custody-review/v1",
         "policy_sha256": hashlib.sha256((ROOT / _REGISTRY).read_bytes()).hexdigest(),
-        "custody_register_sha256": hashlib.sha256((ROOT / "backend/trust-custody-evidence.json").read_bytes()).hexdigest(),
+        "custody_register_sha256": hashlib.sha256(
+            (ROOT / "backend/trust-custody-evidence.json").read_bytes()
+        ).hexdigest(),
         "subject": "admission_issuer_evidence/source_identity",
-        "disposition": "KEEP", "reviewer_id": "test-only-reviewer",
+        "disposition": "KEEP",
+        "reviewer_id": "test-only-reviewer",
         "rationale": "synthetic unit test only, no actual deployment is inspected",
         "observations": {key: "synthetic test statement" for key in _REVIEW_FIELDS},
         "evidence": {"observations.txt": hashlib.sha256(original).hexdigest()},
@@ -63,12 +71,28 @@ def test_valid_signed_packet_is_only_intake_not_trust(tmp_path: Path) -> None:
     assert result["approval"] == "NOT_GRANTED"
 
 
-@pytest.mark.parametrize("attack", [
-    "wrong_pin", "wrong_key", "changed_review", "changed_evidence", "wrong_policy", "wrong_register",
-    "unregistered_subject", "unreviewed", "added_field", "incomplete_observations",
-    "missing_rationale", "no_artifacts", "path_escape", "private_material",
-    "bad_domain_signature", "unsupported_decision", "unsigned_claim_addition",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "wrong_pin",
+        "wrong_key",
+        "changed_review",
+        "changed_evidence",
+        "wrong_policy",
+        "wrong_register",
+        "unregistered_subject",
+        "unreviewed",
+        "added_field",
+        "incomplete_observations",
+        "missing_rationale",
+        "no_artifacts",
+        "path_escape",
+        "private_material",
+        "bad_domain_signature",
+        "unsupported_decision",
+        "unsigned_claim_addition",
+    ],
+)
 def test_forgery_substitution_and_schema_drift_fail(tmp_path: Path, attack: str) -> None:
     directory, key, pin, payload, sign = _packet(tmp_path)
     if attack == "wrong_pin":
@@ -123,7 +147,9 @@ def test_forgery_substitution_and_schema_drift_fail(tmp_path: Path, attack: str)
         inspect_packet(directory, key, pin)
 
 
-@pytest.mark.parametrize("attack", ["symlink_evidence", "hardlink_evidence", "symlink_key", "symlink_packet"])
+@pytest.mark.parametrize(
+    "attack", ["symlink_evidence", "hardlink_evidence", "symlink_key", "symlink_packet"]
+)
 def test_evidence_object_aliases_rejected(tmp_path: Path, attack: str) -> None:
     directory, key, pin, _, _ = _packet(tmp_path)
     if attack == "symlink_evidence":
@@ -144,36 +170,63 @@ def test_evidence_object_aliases_rejected(tmp_path: Path, attack: str) -> None:
 
 
 def _architecture_fixture(tmp_path: Path) -> Path:
-    for source in (_SOURCE, "backend/pyproject.toml", "scripts/qualify_b12_development_wsl.sh",
-                   "backend/tests/unit/repository_tooling/test_t0b2_offline_custody_review.py",
-                   "backend/tests/unit/repository_tooling/test_t0b2b1_custody_dossier.py"):
+    for source in (
+        _SOURCE,
+        "backend/pyproject.toml",
+        "scripts/qualify_b12_development_wsl.sh",
+        "backend/tests/unit/repository_tooling/test_t0b2_offline_custody_review.py",
+        "backend/tests/unit/repository_tooling/test_t0b2b1_custody_dossier.py",
+    ):
         path = tmp_path / source
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / source, path)
     return tmp_path
 
 
-@pytest.mark.parametrize("mutation", ["remove_signature", "dead_branch_signature", "remove_no_follow", "grant_gate", "duplicate_runtime", "remove_enrollment"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "remove_signature",
+        "dead_branch_signature",
+        "remove_no_follow",
+        "grant_gate",
+        "duplicate_runtime",
+        "remove_enrollment",
+    ],
+)
 def test_x0_rejects_offline_review_authority_drift(tmp_path: Path, mutation: str) -> None:
     root = _architecture_fixture(tmp_path)
     assert not check_offline_custody_review_contract(root)
     path = root / _SOURCE
     if mutation == "remove_signature":
-        path.write_text(path.read_text().replace("_verify_review_signature(packet,", "_bypass_signature(packet,"))
+        path.write_text(
+            path.read_text().replace(
+                "_verify_review_signature(packet,", "_bypass_signature(packet,"
+            )
+        )
     elif mutation == "dead_branch_signature":
-        path.write_text(path.read_text().replace(
-            "            _verify_review_signature(packet, bytes.fromhex(sig_hex.strip()), public_key)",
-            "            if False:\n                _verify_review_signature(packet, bytes.fromhex(sig_hex.strip()), public_key)"))
+        path.write_text(
+            path.read_text().replace(
+                "            _verify_review_signature(packet, bytes.fromhex(sig_hex.strip()), public_key)",
+                "            if False:\n                _verify_review_signature(packet, bytes.fromhex(sig_hex.strip()), public_key)",
+            )
+        )
     elif mutation == "remove_no_follow":
         path.write_text(path.read_text().replace("os.O_NOFOLLOW", "os.O_RDONLY"))
     elif mutation == "grant_gate":
-        path.write_text(path.read_text().replace('"gate_a": "BLOCKED", "runtime_authority": False',
-                                                 '"gate_a": "PASS", "runtime_authority": True'))
+        path.write_text(
+            path.read_text().replace(
+                '"gate_a": "BLOCKED"',
+                '"gate_a": "PASS"',
+            )
+        )
     elif mutation == "duplicate_runtime":
         p = root / "backend/src/oh_goon/runtime/second_trust_reviewer.py"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("from oh_goon.repository_tooling import offline_custody_review\n")
     elif mutation == "remove_enrollment":
         shell = root / "scripts/qualify_b12_development_wsl.sh"
-        shell.write_text(shell.read_text().replace("--require-module test_t0b2_offline_custody_review", ""))
+        shell.write_text(
+            shell.read_text().replace("--require-module test_t0b2_offline_custody_review", "")
+        )
     assert check_offline_custody_review_contract(root)

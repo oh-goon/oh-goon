@@ -18,7 +18,9 @@ class _Git:
         return CommandResult(returncode=0, stdout="ok", stderr="", argv=argv)
 
 
-def test_migration_commit_success_without_observable_head_is_outcome_unknown(tmp_path: Path) -> None:
+def test_migration_commit_success_without_observable_head_is_outcome_unknown(
+    tmp_path: Path,
+) -> None:
     git = _Git()
 
     with pytest.raises(ExternalEffectOutcomeUnknown, match="repository mutation outcome"):

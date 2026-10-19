@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -50,7 +49,9 @@ def test_storage_prune_json_reports_owner_results(monkeypatch, capsys) -> None:
     )
     monkeypatch.setattr(
         "oh_goon.services.certification_bootstrap.reconcile_certification_run_workspaces",
-        lambda *, state_home: SimpleNamespace(removed=("repo-a/oh-goon-plan-old",), refused=(), cleanup_incomplete=()),
+        lambda *, state_home: SimpleNamespace(
+            removed=("repo-a/oh-goon-plan-old",), refused=(), cleanup_incomplete=()
+        ),
     )
     args = build_parser().parse_args(["storage", "prune", "--yes", "--json"])
 
@@ -85,12 +86,7 @@ def test_storage_prune_cli_reclaims_only_current_certification_scratch(
 
     old_schema = max(1, DATABASE_SCHEMA_VERSION - 1)
     historical = (
-        state_home
-        / "oh-goon"
-        / "certification"
-        / repo_id
-        / f"schema-{old_schema}"
-        / "state"
+        state_home / "oh-goon" / "certification" / repo_id / f"schema-{old_schema}" / "state"
     )
     historical_workspace = historical / "run-workspaces" / "oh-goon-plan-old-stale"
     historical_workspace.mkdir(parents=True)
@@ -137,13 +133,16 @@ def test_storage_prune_text_names_each_refused_certification_workspace(monkeypat
     assert "Refused certification workspace: repo-b/oh-goon-plan-unproven" in output
 
 
-def test_storage_status_json_exposes_resolved_capacity_policy(monkeypatch, tmp_path, capsys) -> None:
+def test_storage_status_json_exposes_resolved_capacity_policy(
+    monkeypatch, tmp_path, capsys
+) -> None:
     state = tmp_path / "state"
     state.mkdir()
     monkeypatch.setenv("XDG_STATE_HOME", str(state))
     monkeypatch.setenv("OH_GOON_STORAGE_SOFT_FREE_BYTES", "200")
     monkeypatch.setenv("OH_GOON_STORAGE_HARD_FREE_BYTES", "100")
     from collections import namedtuple
+
     Usage = namedtuple("Usage", "total used free")
     monkeypatch.setattr(
         "oh_goon.runtime.storage_health.shutil.disk_usage",

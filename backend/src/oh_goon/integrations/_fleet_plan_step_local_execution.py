@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
-from oh_goon.core.file_digest import sha256_file
 from oh_goon.core.errors import FleetExtensionInvalid, FleetPlanInvalid
+from oh_goon.core.file_digest import sha256_file
 from oh_goon.core.models.fleet_plan import (
     GitResultContract,
     ResolvedExtensionStep,
@@ -18,8 +17,8 @@ from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
-from oh_goon.integrations.fleet_plan_environment import git_execution_environment
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, from_command
+from oh_goon.integrations.fleet_plan_environment import git_execution_environment
 
 
 def execute_pre_commit(

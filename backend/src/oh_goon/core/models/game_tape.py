@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from oh_goon.core.models.storage_maintenance import GameTapeStorage
-
 from typing import Literal
 
 from pydantic import AwareDatetime, Field, computed_field, model_validator
 
 from oh_goon.core.models.base import ImmutableModel
-from oh_goon.core.models.execution_identity import ResolvedExecutionReference
 from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
 )
+from oh_goon.core.models.execution_identity import ResolvedExecutionReference
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanArtifactEvidence,
     PlanOutputEvidence,
@@ -19,10 +17,14 @@ from oh_goon.core.models.fleet_plan_evidence import (
 )
 from oh_goon.core.models.game_tape_observability import GameTapeObservabilityReceipt
 from oh_goon.core.models.game_tape_team import GameTapeTeamComposition
-from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import FleetExecutionAdmission
-from oh_goon.core.models.run_launch import ApplicationLaunchReceipt, UnmanagedApplicationLaunchReceipt
+from oh_goon.core.models.run_launch import (
+    ApplicationLaunchReceipt,
+    UnmanagedApplicationLaunchReceipt,
+)
+from oh_goon.core.models.scheduling import SchedulingEnvelope
+from oh_goon.core.models.storage_maintenance import GameTapeStorage
 from oh_goon.core.vocabulary import FleetRunSource, GameTapeEventType, GameTapeStatus
 
 
@@ -138,6 +140,7 @@ class GameTapeStepExecution(ImmutableModel):
         from oh_goon.core.game_tape_retry_context import summarize_retry_context
 
         return summarize_retry_context(self.attempt_count, self.attempt_transitions)
+
     stdout_evidence: PlanOutputEvidence | None = None
     stderr_evidence: PlanOutputEvidence | None = None
     output_names: tuple[str, ...] = Field(default_factory=tuple, max_length=16)
@@ -204,9 +207,7 @@ class GameTapeShardAttemptLineage(ImmutableModel):
     runtime_authority_receipt_identity: str | None = Field(
         default=None, pattern=r"^sha256:[0-9a-f]{64}$"
     )
-    supervisor_receipt_identity: str | None = Field(
-        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
-    )
+    supervisor_receipt_identity: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     process_group_quiescent: bool | None = None
     forced_termination: bool | None = None
 
@@ -336,6 +337,7 @@ class GameTapeRepositoryExecution(ImmutableModel):
     @property
     def bottleneck_percent(self) -> int | None:
         return self._bottleneck()[1]
+
     shard_lineage: tuple[GameTapeShardLineage, ...] = Field(default_factory=tuple)
     verification_execution: GameTapeVerificationExecutionBoundary | None = None
 
@@ -446,7 +448,9 @@ class GameTapeEvent(ImmutableModel):
     pid: int | None = Field(default=None, ge=1)
     process_identity: str | None = Field(default=None, min_length=1)
     returncode: int | None = None
-    source: Literal["run_lifecycle", "admitted_plan", "operation_report", "step_execution", "lifecycle_event"]
+    source: Literal[
+        "run_lifecycle", "admitted_plan", "operation_report", "step_execution", "lifecycle_event"
+    ]
     message: str = Field(min_length=1, max_length=500)
 
 
@@ -456,7 +460,9 @@ class GameTape(ImmutableModel):
     fleet_run_id: str = Field(min_length=1)
     run_source: FleetRunSource = FleetRunSource.MANUAL
     execution: FleetExecutionAdmission
-    application_launch: ApplicationLaunchReceipt = Field(default_factory=UnmanagedApplicationLaunchReceipt)
+    application_launch: ApplicationLaunchReceipt = Field(
+        default_factory=UnmanagedApplicationLaunchReceipt
+    )
     scheduling: SchedulingEnvelope | None = None
     status: GameTapeStatus
     execution_reference: ResolvedExecutionReference | None = None
@@ -472,6 +478,7 @@ class GameTape(ImmutableModel):
     @property
     def hidden_issue_count(self) -> int:
         return max(0, self.issue_count - len(self.issue_focus))
+
     play_by_play: tuple[GameTapeEvent, ...] = Field(default_factory=tuple)
     repositories: tuple[GameTapeRepositoryExecution, ...]
 

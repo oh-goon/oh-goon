@@ -8,7 +8,6 @@ from oh_goon.core.enforcer_lace_trust import (
     UNPROVISIONED_FLEET_PLAN_INGRESS,
 )
 
-
 SUCCESS_RECORD_ID = "OH_GOON_CERTIFICATION_BOOTSTRAP"
 ERROR_RECORD_ID = "OH_GOON_CERTIFICATION_BOOTSTRAP_ERROR"
 FLEET_PROVISIONING_BLOCKER_RECORD_ID = "OH_GOON_FLEET_PROVISIONING_BLOCKER"
@@ -20,7 +19,8 @@ def is_missing_fleet_provisioning(output: str) -> bool:
     # An unrelated exception, diagnostic quotation or attacker-controlled
     # string containing the phrase must not reclassify APP certification.
     return any(
-        line.strip() in (
+        line.strip()
+        in (
             UNPROVISIONED_FLEET_PLAN_INGRESS,
             UNPROVISIONED_FLEET_ADMISSION,
         )
@@ -42,16 +42,19 @@ def render_error_record(payload: Mapping[str, object]) -> str:
 
 def render_missing_fleet_provisioning_blocker() -> str:
     """Report original admission denial, never mint or infer authority."""
-    return _render_record(FLEET_PROVISIONING_BLOCKER_RECORD_ID, {
-        "schema": "oh-goon.fleet-provisioning-blocker/v1",
-        "reason": "FLEET_ENFORCER_NOT_PROVISIONED",
-        "status": "BLOCKED",
-        "authority": "NOT_ESTABLISHED",
-        "certification_goon_started": False,
-        "app_pass": False,
-        "authenticated_replay": "NOT_AUTHORIZED",
-        "group_a_gate_a": "NOT_RUN",
-    })
+    return _render_record(
+        FLEET_PROVISIONING_BLOCKER_RECORD_ID,
+        {
+            "schema": "oh-goon.fleet-provisioning-blocker/v1",
+            "reason": "FLEET_ENFORCER_NOT_PROVISIONED",
+            "status": "BLOCKED",
+            "authority": "NOT_ESTABLISHED",
+            "certification_goon_started": False,
+            "app_pass": False,
+            "authenticated_replay": "NOT_AUTHORIZED",
+            "group_a_gate_a": "NOT_RUN",
+        },
+    )
 
 
 def _payloads(output: str, record_id: str) -> list[str]:

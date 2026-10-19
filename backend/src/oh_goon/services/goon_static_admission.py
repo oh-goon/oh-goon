@@ -14,19 +14,20 @@ from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.canonical_goon_tool_projection import (
     derive_canonical_goon_tool_projection,
 )
+from oh_goon.services.goon_execution_requirements import REQUIREMENTS_FILE as REQUIREMENTS_FILE
 from oh_goon.services.goon_execution_requirements import (
-    REQUIREMENTS_FILE,
     SCHEMA,
     StaticAdmissionIssue,
-    canonical_step_required_tools,
     load_goon_execution_requirements,
     validate_goon_execution_requirements,
     workload_tool_permissions,
 )
+from oh_goon.services.goon_execution_requirements import (
+    canonical_step_required_tools as canonical_step_required_tools,
+)
 
-def _catalog_keys(
-    store: GoonTemplateStore, issues: list[StaticAdmissionIssue]
-) -> tuple[str, ...]:
+
+def _catalog_keys(store: GoonTemplateStore, issues: list[StaticAdmissionIssue]) -> tuple[str, ...]:
     try:
         return store.keys()
     except Exception as exc:  # template package discovery must become one static failure
@@ -103,9 +104,7 @@ def _compile_catalog(
 def _validate_import_cycles(compiled_by_key: dict[str, object]) -> list[StaticAdmissionIssue]:
     graph = {
         key: tuple(
-            str(step.goon)
-            for step in compiled.steps
-            if getattr(step, "kind", None) == "goon"
+            str(step.goon) for step in compiled.steps if getattr(step, "kind", None) == "goon"
         )
         for key, compiled in compiled_by_key.items()
     }
@@ -157,7 +156,6 @@ def _requirements_failure(exc: ValueError) -> dict[str, object]:
             ).as_payload()
         ],
     }
-
 
 
 def _tool_authority_failure(exc: Exception) -> dict[str, object]:
@@ -277,9 +275,7 @@ def _tool_projection_issues(
                         goon=key,
                         step_id=step_id,
                         missing_tools=missing,
-                        authority_paths=tuple(
-                            path for tool, path in provenance if tool in missing
-                        ),
+                        authority_paths=tuple(path for tool, path in provenance if tool in missing),
                         message=(
                             "generated canonical Step tool transport is missing current "
                             "compiler/workload-derived executable need"
@@ -338,6 +334,7 @@ def _authority_closure_metrics(
             unresolved_count += len(unresolved)
             proven += int(not unresolved)
     return total, proven, unresolved_count
+
 
 def _package_executable_authority_count(
     workloads: WorkloadExecutionRequirements,

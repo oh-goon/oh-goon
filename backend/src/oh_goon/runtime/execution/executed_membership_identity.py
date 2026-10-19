@@ -1,13 +1,12 @@
 """Canonical identity for executed verification membership."""
+
 from __future__ import annotations
 
 import hashlib
 import json
 from collections.abc import Iterable
 
-EXECUTED_VERIFICATION_MEMBERSHIP_SCHEMA = (
-    "oh-goon.executed-verification-membership/v1"
-)
+EXECUTED_VERIFICATION_MEMBERSHIP_SCHEMA = "oh-goon.executed-verification-membership/v1"
 
 
 def executed_verification_membership_identity(members: Iterable[str]) -> str:

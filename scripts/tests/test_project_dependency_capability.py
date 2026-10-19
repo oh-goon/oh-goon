@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import importlib.metadata
 from pathlib import Path
 
@@ -10,7 +12,7 @@ from oh_goon.repository_tooling import project_dependency_capability as capabili
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _versions(**overrides: str):
+def _versions(**overrides: str) -> Callable[[str], str]:
     defaults = {
         "cryptography": "46.0.4",
         "fastapi": "0.128.2",
@@ -40,11 +42,16 @@ def test_project_runtime_capability_requires_declared_runtime_imports(
     monkeypatch.setattr(capability, "_default_import_probe", lambda *_: None)
     payload = capability.build_project_capability(lock=lock)
     assert payload["result"] == "PROJECT-RUNTIME-CAPABILITIES-BLOCKED"
+    assert isinstance(payload["packages"], list)
+    assert isinstance(payload["blockers"], list)
     assert any(
         row["distribution"] == "hashmarks" and row["status"] == "missing"
         for row in payload["packages"]
     )
-    assert "hashmarks: missing from materialized project environment" in payload["blockers"]
+    assert (
+        "hashmarks: missing from materialized project environment"
+        in payload["blockers"]
+    )
 
 
 def test_project_runtime_capability_observes_without_redeciding_versions(
@@ -63,6 +70,8 @@ def test_project_runtime_capability_observes_without_redeciding_versions(
     payload = capability.build_project_capability(lock=lock)
     assert payload["result"] == "PROJECT-RUNTIME-CAPABILITIES-OBSERVED"
     assert payload["compatibility_decision"] == "native-uv-only"
+    assert isinstance(payload["packages"], list)
+    assert isinstance(payload["declared_runtime_dependencies"], list)
     assert {row["status"] for row in payload["packages"]} == {"observed"}
     assert set(payload["declared_runtime_dependencies"]) == {
         "cryptography",
@@ -73,6 +82,8 @@ def test_project_runtime_capability_observes_without_redeciding_versions(
         "pyyaml",
         "uvicorn",
     }
+    assert isinstance(payload["dependency_intent_sha256"], str)
+    assert isinstance(payload["dependency_resolution_sha256"], str)
     assert payload["dependency_intent_sha256"].startswith("sha256:")
     assert payload["dependency_resolution_sha256"].startswith("sha256:")
     assert payload["registry_evaluated"] is False

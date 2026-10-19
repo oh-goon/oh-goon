@@ -5,12 +5,12 @@ from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field, computed_field, model_validator
 
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan_composition import PlanInputDefinition, PlanInputValue
 from oh_goon.core.models.fleet_plan_evidence import FleetPlanPreview
-from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.operator_diagnostic import OperatorWhyNotDiagnostic
+from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.product_identity import stable_id
 from oh_goon.core.template_identity import TemplateClassification
 from oh_goon.core.vocabulary import FleetRunStatus
 

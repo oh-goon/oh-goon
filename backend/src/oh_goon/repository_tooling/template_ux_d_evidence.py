@@ -3,6 +3,7 @@
 All YAML meaning comes from the existing template stores, compiler and UX-C
 proposal service. No workload, Run, Schedule, credential or output is created.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -67,16 +68,25 @@ def source_archive_closure(path: Path) -> dict:
         name = info.filename
         p = PurePosixPath(name)
         kind = (info.external_attr >> 16) & 0o170000
-        if (name.startswith("/") or "\\" in name or ".." in p.parts or
-                not name or name.startswith("./") or name in seen or
-                kind == 0o120000):
+        if (
+            name.startswith("/")
+            or "\\" in name
+            or ".." in p.parts
+            or not name
+            or name.startswith("./")
+            or name in seen
+            or kind == 0o120000
+        ):
             unsafe.append(name)
         seen.add(name)
     missing = sorted(set(GUIDES) - seen)
-    return {"status": "PASS" if not unsafe and not missing else "FAIL",
-            "guide_members_present": len(GUIDES) - len(missing),
-            "guide_members_expected": len(GUIDES),
-            "missing_guides": missing, "unsafe_names": unsafe}
+    return {
+        "status": "PASS" if not unsafe and not missing else "FAIL",
+        "guide_members_present": len(GUIDES) - len(missing),
+        "guide_members_expected": len(GUIDES),
+        "missing_guides": missing,
+        "unsafe_names": unsafe,
+    }
 
 
 def collect(root: Path) -> dict:
@@ -85,46 +95,66 @@ def collect(root: Path) -> dict:
     plans = PlanTemplateStore(root / "templates/plans")
     goons = GoonTemplateStore(root / "templates/goons")
     inventory = collect_catalog(root)
+    plan_keys = plans.keys()
+    goon_keys = goons.keys()
     results = []
-    for key in plans.keys():
+    for key in plan_keys:
         source = plans.source(key)
         try:
-            draft = propose_plan(key=key, expected_sha256=source.sha256,
-                                 plans=plans, goons=goons)
-            parsed = parse_plan_template(draft.plan_yaml,
-                                         expected_name=source.path.parent.name)
-            consistent = (parsed.steps == source.compiled.steps and
-                          draft.report["status"] == "DRAFT_ONLY_NOT_ADMITTED" and
-                          draft.report["execution_permission"] == "NONE" and
-                          draft.report["save_permission"] == "NONE" and
-                          draft.report["original_root_sha256"] == source.sha256)
-            results.append({"key": key, "status": "PASS" if consistent else "FAIL",
-                            "source_sha256": source.sha256,
-                            "source_bytes": len(source.content.encode("utf-8")),
-                            "draft_bytes": len(draft.plan_yaml.encode("utf-8")),
-                            "step_occurrences": len(parsed.steps),
-                            "missing_required_names": draft.report["missing_required_inputs"],
-                            "resolved_status": draft.report["resolved_comparison"]["status"],
-                            "comparison_is_execution": False})
+            draft = propose_plan(key=key, expected_sha256=source.sha256, plans=plans, goons=goons)
+            parsed = parse_plan_template(draft.plan_yaml, expected_name=source.path.parent.name)
+            consistent = (
+                parsed.steps == source.compiled.steps
+                and draft.report["status"] == "DRAFT_ONLY_NOT_ADMITTED"
+                and draft.report["execution_permission"] == "NONE"
+                and draft.report["save_permission"] == "NONE"
+                and draft.report["original_root_sha256"] == source.sha256
+            )
+            results.append(
+                {
+                    "key": key,
+                    "status": "PASS" if consistent else "FAIL",
+                    "source_sha256": source.sha256,
+                    "source_bytes": len(source.content.encode("utf-8")),
+                    "draft_bytes": len(draft.plan_yaml.encode("utf-8")),
+                    "step_occurrences": len(parsed.steps),
+                    "missing_required_names": draft.report["missing_required_inputs"],
+                    "resolved_status": draft.report["resolved_comparison"]["status"],
+                    "comparison_is_execution": False,
+                }
+            )
         except Exception as exc:  # One broken catalog member must not erase the rest.
             results.append({"key": key, "status": "FAIL", "error_type": type(exc).__name__})
     link_results = guide_links(root)
     invalid_links = [v for v in link_results if v["status"] != "OK"]
     package_results = inventory["packages"]
-    catalog_good = (len(package_results) == 65 and
-                    sum(p["kind"] == "goon" for p in package_results) == 41 and
-                    sum(p["kind"] == "plan" for p in package_results) == 24 and
-                    inventory["metrics"].get("unresolved_readme_links", 0) == 0)
-    success = (catalog_good and len(results) == 24 and
-               all(x["status"] == "PASS" for x in results) and not invalid_links)
+    expected_packages = {("goon", key) for key in goon_keys} | {("plan", key) for key in plan_keys}
+    observed_packages = [(p["kind"], p["key"]) for p in package_results]
+    catalog_good = (
+        bool(goon_keys)
+        and bool(plan_keys)
+        and len(observed_packages) == len(set(observed_packages))
+        and set(observed_packages) == expected_packages
+        and inventory["metrics"].get("unresolved_readme_links") == 0
+    )
+    success = (
+        catalog_good
+        and len(results) == len(plan_keys)
+        and all(x["status"] == "PASS" for x in results)
+        and not invalid_links
+    )
     return {
         "schema": "oh-goon.template-ux-d-evidence/v1",
         "status": "PASS" if success else "FAIL",
         "authority": "existing catalog stores, canonical compiler, UX-C draft service",
-        "execution_permission": "NONE", "save_permission": "NONE",
-        "catalog": {"goons": 41, "plans": len(results),
-                    "canonical_inventory_status": "PASS" if catalog_good else "FAIL",
-                    "readme_missing_or_bad_links": inventory["metrics"].get("unresolved_readme_links")},
+        "execution_permission": "NONE",
+        "save_permission": "NONE",
+        "catalog": {
+            "goons": len(goon_keys),
+            "plans": len(results),
+            "canonical_inventory_status": "PASS" if catalog_good else "FAIL",
+            "readme_missing_or_bad_links": inventory["metrics"].get("unresolved_readme_links"),
+        },
         "plan_drafts": results,
         "guide_links": link_results,
         "missing_or_bad_guide_links": invalid_links,
@@ -144,8 +174,10 @@ def collect(root: Path) -> dict:
             "compact_distribution": "NOT_PROVIDED",
             "handoff_distribution": "PENDING_ARTIFACT_AUDIT",
         },
-        "gate_a": "BLOCKED", "gate_b": "BLOCKED",
-        "app_pass": "BLOCKED", "release": "BLOCKED",
+        "gate_a": "BLOCKED",
+        "gate_b": "BLOCKED",
+        "app_pass": "BLOCKED",
+        "release": "BLOCKED",
         "ux_d_final_exit_gate": "BLOCKED_PENDING_PAIRED_AND_NATIVE_EVIDENCE",
     }
 
@@ -163,8 +195,16 @@ def main() -> int:
             payload["status"] = "FAIL"
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"status": payload["status"], "catalog": payload["catalog"],
-                      "drafts": payload["evaluation"]["passing_plan_drafts"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "status": payload["status"],
+                "catalog": payload["catalog"],
+                "drafts": payload["evaluation"]["passing_plan_drafts"],
+            },
+            sort_keys=True,
+        )
+    )
     return 0 if payload["status"] == "PASS" else 2
 
 

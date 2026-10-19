@@ -20,6 +20,7 @@ def _typescript_method_parameter_types(text: str, method: str) -> tuple[str, ...
         types.append(type_name.strip())
     return tuple(types)
 
+
 def _check_frontend_transport_ownership(root: Path) -> list[Violation]:
     source = root / "frontend" / "src"
     violations: list[Violation] = []
@@ -72,6 +73,7 @@ def _check_frontend_transport_ownership(root: Path) -> list[Violation]:
 
     return violations
 
+
 def _check_browser_persistence_boundary(root: Path) -> list[Violation]:
     """Operational authority must not gain browser persistence."""
     source = root / "frontend" / "src"
@@ -96,6 +98,7 @@ def _check_browser_persistence_boundary(root: Path) -> list[Violation]:
                 )
             )
     return violations
+
 
 def _check_mutable_resource_fences(root: Path) -> list[Violation]:
     """Require mutable/destructive public API methods to carry server-owned fence types.

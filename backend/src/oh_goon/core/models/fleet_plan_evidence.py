@@ -13,21 +13,21 @@ from oh_goon.core.fleet_plan_evidence_identity import (
     repository_admission_payload,
     resource_policy_payload,
 )
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
 )
 from oh_goon.core.models.fleet_observation import FleetObservationEvidence
-from oh_goon.core.models.fleet_plan_requirements import RequirementCount
 from oh_goon.core.models.fleet_plan_release_evidence import (
     KubernetesRolloutVerificationEvidence,
     KubernetesRolloutVerificationOutcome,
     PlanReleaseEffectEvidence,
 )
+from oh_goon.core.models.fleet_plan_requirements import RequirementCount
 from oh_goon.core.models.fleet_plan_retry import PlanRetryDecisionEvidence
 from oh_goon.core.models.fleet_plan_tool_authority import PlanHostToolAuthorityEvidence
 from oh_goon.core.models.shard_execution import CanonicalShardExecutionEvidence
+from oh_goon.core.product_identity import stable_id
 
 
 class PlanOutputEvidence(ImmutableModel):
@@ -40,7 +40,9 @@ class PublishedPlanOutputEvidence(ImmutableModel):
     name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     byte_count: int = Field(ge=0)
-    producer_execution_identity: str | None = Field(default=None, pattern=r"^attempt-output-[0-9a-f]{64}$")
+    producer_execution_identity: str | None = Field(
+        default=None, pattern=r"^attempt-output-[0-9a-f]{64}$"
+    )
 
 
 class PlanContentObjectEvidence(ImmutableModel):
@@ -272,7 +274,9 @@ type PlanStepTeardownEvidence = Annotated[
 class PlanExecutionRecoveryEventEvidence(ImmutableModel):
     """Normalized non-authoritative recovery provenance for one execution attempt."""
 
-    kind: Literal["process_group_cleanup", "timeout_refinement", "environment_retry", "sqlite_reproof"]
+    kind: Literal[
+        "process_group_cleanup", "timeout_refinement", "environment_retry", "sqlite_reproof"
+    ]
     action: str = Field(min_length=1)
     reason_code: str = Field(min_length=1)
     outcome: Literal["requested", "succeeded", "failed", "blocked"]

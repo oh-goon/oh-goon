@@ -31,6 +31,11 @@ own Run. Do not introduce another scheduler or executable-recipe owner.
 
 ## Product authority
 
+Ordinary Plan/Goon execution defaults to trusted local verification and waits for
+completion. Deep custody and privileged native qualification apply only to explicitly
+selected strict execution for untrusted code or requested additional guarantees.
+Keep normal startup and provider configuration simple; see `docs/CI_CD_CONTRACT.md`.
+
 Oh-Goon orchestrates native tools; it does not reimplement their semantics.
 Native uv, npm, pytest, Ruff, mypy, Git, Docker/BuildKit, Kubernetes, and operating
 system facilities retain their own resolution, cache, process, and result
@@ -107,8 +112,10 @@ with `backend/pyproject.toml` and native `uv.lock`; do not vendor, reacquire,
 repackage, or maintain a parallel release/commit/wheel identity. Bind evidence
 compatibility to the implementation identity reported by the loaded runtime.
 New repository-intelligence capabilities belong in Hashmarks first, including
-CodeMap, action-role/task ranking, decision packets, verification membership,
-failed-target recovery evidence, scout selection, and agent-economics features.
+CodeMap, repository-derived relevance, decision packets, verification membership,
+negative evidence and evidence economics. The coding agent owns hypotheses,
+attempt memory, scout/delegation choices, model routing and solution strategy;
+Oh-Goon retains execution recovery and workflow control.
 
 Hashmarks nominations are flat evidence, not execution batches. Oh-Goon's
 existing Fleet/Step owners handle grouping, concurrency, process launch,
@@ -160,12 +167,18 @@ Each shipped package contains exactly YAML and README:
   legacy lookup, inheritance, overlay, patching, hidden deduplication, or reordering.
 - YAML owns machine facts; duplicate keys are invalid. README explains the
   package with heading `# category/name`. No sidecars or third classification level.
-- Inputs cross boundaries through explicit `with:` bindings or Composite Goon
-  `pass:` shorthand, which the compiler expands into those bindings. Requirements
+- Plans automatically expose unique unbound direct public inputs; optional `inputs:`
+  narrows that interface. Composite Goons explicitly declare public names. Inputs
+  cross boundaries through projection, `with:` or import-local `pass:`. The compiler expands
+  forwarding into those bindings; multiple recipients must be explicit. Requirements
   stay provenanced to their declaring Goon. Import-local `as:` names one occurrence
   without changing its package identity or lookup. Preserve ordered duplicate edges.
+- Project-owned Goons use an explicit import `from:` catalog directory confined to
+  the root authoring workspace. Omitted `from:` selects the shipped catalog;
+  local packages never shadow shipped imports. Shared Plan storage owns only its
+  Plan file and refuses external local imports. See `templates/README.md`.
 - Classification is backend-owned and category-derived: `python`, `security`,
-  `oci`, and `kubernetes` are production; `advanced`, `general`, and `ml` are
+  `oci`, `kubernetes`, and `agents` are production; `advanced`, `general`, and `ml` are
   teaching; `oh-goon` is internal. Unknown categories fail. Production imports
   production only; teaching/internal may reuse production but not each other.
 - Read and parse each source once; derive compilation and source positions
@@ -293,3 +306,8 @@ Report completion in the response, not in new repository status files:
 A timeout or skipped suite is unverified. Never claim all tests pass unless all
 tests ran. Keep contributor instructions concise and link owning documents;
 there is no arbitrary line-count gate.
+
+Ordinary backend/integration gates exclude the existing `certification` marker.
+Privileged custody, fs-verity and installed-model proofs belong to explicitly
+selected strict/native qualification. Keep their portable negative/lifecycle
+checks in ordinary validation; see `backend/tests/README.md`.

@@ -194,9 +194,7 @@ def test_evaluate_requires_rationale_for_excluded_question(monkeypatch: pytest.M
 def test_evaluate_records_abstention_without_unsupported_penalty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    result, _ = _evaluate(
-        monkeypatch, observation=_observation(result="INSUFFICIENT_EVIDENCE")
-    )
+    result, _ = _evaluate(monkeypatch, observation=_observation(result="INSUFFICIENT_EVIDENCE"))
     assert result["unsupported_assertions"] == 0
     assert result["contradicted_claims"] == 0
     calibration = result["confidence_calibration"]["candidate_epistemic"]

@@ -1,32 +1,45 @@
 """M160: durable Run-selected host-tool evidence, no alternative PATH authority."""
+
 from pathlib import Path
 
 import pytest
 
-from oh_goon.core.enforcer_lace_trust import AdmittedRunContract, TrustProtocolError
 from oh_goon.core.enforcer_lace_issuer_evidence import TrustedIssuerVerifier
+from oh_goon.core.enforcer_lace_trust import AdmittedRunContract, TrustProtocolError
 from oh_goon.core.path_authority import StrictHostPathAuthority
 from oh_goon.integrations import content_snapshot
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.repository_tooling import enforcer_lace_native_tool_issuer as issuer
 from tests.factories.journal import start_run
 from tests.unit.services.test_group_a_verified_ingress_authorities import (
-    FIELDS, _test_private_key, roots, proof,
+    FIELDS,
+    _test_private_key,
+    proof,
+    roots,
 )
 
 
 def fixture(tmp_path: Path, monkeypatch):
+    import hashlib
+
+    from oh_goon.core.models.fleet_executor import (
+        FleetExecutorPlacement,
+        PlanExecutorCapacityEvidence,
+    )
+    from oh_goon.core.models.fleet_plan_evidence import (
+        PlanIsolationBackendEvidence,
+        PlanSnapshotEvidence,
+    )
     from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
-    from oh_goon.core.models.fleet_executor import PlanExecutorCapacityEvidence, FleetExecutorPlacement
-    from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence, PlanSnapshotEvidence
     from oh_goon.core.models.repository import RepositoryIdentity
     from oh_goon.core.models.run_admission import (
-        StrictFleetExecutionAdmission, FleetRunAdmissionIntent,
-        PlanRepositoryAdmissionEvidence, fleet_repository_scope,
+        FleetRunAdmissionIntent,
+        PlanRepositoryAdmissionEvidence,
+        StrictFleetExecutionAdmission,
+        fleet_repository_scope,
     )
     from oh_goon.core.models.source_authority import RepositorySourceAuthority
     from oh_goon.core.vocabulary import OperationAction
-    from oh_goon.integrations.content_snapshot import SnapshotIdentity
     from oh_goon.runtime.database import LocalDatabase
     from oh_goon.runtime.journal import Journal
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -34,15 +47,23 @@ def fixture(tmp_path: Path, monkeypatch):
     from tests.factories.fleet_plan_targets import structural_fleet_plan_target
     from tests.factories.journal import admit_run
     from tests.unit.services.test_group_a_verified_ingress_authorities import setup
-    import hashlib
 
     plan_file = tmp_path / "goon.yml"
-    plan_file.write_text("version: 1\nexecution:\n  purpose: verification\nsteps:\n  - id: check\n    run: 'true'\n")
+    plan_file.write_text(
+        "version: 1\nexecution:\n  purpose: verification\nsteps:\n  - id: check\n    run: 'true'\n"
+    )
     raw = FleetPlanResolver().resolve(plan_file)
     from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
-    plan = ResolvedFleetPlan.create(name=raw.name, description=raw.description,
-        steps=raw.steps, execution=CicdExecutionPolicy(), requirements=raw.requirements,
-        imports=raw.imports, step_sources=raw.step_sources)
+
+    plan = ResolvedFleetPlan.create(
+        name=raw.name,
+        description=raw.description,
+        steps=raw.steps,
+        execution=CicdExecutionPolicy(),
+        requirements=raw.requirements,
+        imports=raw.imports,
+        step_sources=raw.step_sources,
+    )
     target = structural_fleet_plan_target(plan)
     identities = []
     admissions = []
@@ -56,37 +77,64 @@ def fixture(tmp_path: Path, monkeypatch):
         source = RepositorySourceAuthority.create(
             subject_instance_id="repo-subject-instance-" + ch * 64,
             source_snapshot=PlanSnapshotEvidence(
-                sha256=snapshot.sha256, byte_count=1, entry_count=1,
+                sha256=snapshot.sha256,
+                byte_count=1,
+                entry_count=1,
             ),
         )
-        admissions.append(PlanRepositoryAdmissionEvidence.create(
-            repository_id=repository.repository_id, plan_id=plan.plan_id,
-            semantic_preview_id="fleet-plan-repository-preview-" + ch * 64,
-            source_authority=source, active_step_ids=("check",),
-        ))
+        admissions.append(
+            PlanRepositoryAdmissionEvidence.create(
+                repository_id=repository.repository_id,
+                plan_id=plan.plan_id,
+                semantic_preview_id="fleet-plan-repository-preview-" + ch * 64,
+                source_authority=source,
+                active_step_ids=("check",),
+            )
+        )
     identities.sort(key=lambda obj: obj.repository_id)
     admissions.sort(key=lambda obj: obj.repository_id)
     backend = PlanIsolationBackendEvidence(
-        backend_id="test-sandbox", configuration_id="test-backend",
-        kernel_boundary="virtual_machine", remote_execution=True, experimental=False,
+        backend_id="test-sandbox",
+        configuration_id="test-backend",
+        kernel_boundary="virtual_machine",
+        remote_execution=True,
+        experimental=False,
     )
     capacity = PlanExecutorCapacityEvidence(
-        fleet_run_id="durable-run", pool_id="test-pool",
-        placement_policy="priority_rendezvous_fifo_v2", placement_rank=0,
-        executor_priority=0, executor_id="test", executor_generation=1,
-        source="local_verified", backend_configuration_id=backend.configuration_id,
-        capacity_cpu_millis=2000, capacity_memory_bytes=2 * 1024**3,
-        requested_parallelism=1, admitted_parallelism=1,
+        fleet_run_id="durable-run",
+        pool_id="test-pool",
+        placement_policy="priority_rendezvous_fifo_v2",
+        placement_rank=0,
+        executor_priority=0,
+        executor_id="test",
+        executor_generation=1,
+        source="local_verified",
+        backend_configuration_id=backend.configuration_id,
+        capacity_cpu_millis=2000,
+        capacity_memory_bytes=2 * 1024**3,
+        requested_parallelism=1,
+        admitted_parallelism=1,
     )
     intent = FleetRunAdmissionIntent(
-        target=target, capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
-        execution=StrictFleetExecutionAdmission(placement=FleetExecutorPlacement(
-            isolation_backend=backend, executor_capacity=capacity, executor_trust_epoch=0,
-        )), repository_admissions=tuple(admissions),
+        target=target,
+        capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+        execution=StrictFleetExecutionAdmission(
+            placement=FleetExecutorPlacement(
+                isolation_backend=backend,
+                executor_capacity=capacity,
+                executor_trust_epoch=0,
+            )
+        ),
+        repository_admissions=tuple(admissions),
     )
     journal = Journal(LocalDatabase(tmp_path / "run.sqlite3"))
-    admit_run(journal, "durable-run", intent,
-              fleet_repository_scope(set(item.repository_id for item in identities)), identities)
+    admit_run(
+        journal,
+        "durable-run",
+        intent,
+        fleet_repository_scope(set(item.repository_id for item in identities)),
+        identities,
+    )
     root = tmp_path / "deployment"
     bin_dir = root / "bin"
     bin_dir.mkdir(parents=True)
@@ -97,27 +145,34 @@ def fixture(tmp_path: Path, monkeypatch):
     inspector.write_text("inspector")
     inspector.chmod(0o755)
     authority = StrictHostPathAuthority.create(
-        trusted_roots=(root,), tool_search_paths=(bin_dir,), runtime_inspector=inspector,
+        trusted_roots=(root,),
+        tool_search_paths=(bin_dir,),
+        runtime_inspector=inspector,
     )
+
     # Hashmarks is unavailable in this environment. Substitute only its
     # content observer, not Plan selection, path resolution or journal replay.
     def measured(path):
         payload = path.read_bytes()
         return SnapshotIdentity(hashlib.sha256(payload).hexdigest(), len(payload), 1)
+
     monkeypatch.setattr(content_snapshot, "snapshot_identity", measured)
     _, _, _, base_contract, _, _ = setup()
     fields = base_contract.fields
     fields["run_id"] = "durable-run"
     fields["native_tool_identity"] = issuer.observed_admitted_run_native_tool_identity(
-        journal=journal, run_id="durable-run", path_authority=authority,
+        journal=journal,
+        run_id="durable-run",
+        path_authority=authority,
     )
     return journal, AdmittedRunContract.freeze(fields), authority, executable
 
 
-
 def sign(journal, contract, authority):
     return issuer.issue_observed_captured_run_native_tool_identity(
-        journal=journal, contract=contract, path_authority=authority,
+        journal=journal,
+        contract=contract,
+        path_authority=authority,
         issuer_id=roots()["native_tool_identity"][0],
         signing_key=_test_private_key("native_tool_identity"),
     )
@@ -127,10 +182,16 @@ def test_exact_run_selected_native_tool_signed_and_independently_verified(tmp_pa
     journal, contract, authority, _ = fixture(tmp_path, monkeypatch)
     signed = sign(journal, contract, authority)
     assert signed.field == "native_tool_identity"
-    proofs = tuple(signed if field == "native_tool_identity" else proof(field, contract)
-                   for field in FIELDS)
-    TrustedIssuerVerifier(roots()).verify(contract, evidence=proofs,
-        control_epoch=1, lease_identity="lease", lease_is_current=lambda *_: True)
+    proofs = tuple(
+        signed if field == "native_tool_identity" else proof(field, contract) for field in FIELDS
+    )
+    TrustedIssuerVerifier(roots()).verify(
+        contract,
+        evidence=proofs,
+        control_epoch=1,
+        lease_identity="lease",
+        lease_is_current=lambda *_: True,
+    )
     assert signed == sign(journal, contract, authority)
 
 
@@ -152,6 +213,7 @@ def test_tool_swapped_between_observations_rejected(tmp_path, monkeypatch):
     journal, contract, authority, executable = fixture(tmp_path, monkeypatch)
     original = content_snapshot.snapshot_identity
     calls = 0
+
     def changed(path):
         nonlocal calls
         calls += 1
@@ -159,6 +221,7 @@ def test_tool_swapped_between_observations_rejected(tmp_path, monkeypatch):
         if calls == 1:
             executable.write_bytes(b"replacement")
         return result
+
     monkeypatch.setattr(content_snapshot, "snapshot_identity", changed)
     with pytest.raises(TrustProtocolError, match="changed during (issuance|owner observation)"):
         sign(journal, contract, authority)
@@ -168,6 +231,7 @@ def test_run_started_during_observation_rejected(tmp_path, monkeypatch):
     journal, contract, authority, _ = fixture(tmp_path, monkeypatch)
     original = content_snapshot.snapshot_identity
     calls = 0
+
     def changed(path):
         nonlocal calls
         calls += 1
@@ -175,6 +239,7 @@ def test_run_started_during_observation_rejected(tmp_path, monkeypatch):
         if calls == 1:
             start_run(journal, "durable-run")
         return value
+
     monkeypatch.setattr(content_snapshot, "snapshot_identity", changed)
     with pytest.raises(TrustProtocolError, match="sole committed admission"):
         sign(journal, contract, authority)
@@ -190,17 +255,28 @@ def test_wrong_contract_tool_identity_rejected(tmp_path, monkeypatch):
 
 def test_missing_signer_rejected_before_tool_observation(tmp_path, monkeypatch):
     journal, contract, authority, _ = fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(content_snapshot, "snapshot_identity", lambda _: (_ for _ in ()).throw(AssertionError("no observation allowed")))
+    monkeypatch.setattr(
+        content_snapshot,
+        "snapshot_identity",
+        lambda _: (_ for _ in ()).throw(AssertionError("no observation allowed")),
+    )
     with pytest.raises(TrustProtocolError, match="independent native tool signing"):
-        issuer.issue_observed_captured_run_native_tool_identity(journal=journal,
-            contract=contract, path_authority=authority,
-            issuer_id=roots()["native_tool_identity"][0], signing_key=None)
+        issuer.issue_observed_captured_run_native_tool_identity(
+            journal=journal,
+            contract=contract,
+            path_authority=authority,
+            issuer_id=roots()["native_tool_identity"][0],
+            signing_key=None,
+        )
 
 
 def test_noncanonical_deployment_path_authority_rejected(tmp_path, monkeypatch):
     journal, contract, authority, _ = fixture(tmp_path, monkeypatch)
-    unsafe = StrictHostPathAuthority(trusted_roots=authority.trusted_roots,
-       tool_search_paths=(tmp_path / "elsewhere",), runtime_inspector=authority.runtime_inspector)
+    unsafe = StrictHostPathAuthority(
+        trusted_roots=authority.trusted_roots,
+        tool_search_paths=(tmp_path / "elsewhere",),
+        runtime_inspector=authority.runtime_inspector,
+    )
     with pytest.raises(TrustProtocolError, match="deployment tool authority"):
         sign(journal, contract, unsafe)
 
@@ -215,6 +291,7 @@ def test_same_bytes_replaced_inode_between_observations_rejected(tmp_path, monke
     journal, contract, authority, executable = fixture(tmp_path, monkeypatch)
     original = content_snapshot.snapshot_identity
     calls = 0
+
     def relink(path):
         nonlocal calls
         calls += 1
@@ -225,6 +302,7 @@ def test_same_bytes_replaced_inode_between_observations_rejected(tmp_path, monke
             replaced.chmod(0o755)
             replaced.replace(executable)
         return result
+
     monkeypatch.setattr(content_snapshot, "snapshot_identity", relink)
     with pytest.raises(TrustProtocolError, match="changed during (issuance|owner observation)"):
         sign(journal, contract, authority)
@@ -241,11 +319,18 @@ def test_no_private_key_material_in_verification_only_evidence(tmp_path, monkeyp
     journal, contract, authority, _ = fixture(tmp_path, monkeypatch)
     signed = sign(journal, contract, authority)
     assert len(signed.signature_hex) == 128
-    assert _test_private_key("native_tool_identity").private_bytes_raw().hex() not in signed.payload.hex()
+    assert (
+        _test_private_key("native_tool_identity").private_bytes_raw().hex()
+        not in signed.payload.hex()
+    )
 
 
 def test_native_hashmarks_absence_fails_closed(tmp_path, monkeypatch):
     journal, contract, authority, _ = fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(content_snapshot, "snapshot_identity", lambda _: (_ for _ in ()).throw(ImportError("Hashmarks unavailable")))
+    monkeypatch.setattr(
+        content_snapshot,
+        "snapshot_identity",
+        lambda _: (_ for _ in ()).throw(ImportError("Hashmarks unavailable")),
+    )
     with pytest.raises(TrustProtocolError, match="observation unavailable"):
         sign(journal, contract, authority)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import shutil
 import subprocess
@@ -10,11 +9,10 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-
 from oh_goon.core.file_digest import sha256_file
 
-@dataclass(frozen=True)
 
+@dataclass(frozen=True)
 class ExactPatchProof:
     patch_sha256: str
     file_count: int
@@ -92,7 +90,9 @@ def _assert_exact(expected: Path, observed: Path) -> int:
     if expected_files.keys() != observed_files.keys():
         missing = sorted(expected_files.keys() - observed_files.keys())
         extra = sorted(observed_files.keys() - expected_files.keys())
-        raise RuntimeError(f"exact patch replay path mismatch: missing={missing[:5]}, extra={extra[:5]}")
+        raise RuntimeError(
+            f"exact patch replay path mismatch: missing={missing[:5]}, extra={extra[:5]}"
+        )
     changed = [name for name in expected_files if expected_files[name] != observed_files[name]]
     if changed:
         raise RuntimeError(f"exact patch replay byte/mode mismatch: {changed[:5]}")
@@ -143,7 +143,9 @@ def build_exact_patch(parent_zip: Path, child_zip: Path, output_patch: Path) -> 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build and independently replay an exact Oh-Goon release patch")
+    parser = argparse.ArgumentParser(
+        description="Build and independently replay an exact Oh-Goon release patch"
+    )
     parser.add_argument("parent_zip", type=Path)
     parser.add_argument("child_zip", type=Path)
     parser.add_argument("output_patch", type=Path)

@@ -52,6 +52,9 @@ def test_plan_run_binds_source_to_exact_resolved_bytes(tmp_path: Path) -> None:
     observed: dict[str, object] = {}
 
     class RecordingRuns:
+        def require_plan_ingress_preparation(self, run_id):
+            assert run_id is None
+
         def start_prepared_plan(self, target, **kwargs):
             observed["target"] = target
             return object()
@@ -69,6 +72,9 @@ def test_plan_run_rejects_plan_identity_changed_after_preview(tmp_path: Path) ->
     _plan(plan_path)
 
     class NoRuns:
+        def require_plan_ingress_preparation(self, run_id):
+            assert run_id is None
+
         def start(self, *args, **kwargs):
             raise AssertionError("plan identity mismatch must fail before FleetRun admission")
 
@@ -83,6 +89,9 @@ def test_plan_run_rejects_source_digest_not_matching_resolved_bytes(tmp_path: Pa
     _plan(plan_path)
 
     class NoRuns:
+        def require_plan_ingress_preparation(self, run_id):
+            assert run_id is None
+
         def start(self, *args, **kwargs):
             raise AssertionError("source mismatch must fail before FleetRun admission")
 

@@ -4,24 +4,27 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_executor import FleetExecutorPlacement
-from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
-from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_evidence import PlanImportApplicabilityEvidence
+from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.goon_plan_source import (
     TeamGoonSource,
     validate_plan_source_repository_count,
 )
+from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.run_launch import (
+    ApplicationLaunchReceipt,
+    UnmanagedApplicationLaunchReceipt,
+)
 from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
-from oh_goon.core.models.run_launch import ApplicationLaunchReceipt, UnmanagedApplicationLaunchReceipt
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
-from oh_goon.core.vocabulary import FleetRunSource
 from oh_goon.core.product_identity import stable_id
+from oh_goon.core.vocabulary import FleetRunSource
 
 
 class InvalidRepositoryScopeRequest(ValueError):
@@ -108,9 +111,7 @@ class PlanRepositoryAdmissionEvidence(ImmutableModel):
 
     repository_id: str = Field(pattern=r"^repo-[0-9a-f]{20}$")
     plan_id: str = Field(min_length=1)
-    semantic_preview_id: str = Field(
-        pattern=r"^fleet-plan-repository-preview-[0-9a-f]{64}$"
-    )
+    semantic_preview_id: str = Field(pattern=r"^fleet-plan-repository-preview-[0-9a-f]{64}$")
     import_applicability: tuple[PlanImportApplicabilityEvidence, ...]
     active_step_ids: tuple[str, ...]
     source_authority: RepositorySourceAuthority
@@ -133,7 +134,9 @@ class PlanRepositoryAdmissionEvidence(ImmutableModel):
                 "repository_id": repository_id,
                 "plan_id": plan_id,
                 "semantic_preview_id": semantic_preview_id,
-                "import_applicability": [item.model_dump(mode="json") for item in import_applicability],
+                "import_applicability": [
+                    item.model_dump(mode="json") for item in import_applicability
+                ],
                 "active_step_ids": list(active_step_ids),
                 "source_authority_id": source_authority.authority_id,
             },
@@ -156,7 +159,9 @@ class PlanRepositoryAdmissionEvidence(ImmutableModel):
                 "repository_id": self.repository_id,
                 "plan_id": self.plan_id,
                 "semantic_preview_id": self.semantic_preview_id,
-                "import_applicability": [item.model_dump(mode="json") for item in self.import_applicability],
+                "import_applicability": [
+                    item.model_dump(mode="json") for item in self.import_applicability
+                ],
                 "active_step_ids": list(self.active_step_ids),
                 "source_authority_id": self.source_authority.authority_id,
             },
@@ -178,7 +183,9 @@ class StrictFleetExecutionAdmission(ImmutableModel):
 
     kind: Literal["strict"] = "strict"
     placement: FleetExecutorPlacement
-    trusted_local_consent: TrustedLocalRunConsent | None = Field(default=None, exclude_if=lambda value: value is None)
+    trusted_local_consent: TrustedLocalRunConsent | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     readmitted_from_run_id: str | None = Field(default=None, min_length=1)
     rerun_from_run_id: str | None = Field(default=None, min_length=1)
 
@@ -191,18 +198,27 @@ class StrictFleetExecutionAdmission(ImmutableModel):
         if backend.backend_id == "trusted-local":
             if consent is None:
                 raise ValueError("trusted-local placement requires explicit per-Run consent")
-            if (backend.remote_execution or backend.kernel_boundary != "shared_host_kernel"
-                    or capacity.source != "local_verified"
-                    or capacity.per_attempt_cpu_millis is not None
-                    or capacity.per_attempt_memory_bytes is not None
-                    or capacity.per_attempt_max_processes is not None):
-                raise ValueError("trusted-local admission cannot claim remote or kernel-limited execution")
-            if (consent.backend_id != backend.backend_id
-                    or consent.backend_configuration_id != backend.configuration_id
-                    or consent.executor_id != capacity.executor_id
-                    or consent.executor_generation != capacity.executor_generation
-                    or consent.fleet_run_id != capacity.fleet_run_id):
-                raise ValueError("trusted-local consent must match exact admitted Run and executor placement")
+            if (
+                backend.remote_execution
+                or backend.kernel_boundary != "shared_host_kernel"
+                or capacity.source != "local_verified"
+                or capacity.per_attempt_cpu_millis is not None
+                or capacity.per_attempt_memory_bytes is not None
+                or capacity.per_attempt_max_processes is not None
+            ):
+                raise ValueError(
+                    "trusted-local admission cannot claim remote or kernel-limited execution"
+                )
+            if (
+                consent.backend_id != backend.backend_id
+                or consent.backend_configuration_id != backend.configuration_id
+                or consent.executor_id != capacity.executor_id
+                or consent.executor_generation != capacity.executor_generation
+                or consent.fleet_run_id != capacity.fleet_run_id
+            ):
+                raise ValueError(
+                    "trusted-local consent must match exact admitted Run and executor placement"
+                )
         elif consent is not None:
             raise ValueError("trusted-local consent cannot authorize a strict isolation backend")
         return self
@@ -236,9 +252,13 @@ def _validate_execution_admission(
 
 
 def _validate_trusted_local_admission(
-    *, target: OperationTarget | None, execution: FleetExecutionAdmission,
-    fleet_run_id: str, source: FleetRunSource,
-    repository_scope: FleetRepositoryScope, repository_count: int,
+    *,
+    target: OperationTarget | None,
+    execution: FleetExecutionAdmission,
+    fleet_run_id: str,
+    source: FleetRunSource,
+    repository_scope: FleetRepositoryScope,
+    repository_count: int,
 ) -> None:
     """Original RUN_ADMITTED/RunDetail invariant; never an effect authorization.
 
@@ -257,17 +277,23 @@ def _validate_trusted_local_admission(
         raise ValueError("trusted-local consent cannot authorize a strict isolation backend")
     if consent is None:
         return
-    if not isinstance(target, FleetPlanTarget) or not isinstance(target.plan.execution, CicdExecutionPolicy):
+    if not isinstance(target, FleetPlanTarget) or not isinstance(
+        target.plan.execution, CicdExecutionPolicy
+    ):
         raise ValueError("trusted-local consent requires a resolved CI/CD Plan")
     if not isinstance(repository_scope, ExplicitRepositoryScope) or repository_count != 1:
-        raise ValueError("trusted-local consent requires exactly one explicitly selected repository")
+        raise ValueError(
+            "trusted-local consent requires exactly one explicitly selected repository"
+        )
     if source is not FleetRunSource.MANUAL:
         raise ValueError("trusted-local consent forbids scheduled, rerun or unattended admission")
-    if any(step.capabilities.egress.mode != "host_unrestricted"
-           or step.capabilities.nested_strict_execution for step in target.plan.steps):
+    if any(
+        step.capabilities.egress.mode != "host_unrestricted"
+        or step.capabilities.nested_strict_execution
+        for step in target.plan.steps
+    ):
         raise ValueError("trusted-local cannot claim restricted network or nested strict execution")
-    if (execution.readmitted_from_run_id is not None
-            or execution.rerun_from_run_id is not None):
+    if execution.readmitted_from_run_id is not None or execution.rerun_from_run_id is not None:
         raise ValueError("trusted-local consent cannot be inherited by rerun or readmission")
     try:
         consent.require_exact_authority(
@@ -278,8 +304,10 @@ def _validate_trusted_local_admission(
             executor_id=execution.placement.executor_capacity.executor_id,
             executor_generation=execution.placement.executor_capacity.executor_generation,
             execution=target.plan.execution,
-            source=source.value.lower(), all_repositories=False,
-            repository_count=repository_count, unattended=False,
+            source=source.value.lower(),
+            all_repositories=False,
+            repository_count=repository_count,
+            unattended=False,
         )
     except (ValueError, FleetPlanInvalid) as error:
         raise ValueError("trusted-local durable Run admission rejected: " + str(error)) from error
@@ -292,11 +320,15 @@ def _validate_execution_admission_run(
         raise ValueError("Fleet rerun provenance cannot reference the same run")
     if isinstance(execution, StrictFleetExecutionAdmission):
         if execution.placement.executor_capacity.fleet_run_id != fleet_run_id:
-            raise ValueError("Fleet executor-capacity reservation must belong to the same Fleet run")
+            raise ValueError(
+                "Fleet executor-capacity reservation must belong to the same Fleet run"
+            )
         if execution.readmitted_from_run_id == fleet_run_id:
             raise ValueError("Fleet re-admission provenance cannot reference the same run")
         if execution.readmitted_from_run_id is not None and execution.rerun_from_run_id is not None:
-            raise ValueError("Fleet execution cannot be both a re-admission and a Run-history rerun")
+            raise ValueError(
+                "Fleet execution cannot be both a re-admission and a Run-history rerun"
+            )
 
 
 def _validate_plan_repository_admissions(
@@ -307,7 +339,9 @@ def _validate_plan_repository_admissions(
 
     if not isinstance(target, FleetPlanTarget):
         if evidence:
-            raise ValueError("Repository/Plan admission evidence is valid only for Fleet-plan targets")
+            raise ValueError(
+                "Repository/Plan admission evidence is valid only for Fleet-plan targets"
+            )
         return
     if not evidence:
         raise ValueError("Fleet Plan admission requires repository/Plan admission evidence")
@@ -328,7 +362,9 @@ class FleetRunAdmissionIntent(ImmutableModel):
     capability: CapabilitySnapshot
     execution: FleetExecutionAdmission
     repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...]
-    application_launch: ApplicationLaunchReceipt = Field(default_factory=UnmanagedApplicationLaunchReceipt)
+    application_launch: ApplicationLaunchReceipt = Field(
+        default_factory=UnmanagedApplicationLaunchReceipt
+    )
     scheduling: SchedulingEnvelope | None = None
     # Transaction-local input to the ORIGINAL Journal admission cut. The Schedule
     # store persists the joined child identity atomically with RUN_ADMITTED.

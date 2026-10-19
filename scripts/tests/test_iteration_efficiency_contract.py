@@ -22,7 +22,9 @@ def _target_body(name: str) -> str:
     return rest if next_target < 0 else rest[:next_target]
 
 
-def test_repository_understanding_diagnostic_batches_do_not_control_default_tooling_scheduling() -> None:
+def test_repository_understanding_diagnostic_batches_do_not_control_default_tooling_scheduling() -> (
+    None
+):
     tooling = _target_body("test-tooling")
     batched = _target_body("repository-understanding-tests-batched")
     assert "oh-goon-test-batches scripts/tests --granularity files" in tooling
@@ -34,6 +36,7 @@ def test_repository_understanding_diagnostic_batches_do_not_control_default_tool
     single = _target_body("repository-understanding-test-batch")
     assert "--workers 1" in single
 
+
 def test_certification_preflight_is_local_and_has_no_dependency_reacquisition() -> None:
     certify = _target_body("certify")
     preflight = _target_body("certification-preflight")
@@ -44,15 +47,24 @@ def test_certification_preflight_is_local_and_has_no_dependency_reacquisition() 
     assert "make init" not in preflight
     assert "CERTIFICATION PREFLIGHT PASSED" in preflight
 
-def test_release_only_reacquisition_is_not_part_of_normal_certification_preflight() -> None:
+
+def test_release_only_reacquisition_is_not_part_of_normal_certification_preflight() -> (
+    None
+):
     preflight = _target_body("certification-preflight")
     assert "acceptance-retained-supply" not in preflight
     assert "init" not in preflight
     assert "certification-setup" not in preflight
 
 
-def test_lean_certification_consumes_native_init_and_has_no_repair_or_supply_frontdoor() -> None:
-    plan = yaml.safe_load((ROOT / "templates/plans/oh-goon/app-certification/plan.yml").read_text(encoding="utf-8"))
+def test_lean_certification_consumes_native_init_and_has_no_repair_or_supply_frontdoor() -> (
+    None
+):
+    plan = yaml.safe_load(
+        (ROOT / "templates/plans/oh-goon/app-certification/plan.yml").read_text(
+            encoding="utf-8"
+        )
+    )
     assert plan["execution"] == {"purpose": "verification"}
     assert plan["goons"] == [
         "oh-goon/backend-p0",
@@ -62,18 +74,27 @@ def test_lean_certification_consumes_native_init_and_has_no_repair_or_supply_fro
         "oh-goon/local-runtime",
     ]
     assert not (ROOT / "templates/goons/oh-goon/dependency-materialize").exists()
-    for removed in ("certification-setup:", "certification-repair-backend:", "certification-workspace-setup:"):
+    for removed in (
+        "certification-setup:",
+        "certification-repair-backend:",
+        "certification-workspace-setup:",
+    ):
         assert f"\n{removed}" not in f"\n{MAKEFILE}"
     assert not (ROOT / "templates/plans/oh-goon/certification-backend-repair").exists()
 
-def test_full_certification_delegates_database_preflight_to_the_leased_frontdoor() -> None:
+
+def test_full_certification_delegates_database_preflight_to_the_leased_frontdoor() -> (
+    None
+):
     certify = _target_body("certify")
     assert "certification-database-preflight" not in certify.splitlines()[0]
     assert "goon-static-admission" not in certify.splitlines()[0]
     assert "$(CERTIFICATION_FRONTDOOR)" in certify
     assert "CERTIFICATION INITIALIZATION REQUIRED" in certify
     assert "Run: make init" in certify
-    frontdoor = (ROOT / "backend/src/oh_goon/services/certification_frontdoor.py").read_text(encoding="utf-8")
+    frontdoor = (
+        ROOT / "backend/src/oh_goon/services/certification_frontdoor.py"
+    ).read_text(encoding="utf-8")
     assert "with certification_state_lease(state):" in frontdoor
     assert "preflight_certification_database_under_lease(" in frontdoor
 
@@ -84,9 +105,15 @@ def test_logged_frontdoors_emit_banner_before_running_child() -> None:
     assert banner < child
 
 
-def test_command_supervision_avoids_multithreaded_preexec_and_ru_cold_parallelism() -> None:
-    command = (ROOT / "backend/src/oh_goon/engine/command.py").read_text(encoding="utf-8")
-    guard = (ROOT / "backend/src/oh_goon/runtime/exec_guard.py").read_text(encoding="utf-8")
+def test_command_supervision_avoids_multithreaded_preexec_and_ru_cold_parallelism() -> (
+    None
+):
+    command = (ROOT / "backend/src/oh_goon/engine/command.py").read_text(
+        encoding="utf-8"
+    )
+    guard = (ROOT / "backend/src/oh_goon/runtime/exec_guard.py").read_text(
+        encoding="utf-8"
+    )
     command_tree = ast.parse(command)
     popen_calls = [
         node
@@ -105,13 +132,28 @@ def test_command_supervision_avoids_multithreaded_preexec_and_ru_cold_parallelis
     # Package-mode import is legitimate; the direct -S source-file branch must
     # use the colocated stdlib-only protocol with no package import.
     guard_tree = ast.parse(guard)
-    conditional = next(node for node in guard_tree.body if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "__package__")
-    assert any(isinstance(node, ast.ImportFrom) and node.module == "oh_goon.runtime" for node in conditional.body)
-    assert any(isinstance(node, ast.Import) and any(alias.name == "exec_guard_protocol" for alias in node.names) for node in conditional.orelse)
+    conditional = next(
+        node
+        for node in guard_tree.body
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name)
+        and node.test.id == "__package__"
+    )
+    assert any(
+        isinstance(node, ast.ImportFrom) and node.module == "oh_goon.runtime"
+        for node in conditional.body
+    )
+    assert any(
+        isinstance(node, ast.Import)
+        and any(alias.name == "exec_guard_protocol" for alias in node.names)
+        for node in conditional.orelse
+    )
     assert "os.setsid()" in guard
 
 
-def test_batch_runner_splits_and_reports_without_monolithic_first_attempt(tmp_path: Path) -> None:
+def test_batch_runner_splits_and_reports_without_monolithic_first_attempt(
+    tmp_path: Path,
+) -> None:
     test_file = tmp_path / "test_batch_demo.py"
     test_file.write_text(
         "".join(f"def test_{i}():\n    assert True\n\n" for i in range(5)),
@@ -147,7 +189,9 @@ def test_batch_runner_splits_and_reports_without_monolithic_first_attempt(tmp_pa
     assert "PYTEST BATCH RESULT: PASS" in result.stdout
 
 
-def test_repository_understanding_process_cache_returns_defensive_snapshots(monkeypatch) -> None:
+def test_repository_understanding_process_cache_returns_defensive_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from oh_goon.repository_tooling import repository_understanding_material as material
 
     # This is a defensive-copy unit contract, not a Repository Understanding build
@@ -169,7 +213,9 @@ def test_repository_understanding_process_cache_returns_defensive_snapshots(monk
 
 
 @pytest.mark.slow
-def test_repository_understanding_real_process_cache_returns_defensive_snapshots() -> None:
+def test_repository_understanding_real_process_cache_returns_defensive_snapshots() -> (
+    None
+):
     from oh_goon.repository_tooling import repository_understanding_material as material
 
     # Complete/RU qualification retains the production-shaped cold material proof.
@@ -186,16 +232,23 @@ def test_repository_understanding_real_process_cache_returns_defensive_snapshots
     assert material.manifest()["question_count"] == original_question_count
 
 
-def test_development_test_defers_native_frontend_operations_until_backend_feedback() -> None:
+def test_development_test_defers_native_frontend_operations_until_backend_feedback() -> (
+    None
+):
     backend_core = DEVELOPMENT_TEST.index(
         'if command -v "$HOST_PYTHON" >/dev/null 2>&1'
     )
     backend_late = DEVELOPMENT_TEST.index('run_check "Backend fast unit" test-python')
-    backend_integration = DEVELOPMENT_TEST.index('run_check "Backend integration" test-integration')
-    frontend_tests = DEVELOPMENT_TEST.index('run_check "Frontend typecheck" frontend-typecheck')
+    backend_integration = DEVELOPMENT_TEST.index(
+        'run_check "Backend integration" test-integration'
+    )
+    frontend_tests = DEVELOPMENT_TEST.index(
+        'run_check "Frontend typecheck" frontend-typecheck'
+    )
     assert "prepare_frontend" not in DEVELOPMENT_TEST
     assert "prepare_backend && backend_ready=1" not in DEVELOPMENT_TEST
     assert backend_core < backend_late < backend_integration < frontend_tests
+
 
 def test_backend_fast_and_complete_lanes_use_semantic_execution_boundaries() -> None:
     fast = _target_body("test-python")
@@ -209,64 +262,30 @@ def test_backend_fast_and_complete_lanes_use_semantic_execution_boundaries() -> 
     assert "semantic process supervision is serialized" in complete
     assert "--marker 'process'" in complete
 
+
 def test_tooling_fast_and_complete_lanes_keep_distinct_semantic_authority() -> None:
     fast = _target_body("test-tooling")
     complete = _target_body("test-tooling-complete")
     goon = yaml.safe_load(
-        (ROOT / "templates/goons/oh-goon/tooling-tests/goon.yml").read_text(encoding="utf-8")
+        (ROOT / "templates/goons/oh-goon/tooling-tests/goon.yml").read_text(
+            encoding="utf-8"
+        )
     )
     assert "not certification and not process and not slow" in fast
     assert "--marker 'not certification'" in complete
     assert "--exclude " not in fast
     assert "--exclude " not in complete
-    assert "# OH_GOON_OPAQUE_TOOLS: bash dd git node uv\ntest-tooling-complete:" in MAKEFILE
+    assert (
+        "# OH_GOON_OPAQUE_TOOLS: bash dd git node uv\ntest-tooling-complete:"
+        in MAKEFILE
+    )
     assert goon["execution"] == {"shell": "bash"}
     assert goon["steps"] == [{"run": "make test-tooling-complete"}]
 
 
-def test_batch_runner_statically_prunes_only_provable_negative_markers(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling import pytest_member_selection
-
-    path = tmp_path / "test_marked.py"
-    path.write_text(
-        "import pytest\n"
-        "pytestmark = pytest.mark.certification\n"
-        "def test_one(): pass\n",
-        encoding="utf-8",
-    )
-    members = (path.as_posix(),)
-    runnable, pruned = pytest_member_selection.statically_pruned_members(
-        members, marker="not certification and not process and not slow"
-    )
-    assert runnable == ()
-    assert pruned == members
-
-
-def test_batch_runner_prunes_marked_test_nodes_but_falls_back_for_complex_expression(tmp_path: Path) -> None:
-    from oh_goon.repository_tooling import pytest_member_selection
-
-    path = tmp_path / "test_nodes.py"
-    path.write_text(
-        "import pytest\n"
-        "@pytest.mark.slow\n"
-        "def test_slow(): pass\n"
-        "def test_fast(): pass\n",
-        encoding="utf-8",
-    )
-    members = pytest_member_selection.discover_test_nodes(path)
-    runnable, pruned = pytest_member_selection.statically_pruned_members(
-        members, marker="not certification and not process and not slow"
-    )
-    assert runnable == (f"{path.as_posix()}::test_fast",)
-    assert pruned == (f"{path.as_posix()}::test_slow",)
-    fallback, fallback_pruned = pytest_member_selection.statically_pruned_members(
-        members, marker="not slow or certification"
-    )
-    assert fallback == members
-    assert fallback_pruned == ()
-
-
-def test_repository_understanding_tests_use_normal_import_cache_not_dynamic_execution() -> None:
+def test_repository_understanding_tests_use_normal_import_cache_not_dynamic_execution() -> (
+    None
+):
     forbidden_calls = {"spec_from_file_location", "module_from_spec", "exec_module"}
     for path in (ROOT / "scripts/tests").glob("test_repository_understanding*.py"):
         source = path.read_text(encoding="utf-8")
@@ -275,7 +294,9 @@ def test_repository_understanding_tests_use_normal_import_cache_not_dynamic_exec
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 for decorator in node.decorator_list:
-                    target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                    target = (
+                        decorator.func if isinstance(decorator, ast.Call) else decorator
+                    )
                     name = (
                         target.id
                         if isinstance(target, ast.Name)
@@ -295,8 +316,13 @@ def test_repository_understanding_tests_use_normal_import_cache_not_dynamic_exec
                 )
                 assert name not in forbidden_calls
 
-    certification = (ROOT / "scripts/tests/test_repository_understanding_certification.py").read_text(encoding="utf-8")
-    assert "from oh_goon.repository_tooling import repository_understanding_exam" in certification
+    certification = (
+        ROOT / "scripts/tests/test_repository_understanding_certification.py"
+    ).read_text(encoding="utf-8")
+    assert (
+        "from oh_goon.repository_tooling import repository_understanding_exam"
+        in certification
+    )
 
 
 def test_repository_understanding_material_is_the_only_ru_process_cache_owner() -> None:
@@ -309,7 +335,9 @@ def test_repository_understanding_material_is_the_only_ru_process_cache_owner() 
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             for decorator in node.decorator_list:
-                target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                target = (
+                    decorator.func if isinstance(decorator, ast.Call) else decorator
+                )
                 name = (
                     target.id
                     if isinstance(target, ast.Name)
@@ -338,8 +366,13 @@ def test_repository_understanding_material_is_the_only_ru_process_cache_owner() 
     }
 
 
-def test_repository_understanding_cached_mutable_material_has_defensive_public_wrappers() -> None:
-    material = (ROOT / "backend/src/oh_goon/repository_tooling/repository_understanding_material.py").read_text(encoding="utf-8")
+def test_repository_understanding_cached_mutable_material_has_defensive_public_wrappers() -> (
+    None
+):
+    material = (
+        ROOT
+        / "backend/src/oh_goon/repository_tooling/repository_understanding_material.py"
+    ).read_text(encoding="utf-8")
     pairs = {
         "_benchmark_registry_cached": "benchmark_registry",
         "_question_audit_cached": "question_audit",
@@ -349,7 +382,9 @@ def test_repository_understanding_cached_mutable_material_has_defensive_public_w
         "_manifest_cached": "manifest",
     }
     tree = ast.parse(material)
-    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    functions = {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
     for cached_name, public_name in pairs.items():
         assert cached_name in functions and public_name in functions
         public_source = ast.unparse(functions[public_name])
@@ -357,12 +392,20 @@ def test_repository_understanding_cached_mutable_material_has_defensive_public_w
         assert cached_name in public_source
 
 
-def test_repository_understanding_cache_owner_never_imports_exam_or_test_orchestration() -> None:
-    material = (ROOT / "backend/src/oh_goon/repository_tooling/repository_understanding_material.py").read_text(encoding="utf-8")
+def test_repository_understanding_cache_owner_never_imports_exam_or_test_orchestration() -> (
+    None
+):
+    material = (
+        ROOT
+        / "backend/src/oh_goon/repository_tooling/repository_understanding_material.py"
+    ).read_text(encoding="utf-8")
     assert "repository_understanding_exam" not in material
     assert "scripts.tests" not in material
 
-def test_repository_understanding_process_cache_has_no_long_lived_runtime_reverse_references() -> None:
+
+def test_repository_understanding_process_cache_has_no_long_lived_runtime_reverse_references() -> (
+    None
+):
     package = ROOT / "backend/src/oh_goon"
     violations: list[str] = []
     for path in package.rglob("*.py"):
@@ -373,7 +416,10 @@ def test_repository_understanding_process_cache_has_no_long_lived_runtime_revers
             violations.append(path.as_posix())
     assert violations == []
 
-def test_repository_understanding_private_cache_functions_have_no_production_bypasses() -> None:
+
+def test_repository_understanding_private_cache_functions_have_no_production_bypasses() -> (
+    None
+):
     private_caches = {
         "_benchmark_registry_cached",
         "_question_audit_cached",
@@ -396,19 +442,26 @@ def test_repository_understanding_private_cache_functions_have_no_production_byp
 
 def test_fast_semantic_batch_lanes_persist_exact_resume_receipts() -> None:
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    fast = makefile[makefile.index("test-python:") : makefile.index("test-python-complete:")]
-    tooling = makefile[makefile.index("test-tooling:") : makefile.index("test-tooling-complete:")]
+    fast = makefile[
+        makefile.index("test-python:") : makefile.index("test-python-complete:")
+    ]
+    tooling = makefile[
+        makefile.index("test-tooling:") : makefile.index("test-tooling-complete:")
+    ]
     complete_backend = makefile[
-        makefile.index("test-python-complete:") : makefile.index("repository-understanding-test-batch:")
+        makefile.index("test-python-complete:") : makefile.index(
+            "repository-understanding-test-batch:"
+        )
     ]
     complete_tooling = makefile[
         makefile.index("test-tooling-complete:") : makefile.index("test-frontend:")
     ]
 
     assert fast.count("$(PYTEST_RESUME) --resume-key") == 1
-    assert tooling.count(
-        "$(PYTEST_RESUME) $(TOOLING_TEST_RESUME_CONTEXT) --resume-key"
-    ) == 1
+    assert (
+        tooling.count("$(PYTEST_RESUME) $(TOOLING_TEST_RESUME_CONTEXT) --resume-key")
+        == 1
+    )
     assert "--resume-key backend-fast-unit-files" in fast
     assert "--resume-key tooling-fast-files" in tooling
     assert "--exclude " not in fast
@@ -423,19 +476,35 @@ def test_fast_semantic_batch_lanes_persist_exact_resume_receipts() -> None:
 
 
 def test_runtime_liveness_and_tool_lookup_are_owned_not_textual() -> None:
-    workspaces = (ROOT / "backend/src/oh_goon/runtime/workspaces.py").read_text(encoding="utf-8")
-    lease = (ROOT / "backend/src/oh_goon/runtime/execution/lease_environment.py").read_text(encoding="utf-8")
-    process_birth = (ROOT / "backend/src/oh_goon/core/process_birth.py").read_text(encoding="utf-8")
-    process_tests = (ROOT / "backend/tests/unit/repository_tooling/test_test_batches_process.py").read_text(encoding="utf-8")
+    workspaces = (ROOT / "backend/src/oh_goon/runtime/workspaces.py").read_text(
+        encoding="utf-8"
+    )
+    lease = (
+        ROOT / "backend/src/oh_goon/runtime/execution/lease_environment.py"
+    ).read_text(encoding="utf-8")
+    process_birth = (ROOT / "backend/src/oh_goon/core/process_birth.py").read_text(
+        encoding="utf-8"
+    )
+    process_tests = (
+        ROOT / "backend/tests/unit/repository_tooling/test_test_batches_process.py"
+    ).read_text(encoding="utf-8")
 
     assert '"PATH": os.environ.get("PATH", os.defpath)' in workspaces
     assert "observe_process_liveness(pid)" in lease
     assert 'state not in {"Z", "X", "x"}' in process_birth
-    assert "test_long_lived_batch_runner_cleans_completed_pytest_background_groups" in process_tests
-    assert "test_repeated_batch_commands_leave_no_reader_threads_or_fd_growth" in process_tests
+    assert (
+        "test_long_lived_batch_runner_cleans_completed_pytest_background_groups"
+        in process_tests
+    )
+    assert (
+        "test_repeated_batch_commands_leave_no_reader_threads_or_fd_growth"
+        in process_tests
+    )
 
 
-def test_preexec_usage_is_confined_to_single_threaded_opensandbox_chroot_boundary() -> None:
+def test_preexec_usage_is_confined_to_single_threaded_opensandbox_chroot_boundary() -> (
+    None
+):
     backend = ROOT / "backend/src/oh_goon"
     offenders: list[str] = []
     for path in backend.rglob("*.py"):

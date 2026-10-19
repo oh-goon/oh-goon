@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from contextlib import closing
-
 import hashlib
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -202,7 +201,9 @@ def test_active_wait_terminal_handoff_and_restart_share_one_real_sqlite_lifecycl
     _assert_sqlite_is_healthy(database_path)
 
 
-def test_repeated_real_runs_and_runtime_restarts_leave_sqlite_authority_healthy(tmp_path: Path) -> None:
+def test_repeated_real_runs_and_runtime_restarts_leave_sqlite_authority_healthy(
+    tmp_path: Path,
+) -> None:
     """Model repeated developer/certification use instead of a one-shot database fixture."""
 
     repositories = tmp_path / "repos"

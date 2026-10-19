@@ -12,19 +12,19 @@ goons:
 - python/uv-audit
 ```
 
-A Plan can expose a directly selected Goon input without copying its schema:
+A plain import automatically exposes its unambiguous public inputs. To fix an intentional override in the Plan:
 
 ```yaml
 version: 1
-inputs:
-- coverage_threshold
 goons:
-- python/quality
+- import: python/quality
+  with:
+    typechecker: ty
 ```
 
-The Goon remains the authority for type, default, choices, ranges and validation. Projection is explicit, not inheritance: an exposed name must belong to exactly one directly selected Goon.
+The Goon remains the authority for type, default, choices, ranges and validation. No Plan `inputs:` or `pass:` declaration is needed for a plain unique import. Fixed bindings are excluded from automatic caller inputs. Shared names keep independent defaults and require explicit `pass:`/`with:` routing before caller overrides. Optional `inputs: [name, ...]` restricts the Plan's public interface without copying schemas.
 
-Use `with:` only for a real binding that cannot be represented as same-name projection, for example binding a prior Goon output into a later Goon input:
+Use `with:` for fixed values, renamed caller inputs or dataflow, for example binding a prior Goon output into a later Goon input:
 
 ```yaml
 # Real producer-to-consumer binding from templates/plans/oci/release-deploy/plan.yml
@@ -51,3 +51,9 @@ shipped release/deploy Plan retains explicit caller choices instead of an arbitr
 input-count cap. The real [release-deploy Plan](oci/release-deploy/plan.yml) owns the
 ordered roster and its exact projection; examples must not substitute a fictional
 `registry_hostname` for its two separate registry inputs.
+
+## Extend a Plan
+
+Follow the [developer journey](../README.md#append-an-existing-capability). Plans and Composite Goons both support explicit import-local `pass:` and `with:`. A unique named input projects its child contract automatically; multiple recipients require explicit bindings. Project-owned packages use an explicit `from:` directory and never shadow shipped imports.
+
+For task-specific customization, see [independent values for repeated imports](../README.md#give-repeated-imports-independent-values) and [changing the order of work](../README.md#change-the-order-of-work). Select Atomic Goons directly when you need another order inside a Composite. Producer outputs and workspaces must come from earlier imports.

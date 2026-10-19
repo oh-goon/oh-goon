@@ -17,7 +17,6 @@ from oh_goon.runtime.execution.shard_models import (
     execution_policy_identity,
 )
 
-
 ROOT = Path(__file__).resolve().parents[4]
 PRODUCTION_ROOT = ROOT / "backend/src/oh_goon"
 FAMILY = "oh-goon.terminal-execution-attestation"

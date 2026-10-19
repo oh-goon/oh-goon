@@ -7,6 +7,7 @@ outputs:
 steps:
 - id: package
   run: uv run oh-goon-package-source
+  working_directory: .
   workspace:
     from: repository
   outputs:

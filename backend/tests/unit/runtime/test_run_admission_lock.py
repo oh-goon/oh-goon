@@ -41,7 +41,9 @@ def test_same_admission_identity_is_single_flight_across_threads(tmp_path: Path)
     assert len(list((tmp_path / ".admission-locks").glob("admission-*.lock"))) == 1
 
 
-def test_admission_lock_rehardens_existing_lock_directory_and_file_owner_only(tmp_path: Path) -> None:
+def test_admission_lock_rehardens_existing_lock_directory_and_file_owner_only(
+    tmp_path: Path,
+) -> None:
     import os
     import stat
 

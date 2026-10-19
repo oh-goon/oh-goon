@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.fleet_plan_composition import bind_inputs
 from oh_goon.integrations.fleet_plan_compilation import parse_goon_template, parse_plan_template
 from oh_goon.runtime.goon_templates import GoonTemplateStore
@@ -379,9 +379,7 @@ goons:
         ("oci_reference", "registry.example.com/team/app:latest"),
     ],
 )
-def test_semantic_domain_inputs_reject_invalid_values(
-    input_type: str, invalid: str
-) -> None:
+def test_semantic_domain_inputs_reject_invalid_values(input_type: str, invalid: str) -> None:
     compiled = parse_goon_template(
         f"""version: 1
 inputs:
@@ -419,9 +417,9 @@ steps:
 """,
     )
 
-    assert resolver.resolve(
-        plan, repository=repository, environment={"VERSION": "2.1.0"}
-    ).steps[0].argv == ("echo", "2.1.0")
+    assert resolver.resolve(plan, repository=repository, environment={"VERSION": "2.1.0"}).steps[
+        0
+    ].argv == ("echo", "2.1.0")
 
 
 def test_unknown_input_source_does_not_create_expression_language() -> None:
@@ -473,7 +471,6 @@ goons:
     resolved = resolver.resolve(goon, inputs={"value": "ok"})
 
     assert resolved.steps[0].argv == ("echo", "ok")
-
 
 
 def test_toml_source_reads_pyproject_scalar_and_validates_it(tmp_path: Path) -> None:

@@ -3,10 +3,10 @@
 These are deterministic failure-path unit tests, not independent host EIO/fsync
 or native WSL qualification receipts.
 """
+
 from __future__ import annotations
 
 import errno
-import os
 import sqlite3
 import stat
 from pathlib import Path
@@ -20,7 +20,9 @@ from oh_goon.runtime.database import BackupPublicationUncertain, LocalDatabase
 def _original_source(tmp_path: Path) -> tuple[LocalDatabase, Path]:
     owner = LocalDatabase(tmp_path / "state.sqlite3")
     with owner.transaction(write=True) as conn:
-        conn.execute("INSERT INTO locations(path, position, added_at) VALUES ('/db5/record', 1, 'now')")
+        conn.execute(
+            "INSERT INTO locations(path, position, added_at) VALUES ('/db5/record', 1, 'now')"
+        )
     return owner, tmp_path / "snapshots" / "offline.sqlite3"
 
 
@@ -46,7 +48,10 @@ def test_fsync_failure_after_link_rolls_back_publication_and_allows_retry(
     assert not target.exists()
     assert not list(target.parent.glob(".*.snapshot-tmp"))
     with owner.transaction() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM locations WHERE path='/db5/record'").fetchone()[0] == 1
+        assert (
+            conn.execute("SELECT COUNT(*) FROM locations WHERE path='/db5/record'").fetchone()[0]
+            == 1
+        )
     receipt = owner.export_verified_backup(target)
     LocalDatabase.verify_offline_backup(receipt)
 
@@ -64,7 +69,10 @@ def test_repeated_directory_fsync_failure_never_returns_success_receipt(
         owner.export_verified_backup(target)
     assert not list(target.parent.glob(".*.snapshot-tmp"))
     with owner.transaction() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM locations WHERE path='/db5/record'").fetchone()[0] == 1
+        assert (
+            conn.execute("SELECT COUNT(*) FROM locations WHERE path='/db5/record'").fetchone()[0]
+            == 1
+        )
 
 
 def test_postpublish_tamper_prevents_success_and_removes_our_link(
@@ -81,7 +89,9 @@ def test_postpublish_tamper_prevents_success_and_removes_our_link(
                 stream.flush()
         original_verify(receipt)
 
-    monkeypatch.setattr(LocalDatabase, "verify_offline_backup", staticmethod(corrupt_published_snapshot))
+    monkeypatch.setattr(
+        LocalDatabase, "verify_offline_backup", staticmethod(corrupt_published_snapshot)
+    )
     with pytest.raises(sqlite3.DatabaseError, match="SHA-256 mismatch"):
         owner.export_verified_backup(target)
     assert not target.exists()
@@ -101,7 +111,9 @@ def test_postpublish_replacement_never_deletes_unrelated_target(
             raise sqlite3.DatabaseError("injected postpublish replacement")
         original_verify(receipt)
 
-    monkeypatch.setattr(LocalDatabase, "verify_offline_backup", staticmethod(replace_published_snapshot))
+    monkeypatch.setattr(
+        LocalDatabase, "verify_offline_backup", staticmethod(replace_published_snapshot)
+    )
     with pytest.raises(BackupPublicationUncertain, match="never use as runtime authority"):
         owner.export_verified_backup(target)
     assert target.read_bytes() == b"other-owner"

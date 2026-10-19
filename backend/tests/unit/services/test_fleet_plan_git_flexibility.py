@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import (
     GitNativeAction,
     GitPlanStep,
@@ -18,7 +19,6 @@ from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     FailedPlanStepExecution,
 )
-from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
 from oh_goon.core.models.fleet_plan_values import (
     HostEnvironmentPart,
@@ -323,9 +323,7 @@ def test_native_git_cannot_execute_plan_selected_external_diff(tmp_path: Path) -
     (repository / "tracked.txt").write_text("changed\n", encoding="utf-8")
     marker = tmp_path / "external-diff-ran"
     external_diff = tmp_path / "host-diff"
-    external_diff.write_text(
-        f"#!/bin/sh\nprintf ran > {marker}\nexit 0\n", encoding="utf-8"
-    )
+    external_diff.write_text(f"#!/bin/sh\nprintf ran > {marker}\nexit 0\n", encoding="utf-8")
     external_diff.chmod(0o755)
     plan = ResolvedFleetPlan.create(
         execution=MaintenanceExecutionPolicy(),

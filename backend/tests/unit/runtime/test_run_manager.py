@@ -216,9 +216,11 @@ def test_manager_rerun_does_not_inherit_system_execution_source(tmp_path: Path) 
     class _View:
         def __init__(self, delegate):
             self._delegate = delegate
+
         def required_run_detail(self, run_id):
             current = self._delegate.required_run_detail(run_id)
             return current.model_copy(update={"run": system_parent})
+
         def run_detail(self, run_id):
             return self._delegate.run_detail(run_id)
 
@@ -355,7 +357,9 @@ def test_active_wait_progress_uses_process_local_owners_without_sqlite_reconnect
         manager.wait_for_terminal(started.fleet_run_id, timeout=2)
 
 
-def test_wait_for_terminal_surfaces_exact_run_scoped_background_failure(tmp_path: Path, monkeypatch) -> None:
+def test_wait_for_terminal_surfaces_exact_run_scoped_background_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
     root = tmp_path / "repos"
     make_repository(root, "a")
     database = LocalDatabase(tmp_path / "worker-failure.db")

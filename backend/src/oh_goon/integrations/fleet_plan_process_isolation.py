@@ -5,28 +5,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
-from oh_goon.core.ports.original_mount_intent import OriginalSandboxMount
 from oh_goon.core.errors import ExecutorPlacementLost, FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
-from oh_goon.core.models.run import FleetRunDetail
-from oh_goon.core.models.run_admission import ExplicitRepositoryScope, StrictFleetExecutionAdmission
-from oh_goon.core.models.target import FleetPlanTarget
-from oh_goon.core.vocabulary import FleetRunSource
-from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent, TrustedLocalRunScope
 from oh_goon.core.models.fleet_plan_isolation import (
     IsolationBackendCapabilities,
     isolation_requirements,
 )
+from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent, TrustedLocalRunScope
+from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.models.run_admission import ExplicitRepositoryScope, StrictFleetExecutionAdmission
+from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.models.termination import TerminationSignal
+from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
+from oh_goon.core.ports.original_mount_intent import OriginalSandboxMount
+from oh_goon.core.vocabulary import FleetRunSource
 from oh_goon.engine.command import CommandOutputObserver, CommandProcessObserver, CommandResult
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
-from oh_goon.core.models.termination import TerminationSignal
+from oh_goon.integrations.fleet_plan_lace_policy import require_policy_aware_lace_backend
 from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
 from oh_goon.integrations.source_snapshot import SourceSnapshotBinding, verify_clean_source_snapshot
-from oh_goon.integrations.fleet_plan_lace_policy import require_policy_aware_lace_backend
-
 
 MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM = 1024 * 1024
 
@@ -48,8 +47,6 @@ class ProcessIsolationBackend(Protocol):
         process_observer: CommandProcessObserver | None = None,
         runtime_supervision: CommandRuntimeSupervision | None = None,
     ) -> CommandResult: ...
-
-
 
 
 class TrustedLocalEffectAuthority(Protocol):
@@ -132,7 +129,9 @@ def admitted_tl1_run_context(
     run = admitted_run.run
     target = run.target
     execution = admitted_run.execution
-    if not isinstance(target, FleetPlanTarget) or not isinstance(execution, StrictFleetExecutionAdmission):
+    if not isinstance(target, FleetPlanTarget) or not isinstance(
+        execution, StrictFleetExecutionAdmission
+    ):
         raise FleetPlanInvalid("TL-1 worker requires original admitted strict Plan authority")
     if target.plan != plan:
         raise FleetPlanInvalid("Worker Plan differs from immutable RUN_ADMITTED Plan")
@@ -143,13 +142,17 @@ def admitted_tl1_run_context(
         if admitted.backend_id == "trusted-local":
             raise FleetPlanInvalid("TL-1 backend requires original RUN_ADMITTED consent")
         return None, None
-    if (admitted.backend_id != "trusted-local"
-            or run.source is not FleetRunSource.MANUAL
-            or not isinstance(run.repository_scope, ExplicitRepositoryScope)
-            or len(run.repository_scope.repository_ids) != 1
-            or len(run.targets) != 1
-            or admitted_run.scheduling is not None):
-        raise FleetPlanInvalid("TL-1 worker requires interactive single-repository manual admission")
+    if (
+        admitted.backend_id != "trusted-local"
+        or run.source is not FleetRunSource.MANUAL
+        or not isinstance(run.repository_scope, ExplicitRepositoryScope)
+        or len(run.repository_scope.repository_ids) != 1
+        or len(run.targets) != 1
+        or admitted_run.scheduling is not None
+    ):
+        raise FleetPlanInvalid(
+            "TL-1 worker requires interactive single-repository manual admission"
+        )
     if not isinstance(plan.execution, CicdExecutionPolicy):
         raise FleetPlanInvalid("TL-1 worker requires trusted CI/CD execution")
     return consent, TrustedLocalRunScope(
@@ -185,7 +188,9 @@ def select_bound_process_isolation_backend(
     if admitted_run is not None:
         consent, scope = admitted_tl1_run_context(plan, admitted, admitted_run)
     if admitted.backend_id == "trusted-local" and (consent is None or scope is None):
-        raise FleetPlanInvalid("TL-1 worker requires original RUN_ADMITTED consent before backend selection")
+        raise FleetPlanInvalid(
+            "TL-1 worker requires original RUN_ADMITTED consent before backend selection"
+        )
     if consent is not None and admitted.backend_id != "trusted-local":
         raise FleetPlanInvalid("TL-1 consent cannot authorize a strict backend")
     for backend in backends:
@@ -201,7 +206,9 @@ def select_bound_process_isolation_backend(
             # Only exact, original Run-authoritative consent can replace the
             # default strict requirement. This is SELECTION, not effect authority.
             require_policy_aware_lace_backend(
-                execution=execution, backend=backend.capabilities, consent=consent,
+                execution=execution,
+                backend=backend.capabilities,
+                consent=consent,
                 fleet_run_id=scope.fleet_run_id,
                 execution_digest=scope.execution_digest,
                 backend_configuration_id=backend.configuration_identity(),

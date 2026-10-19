@@ -1,6 +1,18 @@
 version: 1
+inputs:
+  project:
+    type: string
+    non_empty: true
+    default: .
+    description: Repository-relative directory containing pyproject.toml and uv.lock
+  dependency_group:
+    type: string
+    non_empty: true
+    default: dev
+    description: Locked uv dependency group containing the selected tools
 uv:
-  group: dev
+  project: ${{ inputs.project }}
+  group: ${{ inputs.dependency_group }}
 steps:
 - run: uv run package-artifacts --output-dir dist --bundle package-distributions.tar --manifest package-artifacts.json
   artifacts:

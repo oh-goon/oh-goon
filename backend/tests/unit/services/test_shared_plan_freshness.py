@@ -5,8 +5,6 @@ from unittest.mock import Mock
 import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceStale
-from oh_goon.core.models.goon_plan_source import SharedPlanSource
-from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.runtime.shared_plans import SharedPlanFileStore
 from oh_goon.services.shared_plans import SharedPlanService
 from tests.factories.shipped_templates import GOON_TEMPLATES as SHIPPED_GOONS
@@ -40,7 +38,10 @@ def test_shared_plan_run_rejects_repository_instance_map_that_does_not_match_sel
         )
     plans.run_reviewed.assert_not_called()
 
-def test_shared_plan_preview_rejects_comment_only_change_during_real_resolution(tmp_path: Path) -> None:
+
+def test_shared_plan_preview_rejects_comment_only_change_during_real_resolution(
+    tmp_path: Path,
+) -> None:
     from oh_goon.core.models.repository import RepositoryIdentity
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
@@ -102,7 +103,9 @@ def test_shared_plan_lock_preview_rejects_comment_only_change_during_real_resolu
         service.lock_preview("python-quality")
 
 
-def test_shared_plan_input_projection_rejects_source_change_during_projection(tmp_path: Path) -> None:
+def test_shared_plan_input_projection_rejects_source_change_during_projection(
+    tmp_path: Path,
+) -> None:
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
     store = SharedPlanFileStore(tmp_path / "plans")

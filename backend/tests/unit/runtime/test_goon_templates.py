@@ -85,16 +85,12 @@ def test_composite_goon_compiles_only_ordered_goon_edges() -> None:
 
 def test_atomic_and_composite_forms_are_mutually_exclusive() -> None:
     with pytest.raises(FleetPlanInvalid, match="declare exactly one, never both"):
-        parse_goon_template(
-            """version: 1\ngoons:\n- python/quality\nsteps:\n- run: 'true'\n"""
-        )
+        parse_goon_template("""version: 1\ngoons:\n- python/quality\nsteps:\n- run: 'true'\n""")
 
 
 def test_only_canonical_goon_composition_forms_are_accepted() -> None:
     with pytest.raises(FleetPlanInvalid, match="declare exactly one"):
-        parse_goon_template(
-            """version: 1\nimports: [python/quality]\n"""
-        )
+        parse_goon_template("""version: 1\nimports: [python/quality]\n""")
     with pytest.raises(FleetPlanInvalid, match="unsupported typed executor: template"):
         parse_goon_template(
             """version: 1\nsteps:\n- uses: template\n  id: child\n  template: goon:python/quality\n"""
@@ -129,7 +125,9 @@ def test_goon_catalog_ignores_only_windows_zone_identifier_transport_sidecars(
 ) -> None:
     directory = _package(tmp_path, "general/valid", _atomic())
     (tmp_path / "README.md:Zone.Identifier").write_text("[ZoneTransfer]\n", encoding="utf-8")
-    (tmp_path / "general" / "valid:Zone.Identifier").write_text("[ZoneTransfer]\n", encoding="utf-8")
+    (tmp_path / "general" / "valid:Zone.Identifier").write_text(
+        "[ZoneTransfer]\n", encoding="utf-8"
+    )
     (directory / "README.md:Zone.Identifier").write_text("[ZoneTransfer]\n", encoding="utf-8")
     (directory / "goon.yml:Zone.Identifier:$DATA").write_text("[ZoneTransfer]\n", encoding="utf-8")
 
@@ -144,11 +142,15 @@ def test_goon_catalog_ignores_only_windows_zone_identifier_transport_sidecars(
 
 
 def test_shipped_goon_rejects_authored_name_drift_from_package_identity(tmp_path: Path) -> None:
-    _package(tmp_path, "general/valid", """version: 1
+    _package(
+        tmp_path,
+        "general/valid",
+        """version: 1
 name: other
 steps:
 - run: 'true'
-""")
+""",
+    )
     with pytest.raises(FleetPlanInvalid, match="must match package name 'valid'"):
         GoonTemplateStore(tmp_path).source("general/valid")
 
@@ -202,7 +204,6 @@ def test_oh_goon_certification_goons_are_atomic_canonical_command_delegates() ->
         "oh-goon/browser-targeted": ("make", "browser-targeted-certification"),
         "oh-goon/browser-required": ("make", "browser-required-certification"),
     }
-
 
     initialized_repository_goons = {
         "oh-goon/backend-p0",

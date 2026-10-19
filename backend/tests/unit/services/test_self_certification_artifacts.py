@@ -28,13 +28,15 @@ def _canonical_zip(source: Path, output: Path) -> str:
     return _sha(output)
 
 
-def test_fresh_source_zip_rejects_missing_committed_uv_lock_before_native_bootstrap(tmp_path, monkeypatch) -> None:
+def test_fresh_source_zip_rejects_missing_committed_uv_lock_before_native_bootstrap(
+    tmp_path, monkeypatch
+) -> None:
     root = tmp_path / "root"
     (root / "backend").mkdir(parents=True)
     (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
     (root / "backend/pyproject.toml").write_text(
         '[project]\nname="demo"\nversion="1.2.3"\nrequires-python=">=3.12,<3.15"\n'
-        '[dependency-groups]\ndev=[]\n',
+        "[dependency-groups]\ndev=[]\n",
         encoding="utf-8",
     )
     archive = tmp_path / "oh-goon-1.2.3.zip"
@@ -42,7 +44,9 @@ def test_fresh_source_zip_rejects_missing_committed_uv_lock_before_native_bootst
     archive.with_name(archive.name + ".sha256").write_text(
         f"{digest}  {archive.name}\n", encoding="utf-8"
     )
-    monkeypatch.setattr(artifacts, "archive_source_identity", lambda _path: "sha256:source")
+    from oh_goon.repository_tooling import _self_certification_artifact_verification as verification
+
+    monkeypatch.setattr(verification, "archive_source_identity", lambda _path: "sha256:source")
     state = tmp_path / "state"
     try:
         artifacts.verify_fresh_source_zip(
@@ -54,7 +58,9 @@ def test_fresh_source_zip_rejects_missing_committed_uv_lock_before_native_bootst
         raise AssertionError("missing committed backend lock must fail before native bootstrap")
 
 
-def test_cumulative_patch_supports_binary_changes_and_replays_exact_bytes(tmp_path, monkeypatch) -> None:
+def test_cumulative_patch_supports_binary_changes_and_replays_exact_bytes(
+    tmp_path, monkeypatch
+) -> None:
     parent_root = tmp_path / "parent"
     current_root = tmp_path / "current"
     parent_root.mkdir()
@@ -187,7 +193,9 @@ def test_retained_readback_evidence_is_invalidated_by_later_byte_corruption(tmp_
     )
 
 
-def test_artifact_manifest_binds_version_package_replay_and_persistence_identity(tmp_path, monkeypatch) -> None:
+def test_artifact_manifest_binds_version_package_replay_and_persistence_identity(
+    tmp_path, monkeypatch
+) -> None:
     root = tmp_path / "root"
     root.mkdir()
     (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
@@ -242,13 +250,19 @@ def test_artifact_manifest_binds_version_package_replay_and_persistence_identity
     assert evidence is not None
     assert evidence["persistence_identity"] == payload["persistence"]["identity"]
 
-    assert artifacts.load_manifest_evidence(
-        root, state_dir, "sha256:" + "9" * 64, sidecars, replay, fresh
-    ) is None
+    assert (
+        artifacts.load_manifest_evidence(
+            root, state_dir, "sha256:" + "9" * 64, sidecars, replay, fresh
+        )
+        is None
+    )
     changed_replay = {**replay, "status": "FAILED"}
-    assert artifacts.load_manifest_evidence(
-        root, state_dir, package_config_identity, sidecars, changed_replay, fresh
-    ) is None
+    assert (
+        artifacts.load_manifest_evidence(
+            root, state_dir, package_config_identity, sidecars, changed_replay, fresh
+        )
+        is None
+    )
 
 
 def test_persistence_rejects_manifest_persistence_identity_drift(tmp_path, monkeypatch) -> None:

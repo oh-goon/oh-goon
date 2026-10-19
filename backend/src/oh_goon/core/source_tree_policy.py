@@ -42,18 +42,21 @@ TRANSIENT_RELATIVE_PATHS: frozenset[PurePosixPath] = frozenset(
         PurePosixPath("release-artifacts"),
     }
 )
-TRANSIENT_DIRECTORY_NAMES: frozenset[str] = frozenset(
-    {
-        ".git",
-        ".hashmarks",
-        ".oh-goon-playwright-browsers",
-        ".oh-goon-vite-cache",
-        "__pycache__",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-    }
-) | PACKAGE_MANAGER_MATERIALIZATION_DIRECTORY_NAMES
+TRANSIENT_DIRECTORY_NAMES: frozenset[str] = (
+    frozenset(
+        {
+            ".git",
+            ".hashmarks",
+            ".oh-goon-playwright-browsers",
+            ".oh-goon-vite-cache",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+        }
+    )
+    | PACKAGE_MANAGER_MATERIALIZATION_DIRECTORY_NAMES
+)
 TRANSIENT_FILE_NAMES: frozenset[str] = frozenset({".coverage", "coverage-python.json"})
 TRANSIENT_FILE_PREFIXES: tuple[str, ...] = (".coverage.",)
 TRANSIENT_SUFFIXES: frozenset[str] = frozenset({".pyc", ".pyo", ".tsbuildinfo"})
@@ -97,9 +100,7 @@ def is_package_manager_materialization_path(
     """Whether a canonical source-tree path belongs to package-manager materialization."""
 
     relative = repository_relative_path(path)
-    return any(
-        part in PACKAGE_MANAGER_MATERIALIZATION_DIRECTORY_NAMES for part in relative.parts
-    )
+    return any(part in PACKAGE_MANAGER_MATERIALIZATION_DIRECTORY_NAMES for part in relative.parts)
 
 
 def is_transient_source_path(path: Path | PurePosixPath | str) -> bool:
@@ -155,7 +156,9 @@ def canonical_lock_layout_issues(root: Path) -> tuple[tuple[Path, str], ...]:
             import stat
 
             if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
-                issues.append((lock, "committed backend dependency lock must be a regular non-symlink file"))
+                issues.append(
+                    (lock, "committed backend dependency lock must be a regular non-symlink file")
+                )
 
     for directory, dirnames, filenames in os.walk(root, followlinks=False):
         current = Path(directory)

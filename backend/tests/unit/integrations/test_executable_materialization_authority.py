@@ -310,9 +310,7 @@ def test_materialization_refusal_occurs_before_process_backend_launch(tmp_path: 
         paths=SimpleNamespace(workspace=tmp_path),
         executable_materialization=receipt,
     )
-    runner = _isolated_command_runner(
-        attempt, step, backend, termination_requested=None
-    )
+    runner = _isolated_command_runner(attempt, step, backend, termination_requested=None)
 
     with pytest.raises(FleetPlanInvalid, match="changed after materialization binding"):
         runner("make", "typecheck", cwd=tmp_path, env={})

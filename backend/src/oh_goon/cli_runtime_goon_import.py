@@ -10,7 +10,9 @@ from oh_goon.core.errors import FleetDomainError
 def import_gitlab(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     """One-way GitLab CI/component migration into one Atomic repository Goon."""
     try:
-        import_variables = _named_values(getattr(args, "gitlab_variables", None), label="--variable")
+        import_variables = _named_values(
+            getattr(args, "gitlab_variables", None), label="--variable"
+        )
         token_env = getattr(args, "token_env", None)
         token = os.environ.get(token_env) if token_env else None
         if token_env and token is None:

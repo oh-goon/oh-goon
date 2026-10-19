@@ -4,14 +4,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api import dependencies
 from oh_goon.api.app import app as api_app
-from oh_goon.scout.policy import SCOUT_MEASUREMENT_SCHEMA_VERSION
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.scout.database import scout_analytical_database_path
+from oh_goon.scout.policy import SCOUT_MEASUREMENT_SCHEMA_VERSION
 from oh_goon.scout.service import ScoutService
+from tests.integration.api.client import authenticated_api_client
 
 
 class _EmptyJournal:

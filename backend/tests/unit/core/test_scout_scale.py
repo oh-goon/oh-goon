@@ -2,12 +2,14 @@ from dataclasses import replace
 from datetime import timedelta
 
 from oh_goon.core.execution_observability import RepositoryRunObservation
-from oh_goon.scout.models import ScoutWindow
+from oh_goon.core.time import utc_now
+from oh_goon.core.vocabulary import GameTapeStatus
 from oh_goon.scout.aggregation import goon_rows, goon_versions
 from oh_goon.scout.evidence import (
     ScoutEvidenceSnapshot,
     ScoutStepObservation,
 )
+from oh_goon.scout.models import ScoutWindow
 from oh_goon.scout.projection import (
     project_scout_findings,
     project_scout_goon,
@@ -15,8 +17,6 @@ from oh_goon.scout.projection import (
     project_scout_plan,
     project_scout_repository,
 )
-from oh_goon.core.time import utc_now
-from oh_goon.core.vocabulary import GameTapeStatus
 
 
 def _window(now) -> ScoutWindow:
@@ -223,10 +223,20 @@ def test_plan_and_goon_repository_pages_reach_rows_beyond_first_bound() -> None:
     snapshot = ScoutEvidenceSnapshot(journal_revision=17, runs=runs, steps=steps)
 
     first = project_scout_plan(
-        snapshot, window=_window(now), plan_id="plan", page_section="repositories", page_offset=0, page_limit=100
+        snapshot,
+        window=_window(now),
+        plan_id="plan",
+        page_section="repositories",
+        page_offset=0,
+        page_limit=100,
     )
     third = project_scout_plan(
-        snapshot, window=_window(now), plan_id="plan", page_section="repositories", page_offset=200, page_limit=100
+        snapshot,
+        window=_window(now),
+        plan_id="plan",
+        page_section="repositories",
+        page_offset=200,
+        page_limit=100,
     )
     goon_third = project_scout_goon(
         snapshot,
@@ -253,9 +263,7 @@ def test_plan_and_goon_repository_pages_reach_rows_beyond_first_bound() -> None:
 
 def test_heavy_hitters_are_reachable_through_paginated_findings() -> None:
     now = utc_now()
-    steps = tuple(
-        _observation(repo=repo, now=now, cpu=float(100 - repo)) for repo in range(25)
-    )
+    steps = tuple(_observation(repo=repo, now=now, cpu=float(100 - repo)) for repo in range(25))
     runs = tuple(
         RepositoryRunObservation(
             run_id=step.run_id,

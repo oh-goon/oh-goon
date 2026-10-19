@@ -22,7 +22,6 @@ def catalog(service: ScheduleService = Depends(schedule_service)) -> ScheduleCat
     return service.catalog()
 
 
-
 @router.post(
     "/{schedule_id}/from-shared-plan",
     response_model=ScheduleDefinition,

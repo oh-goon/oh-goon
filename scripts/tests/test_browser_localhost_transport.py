@@ -10,7 +10,12 @@ FRONTEND = ROOT / "frontend"
 
 def test_node_localhost_transport_regressions_pass_on_real_host() -> None:
     completed = subprocess.run(
-        ["node", "--test", "e2e/browser-localhost-transport.test.mjs", "e2e/localhost-tcp-probe.test.mjs"],
+        [
+            "node",
+            "--test",
+            "e2e/browser-localhost-transport.test.mjs",
+            "e2e/localhost-tcp-probe.test.mjs",
+        ],
         cwd=FRONTEND,
         text=True,
         capture_output=True,
@@ -19,7 +24,9 @@ def test_node_localhost_transport_regressions_pass_on_real_host() -> None:
 
 
 def test_public_browser_entrypoints_own_transport_without_make_duplication() -> None:
-    scripts = json.loads((FRONTEND / "package.json").read_text(encoding="utf-8"))["scripts"]
+    scripts = json.loads((FRONTEND / "package.json").read_text(encoding="utf-8"))[
+        "scripts"
+    ]
     for name in (
         "test:browser",
         "test:browser:chromium",
@@ -51,9 +58,16 @@ def test_public_browser_entrypoints_own_transport_without_make_duplication() -> 
     assert "node e2e/browser-preflight.mjs" in release
     assert "node e2e/browser-runtime-preflight.mjs" in release
     assert "npm run browser:test --" in release
-    assert "playwright test --config=playwright.visual.config.ts --project=chromium" in release
+    assert (
+        "playwright test --config=playwright.visual.config.ts --project=chromium"
+        in release
+    )
 
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    for target in ("browser-preflight", "browser-harness-preflight", "browser-runtime-preflight"):
+    for target in (
+        "browser-preflight",
+        "browser-harness-preflight",
+        "browser-runtime-preflight",
+    ):
         header = makefile.split(f"{target}:", 1)[1].split("\n", 1)[0]
         assert "browser-localhost-transport-preflight" not in header

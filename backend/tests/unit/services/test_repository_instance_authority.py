@@ -5,9 +5,9 @@ from pydantic import ValidationError
 
 from oh_goon.api.schemas.fleet import FleetRunRequest
 from oh_goon.core.errors import TargetSelectionError
-from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.models.target import UvRecipeTarget
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary import FleetScope, OperationAction, UvRecipeId
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
 
@@ -70,7 +70,9 @@ def test_fleet_run_request_defaults_priority_and_accepts_canonical_priority() ->
 
     normal = FleetRunRequest(fleet_run_id="normal", action=OperationAction.STATUS)
     high = FleetRunRequest(
-        fleet_run_id="high", action=OperationAction.STATUS, requested_priority=SchedulingPriority.HIGH
+        fleet_run_id="high",
+        action=OperationAction.STATUS,
+        requested_priority=SchedulingPriority.HIGH,
     )
 
     assert normal.requested_priority is SchedulingPriority.NORMAL

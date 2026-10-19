@@ -1,11 +1,12 @@
 """B13 physical-negative-evidence regression ring; no mocked proof or gate seal."""
+
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
+
 from oh_goon.repository_tooling import local_lace_physical_preflight as b13
 
 
@@ -13,11 +14,17 @@ def scope(tmp_path: Path, **changes):
     root = tmp_path / "original-cgroup"
     root.mkdir(exist_ok=True)
     raw = {
-        "run_id": "original-run", "subject_identity": "sha256:" + "a" * 64,
-        "cgroup_path": str(root), "cgroup_device": root.stat().st_dev,
-        "cgroup_inode": root.stat().st_ino, "tracked_pid": 1234567,
-        "tracked_birth": "boot-test:123", "mount_targets": ["/private/original-mount"],
-        "network_namespace": "testnet", "host_veth": "testveth", "nft_table": "testnft",
+        "run_id": "original-run",
+        "subject_identity": "sha256:" + "a" * 64,
+        "cgroup_path": str(root),
+        "cgroup_device": root.stat().st_dev,
+        "cgroup_inode": root.stat().st_ino,
+        "tracked_pid": 1234567,
+        "tracked_birth": "boot-test:123",
+        "mount_targets": ["/private/original-mount"],
+        "network_namespace": "testnet",
+        "host_veth": "testveth",
+        "nft_table": "testnft",
     }
     raw.update(changes)
     return raw
@@ -26,13 +33,15 @@ def scope(tmp_path: Path, **changes):
 def test_exact_schema_rejects_missing_extra_and_invalid_id(tmp_path):
     raw = scope(tmp_path)
     assert b13.parse_scope(raw).subject_identity == raw["subject_identity"]
-    for invalid in ({**raw, "effect_permission": "GRANTED"},
-                    {k: v for k, v in raw.items() if k != "tracked_birth"},
-                    {**raw, "subject_identity": "fake"},
-                    {**raw, "tracked_pid": True},
-                    {**raw, "mount_targets": []},
-                    {**raw, "mount_targets": ["/good", "../bad"]},
-                    {**raw, "network_namespace": None}):
+    for invalid in (
+        {**raw, "effect_permission": "GRANTED"},
+        {k: v for k, v in raw.items() if k != "tracked_birth"},
+        {**raw, "subject_identity": "fake"},
+        {**raw, "tracked_pid": True},
+        {**raw, "mount_targets": []},
+        {**raw, "mount_targets": ["/good", "../bad"]},
+        {**raw, "network_namespace": None},
+    ):
         with pytest.raises(b13.PreflightError):
             b13.parse_scope(invalid)
 
@@ -107,7 +116,9 @@ def test_mounts_in_observer_namespace_only(tmp_path):
     raw = scope(tmp_path)
     proc = tmp_path / "proc"
     (proc / "self").mkdir(parents=True)
-    (proc / "self/mountinfo").write_text("42 39 0:42 / /private/original-mount rw - tmpfs tmpfs rw\n")
+    (proc / "self/mountinfo").write_text(
+        "42 39 0:42 / /private/original-mount rw - tmpfs tmpfs rw\n"
+    )
     assert b13._mounts(b13.parse_scope(raw), proc)["state"] == "PRESENT"
     (proc / "self/mountinfo").write_text("42 39 0:42 / /somewhere rw - tmpfs tmpfs rw\n")
     assert b13._mounts(b13.parse_scope(raw), proc)["state"] == "NOT_OBSERVED"
@@ -121,19 +132,20 @@ def test_network_unavailable_is_unknown_never_absent(tmp_path, monkeypatch):
 
 def test_network_any_one_remaining_object_is_present(tmp_path, monkeypatch):
     raw = scope(tmp_path)
+
     def command(argv):
         if "netns" in argv:
             return []
         if "link" in argv:
             return [{"ifname": "testveth@if12"}]
         return {"nftables": []}
+
     monkeypatch.setattr(b13, "_command", command)
     assert b13._network(b13.parse_scope(raw))["state"] == "PRESENT"
 
 
 def test_double_scan_race_is_unknown_and_no_seal(tmp_path, monkeypatch):
     spec = b13.parse_scope(scope(tmp_path))
-    original = b13._cgroup
     sequence = iter([b13._component("PRESENT", "found"), b13._component("NOT_OBSERVED", "missing")])
     monkeypatch.setattr(b13, "_cgroup", lambda *_a: next(sequence))
     monkeypatch.setattr(b13, "_process", lambda *_a: b13._component("NOT_OBSERVED", "pid missing"))
@@ -148,12 +160,29 @@ def test_double_scan_race_is_unknown_and_no_seal(tmp_path, monkeypatch):
 
 def test_all_no_matches_still_cannot_upgrade_into_proof(tmp_path, monkeypatch):
     spec = b13.parse_scope(scope(tmp_path))
-    for name in ("_cgroup", "_cgroup_subtree", "_process", "_mounts", "_network", "_tracked_namespace_inventory", "_namespace_fd_holders", "_visible_foreign_mount_targets", "_visible_mount_fd_holders"):
-        monkeypatch.setattr(b13, name, (lambda *_a: {
-            "tracked_mount_namespace": b13._component("NOT_OBSERVED", "local-only"),
-            "tracked_network_namespace": b13._component("NOT_OBSERVED", "local-only")
-        }) if name == "_tracked_namespace_inventory" else
-        (lambda *_a: b13._component("NOT_OBSERVED", "local-only")))
+    for name in (
+        "_cgroup",
+        "_cgroup_subtree",
+        "_process",
+        "_mounts",
+        "_network",
+        "_tracked_namespace_inventory",
+        "_namespace_fd_holders",
+        "_visible_foreign_mount_targets",
+        "_visible_mount_fd_holders",
+    ):
+        monkeypatch.setattr(
+            b13,
+            name,
+            (
+                lambda *_a: {
+                    "tracked_mount_namespace": b13._component("NOT_OBSERVED", "local-only"),
+                    "tracked_network_namespace": b13._component("NOT_OBSERVED", "local-only"),
+                }
+            )
+            if name == "_tracked_namespace_inventory"
+            else (lambda *_a: b13._component("NOT_OBSERVED", "local-only")),
+        )
     receipt = b13.observe(spec)
     assert all(x["state"] == "NOT_OBSERVED" for x in receipt["observations"].values())
     assert receipt["physical_absence_proven"] is receipt["teardown_proven"] is False
@@ -165,14 +194,17 @@ def test_module_does_not_import_effect_issuer_or_journal(tmp_path):
     source = path.read_text()
     assert "from oh_goon.runtime" not in source
     assert "from oh_goon.services" not in source
-    assert "QUIESCENCE_PROVEN\"" not in source
-    assert "TEARDOWN_PROVEN\"" not in source
+    assert 'QUIESCENCE_PROVEN"' not in source
+    assert 'TEARDOWN_PROVEN"' not in source
 
 
 def test_b13_source_identity_is_selected_before_b12_in_development_witness():
     source = Path(__file__).resolve().parents[4] / "scripts" / "qualify_b12_development_wsl.sh"
     content = source.read_text()
     assert "embedded='.checkpoint/B12_SOURCE.sha256'" in content
-    assert "if [[ -f .checkpoint/B13_SOURCE.sha256 ]]; then embedded='.checkpoint/B13_SOURCE.sha256'; fi" in content
+    assert (
+        "if [[ -f .checkpoint/B13_SOURCE.sha256 ]]; then embedded='.checkpoint/B13_SOURCE.sha256'; fi"
+        in content
+    )
     assert 'source_transport_audit --baseline "$embedded"' in content
     assert 'source_inventory | grep -v -F "  ./$embedded"' in content

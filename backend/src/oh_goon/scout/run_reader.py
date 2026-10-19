@@ -7,15 +7,14 @@ from statistics import median
 from typing import Iterable
 
 from oh_goon.core.errors import OperationNotFound
+from oh_goon.core.vocabulary import GameTapeStatus
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.scout.database import ScoutAnalyticalDatabase
 from oh_goon.scout.models import (
     ScoutRunEvidence,
     ScoutRunRepositoryEvidence,
     ScoutRunStepEvidence,
 )
-from oh_goon.core.vocabulary import GameTapeStatus
-from oh_goon.runtime.database import LocalDatabase
-from oh_goon.scout.database import ScoutAnalyticalDatabase
-
 
 PeerKey = tuple[str, str, str, str, str]
 
@@ -118,7 +117,11 @@ def _group_peer_rows(rows: Iterable[sqlite3.Row]) -> dict[PeerKey, tuple[sqlite3
     return {key: tuple(items) for key, items in grouped.items()}
 
 
-def _repository_evidence(run_row: sqlite3.Row, rows: Iterable[sqlite3.Row], peers_by_key: dict[PeerKey, tuple[sqlite3.Row, ...]]) -> ScoutRunRepositoryEvidence:
+def _repository_evidence(
+    run_row: sqlite3.Row,
+    rows: Iterable[sqlite3.Row],
+    peers_by_key: dict[PeerKey, tuple[sqlite3.Row, ...]],
+) -> ScoutRunRepositoryEvidence:
     steps = tuple(_step_evidence(row, peers_by_key.get(_peer_key(row), ())) for row in rows)
     cpu_values = [item.cpu_seconds for item in steps if item.cpu_seconds is not None]
     memory_values = [item.peak_memory_bytes for item in steps if item.peak_memory_bytes is not None]
@@ -138,10 +141,14 @@ def _step_evidence(row: sqlite3.Row, peers: Iterable[sqlite3.Row]) -> ScoutRunSt
     memory = _int_or_none(row["complete_peak_memory_bytes"])
     duration = _float_or_none(row["duration_seconds"])
     peer_cpu = tuple(
-        value for item in peers if (value := _float_or_none(item["complete_cpu_seconds"])) is not None
+        value
+        for item in peers
+        if (value := _float_or_none(item["complete_cpu_seconds"])) is not None
     )
     peer_memory = tuple(
-        value for item in peers if (value := _int_or_none(item["complete_peak_memory_bytes"])) is not None
+        value
+        for item in peers
+        if (value := _int_or_none(item["complete_peak_memory_bytes"])) is not None
     )
     peer_duration = tuple(
         value for item in peers if (value := _float_or_none(item["duration_seconds"])) is not None

@@ -4,6 +4,7 @@ This module deliberately does not own semantic answer truth. Hidden paraphrase, 
 and fresh-challenge prompts bind back to canonical Repository Understanding questions, so the
 existing SECRET expected claims/evidence remain the sole semantic grading authority.
 """
+
 from __future__ import annotations
 
 import copy
@@ -141,7 +142,9 @@ def load_benchmark_registry(
         if family_id in family_ids:
             raise ValueError(f"duplicate equivalence family id: {family_id}")
         family_ids.add(family_id)
-        qid = _canonical_target(family.get("question_id"), label=family_id, questions=question_by_id)
+        qid = _canonical_target(
+            family.get("question_id"), label=family_id, questions=question_by_id
+        )
         variants_raw = family.get("variants")
         if not isinstance(variants_raw, list) or len(variants_raw) < 2:
             raise ValueError(f"{family_id} must contain at least two hidden paraphrase variants")
@@ -180,7 +183,9 @@ def load_benchmark_registry(
             if not isinstance(item, dict):
                 raise ValueError(f"{key} entry must be an object")
             challenge_id = _challenge_id(item.get("id"), label=key, seen=seen_ids)
-            qid = _canonical_target(item.get("question_id"), label=challenge_id, questions=question_by_id)
+            qid = _canonical_target(
+                item.get("question_id"), label=challenge_id, questions=question_by_id
+            )
             row: dict[str, Any] = {
                 "id": challenge_id,
                 "question_id": qid,
@@ -189,8 +194,13 @@ def load_benchmark_registry(
                 "critical": getattr(question_by_id[qid], "severity", None) == "critical",
             }
             if require_never_calibrated:
-                if item.get("calibration_exposure") != "NEVER" or item.get("score_bearing") is not False:
-                    raise ValueError(f"{challenge_id} canary must be NEVER calibrated and non-score-bearing")
+                if (
+                    item.get("calibration_exposure") != "NEVER"
+                    or item.get("score_bearing") is not False
+                ):
+                    raise ValueError(
+                        f"{challenge_id} canary must be NEVER calibrated and non-score-bearing"
+                    )
                 introduced_source_version = _introduced_source_version(
                     item.get("introduced_source_version"),
                     label=challenge_id,
@@ -205,7 +215,9 @@ def load_benchmark_registry(
                 )
             if require_shadow:
                 if item.get("lifecycle") != "SHADOW" or item.get("score_bearing") is not False:
-                    raise ValueError(f"{challenge_id} fresh challenge must be SHADOW and non-score-bearing")
+                    raise ValueError(
+                        f"{challenge_id} fresh challenge must be SHADOW and non-score-bearing"
+                    )
                 introduced_source_version = _introduced_source_version(
                     item.get("introduced_source_version"),
                     label=challenge_id,
@@ -222,12 +234,8 @@ def load_benchmark_registry(
         return rows
 
     pressure = normalize_rows("contradiction_pressure", role="CONTRADICTION_PRESSURE")
-    canaries = normalize_rows(
-        "canaries", role="CANARY", require_never_calibrated=True
-    )
-    fresh = normalize_rows(
-        "fresh_challenges", role="FRESH_SHADOW", require_shadow=True
-    )
+    canaries = normalize_rows("canaries", role="CANARY", require_never_calibrated=True)
+    fresh = normalize_rows("fresh_challenges", role="FRESH_SHADOW", require_shadow=True)
 
     rotation_raw = payload.get("rotation")
     if not isinstance(rotation_raw, dict):
@@ -290,20 +298,22 @@ def _choose_variant(family: dict[str, Any], seed: str) -> dict[str, Any]:
     return family["variants"][index]
 
 
-def _select_rotating(rows: list[dict[str, Any]], *, slots: int, seed: str, label: str) -> list[dict[str, Any]]:
+def _select_rotating(
+    rows: list[dict[str, Any]], *, slots: int, seed: str, label: str
+) -> list[dict[str, Any]]:
     """Select a deterministic seed-bound subset without exposing pool order as authority."""
 
     ranked = sorted(
         rows,
-        key=lambda row: hashlib.sha256(
-            f"{seed}\0{label}\0{row['id']}".encode("utf-8")
-        ).hexdigest(),
+        key=lambda row: hashlib.sha256(f"{seed}\0{label}\0{row['id']}".encode("utf-8")).hexdigest(),
     )
     return [copy.deepcopy(row) for row in ranked[:slots]]
 
 
 def _delivery_id(registry_identity: str, challenge_id: str, seed: str) -> str:
-    digest = hashlib.sha256(f"{registry_identity}\0{challenge_id}\0{seed}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(
+        f"{registry_identity}\0{challenge_id}\0{seed}".encode("utf-8")
+    ).hexdigest()
     return "D-" + digest[:20].upper()
 
 
@@ -340,8 +350,7 @@ def challenge_set(
             )
         )
     chosen.extend(
-        (copy.deepcopy(row), "CONTRADICTION_PRESSURE")
-        for row in registry["contradiction_pressure"]
+        (copy.deepcopy(row), "CONTRADICTION_PRESSURE") for row in registry["contradiction_pressure"]
     )
     chosen.extend(
         (row, "CANARY")
@@ -369,7 +378,9 @@ def challenge_set(
         expected_critical = item.get("critical")
         if expected_critical is None and role == "PARAPHRASE":
             family = next(
-                family for family in registry["equivalence_families"] if family["id"] == item["family_id"]
+                family
+                for family in registry["equivalence_families"]
+                if family["id"] == item["family_id"]
             )
             expected_critical = family["critical"]
         if expected_critical != (getattr(question, "severity", None) == "critical"):
@@ -387,9 +398,7 @@ def challenge_set(
             secret["family_id"] = item["family_id"]
         rows.append((delivery_id, public, secret))
 
-    rows.sort(
-        key=lambda row: hashlib.sha256(f"{seed}\0{row[0]}".encode("utf-8")).hexdigest()
-    )
+    rows.sort(key=lambda row: hashlib.sha256(f"{seed}\0{row[0]}".encode("utf-8")).hexdigest())
     base = {
         "artifact_type": "repository-understanding-challenge-set",
         "schema_version": CHALLENGE_INSTANCE_SCHEMA_VERSION,
@@ -441,7 +450,9 @@ def _registry_challenge_bindings(registry: dict[str, Any]) -> dict[str, dict[str
     return expected
 
 
-def _validate_challenge_instance(payload: dict[str, Any], registry: dict[str, Any]) -> dict[str, Any]:
+def _validate_challenge_instance(
+    payload: dict[str, Any], registry: dict[str, Any]
+) -> dict[str, Any]:
     if payload.get("artifact_type") != "repository-understanding-challenge-set":
         raise ValueError("challenge input artifact_type mismatch")
     if payload.get("schema_version") != CHALLENGE_INSTANCE_SCHEMA_VERSION:
@@ -456,10 +467,16 @@ def _validate_challenge_instance(payload: dict[str, Any], registry: dict[str, An
     )
     if identity != expected_identity:
         raise ValueError("challenge instance identity does not match challenge bytes")
-    if payload.get("candidate_visibility_rule") != "expose public_delivery only; never expose secret_bindings":
+    if (
+        payload.get("candidate_visibility_rule")
+        != "expose public_delivery only; never expose secret_bindings"
+    ):
         raise ValueError("challenge instance candidate visibility rule mismatch")
     seed_identity = payload.get("seed_identity")
-    if not isinstance(seed_identity, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", seed_identity) is None:
+    if (
+        not isinstance(seed_identity, str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", seed_identity) is None
+    ):
         raise ValueError("challenge instance seed identity is invalid")
     rotation_seed = payload.get("secret_rotation_seed")
     if not isinstance(rotation_seed, str) or not rotation_seed.strip() or len(rotation_seed) > 256:
@@ -473,7 +490,11 @@ def _validate_challenge_instance(payload: dict[str, Any], registry: dict[str, An
         raise ValueError("challenge instance public/secret bindings are inconsistent")
     public_ids = [row.get("delivery_id") for row in public if isinstance(row, dict)]
     secret_ids = [row.get("delivery_id") for row in secret if isinstance(row, dict)]
-    if len(public_ids) != len(public) or public_ids != secret_ids or len(set(public_ids)) != len(public_ids):
+    if (
+        len(public_ids) != len(public)
+        or public_ids != secret_ids
+        or len(set(public_ids)) != len(public_ids)
+    ):
         raise ValueError("challenge instance delivery identities are inconsistent")
     if any(set(row) != {"delivery_id", "prompt"} for row in public if isinstance(row, dict)):
         raise ValueError("challenge public delivery leaks non-public metadata")
@@ -491,7 +512,9 @@ def _validate_challenge_instance(payload: dict[str, Any], registry: dict[str, An
         challenge_id = binding.get("challenge_id")
         expected = registry_bindings.get(challenge_id)
         if expected is None:
-            raise ValueError(f"challenge instance contains unknown registry challenge: {challenge_id}")
+            raise ValueError(
+                f"challenge instance contains unknown registry challenge: {challenge_id}"
+            )
         for field in ("question_id", "role", "critical"):
             if binding.get(field) != expected[field]:
                 raise ValueError(f"challenge {challenge_id} {field} drifted from SECRET registry")
@@ -499,9 +522,13 @@ def _validate_challenge_instance(payload: dict[str, Any], registry: dict[str, An
             raise ValueError(f"challenge {challenge_id} prompt drifted from SECRET registry")
         if expected["role"] == "PARAPHRASE":
             if binding.get("family_id") != expected["family_id"]:
-                raise ValueError(f"challenge {challenge_id} equivalence family drifted from SECRET registry")
+                raise ValueError(
+                    f"challenge {challenge_id} equivalence family drifted from SECRET registry"
+                )
             if expected["family_id"] in selected_families:
-                raise ValueError(f"challenge instance selected multiple variants for {expected['family_id']}")
+                raise ValueError(
+                    f"challenge instance selected multiple variants for {expected['family_id']}"
+                )
             selected_families.add(expected["family_id"])
         elif expected["role"] == "CONTRADICTION_PRESSURE":
             pressure_observed.add(challenge_id)
@@ -511,7 +538,9 @@ def _validate_challenge_instance(payload: dict[str, Any], registry: dict[str, An
             fresh_observed.add(challenge_id)
     expected_families = {family["id"] for family in registry["equivalence_families"]}
     if selected_families != expected_families or pressure_observed != pressure_expected:
-        raise ValueError("challenge instance does not contain the exact fixed SECRET challenge composition")
+        raise ValueError(
+            "challenge instance does not contain the exact fixed SECRET challenge composition"
+        )
     if len(canary_observed) != registry["rotation"]["canary_slots"]:
         raise ValueError("challenge instance canary rotation slot count mismatch")
     if len(fresh_observed) != registry["rotation"]["fresh_shadow_slots"]:
@@ -630,7 +659,9 @@ def adversarial_report(
     false_rows = observations.get("false_premises")
     expected_false = list(registry["false_premise_question_ids"])
     if not isinstance(false_rows, list) or len(false_rows) != len(expected_false):
-        raise ValueError("adversarial observations must cover every canonical false-premise question")
+        raise ValueError(
+            "adversarial observations must cover every canonical false-premise question"
+        )
     normalized_false: list[dict[str, Any]] = []
     observed_false: list[str] = []
     for row in false_rows:
@@ -712,7 +743,9 @@ def benchmark_integrity_report(
         raise ValueError("benchmark execution evidence candidate_run_identity is required")
     config_identity = payload.get("candidate_configuration_identity")
     if not isinstance(config_identity, str) or not config_identity.startswith("sha256:"):
-        raise ValueError("benchmark execution evidence candidate_configuration_identity is required")
+        raise ValueError(
+            "benchmark execution evidence candidate_configuration_identity is required"
+        )
 
     challenge_identity: str | None = None
     if challenge_instance_path is not None:

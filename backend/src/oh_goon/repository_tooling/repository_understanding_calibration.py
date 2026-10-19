@@ -4,6 +4,7 @@ Empirical observations are measurements, not grading-policy authority.  This mod
 reproducible telemetry without silently changing authored difficulty, qualification thresholds, or
 question health.  Promotion to calibrated difficulty remains an explicit SECRET bank-authority act.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -17,7 +18,9 @@ import yaml
 
 CALIBRATION_POLICY_VERSION = "repository-understanding-calibration.v8"
 QUESTION_AUDIT_POLICY_VERSION = "repository-question-audit.v4"
-CALIBRATION_PROMOTION_REVIEW_POLICY_VERSION = "repository-understanding-calibration-promotion-review.v2"
+CALIBRATION_PROMOTION_REVIEW_POLICY_VERSION = (
+    "repository-understanding-calibration-promotion-review.v2"
+)
 CALIBRATION_OBSERVATION_SCHEMA = 1
 CALIBRATION_PROMOTION_REVIEW_SCHEMA = 2
 QUESTION_AUDIT_SCHEMA = 4
@@ -54,12 +57,18 @@ def _identity(value: Any, *, label: str) -> str:
 
 
 def _sha256_digest(value: Any, *, label: str) -> str:
-    if not isinstance(value, str) or len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(ch not in "0123456789abcdef" for ch in value)
+    ):
         raise ValueError(f"{label} must be a sha256 digest")
     return value
 
 
-def _wilson_interval(successes: int, total: int, *, z: float = 1.959963984540054) -> dict[str, Any] | None:
+def _wilson_interval(
+    successes: int, total: int, *, z: float = 1.959963984540054
+) -> dict[str, Any] | None:
     """Return a descriptive 95% Wilson interval for a Bernoulli rate.
 
     This is uncertainty telemetry only. Calibration observations are not asserted to be
@@ -143,7 +152,9 @@ def _calibration_review_eligibility(
             gaps.append(f"{cohort}_system_count<{CALIBRATION_REVIEW_MIN_SYSTEMS_PER_COHORT}")
         independent_count = cohort_independent_subject_counts.get(cohort, 0)
         if independent_count < CALIBRATION_REVIEW_MIN_SYSTEMS_PER_COHORT:
-            gaps.append(f"{cohort}_independent_subject_count<{CALIBRATION_REVIEW_MIN_SYSTEMS_PER_COHORT}")
+            gaps.append(
+                f"{cohort}_independent_subject_count<{CALIBRATION_REVIEW_MIN_SYSTEMS_PER_COHORT}"
+            )
     return {
         "status": "ELIGIBLE_FOR_REVIEW" if not gaps else "INSUFFICIENT_EVIDENCE",
         "minimum_observations": CALIBRATION_REVIEW_MIN_OBSERVATIONS,
@@ -157,7 +168,6 @@ def _calibration_review_eligibility(
             "guarantee and cannot itself promote calibrated difficulty"
         ),
     }
-
 
 
 def calibration_promotion_review(
@@ -215,7 +225,9 @@ def _retained_promotion_review(
         raise ValueError(f"{qid} CALIBRATED requires calibration_evidence.promotion_review_path")
     rel = Path(relative)
     if rel.is_absolute():
-        raise ValueError(f"{qid} promotion review path must be relative to the SECRET audit directory")
+        raise ValueError(
+            f"{qid} promotion review path must be relative to the SECRET audit directory"
+        )
     base_dir = audit_path.parent.resolve()
     review_path = (base_dir / rel).resolve()
     try:
@@ -263,6 +275,7 @@ def _retained_promotion_review(
     _identity(review.get("reviewer_identity"), label=f"{qid} promotion review reviewer_identity")
     return {"promotion_review_path": rel.as_posix(), "promotion_review_identity": requested}
 
+
 def _retained_calibration_report(
     audit_path: Path,
     evidence: Any,
@@ -278,13 +291,17 @@ def _retained_calibration_report(
         raise ValueError(f"{qid} calibration_evidence.report_path is required")
     rel = Path(relative)
     if rel.is_absolute():
-        raise ValueError(f"{qid} calibration report path must be relative to the SECRET audit directory")
+        raise ValueError(
+            f"{qid} calibration report path must be relative to the SECRET audit directory"
+        )
     base_dir = audit_path.parent.resolve()
     report_path = (base_dir / rel).resolve()
     try:
         report_path.relative_to(base_dir)
     except ValueError as exc:
-        raise ValueError(f"{qid} calibration report path escapes the SECRET audit directory") from exc
+        raise ValueError(
+            f"{qid} calibration report path escapes the SECRET audit directory"
+        ) from exc
     if not report_path.is_file():
         raise ValueError(f"{qid} retained calibration report does not exist")
     report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -318,7 +335,9 @@ def _retained_calibration_report(
             current_question_binding, label=f"{qid} current calibration question binding"
         )
         if retained_binding != current_question_binding:
-            raise ValueError(f"{qid} retained calibration report is stale for current question binding")
+            raise ValueError(
+                f"{qid} retained calibration report is stale for current question binding"
+            )
     normalized = {
         "report_path": rel.as_posix(),
         "report_identity": requested_identity,
@@ -392,7 +411,9 @@ def load_question_audit(
             else:
                 eligibility = calibration_row["review_eligibility"]
                 if eligibility.get("status") != "ELIGIBLE_FOR_REVIEW":
-                    raise ValueError(f"{qid} CALIBRATED has insufficient empirical calibration evidence")
+                    raise ValueError(
+                        f"{qid} CALIBRATED has insufficient empirical calibration evidence"
+                    )
                 review_evidence = _retained_promotion_review(
                     path,
                     evidence,
@@ -422,6 +443,7 @@ def load_question_audit(
         "questions": normalized,
     }
     return {**base, "audit_identity": "sha256:" + _canonical_sha256(base)}
+
 
 def _empirical_calibration_status(rows: list[dict[str, Any]]) -> str:
     if not rows:
@@ -541,7 +563,12 @@ def _run_provenance(run: dict[str, Any]) -> dict[str, Any]:
         "system_family": run.get("system_family"),
         "provider": run.get("provider"),
     }
-    for field in ("candidate_identity", "grading_artifact_identity", "model_identity", "configuration_identity"):
+    for field in (
+        "candidate_identity",
+        "grading_artifact_identity",
+        "model_identity",
+        "configuration_identity",
+    ):
         if values[field] is not None:
             values[field] = _identity(values[field], label=field)
     profile = values["qualification_profile"]
@@ -552,10 +579,12 @@ def _run_provenance(run: dict[str, Any]) -> dict[str, Any]:
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"calibration run {field} must be a non-empty string or null")
     if values["model_identity"] is not None and values["configuration_identity"] is not None:
-        values["independence_subject_identity"] = "sha256:" + _canonical_sha256({
-            "model_identity": values["model_identity"],
-            "configuration_identity": values["configuration_identity"],
-        })
+        values["independence_subject_identity"] = "sha256:" + _canonical_sha256(
+            {
+                "model_identity": values["model_identity"],
+                "configuration_identity": values["configuration_identity"],
+            }
+        )
     else:
         values["independence_subject_identity"] = None
     return values
@@ -602,9 +631,15 @@ def _validate_answer(answer: Any, *, id_set: set[str], seen: set[str]) -> tuple[
 
 def _append_run_rows(
     *,
-    answers: list[dict[str, Any]], id_set: set[str], system_id: str, cohort: str,
-    provenance: dict[str, Any], run_identity: str, source_version: str,
-    repository_identity: str, exam_snapshot_sha256: str,
+    answers: list[dict[str, Any]],
+    id_set: set[str],
+    system_id: str,
+    cohort: str,
+    provenance: dict[str, Any],
+    run_identity: str,
+    source_version: str,
+    repository_identity: str,
+    exam_snapshot_sha256: str,
     rows_by_question: dict[str, list[dict[str, Any]]],
     grading_question_bindings: set[tuple[str, str]],
 ) -> None:
@@ -615,32 +650,55 @@ def _append_run_rows(
         if grading_identity is not None:
             binding = (qid, grading_identity)
             if binding in grading_question_bindings:
-                raise ValueError(f"{qid} grading artifact is represented by more than one calibration observation")
+                raise ValueError(
+                    f"{qid} grading artifact is represented by more than one calibration observation"
+                )
             grading_question_bindings.add(binding)
         observation_base = {
             "observation_schema_version": CALIBRATION_OBSERVATION_SCHEMA,
-            "source_version": source_version, "repository_identity": repository_identity,
-            "exam_snapshot_sha256": exam_snapshot_sha256, "question_id": qid,
-            "system_id": system_id, **provenance, "cohort": cohort,
-            "run_identity": run_identity, "outcome": answer,
-        }
-        rows_by_question[qid].append({
-            **answer, "system_id": system_id, "cohort": cohort, **provenance,
+            "source_version": source_version,
+            "repository_identity": repository_identity,
+            "exam_snapshot_sha256": exam_snapshot_sha256,
+            "question_id": qid,
+            "system_id": system_id,
+            **provenance,
+            "cohort": cohort,
             "run_identity": run_identity,
-            "observation_identity": "sha256:" + _canonical_sha256(observation_base),
-            "provenance_complete": all(provenance[key] is not None for key in (
-                "candidate_identity", "grading_artifact_identity", "qualification_profile"
-            )),
-        })
+            "outcome": answer,
+        }
+        rows_by_question[qid].append(
+            {
+                **answer,
+                "system_id": system_id,
+                "cohort": cohort,
+                **provenance,
+                "run_identity": run_identity,
+                "observation_identity": "sha256:" + _canonical_sha256(observation_base),
+                "provenance_complete": all(
+                    provenance[key] is not None
+                    for key in (
+                        "candidate_identity",
+                        "grading_artifact_identity",
+                        "qualification_profile",
+                    )
+                ),
+            }
+        )
         seen.add(qid)
 
 
 def _question_report(
-    qid: str, rows: list[dict[str, Any]], *, authored_difficulty: dict[str, str],
+    qid: str,
+    rows: list[dict[str, Any]],
+    *,
+    authored_difficulty: dict[str, str],
     question_binding_identities: dict[str, str] | None,
 ) -> dict[str, Any]:
     overall = [bool(row["success"]) for row in rows]
-    cohort_rates = {cohort: _rate([bool(row["success"]) for row in rows if row["cohort"] == cohort]) for cohort in CALIBRATION_COHORTS}
+    cohort_rates = {
+        cohort: _rate([bool(row["success"]) for row in rows if row["cohort"] == cohort])
+        for cohort in CALIBRATION_COHORTS
+    }
     system_success: dict[str, list[bool]] = defaultdict(list)
     cohort_systems: dict[str, set[str]] = defaultdict(set)
     independent_subjects: set[str] = set()
@@ -652,34 +710,65 @@ def _question_report(
         if subject is not None:
             independent_subjects.add(subject)
             cohort_subjects[row["cohort"]].add(subject)
-    system_counts = {cohort: len(cohort_systems.get(cohort, set())) for cohort in CALIBRATION_COHORTS}
-    subject_counts = {cohort: len(cohort_subjects.get(cohort, set())) for cohort in CALIBRATION_COHORTS}
+    system_counts = {
+        cohort: len(cohort_systems.get(cohort, set())) for cohort in CALIBRATION_COHORTS
+    }
+    subject_counts = {
+        cohort: len(cohort_subjects.get(cohort, set())) for cohort in CALIBRATION_COHORTS
+    }
     provenance_complete = bool(rows) and all(bool(row["provenance_complete"]) for row in rows)
     eligibility = _calibration_review_eligibility(
-        observation_count=len(rows), system_count=len(system_success), cohort_system_counts=system_counts,
-        independent_subject_count=len(independent_subjects), cohort_independent_subject_counts=subject_counts,
+        observation_count=len(rows),
+        system_count=len(system_success),
+        cohort_system_counts=system_counts,
+        independent_subject_count=len(independent_subjects),
+        cohort_independent_subject_counts=subject_counts,
         provenance_complete=provenance_complete,
     )
     strong, weak = cohort_rates["STRONG"], cohort_rates["WEAK"]
-    failures = Counter(str(row["failure_mode"]) for row in rows if not row["success"] and row.get("failure_mode") is not None)
+    failures = Counter(
+        str(row["failure_mode"])
+        for row in rows
+        if not row["success"] and row.get("failure_mode") is not None
+    )
     per_system_rates = [sum(values) / len(values) for values in system_success.values() if values]
     return {
         "authored_difficulty": authored_difficulty[qid],
         "calibration_question_binding": (question_binding_identities or {}).get(qid),
-        "observation_count": len(rows), "system_count": len(system_success),
-        "independent_subject_count": len(independent_subjects), "cohort_independent_subject_count": subject_counts,
+        "observation_count": len(rows),
+        "system_count": len(system_success),
+        "independent_subject_count": len(independent_subjects),
+        "cohort_independent_subject_count": subject_counts,
         "unique_run_count": len({row["run_identity"] for row in rows}),
-        "observation_identities": [row["observation_identity"] for row in rows], "provenance_complete": provenance_complete,
+        "observation_identities": [row["observation_identity"] for row in rows],
+        "provenance_complete": provenance_complete,
         "empirical_success_rate_percent": _rate(overall),
-        "median_tool_calls": _median([row["tool_calls"] for row in rows if row.get("tool_calls") is not None]),
-        "median_time_to_evidence_seconds": _median([row["time_to_evidence_seconds"] for row in rows if row.get("time_to_evidence_seconds") is not None]),
-        "median_context_tokens": _median([row["context_tokens"] for row in rows if row.get("context_tokens") is not None]),
-        "cross_system_success_variance": _variance(per_system_rates), "cohort_success_rate_percent": cohort_rates,
+        "median_tool_calls": _median(
+            [row["tool_calls"] for row in rows if row.get("tool_calls") is not None]
+        ),
+        "median_time_to_evidence_seconds": _median(
+            [
+                row["time_to_evidence_seconds"]
+                for row in rows
+                if row.get("time_to_evidence_seconds") is not None
+            ]
+        ),
+        "median_context_tokens": _median(
+            [row["context_tokens"] for row in rows if row.get("context_tokens") is not None]
+        ),
+        "cross_system_success_variance": _variance(per_system_rates),
+        "cohort_success_rate_percent": cohort_rates,
         "cohort_system_count": system_counts,
-        "item_discrimination_strong_minus_weak": None if strong is None or weak is None else round(strong - weak, 1),
-        "failure_mode_distribution": dict(sorted(failures.items())), "review_eligibility": eligibility,
-        "promotion_evidence_assessment": _promotion_evidence_assessment(rows=rows, review_eligibility=eligibility),
-        "calibration_maturity": "UNCALIBRATED" if not rows else "CALIBRATING", "calibrated_difficulty": None,
+        "item_discrimination_strong_minus_weak": None
+        if strong is None or weak is None
+        else round(strong - weak, 1),
+        "failure_mode_distribution": dict(sorted(failures.items())),
+        "review_eligibility": eligibility,
+        "promotion_evidence_assessment": _promotion_evidence_assessment(
+            rows=rows, review_eligibility=eligibility
+        ),
+        "calibration_maturity": "UNCALIBRATED" if not rows else "CALIBRATING",
+        "calibrated_difficulty": None,
         "note": "telemetry cannot promote calibrated difficulty; review eligibility is only an operational minimum evidence floor and explicit bank-authority promotion is still required",
     }
 
@@ -695,7 +784,9 @@ def calibration_report(
     question_binding_identities: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     runs = _calibration_payload_runs(
-        observations_path, source_version=source_version, repository_identity=repository_identity,
+        observations_path,
+        source_version=source_version,
+        repository_identity=repository_identity,
         exam_snapshot_sha256=exam_snapshot_sha256,
     )
     ids = tuple(question_ids)
@@ -709,9 +800,13 @@ def calibration_report(
     for raw_run in runs:
         system_id, cohort, answers, provenance = _validated_run(raw_run)
         run_base = {
-            "source_version": source_version, "repository_identity": repository_identity,
-            "exam_snapshot_sha256": exam_snapshot_sha256, "system_id": system_id,
-            **provenance, "cohort": cohort, "questions": answers,
+            "source_version": source_version,
+            "repository_identity": repository_identity,
+            "exam_snapshot_sha256": exam_snapshot_sha256,
+            "system_id": system_id,
+            **provenance,
+            "cohort": cohort,
+            "questions": answers,
         }
         run_identity = "sha256:" + _canonical_sha256(run_base)
         if run_identity in run_identities:
@@ -728,18 +823,40 @@ def calibration_report(
         systems.add(system_id)
         cohort_systems[cohort].add(system_id)
         _append_run_rows(
-            answers=answers, id_set=set(ids), system_id=system_id, cohort=cohort, provenance=provenance,
-            run_identity=run_identity, source_version=source_version, repository_identity=repository_identity,
-            exam_snapshot_sha256=exam_snapshot_sha256, rows_by_question=rows_by_question,
+            answers=answers,
+            id_set=set(ids),
+            system_id=system_id,
+            cohort=cohort,
+            provenance=provenance,
+            run_identity=run_identity,
+            source_version=source_version,
+            repository_identity=repository_identity,
+            exam_snapshot_sha256=exam_snapshot_sha256,
+            rows_by_question=rows_by_question,
             grading_question_bindings=grading_bindings,
         )
-    questions = {qid: _question_report(qid, rows_by_question.get(qid, []), authored_difficulty=authored_difficulty, question_binding_identities=question_binding_identities) for qid in ids}
+    questions = {
+        qid: _question_report(
+            qid,
+            rows_by_question.get(qid, []),
+            authored_difficulty=authored_difficulty,
+            question_binding_identities=question_binding_identities,
+        )
+        for qid in ids
+    }
     base = {
-        "artifact_type": "repository-understanding-calibration-report", "policy_version": CALIBRATION_POLICY_VERSION,
-        "observation_schema_version": CALIBRATION_OBSERVATION_SCHEMA, "source_version": source_version,
-        "repository_identity": repository_identity, "exam_snapshot_sha256": exam_snapshot_sha256,
-        "run_count": len(runs), "unique_run_count": len(run_identities), "system_count": len(systems),
-        "cohort_system_counts": {cohort: len(cohort_systems.get(cohort, set())) for cohort in CALIBRATION_COHORTS},
+        "artifact_type": "repository-understanding-calibration-report",
+        "policy_version": CALIBRATION_POLICY_VERSION,
+        "observation_schema_version": CALIBRATION_OBSERVATION_SCHEMA,
+        "source_version": source_version,
+        "repository_identity": repository_identity,
+        "exam_snapshot_sha256": exam_snapshot_sha256,
+        "run_count": len(runs),
+        "unique_run_count": len(run_identities),
+        "system_count": len(systems),
+        "cohort_system_counts": {
+            cohort: len(cohort_systems.get(cohort, set())) for cohort in CALIBRATION_COHORTS
+        },
         "questions": questions,
     }
     return {**base, "report_identity": "sha256:" + _canonical_sha256(base)}

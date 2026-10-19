@@ -27,22 +27,22 @@ from oh_goon.core.models.fleet_plan_isolation import (
     IsolationBackendCapabilities,
     IsolationKernelBoundary,
 )
+from oh_goon.core.models.fleet_plan_requirements import RepositoryFileExistsRequirement
 from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepCapabilities,
     PlanStepWorkspace,
     StepWorkspaceSource,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.fleet_plan_requirements import RepositoryFileExistsRequirement
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.git import GitService
-from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations._fleet_plan_host_resources import preflight_executor_tool_feasibility
+from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations._fleet_plan_step_dataflow import collect_published_outputs
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
-from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.bubblewrap_command import prepared_bubblewrap_command as _prepared
+from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import (
     TEST_ISOLATION_BACKEND,
     PhysicalFleetPlanExecutorHarness,
@@ -125,8 +125,6 @@ def test_cicd_tool_requirement_is_derived_from_resolved_command() -> None:
     assert required_execution_tool_names(plan) == ("uv",)
 
 
-
-
 def test_inapplicable_import_does_not_require_its_missing_host_tool(tmp_path: Path) -> None:
     repository = tmp_path / "repo"
     seed_cicd_repository(repository)
@@ -140,9 +138,7 @@ def test_inapplicable_import_does_not_require_its_missing_host_tool(tmp_path: Pa
         description="",
         execution=CicdExecutionPolicy(
             trust_repository_code=True,
-            resources=CicdResourcePolicy(
-                cpu_millis=2000, memory_mib=4096, max_processes=256
-            ),
+            resources=CicdResourcePolicy(cpu_millis=2000, memory_mib=4096, max_processes=256),
         ),
         requirements=(),
         imports=(
@@ -167,6 +163,7 @@ def test_inapplicable_import_does_not_require_its_missing_host_tool(tmp_path: Pa
     assert result.execution_inputs is not None
     assert result.execution_inputs.host_tools == ()
 
+
 def test_applicable_import_missing_tool_fails_executor_feasibility(tmp_path: Path) -> None:
     repository = tmp_path / "repo"
     seed_cicd_repository(repository)
@@ -181,9 +178,7 @@ def test_applicable_import_missing_tool_fails_executor_feasibility(tmp_path: Pat
         description="",
         execution=CicdExecutionPolicy(
             trust_repository_code=True,
-            resources=CicdResourcePolicy(
-                cpu_millis=2000, memory_mib=4096, max_processes=256
-            ),
+            resources=CicdResourcePolicy(cpu_millis=2000, memory_mib=4096, max_processes=256),
         ),
         requirements=(),
         imports=(
@@ -240,7 +235,6 @@ def test_cicd_steps_do_not_share_undeclared_workspace_files(
     assert not (repository / "undeclared-secret.txt").exists()
 
 
-
 def test_published_output_evidence_identifies_the_canonical_consumed_value(tmp_path: Path) -> None:
     repository = tmp_path / "repo"
     repository.mkdir()
@@ -258,6 +252,7 @@ def test_published_output_evidence_identifies_the_canonical_consumed_value(tmp_p
     assert values == {"VALUE": "sha256:abc"}
     assert evidence[0].sha256 == hashlib.sha256(b"sha256:abc").hexdigest()
     assert evidence[0].byte_count == len(b"sha256:abc")
+
 
 def test_published_workspace_is_an_explicit_filesystem_edge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -415,7 +410,6 @@ def test_retry_attempt_starts_from_clean_declared_source(
     assert second.retry is None
 
 
-
 def test_retry_cannot_publish_output_left_by_failed_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -491,6 +485,7 @@ def test_finalizer_cannot_consume_output_from_failed_producer(
     assert result.steps[1].status == "FAILED"
     assert result.steps[1].returncode == 125
     assert "requires unavailable output producer.VALUE" in result.stderr
+
 
 def test_step_environment_uses_private_home_tmp_and_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

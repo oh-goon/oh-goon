@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
+import pytest
+
 from pathlib import Path
 
 from oh_goon.repository_tooling.acceptance import shared_plan_parallel
@@ -36,25 +40,36 @@ def test_parallel_repository_fixture_executes_the_canonical_locked_uv_command(
         timeout=15,
     )
     assert result.returncode == 0, result.stderr
-    assert (repository / ".fleet/release/PROJECT_VERSION").read_text().strip() == "1.0.0"
-    assert (repository / ".fleet/release/RELEASE_VERSION").read_text().strip().endswith(
-        revision[:7]
+    assert (
+        repository / ".fleet/release/PROJECT_VERSION"
+    ).read_text().strip() == "1.0.0"
+    assert (
+        (repository / ".fleet/release/RELEASE_VERSION")
+        .read_text()
+        .strip()
+        .endswith(revision[:7])
     )
 
 
-def test_parallel_preview_to_run_carries_exact_plan_and_repository_instance_authority(monkeypatch) -> None:
+def test_parallel_preview_to_run_carries_exact_plan_and_repository_instance_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[tuple[str, str, dict[str, object] | None]] = []
     repository_ids = ["repo-left", "repo-right"]
     preview_payload = {
         "plan_id": "plan-reviewed",
         "sha256": "a" * 64,
-    "execution_digest": "sha256:" + "d" * 64,
+        "execution_digest": "sha256:" + "d" * 64,
         "ready_count": 2,
         "blocked_count": 0,
         "teams": [
             {
                 "state": "READY",
-                "repository": {"repository_id": "repo-left", "name": "left", "path": "/left"},
+                "repository": {
+                    "repository_id": "repo-left",
+                    "name": "left",
+                    "path": "/left",
+                },
                 "repository_instance_id": "instance-left",
                 "preview": {
                     "imports": [{"applicability": "APPLICABLE", "reason": ""}],
@@ -63,7 +78,11 @@ def test_parallel_preview_to_run_carries_exact_plan_and_repository_instance_auth
             },
             {
                 "state": "READY",
-                "repository": {"repository_id": "repo-right", "name": "right", "path": "/right"},
+                "repository": {
+                    "repository_id": "repo-right",
+                    "name": "right",
+                    "path": "/right",
+                },
                 "repository_instance_id": "instance-right",
                 "preview": {
                     "imports": [{"applicability": "APPLICABLE", "reason": ""}],
@@ -73,7 +92,13 @@ def test_parallel_preview_to_run_carries_exact_plan_and_repository_instance_auth
         ],
     }
 
-    def request(method, url, *, access_token, payload=None):
+    def request(
+        method: str,
+        url: str,
+        *,
+        access_token: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         calls.append((method, url, payload))
         if url.endswith("/shared-plan-previews"):
             return preview_payload
@@ -97,7 +122,9 @@ def test_parallel_preview_to_run_carries_exact_plan_and_repository_instance_auth
     )
     preview_request = calls[0][2]
     run_request = calls[1][2]
-    assert preview_request is not None and preview_request["expected_revision"] == "b" * 64
+    assert (
+        preview_request is not None and preview_request["expected_revision"] == "b" * 64
+    )
     assert run_request is not None
     assert run_request["expected_plan_id"] == "plan-reviewed"
     assert run_request["expected_plan_revision"] == "a" * 64
@@ -110,7 +137,9 @@ def test_parallel_preview_to_run_carries_exact_plan_and_repository_instance_auth
     SharedPlanRunRequest.model_validate(run_request)
 
 
-def test_repository_replacement_keeps_stable_team_id_but_changes_instance_authority(tmp_path: Path) -> None:
+def test_repository_replacement_keeps_stable_team_id_but_changes_instance_authority(
+    tmp_path: Path,
+) -> None:
     import shutil
 
     from oh_goon.core.product_identity import repository_id, repository_instance_id
@@ -125,7 +154,9 @@ def test_repository_replacement_keeps_stable_team_id_but_changes_instance_author
     assert repository_instance_id(repository) != before
 
 
-def test_parallel_repository_owned_failure_and_sibling_success_are_real_processes(tmp_path: Path) -> None:
+def test_parallel_repository_owned_failure_and_sibling_success_are_real_processes(
+    tmp_path: Path,
+) -> None:
     import subprocess
     import sys
     import uuid
@@ -133,7 +164,9 @@ def test_parallel_repository_owned_failure_and_sibling_success_are_real_processe
     failing = tmp_path / "failing"
     sibling = tmp_path / "sibling"
     shared_plan_parallel.prepare_parallel_shared_repository(failing, behavior="fail")
-    shared_plan_parallel.prepare_parallel_shared_repository(sibling, behavior="slow-success")
+    shared_plan_parallel.prepare_parallel_shared_repository(
+        sibling, behavior="slow-success"
+    )
     revision = "f" + uuid.uuid4().hex + "abcdef0"
     commands = []
     for repository in (failing, sibling):
@@ -172,7 +205,13 @@ def test_parallel_process_probe_observes_two_real_children_for_one_revision() ->
 
     children = [
         subprocess.Popen(
-            (sys.executable, "-c", "import time; time.sleep(30)", "release-metadata", revision)
+            (
+                sys.executable,
+                "-c",
+                "import time; time.sleep(30)",
+                "release-metadata",
+                revision,
+            )
         )
         for _ in range(2)
     ]

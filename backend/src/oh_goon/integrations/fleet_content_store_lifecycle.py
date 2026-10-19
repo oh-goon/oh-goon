@@ -21,7 +21,6 @@ from oh_goon.core.path_authority import ensure_private_directory
 from oh_goon.core.path_layouts import ContentStorePathLayout
 from oh_goon.integrations.exact_file_write import prepared_text_file, replace_prepared_file
 
-
 STAGE_OWNER_SCHEMA = "oh-goon.content-stage-owner/v1"
 STAGE_OWNER_SUFFIX = ".owner.json"
 
@@ -143,11 +142,7 @@ def prune_orphan_staging(layout: ContentStorePathLayout, lock_path: Path) -> Sta
             for path in entries
             if path.name.endswith(STAGE_OWNER_SUFFIX) and path.is_file()
         }
-        stages = {
-            path.name: path
-            for path in entries
-            if not path.name.endswith(STAGE_OWNER_SUFFIX)
-        }
+        stages = {path.name: path for path in entries if not path.name.endswith(STAGE_OWNER_SUFFIX)}
         for stage_name, stage in sorted(stages.items()):
             owner_path = owners.pop(stage_name, None)
             if owner_path is None:
@@ -174,7 +169,7 @@ def prune_orphan_staging(layout: ContentStorePathLayout, lock_path: Path) -> Sta
             removed.append(stage_name)
         # Owner records whose stage was atomically published before a crash are safe to
         # collect only after their creating process is no longer live.
-        for stage_name, owner_path in sorted(owners.items()):
+        for _stage_name, owner_path in sorted(owners.items()):
             payload = read_json_record(owner_path)
             try:
                 if payload is None or payload.get("schema") != STAGE_OWNER_SCHEMA:
@@ -189,9 +184,7 @@ def prune_orphan_staging(layout: ContentStorePathLayout, lock_path: Path) -> Sta
             else:
                 owner_path.unlink(missing_ok=True)
                 removed.append(owner_path.name)
-    return StagingPruneResult(
-        tuple(sorted(removed)), tuple(sorted(live)), tuple(sorted(refused))
-    )
+    return StagingPruneResult(tuple(sorted(removed)), tuple(sorted(live)), tuple(sorted(refused)))
 
 
 def _remove_gc_stage(path: Path, *, stage_name: str) -> None:
@@ -222,7 +215,10 @@ def garbage_collect(root: Path, layout: ContentStorePathLayout, lock_path: Path)
             for path in layout.objects(kind).iterdir():
                 object_id = f"{kind}-sha256-{path.name}"
                 if path.exists() and object_id not in protected:
-                    from oh_goon.integrations.fleet_content_crash_reconciliation import complete_deletion_locked
+                    from oh_goon.integrations.fleet_content_crash_reconciliation import (
+                        complete_deletion_locked,
+                    )
+
                     complete_deletion_locked(root, path, object_id)
                     removed.append(object_id)
         return tuple(sorted(removed))
@@ -232,6 +228,7 @@ def create_reference_locked(root: Path, object_id: str, *, owner_repository_id: 
     """Create one durable object reference while the caller owns the store lock."""
     validate_repository_id(owner_repository_id)
     from oh_goon.integrations.fleet_content_crash_reconciliation import deletion_intent_exists
+
     if deletion_intent_exists(root, object_id):
         raise FleetPlanInvalid(f"Fleet content object is pending deletion: {object_id}")
     reference_id = f"ref-{uuid.uuid4().hex}"

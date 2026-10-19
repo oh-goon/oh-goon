@@ -47,15 +47,27 @@ class RecoveryLifecycle:
                 reason="retry budget exhausted",
             )
         if failure.failure_class == "environment":
-            disposition, reason = "ADMITTED", "exact immutable work may be retried after environment failure"
+            disposition, reason = (
+                "ADMITTED",
+                "exact immutable work may be retried after environment failure",
+            )
         elif failure.failure_class == "timeout":
-            disposition, reason = "ADMITTED", "exact immutable work may be retried after bounded timeout"
+            disposition, reason = (
+                "ADMITTED",
+                "exact immutable work may be retried after bounded timeout",
+            )
         elif failure.failure_class == "product_assertion":
-            disposition, reason = "BLOCKED", "product/assertion failure requires remediation, not environment retry"
+            disposition, reason = (
+                "BLOCKED",
+                "product/assertion failure requires remediation, not environment retry",
+            )
         elif failure.failure_class == "cancelled":
             disposition, reason = "BLOCKED", "cancellation is terminal unless separately readmitted"
         else:
-            disposition, reason = "BLOCKED", "authority/integrity failure cannot be recovered by retry"
+            disposition, reason = (
+                "BLOCKED",
+                "authority/integrity failure cannot be recovered by retry",
+            )
         return self._decision(
             previous_assignment=previous_assignment,
             checkpoint=checkpoint,

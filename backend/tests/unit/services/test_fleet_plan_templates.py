@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from oh_goon.core.models.fleet_plan import CompiledGoonImportStep
+from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.template_identity import TemplateClassification
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_source_graph import analyze_fleet_plan_sources
@@ -15,6 +16,7 @@ from tests.factories.shipped_templates import PLAN_TEMPLATES as PLANS
 
 def test_shipped_template_classification_is_category_owned() -> None:
     expected = {
+        "agents": TemplateClassification.PRODUCTION,
         "advanced": TemplateClassification.TEACHING_EXAMPLE,
         "kubernetes": TemplateClassification.PRODUCTION,
         "ml": TemplateClassification.TEACHING_EXAMPLE,
@@ -31,7 +33,6 @@ def test_shipped_template_classification_is_category_owned() -> None:
             previous = observed.setdefault(category, template.classification)
             assert previous is template.classification
         assert observed == expected
-
 
 
 def test_every_shipped_plan_is_a_small_ordered_goon_roster() -> None:
@@ -70,7 +71,15 @@ def test_every_shipped_goon_is_atomic_or_composite_never_both() -> None:
                 else:
                     # Recipient-local pass is the explicit same-name binding shorthand;
                     # do not mistake it for ambient propagation or Plan-level syntax.
-                    assert set(item) <= {"import", "with", "pass", "failure_impact"}, (key, item)
+                    assert set(item) <= {
+                        "import",
+                        "with",
+                        "pass",
+                        "failure_impact",
+                        "as",
+                        "from",
+                        "phase",
+                    }, (key, item)
                     passed = item.get("pass", ())
                     assert isinstance(passed, (list, tuple)), (key, item)
                     assert all(type(name) is str for name in passed), (key, item)
@@ -81,7 +90,6 @@ def test_every_shipped_goon_is_atomic_or_composite_never_both() -> None:
                     actual = {binding.name: binding.value for binding in compiled.inputs}
                     for name in passed:
                         assert actual[name] == "${{ inputs." + name + " }}", (key, item)
-
 
 
 def test_every_shipped_plan_builds_one_complete_goon_source_graph() -> None:
@@ -150,6 +158,8 @@ def test_production_plans_do_not_repeat_default_resource_envelopes() -> None:
         execution = payload.get("execution", {})
         assert "resources" not in execution, key
         compiled = PLANS.source(key).compiled
+        if not isinstance(compiled.execution, CicdExecutionPolicy):
+            continue
         assert compiled.execution.resources.cpu_millis is None, key
         assert compiled.execution.resources.memory_mib is None, key
         assert compiled.execution.resources.max_processes is None, key
@@ -163,6 +173,7 @@ def test_core_python_goons_do_not_author_runtime_plumbing() -> None:
         assert "timeout_seconds:" not in content, key
         assert "uv lock --check" not in content, key
         assert "python -c" not in content, key
+
 
 def test_ml_iris_training_uses_project_command_and_locked_group() -> None:
     source = GOONS.source("ml/iris-train")
@@ -179,9 +190,9 @@ def test_ml_iris_training_uses_project_command_and_locked_group() -> None:
     assert len(goon["steps"]) == 1
     assert goon["steps"][0]["run"].startswith("uv run iris-train ")
     assert "python -c" not in source.content
-    assert [item.kind for item in source.compiled.requirements] == ["uv_project"]
 
     resolved = FleetPlanResolver(goon_templates=GOONS).resolve(plan_source.path)
+    assert [item.kind for item in resolved.imports[0].requirements] == ["uv_project"]
     assert [item.name for item in resolved.imports] == ["ml/iris-train"]
     assert [step.step_id for step in resolved.steps] == ["ml-iris-train.iris-train"]
     command = resolved.steps[0]
@@ -201,27 +212,21 @@ def test_ml_iris_training_uses_project_command_and_locked_group() -> None:
 def test_resolver_translates_resolved_plan_model_validation_to_domain_error(tmp_path: Path) -> None:
     from oh_goon.core.errors import FleetPlanInvalid
 
+    package = tmp_path / "goons/general/restricted"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# general/restricted\n")
+    (package / "goon.yml").write_text(
+        "version: 1\nrequirements:\n- kind: file_exists\n  path: marker\nsteps:\n- run: 'true'\n"
+    )
     plan_path = tmp_path / "plan.yml"
     plan_path.write_text(
-        """version: 1
-execution:
-  purpose: verification
-inputs:
-- release_channel
-- revision
-goons:
-- python/release-metadata
-""",
-        encoding="utf-8",
+        "version: 1\nexecution: {purpose: verification}\ngoons:\n- import: general/restricted\n  from: goons\n"
     )
-
     with pytest.raises(
         FleetPlanInvalid,
         match="Verification Goon imports cannot carry repository admission requirements",
     ):
-        FleetPlanResolver(goon_templates=GOONS).resolve(
-            plan_path, inputs={"release_channel": "beta", "revision": "abcdef1"}
-        )
+        FleetPlanResolver().resolve(plan_path)
 
 
 def test_simple_core_goons_keep_the_small_authoring_contract() -> None:
@@ -284,9 +289,11 @@ def test_shipped_template_identity_and_description_have_single_owners() -> None:
 
 def test_release_deploy_plan_projects_owned_contracts_instead_of_copying_schemas() -> None:
     payload = yaml.safe_load(PLANS.source("oci/release-deploy").content)
-    assert isinstance(payload["inputs"], list)
-    assert payload["inputs"] == [
-        "coverage_threshold",
+    assert "inputs" not in payload
+    resolver = FleetPlanResolver(goon_templates=GOONS)
+    assert {
+        item.name for item in resolver.input_definitions(PLANS.source("oci/release-deploy").path)
+    } == {
         "base_registry_hostname",
         "publish_registry_hostname",
         "publish_repository",
@@ -297,7 +304,10 @@ def test_release_deploy_plan_projects_owned_contracts_instead_of_copying_schemas
         "namespace",
         "deployment",
         "container",
-    ]
+        "project",
+        "dependency_group",
+        "typechecker",
+    }
     bindings = payload["goons"][-1]["with"]
     assert bindings == {"image": "${{ goons.oci-publish-image.outputs.OCI_REFERENCE }}"}
 
@@ -349,9 +359,7 @@ def test_typed_executor_templates_do_not_repeat_fixed_backend_policy() -> None:
         assert "policy" not in step, key
         assert "timeout_seconds" not in step, key
     publish = yaml.safe_load(GOONS.source("oci/publish").content)["steps"][0]
-    assert publish["target"]["registry"] == {
-        "hostname": "${{ inputs.publish_registry_hostname }}"
-    }
+    assert publish["target"]["registry"] == {"hostname": "${{ inputs.publish_registry_hostname }}"}
     assert "output" not in publish
 
 
@@ -359,4 +367,3 @@ def test_shipped_plan_template_descriptions_are_plain_text_for_browser_ui() -> N
     description = PLANS.catalog().templates[0].description
     assert not description.startswith("**")
     assert not description.endswith("**")
-

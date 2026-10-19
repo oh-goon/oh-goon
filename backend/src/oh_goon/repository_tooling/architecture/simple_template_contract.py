@@ -139,7 +139,6 @@ def _check_shipped_entrypoint_authority(
         )
 
 
-
 def _check_shipped_shell_authority(
     path: Path,
     document: ParsedFleetYamlDocument,
@@ -157,9 +156,12 @@ def _check_shipped_shell_authority(
         readme = ""
     if f"Shell authority (`{shell}`):" not in readme:
         violations.append(
-            Violation(path, "Shipped explicit execution.shell requires a README Shell authority "
-                      "reason identifying real shell semantics or opaque child-tool authority; "
-                      "direct run argv alone does not require a shell")
+            Violation(
+                path,
+                "Shipped explicit execution.shell requires a README Shell authority "
+                "reason identifying real shell semantics or opaque child-tool authority; "
+                "direct run argv alone does not require a shell",
+            )
         )
 
 
@@ -209,8 +211,7 @@ def _check_catalog_classification(
         violations.append(
             Violation(
                 path,
-                f"{owner.value} {kind} {key} cannot reference "
-                f"{imported.value} Goon {step.goon}",
+                f"{owner.value} {kind} {key} cannot reference {imported.value} Goon {step.goon}",
             )
         )
 

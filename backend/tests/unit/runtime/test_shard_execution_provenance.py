@@ -28,9 +28,7 @@ def _context() -> subject.ShardExecutionContext:
 
 
 def _work() -> subject.ShardWork:
-    return subject.ShardWork(
-        shard_id="a", argv=("fake", "a"), work_identity="sha256:" + "a" * 64
-    )
+    return subject.ShardWork(shard_id="a", argv=("fake", "a"), work_identity="sha256:" + "a" * 64)
 
 
 def _refinable_work() -> subject.ShardWork:
@@ -95,12 +93,20 @@ def test_durable_pass_resume_is_bound_to_execution_policy(
     state = tmp_path / "state"
     plan = _plan(_work())
     first = subject.execute_shard_plan(
-        plan, cwd=tmp_path, workers=1, shard_timeout_seconds=1,
-        state_root=state, execution_context=_context(),
+        plan,
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=1,
+        state_root=state,
+        execution_context=_context(),
     )
     second = subject.execute_shard_plan(
-        plan, cwd=tmp_path, workers=1, shard_timeout_seconds=2,
-        state_root=state, execution_context=_context(),
+        plan,
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=2,
+        state_root=state,
+        execution_context=_context(),
     )
     assert first.results[0].status == second.results[0].status == "PASS"
     assert second.results[0].resumed is False
@@ -123,13 +129,21 @@ def test_durable_refinement_resume_is_bound_to_execution_policy(
     state = tmp_path / "state"
     plan = _plan(_refinable_work())
     first = subject.execute_shard_plan(
-        plan, cwd=tmp_path, workers=1, shard_timeout_seconds=1,
-        state_root=state, execution_context=_context(),
+        plan,
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=1,
+        state_root=state,
+        execution_context=_context(),
     )
     first_count = len(calls)
     second = subject.execute_shard_plan(
-        plan, cwd=tmp_path, workers=1, shard_timeout_seconds=2,
-        state_root=state, execution_context=_context(),
+        plan,
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=2,
+        state_root=state,
+        execution_context=_context(),
     )
     assert first.results[0].status == second.results[0].status == "REFINED_PASS"
     assert second.results[0].reason_code == "timeout_refinement"
@@ -141,11 +155,15 @@ def test_canonical_evidence_retains_execution_policy_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        subject, "run_command",
+        subject,
+        "run_command",
         lambda *args, **kwargs: CommandResult(returncode=0, stdout="ok", stderr=""),
     )
     report = subject.execute_shard_plan(
-        _plan(_work()), cwd=tmp_path, workers=1, shard_timeout_seconds=1,
+        _plan(_work()),
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=1,
         execution_context=_context(),
     )
     canonical = report.canonical_evidence()

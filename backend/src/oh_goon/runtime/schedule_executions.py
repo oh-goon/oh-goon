@@ -4,6 +4,7 @@ import json
 import sqlite3
 
 from oh_goon.core.errors import ScheduleExecutionActive, ScheduleExecutionStale
+from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.schedule_execution import (
     FailedScheduleRun,
     RunningScheduleRun,
@@ -11,11 +12,9 @@ from oh_goon.core.models.schedule_execution import (
     ScheduleRunRecord,
     parse_schedule_run,
 )
-from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.product_identity import schedule_repository_fleet_run_id
-from oh_goon.core.vocabulary import ScheduleRepositoryRunStatus
-from oh_goon.core.vocabulary import ScheduleExecutionStatus
+from oh_goon.core.vocabulary import ScheduleExecutionStatus, ScheduleRepositoryRunStatus
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.durable_revision import require_durable_revision
 
@@ -80,12 +79,13 @@ class ScheduleExecutionStore:
         if (
             current.intent.capability != capability
             or current.intent.target != target
-            or repository_instance_ids != {
-                repository_id: current.intent.repository_instance_ids.get(repository_id)
-            }
+            or repository_instance_ids
+            != {repository_id: current.intent.repository_instance_ids.get(repository_id)}
             or repository_id not in current.intent.repository_scope.repository_ids
         ):
-            raise ScheduleExecutionStale("Scheduled Fleet child does not match frozen occurrence authority")
+            raise ScheduleExecutionStale(
+                "Scheduled Fleet child does not match frozen occurrence authority"
+            )
         if not any(
             row.repository_id == repository_id
             and row.status is ScheduleRepositoryRunStatus.PENDING
@@ -140,7 +140,8 @@ class ScheduleExecutionStore:
 
         updated = mark_repository_running(current, repository_id, fleet_run_id)
         self._update(
-            connection, _with_record_version(updated, current.record_version + 1),
+            connection,
+            _with_record_version(updated, current.record_version + 1),
             expected_revision=current.record_version,
         )
 

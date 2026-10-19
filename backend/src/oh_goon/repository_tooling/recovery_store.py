@@ -131,9 +131,9 @@ class FilesystemRecoveryPublisher:
                 os.fsync(stream.fileno())
             try:
                 os.link(temporary, path)
-            except FileExistsError:
+            except FileExistsError as exc:
                 if path.read_bytes() != content:
-                    raise RuntimeError(f"immutable recovery object conflicts: {key}")
+                    raise RuntimeError(f"immutable recovery object conflicts: {key}") from exc
             self._sync_parent(path)
         finally:
             Path(temporary).unlink(missing_ok=True)

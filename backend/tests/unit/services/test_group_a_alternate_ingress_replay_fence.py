@@ -4,6 +4,7 @@ This is deliberately a rejection cut, not a replay implementation. The public
 rerun/readmission API is retained, but no Fleet Plan lineage can be admitted by
 production composition until a separate native authenticated cutover owns it.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -21,7 +22,10 @@ from tests.unit.services.test_group_a_strict_cicd_ingress import strict_fixture
 @pytest.mark.parametrize("mode", ["direct", "strict"])
 @pytest.mark.parametrize("lineage", ["rerun_from_run_id", "readmitted_from_run_id"])
 def test_enrolled_fleet_replay_rejected_before_planning_or_native_observation(
-    tmp_path, monkeypatch, mode, lineage,
+    tmp_path,
+    monkeypatch,
+    mode,
+    lineage,
 ):
     if mode == "strict":
         args, connection, lifecycle, pool, _, _admit, _observed, issuer_calls = strict_fixture(
@@ -52,19 +56,30 @@ def test_enrolled_fleet_replay_rejected_before_planning_or_native_observation(
     monkeypatch.setattr(FleetPreworkProvisioner, "resolve", never_resolve)
     try:
         with monkeypatch.context() as guard:
-            guard.setattr(args["journal"], "read_view", lambda: pytest.fail(
-                "replay must not enter idempotent journal lookup before the lineage cutover"
-            ))
+            guard.setattr(
+                args["journal"],
+                "read_view",
+                lambda: pytest.fail(
+                    "replay must not enter idempotent journal lookup before the lineage cutover"
+                ),
+            )
             with pytest.raises(TrustProtocolError, match="replay Fleet ingress requires"):
                 control._start_intent(
-                    intent, repository_scope=args["repository_scope"],
-                    fleet_run_id="durable-run", source=args["intent"].source,
-                    readmitted_from_run_id="earlier-run" if lineage == "readmitted_from_run_id" else None,
+                    intent,
+                    repository_scope=args["repository_scope"],
+                    fleet_run_id="durable-run",
+                    source=args["intent"].source,
+                    readmitted_from_run_id="earlier-run"
+                    if lineage == "readmitted_from_run_id"
+                    else None,
                     rerun_from_run_id="earlier-run" if lineage == "rerun_from_run_id" else None,
                 )
         assert facts(args, connection) == (None, 0, 0)
         assert connection.execute("SELECT count(*) FROM execution_lease").fetchone()[0] == 0
-        assert connection.execute("SELECT count(*) FROM executor_capacity_reservations").fetchone()[0] == 0
+        assert (
+            connection.execute("SELECT count(*) FROM executor_capacity_reservations").fetchone()[0]
+            == 0
+        )
         if pool is not None:
             assert pool.placement_queue().entries == ()
         assert issuer_calls == []
@@ -90,14 +105,17 @@ def test_normal_enrolled_fleet_ingress_still_reaches_existing_planner(tmp_path, 
         def plan(self, *args, **kwargs):
             raise PlannerReached
 
-    control = FleetRunControlPlane(Planner(), args["journal"], lifecycle,
-                                   object(), object(), object())
+    control = FleetRunControlPlane(
+        Planner(), args["journal"], lifecycle, object(), object(), object()
+    )
     try:
         with pytest.raises(PlannerReached):
             control._start_intent(
                 resolve_capability_intent(OperationAction.EXECUTE_PLAN, args["intent"].target),
-                repository_scope=args["repository_scope"], fleet_run_id="durable-run",
-                source=args["intent"].source, readmitted_from_run_id=None,
+                repository_scope=args["repository_scope"],
+                fleet_run_id="durable-run",
+                source=args["intent"].source,
+                readmitted_from_run_id=None,
                 rerun_from_run_id=None,
             )
         assert facts(args, connection) == (None, 0, 0)

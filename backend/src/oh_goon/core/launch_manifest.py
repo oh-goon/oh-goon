@@ -169,13 +169,20 @@ class LaunchServiceObservation:
             raise ValueError("launch service observation requires service")
         if self.service_generation < 1:
             raise ValueError("launch service generation must be >= 1")
-        if self.process is not None and self.process.pid.service_generation != self.service_generation:
+        if (
+            self.process is not None
+            and self.process.pid.service_generation != self.service_generation
+        ):
             raise ValueError("process observation belongs to another service generation")
         if self.bound_endpoint is not None:
             observed_generation = self.bound_endpoint.host.service_generation
             if observed_generation != self.service_generation:
                 raise ValueError("endpoint observation belongs to another service generation")
-        for name, fact in (("startup", self.startup), ("readiness", self.readiness), ("health", self.health)):
+        for name, fact in (
+            ("startup", self.startup),
+            ("readiness", self.readiness),
+            ("health", self.health),
+        ):
             if fact is not None and fact.service_generation != self.service_generation:
                 raise ValueError(f"{name} observation belongs to another service generation")
 
@@ -287,7 +294,9 @@ class LaunchManifest:
                 owner_facts.append(self.observed.owner_process.birth_identity)
             for fact in owner_facts:
                 if fact.owner_generation != self.identity.owner_generation:
-                    raise ValueError("observed owner fact belongs to another launch owner generation")
+                    raise ValueError(
+                        "observed owner fact belongs to another launch owner generation"
+                    )
         for service in self.observed.services:
             for fact in _service_observed_facts(service):
                 if fact.owner_generation != self.identity.owner_generation:

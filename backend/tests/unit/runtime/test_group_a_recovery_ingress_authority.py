@@ -1,7 +1,9 @@
 """M185: recovery repository observation must be fenced by the original lease."""
+
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 from threading import Event
 
@@ -29,29 +31,40 @@ def _stack(tmp_path: Path):
     git = GitService()
     repository = tmp_path / "repo"
     repository.mkdir()
-    (repository / "pyproject.toml").write_text("[project]\nname='recovery-proof'\n", encoding="utf-8")
+    (repository / "pyproject.toml").write_text(
+        "[project]\nname='recovery-proof'\n", encoding="utf-8"
+    )
     with database.transaction(write=True) as connection:
         attempt = attempts.begin_direct_in(
-            connection, repository, capability_snapshot(OperationAction.UPDATE),
-            target=None, baseline=baseline_for(repository),
+            connection,
+            repository,
+            capability_snapshot(OperationAction.UPDATE),
+            target=None,
+            baseline=baseline_for(repository),
             effect_boundary=EffectBoundaryKind.EXTERNAL,
         )
         attempts.start_effect_in(connection, attempt.operation_id)
         attempt = attempts.mark_unknown_in(connection, attempt.operation_id, note="interrupted")
     recovery = RepositoryEffectRecovery(
-        database, attempts, journal, execution,
-        RepositoryReconciler(journal, git),
+        database,
+        attempts,
+        journal,
+        execution,
+        RepositoryReconciler(git),
         RepositoryEffectSettlement(database, journal, attempts),
     )
     return database, attempts, journal, execution, git, attempt, recovery
 
 
-def test_live_lease_denies_native_recovery_observation_before_work(tmp_path: Path, monkeypatch) -> None:
+def test_live_lease_denies_native_recovery_observation_before_work(
+    tmp_path: Path, monkeypatch
+) -> None:
     database, attempts, journal, execution, git, attempt, recovery = _stack(tmp_path)
     observed = []
     monkeypatch.setattr(GitService, "fingerprint", lambda _self, path: observed.append(path))
     ticket, _ = execution.reserve_direct_with(
-        expected_durable_revision=database.durable_revision(), mutate=lambda _connection: None,
+        expected_durable_revision=database.durable_revision(),
+        mutate=lambda _connection: None,
     )
     revision = journal.read_view().revision
     try:
@@ -76,7 +89,8 @@ def test_stale_recovery_version_never_observes_repository(tmp_path: Path, monkey
 
 
 def test_failed_native_observation_does_not_settle_attempt_or_hold_lease(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     database, attempts, journal, execution, git, attempt, recovery = _stack(tmp_path)
     revision = journal.read_view().revision
@@ -91,13 +105,15 @@ def test_failed_native_observation_does_not_settle_attempt_or_hold_lease(
     assert journal.read_view().revision == revision
     assert journal.read_view().latest_effect_reconciliation(attempt.operation_id) is None
     ticket, _ = execution.reserve_direct_with(
-        expected_durable_revision=database.durable_revision(), mutate=lambda _connection: None,
+        expected_durable_revision=database.durable_revision(),
+        mutate=lambda _connection: None,
     )
     execution.activate(ticket).finish(lambda _connection: None)
 
 
 def test_native_recovery_observation_pins_original_read_cut_until_finished(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     database, attempts, journal, execution, git, attempt, recovery = _stack(tmp_path)
     entered, release, admission_entered = Event(), Event(), Event()
@@ -136,6 +152,7 @@ def test_native_recovery_observation_pins_original_read_cut_until_finished(
     with pytest.raises(OperationNotFound):
         attempts.get(attempt.operation_id)
     ticket, _ = execution.reserve_direct_with(
-        expected_durable_revision=database.durable_revision(), mutate=lambda _connection: None,
+        expected_durable_revision=database.durable_revision(),
+        mutate=lambda _connection: None,
     )
     execution.activate(ticket).finish(lambda _connection: None)

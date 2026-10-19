@@ -7,17 +7,23 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from oh_goon.core.sqlite_journal_vocabulary import (
-    SQLITE_JOURNAL_AUTO, SQLITE_JOURNAL_DELETE, SQLITE_JOURNAL_MODE_ENV, SQLITE_JOURNAL_WAL,
+    SQLITE_JOURNAL_AUTO,
+    SQLITE_JOURNAL_DELETE,
+    SQLITE_JOURNAL_MODE_ENV,
+    SQLITE_JOURNAL_WAL,
 )
 from oh_goon.runtime._sqlite_authority_gate import sqlite_authority_gate
 from oh_goon.runtime.local_state_maintenance import LocalStateCompatibility, LocalStateInspection
 from oh_goon.runtime.schema_version_policy import DurableSchemaDisposition, DurableSchemaPolicy
 
-DATABASE_SCHEMA_VERSION = 87
-DATABASE_SCHEMA_POLICY = DurableSchemaPolicy(name="Local oh-goon database", current=DATABASE_SCHEMA_VERSION)
+DATABASE_SCHEMA_VERSION = 88
+DATABASE_SCHEMA_POLICY = DurableSchemaPolicy(
+    name="Local oh-goon database", current=DATABASE_SCHEMA_VERSION
+)
 DEFAULT_DATABASE_NAME = "oh-goon.db"
 MIN_SAFE_WAL_SQLITE_VERSION = (3, 51, 3)
 _UNSAFE_WAL_FILESYSTEMS = frozenset({"9p", "drvfs", "cifs", "smb3", "nfs", "nfs4"})
+
 
 def _decode_mountinfo_path(value: str) -> str:
     return (
@@ -104,9 +110,7 @@ def sqlite_journal_mode_for_path(
     )
     mode = raw.strip().upper() or SQLITE_JOURNAL_AUTO
     if mode not in {SQLITE_JOURNAL_AUTO, SQLITE_JOURNAL_DELETE, SQLITE_JOURNAL_WAL}:
-        raise RuntimeError(
-            f"{SQLITE_JOURNAL_MODE_ENV} must be AUTO, DELETE, or WAL; got {raw!r}"
-        )
+        raise RuntimeError(f"{SQLITE_JOURNAL_MODE_ENV} must be AUTO, DELETE, or WAL; got {raw!r}")
     version = tuple(sqlite_version or sqlite3.sqlite_version_info[:3])
     safe_wal = version >= MIN_SAFE_WAL_SQLITE_VERSION and _wal_filesystem_safe(path)
     if mode == SQLITE_JOURNAL_AUTO:
@@ -169,8 +173,7 @@ def _require_database_integrity(
         violations = connection.execute("PRAGMA foreign_key_check").fetchmany(5)
         if violations:
             detail = "; ".join(
-                f"table={row[0]} rowid={row[1]} parent={row[2]} fk={row[3]}"
-                for row in violations
+                f"table={row[0]} rowid={row[1]} parent={row[2]} fk={row[3]}" for row in violations
             )
             raise sqlite3.DatabaseError("SQLite foreign_key_check failed: " + detail)
 
@@ -248,31 +251,44 @@ def inspect_database_path(
     disposition = policy.classify(version)
     if disposition is DurableSchemaDisposition.CURRENT:
         return LocalStateInspection(
-            path=path, status=LocalStateCompatibility.READY, found_schema_version=version,
+            path=path,
+            status=LocalStateCompatibility.READY,
+            found_schema_version=version,
             expected_schema_version=expected_schema_version,
             detail="Local database schema matches this build.",
         )
     if version == 0 and existing_tables is not None:
         return LocalStateInspection(
-            path=path, status=LocalStateCompatibility.UNVERSIONED, found_schema_version=version,
+            path=path,
+            status=LocalStateCompatibility.UNVERSIONED,
+            found_schema_version=version,
             expected_schema_version=expected_schema_version,
             detail="The local database has tables but no supported pre-live schema epoch.",
         )
     if version == 0:
         return LocalStateInspection(
-            path=path, status=LocalStateCompatibility.NEW, found_schema_version=version,
+            path=path,
+            status=LocalStateCompatibility.NEW,
+            found_schema_version=version,
             expected_schema_version=expected_schema_version,
             detail="The local database is empty and can be initialized by this build.",
         )
     if disposition is DurableSchemaDisposition.FUTURE:
         return LocalStateInspection(
-            path=path, status=LocalStateCompatibility.FUTURE, found_schema_version=version,
-            expected_schema_version=expected_schema_version, detail=policy.version_status_text(version),
+            path=path,
+            status=LocalStateCompatibility.FUTURE,
+            found_schema_version=version,
+            expected_schema_version=expected_schema_version,
+            detail=policy.version_status_text(version),
         )
     return LocalStateInspection(
-        path=path, status=LocalStateCompatibility.STALE, found_schema_version=version,
-        expected_schema_version=expected_schema_version, detail=policy.version_status_text(version),
+        path=path,
+        status=LocalStateCompatibility.STALE,
+        found_schema_version=version,
+        expected_schema_version=expected_schema_version,
+        detail=policy.version_status_text(version),
     )
+
 
 def inspect_local_database(
     *,
@@ -290,4 +306,3 @@ def inspect_local_database(
         integrity_check=integrity_check,
         foreign_key_check=foreign_key_check,
     )
-

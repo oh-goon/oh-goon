@@ -70,7 +70,6 @@ def test_recipe_definition_filters_are_registry_owned() -> None:
     assert len(capability_definitions()) > len(configurable) + len(fixed)
 
 
-
 def test_registered_capabilities_exhaust_canonical_dispatch_vocabularies() -> None:
     definitions = capability_definitions()
 
@@ -78,6 +77,7 @@ def test_registered_capabilities_exhaust_canonical_dispatch_vocabularies() -> No
     assert {item.runner_kind for item in definitions} == set(CapabilityRunnerKind)
     assert {item.selector for item in definitions} == set(CapabilityTargetSelector)
     assert {operation_evidence_kind(action) for action in OperationAction}
+
 
 def test_registry_rejects_duplicate_capability_ids() -> None:
     definitions = capability_definitions()

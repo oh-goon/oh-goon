@@ -1,4 +1,5 @@
 """M188: rerun parent identity and original replay gate precede new-Run work."""
+
 from __future__ import annotations
 
 from contextlib import nullcontext
@@ -40,7 +41,9 @@ def _target(mode: str) -> FleetPlanTarget:
         requirements=(),
         steps=(
             ResolvedCommandStep(
-                step_id="noop", argv=("true",), timeout_seconds=15,
+                step_id="noop",
+                argv=("true",),
+                timeout_seconds=15,
                 capabilities=PlanStepCapabilities(),
             ),
         ),
@@ -68,6 +71,7 @@ def _manager(*, requested: str = "parent", mode: str = "direct", authenticated: 
     manager._journal = SimpleNamespace(read_view=read_view)  # type: ignore[attr-defined]
     lifecycle = SimpleNamespace(
         _require_authenticated_fleet=authenticated,
+        _standard_local_fleet=False,
         serialize_admission=lambda _key: nullcontext(),
     )
     lifecycle.require_fleet_prework_available = (  # type: ignore[attr-defined]
@@ -83,15 +87,18 @@ def _manager(*, requested: str = "parent", mode: str = "direct", authenticated: 
 
 @pytest.mark.parametrize("mode", ["direct", "strict"])
 def test_authenticated_plan_rerun_denied_before_capability_resolution_or_scope(
-    monkeypatch: pytest.MonkeyPatch, mode: str,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
 ) -> None:
     manager, _parent, reads = _manager(mode=mode)
     monkeypatch.setattr(
-        rerun_module, "resolve_bound_capability_intent",
+        rerun_module,
+        "resolve_bound_capability_intent",
         lambda *a: pytest.fail("capability resolution must not preempt replay authority"),
     )
     monkeypatch.setattr(
-        rerun_module, "rerun_repository_scope",
+        rerun_module,
+        "rerun_repository_scope",
         lambda *a: pytest.fail("scope derivation must not precede replay authority"),
     )
     with pytest.raises(TrustProtocolError, match="replay Fleet ingress requires"):
@@ -103,14 +110,16 @@ def test_authenticated_plan_rerun_denied_before_capability_resolution_or_scope(
 
 @pytest.mark.parametrize("mode", ["direct", "strict"])
 def test_foreign_run_projection_rejected_before_any_prework_or_capability(
-    monkeypatch: pytest.MonkeyPatch, mode: str,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
 ) -> None:
     manager, parent, reads = _manager(mode=mode)
     parent.fleet_run_id = "foreign-parent"
     gate = Mock(side_effect=AssertionError("foreign Run must not reach prework gate"))
     manager._lifecycle.require_fleet_prework_available = gate
     monkeypatch.setattr(
-        rerun_module, "resolve_bound_capability_intent",
+        rerun_module,
+        "resolve_bound_capability_intent",
         lambda *a: pytest.fail("foreign Run must not resolve authority"),
     )
     with pytest.raises(JournalConflict, match="enrolled Run identity"):
@@ -120,7 +129,9 @@ def test_foreign_run_projection_rejected_before_any_prework_or_capability(
     manager._start_intent.assert_not_called()
 
 
-def test_authenticated_deployment_keeps_nonplan_rerun_available(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_authenticated_deployment_keeps_nonplan_rerun_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     manager, parent, reads = _manager()
     parent.target = None
     parent.capability = capability_snapshot(OperationAction.INIT)
@@ -130,8 +141,12 @@ def test_authenticated_deployment_keeps_nonplan_rerun_available(monkeypatch: pyt
     manager._start_intent = Mock(return_value="existing-native-path")  # type: ignore[method-assign]
     assert manager.rerun("parent", new_fleet_run_id="child") == "existing-native-path"
     manager._start_intent.assert_called_once_with(
-        resolved, repository_scope="preserved-scope", fleet_run_id="child",
-        source=FleetRunSource.MANUAL, readmitted_from_run_id=None, rerun_from_run_id="parent",
+        resolved,
+        repository_scope="preserved-scope",
+        fleet_run_id="child",
+        source=FleetRunSource.MANUAL,
+        readmitted_from_run_id=None,
+        rerun_from_run_id="parent",
     )
     assert reads == ["read"]
 

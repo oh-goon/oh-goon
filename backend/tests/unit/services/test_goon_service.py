@@ -7,9 +7,9 @@ from typing import cast
 from unittest.mock import Mock
 
 from oh_goon.core.models.goon_plan_source import TeamGoonSource
-from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.league import ConfiguredTeamPipeline, LeagueTeam
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plans import FleetPlanService
@@ -54,10 +54,17 @@ def test_goon_run_delegates_to_the_same_canonical_plan_run_boundary(tmp_path: Pa
     team = _team(repository)
     admitted = Mock(name="admitted")
     league = SimpleNamespace(configured_team=Mock(return_value=team))
-    plans = SimpleNamespace(run=Mock(return_value=admitted), require_plan_ingress_preparation=Mock())
+    plans = SimpleNamespace(
+        run=Mock(return_value=admitted), require_plan_ingress_preparation=Mock()
+    )
     service = GoonService(league, plans, cast(object, object()))
 
-    result = service.run(repository / "src", expected_pipeline_sha256=league.configured_team(repository).pipeline.sha256, inputs={"profile": "strict"}, fleet_run_id="run-1")
+    result = service.run(
+        repository / "src",
+        expected_pipeline_sha256=league.configured_team(repository).pipeline.sha256,
+        inputs={"profile": "strict"},
+        fleet_run_id="run-1",
+    )
 
     assert result is admitted
     plans.require_plan_ingress_preparation.assert_called_once_with("run-1")
@@ -71,7 +78,6 @@ def test_goon_run_delegates_to_the_same_canonical_plan_run_boundary(tmp_path: Pa
     )
 
 
-
 def test_goon_run_rejects_pipeline_changed_since_display(tmp_path: Path) -> None:
     repository = tmp_path / "api"
     team = _team(repository)
@@ -79,12 +85,14 @@ def test_goon_run_rejects_pipeline_changed_since_display(tmp_path: Path) -> None
     plans = SimpleNamespace(run=Mock(), require_plan_ingress_preparation=Mock())
     service = GoonService(league, plans, cast(object, object()))
 
-    from oh_goon.core.errors import StateConflict
     import pytest
+
+    from oh_goon.core.errors import StateConflict
 
     with pytest.raises(StateConflict, match="pipeline changed"):
         service.run(repository, expected_pipeline_sha256="b" * 64)
     plans.run.assert_not_called()
+
 
 def test_single_team_run_resolves_the_exact_repository_goon_bytes(tmp_path: Path) -> None:
     repository = tmp_path / "api"
@@ -150,8 +158,9 @@ def test_goon_run_rejects_replacement_repository_instance_before_plan_run(tmp_pa
     plans = SimpleNamespace(run=Mock(), require_plan_ingress_preparation=Mock())
     service = GoonService(league, plans, cast(object, object()))
 
-    from oh_goon.core.errors import StateConflict
     import pytest
+
+    from oh_goon.core.errors import StateConflict
 
     with pytest.raises(StateConflict, match="repository instance changed"):
         service.run(

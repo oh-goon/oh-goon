@@ -66,7 +66,11 @@ def _print_shards(payload: dict[str, object]) -> None:
     print("OH-GOON VALIDATION SHARDS")
     print(f"Surface: {payload['surface']}")
     print(f"Strategy: {payload['strategy']}")
-    print(f"Tests: {payload['test_count']} assigned={payload['assigned']} duplicates={payload['duplicates']} missing={payload['missing']}")
+    print(
+        f"Tests: {payload['test_count']} assigned={payload['assigned']} duplicates={payload['duplicates']} missing={payload['missing']}"
+    )
     for shard in payload["shards"]:
-        print(f"- {shard['id']}: {shard['test_count']} files | budget={shard['execution_budget_seconds']}s | {shard['execution_unit_id']}")
+        print(
+            f"- {shard['id']}: {shard['test_count']} files | budget={shard['execution_budget_seconds']}s | {shard['execution_unit_id']}"
+        )
         print("  Command: " + " ".join(shard["command"]))

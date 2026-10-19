@@ -22,7 +22,6 @@ from oh_goon.core.models.fleet_plan_isolation import (
     IsolationKernelBoundary,
 )
 from oh_goon.core.models.fleet_plan_step_contract import (
-    PlanStepCache,
     PlanStepWorkspace,
     StepWorkspaceSource,
 )
@@ -30,9 +29,9 @@ from oh_goon.engine.command import CommandResult
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations.fleet_plan_run import PreparedPlanRun
-from tests.factories.runtime_authority import authorized_command_result
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import PhysicalFleetPlanExecutorHarness
+from tests.factories.runtime_authority import authorized_command_result
 
 
 class _UnitProcessIsolation:
@@ -122,7 +121,9 @@ def test_stop_halts_normal_condition_but_finalizer_still_runs(
         when=StepStatusCondition(step_id="failed", statuses=("FAILED",)),
     )
 
-    outcome = _executor().execute(repository, _cicd(failed, blocked, finalizer), cancel_requested=None)
+    outcome = _executor().execute(
+        repository, _cicd(failed, blocked, finalizer), cancel_requested=None
+    )
 
     assert launched == ["fail", "finalizer"]
     assert [step.status for step in outcome.steps] == ["FAILED", "SKIPPED", "COMPLETED"]
@@ -289,7 +290,9 @@ def test_path_condition_uses_declared_published_source_lineage(
         when=PathExistsCondition(path="published.marker"),
     )
 
-    outcome = _executor().execute(repository, _cicd(producer, consumer, base), cancel_requested=None)
+    outcome = _executor().execute(
+        repository, _cicd(producer, consumer, base), cancel_requested=None
+    )
 
     assert launched == ["producer", "consumer"]
     assert outcome.steps[1].status == "COMPLETED"

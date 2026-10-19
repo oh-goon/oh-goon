@@ -6,9 +6,9 @@ import shutil
 import tarfile
 import tempfile
 from collections.abc import Callable
-from typing import BinaryIO
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.path_authority import (
@@ -273,6 +273,7 @@ def snapshot_identity_with_direct_children(
             for name, child in result.children.items()
         },
     )
+
 
 def verify_snapshot(
     path: Path,

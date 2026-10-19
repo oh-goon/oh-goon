@@ -1,15 +1,38 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
-from oh_goon.core.models.fleet_plan import ExtensionCatalog
+from oh_goon.core.models.agent_providers import AgentConnection
+from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+from oh_goon.core.models.execution_lock_models import LockedSkillSource
+from oh_goon.core.models.fleet_plan import AgentPlanStep, ExtensionCatalog
+from oh_goon.core.models.fleet_plan_composition import PlanInputDefinition, PlanInputValue
 from oh_goon.core.models.fleet_plan_execution_policy import PlanExecutionPolicy
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
-from oh_goon.services.fleet_plan_resolution_diagnostics import FleetPlanResolutionDiagnostics
 from oh_goon.services.fleet_plan_input_resolution import InputResolutionContext
+from oh_goon.services.fleet_plan_resolution_diagnostics import FleetPlanResolutionDiagnostics
 from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
+
+type AgentConnectionSelection = AgentConnection | Callable[[], AgentConnection]
+type AgentCapture = Callable[
+    [Path, AgentPlanStep, str, tuple[PlanInputDefinition, ...], dict[str, PlanInputValue]],
+    FrozenAgentStepHandoff,
+]
+
+
+class AgentCaptureOptions(TypedDict):
+    inputs: dict[str, PlanInputValue]
+    repository_root: Path
+    skill_root: Path
+    allowed_acceptance: tuple[str, ...]
+    extensions_path: Path | None
+    cancel_requested: Callable[[], bool] | None
+    connection: AgentConnectionSelection | None
+    locked_skills: tuple[LockedSkillSource, ...]
 
 
 @dataclass(frozen=True)
@@ -23,5 +46,7 @@ class FleetPlanResolutionContext:
     diagnostics: FleetPlanResolutionDiagnostics
     source_graph: FleetPlanSourceGraph
     input_resolution: InputResolutionContext
-    agent_handoff: object | None = None
+    agent_handoff: FrozenAgentStepHandoff | None = None
     agent_owner_path: Path | None = None
+    agent_capture: AgentCapture | None = None
+    agent_connection: AgentConnectionSelection | None = None

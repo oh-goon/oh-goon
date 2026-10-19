@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
 import json
-from pathlib import Path
 import re
 import subprocess
+from collections.abc import Callable
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[5]
 PLAYWRIGHT_PACKAGES = (
@@ -36,9 +36,7 @@ def _collect_npm_versions(node: object, versions: dict[str, set[str]]) -> None:
         _collect_npm_versions(entry, versions)
 
 
-def locked_playwright_version(
-    root: Path = ROOT, *, runner: Runner = subprocess.run
-) -> str:
+def locked_playwright_version(root: Path = ROOT, *, runner: Runner = subprocess.run) -> str:
     lock_path = root / "frontend" / "package-lock.json"
     if lock_path.is_symlink() or not lock_path.is_file():
         raise BrowserAcceptanceEnvironmentError(

@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from oh_goon.core.errors import RepositoryNotManaged, StateConflict
-from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.models.repository import (
     ExcludedRepositoryCatalogEntry,
     IncludedRepositoryCatalogEntry,
     RepositoryCatalogEntry,
 )
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary import FleetScope
 from oh_goon.runtime.state import LocalState, LocalStateReadView
 from oh_goon.services.repository_discovery import RepositoryDiscoveryService

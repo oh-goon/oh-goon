@@ -5,9 +5,9 @@ import shlex
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.fleet_plan_oci_steps import ResolvedOciBuildStep
 from oh_goon.core.path_authority import ContainedPathSpace, RepositoryPathSpace
+from oh_goon.core.product_identity import stable_id
 
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _REMOTE_SOURCE = re.compile(r"^(?:https?|git|ssh)://|^git@", re.IGNORECASE)

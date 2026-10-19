@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
@@ -20,33 +19,30 @@ from typing import Any
 import yaml
 
 from oh_goon.repository_tooling.release.package_slim import (
-    canonical_source_files,
     canonical_source_identity,
 )
-from oh_goon.repository_tooling.repository_understanding_capability import (
-    CAPABILITY_POLICY_VERSION,
-    capability_policy_manifest,
+from oh_goon.repository_tooling.repository_understanding_blueprint import (
+    QUESTION_FORMS as BLUEPRINT_QUESTION_FORMS,
+)
+from oh_goon.repository_tooling.repository_understanding_blueprint import (
+    assert_exam_release_ready,
 )
 from oh_goon.repository_tooling.repository_understanding_calibration import (
     CALIBRATION_POLICY_VERSION,
     CALIBRATION_PROMOTION_REVIEW_POLICY_VERSION,
     QUESTION_AUDIT_POLICY_VERSION,
     assert_question_audit_release_ready,
-    audit_manifest as question_audit_manifest,
     load_question_audit,
 )
-from oh_goon.repository_tooling.repository_understanding_blueprint import (
-    QUESTION_FORMS as BLUEPRINT_QUESTION_FORMS,
-    assert_exam_release_ready,
-    question_blueprint,
+from oh_goon.repository_tooling.repository_understanding_capability import (
+    CAPABILITY_POLICY_VERSION,
+    capability_policy_manifest,
 )
 from oh_goon.repository_tooling.repository_understanding_game_tape import (
     GAME_TAPE_POLICY_VERSION,
     game_tape_policy_manifest,
 )
 from oh_goon.repository_tooling.repository_understanding_graph import (
-    EVIDENCE_ROLE_POLICY_VERSION,
-    evidence_expectation_roles,
     graph_spec,
 )
 from oh_goon.repository_tooling.repository_understanding_integrity import (
@@ -55,36 +51,36 @@ from oh_goon.repository_tooling.repository_understanding_integrity import (
     benchmark_integrity_manifest,
     load_benchmark_registry,
 )
+from oh_goon.repository_tooling.repository_understanding_lifecycle import (
+    HUMAN_BASELINE_POLICY_VERSION,
+    QUESTION_LIFECYCLE_POLICY_VERSION,
+    assert_current_score_bank_active,
+    load_question_lifecycle,
+)
 from oh_goon.repository_tooling.repository_understanding_policy import (
     ASSERTION_RELATIONS,
     CANDIDATE_CONFIDENCE_STATES,
     CANDIDATE_EPISTEMIC_STATES,
     CLAIM_STATES,
     DIMENSION_NORMALIZATION_POLICY_VERSION,
-    DIMENSION_WEIGHTS,
     QUALIFICATION_POLICY_VERSION,
     QUESTION_STATES,
     REFERENCE_STATES,
     SCORING_POLICY_VERSION,
     qualification_policy_manifest,
 )
-from oh_goon.repository_tooling.repository_understanding_stability import (
-    STABILITY_POLICY_VERSION,
-    stability_policy_manifest,
+from oh_goon.repository_tooling.repository_understanding_policy import (
+    DIMENSION_WEIGHTS as DIMENSION_WEIGHTS,
 )
 from oh_goon.repository_tooling.repository_understanding_recertification import (
     DIFFERENTIAL_RECERTIFICATION_POLICY_VERSION,
     recertification_policy_manifest,
 )
-from oh_goon.repository_tooling.repository_understanding_lifecycle import (
-    HUMAN_BASELINE_POLICY_VERSION,
-    QUESTION_LIFECYCLE_POLICY_VERSION,
-    assert_current_score_bank_active,
-    load_question_lifecycle,
-    question_lifecycle_manifest,
+from oh_goon.repository_tooling.repository_understanding_stability import (
+    STABILITY_POLICY_VERSION,
+    stability_policy_manifest,
 )
 from oh_goon.repository_tooling.source_layout import (
-    assert_prepared_source_tree,
     is_transient_source_path,
 )
 
@@ -145,7 +141,9 @@ RUBRIC_VERSION = "repository-understanding.v17"
 MISCONCEPTION_COVERAGE_POLICY_VERSION = "repository-misconception-coverage.v7"
 CANDIDATE_GOLD_MARKER = "docs/certification/answers"
 ANSWERABILITY_POLICY_VERSION = "repository-understanding-external-answerability.v1"
-QUESTION_HEALTH_MAINTENANCE_POLICY_VERSION = "repository-understanding-question-health-maintenance.v1"
+QUESTION_HEALTH_MAINTENANCE_POLICY_VERSION = (
+    "repository-understanding-question-health-maintenance.v1"
+)
 
 
 @dataclass(frozen=True)
@@ -181,16 +179,16 @@ class ExamQuestion:
     evidence_expectations: tuple[str, ...]
 
 
-def  _source_version() -> str:
+def _source_version() -> str:
     return (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
 
-def  _canonical_json_sha256(payload: Any) -> str:
+def _canonical_json_sha256(payload: Any) -> str:
     body = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
-def  _contained(path: Path, root: Path) -> bool:
+def _contained(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())
     except ValueError:
@@ -198,7 +196,7 @@ def  _contained(path: Path, root: Path) -> bool:
     return True
 
 
-def  _ignore(directory: str, names: list[str]) -> set[str]:
+def _ignore(directory: str, names: list[str]) -> set[str]:
     current = Path(directory)
     try:
         relative_dir = current.relative_to(ROOT)
@@ -206,12 +204,15 @@ def  _ignore(directory: str, names: list[str]) -> set[str]:
         raise ValueError(f"exam copy escaped source root: {current}") from exc
     ignored = {name for name in names if is_transient_source_path(relative_dir / name)}
     answers = ANSWER_RELATIVE
-    if PurePosixPath(*relative_dir.parts) == PurePosixPath(*answers.parent.parts) and answers.name in names:
+    if (
+        PurePosixPath(*relative_dir.parts) == PurePosixPath(*answers.parent.parts)
+        and answers.name in names
+    ):
         ignored.add(answers.name)
     return ignored
 
 
-def  _validate_source_symlinks(root: Path = ROOT) -> None:
+def _validate_source_symlinks(root: Path = ROOT) -> None:
     """Fail closed on non-transient source symlinks before blind-copy preparation."""
 
     root = root.resolve()
@@ -231,7 +232,6 @@ def  _validate_source_symlinks(root: Path = ROOT) -> None:
                 )
 
 
-
 def _question_prompts() -> dict[str, str]:
     prompts: dict[str, str] = {}
     for path in sorted((ROOT / QUESTION_RELATIVE).glob("*.md")):
@@ -246,7 +246,6 @@ def _question_prompts() -> dict[str, str]:
                 raise ValueError(f"duplicate PUBLIC question id: {match.group(1)}")
             prompts[match.group(1)] = prompt
     return prompts
-
 
 
 def _metadata() -> dict[str, dict[str, Any]]:
@@ -273,16 +272,25 @@ def _metadata() -> dict[str, dict[str, Any]]:
         if item.get("difficulty") not in DIFFICULTIES:
             raise ValueError(f"{qid} has invalid difficulty")
         blueprint_dimension = item.get("blueprint_dimension")
-        from oh_goon.repository_tooling.repository_understanding_blueprint import DIMENSION_TARGET_RANGES
+        from oh_goon.repository_tooling.repository_understanding_blueprint import (
+            DIMENSION_TARGET_RANGES,
+        )
+
         if blueprint_dimension not in DIMENSION_TARGET_RANGES:
             raise ValueError(f"{qid} has invalid blueprint_dimension")
         if item.get("blueprint_form") not in BLUEPRINT_QUESTION_FORMS:
             raise ValueError(f"{qid} has invalid blueprint_form")
         expectations = item.get("response_expectations")
         if expectations != {"require_evidence": True, "allow_insufficient_evidence": True}:
-            raise ValueError(f"{qid} response_expectations must use the canonical candidate contract")
+            raise ValueError(
+                f"{qid} response_expectations must use the canonical candidate contract"
+            )
         scope = item.get("evidence_scope")
-        if not isinstance(scope, list) or not scope or not all(isinstance(value, str) for value in scope):
+        if (
+            not isinstance(scope, list)
+            or not scope
+            or not all(isinstance(value, str) for value in scope)
+        ):
             raise ValueError(f"{qid} must declare broad EVIDENCE scope")
         body = json.dumps(item, sort_keys=True)
         if CANDIDATE_GOLD_MARKER in body or INLINE_SOURCE_REFERENCE.search(body):
@@ -291,10 +299,13 @@ def _metadata() -> dict[str, dict[str, Any]]:
     return by_id
 
 
-
 def _answer_payloads() -> list[tuple[Path, dict[str, Any]]]:
     payloads: list[tuple[Path, dict[str, Any]]] = []
-    special = {ROOT / QUESTION_AUDIT_RELATIVE, ROOT / QUESTION_LIFECYCLE_RELATIVE, ROOT / BENCHMARK_REGISTRY_RELATIVE}
+    special = {
+        ROOT / QUESTION_AUDIT_RELATIVE,
+        ROOT / QUESTION_LIFECYCLE_RELATIVE,
+        ROOT / BENCHMARK_REGISTRY_RELATIVE,
+    }
     for path in sorted((ROOT / ANSWER_RELATIVE).glob("*.yml")):
         if path in special:
             continue
@@ -303,7 +314,6 @@ def _answer_payloads() -> list[tuple[Path, dict[str, Any]]]:
             raise ValueError(f"SECRET answer file must contain a mapping: {path.relative_to(ROOT)}")
         payloads.append((path, payload))
     return payloads
-
 
 
 def _validate_evidence(reference: str, *, root: Path = ROOT) -> None:
@@ -326,7 +336,6 @@ def _validate_evidence(reference: str, *, root: Path = ROOT) -> None:
         raise ValueError(
             f"evidence line range is outside {relative}: {start}-{end} (lines={line_count})"
         )
-
 
 
 def _evidence_reference_identity(reference: str, *, root: Path = ROOT) -> dict[str, Any]:
@@ -374,7 +383,6 @@ def _expected_claims(qid: str, value: Any) -> tuple[ExpectedClaim, ...]:
     return tuple(claims)
 
 
-
 def _contradictions(qid: str, value: Any, severity: str) -> tuple[Contradiction, ...]:
     if not isinstance(value, list):
         raise ValueError(f"{qid} SECRET contradictions must be a list")
@@ -409,12 +417,13 @@ def _contradictions(qid: str, value: Any, severity: str) -> tuple[Contradiction,
     return tuple(contradictions)
 
 
-
 @lru_cache(maxsize=1)
 def load_exam() -> tuple[ExamQuestion, ...]:
     prompts = _question_prompts()
     metadata = _metadata()
-    secret_by_id: dict[str, tuple[str, str, tuple[ExpectedClaim, ...], tuple[Contradiction, ...], tuple[str, ...]]] = {}
+    secret_by_id: dict[
+        str, tuple[str, str, tuple[ExpectedClaim, ...], tuple[Contradiction, ...], tuple[str, ...]]
+    ] = {}
     for path, payload in _answer_payloads():
         if payload.get("schema_version") != SECRET_SCHEMA_VERSION:
             raise ValueError(f"SECRET schema_version mismatch in {path.relative_to(ROOT)}")
@@ -440,7 +449,11 @@ def load_exam() -> tuple[ExamQuestion, ...]:
             claims = _expected_claims(qid, entry.get("expected_claims"))
             contradictions = _contradictions(qid, entry.get("contradictions"), severity)
             evidence = entry.get("evidence_expectations")
-            if not isinstance(evidence, list) or not evidence or not all(isinstance(ref, str) for ref in evidence):
+            if (
+                not isinstance(evidence, list)
+                or not evidence
+                or not all(isinstance(ref, str) for ref in evidence)
+            ):
                 raise ValueError(f"{qid} must declare SECRET evidence_expectations")
             for reference in evidence:
                 _validate_evidence(reference)
@@ -527,67 +540,128 @@ def question_lifecycle() -> dict[str, Any]:
 
 
 def _severity_encoded_misconception_ids(misconceptions: tuple[str, ...]) -> list[str]:
-    from oh_goon.repository_tooling._repository_understanding_material_audits import _severity_encoded_misconception_ids as impl
+    from oh_goon.repository_tooling._repository_understanding_material_audits import (
+        _severity_encoded_misconception_ids as impl,
+    )
+
     return impl(misconceptions)
 
 
 def _misconception_coverage_audit(questions: tuple[ExamQuestion, ...]) -> dict[str, Any]:
-    from oh_goon.repository_tooling._repository_understanding_material_audits import _misconception_coverage_audit as impl
+    from oh_goon.repository_tooling._repository_understanding_material_audits import (
+        _misconception_coverage_audit as impl,
+    )
+
     return impl(questions)
 
 
-def _assert_misconception_coverage_release_ready(questions: tuple[ExamQuestion, ...]) -> dict[str, Any]:
-    from oh_goon.repository_tooling._repository_understanding_material_audits import _assert_misconception_coverage_release_ready as impl
+def _assert_misconception_coverage_release_ready(
+    questions: tuple[ExamQuestion, ...],
+) -> dict[str, Any]:
+    from oh_goon.repository_tooling._repository_understanding_material_audits import (
+        _assert_misconception_coverage_release_ready as impl,
+    )
+
     return impl(questions)
 
 
 def _evidence_authority_audit(questions: tuple[ExamQuestion, ...]) -> dict[str, Any]:
-    from oh_goon.repository_tooling._repository_understanding_material_audits import _evidence_authority_audit as impl
+    from oh_goon.repository_tooling._repository_understanding_material_audits import (
+        _evidence_authority_audit as impl,
+    )
+
     return impl(questions)
 
 
-def _external_answerability_audit(questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]) -> dict[str, Any]:
-    from oh_goon.repository_tooling._repository_understanding_material_audits import _external_answerability_audit as impl
+def _external_answerability_audit(
+    questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]
+) -> dict[str, Any]:
+    from oh_goon.repository_tooling._repository_understanding_material_audits import (
+        _external_answerability_audit as impl,
+    )
+
     return impl(questions, lifecycle)
 
 
-def _assert_external_answerability_ready(questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]) -> dict[str, Any]:
-    from oh_goon.repository_tooling._repository_understanding_material_audits import _assert_external_answerability_ready as impl
+def _assert_external_answerability_ready(
+    questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]
+) -> dict[str, Any]:
+    from oh_goon.repository_tooling._repository_understanding_material_audits import (
+        _assert_external_answerability_ready as impl,
+    )
+
     return impl(questions, lifecycle)
 
 
-def _question_health_maintenance_audit(questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any], audit: dict[str, Any], answerability: dict[str, Any]) -> dict[str, Any]:
-    from oh_goon.repository_tooling._repository_understanding_material_audits import _question_health_maintenance_audit as impl
+def _question_health_maintenance_audit(
+    questions: tuple[ExamQuestion, ...],
+    lifecycle: dict[str, Any],
+    audit: dict[str, Any],
+    answerability: dict[str, Any],
+) -> dict[str, Any]:
+    from oh_goon.repository_tooling._repository_understanding_material_audits import (
+        _question_health_maintenance_audit as impl,
+    )
+
     return impl(questions, lifecycle, audit, answerability)
 
 
-def _assert_question_health_maintenance_ready(questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any], audit: dict[str, Any], answerability: dict[str, Any]) -> dict[str, Any]:
-    from oh_goon.repository_tooling._repository_understanding_material_audits import _assert_question_health_maintenance_ready as impl
+def _assert_question_health_maintenance_ready(
+    questions: tuple[ExamQuestion, ...],
+    lifecycle: dict[str, Any],
+    audit: dict[str, Any],
+    answerability: dict[str, Any],
+) -> dict[str, Any]:
+    from oh_goon.repository_tooling._repository_understanding_material_audits import (
+        _assert_question_health_maintenance_ready as impl,
+    )
+
     return impl(questions, lifecycle, audit, answerability)
 
 
-def _question_snapshot(question: ExamQuestion, audit_row: dict[str, Any], lifecycle_row: dict[str, Any]) -> dict[str, Any]:
-    from oh_goon.repository_tooling._repository_understanding_material_snapshot import _question_snapshot as impl
+def _question_snapshot(
+    question: ExamQuestion, audit_row: dict[str, Any], lifecycle_row: dict[str, Any]
+) -> dict[str, Any]:
+    from oh_goon.repository_tooling._repository_understanding_material_snapshot import (
+        _question_snapshot as impl,
+    )
+
     return impl(question, audit_row, lifecycle_row)
 
 
 def _calibration_question_binding(question: ExamQuestion) -> str:
-    from oh_goon.repository_tooling._repository_understanding_material_snapshot import _calibration_question_binding as impl
+    from oh_goon.repository_tooling._repository_understanding_material_snapshot import (
+        _calibration_question_binding as impl,
+    )
+
     return impl(question)
 
 
 def _repository_evidence_index() -> dict[str, dict[str, Any]]:
-    from oh_goon.repository_tooling._repository_understanding_material_snapshot import _repository_evidence_index as impl
+    from oh_goon.repository_tooling._repository_understanding_material_snapshot import (
+        _repository_evidence_index as impl,
+    )
+
     return impl()
 
 
-def _qualification_bank_questions(questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]) -> tuple[ExamQuestion, ...]:
-    from oh_goon.repository_tooling._repository_understanding_material_snapshot import _qualification_bank_questions as impl
+def _qualification_bank_questions(
+    questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]
+) -> tuple[ExamQuestion, ...]:
+    from oh_goon.repository_tooling._repository_understanding_material_snapshot import (
+        _qualification_bank_questions as impl,
+    )
+
     return impl(questions, lifecycle)
 
 
-def _dimension_normalization_bank_audit(questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]) -> dict[str, Any]:
-    from oh_goon.repository_tooling._repository_understanding_material_snapshot import _dimension_normalization_bank_audit as impl
+def _dimension_normalization_bank_audit(
+    questions: tuple[ExamQuestion, ...], lifecycle: dict[str, Any]
+) -> dict[str, Any]:
+    from oh_goon.repository_tooling._repository_understanding_material_snapshot import (
+        _dimension_normalization_bank_audit as impl,
+    )
+
     return impl(questions, lifecycle)
 
 
@@ -599,7 +673,9 @@ def _exam_snapshot_cached() -> dict[str, Any]:
     blueprint_audit = assert_exam_release_ready(qualification_questions)
     misconception_audit = _assert_misconception_coverage_release_ready(qualification_questions)
     audit = _question_audit_cached()
-    critical_question_ids = tuple(question.id for question in qualification_questions if question.severity == "critical")
+    critical_question_ids = tuple(
+        question.id for question in qualification_questions if question.severity == "critical"
+    )
     audit_report = assert_question_audit_release_ready(
         audit, critical_question_ids=critical_question_ids
     )
@@ -607,7 +683,9 @@ def _exam_snapshot_cached() -> dict[str, Any]:
         lifecycle, critical_question_ids=critical_question_ids
     )
     answerability_report = _assert_external_answerability_ready(questions, lifecycle)
-    health_maintenance_report = _assert_question_health_maintenance_ready(questions, lifecycle, audit, answerability_report)
+    health_maintenance_report = _assert_question_health_maintenance_ready(
+        questions, lifecycle, audit, answerability_report
+    )
     dimension_normalization_audit = _dimension_normalization_bank_audit(questions, lifecycle)
     registry = _benchmark_registry_cached()
     integrity = benchmark_integrity_manifest(registry)
@@ -684,13 +762,19 @@ def _manifest_cached() -> dict[str, Any]:
     blueprint_audit = assert_exam_release_ready(qualification_questions)
     misconception_audit = _assert_misconception_coverage_release_ready(qualification_questions)
     audit = _question_audit_cached()
-    critical_question_ids = tuple(question.id for question in qualification_questions if question.severity == "critical")
+    critical_question_ids = tuple(
+        question.id for question in qualification_questions if question.severity == "critical"
+    )
     audit_report = assert_question_audit_release_ready(
         audit, critical_question_ids=critical_question_ids
     )
-    lifecycle_report = assert_current_score_bank_active(lifecycle, critical_question_ids=critical_question_ids)
+    lifecycle_report = assert_current_score_bank_active(
+        lifecycle, critical_question_ids=critical_question_ids
+    )
     answerability_report = _assert_external_answerability_ready(questions, lifecycle)
-    health_maintenance_report = _assert_question_health_maintenance_ready(questions, lifecycle, audit, answerability_report)
+    health_maintenance_report = _assert_question_health_maintenance_ready(
+        questions, lifecycle, audit, answerability_report
+    )
     dimension_normalization_audit = _dimension_normalization_bank_audit(questions, lifecycle)
     registry = _benchmark_registry_cached()
     integrity = benchmark_integrity_manifest(registry)
@@ -723,9 +807,13 @@ def _manifest_cached() -> dict[str, Any]:
         "question_count": len(questions),
         "qualification_question_count": len(qualification_questions),
         "shadow_question_count": len(questions) - len(qualification_questions),
-        "critical_question_count": sum(question.severity == "critical" for question in qualification_questions),
+        "critical_question_count": sum(
+            question.severity == "critical" for question in qualification_questions
+        ),
         "critical_claim_count": sum(
-            claim.critical for question in qualification_questions for claim in question.expected_claims
+            claim.critical
+            for question in qualification_questions
+            for claim in question.expected_claims
         ),
         "question_types": type_counts,
         "difficulty": difficulty_counts,
@@ -777,8 +865,7 @@ def verify(*, manifest_path: Path | None = None) -> dict[str, Any]:
     return payload
 
 
-
 def prepare(destination: Path, *, force: bool = False) -> Path:
     from oh_goon.repository_tooling._repository_understanding_material_prepare import prepare_exam
-    return prepare_exam(destination, force=force)
 
+    return prepare_exam(destination, force=force)

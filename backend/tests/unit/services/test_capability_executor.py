@@ -257,6 +257,7 @@ def test_direct_effect_boundary_follows_capability_policy(
         lambda *_args, **_kwargs: blocked,
     )
 
-    with pytest.raises(CapabilityUnavailable, match="not executable through the Direct effect boundary"):
+    with pytest.raises(
+        CapabilityUnavailable, match="not executable through the Direct effect boundary"
+    ):
         operations.run(tmp_path / "repo", OperationAction.PLAN)
-

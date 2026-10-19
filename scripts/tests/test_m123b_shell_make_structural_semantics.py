@@ -25,7 +25,9 @@ def _write(root: Path, relative: str, text: str) -> Path:
 
 def _selector_messages(tmp_path: Path, text: str) -> list[str]:
     path = _write(tmp_path, "host_python.sh", text)
-    return [violation.message for violation in _check_host_python_selector_contract(path)]
+    return [
+        violation.message for violation in _check_host_python_selector_contract(path)
+    ]
 
 
 def _tooling_repo(tmp_path: Path, makefile: str) -> tuple[Path, Path, str]:
@@ -97,38 +99,49 @@ def _workflow_root(tmp_path: Path, makefile: str | None = None) -> Path:
 
 
 def test_selector_comment_decoy_is_representation_only(tmp_path: Path) -> None:
-    assert _selector_messages(
-        tmp_path,
-        "select_host_python() {\n  # uv sync is forbidden here; this is only documentation\n  printf '%s\\n' python3\n}\n",
-    ) == []
+    assert (
+        _selector_messages(
+            tmp_path,
+            "select_host_python() {\n  # uv sync is forbidden here; this is only documentation\n  printf '%s\\n' python3\n}\n",
+        )
+        == []
+    )
 
 
-def test_selector_scalar_alias_cannot_hide_dependency_acquisition(tmp_path: Path) -> None:
+def test_selector_scalar_alias_cannot_hide_dependency_acquisition(
+    tmp_path: Path,
+) -> None:
     messages = _selector_messages(
         tmp_path,
-        "select_host_python() {\n  tool=uv\n  action=sync\n  \"$tool\" \"$action\" --project backend\n}\n",
+        'select_host_python() {\n  tool=uv\n  action=sync\n  "$tool" "$action" --project backend\n}\n',
     )
     assert any("must never acquire dependencies" in message for message in messages)
 
 
-def test_selector_helper_extraction_cannot_hide_dependency_acquisition(tmp_path: Path) -> None:
+def test_selector_helper_extraction_cannot_hide_dependency_acquisition(
+    tmp_path: Path,
+) -> None:
     messages = _selector_messages(
         tmp_path,
-        "acquire() {\n  native=uv\n  operation=lock\n  \"$native\" \"$operation\" --project backend\n}\n"
+        'acquire() {\n  native=uv\n  operation=lock\n  "$native" "$operation" --project backend\n}\n'
         "select_host_python() { printf '%s\\n' python3; }\n",
     )
     assert any("must never acquire dependencies" in message for message in messages)
 
 
-def test_selector_array_alias_cannot_hide_dependency_acquisition(tmp_path: Path) -> None:
+def test_selector_array_alias_cannot_hide_dependency_acquisition(
+    tmp_path: Path,
+) -> None:
     messages = _selector_messages(
         tmp_path,
-        "select_host_python() {\n  operation=(uv sync)\n  \"${operation[@]}\" --project backend\n}\n",
+        'select_host_python() {\n  operation=(uv sync)\n  "${operation[@]}" --project backend\n}\n',
     )
     assert any("must never acquire dependencies" in message for message in messages)
 
 
-def test_make_comments_do_not_create_python_or_frontend_authority(tmp_path: Path) -> None:
+def test_make_comments_do_not_create_python_or_frontend_authority(
+    tmp_path: Path,
+) -> None:
     messages = _tooling_messages(
         tmp_path,
         "POLICY = uv run --no-project python backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py\n"
@@ -158,7 +171,9 @@ def test_make_command_alias_cannot_hide_direct_node(tmp_path: Path) -> None:
     assert any("node/npx" in message for message in messages)
 
 
-def test_dependency_policy_private_variable_name_is_representation_only(tmp_path: Path) -> None:
+def test_dependency_policy_private_variable_name_is_representation_only(
+    tmp_path: Path,
+) -> None:
     messages = _tooling_messages(
         tmp_path,
         "NATIVE = uv\nACTION = run\n"
@@ -176,21 +191,32 @@ def test_renamed_unowned_source_execution_still_fails(tmp_path: Path) -> None:
         "OTHER = backend/src/oh_goon/repository_tooling/shadow.py\n"
         "check:\n\t@$(POLICY) public-lock-check\n\t@uv run --no-project python $(OTHER)\n",
     )
-    assert any("only the explicit pre-environment dependency-policy capability" in message for message in messages)
+    assert any(
+        "only the explicit pre-environment dependency-policy capability" in message
+        for message in messages
+    )
 
 
 def test_operator_uv_comment_decoy_is_inert(tmp_path: Path) -> None:
-    root, path, _ = _tooling_repo(tmp_path, "check:\n\t# UV_CONCURRENT_DOWNLOADS=99 uv --default-index https://example.invalid\n\t@uv --version\n")
+    root, path, _ = _tooling_repo(
+        tmp_path,
+        "check:\n\t# UV_CONCURRENT_DOWNLOADS=99 uv --default-index https://example.invalid\n\t@uv --version\n",
+    )
     del root
     facts = make_semantic_facts(path.read_text(encoding="utf-8"))
     assert _check_operator_uv_environment(path, facts) == []
 
 
 def test_operator_uv_environment_assignment_remains_semantic(tmp_path: Path) -> None:
-    root, path, _ = _tooling_repo(tmp_path, "UV_CONCURRENT_DOWNLOADS = 99\ncheck:\n\t@uv --version\n")
+    root, path, _ = _tooling_repo(
+        tmp_path, "UV_CONCURRENT_DOWNLOADS = 99\ncheck:\n\t@uv --version\n"
+    )
     del root
     facts = make_semantic_facts(path.read_text(encoding="utf-8"))
-    assert any("download concurrency" in item.message for item in _check_operator_uv_environment(path, facts))
+    assert any(
+        "download concurrency" in item.message
+        for item in _check_operator_uv_environment(path, facts)
+    )
 
 
 def test_precommit_comment_decoy_is_representation_only(tmp_path: Path) -> None:
@@ -216,15 +242,21 @@ def test_precommit_shell_alias_cannot_hide_direct_python(tmp_path: Path) -> None
         "    language: system\n"
         "    entry: bash -lc 'launcher=python3; \"$launcher\" -m oh_goon'\n",
     )
-    assert any("direct python/python3" in item.message for item in _check_precommit(root))
+    assert any(
+        "direct python/python3" in item.message for item in _check_precommit(root)
+    )
 
 
-def test_workflow_make_private_variable_names_are_representation_only(tmp_path: Path) -> None:
+def test_workflow_make_private_variable_names_are_representation_only(
+    tmp_path: Path,
+) -> None:
     root = _workflow_root(tmp_path)
     assert check_make_single_path(root) == []
 
 
-def test_workflow_make_helper_variable_extraction_is_representation_only(tmp_path: Path) -> None:
+def test_workflow_make_helper_variable_extraction_is_representation_only(
+    tmp_path: Path,
+) -> None:
     makefile = _workflow_makefile().replace(
         "LOGGER = bash scripts/run_logged.sh",
         "SHELL = bash\nLOG_SCRIPT = scripts/run_logged.sh\nLOGGER = $(SHELL) $(LOG_SCRIPT)",
@@ -234,15 +266,27 @@ def test_workflow_make_helper_variable_extraction_is_representation_only(tmp_pat
 
 
 def test_workflow_make_comment_cannot_create_direct_plan_path(tmp_path: Path) -> None:
-    makefile = _workflow_makefile() + "\n# oh-goon plan run is forbidden outside the workflow owner\n"
+    makefile = (
+        _workflow_makefile()
+        + "\n# oh-goon plan run is forbidden outside the workflow owner\n"
+    )
     root = _workflow_root(tmp_path, makefile)
-    assert not any("direct Plan execution path" in item.message for item in check_make_single_path(root))
+    assert not any(
+        "direct Plan execution path" in item.message
+        for item in check_make_single_path(root)
+    )
 
 
 def test_workflow_make_alias_cannot_hide_direct_plan_path(tmp_path: Path) -> None:
-    makefile = _workflow_makefile() + "\nCLI = backend/.venv/bin/oh-goon\nshadow:\n\t@$(CLI) plan run plan.yml\n"
+    makefile = (
+        _workflow_makefile()
+        + "\nCLI = backend/.venv/bin/oh-goon\nshadow:\n\t@$(CLI) plan run plan.yml\n"
+    )
     root = _workflow_root(tmp_path, makefile)
-    assert any("direct Plan execution path" in item.message for item in check_make_single_path(root))
+    assert any(
+        "direct Plan execution path" in item.message
+        for item in check_make_single_path(root)
+    )
 
 
 def test_workflow_make_extra_test_choreography_still_fails(tmp_path: Path) -> None:
@@ -251,4 +295,6 @@ def test_workflow_make_extra_test_choreography_still_fails(tmp_path: Path) -> No
         "test:\n\t@$(TEST_GATE)\n\t@$(MAKE) test-python",
     )
     root = _workflow_root(tmp_path, makefile)
-    assert any("one-line delegation" in item.message for item in check_make_single_path(root))
+    assert any(
+        "one-line delegation" in item.message for item in check_make_single_path(root)
+    )

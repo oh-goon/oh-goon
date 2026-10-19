@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from email.message import Message
+
+from typing import Any
+
+import urllib.request
+
+import pytest
+
 import json
 import os
 from pathlib import Path
@@ -31,12 +39,19 @@ PREVIEW_PAYLOAD = {
 }
 
 
-def test_baseline_shared_plan_preview_to_run_carries_exact_authority(monkeypatch) -> None:
+def test_baseline_shared_plan_preview_to_run_carries_exact_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[tuple[str, str, dict[str, object] | None]] = []
     preview_payload = PREVIEW_PAYLOAD
 
-
-    def request(method, url, *, access_token, payload=None):
+    def request(
+        method: str,
+        url: str,
+        *,
+        access_token: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         calls.append((method, url, payload))
         if url.endswith("/shared-plan-previews"):
             return preview_payload
@@ -55,8 +70,16 @@ def test_baseline_shared_plan_preview_to_run_carries_exact_authority(monkeypatch
             "outcome": "SUCCESS",
             "game_tape": {
                 "repositories": [
-                    {"repository": {"repository_id": "repo-left"}, "status": "PASSED", "steps": [{"status": "PASSED"}]},
-                    {"repository": {"repository_id": "repo-right"}, "status": "PASSED", "steps": [{"status": "PASSED"}]},
+                    {
+                        "repository": {"repository_id": "repo-left"},
+                        "status": "PASSED",
+                        "steps": [{"status": "PASSED"}],
+                    },
+                    {
+                        "repository": {"repository_id": "repo-right"},
+                        "status": "PASSED",
+                        "steps": [{"status": "PASSED"}],
+                    },
                 ]
             },
         },
@@ -99,10 +122,12 @@ def test_baseline_shared_plan_preview_to_run_carries_exact_authority(monkeypatch
     }
 
 
-def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(monkeypatch) -> None:
+def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[tuple[str, str]] = []
 
-    def urlopen(request, timeout):
+    def urlopen(request: urllib.request.Request, timeout: float) -> None:
         calls.append((request.get_method(), request.full_url))
         if request.get_method() == "PUT":
             body = {
@@ -110,16 +135,22 @@ def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(monkeypat
                 "message": "Plans do not own input schemas",
             }
             raise urllib.error.HTTPError(
-                request.full_url, 400, "bad request", hdrs=None,
+                request.full_url,
+                400,
+                "bad request",
+                hdrs=Message(),
                 fp=BytesIO(json.dumps(body).encode()),
             )
         body = {"code": "FLEET_PLAN_SOURCE_NOT_FOUND", "message": "not found"}
         raise urllib.error.HTTPError(
-            request.full_url, 404, "not found", hdrs=None,
+            request.full_url,
+            404,
+            "not found",
+            hdrs=Message(),
             fp=BytesIO(json.dumps(body).encode()),
         )
 
-    monkeypatch.setattr(shared_plan.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
 
     shared_plan._assert_invalid_shared_plan_is_rejected_before_persistence(
         "http://local", access_token="token"
@@ -128,7 +159,9 @@ def test_invalid_shared_plan_is_rejected_before_it_becomes_saved_state(monkeypat
     assert [method for method, _url in calls] == ["PUT", "GET"]
 
 
-def test_ready_shared_plan_repository_can_run_release_metadata_offline(tmp_path: Path) -> None:
+def test_ready_shared_plan_repository_can_run_release_metadata_offline(
+    tmp_path: Path,
+) -> None:
     repository = tmp_path / "ready"
     shared_plan._repository(repository, version="1.2.3")
     environment = dict(os.environ)
@@ -156,4 +189,6 @@ def test_ready_shared_plan_repository_can_run_release_metadata_offline(tmp_path:
     )
     assert completed.returncode == 0, completed.stderr
     assert (repository / ".fleet/release/PROJECT_VERSION").read_text() == "1.2.3\n"
-    assert (repository / ".fleet/release/RELEASE_VERSION").read_text() == "1.2.3-beta.abcdef1\n"
+    assert (
+        repository / ".fleet/release/RELEASE_VERSION"
+    ).read_text() == "1.2.3-beta.abcdef1\n"

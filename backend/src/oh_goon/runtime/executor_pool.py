@@ -11,7 +11,6 @@ from oh_goon.core.errors import (
     FleetPlanInvalid,
     StateConflict,
 )
-from oh_goon.core.models.scheduling import SchedulingEnvelope, SchedulingPriority
 from oh_goon.core.models.fleet_executor import (
     FleetExecutorPlacement,
     PlanExecutorCapacityEvidence,
@@ -24,9 +23,10 @@ from oh_goon.core.models.fleet_executor_operations import (
     PlacementQueueSnapshot,
 )
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
-from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
+from oh_goon.core.models.scheduling import SchedulingEnvelope, SchedulingPriority
 from oh_goon.core.strict_executor_authority import EXECUTORS_FILE_ENV
 from oh_goon.integrations.fleet_plan_process_isolation import (
     ProcessIsolationBackend,
@@ -117,7 +117,9 @@ class FleetExecutorPool:
         """Project immutable admitted scheduling evidence without transferring ownership."""
         return self._placement().scheduling_receipt_in(connection, fleet_run_id)
 
-    def cancel_queued_admission(self, fleet_run_id: str, *, expected_sequence: int) -> PlacementQueueEntry:
+    def cancel_queued_admission(
+        self, fleet_run_id: str, *, expected_sequence: int
+    ) -> PlacementQueueEntry:
         return self._placement_queue().cancel(fleet_run_id, expected_sequence=expected_sequence)
 
     def reprioritize_queued_admission(
@@ -149,32 +151,41 @@ class FleetExecutorPool:
         self, executor_id: str, *, expected_generation: int, expected_revision: int
     ) -> FleetExecutorStatus:
         return self._operator_mutation_controls().drain(
-            executor_id, expected_generation=expected_generation, expected_revision=expected_revision
+            executor_id,
+            expected_generation=expected_generation,
+            expected_revision=expected_revision,
         )
 
     def activate_executor(
         self, executor_id: str, *, expected_generation: int, expected_revision: int
     ) -> FleetExecutorStatus:
         return self._operator_mutation_controls().activate(
-            executor_id, expected_generation=expected_generation, expected_revision=expected_revision
+            executor_id,
+            expected_generation=expected_generation,
+            expected_revision=expected_revision,
         )
 
     def revoke_executor_trust(
         self, executor_id: str, *, expected_generation: int, expected_revision: int
     ) -> FleetExecutorStatus:
         return self._operator_mutation_controls().revoke_trust(
-            executor_id, expected_generation=expected_generation, expected_revision=expected_revision
+            executor_id,
+            expected_generation=expected_generation,
+            expected_revision=expected_revision,
         )
 
     def restore_executor_trust(
         self, executor_id: str, *, expected_generation: int, expected_revision: int
     ) -> FleetExecutorStatus:
         return self._operator_mutation_controls().restore_trust(
-            executor_id, expected_generation=expected_generation, expected_revision=expected_revision
+            executor_id,
+            expected_generation=expected_generation,
+            expected_revision=expected_revision,
         )
 
     def original_local_lace_recovery_backend(
-        self, placement: FleetExecutorPlacement,
+        self,
+        placement: FleetExecutorPlacement,
     ) -> ProcessIsolationBackend:
         """Read the exact configured local backend; never mint recovery authority.
 
@@ -184,8 +195,10 @@ class FleetExecutorPool:
         """
         configured = self._configured()
         candidate = _exact_candidate(configured.executors, placement.executor_capacity)
-        if (candidate is None or isolation_backend_evidence(candidate.backend)
-                != placement.isolation_backend):
+        if (
+            candidate is None
+            or isolation_backend_evidence(candidate.backend) != placement.isolation_backend
+        ):
             raise ExecutorPlacementLost(
                 "Exact admitted local-LACE observer backend is no longer configured"
             )
@@ -231,9 +244,7 @@ class FleetExecutorPool:
                 "The exact Fleet executor generation admitted before RUN_ADMITTED is no longer "
                 "current; automatic relocation is forbidden"
             ) from exc
-        operational = ExecutorOperatorControls.state_in(
-            connection, candidate.identity.executor_id
-        )
+        operational = ExecutorOperatorControls.state_in(connection, candidate.identity.executor_id)
         if operational.trust_state is ExecutorTrustState.REVOKED:
             raise ExecutorTrustRevoked(
                 "Trust for the exact Fleet executor admitted before RUN_ADMITTED was revoked; "

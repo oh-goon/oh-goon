@@ -1,10 +1,10 @@
 """Atomic persistence and schema authority for bounded pytest execution reports."""
+
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-
 
 PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_FAMILY = "oh-goon.pytest-batch-execution"
 PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_VERSION = 1

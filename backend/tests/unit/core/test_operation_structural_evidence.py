@@ -7,12 +7,12 @@ from pydantic import ValidationError
 
 from oh_goon.core.models.operation import (
     AvailableToolVersion,
-    ReadyUvTool,
-    RejectedUvProject,
     DependenciesUpdated,
     DetachedGitPosition,
     MissingToolVersion,
     NamedGitPosition,
+    ReadyUvTool,
+    RejectedUvProject,
     RepositorySyncFailedValidation,
     ToolchainResult,
     UnavailableToolVersion,
@@ -101,6 +101,7 @@ def test_toolchain_executes_each_native_probe_once(
     assert calls == [("uv", ("version",)), ("python3", ("--version",))]
     assert tools.uv.state == "ready"
     assert tools.git.state == "version_unavailable"
+
 
 def test_readiness_alias_actions_are_not_part_of_operation_vocabulary() -> None:
     assert "git-ready" not in {action.value for action in OperationAction}
@@ -200,11 +201,10 @@ def test_git_readiness_uses_status_launch_as_availability_authority(
 
     observation = readiness_module.GitService().observe(tmp_path)
 
-    assert calls == [
-        ("status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal")
-    ]
+    assert calls == [("status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal")]
     assert observation.tool_available is False
     assert observation.worktree_state is WorktreeState.NOT_GIT
+
 
 def test_repository_validation_stops_at_first_failed_stage_and_preserves_output(
     monkeypatch: pytest.MonkeyPatch,

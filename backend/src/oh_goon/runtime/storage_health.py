@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import errno
 import os
-import sqlite3
 import shutil
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -71,9 +71,7 @@ def resolve_storage_capacity_policy(environment: dict[str, str]) -> StorageCapac
         environment, STORAGE_HARD_FREE_BYTES_ENV, DEFAULT_STORAGE_HARD_FREE_BYTES
     )
     if hard > soft:
-        raise ValueError(
-            f"{STORAGE_HARD_FREE_BYTES_ENV} must be <= {STORAGE_SOFT_FREE_BYTES_ENV}"
-        )
+        raise ValueError(f"{STORAGE_HARD_FREE_BYTES_ENV} must be <= {STORAGE_SOFT_FREE_BYTES_ENV}")
     return StorageCapacityPolicy(soft_free_bytes=soft, hard_free_bytes=hard)
 
 

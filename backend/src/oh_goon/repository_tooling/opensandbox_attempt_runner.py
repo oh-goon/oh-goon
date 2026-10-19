@@ -6,10 +6,10 @@ import ctypes
 import fcntl
 import hashlib
 import json
-import shlex
-import signal
 import os
+import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -17,20 +17,30 @@ import threading
 import time
 import warnings
 from pathlib import Path
+from typing import Any
 
 from oh_goon.repository_tooling._opensandbox_attempt_io import (
     ByteCapture as _ByteCapture,
-    complete_child_result as _complete_child_result,
+)
+from oh_goon.repository_tooling._opensandbox_attempt_io import (
     archive_tree as _archive_tree,
+)
+from oh_goon.repository_tooling._opensandbox_attempt_io import (
+    complete_child_result as _complete_child_result,
+)
+from oh_goon.repository_tooling._opensandbox_attempt_io import (
     extract_tree as _extract_tree,
+)
+from oh_goon.repository_tooling._opensandbox_attempt_io import (
     fleet_file as _fleet_file,
+)
+from oh_goon.repository_tooling._opensandbox_attempt_io import (
     read_pipe as _read_pipe,
 )
 from oh_goon.runtime.process_group import (
     process_group_exists,
     wait_for_process_group_quiescence,
 )
-from typing import Any
 
 _PROTOCOL = 3
 _RESERVED = ("/workspace", "/cache", "/home/fleet", "/tmp", "/config", "/toolchain")
@@ -61,9 +71,7 @@ def _write_readonly(root: Path, item: dict[str, Any]) -> None:
     if declared == "/" or any(
         declared == value or declared.startswith(value + "/") for value in _RESERVED
     ):
-        raise ValueError(
-            f"Fleet runner readonly input collides with reserved path: {declared}"
-        )
+        raise ValueError(f"Fleet runner readonly input collides with reserved path: {declared}")
     destination = _inside(root, declared)
     source = _fleet_file(root, str(item["source"]))
     if item["kind"] == "tree":
@@ -123,12 +131,10 @@ def _prepare_root(payload: dict[str, Any], root: Path) -> None:
             (etc / name).write_text(str(text), encoding="utf-8")
 
 
-
-
 def _identity(payload: object) -> str:
-    raw = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
@@ -234,6 +240,7 @@ def _seal_descriptor(descriptor: int, *, label: str) -> None:
     applied = fcntl.fcntl(descriptor, getattr(fcntl, "F_GET_SEALS", 1034))
     if applied & required != required:
         raise ValueError(f"Fleet runner {label} memfd is not fully sealed")
+
 
 def _fd_identity(descriptor: int) -> str:
     digest = hashlib.sha256()
@@ -364,7 +371,9 @@ def _restore_atomic_interpreter(binding: dict[str, Any]) -> None:
     os.replace(temporary, destination)
 
 
-def _run(payload: dict[str, Any], root: Path, binding: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+def _run(
+    payload: dict[str, Any], root: Path, binding: dict[str, Any]
+) -> subprocess.CompletedProcess[str]:
     cwd = str(payload["cwd"])
     _inside(root, cwd)
     env = _runtime_environment(payload)
@@ -488,8 +497,13 @@ def _collect_atomic_child(
     finally:
         _settle_atomic_child(pid, readers)
     return _complete_child_result(
-        exec_argv, timeout, status, timed_out=timed_out, output_limited=output_limited,
-        stdout_capture=stdout_capture, stderr_capture=stderr_capture,
+        exec_argv,
+        timeout,
+        status,
+        timed_out=timed_out,
+        output_limited=output_limited,
+        stdout_capture=stdout_capture,
+        stderr_capture=stderr_capture,
     )
 
 
@@ -508,9 +522,7 @@ def _join_readers(readers: tuple[threading.Thread, threading.Thread]) -> None:
         )
 
 
-def _settle_atomic_child(
-    pid: int, readers: tuple[threading.Thread, threading.Thread]
-) -> None:
+def _settle_atomic_child(pid: int, readers: tuple[threading.Thread, threading.Thread]) -> None:
     settlement_error: _AttemptQuiescenceError | None = None
     try:
         _settle_remaining_group(pid)
@@ -554,9 +566,7 @@ def _settle_remaining_group(pid: int) -> None:
         raise _AttemptQuiescenceError(
             "Fleet OpenSandbox could not signal the owned process group"
         ) from exc
-    if wait_for_process_group_quiescence(
-        pid, timeout=_PROCESS_GROUP_TERM_GRACE_SECONDS
-    ):
+    if wait_for_process_group_quiescence(pid, timeout=_PROCESS_GROUP_TERM_GRACE_SECONDS):
         return
     try:
         os.killpg(pid, signal.SIGKILL)
@@ -566,9 +576,7 @@ def _settle_remaining_group(pid: int) -> None:
         raise _AttemptQuiescenceError(
             "Fleet OpenSandbox could not kill the owned process group"
         ) from exc
-    if not wait_for_process_group_quiescence(
-        pid, timeout=_PROCESS_GROUP_KILL_SETTLEMENT_SECONDS
-    ):
+    if not wait_for_process_group_quiescence(pid, timeout=_PROCESS_GROUP_KILL_SETTLEMENT_SECONDS):
         raise _AttemptQuiescenceError(
             "Fleet OpenSandbox owned process group did not become quiescent"
         )

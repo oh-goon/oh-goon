@@ -1,9 +1,10 @@
+import pytest
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture import simple_template_contract
 
 
-def _roots(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
+def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     goons = tmp_path / "goons"
     plans = tmp_path / "plans"
     goons.mkdir()
@@ -18,7 +19,7 @@ def test_shipped_catalog_satisfies_simple_contract() -> None:
 
 
 def test_simple_contract_consumes_production_compiler_for_universal_goon_semantics(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     goons, _plans = _roots(tmp_path, monkeypatch)
     package = goons / "python" / "bad"
@@ -33,14 +34,16 @@ def test_simple_contract_consumes_production_compiler_for_universal_goon_semanti
         encoding="utf-8",
     )
 
-    messages = [v.message for v in simple_template_contract.check_simple_template_contract()]
+    messages = [
+        v.message for v in simple_template_contract.check_simple_template_contract()
+    ]
 
     assert len(messages) == 1
     assert "internal execution fields" in messages[0]
 
 
 def test_simple_contract_does_not_reinterpret_safe_run_arguments(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     goons, _plans = _roots(tmp_path, monkeypatch)
     package = goons / "python" / "safe"
@@ -54,7 +57,7 @@ def test_simple_contract_does_not_reinterpret_safe_run_arguments(
 
 
 def test_simple_contract_rejects_redundant_shipped_goon_metadata(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     goons, _plans = _roots(tmp_path, monkeypatch)
     package = goons / "python" / "redundant"
@@ -64,7 +67,9 @@ def test_simple_contract_rejects_redundant_shipped_goon_metadata(
         encoding="utf-8",
     )
 
-    messages = [v.message for v in simple_template_contract.check_simple_template_contract()]
+    messages = [
+        v.message for v in simple_template_contract.check_simple_template_contract()
+    ]
 
     assert len(messages) == 1
     assert "package path owns machine identity" in messages[0]
@@ -72,7 +77,7 @@ def test_simple_contract_rejects_redundant_shipped_goon_metadata(
 
 
 def test_simple_contract_rejects_incidental_virtualenv_entrypoint_authority(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     goons, _plans = _roots(tmp_path, monkeypatch)
     package = goons / "oh-goon" / "entrypoint-probe"
@@ -82,7 +87,9 @@ def test_simple_contract_rejects_incidental_virtualenv_entrypoint_authority(
         encoding="utf-8",
     )
 
-    messages = [v.message for v in simple_template_contract.check_simple_template_contract()]
+    messages = [
+        v.message for v in simple_template_contract.check_simple_template_contract()
+    ]
 
     assert messages == [
         "Shipped Goon commands must not bind execution authority to .venv/bin paths; "
@@ -91,7 +98,7 @@ def test_simple_contract_rejects_incidental_virtualenv_entrypoint_authority(
 
 
 def test_simple_contract_rejects_unclassified_shipped_category(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     goons, _plans = _roots(tmp_path, monkeypatch)
     package = goons / "experimental" / "new-capability"
@@ -101,13 +108,17 @@ def test_simple_contract_rejects_unclassified_shipped_category(
         encoding="utf-8",
     )
 
-    messages = [v.message for v in simple_template_contract.check_simple_template_contract()]
+    messages = [
+        v.message for v in simple_template_contract.check_simple_template_contract()
+    ]
 
-    assert messages == ["Goon category 'experimental' has no shipped template classification"]
+    assert messages == [
+        "Goon category 'experimental' has no shipped template classification"
+    ]
 
 
 def test_production_template_cannot_reference_teaching_example(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     goons, _plans = _roots(tmp_path, monkeypatch)
     package = goons / "python" / "bad-reference"
@@ -117,7 +128,9 @@ def test_production_template_cannot_reference_teaching_example(
         encoding="utf-8",
     )
 
-    messages = [v.message for v in simple_template_contract.check_simple_template_contract()]
+    messages = [
+        v.message for v in simple_template_contract.check_simple_template_contract()
+    ]
 
     assert messages == [
         "production Goon python/bad-reference cannot reference "
@@ -126,7 +139,7 @@ def test_production_template_cannot_reference_teaching_example(
 
 
 def test_teaching_example_may_reuse_production_capability(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     goons, _plans = _roots(tmp_path, monkeypatch)
     package = goons / "advanced" / "example"
@@ -140,14 +153,14 @@ def test_teaching_example_may_reuse_production_capability(
 
 
 def test_simple_contract_rejects_resource_overrides_even_for_app_certification(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _goons, plans = _roots(tmp_path, monkeypatch)
     certification = plans / "oh-goon" / "app-certification"
     ordinary = plans / "python" / "standard"
     certification.mkdir(parents=True)
     ordinary.mkdir(parents=True)
-    body = "version: 1\nexecution:\n  resources:\n    memory_mib: 4096\ngoons:\n- python/quality\n"
+    body = "version: 1\nexecution:\n  purpose: cicd\n  resources:\n    memory_mib: 4096\ngoons:\n- python/quality\n"
     (certification / "plan.yml").write_text(body, encoding="utf-8")
     (ordinary / "plan.yml").write_text(body, encoding="utf-8")
 
@@ -157,11 +170,14 @@ def test_simple_contract_rejects_resource_overrides_even_for_app_certification(
         certification / "plan.yml",
         ordinary / "plan.yml",
     }
-    assert all("omitted caps inherit the selected executor capacity" in violation.message for violation in violations)
+    assert all(
+        "omitted caps inherit the selected executor capacity" in violation.message
+        for violation in violations
+    )
 
 
 def test_plan_readme_cannot_duplicate_execution_or_fixed_resource_policy(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _goons, plans = _roots(tmp_path, monkeypatch)
     package = plans / "python" / "policy-probe"
@@ -177,14 +193,22 @@ def test_plan_readme_cannot_duplicate_execution_or_fixed_resource_policy(
         encoding="utf-8",
     )
 
-    messages = [v.message for v in simple_template_contract.check_simple_template_contract()]
+    messages = [
+        v.message for v in simple_template_contract.check_simple_template_contract()
+    ]
 
-    assert any("must not duplicate Plan execution/resource policy" in message for message in messages)
-    assert any("must not publish fixed CPU/memory/process values" in message for message in messages)
+    assert any(
+        "must not duplicate Plan execution/resource policy" in message
+        for message in messages
+    )
+    assert any(
+        "must not publish fixed CPU/memory/process values" in message
+        for message in messages
+    )
 
 
 def test_plan_readme_inputs_are_a_compiler_projection_not_a_second_schema(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _goons, plans = _roots(tmp_path, monkeypatch)
     package = plans / "python" / "input-probe"
@@ -198,7 +222,9 @@ def test_plan_readme_inputs_are_a_compiler_projection_not_a_second_schema(
         encoding="utf-8",
     )
 
-    messages = [v.message for v in simple_template_contract.check_simple_template_contract()]
+    messages = [
+        v.message for v in simple_template_contract.check_simple_template_contract()
+    ]
 
     assert messages == [
         "README.md Inputs projection does not match the production compiler: "
@@ -207,7 +233,7 @@ def test_plan_readme_inputs_are_a_compiler_projection_not_a_second_schema(
 
 
 def test_plan_readme_can_explain_machine_policy_without_copying_values(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _goons, plans = _roots(tmp_path, monkeypatch)
     package = plans / "python" / "explanation-probe"
@@ -228,7 +254,7 @@ def test_plan_readme_can_explain_machine_policy_without_copying_values(
 
 
 def test_readme_structure_claim_must_match_compiled_goon_structure(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     goons, _plans = _roots(tmp_path, monkeypatch)
 
@@ -274,7 +300,9 @@ def test_shipped_structural_claims_are_generic_compiler_projections() -> None:
     ]
 
 
-def test_explicit_shell_requires_documented_semantic_reason(tmp_path: Path, monkeypatch) -> None:
+def test_explicit_shell_requires_documented_semantic_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     goons, _plans = _roots(tmp_path, monkeypatch)
     package = goons / "oh-goon" / "shell-probe"
     package.mkdir(parents=True)
@@ -283,7 +311,9 @@ def test_explicit_shell_requires_documented_semantic_reason(tmp_path: Path, monk
         encoding="utf-8",
     )
     (package / "README.md").write_text("# shell probe\n", encoding="utf-8")
-    messages = [v.message for v in simple_template_contract.check_simple_template_contract()]
+    messages = [
+        v.message for v in simple_template_contract.check_simple_template_contract()
+    ]
     assert len(messages) == 1
     assert "direct run argv alone does not require a shell" in messages[0]
 
@@ -297,6 +327,7 @@ def test_explicit_shell_requires_documented_semantic_reason(tmp_path: Path, monk
 def test_shipped_shell_audit_retains_only_proven_opaque_child_authority() -> None:
     from oh_goon.runtime.goon_templates import GoonTemplateStore
     import yaml
+
     store = GoonTemplateStore()
     explicit = {
         key: yaml.safe_load(store.source(key).content)["execution"]["shell"]

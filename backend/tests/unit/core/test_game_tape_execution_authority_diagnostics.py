@@ -7,6 +7,12 @@ from types import SimpleNamespace
 from oh_goon.core.errors import ErrorKind
 from oh_goon.core.game_tape_projection import _why_not
 from oh_goon.core.game_tape_step_projection import project_steps
+from oh_goon.core.models.execution_authority_diagnostics import (
+    PlanExecutionAuthorityAtomicHandoffEvidence,
+    PlanExecutionAuthorityDiagnosticEvidence,
+    PlanExecutionAuthorityMaterializationEvidence,
+    PlanExecutionAuthorityRuntimeEvidence,
+)
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
@@ -15,27 +21,26 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanStepAttemptEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
-from oh_goon.core.models.execution_authority_diagnostics import (
-    PlanExecutionAuthorityAtomicHandoffEvidence,
-    PlanExecutionAuthorityDiagnosticEvidence,
-    PlanExecutionAuthorityMaterializationEvidence,
-    PlanExecutionAuthorityRuntimeEvidence,
+from oh_goon.core.models.goon_plan_source import PlanFileSource
+from oh_goon.core.models.operation import OperationAction
+from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.run import (
+    FailedFleetRun,
+    FleetRunDetail,
+    FleetRunFailure,
+    FleetRunProgress,
 )
-from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail, FleetRunFailure, FleetRunProgress
+from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, fleet_repository_scope
+from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import FleetRunFailureStage, FleetRunStatus
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
 from oh_goon.integrations.fleet_plan_attempt_evidence import _execution_authority_diagnostic
 from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
 from oh_goon.integrations.fleet_plan_runtime_authority import expected_runtime_authority_sources
+from tests.factories.capabilities import capability_snapshot
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import prepare_physical_test_run, strict_test_plan
-from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.goon_plan_source import PlanFileSource
-from oh_goon.core.models.operation import OperationAction
-from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, fleet_repository_scope
-from oh_goon.core.models.target import FleetPlanTarget
-from oh_goon.core.time import utc_now
-from tests.factories.capabilities import capability_snapshot
 from tests.factories.fleet_plan_targets import structural_execution_identity
 from tests.factories.run_admission import repository_admissions_for
 
@@ -100,7 +105,6 @@ def test_game_tape_why_not_projects_execution_authority_divergence() -> None:
     assert diagnostic.retryable is False
     assert "fresh admission" in diagnostic.safe_next_action
     assert "diverged materialization" in diagnostic.safe_next_action
-
 
 
 def _output() -> PlanOutputEvidence:
@@ -211,7 +215,11 @@ def test_game_tape_run_projects_durable_authority_failure_as_why_not(tmp_path: P
         progress=FleetRunProgress(total=1, succeeded=0, failed=1, needs_attention=1),
     )
 
-    tape = FleetRunDetail(repository_admissions=repository_admissions_for(run.target, run.targets), run=run, execution=DirectFleetExecutionAdmission()).game_tape
+    tape = FleetRunDetail(
+        repository_admissions=repository_admissions_for(run.target, run.targets),
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+    ).game_tape
 
     assert tape.why_not is not None
     assert tape.why_not.code == failure.code

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import oh_goon.repository_tooling.architecture.diagnostic_ownership_contract as contract
 
-
 _REQUIRED_SOURCES = (
     "services/fleet_run_execution.py",
     "services/game_tape_live_output.py",

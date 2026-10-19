@@ -38,3 +38,14 @@ Different storage classes require different positive proof:
 - Completed run logs: the canonical count/byte retention policy owns deletion.
 
 SQLite file correctness and logical execution ownership are separate layers. SQLite journal mode is selected conservatively; certification uses rollback `DELETE` journaling under its outer workflow lease. Execution ownership uses short SQLite write transactions plus the exact lease token and process-birth identity. A numeric PID alone, or a short wall-clock timeout, is not sufficient authority to steal or delete live work.
+
+## Remote Skill source cache
+
+`agent_skill_sources` owns `${XDG_CACHE_HOME:-~/.cache}/oh-goon/skill-sources`.
+Native Git stores fetched objects and retains selected commits under its refs;
+`goon.lock` owns the chosen revisions. Native Git worktree registration protects
+objects during capture, and each temporary worktree is removed at last use.
+Preparation holds an OS file lease while creating/fetching the shared Git store.
+Generic pruning does not delete this cache. Explicit cache removal is safe while
+no captures are active; the next capture fetches the locked commits again.
+Cache location and contents are never receipts or dependency selectors.

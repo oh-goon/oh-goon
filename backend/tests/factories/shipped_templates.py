@@ -12,53 +12,45 @@ from pathlib import Path
 
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
+from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 TEMPLATES = Path(__file__).resolve().parents[3] / "templates"
 
 
 class CachedShippedPlanTemplateStore(PlanTemplateStore):
-    """Cache immutable checked-in Plan reads for the lifetime of one pytest process."""
+    """Cache immutable checked-in Plan reads for this store's lifetime."""
 
-    @cache
-    def catalog(self):
-        return super().catalog()
-
-    @cache
-    def keys(self):
-        return super().keys()
-
-    @cache
-    def read(self, template_key: str):
-        return super().read(template_key)
-
-    @cache
-    def runnable_keys(self):
-        return super().runnable_keys()
-
-    @cache
-    def source(self, template_key: str):
-        return super().source(template_key)
+    def __init__(self, root: Path | None = None) -> None:
+        super().__init__(root)
+        self.catalog = cache(super().catalog)
+        self.keys = cache(super().keys)
+        self.read = cache(super().read)
+        self.runnable_keys = cache(super().runnable_keys)
+        self.source = cache(super().source)
 
 
 class CachedShippedGoonTemplateStore(GoonTemplateStore):
-    """Cache immutable checked-in Goon reads for the lifetime of one pytest process."""
+    """Cache immutable checked-in Goon reads for this store's lifetime."""
 
-    @cache
-    def catalog(self):
-        return super().catalog()
-
-    @cache
-    def keys(self):
-        return super().keys()
-
-    @cache
-    def read(self, template_key: str):
-        return super().read(template_key)
-
-    @cache
-    def source(self, template_key: str):
-        return super().source(template_key)
+    def __init__(
+        self, root: Path | None = None, *, tool_authority_path: Path | None = None
+    ) -> None:
+        super().__init__(root, tool_authority_path=tool_authority_path)
+        self.catalog = cache(super().catalog)
+        self.keys = cache(super().keys)
+        self.read = cache(super().read)
+        self.source = cache(super().source)
 
 
 PLAN_TEMPLATES = CachedShippedPlanTemplateStore(TEMPLATES / "plans")
 GOON_TEMPLATES = CachedShippedGoonTemplateStore(TEMPLATES / "goons")
+
+# Agent Plans use captured sources and standard-local admission. Their native
+# lifecycle proofs are parametrized over this same compiler-owned membership.
+AGENT_PLAN_TEMPLATES = tuple(
+    key
+    for key in PLAN_TEMPLATES.keys()
+    if FleetPlanResolver(goon_templates=GOON_TEMPLATES)
+    .analyze_source(PLAN_TEMPLATES.source(key).path)
+    .agent_step_sources()
+)

@@ -15,6 +15,11 @@ from oh_goon.api.errors import (
     unexpected_exception_handler,
     validation_exception_handler,
 )
+from oh_goon.api.local_access import (
+    LocalAccessMiddleware,
+    configured_local_access_token,
+    install_local_access_exchange,
+)
 from oh_goon.api.routes import (
     capabilities,
     dependencies,
@@ -33,11 +38,6 @@ from oh_goon.api.routes import (
     repositories,
     schedules,
     scout,
-)
-from oh_goon.api.local_access import (
-    LocalAccessMiddleware,
-    configured_local_access_token,
-    install_local_access_exchange,
 )
 from oh_goon.api.security import LocalOnlySecurityHeadersMiddleware
 from oh_goon.api.ui import mount_built_ui

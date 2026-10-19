@@ -199,7 +199,6 @@ def _regenerate_generated_authority() -> None:
         raise RuntimeError("generated authority did not converge after release version authoring")
 
 
-
 def _source_identity_matches(version: str, receipt: ReleaseDependencyReceipt) -> bool:
     return (
         canonical_version() == version
@@ -249,14 +248,11 @@ def _stamp_native(version: str) -> None:
     portability = backend_lock_portability_issues(BACKEND_LOCK)
     if portability:
         rendered = "; ".join(portability)
-        raise RuntimeError(
-            "native uv authored a non-portable backend/uv.lock: " + rendered
-        )
+        raise RuntimeError("native uv authored a non-portable backend/uv.lock: " + rendered)
     _run(
         ("npm", "version", version, "--no-git-tag-version", "--allow-same-version"),
         cwd=ROOT / "frontend",
     )
-
 
 
 def _certification_source_version_files() -> tuple[Path, ...]:
@@ -287,6 +283,7 @@ def _stamp_certification_source_versions(version: str, paths: tuple[Path, ...]) 
                 f"{path.relative_to(ROOT)} must contain exactly one source_version field"
             )
         _write_text(path, updated)
+
 
 def stamp() -> None:
     version = canonical_version()
@@ -336,9 +333,13 @@ def set_version(value: str) -> None:
             rendered = ", ".join(f"{name}={observed!r}" for name, observed in drift.items())
             raise RuntimeError(f"release identity did not converge after authoring: {rendered}")
         if _sha256_file(BACKEND_LOCK) != post_receipt.backend_lock_sha256:
-            raise RuntimeError("backend dependency receipt changed after generated-authority regeneration")
+            raise RuntimeError(
+                "backend dependency receipt changed after generated-authority regeneration"
+            )
         if _sha256_file(FRONTEND_LOCK) != post_receipt.frontend_lock_sha256:
-            raise RuntimeError("frontend dependency receipt changed after generated-authority regeneration")
+            raise RuntimeError(
+                "frontend dependency receipt changed after generated-authority regeneration"
+            )
         assert_canonical_source_layout(ROOT)
     except BaseException:
         _restore_authoring_state(snapshot)

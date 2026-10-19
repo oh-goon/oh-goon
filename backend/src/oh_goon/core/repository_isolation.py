@@ -11,7 +11,6 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.source_tree_policy import is_transient_source_path
 
 
-
 @dataclass(slots=True)
 class _RepositoryRootTrieNode:
     children: dict[str, "_RepositoryRootTrieNode"] = field(default_factory=dict)
@@ -130,7 +129,9 @@ def require_owned_filesystem_tree(root: Path) -> None:
 
     root = root.resolve()
     _require_no_nested_mounts(root, ignore_transient=False)
-    _require_single_repository_filesystem_tree(root, reject_nested_git=False, ignore_transient=False)
+    _require_single_repository_filesystem_tree(
+        root, reject_nested_git=False, ignore_transient=False
+    )
 
 
 def _require_disjoint_repository_roots(root: Path, other_repository_roots: Iterable[Path]) -> None:
@@ -237,9 +238,7 @@ def _require_single_repository_filesystem_tree(
                 if not is_transient_source_path(relative_current / name)
             ]
             files = [
-                name
-                for name in files
-                if not is_transient_source_path(relative_current / name)
+                name for name in files if not is_transient_source_path(relative_current / name)
             ]
 
         for name in (*directories, *files):

@@ -139,9 +139,7 @@ def _prepared_extension_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
                 duration_ms=1,
             )
         environment.mkdir(parents=True, exist_ok=True)
-        return CommandResult(
-            argv=tuple(argv), returncode=0, stdout="", stderr="", duration_ms=1
-        )
+        return CommandResult(argv=tuple(argv), returncode=0, stdout="", stderr="", duration_ms=1)
 
     monkeypatch.setattr("oh_goon.engine.fleet_extensions.run_command", fake_run_command)
 

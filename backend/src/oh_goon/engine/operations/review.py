@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from oh_goon.core.product_identity import opaque_identity_token
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.operation import (
     FailedOperationOutcome,
@@ -9,6 +8,7 @@ from oh_goon.core.models.operation import (
     ReviewOperationEvidence,
     SuccessfulOperationOutcome,
 )
+from oh_goon.core.product_identity import opaque_identity_token
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import GitFinalState, Verdict
 from oh_goon.engine.operation_execution_context import OperationContext

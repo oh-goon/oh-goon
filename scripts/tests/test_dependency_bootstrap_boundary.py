@@ -10,7 +10,9 @@ BOOTSTRAP_DIR = ROOT / "backend/src/oh_goon/repository_tooling"
 
 
 def _bootstrap_entry() -> Path:
-    payload = tomllib.loads((ROOT / "backend/pyproject.toml").read_text(encoding="utf-8"))
+    payload = tomllib.loads(
+        (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
+    )
     target = payload["project"]["scripts"]["oh-goon-dependency-policy"]
     module, separator, callable_name = target.partition(":")
     assert separator and callable_name == "main"
@@ -38,11 +40,15 @@ def _import_dependencies(node: ast.Import, stdlib: set[str]) -> tuple[Path, ...]
     return tuple(dependencies)
 
 
-def _from_import_dependencies(node: ast.ImportFrom, stdlib: set[str]) -> tuple[Path, ...]:
+def _from_import_dependencies(
+    node: ast.ImportFrom, stdlib: set[str]
+) -> tuple[Path, ...]:
     module = node.module or ""
     local = _local_module_path(module)
     if node.level:
-        assert local is not None, f"bootstrap relative import escapes owned closure: {module!r}"
+        assert local is not None, (
+            f"bootstrap relative import escapes owned closure: {module!r}"
+        )
     elif local is None:
         assert module.split(".", 1)[0] in stdlib
     return () if local is None else (local,)
@@ -59,7 +65,9 @@ def _bootstrap_import_dependencies(path: Path, stdlib: set[str]) -> tuple[Path, 
     return tuple(dependencies)
 
 
-def test_pre_environment_bootstrap_dependency_closure_is_stdlib_or_bootstrap_owned() -> None:
+def test_pre_environment_bootstrap_dependency_closure_is_stdlib_or_bootstrap_owned() -> (
+    None
+):
     stdlib = set(sys.stdlib_module_names) | {"__future__"}
     pending = [BOOTSTRAP_ENTRY]
     seen: set[Path] = set()
@@ -74,13 +82,20 @@ def test_pre_environment_bootstrap_dependency_closure_is_stdlib_or_bootstrap_own
     assert BOOTSTRAP_DIR / "_dependency_lock_portability.py" in seen
 
 
-def test_direct_bootstrap_starts_without_pythonpath_site_packages_or_installed_oh_goon() -> None:
+def test_direct_bootstrap_starts_without_pythonpath_site_packages_or_installed_oh_goon() -> (
+    None
+):
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env["PYTHONNOUSERSITE"] = "1"
     result = subprocess.run(
-        [sys.executable, "-S", str(BOOTSTRAP_ENTRY), "--help"], cwd=ROOT, env=env,
-        check=False, capture_output=True, text=True, timeout=30,
+        [sys.executable, "-S", str(BOOTSTRAP_ENTRY), "--help"],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert result.returncode == 0, result.stderr
     assert "oh-goon-dependency-policy" in result.stdout

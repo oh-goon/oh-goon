@@ -14,7 +14,11 @@ from oh_goon.core.models.reconciliation import (
     RepositoryEffectReconciliationEvidence,
 )
 from oh_goon.core.models.run import FleetRunFailure
-from oh_goon.core.models.run_events import DescendantsQuiescentEvent, ProcessStartedEvent, ProcessStateUnknownEvent
+from oh_goon.core.models.run_events import (
+    DescendantsQuiescentEvent,
+    ProcessStartedEvent,
+    ProcessStateUnknownEvent,
+)
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
     EffectAttemptStatus,
@@ -25,10 +29,10 @@ from oh_goon.core.vocabulary import (
 )
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
-from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.enforcer_lace_restart_reclaim_fence import (
     require_no_original_lace_intent_before_reclamation_in,
 )
+from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.executor_capacity import FleetExecutorCapacityReservations
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.journal_view import JournalReadView
@@ -91,7 +95,12 @@ class RepositoryEffectRecovery:
         try:
             with self._database.transaction(write=True) as connection:
                 self._execution.assert_idle(connection)
-                self._journal.record_reconciliation_lifecycle_in(connection, run_id, FleetRunEventType.RECONCILIATION_FAILED, reason=f"{type(exc).__name__}: {exc}")
+                self._journal.record_reconciliation_lifecycle_in(
+                    connection,
+                    run_id,
+                    FleetRunEventType.RECONCILIATION_FAILED,
+                    reason=f"{type(exc).__name__}: {exc}",
+                )
         except BaseException:
             pass
 
@@ -148,7 +157,10 @@ class RepositoryEffectRecovery:
                 if existing is not None and not existing.reconciliation.requires_operator:
                     return existing
                 raise OperationNotFound(operation_id)
-            if expected_record_version is not None and current.record_version != expected_record_version:
+            if (
+                expected_record_version is not None
+                and current.record_version != expected_record_version
+            ):
                 raise StateConflict(f"Effect recovery command is stale: {operation_id}")
             if current.status in OPERATOR_REQUIRED_EFFECT_STATUSES:
                 return _operator_reconciliation_evidence(current, view)
@@ -158,6 +170,7 @@ class RepositoryEffectRecovery:
             result = self._reconciler.reconcile(
                 current.repository.path,
                 current.operation_id,
+                report=view.operation(current.operation_id),
                 safety=current.safety,
                 baseline=current.baseline,
             )
@@ -186,7 +199,10 @@ class RepositoryEffectRecovery:
             if existing is None:
                 raise OperationNotFound(operation_id)
             return existing
-        if expected_record_version is not None and current.record_version != expected_record_version:
+        if (
+            expected_record_version is not None
+            and current.record_version != expected_record_version
+        ):
             raise StateConflict(f"Effect acknowledgement command is stale: {operation_id}")
         reconciliation = _operator_reconciliation_evidence(current, view).reconciliation
         evidence = RepositoryEffectAcknowledgementEvidence(
@@ -218,40 +234,93 @@ class RepositoryEffectRecovery:
             # intents. Do NOT let assert_idle() reclaim it before the original
             # issuer can transfer cleanup-only custody. One SQLite writer cut.
             require_no_original_lace_intent_before_reclamation_in(
-                connection, run.fleet_run_id,
+                connection,
+                run.fleet_run_id,
             )
             self._execution.assert_idle(connection)
             unresolved = self._attempts.by_fleet_run_in(connection, run.fleet_run_id)
-            uncertain = [attempt for attempt in unresolved if attempt.effect_boundary is EffectBoundaryKind.EXTERNAL and attempt.status in EXTERNAL_OUTCOME_UNCERTAIN_STATUSES]
+            uncertain = [
+                attempt
+                for attempt in unresolved
+                if attempt.effect_boundary is EffectBoundaryKind.EXTERNAL
+                and attempt.status in EXTERNAL_OUTCOME_UNCERTAIN_STATUSES
+            ]
             operation_ids = tuple(sorted(attempt.operation_id for attempt in unresolved))
-            self._journal.record_reconciliation_lifecycle_in(connection, run.fleet_run_id, FleetRunEventType.RECONCILIATION_REQUIRED, operation_ids=operation_ids, reason="Controller restart found a non-terminal Fleet run without a live execution owner")
-            self._journal.record_reconciliation_lifecycle_in(connection, run.fleet_run_id, FleetRunEventType.RECONCILIATION_STARTED)
+            self._journal.record_reconciliation_lifecycle_in(
+                connection,
+                run.fleet_run_id,
+                FleetRunEventType.RECONCILIATION_REQUIRED,
+                operation_ids=operation_ids,
+                reason="Controller restart found a non-terminal Fleet run without a live execution owner",
+            )
+            self._journal.record_reconciliation_lifecycle_in(
+                connection, run.fleet_run_id, FleetRunEventType.RECONCILIATION_STARTED
+            )
             self._record_interrupted_process_uncertainty(connection, detail)
             self._terminalize_recovered_run(connection, run, uncertain)
             FleetExecutorCapacityReservations.release_run_in(connection, run.fleet_run_id)
             return run.fleet_run_id
 
     def _record_interrupted_process_uncertainty(self, connection, detail) -> None:
-        settled = {later.physical_execution_id for later in detail.lifecycle_events if isinstance(later, (DescendantsQuiescentEvent, ProcessStateUnknownEvent))}
+        settled = {
+            later.physical_execution_id
+            for later in detail.lifecycle_events
+            if isinstance(later, (DescendantsQuiescentEvent, ProcessStateUnknownEvent))
+        }
         for event in detail.lifecycle_events:
             if type(event) is not ProcessStartedEvent or event.physical_execution_id in settled:
                 continue
-            common = dict(fleet_run_id=detail.run.fleet_run_id, repository_id=event.repository_id, operation_id=event.operation_id, step_id=event.step_id, step_order=event.step_order, attempt_number=event.attempt_number, physical_execution_id=event.physical_execution_id)
-            self._journal.record_execution_lifecycle_in(connection, event_type=FleetRunEventType.PROCESS_STATE_UNKNOWN, pid=event.pid, process_identity=event.process_identity, **common)
-            self._journal.record_execution_lifecycle_in(connection, event_type=FleetRunEventType.OUTPUT_QUARANTINED, **common)
+            common = dict(
+                fleet_run_id=detail.run.fleet_run_id,
+                repository_id=event.repository_id,
+                operation_id=event.operation_id,
+                step_id=event.step_id,
+                step_order=event.step_order,
+                attempt_number=event.attempt_number,
+                physical_execution_id=event.physical_execution_id,
+            )
+            self._journal.record_execution_lifecycle_in(
+                connection,
+                event_type=FleetRunEventType.PROCESS_STATE_UNKNOWN,
+                pid=event.pid,
+                process_identity=event.process_identity,
+                **common,
+            )
+            self._journal.record_execution_lifecycle_in(
+                connection, event_type=FleetRunEventType.OUTPUT_QUARANTINED, **common
+            )
 
     def _terminalize_recovered_run(self, connection, run, uncertain) -> None:
         if run.status is FleetRunStatus.CANCELLING:
-            self._journal.terminalize_run_in(connection, run.fleet_run_id, FleetRunTerminalIntent.CANCEL)
+            self._journal.terminalize_run_in(
+                connection, run.fleet_run_id, FleetRunTerminalIntent.CANCEL
+            )
             return
         if uncertain:
-            self._journal.terminalize_run_in(connection, run.fleet_run_id, FleetRunTerminalIntent.FAIL, FleetRunFailure.uncertain_repository_effects(len(uncertain)))
+            self._journal.terminalize_run_in(
+                connection,
+                run.fleet_run_id,
+                FleetRunTerminalIntent.FAIL,
+                FleetRunFailure.uncertain_repository_effects(len(uncertain)),
+            )
             return
         if run.progress.completed == run.progress.total:
-            self._journal.terminalize_run_in(connection, run.fleet_run_id, FleetRunTerminalIntent.COMPLETE)
+            self._journal.terminalize_run_in(
+                connection, run.fleet_run_id, FleetRunTerminalIntent.COMPLETE
+            )
             return
-        failure = FleetRunFailure.partial_recovery(completed=run.progress.completed, total=run.progress.total) if run.progress.completed > 0 else FleetRunFailure.recovery("Application restarted before any repository operation durably completed")
-        self._journal.terminalize_run_in(connection, run.fleet_run_id, FleetRunTerminalIntent.FAIL, failure)
+        failure = (
+            FleetRunFailure.partial_recovery(
+                completed=run.progress.completed, total=run.progress.total
+            )
+            if run.progress.completed > 0
+            else FleetRunFailure.recovery(
+                "Application restarted before any repository operation durably completed"
+            )
+        )
+        self._journal.terminalize_run_in(
+            connection, run.fleet_run_id, FleetRunTerminalIntent.FAIL, failure
+        )
 
 
 def _recovery_read_cut(

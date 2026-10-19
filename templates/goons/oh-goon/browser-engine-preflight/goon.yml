@@ -2,6 +2,7 @@ version: 1
 inputs:
   source_workspace:
     type: workspace_reference
+    description: Workspace reference from the exact earlier producing Goon
 steps:
 - run: make browser-preflight
   workspace:

@@ -9,7 +9,6 @@ from oh_goon.repository_tooling.architecture._launch_contract_foundation import 
     check_launch_foundation_model,
 )
 
-
 FORMER_PROSE_MARKERS = (
     "scripts/dev.sh",
     "cli_start.py",
@@ -86,7 +85,9 @@ def test_launch_schema_identity_owner_still_fails_closed(tmp_path: Path) -> None
     _write_document(tmp_path, "# Launch ownership\n\nWording is descriptive.\n")
     _write_foundation(tmp_path)
     path = tmp_path / "backend/src/oh_goon/core/launch_manifest.py"
-    path.write_text('LAUNCH_MANIFEST_KIND = "manifest"\nVALUE = LAUNCH_MANIFEST_KIND\n', encoding="utf-8")
+    path.write_text(
+        'LAUNCH_MANIFEST_KIND = "manifest"\nVALUE = LAUNCH_MANIFEST_KIND\n', encoding="utf-8"
+    )
 
     violations = check_launch_foundation_model(tmp_path)
 
@@ -96,8 +97,7 @@ def test_launch_schema_identity_owner_still_fails_closed(tmp_path: Path) -> None
 def test_launch_architecture_contains_no_exact_prose_authority() -> None:
     root = Path(__file__).resolve().parents[4]
     architecture = (
-        root
-        / "backend/src/oh_goon/repository_tooling/architecture/_launch_contract_foundation.py"
+        root / "backend/src/oh_goon/repository_tooling/architecture/_launch_contract_foundation.py"
     ).read_text(encoding="utf-8")
 
     for marker in FORMER_PROSE_MARKERS:

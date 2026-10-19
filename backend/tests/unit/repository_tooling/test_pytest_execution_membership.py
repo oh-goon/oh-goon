@@ -44,18 +44,24 @@ def test_execution_run_identity_is_unique_even_for_same_plan() -> None:
     assert execution_run_identity(**kwargs) != execution_run_identity(**kwargs)
 
 
-def test_failed_attempt_then_retry_passes_without_duplicate_terminal_coverage(tmp_path: Path) -> None:
+def test_failed_attempt_then_retry_passes_without_duplicate_terminal_coverage(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path)
     member = "tests/test_a.py::test_one"
     first, second = _attempt(member, 1), _attempt(member, 2)
-    store.record_started(member, attempt_identity=first, observed_batch_identity="sha256:" + "e" * 64)
+    store.record_started(
+        member, attempt_identity=first, observed_batch_identity="sha256:" + "e" * 64
+    )
     store.record_terminal(
         member,
         attempt_identity=first,
         observed_batch_identity="sha256:" + "e" * 64,
         status="FAILED",
     )
-    store.record_started(member, attempt_identity=second, observed_batch_identity="sha256:" + "f" * 64)
+    store.record_started(
+        member, attempt_identity=second, observed_batch_identity="sha256:" + "f" * 64
+    )
     store.record_terminal(
         member,
         attempt_identity=second,

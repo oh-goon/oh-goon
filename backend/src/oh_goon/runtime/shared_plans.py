@@ -9,7 +9,6 @@ from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceStale
 from oh_goon.core.models.shared_plan import SharedPlanDocument
 from oh_goon.runtime.exact_file_store import ExactFileStore
 from oh_goon.runtime.league_folders import (
-    default_league_preferences_path,
     league_preferences_path_for_environment,
 )
 

@@ -9,7 +9,7 @@ from oh_goon.runtime.database import DatabasePathIdentityLost
 
 class _Parser:
     def parse_args(self, _argv):
-        return argparse.Namespace(command="plan")
+        return argparse.Namespace(command="plan", plan_command=None)
 
     def print_help(self):
         raise AssertionError("help must not replace storage failure")
@@ -31,7 +31,11 @@ def _prepare(monkeypatch, runtime: _Runtime) -> None:
     monkeypatch.setattr(cli, "run_start_command", lambda _args: None)
     monkeypatch.setattr(cli, "run_enforcer_compare_command", lambda _args: None)
     monkeypatch.setattr(cli, "run_state_free_developer_command", lambda _args: None)
-    monkeypatch.setattr(cli.ApplicationRuntime, "build", classmethod(lambda _cls: runtime))
+
+    def build(_cls, *, standard_local=None):
+        return runtime
+
+    monkeypatch.setattr(cli.ApplicationRuntime, "build", classmethod(build))
 
 
 def test_cli_reports_primary_runtime_storage_loss_once_and_shutdown_cannot_mask_it(
@@ -81,10 +85,15 @@ def test_cli_reports_database_identity_replacement_without_traceback(monkeypatch
     output = capsys.readouterr().out
     assert "OH-GOON RUNTIME DATABASE IDENTITY LOST" in output
     assert "bounded observation-only checks" in output
-    assert "will not recreate/repair the database or replay a Plan, Step, or external effect" in output
+    assert (
+        "will not recreate/repair the database or replay a Plan, Step, or external effect" in output
+    )
     assert "preserve this diagnostic before using make certification-state-reset" in output
     assert "source/storage defect" in output
-    assert "Native package-manager state is outside certification control-state reset authority" in output
+    assert (
+        "Native package-manager state is outside certification control-state reset authority"
+        in output
+    )
 
 
 def test_cli_preserves_nonzero_primary_result_when_shutdown_loses_database_identity(
@@ -96,9 +105,7 @@ def test_cli_preserves_nonzero_primary_result_when_shutdown_loses_database_ident
     monkeypatch.setattr(
         runtime,
         "shutdown",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            DatabasePathIdentityLost("file is not a database")
-        ),
+        lambda **_kwargs: (_ for _ in ()).throw(DatabasePathIdentityLost("file is not a database")),
     )
 
     assert cli.main([]) == 7

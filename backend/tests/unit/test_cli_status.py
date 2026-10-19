@@ -8,7 +8,12 @@ from oh_goon.cli_status import LAUNCH_STATUS_ERROR_SCHEMA, run_status_command
 from oh_goon.core.launch_events import LaunchEventKind
 from oh_goon.core.launch_status import LAUNCH_STATUS_SCHEMA
 from oh_goon.core.process_birth import ProcessBirthIdentity
-from oh_goon.runtime.local_launch_owner import BACKEND_GENERATION, BACKEND_SERVICE, LocalLaunchOwner, built_local_intent
+from oh_goon.runtime.local_launch_owner import (
+    BACKEND_GENERATION,
+    BACKEND_SERVICE,
+    LocalLaunchOwner,
+    built_local_intent,
+)
 
 
 def _args(*, as_json: bool) -> argparse.Namespace:
@@ -16,7 +21,9 @@ def _args(*, as_json: bool) -> argparse.Namespace:
 
 
 def _install_process_birth_observer(monkeypatch) -> None:
-    observer = lambda pid: ProcessBirthIdentity(pid=pid, boot_id="boot-test", start_ticks=1)
+    def observer(pid):
+        return ProcessBirthIdentity(pid=pid, boot_id="boot-test", start_ticks=1)
+
     monkeypatch.setattr("oh_goon.runtime.local_launch_owner.observe_process_birth", observer)
 
     from oh_goon.core.launch_status import safe_launch_status as project_launch_status
@@ -61,15 +68,19 @@ def test_status_json_resolves_exact_cwd_binding_and_emits_one_safe_document(
         "services",
         "failure",
     }
-    assert all(set(service) == {
-        "service",
-        "required",
-        "service_generation",
-        "startup",
-        "readiness",
-        "health",
-        "bound_endpoint",
-    } for service in payload["services"])
+    assert all(
+        set(service)
+        == {
+            "service",
+            "required",
+            "service_generation",
+            "startup",
+            "readiness",
+            "health",
+            "bound_endpoint",
+        }
+        for service in payload["services"]
+    )
     # The persisted manifest contains the spawned PID 321 and launch commands, but
     # public status is a semantic whitelist. Never search the serialized JSON for a
     # short value: an unrelated hash/path may legitimately contain those characters.
@@ -158,7 +169,9 @@ def test_status_preserves_ready_when_recorded_owner_birth_cannot_be_observed(
     assert payload["owner_proof"] == "unavailable"
 
 
-def test_status_without_binding_does_not_scan_launch_records(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_status_without_binding_does_not_scan_launch_records(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     workspace = tmp_path / "repo"
     workspace.mkdir()
     monkeypatch.chdir(workspace)

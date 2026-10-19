@@ -1,7 +1,9 @@
 """AG-02A prework capture is a read-once contract, not agent execution."""
+
 from __future__ import annotations
 
 import os
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -39,8 +41,10 @@ steps:
     _, sha = resolver.input_definitions_with_source(plan)
     kw = dict(
         inputs={"repo": "local:team/app", "skill": "local:team/review", "acceptance": "review"},
-        repository_root=repo_root, skill_root=skill_root,
-        allowed_acceptance=("review",), expected_source_sha256=sha,
+        repository_root=repo_root,
+        skill_root=skill_root,
+        allowed_acceptance=("review",),
+        expected_source_sha256=sha,
     )
     return resolver, plan, kw, repo, skill
 
@@ -88,7 +92,9 @@ def test_capture_open_count_equals_member_count_not_twice(tmp_path, monkeypatch)
     assert len(opened_files) == 3
 
 
-def test_capture_fd_anchoring_rejects_ancestor_swap_without_reading_foreign_source(tmp_path, monkeypatch):
+def test_capture_fd_anchoring_rejects_ancestor_swap_without_reading_foreign_source(
+    tmp_path, monkeypatch
+):
     resolver, plan, kw, repo, _ = _case(tmp_path)
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -115,7 +121,7 @@ def test_frozen_bytes_reject_tamper_and_keep_raw_data_out_of_repr(tmp_path):
     captured = resolver.capture_agent_sources(plan, **kw)
     assert "private task source" not in repr(captured)
     member = captured.repository.members[0]
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         member.data = b"evil"
     object.__setattr__(member, "data", b"evil")
     with pytest.raises(FleetPlanInvalid, match="digest mismatch"):
@@ -126,19 +132,23 @@ def test_capture_rejects_stale_source_or_unavailable_remote_acquisition(tmp_path
     resolver, plan, kw, _, _ = _case(tmp_path)
     with pytest.raises(FleetPlanInvalid, match="revision changed"):
         resolver.capture_agent_sources(plan, **{**kw, "expected_source_sha256": "0" * 64})
-    with pytest.raises(FleetPlanInvalid, match="original source-acquisition proof"):
-        resolver.capture_agent_sources(plan, **{
-            **kw, "inputs": {**kw["inputs"], "skill": "github:team/review@" + "a"*40 + ":skill"}
-        })
+    with pytest.raises(FleetPlanInvalid, match="invalid skill_reference"):
+        resolver.capture_agent_sources(
+            plan,
+            **{
+                **kw,
+                "inputs": {**kw["inputs"], "skill": "github:team/review@" + "a" * 40 + ":skill"},
+            },
+        )
 
 
 def test_capture_identity_tracks_imported_goon_source_not_only_root_plan(tmp_path):
     resolver, plan, kw, _, _ = _case(tmp_path)
     first = resolver.capture_agent_sources(plan, **kw)
     goon_file = tmp_path / "goons" / "agent" / "capture" / "goon.yml"
-    goon_file.write_text(goon_file.read_text().replace(
-        "echo not-executable", "echo changed-but-still-blocked"
-    ))
+    goon_file.write_text(
+        goon_file.read_text().replace("echo not-executable", "echo changed-but-still-blocked")
+    )
     # The exact root Plan file stays unchanged. Imported source must change the
     # commitment even though the same repository/skill bytes were captured.
     second = resolver.capture_agent_sources(plan, **kw)

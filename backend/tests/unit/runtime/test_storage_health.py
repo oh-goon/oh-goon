@@ -16,9 +16,10 @@ def test_storage_unavailable_reason_accepts_only_concrete_storage_failures() -> 
     assert "Input/output error" in storage_unavailable_reason(
         OSError(errno.EIO, "Input/output error")
     )
-    assert storage_unavailable_reason(
-        sqlite3.OperationalError("unable to open database file")
-    ) == "unable to open database file"
+    assert (
+        storage_unavailable_reason(sqlite3.OperationalError("unable to open database file"))
+        == "unable to open database file"
+    )
     assert storage_unavailable_reason(sqlite3.OperationalError("no such table: nope")) is None
     assert storage_unavailable_reason(ValueError("application defect")) is None
 
@@ -28,7 +29,9 @@ def test_probe_writable_directory_creates_no_retained_evidence(tmp_path: Path) -
     assert list(tmp_path.iterdir()) == []
 
 
-def test_probe_writable_directory_fails_closed_when_owner_cannot_create(monkeypatch, tmp_path: Path) -> None:
+def test_probe_writable_directory_fails_closed_when_owner_cannot_create(
+    monkeypatch, tmp_path: Path
+) -> None:
     def fail_open(*_args, **_kwargs):
         raise OSError(errno.EROFS, "Read-only file system")
 

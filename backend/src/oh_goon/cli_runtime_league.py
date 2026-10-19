@@ -236,13 +236,25 @@ def _run_shared_plan(
     admitted = None
     try:
         inputs = plan_inputs(args)
-        preview = runtime.shared_plan.preview(args.plan_key, repository_ids=repository_ids, inputs=inputs)
+        preview = runtime.shared_plan.preview(
+            args.plan_key, repository_ids=repository_ids, inputs=inputs
+        )
         if preview.blocked_count:
-            raise FleetPlanInvalid(f"Shared Plan preview blocked {preview.blocked_count} selected Team(s); resolve the reported blockers before execution")
+            raise FleetPlanInvalid(
+                f"Shared Plan preview blocked {preview.blocked_count} selected Team(s); resolve the reported blockers before execution"
+            )
         admitted = runtime.shared_plan.run(
-            args.plan_key, repository_ids=repository_ids, inputs=inputs, fleet_run_id=args.fleet_run_id, requested_priority=args.priority,
-            expected_plan_id=preview.plan_id, expected_execution_digest=preview.execution_digest, expected_plan_revision=preview.sha256,
-            repository_instance_ids={team.repository.repository_id: team.repository_instance_id for team in preview.teams},
+            args.plan_key,
+            repository_ids=repository_ids,
+            inputs=inputs,
+            fleet_run_id=args.fleet_run_id,
+            requested_priority=args.priority,
+            expected_plan_id=preview.plan_id,
+            expected_execution_digest=preview.execution_digest,
+            expected_plan_revision=preview.sha256,
+            repository_instance_ids={
+                team.repository.repository_id: team.repository_instance_id for team in preview.teams
+            },
         )
         if not args.as_json:
             print(f"Fleet Run ID: {admitted.fleet_run_id}")

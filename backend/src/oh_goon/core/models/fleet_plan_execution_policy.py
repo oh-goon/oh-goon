@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan_isolation import (
@@ -12,6 +12,13 @@ from oh_goon.core.models.fleet_plan_isolation import (
     IsolationThreatModel,
     isolation_requirements,
 )
+
+
+class FleetPlanRunLimits(ImmutableModel):
+    """Caller-resolved limits consumed by the original Fleet Step supervisor."""
+
+    deadline_at: AwareDatetime
+    step_timeout_seconds: float = Field(strict=True, gt=0, le=21600, allow_inf_nan=False)
 
 
 class ExecutionPurpose(StrEnum):
@@ -134,10 +141,15 @@ def compile_lace_required_guarantees(policy: PlanExecutionPolicy) -> LaceRequire
             isolation=isolation_requirements(threat, policy.resources),
             profile_status="defined",
         )
-    if isinstance(policy, (
-        MaintenanceExecutionPolicy, MigrationExecutionPolicy,
-        VerificationExecutionPolicy, InspectionExecutionPolicy,
-    )):
+    if isinstance(
+        policy,
+        (
+            MaintenanceExecutionPolicy,
+            MigrationExecutionPolicy,
+            VerificationExecutionPolicy,
+            InspectionExecutionPolicy,
+        ),
+    ):
         return LaceRequiredGuarantees(
             purpose=policy.purpose,
             threat_model=None,

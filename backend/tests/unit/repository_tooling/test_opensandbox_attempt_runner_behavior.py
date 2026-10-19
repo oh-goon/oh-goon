@@ -91,7 +91,9 @@ def _base_payload(tmp_path: Path) -> dict[str, object]:
     return {
         "protocol": runner._PROTOCOL,
         "runtime_root_archive": runtime_root,
-        "workspace_archive": _tree_archive(tmp_path, label="workspace", **{"input.txt": "workspace\n"}),
+        "workspace_archive": _tree_archive(
+            tmp_path, label="workspace", **{"input.txt": "workspace\n"}
+        ),
         "cache_archive": _tree_archive(tmp_path, label="cache", **{"cached.txt": "cache\n"}),
         "cache_read_only": False,
         "toolchain": [],
@@ -197,7 +199,9 @@ def test_prepare_root_replaces_old_bytes_builds_shell_and_validates_etc(tmp_path
         runner._prepare_root(invalid, tmp_path / "invalid-root")
 
 
-def test_runtime_path_and_executable_resolution_cover_absolute_and_path_modes(tmp_path: Path) -> None:
+def test_runtime_path_and_executable_resolution_cover_absolute_and_path_modes(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "root"
     binary = root / "toolchain/bin/tool"
     binary.parent.mkdir(parents=True)
@@ -216,12 +220,16 @@ def test_runtime_path_and_executable_resolution_cover_absolute_and_path_modes(tm
     with pytest.raises(ValueError, match="escapes root"):
         runner._resolve_runtime_path(root, "/toolchain/bin/escape")
 
-    assert runner._runtime_executable(
-        {"argv": ["/toolchain/bin/tool"], "env": {"PATH": ""}}, root
-    )[0] == "/toolchain/bin/tool"
-    assert runner._runtime_executable(
-        {"argv": ["tool"], "env": {"PATH": "/missing:/toolchain/bin"}}, root
-    )[0] == "/toolchain/bin/tool"
+    assert (
+        runner._runtime_executable({"argv": ["/toolchain/bin/tool"], "env": {"PATH": ""}}, root)[0]
+        == "/toolchain/bin/tool"
+    )
+    assert (
+        runner._runtime_executable(
+            {"argv": ["tool"], "env": {"PATH": "/missing:/toolchain/bin"}}, root
+        )[0]
+        == "/toolchain/bin/tool"
+    )
     with pytest.raises(ValueError, match="identify an executable"):
         runner._runtime_executable({"argv": [], "env": {}}, root)
     with pytest.raises(ValueError, match="relative executable path is not normalized"):
@@ -232,7 +240,9 @@ def test_runtime_path_and_executable_resolution_cover_absolute_and_path_modes(tm
         runner._runtime_executable({"argv": ["missing"], "env": {"PATH": "/toolchain/bin"}}, root)
 
 
-def test_runtime_file_and_memfd_validation_fail_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runtime_file_and_memfd_validation_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     file_path = tmp_path / "tool"
     file_path.write_bytes(b"payload")
     assert runner._file_identity(file_path).startswith("sha256:")
@@ -312,13 +322,17 @@ def test_deadline_and_process_group_helpers_classify_live_and_gone_processes(
     assert runner._terminate_if_deadline_expired(44, 11.0) is False
 
     waited: list[int] = []
-    monkeypatch.setattr(runner.os, "killpg", lambda *_args: (_ for _ in ()).throw(ProcessLookupError()))
+    monkeypatch.setattr(
+        runner.os, "killpg", lambda *_args: (_ for _ in ()).throw(ProcessLookupError())
+    )
     monkeypatch.setattr(runner, "_wait_for_pid", lambda pid: waited.append(pid))
     assert runner._terminate_if_deadline_expired(44, 9.0) is True
     assert waited == [44]
 
     monkeypatch.setattr(runner, "process_group_exists", lambda _pid: True)
-    monkeypatch.setattr(runner.os, "killpg", lambda *_args: (_ for _ in ()).throw(PermissionError()))
+    monkeypatch.setattr(
+        runner.os, "killpg", lambda *_args: (_ for _ in ()).throw(PermissionError())
+    )
     with pytest.raises(runner._AttemptQuiescenceError, match="could not signal"):
         runner._settle_remaining_group(44)
 
@@ -375,9 +389,7 @@ def test_collect_child_proves_stubborn_descendant_group_quiescent_before_return(
 ) -> None:
     leader, stdout_r, stderr_r, control_w, marker = _spawn_stubborn_descendant_group(tmp_path)
     try:
-        completed = runner._collect_atomic_child(
-            leader, ["tool"], None, stdout_r, stderr_r
-        )
+        completed = runner._collect_atomic_child(leader, ["tool"], None, stdout_r, stderr_r)
         assert completed.returncode == 0
         assert runner.process_group_exists(leader) is False
         assert marker.read_bytes() == b"EARLY\n"
@@ -398,9 +410,7 @@ def test_workspace_archive_is_cut_only_after_stubborn_descendant_is_quiescent(
     (root / "cache").mkdir()
     leader, stdout_r, stderr_r, control_w, marker = _spawn_stubborn_descendant_group(root)
     try:
-        completed = runner._collect_atomic_child(
-            leader, ["tool"], None, stdout_r, stderr_r
-        )
+        completed = runner._collect_atomic_child(leader, ["tool"], None, stdout_r, stderr_r)
         assert completed.returncode == 0
         archives = runner._archive_result_trees(root)
         with pytest.raises(BrokenPipeError):
@@ -478,11 +488,15 @@ def test_main_validates_protocol_egress_and_writes_result(
     with pytest.raises(ValueError, match="unsupported Fleet runner protocol"):
         runner.main()
 
-    request.write_text(json.dumps({"protocol": runner._PROTOCOL, "egress": {"mode": "allow"}}), encoding="utf-8")
+    request.write_text(
+        json.dumps({"protocol": runner._PROTOCOL, "egress": {"mode": "allow"}}), encoding="utf-8"
+    )
     with pytest.raises(ValueError, match="deny-all egress only"):
         runner.main()
 
-    request.write_text(json.dumps({"protocol": runner._PROTOCOL, "egress": {"mode": "none"}}), encoding="utf-8")
+    request.write_text(
+        json.dumps({"protocol": runner._PROTOCOL, "egress": {"mode": "none"}}), encoding="utf-8"
+    )
     monkeypatch.setattr(
         runner,
         "_execute_attempt",

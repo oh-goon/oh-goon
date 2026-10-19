@@ -23,7 +23,10 @@ class TerminalRaceAuthority:
         if winner is None:
             self._winner = candidate
             return candidate
-        if candidate.execution_id != winner.execution_id or candidate.generation != winner.generation:
+        if (
+            candidate.execution_id != winner.execution_id
+            or candidate.generation != winner.generation
+        ):
             raise ValueError("terminal claim belongs to another execution generation")
         if candidate.claim_id == winner.claim_id:
             return winner

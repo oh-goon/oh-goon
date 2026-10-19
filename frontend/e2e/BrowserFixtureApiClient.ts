@@ -125,7 +125,6 @@ function normalizedDependencyFilter(filter: DependencyTargetFilter): DependencyT
     coverage: filter.coverage ?? "matching",
     resolved_version: filter.resolved_version ?? null,
     version_prefix: filter.version_prefix ?? null,
-    relationship: filter.relationship ?? "all",
     evidence: filter.evidence ?? "all",
     version_specifier: filter.version_specifier ?? null,
     advisory_id: filter.advisory_id ?? null,
@@ -334,25 +333,23 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
   }
 
   override async dependencyFleetCoverage(_options?: ReadRequestOptions): Promise<DependencyFleetCoverageOverview> {
-    if (this.scenario === "scale") return { repository_total: 5000, current_dependency_evidence: 4848, aged_dependency_evidence: 0, stale_dependency_evidence: 0, missing_dependency_evidence: 152, no_current_dependency_evidence: 152 };
-    return { repository_total: 7, current_dependency_evidence: 5, aged_dependency_evidence: 1, stale_dependency_evidence: 0, missing_dependency_evidence: 1, no_current_dependency_evidence: 2 };
+    if (this.scenario === "scale") return { repository_total: 5000, current_dependency_evidence: 4848, unknown_dependency_evidence: 0, stale_dependency_evidence: 0, missing_dependency_evidence: 152, no_current_dependency_evidence: 152 };
+    return { repository_total: 7, current_dependency_evidence: 5, unknown_dependency_evidence: 1, stale_dependency_evidence: 0, missing_dependency_evidence: 1, no_current_dependency_evidence: 2 };
   }
 
   override async dependencyOverview(packageName: string, _options?: ReadRequestOptions): Promise<DependencyPackageOverview> {
     if (packageName.toLowerCase() !== "mlflow") return emptyDependencyOverview(packageName, repositories);
     if (this.scenario === "scale") return {
-      ecosystem: "pypi", package_name: "mlflow", observed_repositories: 137, direct_repositories: 137, transitive_repositories: 0, latest_observed_at: NOW,
-      freshness: { current: 137, no_matching_dependency: 4711, aged: 0, stale: 0, no_current_evidence: 152 },
+      ecosystem: "pypi", package_name: "mlflow", observed_repositories: 137, latest_observed_at: NOW,
+      freshness: { current: 137, no_matching_dependency: 4711, unknown: 0, stale: 0, no_current_evidence: 152 },
       versions: [{ version: "2.17.2", repositories: 92 }, { version: "2.18.0", repositories: 45 }],
     };
     return {
       ecosystem: "pypi",
       package_name: "mlflow",
       observed_repositories: 5,
-      direct_repositories: 4,
-      transitive_repositories: 1,
       latest_observed_at: NOW,
-      freshness: { current: 4, no_matching_dependency: 1, aged: 1, stale: 0, no_current_evidence: 2 },
+      freshness: { current: 4, no_matching_dependency: 1, unknown: 1, stale: 0, no_current_evidence: 2 },
       versions: [
         { version: "2.17.2", repositories: 1 },
         { version: "2.17.1", repositories: 1 },
@@ -368,7 +365,7 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
       package_name: packageName, advisory_id: advisoryId, affected_specifier: affectedSpecifier,
       affected_repositories: packageName.toLowerCase() === "mlflow" && affectedSpecifier === "<2.18.0" ? 92 : 0,
       observed_not_affected: packageName.toLowerCase() === "mlflow" && affectedSpecifier === "<2.18.0" ? 45 : 0,
-      version_unclassified: 0, aged: 0, stale: 0, no_matching_dependency: packageName.toLowerCase() === "mlflow" ? 4711 : 0, no_current_evidence: packageName.toLowerCase() === "mlflow" ? 152 : 5000,
+      version_unclassified: 0, unknown: 0, stale: 0, no_matching_dependency: packageName.toLowerCase() === "mlflow" ? 4711 : 0, no_current_evidence: packageName.toLowerCase() === "mlflow" ? 152 : 5000,
     };
     return {
       package_name: packageName,
@@ -377,7 +374,7 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
       affected_repositories: packageName.toLowerCase() === "mlflow" && affectedSpecifier === "<2.18.0" ? 2 : 0,
       observed_not_affected: packageName.toLowerCase() === "mlflow" && affectedSpecifier === "<2.18.0" ? 1 : 0,
       version_unclassified: packageName.toLowerCase() === "mlflow" && affectedSpecifier === "<2.18.0" ? 1 : 0,
-      aged: packageName.toLowerCase() === "mlflow" ? 1 : 0,
+      unknown: packageName.toLowerCase() === "mlflow" ? 1 : 0,
       stale: 0,
       no_matching_dependency: packageName.toLowerCase() === "mlflow" ? 1 : 0,
       no_current_evidence: packageName.toLowerCase() === "mlflow" ? 2 : repositories.length,
@@ -388,8 +385,7 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
     packageName: string,
     resolvedVersion?: string,
     _versionPrefix?: string,
-    relationship: "all" | "direct" | "transitive" = "all",
-    evidence: "all" | "current" | "aged" | "stale" = "all",
+    evidence: "all" | "current" | "unknown" | "stale" = "all",
     offset = 0,
     limit = 20,
     versionSpecifier?: string,
@@ -398,38 +394,37 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
   ): Promise<DependencyRepositoryPage> {
     let items = this.scenario === "scale" ? scaleDependencyFixtureMatches(scaleRepositories, packageName, NOW, DEFAULT_RUN_ID) : dependencyMatches(packageName);
     if (resolvedVersion) items = items.filter((item) => (item.resolved_versions ?? []).includes(resolvedVersion));
-    if (relationship !== "all") items = items.filter((item) => item.relationship === relationship);
-    if (evidence !== "all") items = items.filter((item) => item.evidence_state === evidence);
-    if (versionSpecifier === "<2.18.0") items = items.filter((item) => item.evidence_state === "current" && ["2.17.2", "2.17.1"].some((version) => (item.resolved_versions ?? []).includes(version)));
+    if (evidence !== "all") items = items.filter((item) => item.evidence.freshness === evidence);
+    if (versionSpecifier === "<2.18.0") items = items.filter((item) => item.evidence.freshness === "current" && ["2.17.2", "2.17.1"].some((version) => (item.resolved_versions ?? []).includes(version)));
     const filter: DependencyTargetFilter = { package_name: packageName, coverage: "matching", resolved_version: resolvedVersion ?? null, version_prefix: _versionPrefix ?? null,
-      relationship, evidence, version_specifier: versionSpecifier ?? null, advisory_id: _advisoryId ?? null };
+      evidence, version_specifier: versionSpecifier ?? null, advisory_id: _advisoryId ?? null };
     const repoIds = items.map((item) => item.repository.repository_id);
     return { package_name: packageName, population_id: dependencyPopulationId(filter, repoIds), total: items.length, offset, limit, items: items.slice(offset, offset + limit) };
   }
 
   override async dependencyCoverageRepositories(
     packageName: string,
-    coverage: "proven_no_match" | "no_current_evidence",
+    coverage: "absent_from_lock" | "no_current_evidence",
     offset = 0,
     limit = 20,
     _options?: ReadRequestOptions,
   ): Promise<DependencyCoverageRepositoryPage> {
     if (this.scenario === "scale" && packageName.toLowerCase() === "mlflow") {
-      const start = coverage === "proven_no_match" ? 137 : 4848;
-      const total = coverage === "proven_no_match" ? 4711 : 152;
+      const start = coverage === "absent_from_lock" ? 137 : 4848;
+      const total = coverage === "absent_from_lock" ? 4711 : 152;
       const pageRepositories = scaleRepositories.slice(start + offset, start + Math.min(total, offset + limit));
-      const items = pageRepositories.map((repositoryIdentity, index) => ({ repository: repositoryIdentity, coverage, evidence_state: coverage === "proven_no_match" ? "current" as const : "missing" as const, sources: coverage === "proven_no_match" ? ["uv.lock"] : [], observed_at: coverage === "proven_no_match" ? NOW : undefined, fleet_run_id: coverage === "proven_no_match" ? DEFAULT_RUN_ID : undefined, operation_id: coverage === "proven_no_match" ? `operation-scale-coverage-${offset + index}` : undefined, producer_goon: coverage === "proven_no_match" ? "python/dependency-inventory" : undefined, step_id: coverage === "proven_no_match" ? "dependency-inventory" : undefined }));
-      const filter: DependencyTargetFilter = { package_name: packageName, coverage, relationship: "all", evidence: "all" };
+      const items = pageRepositories.map((repositoryIdentity, index) => ({ repository: repositoryIdentity, coverage, evidence: { scope: "locked-inventory" as const, freshness: coverage === "absent_from_lock" ? "current" as const : "unknown" as const, completeness: coverage === "absent_from_lock" ? "complete" as const : "unknown" as const, availability: coverage === "absent_from_lock" ? "available" as const : "missing" as const, absence_admissible: coverage === "absent_from_lock" }, sources: coverage === "absent_from_lock" ? ["uv.lock"] : [], observed_at: coverage === "absent_from_lock" ? NOW : undefined, fleet_run_id: coverage === "absent_from_lock" ? DEFAULT_RUN_ID : undefined, operation_id: coverage === "absent_from_lock" ? `operation-scale-coverage-${offset + index}` : undefined, producer_goon: coverage === "absent_from_lock" ? "python/dependency-inventory" : undefined, step_id: coverage === "absent_from_lock" ? "dependency-inventory" : undefined }));
+      const filter: DependencyTargetFilter = { package_name: packageName, coverage, evidence: "all" };
       const repoIds = scaleRepositories.slice(start, start + total).map((item) => item.repository_id);
       return { package_name: packageName, coverage, population_id: dependencyPopulationId(filter, repoIds), total, offset, limit, items };
     }
-    const items = packageName.toLowerCase() !== "mlflow" ? [] : coverage === "proven_no_match"
-      ? [{ repository: FIXTURE_REPOSITORIES.notify, coverage, evidence_state: "current" as const, sources: ["uv.lock"], observed_at: NOW, fleet_run_id: DEFAULT_RUN_ID, operation_id: "operation-dependency-notify", producer_goon: "python/dependency-inventory", step_id: "dependency-inventory" }]
+    const items = packageName.toLowerCase() !== "mlflow" ? [] : coverage === "absent_from_lock"
+      ? [{ repository: FIXTURE_REPOSITORIES.notify, coverage, evidence: { freshness: "current" as const, completeness: "complete" as const, availability: "available" as const, absence_admissible: true }, sources: ["uv.lock"], observed_at: NOW, fleet_run_id: DEFAULT_RUN_ID, operation_id: "operation-dependency-notify", producer_goon: "python/dependency-inventory", step_id: "dependency-inventory" }]
       : [
-          { repository: FIXTURE_REPOSITORIES.catalog, coverage, evidence_state: "aged" as const, sources: ["uv.lock"], observed_at: "2026-08-10T12:00:00Z", fleet_run_id: DEFAULT_RUN_ID, operation_id: "operation-dependency-catalog", producer_goon: "python/dependency-inventory", step_id: "dependency-inventory" },
-          { repository: FIXTURE_REPOSITORIES.report, coverage, evidence_state: "missing" as const, sources: [] },
+          { repository: FIXTURE_REPOSITORIES.catalog, coverage, evidence: { freshness: "unknown" as const, completeness: "unknown" as const, availability: "available" as const, absence_admissible: false }, sources: ["uv.lock"], observed_at: "2026-08-10T12:00:00Z", fleet_run_id: DEFAULT_RUN_ID, operation_id: "operation-dependency-catalog", producer_goon: "python/dependency-inventory", step_id: "dependency-inventory" },
+          { repository: FIXTURE_REPOSITORIES.report, coverage, evidence: { freshness: "unknown" as const, completeness: "unknown" as const, availability: "missing" as const, absence_admissible: false }, sources: [] },
         ];
-    const filter: DependencyTargetFilter = { package_name: packageName, coverage, relationship: "all", evidence: "all" };
+    const filter: DependencyTargetFilter = { package_name: packageName, coverage, evidence: "all" };
     const repoIds = items.map((item) => item.repository.repository_id);
     return { package_name: packageName, coverage, population_id: dependencyPopulationId(filter, repoIds), total: items.length, offset, limit, items: items.slice(offset, offset + limit) };
   }
@@ -442,9 +437,8 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
           ecosystem: "pypi",
           package_name: `scale-package-${String(index + 1).padStart(3, "0")}`,
           resolved_versions: [`${1 + (index % 5)}.${index % 20}.0`],
-          declared_ranges: [">=1"],
-          relationship: index % 3 === 0 ? "transitive" : "direct",
-          evidence_state: "current",
+          contexts: ["lock"],
+          evidence: { freshness: "current", completeness: "complete", availability: "available", absence_admissible: true },
           sources: ["uv.lock"],
           observed_at: NOW,
           fleet_run_id: DEFAULT_RUN_ID,
@@ -461,14 +455,14 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
     const repoIds = this.scenario === "scale"
       ? filter.coverage === "no_current_evidence"
         ? scaleRepositories.slice(4848).map((item) => item.repository_id)
-        : filter.coverage === "proven_no_match"
+        : filter.coverage === "absent_from_lock"
           ? scaleRepositories.slice(137, 4848).map((item) => item.repository_id)
           : filter.version_specifier === "<2.18.0"
             ? scaleRepositories.slice(0, 92).map((item) => item.repository_id)
             : scaleRepositories.slice(0, 137).map((item) => item.repository_id)
       : filter.coverage === "no_current_evidence"
       ? [FIXTURE_REPOSITORIES.catalog.repository_id, FIXTURE_REPOSITORIES.report.repository_id]
-      : filter.coverage === "proven_no_match"
+      : filter.coverage === "absent_from_lock"
         ? [FIXTURE_REPOSITORIES.notify.repository_id]
         : filter.version_specifier === "<2.18.0"
           ? [FIXTURE_REPOSITORIES.payments.repository_id, FIXTURE_REPOSITORIES.web.repository_id]

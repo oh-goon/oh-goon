@@ -9,4 +9,4 @@ export { useDependencyRepositories } from "@/features/dependencies/hooks/useDepe
 export { useDependencyCoverageRepositories } from "@/features/dependencies/hooks/useDependencyCoverageRepositories";
 export { useRepositoryDependencies } from "@/features/dependencies/hooks/useRepositoryDependencies";
 export { useDependencyTargetSelection } from "@/features/dependencies/hooks/useDependencyTargetSelection";
-export type { DependencyCoverage, DependencyEvidence, DependencyRelationship } from "@/features/dependencies/model";
+export type { DependencyCoverage, DependencyEvidence } from "@/features/dependencies/model";

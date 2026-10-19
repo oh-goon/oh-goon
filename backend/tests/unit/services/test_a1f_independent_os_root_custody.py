@@ -3,6 +3,7 @@
 These fixtures are diagnostic only, not proof of a real deploying-process
 principal, key provenance, host attestation, or authenticated Run admission.
 """
+
 from __future__ import annotations
 
 import os
@@ -16,6 +17,8 @@ from oh_goon.runtime.enforcer_lace_issuer_keyring import load_explicit_issuer_ve
 from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import facts
 from tests.unit.services.test_group_a_explicit_issuer_keyring import secure_roots
 from tests.unit.services.test_group_a_fleet_provisioning_authority import provisioned
+
+pytestmark = pytest.mark.certification
 
 
 def _foreign_uid() -> int:
@@ -45,11 +48,21 @@ def test_explicit_foreign_uid_root_verifies_without_signing(tmp_path):
         load_explicit_issuer_verifier(directory, refs)  # no ambient foreign-owner fallback
 
 
-@pytest.mark.parametrize("attack", [
-    "unpinned", "same-process-owner", "bool-owner", "negative-owner",
-    "wrong-owner", "writable-directory", "writable-leaf", "wrong-leaf-owner",
-    "symlink-leaf", "same-byte-leaf-replacement",
-])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "unpinned",
+        "same-process-owner",
+        "bool-owner",
+        "negative-owner",
+        "wrong-owner",
+        "writable-directory",
+        "writable-leaf",
+        "wrong-leaf-owner",
+        "symlink-leaf",
+        "same-byte-leaf-replacement",
+    ],
+)
 def test_foreign_owned_root_rejects_untrusted_authority(tmp_path, monkeypatch, attack):
     directory, refs, _keys = secure_roots(tmp_path)
     uid = _make_foreign_roots(directory)
@@ -94,14 +107,18 @@ def test_foreign_owned_root_rejects_untrusted_authority(tmp_path, monkeypatch, a
                 backup.chmod(0o644)
                 os.replace(backup, leaf)
             return result
+
         monkeypatch.setattr(os, "read", replace_after_read)
     with pytest.raises(TrustProtocolError):
         load_explicit_issuer_verifier(directory, refs, public_root_owner_uid=uid)
 
 
-def test_original_provisioner_rejects_privileged_signer_even_with_distinct_uids(tmp_path, monkeypatch):
-    args, _params, conn, calls, _lifecycle, binding, provisioner, _inventory, roots, _admit = provisioned(
-        tmp_path, monkeypatch)
+def test_original_provisioner_rejects_privileged_signer_even_with_distinct_uids(
+    tmp_path, monkeypatch
+):
+    args, _params, conn, calls, _lifecycle, binding, provisioner, _inventory, roots, _admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     uid = _make_foreign_roots(roots)
     try:
         owner = replace(provisioner, public_root_owner_uid=uid)
@@ -115,14 +132,17 @@ def test_original_provisioner_rejects_privileged_signer_even_with_distinct_uids(
 
 
 def test_legacy_or_unenrolled_custody_never_qualifies(tmp_path, monkeypatch):
-    args, _params, conn, calls, _lifecycle, _binding, provisioner, _inventory, _roots, _admit = provisioned(
-        tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, _binding, provisioner, _inventory, _roots, _admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     try:
         with pytest.raises(TrustProtocolError, match="not provisioned"):
             provisioner.inspect_independent_root_custody("durable-run")
         with pytest.raises(TrustProtocolError, match="not provisioned"):
             provisioner.inspect_independent_root_custody("unknown-run")
-        with pytest.raises(TrustProtocolError, match="complete explicit Fleet deployment provisioning"):
+        with pytest.raises(
+            TrustProtocolError, match="complete explicit Fleet deployment provisioning"
+        ):
             replace(provisioner, public_root_owner_uid=os.geteuid())
         assert facts(args, conn) == (None, 0, 0)
         assert calls == []
@@ -131,14 +151,16 @@ def test_legacy_or_unenrolled_custody_never_qualifies(tmp_path, monkeypatch):
 
 
 def test_signer_mutable_public_ancestor_rejected_before_inventory(tmp_path, monkeypatch):
-    args, _params, conn, calls, _lifecycle, binding, provisioner, _inventory, roots, _admit = provisioned(
-        tmp_path, monkeypatch)
+    args, _params, conn, calls, _lifecycle, binding, provisioner, _inventory, roots, _admit = (
+        provisioned(tmp_path, monkeypatch)
+    )
     # In this hosted fixture, public roots are below a signer-controlled tmp
     # parent. Simulate an unprivileged signer EUID solely for the ancestry
     # classifier; this is NOT a positive real-host principal observation.
     try:
         owner = replace(provisioner, public_root_owner_uid=_foreign_uid())
         from oh_goon.services import fleet_prework_provisioner as module
+
         with monkeypatch.context() as patch:
             patch.setattr(os, "geteuid", lambda: 1001)
             patch.setattr(module, "_native_unprivileged_signer_identity", lambda: (1001,))

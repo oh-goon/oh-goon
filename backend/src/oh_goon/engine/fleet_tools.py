@@ -6,9 +6,8 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
-from oh_goon.core.file_digest import sha256_file
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.product_identity import stable_id
+from oh_goon.core.file_digest import sha256_file
 from oh_goon.core.models.fleet_plan import ManagedToolRuntime
 from oh_goon.core.path_authority import (
     StrictHostPathAuthority,
@@ -16,6 +15,7 @@ from oh_goon.core.path_authority import (
     ensure_private_directory,
 )
 from oh_goon.core.path_layouts import ManagedPreparationPathLayout
+from oh_goon.core.product_identity import stable_id
 from oh_goon.engine.command import run_command
 from oh_goon.engine.native_uv_environment import NativeUvAuthority, capture_native_uv_authority
 from oh_goon.integrations.exact_file_write import (
@@ -142,9 +142,7 @@ class FleetToolStore:
         temporary = self._root / f".{runtime_id}-{uuid4().hex}"
         try:
             temporary.mkdir(mode=0o700)
-            (temporary / "pyproject.toml").write_text(
-                _project_text(requirement), encoding="utf-8"
-            )
+            (temporary / "pyproject.toml").write_text(_project_text(requirement), encoding="utf-8")
             result = run_command(
                 _uv_executable(self._path_authority),
                 "lock",
@@ -239,7 +237,6 @@ def _uv_executable(path_authority: StrictHostPathAuthority | None) -> str:
             "Fleet managed tool operations require deployment path authority for host tool 'uv'"
         )
     return str(path_authority.tool("uv"))
-
 
 
 def _runtime_id(tool: str, requirement: str) -> str:

@@ -11,10 +11,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO
 
-
+from oh_goon.core.file_digest import sha256_file
 from oh_goon.core.path_authority import ensure_private_directory
 
-from oh_goon.core.file_digest import sha256_file
 
 class ExactPublicationDurabilityError(OSError):
     """Publication became visible but its directory durability could not be proven."""
@@ -39,7 +38,6 @@ def exact_file_write_lock(target: Path) -> Iterator[None]:
             _release_lock(stream)
 
 
-
 def _exact_file_lock_root() -> Path:
     """Return one private cooperating-lock directory for the current OS user."""
 
@@ -47,6 +45,7 @@ def _exact_file_lock_root() -> Path:
     return ensure_private_directory(
         Path(tempfile.gettempdir()) / f"oh-goon-exact-file-locks{suffix}"
     )
+
 
 def exact_file_revision(target: Path) -> str:
     """Return the SHA-256 identity of the exact bytes currently committed at target."""

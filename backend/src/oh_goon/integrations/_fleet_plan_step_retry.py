@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from oh_goon.core.fleet_plan_retry import retry_decision
@@ -248,11 +248,21 @@ def _successful_direct_publication(
         # a bounded diagnostic file to subsequent authored Steps.  Its nonzero
         # physical result remains FAILED in Game Tape.  Agent proposals, strict
         # workspaces, and retryable attempts never use this diagnostic path.
-        if not (type(step) is ResolvedCommandStep
-                and step.on_failure is StepFailurePolicy.CONTINUE
-                and step.retry.max_attempts == 1 and step.outputs):
+        if not (
+            type(step) is ResolvedCommandStep
+            and step.on_failure is StepFailurePolicy.CONTINUE
+            and step.retry.max_attempts == 1
+            and step.outputs
+        ):
             return AttemptPublication({}, (), outcome, None, None)
-    return publish_direct_attempt_outputs(step, outcome, repository)
+    publication = publish_direct_attempt_outputs(step, outcome, repository)
+    if not step_succeeded(step, outcome) and publication.outcome.returncode != outcome.returncode:
+        # A bad/missing diagnostic adds a publication failure, never a different
+        # native exit code for an already-failed test.
+        publication = replace(
+            publication, outcome=replace(publication.outcome, returncode=outcome.returncode)
+        )
+    return publication
 
 
 def _successful_strict_publication(

@@ -4,6 +4,7 @@ Lifecycle state is bank governance, not candidate grading. Empirical calibration
 reports provide evidence to an explicit transition review; they never promote, retire, reweight, or
 change a question automatically.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -23,7 +24,15 @@ QUESTION_TRANSITION_SCHEMA_VERSION = 1
 HUMAN_BASELINE_OBSERVATION_SCHEMA_VERSION = 1
 HUMAN_BASELINE_REPORT_SCHEMA_VERSION = 1
 
-QUESTION_LIFECYCLE_STATES = ("DRAFT", "SHADOW", "CALIBRATING", "ACTIVE", "REVIEW_REQUIRED", "QUARANTINED", "RETIRED")
+QUESTION_LIFECYCLE_STATES = (
+    "DRAFT",
+    "SHADOW",
+    "CALIBRATING",
+    "ACTIVE",
+    "REVIEW_REQUIRED",
+    "QUARANTINED",
+    "RETIRED",
+)
 LEGAL_TRANSITIONS = {
     ("DRAFT", "SHADOW"),
     ("SHADOW", "CALIBRATING"),
@@ -43,7 +52,9 @@ _VERSION = re.compile(r"\d+\.\d+\.\d+")
 
 
 def _canonical_sha256(payload: Any) -> str:
-    body = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     return hashlib.sha256(body).hexdigest()
 
 
@@ -55,13 +66,17 @@ def _identity(value: Any, *, label: str) -> str:
 
 def _assert_embedded_identity(payload: dict[str, Any], *, field: str, label: str) -> str:
     identity = _identity(payload.get(field), label=field)
-    expected = "sha256:" + _canonical_sha256({key: value for key, value in payload.items() if key != field})
+    expected = "sha256:" + _canonical_sha256(
+        {key: value for key, value in payload.items() if key != field}
+    )
     if identity != expected:
         raise ValueError(f"{label} identity does not match artifact bytes")
     return identity
 
 
-def _version_not_future(value: Any, *, label: str, source_version: str, allow_legacy: bool = False) -> str:
+def _version_not_future(
+    value: Any, *, label: str, source_version: str, allow_legacy: bool = False
+) -> str:
     if allow_legacy and value == "PRE_LIFECYCLE":
         return value
     if not isinstance(value, str) or _VERSION.fullmatch(value) is None:
@@ -89,7 +104,9 @@ def _state_projection(state: str) -> dict[str, Any]:
     }
 
 
-def load_question_lifecycle(path: Path, *, source_version: str, question_ids: Iterable[str]) -> dict[str, Any]:
+def load_question_lifecycle(
+    path: Path, *, source_version: str, question_ids: Iterable[str]
+) -> dict[str, Any]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("repository question lifecycle must be an object")
@@ -169,11 +186,15 @@ def question_lifecycle_manifest(
     states = Counter(row["state"] for row in lifecycle["questions"])
     score_bearing = [row["id"] for row in lifecycle["questions"] if row["score_bearing"]]
     qualification_bank = [row for row in lifecycle["questions"] if row["qualification_bank_member"]]
-    shadow_pool = [row["id"] for row in lifecycle["questions"] if not row["qualification_bank_member"]]
+    shadow_pool = [
+        row["id"] for row in lifecycle["questions"] if not row["qualification_bank_member"]
+    ]
     critical_ids = set(critical_question_ids)
     unavailable = [row["id"] for row in qualification_bank if row["state"] != "ACTIVE"]
     unavailable_critical = [qid for qid in unavailable if qid in critical_ids]
-    qualification_status = "BLOCKED" if unavailable_critical else ("DEGRADED" if unavailable else "READY")
+    qualification_status = (
+        "BLOCKED" if unavailable_critical else ("DEGRADED" if unavailable else "READY")
+    )
     return {
         "policy_version": QUESTION_LIFECYCLE_POLICY_VERSION,
         "lifecycle_identity": lifecycle["lifecycle_identity"],
@@ -183,7 +204,9 @@ def question_lifecycle_manifest(
         "shadow_pool_count": len(shadow_pool),
         "shadow_pool_ids": shadow_pool,
         "score_bearing_count": len(score_bearing),
-        "candidate_delivery_count": sum(row["candidate_delivery"] for row in lifecycle["questions"]),
+        "candidate_delivery_count": sum(
+            row["candidate_delivery"] for row in lifecycle["questions"]
+        ),
         "unavailable_question_count": len(unavailable),
         "unavailable_question_ids": unavailable,
         "unavailable_critical_question_count": len(unavailable_critical),
@@ -206,7 +229,11 @@ def assert_current_score_bank_active(
     inactive = manifest["unavailable_question_ids"]
     if inactive:
         critical = manifest["unavailable_critical_question_ids"]
-        detail = "" if not critical else "; critical qualification coverage blocked: " + ", ".join(critical)
+        detail = (
+            ""
+            if not critical
+            else "; critical qualification coverage blocked: " + ", ".join(critical)
+        )
         raise ValueError(
             "current qualification bank contains non-ACTIVE questions; qualification thresholds are not rescaled: "
             + ", ".join(inactive)
@@ -259,7 +286,11 @@ def human_baseline_report(
         if not isinstance(reviewer, dict):
             raise ValueError("human baseline reviewer must be an object")
         reviewer_id = reviewer.get("reviewer_id")
-        if not isinstance(reviewer_id, str) or not reviewer_id.strip() or reviewer_id in reviewer_ids:
+        if (
+            not isinstance(reviewer_id, str)
+            or not reviewer_id.strip()
+            or reviewer_id in reviewer_ids
+        ):
             raise ValueError("human baseline reviewer_id must be unique and non-empty")
         reviewer_ids.add(reviewer_id)
         expertise = reviewer.get("expertise")
@@ -309,7 +340,9 @@ def human_baseline_report(
             disagreement_questions.append(qid)
         question_reports[qid] = {
             "reviewer_count": len(rows),
-            "median_time_to_evidence_seconds": _median([row["time_to_evidence_seconds"] for row in rows]),
+            "median_time_to_evidence_seconds": _median(
+                [row["time_to_evidence_seconds"] for row in rows]
+            ),
             "success_rate_percent": _rate([row["outcome"] == "SUCCESS" for row in rows]),
             "outcome_distribution": dict(sorted(outcomes.items())),
             "reference_assessment_distribution": dict(sorted(reference_counts.items())),
@@ -391,7 +424,9 @@ def authorize_question_transition(
         if audit_by_id[qid]["health_status"] != "VALID":
             raise ValueError(f"{qid} cannot become ACTIVE while question health is not VALID")
         if calibration_report is None or human_baseline is None:
-            raise ValueError("CALIBRATING -> ACTIVE requires calibration and human baseline reports")
+            raise ValueError(
+                "CALIBRATING -> ACTIVE requires calibration and human baseline reports"
+            )
         _assert_embedded_identity(
             calibration_report, field="report_identity", label="calibration report"
         )
@@ -414,10 +449,15 @@ def authorize_question_transition(
             raise ValueError("human baseline identity does not match transition request")
         calibration_row = (calibration_report.get("questions") or {}).get(qid)
         human_row = (human_baseline.get("questions") or {}).get(qid)
-        if not isinstance(calibration_row, dict) or calibration_row.get("observation_count", 0) <= 0:
+        if (
+            not isinstance(calibration_row, dict)
+            or calibration_row.get("observation_count", 0) <= 0
+        ):
             raise ValueError(f"{qid} has no empirical calibration observations")
         if not isinstance(human_row, dict) or human_row.get("reviewer_count", 0) < 2:
-            raise ValueError(f"{qid} ACTIVE promotion requires at least two independent human reviewers")
+            raise ValueError(
+                f"{qid} ACTIVE promotion requires at least two independent human reviewers"
+            )
         if human_row.get("reference_disagreement"):
             evidence["adjudication_identity"] = _identity(
                 request.get("adjudication_identity"), label="adjudication_identity"

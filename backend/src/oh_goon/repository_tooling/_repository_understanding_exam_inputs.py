@@ -5,8 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from oh_goon.core.file_digest import sha256_file, update_digest_from_file
+from oh_goon.core.file_digest import update_digest_from_file
 from oh_goon.repository_tooling.repository_understanding_material import CANDIDATE_GOLD_MARKER
+
 
 def _submission_sha256(path: Path) -> str:
     path = path.expanduser().resolve()
@@ -33,7 +34,6 @@ def _submission_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-
 def _submission_bundle(path: Path) -> dict[str, Any]:
     path = path.expanduser().resolve()
     digest = _submission_sha256(path)
@@ -53,14 +53,13 @@ def _submission_bundle(path: Path) -> dict[str, Any]:
     return {"sha256": digest, "files": rows}
 
 
-
 def _validate_candidate_submission(path: Path) -> tuple[str, dict[str, Any]]:
     bundle = _submission_bundle(path)
     for item in bundle["files"]:
         text = item["text"]
         if isinstance(text, str) and CANDIDATE_GOLD_MARKER in text:
             raise ValueError(
-                "candidate submission references grader-only answer material: " f"{item['path']}"
+                f"candidate submission references grader-only answer material: {item['path']}"
             )
     return bundle["sha256"], bundle
 

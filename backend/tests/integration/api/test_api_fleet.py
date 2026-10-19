@@ -1,8 +1,7 @@
 from pathlib import Path
 
-from tests.integration.api.client import authenticated_api_client
-
 from oh_goon.api.app import app as api_app
+from tests.integration.api.client import authenticated_api_client
 
 
 def test_fleet_snapshot_does_not_infer_readiness_during_discovery(tmp_path: Path) -> None:
@@ -52,7 +51,7 @@ def test_dependency_discovery_does_not_scan_repository_files_without_observed_ev
     assert coverage.json() == {
         "repository_total": 1,
         "current_dependency_evidence": 0,
-        "aged_dependency_evidence": 0,
+        "unknown_dependency_evidence": 0,
         "stale_dependency_evidence": 0,
         "missing_dependency_evidence": 1,
         "no_current_dependency_evidence": 1,

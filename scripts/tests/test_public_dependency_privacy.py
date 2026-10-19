@@ -14,13 +14,29 @@ def _root(tmp_path: Path, resolved: str) -> Path:
     root = tmp_path / "repo"
     (root / "backend").mkdir(parents=True)
     (root / "frontend").mkdir()
-    (root / "backend/pyproject.toml").write_text("[project]\nname='x'\nversion='1.0'\n", encoding="utf-8")
+    (root / "backend/pyproject.toml").write_text(
+        "[project]\nname='x'\nversion='1.0'\n", encoding="utf-8"
+    )
     (root / "frontend/package.json").write_text('{"name":"x"}\n', encoding="utf-8")
-    (root / "backend/uv.lock").write_text('version = 1\nrequires-python = ">=3.12"\npackage = []\n', encoding="utf-8")
-    (root / "frontend/package-lock.json").write_text(json.dumps({
-        "lockfileVersion": 3,
-        "packages": {"": {"name": "x"}, "node_modules/a": {"version": "1.0.0", "resolved": resolved, "integrity": "sha512-x"}},
-    }), encoding="utf-8")
+    (root / "backend/uv.lock").write_text(
+        'version = 1\nrequires-python = ">=3.12"\npackage = []\n', encoding="utf-8"
+    )
+    (root / "frontend/package-lock.json").write_text(
+        json.dumps(
+            {
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {"name": "x"},
+                    "node_modules/a": {
+                        "version": "1.0.0",
+                        "resolved": resolved,
+                        "integrity": "sha512-x",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     return root
 
 
@@ -29,22 +45,33 @@ def test_public_npm_registry_is_allowed(tmp_path: Path) -> None:
     assert frontend_package_lock_privacy_issues(root) == ()
 
 
-def test_private_npm_registry_is_rejected_without_echoing_hostname(tmp_path: Path) -> None:
+def test_private_npm_registry_is_rejected_without_echoing_hostname(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path, "https://npm.company.internal/a/-/a-1.0.0.tgz")
     issues = frontend_package_lock_privacy_issues(root)
     assert issues
     assert "npm.company.internal" not in " ".join(issues)
 
 
-def test_operator_configured_host_is_rejected_from_public_intent(tmp_path: Path) -> None:
+def test_operator_configured_host_is_rejected_from_public_intent(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path, "https://registry.npmjs.org/a/-/a-1.0.0.tgz")
-    (root / "backend/pyproject.toml").write_text("[project]\nname='x'\nurl='https://packages.example.com/simple'\n", encoding="utf-8")
-    issues = public_source_privacy_issues(root, environment={"UV_DEFAULT_INDEX": "https://packages.example.com/simple"})
+    (root / "backend/pyproject.toml").write_text(
+        "[project]\nname='x'\nurl='https://packages.example.com/simple'\n",
+        encoding="utf-8",
+    )
+    issues = public_source_privacy_issues(
+        root, environment={"UV_DEFAULT_INDEX": "https://packages.example.com/simple"}
+    )
     assert issues
     assert "packages.example.com" not in " ".join(issues)
 
 
-def test_private_backend_lock_registry_is_rejected_without_echoing_hostname(tmp_path: Path) -> None:
+def test_private_backend_lock_registry_is_rejected_without_echoing_hostname(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path, "https://registry.npmjs.org/a/-/a-1.0.0.tgz")
     (root / "backend/uv.lock").write_text(
         'version = 1\nrequires-python = ">=3.12"\n[[package]]\nname = "a"\nversion = "1.0.0"\nsource = { registry = "https://python.company.internal/simple" }\n',
@@ -95,7 +122,10 @@ def test_backend_lock_rejects_arbitrary_github_url(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     issues = backend_uv_lock_privacy_issues(root)
-    assert any("non-public/non-approved Python registry or artifact host" in issue for issue in issues)
+    assert any(
+        "non-public/non-approved Python registry or artifact host" in issue
+        for issue in issues
+    )
 
 
 def test_backend_lock_rejects_http_github_release_artifact(tmp_path: Path) -> None:
@@ -106,10 +136,15 @@ def test_backend_lock_rejects_http_github_release_artifact(tmp_path: Path) -> No
         encoding="utf-8",
     )
     issues = backend_uv_lock_privacy_issues(root)
-    assert any("non-public/non-approved Python registry or artifact host" in issue for issue in issues)
+    assert any(
+        "non-public/non-approved Python registry or artifact host" in issue
+        for issue in issues
+    )
 
 
-def test_backend_lock_allows_repository_approved_public_python_hosts(tmp_path: Path) -> None:
+def test_backend_lock_allows_repository_approved_public_python_hosts(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path, "https://registry.npmjs.org/a/-/a-1.0.0.tgz")
     (root / "backend/uv.lock").write_text(
         'version = 1\nrequires-python = ">=3.12"\n[[package]]\nname = "a"\nversion = "1.0.0"\n'
@@ -120,7 +155,9 @@ def test_backend_lock_allows_repository_approved_public_python_hosts(tmp_path: P
     assert backend_uv_lock_privacy_issues(root) == ()
 
 
-def test_backend_lock_rejects_nonpublic_registry_even_without_ambient_hint(tmp_path: Path) -> None:
+def test_backend_lock_rejects_nonpublic_registry_even_without_ambient_hint(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path, "https://registry.npmjs.org/a/-/a-1.0.0.tgz")
     private_host = "repo.intern.example.test"
     (root / "backend/uv.lock").write_text(

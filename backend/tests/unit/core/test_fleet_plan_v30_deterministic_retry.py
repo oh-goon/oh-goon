@@ -75,7 +75,6 @@ def test_retry_decision_only_replays_declared_completed_exit_codes() -> None:
     assert exhausted.policy_reason == "temporary upstream unavailable"
 
 
-
 def test_outer_retry_is_rejected_outside_attempt_private_strict_cicd() -> None:
     step = ResolvedCommandStep(
         step_id="local",
@@ -97,6 +96,7 @@ def test_outer_retry_is_rejected_outside_attempt_private_strict_cicd() -> None:
             execution=MaintenanceExecutionPolicy(),
             steps=(step,),
         )
+
 
 def test_outer_retry_is_rejected_when_step_has_network_authority() -> None:
     step = ResolvedCommandStep(

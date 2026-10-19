@@ -4,7 +4,11 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-_DYNAMIC_FILE_LOADER_CALLS = {"spec_from_file_location", "module_from_spec", "exec_module"}
+_DYNAMIC_FILE_LOADER_CALLS = {
+    "spec_from_file_location",
+    "module_from_spec",
+    "exec_module",
+}
 _TEST_MODULE_PREFIX = "_oh_goon_test_"
 
 
@@ -65,7 +69,9 @@ def _synthetic_module_names(path: Path) -> tuple[str, ...]:
     return tuple(names)
 
 
-def test_repository_tests_use_explicit_test_only_identity_for_dynamic_module_loading() -> None:
+def test_repository_tests_use_explicit_test_only_identity_for_dynamic_module_loading() -> (
+    None
+):
     observed: dict[str, set[tuple[str | None, str]]] = {}
     for base in (ROOT / "backend/tests", ROOT / "scripts/tests"):
         for path in base.rglob("*.py"):

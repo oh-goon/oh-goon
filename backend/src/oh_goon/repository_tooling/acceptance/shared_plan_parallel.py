@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
 import time
 import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
 
 from oh_goon.core.process_birth import observe_process_liveness
 from oh_goon.core.strict_executor_authority import EXECUTORS_FILE_ENV
@@ -21,6 +21,7 @@ from oh_goon.repository_tooling.acceptance.uv_fixture import (
     editable_uv_lock,
 )
 from oh_goon.repository_tooling.local_access_http import authorized_request
+
 PARALLEL_PLAN_KEY = "acceptance-parallel-shared"
 
 PARALLEL_SHARED_PLAN = """version: 1
@@ -39,7 +40,7 @@ goons:
 - python/release-metadata
 """
 
-_PARALLEL_RUNTIME_TEMPLATE = r'''from __future__ import annotations
+_PARALLEL_RUNTIME_TEMPLATE = r"""from __future__ import annotations
 
 import argparse
 from pathlib import Path
@@ -78,17 +79,13 @@ def main() -> None:
         f"1.0.0-{{args.channel}}.{{args.revision[:7]}}\n", encoding="utf-8"
     )
     _marker("finished", args.revision).write_text("completed\n", encoding="utf-8")
-'''
+"""
 
 
 def _parallel_runtime(path: Path, behavior: str) -> str:
     if behavior not in {"normal", "fail", "slow-success"}:
         raise ValueError(f"unsupported parallel acceptance behavior: {behavior}")
-    return _PARALLEL_RUNTIME_TEMPLATE.format(
-        behavior=behavior, marker_root=str(path.resolve())
-    )
-
-
+    return _PARALLEL_RUNTIME_TEMPLATE.format(behavior=behavior, marker_root=str(path.resolve()))
 
 
 def prepare_parallel_shared_repository(path: Path, *, behavior: str = "normal") -> None:
@@ -234,10 +231,14 @@ def _wait_parallel_children(revision: str, *, timeout_seconds: float = 30.0) -> 
         if len(matches) >= 2:
             return matches[0], matches[1]
         time.sleep(0.05)
-    raise RuntimeError("parallel Shared Plan never had two physical release-metadata children alive")
+    raise RuntimeError(
+        "parallel Shared Plan never had two physical release-metadata children alive"
+    )
 
 
-def _wait_children_dead(pids: tuple[int, int], revision: str, *, timeout_seconds: float = 8.0) -> None:
+def _wait_children_dead(
+    pids: tuple[int, int], revision: str, *, timeout_seconds: float = 8.0
+) -> None:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         if all(not _pid_alive(pid) for pid in pids) and not _processes_for_revision(revision):
@@ -260,7 +261,9 @@ def _wait_run(
     deadline = time.monotonic() + timeout_seconds
     last: dict[str, object] | None = None
     while time.monotonic() < deadline:
-        last = _request_json("GET", f"{base_url}/api/fleet/runs/{run_id}", access_token=access_token)
+        last = _request_json(
+            "GET", f"{base_url}/api/fleet/runs/{run_id}", access_token=access_token
+        )
         run = last.get("run")
         status = run.get("status") if isinstance(run, dict) else None
         if status == expected_status:
@@ -374,9 +377,7 @@ def _request_expected_error(
             ) from exc
         value = json.loads(body)
         if not isinstance(value, dict) or value.get("code") != expected_code:
-            raise RuntimeError(
-                f"expected {expected_code} from {url}, got {value!r}"
-            ) from exc
+            raise RuntimeError(f"expected {expected_code} from {url}, got {value!r}") from exc
         return value
     raise RuntimeError(f"expected HTTP {expected_status} from {url}, request succeeded")
 
@@ -479,8 +480,7 @@ def exercise_parallel_shared_plan_stale_preview_recovery(
     if _processes_for_revision(stale_revision):
         raise RuntimeError("stale Shared Plan preview launched physical repository work")
     if any(
-        (repository / f"parallel-started-{stale_revision}").exists()
-        for repository in (left, right)
+        (repository / f"parallel-started-{stale_revision}").exists() for repository in (left, right)
     ):
         raise RuntimeError("stale Shared Plan preview produced repository start effects")
     _request_expected_error(
@@ -572,9 +572,7 @@ def exercise_parallel_shared_plan_failure_repair(
     children = _wait_parallel_children(failure_revision)
     _wait_marker(failing, "started", failure_revision)
     _wait_marker(sibling, "started", failure_revision)
-    failed = _wait_run(
-        base_url, failed_run_id, access_token=access_token, expected_status="FAILED"
-    )
+    failed = _wait_run(base_url, failed_run_id, access_token=access_token, expected_status="FAILED")
     _wait_marker(failing, "failed", failure_revision)
     _wait_marker(sibling, "finished", failure_revision)
     if (failing / f"parallel-finished-{failure_revision}").exists():
@@ -584,7 +582,10 @@ def exercise_parallel_shared_plan_failure_repair(
     failed_rendered = json.dumps(failed)
     if failing.name not in failed_rendered or sibling.name not in failed_rendered:
         raise RuntimeError("failed parallel Shared Plan lost per-repository attribution")
-    if "intentional repository-owned failure" not in failed_rendered and "exit" not in failed_rendered.lower():
+    if (
+        "intentional repository-owned failure" not in failed_rendered
+        and "exit" not in failed_rendered.lower()
+    ):
         raise RuntimeError("failed parallel Shared Plan lost deterministic failure evidence")
     game_tape = failed.get("game_tape")
     repository_facts = game_tape.get("repositories") if isinstance(game_tape, dict) else None
@@ -598,9 +599,13 @@ def exercise_parallel_shared_plan_failure_repair(
         if isinstance(name, str) and isinstance(status, str):
             statuses[name] = status
     if statuses.get(failing.name) != "FAILED":
-        raise RuntimeError(f"failed parallel target lost deterministic FAILED attribution: {statuses!r}")
+        raise RuntimeError(
+            f"failed parallel target lost deterministic FAILED attribution: {statuses!r}"
+        )
     if statuses.get(sibling.name) != "SUCCESS":
-        raise RuntimeError(f"running sibling did not finish SUCCESS after peer failure: {statuses!r}")
+        raise RuntimeError(
+            f"running sibling did not finish SUCCESS after peer failure: {statuses!r}"
+        )
     operations = failed.get("operations")
     if not isinstance(operations, list):
         raise RuntimeError("failed parallel Shared Plan lost successful operation evidence")
@@ -716,7 +721,9 @@ def exercise_parallel_shared_plan_cancellation(
         base_url, cancelled_run_id, access_token=access_token, expected_status="CANCELLED"
     )
     if cancelled.get("outcome") != "CANCELLED":
-        raise RuntimeError(f"parallel Shared Plan cancellation lost CANCELLED outcome: {cancelled!r}")
+        raise RuntimeError(
+            f"parallel Shared Plan cancellation lost CANCELLED outcome: {cancelled!r}"
+        )
     _wait_children_dead(children, cancel_revision)
     fleet = _request_json("GET", f"{base_url}/api/fleet", access_token=access_token)
     if fleet.get("active_fleet_run") is not None:
@@ -744,7 +751,9 @@ def exercise_parallel_shared_plan_cancellation(
         base_url, success_run_id, access_token=access_token, expected_status="COMPLETED"
     )
     if success.get("outcome") != "SUCCESS":
-        raise RuntimeError(f"fresh parallel Shared Plan did not succeed after cancellation: {success!r}")
+        raise RuntimeError(
+            f"fresh parallel Shared Plan did not succeed after cancellation: {success!r}"
+        )
     success_rendered = json.dumps(success)
     for repository in (left, right):
         if repository.name not in success_rendered:

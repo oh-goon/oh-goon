@@ -14,7 +14,9 @@ def check_launch_status_schemas(root: Path) -> list[Violation]:
     return owned_string_constant_violations(
         root,
         {
-            root / "backend/src/oh_goon/runtime/local_launch_binding.py": ("LOCAL_LAUNCH_BINDING_SCHEMA",),
+            root / "backend/src/oh_goon/runtime/local_launch_binding.py": (
+                "LOCAL_LAUNCH_BINDING_SCHEMA",
+            ),
             root / "backend/src/oh_goon/core/launch_status.py": ("LAUNCH_STATUS_SCHEMA",),
             root / "backend/src/oh_goon/cli_status.py": ("LAUNCH_STATUS_ERROR_SCHEMA",),
         },

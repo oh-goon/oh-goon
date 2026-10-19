@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 
 from oh_goon.core.game_tape_projection import project_game_tape
@@ -13,18 +13,18 @@ from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.journal import Journal
-from tests.factories.repository_effect_runtime import effect_recovery
 from tests.factories.local_lifecycle_execution import prepare_local_lifecycle_execution
+from tests.factories.repository_effect_runtime import effect_recovery
 
 
 def _script_plan(*, retry: str = "") -> str:
-    return f'''version: 1
+    return f"""version: 1
 execution:
   purpose: verification
 steps:
   - id: lifecycle
     run: "./lifecycle-step.py"
-{retry}'''
+{retry}"""
 
 
 def test_real_local_success_reconstructs_from_fresh_durable_owners(tmp_path: Path) -> None:
@@ -170,7 +170,10 @@ def test_process_restart_recovery_terminalizes_orphan_from_durable_truth(tmp_pat
     )
     session = execution.lifecycle.activate(execution.ticket)
     execution.lifecycle.begin(session)
-    assert execution.journal.read_view().required_run_detail(execution.fleet_run_id).run.status is FleetRunStatus.RUNNING
+    assert (
+        execution.journal.read_view().required_run_detail(execution.fleet_run_id).run.status
+        is FleetRunStatus.RUNNING
+    )
 
     environment.alive = False
     database = LocalDatabase(execution.database_path)

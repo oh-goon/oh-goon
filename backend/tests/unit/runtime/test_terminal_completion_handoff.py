@@ -41,7 +41,8 @@ def _repository(root: Path) -> None:
 
 
 def test_local_wait_reconstructs_terminal_truth_from_fresh_sqlite_after_worker_retires(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     repositories = tmp_path / "repos"
     _repository(repositories / "a")

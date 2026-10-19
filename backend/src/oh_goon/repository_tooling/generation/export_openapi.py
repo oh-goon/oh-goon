@@ -42,9 +42,7 @@ def write_openapi(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Generate the current backend OpenAPI contract"
-    )
+    parser = argparse.ArgumentParser(description="Generate the current backend OpenAPI contract")
     parser.add_argument(
         "--stdout",
         action="store_true",

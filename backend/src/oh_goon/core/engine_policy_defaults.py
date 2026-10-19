@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Built-in Oh-Goon repository-operation policy defaults and environment defaults."""
+
+from __future__ import annotations
 
 from types import MappingProxyType
 

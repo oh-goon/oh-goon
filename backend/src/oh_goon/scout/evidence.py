@@ -4,15 +4,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
-from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.execution_observability import (
     RepositoryRunObservation,
     project_repository_run_observations,
 )
 from oh_goon.core.fleet_plan_projection import atomic_goon_by_step
-from oh_goon.scout.models import ScoutComparisonEnvironment, ScoutResourceEnvelope
+from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import GameTapeStatus
+from oh_goon.scout.models import ScoutComparisonEnvironment, ScoutResourceEnvelope
 
 _EXECUTED_STEP_STATUSES = frozenset(
     {

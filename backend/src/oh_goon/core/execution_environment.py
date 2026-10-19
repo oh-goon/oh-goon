@@ -3,13 +3,14 @@
 This is a projection of one configured backend, never a second selector or an
 admission decision. Enforcer will consume this contract in the next phases.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.enforcer_lace_trust import canonical_bytes, digest
+from oh_goon.core.errors import FleetPlanInvalid
 
 EXECUTION_ENVIRONMENT_SCHEMA = "oh-goon.execution-environment/v1"
 SUPPORTED_BACKENDS = frozenset({"bubblewrap", "opensandbox"})
@@ -57,17 +58,21 @@ class ResolvedExecutionEnvironment:
             raise FleetPlanInvalid("ExecutionEnvironment capability/backend identity mismatch")
         if not executor_id or executor_generation < 1 or not backend_configuration_identity:
             raise FleetPlanInvalid("ExecutionEnvironment authority is incomplete")
-        capability_id = digest("oh-goon/backend-capability-manifest/v1", canonical_bytes(dict(capability_statement)))
+        capability_id = digest(
+            "oh-goon/backend-capability-manifest/v1", canonical_bytes(dict(capability_statement))
+        )
         identity = digest(
             "oh-goon/execution-environment/v1",
-            canonical_bytes({
-                "schema": EXECUTION_ENVIRONMENT_SCHEMA,
-                "backend": backend,
-                "executor": {"id": executor_id, "generation": executor_generation},
-                "backend_configuration_identity": backend_configuration_identity,
-                "capability_manifest_identity": capability_id,
-                "deployment_authority": dict(deployment_authority),
-            }),
+            canonical_bytes(
+                {
+                    "schema": EXECUTION_ENVIRONMENT_SCHEMA,
+                    "backend": backend,
+                    "executor": {"id": executor_id, "generation": executor_generation},
+                    "backend_configuration_identity": backend_configuration_identity,
+                    "capability_manifest_identity": capability_id,
+                    "deployment_authority": dict(deployment_authority),
+                }
+            ),
         )
         return cls(
             schema=EXECUTION_ENVIRONMENT_SCHEMA,
@@ -81,4 +86,6 @@ class ResolvedExecutionEnvironment:
 
     def require_unchanged(self, fresh: ResolvedExecutionEnvironment) -> None:
         if self != fresh:
-            raise FleetPlanInvalid("ExecutionEnvironment identity/capability/generation drift; fresh admission required")
+            raise FleetPlanInvalid(
+                "ExecutionEnvironment identity/capability/generation drift; fresh admission required"
+            )

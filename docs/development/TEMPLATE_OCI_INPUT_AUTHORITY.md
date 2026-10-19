@@ -1,8 +1,9 @@
 # Shipped OCI input ownership and registry identities
 
 This is the M135 owner audit of the actual shipped OCI templates. It is **not** another
-input schema. `templates/plans/oci/**/plan.yml` owns the caller's projected input
-interface, the imported Goons own declarations/defaults/constraints, and the canonical
+input schema. `templates/plans/oci/**/plan.yml` owns the ordered imports and intentional
+bindings. Unique unbound public inputs are exposed automatically; imported Goons own
+declarations/defaults/constraints, and the canonical
 `FleetPlanResolver` owns resolution and explicit transport. See the
 [general input resolution contract](TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md).
 
@@ -32,7 +33,9 @@ These roles are reviewed against the shipped
 
 | Input | Classification | Owning contract and why it stays visible |
 | --- | --- | --- |
-| `coverage_threshold` | A: caller choice | `python/test`, explicitly forwarded through `python/quality`; not a fixed global threshold |
+| `project` | A: caller choice | Python project directory, explicitly forwarded to native environments |
+| `dependency_group` | A: caller choice | Locked native tool group used by the Python capabilities |
+| `typechecker` | A: caller choice | `python/typecheck`, uniquely projected through `python/quality` |
 | `base_registry_hostname` | A: caller choice | `oci/image`; permitted external digest-pinned source registry |
 | `publish_registry_hostname` | A: caller choice | `oci/publish`; independent publication destination |
 | `publish_repository` | A: caller choice | `oci/publish`; destination namespace/repository |
@@ -62,7 +65,7 @@ actual producer values are not invented during admission.
 | --- | --- | --- |
 | `oci/image` | Build choices only | Does not publish |
 | `oci/publish-image` | Build choices + publication coordinates | No quality gate or Kubernetes target |
-| `oci/release-candidate` | Build choices + quality threshold | Does not publish |
+| `oci/release-candidate` | Build choices + native Python quality selections | Does not publish |
 | `oci/release` | Build, publication, quality | No Kubernetes target |
 | `oci/release-deploy` | Build, publication, quality, Kubernetes target | Deployment image supplied by upstream publication output |
 | `oci/tag-gate` | Registry/repository/tag/expected digest | **Read-only assertion** of an existing tag; not a publish credential alias or mutable tag creation |
@@ -70,6 +73,7 @@ actual producer values are not invented during admission.
 There is deliberately **no arbitrary maximum input count**. A reviewer must show
 which single authority makes an input redundant before deleting it, and must
 prove negative admission and Step-work isolation for any changed binding. Do not
-replace explicit forwarding with implicit inheritance or introduce environment
-fallbacks. Resolved egress and typed executor targets must show the exact chosen
+replace shared recipient bindings or producer dataflow with implicit fan-out, or
+introduce environment fallbacks. Unique scalar projection needs no repeated forwarding.
+Resolved egress and typed executor targets must show the exact chosen
 source/destination, including when the two registry hostnames differ.

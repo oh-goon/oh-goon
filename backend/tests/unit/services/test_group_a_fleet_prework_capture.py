@@ -3,14 +3,15 @@
 These are NOT live issuer/cutover tests: M157–M165 still require a committed
 operational Run and therefore cannot produce pre-admission native signatures.
 """
+
 from __future__ import annotations
 
 import sqlite3
 
 import pytest
 
-from oh_goon.core.errors import JournalConflict
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
+from oh_goon.core.errors import JournalConflict
 from oh_goon.core.models.run_admission import FleetRunAdmissionIntent
 from oh_goon.repository_tooling import enforcer_lace_native_issuer_suite as native_suite
 from oh_goon.runtime.database import LocalDatabase
@@ -25,22 +26,31 @@ def setup(tmp_path, monkeypatch):
     existing = original_journal.read_view().run_events("durable-run").events[0]
     fresh = Journal(LocalDatabase(tmp_path / "m166-precommit.sqlite"))
     intent = FleetRunAdmissionIntent(
-        source=existing.source, target=existing.target, capability=existing.capability,
-        execution=existing.execution, repository_admissions=existing.repository_admissions,
-        application_launch=existing.application_launch, scheduling=existing.scheduling,
+        source=existing.source,
+        target=existing.target,
+        capability=existing.capability,
+        execution=existing.execution,
+        repository_admissions=existing.repository_admissions,
+        application_launch=existing.application_launch,
+        scheduling=existing.scheduling,
     )
     return fresh, contract, path_authority, intent, existing
 
 
 def capture(journal, conn, intent, event):
     return FleetAdmissionPlanner.prepare_fleet_prework_capture_in(
-        journal=journal, connection=conn, run_id=event.fleet_run_id,
-        intent=intent, repository_scope=event.repository_scope,
+        journal=journal,
+        connection=conn,
+        run_id=event.fleet_run_id,
+        intent=intent,
+        repository_scope=event.repository_scope,
         targets=list(event.targets),
     )
 
 
-def test_precommit_capture_is_identical_to_actual_canonical_operational_admission(tmp_path, monkeypatch):
+def test_precommit_capture_is_identical_to_actual_canonical_operational_admission(
+    tmp_path, monkeypatch
+):
     journal, _, _, intent, event = setup(tmp_path, monkeypatch)
     with journal._database.transaction(write=True) as conn:
         before = conn.total_changes
@@ -50,10 +60,13 @@ def test_precommit_capture_is_identical_to_actual_canonical_operational_admissio
         assert candidate.repository_admissions == event.repository_admissions
         assert conn.total_changes == before
         assert journal.read_view_from_connection(conn).run_detail("durable-run") is None
-        journal.admit_run_in(conn, event.fleet_run_id, intent,
-                             event.repository_scope, list(event.targets))
+        journal.admit_run_in(
+            conn, event.fleet_run_id, intent, event.repository_scope, list(event.targets)
+        )
         stored = journal.read_view_from_connection(conn).run_events("durable-run").events[0]
-        assert candidate.model_dump(exclude={"generated_at"}) == stored.model_dump(exclude={"generated_at"})
+        assert candidate.model_dump(exclude={"generated_at"}) == stored.model_dump(
+            exclude={"generated_at"}
+        )
     assert journal.read_view().run_detail("durable-run") is not None
 
 
@@ -73,8 +86,12 @@ def test_prework_requires_an_existing_transaction_and_real_journal(tmp_path, mon
     with journal._database.transaction(write=True) as conn:
         with pytest.raises(TrustProtocolError, match="canonical operational Fleet Journal"):
             FleetAdmissionPlanner.prepare_fleet_prework_capture_in(
-                journal=object(), connection=conn, run_id=event.fleet_run_id,
-                intent=intent, repository_scope=event.repository_scope, targets=list(event.targets),
+                journal=object(),
+                connection=conn,
+                run_id=event.fleet_run_id,
+                intent=intent,
+                repository_scope=event.repository_scope,
+                targets=list(event.targets),
             )
         assert journal.read_view_from_connection(conn).run_detail("durable-run") is None
 
@@ -94,8 +111,12 @@ def test_invalid_capture_fails_before_any_run_fact(tmp_path, monkeypatch, invali
         before = conn.total_changes
         with pytest.raises((ValueError, JournalConflict, TrustProtocolError)):
             FleetAdmissionPlanner.prepare_fleet_prework_capture_in(
-                journal=journal, connection=conn, run_id=run_id, intent=intent,
-                repository_scope=event.repository_scope, targets=targets,
+                journal=journal,
+                connection=conn,
+                run_id=run_id,
+                intent=intent,
+                repository_scope=event.repository_scope,
+                targets=targets,
             )
         assert conn.total_changes == before
         assert journal.read_view_from_connection(conn).run_detail("durable-run") is None
@@ -104,7 +125,9 @@ def test_invalid_capture_fails_before_any_run_fact(tmp_path, monkeypatch, invali
 def test_capture_rejects_when_run_already_exists(tmp_path, monkeypatch):
     journal, _, _, intent, event = setup(tmp_path, monkeypatch)
     with journal._database.transaction(write=True) as conn:
-        journal.admit_run_in(conn, event.fleet_run_id, intent, event.repository_scope, list(event.targets))
+        journal.admit_run_in(
+            conn, event.fleet_run_id, intent, event.repository_scope, list(event.targets)
+        )
     with journal._database.transaction(write=True) as conn:
         before = conn.total_changes
         with pytest.raises(JournalConflict, match="already"):
@@ -112,7 +135,9 @@ def test_capture_rejects_when_run_already_exists(tmp_path, monkeypatch):
         assert conn.total_changes == before
 
 
-def test_committed_run_only_issuer_suite_fails_closed_for_new_prework_candidate(tmp_path, monkeypatch):
+def test_committed_run_only_issuer_suite_fails_closed_for_new_prework_candidate(
+    tmp_path, monkeypatch
+):
     journal, contract, authority, intent, event = setup(tmp_path, monkeypatch)
     with journal._database.transaction(write=True) as conn:
         candidate = capture(journal, conn, intent, event)
@@ -121,7 +146,10 @@ def test_committed_run_only_issuer_suite_fails_closed_for_new_prework_candidate(
         # candidate. Connecting them as-is would create a circular admission.
         with pytest.raises(TrustProtocolError, match="durable Run admission"):
             native_suite.issue_fixed_native_admission_evidence(
-                journal=journal, contract=contract, path_authority=authority,
-                key_directory=tmp_path / "nonexistent-keys", trusted_public_roots=roots(),
+                journal=journal,
+                contract=contract,
+                path_authority=authority,
+                key_directory=tmp_path / "nonexistent-keys",
+                trusted_public_roots=roots(),
             )
         assert journal.read_view_from_connection(conn).run_detail("durable-run") is None

@@ -5,6 +5,7 @@ provides a fresh, empty, exclusively delegated disposable cgroup-v2 parent.
 An allocation_pending crash intentionally leaves a quarantined native child;
 this test never invents cleanup authority for the unknown original inode.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,14 +25,19 @@ from oh_goon.integrations import _fleet_plan_cgroup_resources as cg
 
 def _mount_path(text: str) -> str:
     import re
+
     return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), text)
 
 
 def _require_disposable_delegated_cgroup(root: Path, mountinfo: str) -> dict[str, str]:
     """Pure fail-before-effects preflight; no probes may create/attach/kill."""
-    if (not root.is_absolute() or root.is_symlink() or root.name.startswith(".")
-            or not root.name.startswith("oh-goon-native-")
-            or root.resolve() != root):
+    if (
+        not root.is_absolute()
+        or root.is_symlink()
+        or root.name.startswith(".")
+        or not root.name.startswith("oh-goon-native-")
+        or root.resolve() != root
+    ):
         raise RuntimeError("CO-R3N requires a canonical dedicated oh-goon-native-* cgroup")
     metadata = root.stat()
     if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
@@ -60,7 +66,11 @@ def _require_disposable_delegated_cgroup(root: Path, mountinfo: str) -> dict[str
         raise RuntimeError("CO-R3N delegated parent already contains processes")
     if not os.access(root, os.W_OK | os.X_OK):
         raise RuntimeError("CO-R3N delegated parent is not writable")
-    return {"root": str(root), "filesystem": "cgroup2", "mount": str(max(mounts, key=lambda pair: len(pair[0].parts))[0])}
+    return {
+        "root": str(root),
+        "filesystem": "cgroup2",
+        "mount": str(max(mounts, key=lambda pair: len(pair[0].parts))[0]),
+    }
 
 
 def _native_parent() -> Path:
@@ -68,17 +78,21 @@ def _native_parent() -> Path:
     if not selected:
         raise RuntimeError("CO-R3N native witness was run without explicit QUALIFY_R3N_CGROUP_ROOT")
     root = Path(selected)
-    _require_disposable_delegated_cgroup(root, Path("/proc/self/mountinfo").read_text(encoding="utf-8"))
+    _require_disposable_delegated_cgroup(
+        root, Path("/proc/self/mountinfo").read_text(encoding="utf-8")
+    )
     return root
 
 
 def _lease(root: Path, state_root: Path) -> cg.CgroupV2AttemptLease:
     identity = uuid4().hex[:16]
     return cg.CgroupV2AttemptLease(
-        root=root, cgroup=root / f"attempt-{identity}",
+        root=root,
+        cgroup=root / f"attempt-{identity}",
         state_file=state_root / "state" / f"{identity}.json",
         lock_path=state_root / "lock" / "original.lock",
-        policy=CicdResourcePolicy(), attempt_root=state_root / "attempt",
+        policy=CicdResourcePolicy(),
+        attempt_root=state_root / "attempt",
     )
 
 
@@ -90,8 +104,12 @@ def test_real_cgroup_v2_original_process_attachment_and_teardown(tmp_path: Path)
     lease.open()
     assert lease.cgroup_identity is not None
     assert json.loads(lease.state_file.read_text())["phase"] == "identity_bound"
-    command = (*lease.command_prefix(), sys.executable, "-c",
-               "from pathlib import Path;print(Path('/proc/self/cgroup').read_text().strip())")
+    command = (
+        *lease.command_prefix(),
+        sys.executable,
+        "-c",
+        "from pathlib import Path;print(Path('/proc/self/cgroup').read_text().strip())",
+    )
     result = subprocess.run(command, check=False, text=True, capture_output=True, timeout=15)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().endswith("/" + lease.cgroup.name)
@@ -119,7 +137,10 @@ def test_real_cgroup_v2_stale_identity_cannot_start_payload(tmp_path: Path) -> N
         prefix = lease.command_prefix()
         result = subprocess.run(
             (*prefix, sys.executable, "-c", "print('CO_R3O_PAYLOAD_EXECUTED')"),
-            check=False, text=True, capture_output=True, timeout=15,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=15,
         )
         assert result.returncode != 0
         assert "CO_R3O_PAYLOAD_EXECUTED" not in result.stdout
@@ -180,8 +201,13 @@ def die(path,*args,**kwargs):
 Path.mkdir=die
 lease.open()
 """
-    env = dict(os.environ, R3N_ROOT=str(lease.root), R3N_NAME=lease.cgroup.name,
-               R3N_STATE=str(lease.state_file), R3N_LOCK=str(lease.lock_path))
+    env = dict(
+        os.environ,
+        R3N_ROOT=str(lease.root),
+        R3N_NAME=lease.cgroup.name,
+        R3N_STATE=str(lease.state_file),
+        R3N_LOCK=str(lease.lock_path),
+    )
     result = subprocess.run([sys.executable, "-c", program], env=env, timeout=15, check=False)
     assert result.returncode == 77, result.returncode
     body = json.loads(lease.state_file.read_text(encoding="utf-8"))
@@ -193,4 +219,6 @@ lease.open()
         cg._reconcile_stale_cgroups(lease.root, lease.state_file.parent)
     assert lease.state_file.exists()
     assert (lease.cgroup.stat().st_dev, lease.cgroup.stat().st_ino) == original_identity
-    print("CO_R3N_NATIVE_PENDING=QUARANTINED (NOT cleaned; independent custody required)", flush=True)
+    print(
+        "CO_R3N_NATIVE_PENDING=QUARANTINED (NOT cleaned; independent custody required)", flush=True
+    )

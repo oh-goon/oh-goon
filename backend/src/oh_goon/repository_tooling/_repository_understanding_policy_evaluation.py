@@ -77,7 +77,9 @@ def _route_confidence_finding(
     state: EvaluationState, finding: dict[str, Any], confidence: float
 ) -> None:
     confidence_floor = float(state.profile["critical_judgment_confidence_minimum"])
-    target = state.critical_failures if confidence >= confidence_floor else state.adjudication_required
+    target = (
+        state.critical_failures if confidence >= confidence_floor else state.adjudication_required
+    )
     target.append(finding)
 
 
@@ -253,8 +255,13 @@ def _claim_evidence(
     if not isinstance(authority, dict):
         raise ValueError(f"{label} evidence authority assessment is missing")
     quality, floor_met, minimum, _ = _evidence_authority_result(
-        state, qid=qid, expected=expected, confidence=confidence, existence=existence,
-        quality=quality, authority_assessment=authority
+        state,
+        qid=qid,
+        expected=expected,
+        confidence=confidence,
+        existence=existence,
+        quality=quality,
+        authority_assessment=authority,
     )
     state.all_claim_evidence_scores.append(quality)
     _record_fabricated_evidence(
@@ -411,10 +418,10 @@ def _evaluate_contradictions(
     return observed_ids
 
 
-def _validated_question_status(
-    observation: dict[str, Any], qid: str
-) -> tuple[str, str]:
-    status = _require_choice(observation.get("question_status"), QUESTION_STATES, f"{qid} question_status")
+def _validated_question_status(observation: dict[str, Any], qid: str) -> tuple[str, str]:
+    status = _require_choice(
+        observation.get("question_status"), QUESTION_STATES, f"{qid} question_status"
+    )
     reference_status = _require_choice(
         observation.get("reference_status"), REFERENCE_STATES, f"{qid} reference_status"
     )
@@ -494,11 +501,12 @@ def evaluate_question(
     if not isinstance(raw_assertions, list):
         raise ValueError(f"{qid} assertions must be a list")
     state.assertions.extend(
-        _validated_assertion(raw, qid, index)
-        for index, raw in enumerate(raw_assertions, start=1)
+        _validated_assertion(raw, qid, index) for index, raw in enumerate(raw_assertions, start=1)
     )
     question_score = _percentage(100.0 * max(0.0, sum(claim_values) / len(claim_values)))
-    evidence_quality = _percentage(sum(evidence_scores) / len(evidence_scores)) if evidence_scores else 0.0
+    evidence_quality = (
+        _percentage(sum(evidence_scores) / len(evidence_scores)) if evidence_scores else 0.0
+    )
     dimension = question["public"]["dimension"]
     state.dimension_claim_values[dimension].extend(claim_values)
     state.dimension_question_scores[dimension].append(question_score)

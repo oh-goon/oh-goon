@@ -11,6 +11,7 @@ _TRANSPORT = Path("backend/src/oh_goon/integrations/_fleet_plan_opensandbox_tran
 _ISOLATION = Path("backend/src/oh_goon/integrations/fleet_plan_opensandbox_isolation.py")
 _PYPROJECT = Path("backend/pyproject.toml")
 
+
 def _imports_opensandbox(path: Path) -> bool:
     try:
         tree = python_ast(path)
@@ -18,7 +19,10 @@ def _imports_opensandbox(path: Path) -> bool:
         return True
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            if any(alias.name == "opensandbox" or alias.name.startswith("opensandbox.") for alias in node.names):
+            if any(
+                alias.name == "opensandbox" or alias.name.startswith("opensandbox.")
+                for alias in node.names
+            ):
                 return True
         elif isinstance(node, ast.ImportFrom):
             if node.module == "opensandbox" or (node.module or "").startswith("opensandbox."):
@@ -53,7 +57,11 @@ def check_sandbox_provider_boundary_contract(root: Path = ROOT) -> list[Violatio
     pyproject = root / _PYPROJECT
 
     if _imports_opensandbox(transport):
-        violations.append(Violation(transport, "OpenSandbox provider transport must not import the provider Python SDK"))
+        violations.append(
+            Violation(
+                transport, "OpenSandbox provider transport must not import the provider Python SDK"
+            )
+        )
 
     try:
         project = tomllib.loads(pyproject.read_text(encoding="utf-8"))
@@ -63,8 +71,16 @@ def check_sandbox_provider_boundary_contract(root: Path = ROOT) -> list[Violatio
         dependencies = list(project.get("project", {}).get("dependencies", ()))
         optional = project.get("project", {}).get("optional-dependencies", {})
         all_declared = dependencies + [item for values in optional.values() for item in values]
-        if any(str(item).split("[", 1)[0].split("=", 1)[0].strip().lower() == "opensandbox" for item in all_declared):
-            violations.append(Violation(pyproject, "OpenSandbox provider must not become Oh-Goon Python dependency authority"))
+        if any(
+            str(item).split("[", 1)[0].split("=", 1)[0].strip().lower() == "opensandbox"
+            for item in all_declared
+        ):
+            violations.append(
+                Violation(
+                    pyproject,
+                    "OpenSandbox provider must not become Oh-Goon Python dependency authority",
+                )
+            )
 
     isolation_text = isolation.read_text(encoding="utf-8") if isolation.is_file() else ""
     for token in (
@@ -75,17 +91,34 @@ def check_sandbox_provider_boundary_contract(root: Path = ROOT) -> list[Violatio
         "server_configuration_sha256",
     ):
         if token not in isolation_text:
-            violations.append(Violation(isolation, f"sandbox provider authority contract is missing: {token}"))
-    if "OpenSandboxRuntimeKind.RUNC," in isolation_text or "OpenSandboxRuntimeKind.GVISOR," in isolation_text:
-        violations.append(Violation(isolation, "deny-all remote OpenSandbox backend must not admit runc or gVisor"))
+            violations.append(
+                Violation(isolation, f"sandbox provider authority contract is missing: {token}")
+            )
+    if (
+        "OpenSandboxRuntimeKind.RUNC," in isolation_text
+        or "OpenSandboxRuntimeKind.GVISOR," in isolation_text
+    ):
+        violations.append(
+            Violation(
+                isolation, "deny-all remote OpenSandbox backend must not admit runc or gVisor"
+            )
+        )
 
     transport_text = transport.read_text(encoding="utf-8") if transport.is_file() else ""
-    for token in (
-        '"resourceLimits"',
-    ):
+    for token in ('"resourceLimits"',):
         if token not in transport_text:
-            violations.append(Violation(transport, f"sandbox provider transport is missing fail-closed public field: {token}"))
+            violations.append(
+                Violation(
+                    transport,
+                    f"sandbox provider transport is missing fail-closed public field: {token}",
+                )
+            )
     if not _assigns_environment_key(transport, "OPEN_SANDBOX_API_KEY"):
-        violations.append(Violation(transport, "OpenSandbox API key must be transported through environment authority, independent of private local names"))
+        violations.append(
+            Violation(
+                transport,
+                "OpenSandbox API key must be transported through environment authority, independent of private local names",
+            )
+        )
 
     return violations

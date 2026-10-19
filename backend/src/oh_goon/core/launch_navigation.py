@@ -42,11 +42,17 @@ def safe_launch_navigation_target(
 
     service_name = NAVIGATION_SERVICE_BY_PROFILE.get(manifest.intent.profile)
     if service_name is None:
-        raise ValueError(f"launch profile has no browser navigation policy: {manifest.intent.profile}")
-    requested = next((item for item in manifest.intent.services if item.service == service_name), None)
+        raise ValueError(
+            f"launch profile has no browser navigation policy: {manifest.intent.profile}"
+        )
+    requested = next(
+        (item for item in manifest.intent.services if item.service == service_name), None
+    )
     if requested is None or requested.endpoint is None or requested.endpoint.exposure != "local":
         raise ValueError("launch navigation service lacks explicit local exposure intent")
-    observed = next((item for item in manifest.observed.services if item.service == service_name), None)
+    observed = next(
+        (item for item in manifest.observed.services if item.service == service_name), None
+    )
     if observed is None or observed.readiness is None:
         raise ValueError("launch navigation service has no authoritative readiness observation")
     if observed.readiness.value is not LaunchFactState.SATISFIED:

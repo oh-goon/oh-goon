@@ -1,62 +1,34 @@
 from __future__ import annotations
 
-import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from oh_goon.core.capability_registry import resolve_capability_intent
-from oh_goon.core.errors import (
-    JournalConflict,
-    RuntimeSafetyStale,
-    ScheduleExecutionActive,
-    ScheduleExecutionStale,
-    StateConflict,
-)
-from oh_goon.core.product_identity import repository_attempt_operation_id, schedule_repository_fleet_run_id
 from oh_goon.core.models.repository import (
-    IncludedRepositoryCatalogEntry,
     RepositoryCatalogEntry,
-    RepositoryIdentity,
 )
 from oh_goon.core.models.run_admission import (
     ExplicitRepositoryScope,
     FleetRepositoryScope,
     fleet_repository_scope,
 )
-from oh_goon.core.models.schedule import ScheduleDeleteRequest, ScheduleFailure, ScheduleReplace
 from oh_goon.core.vocabulary import (
-    EffectBoundaryKind,
     FleetRunEventType,
     FleetRunSource,
     FleetRunStatus,
     FleetRunTerminalIntent,
-    FleetScope,
     OperationAction,
-    ScheduleExecutionStatus,
-    ScheduleFailureStage,
 )
 from oh_goon.runtime.database import LocalDatabase
-from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator, RunExecutionSupervisor
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
-from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
-from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.services.fleet_admission import FleetAdmissionPlan
+from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
-from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
-from oh_goon.services.schedules import ScheduleService
-from tests.factories.capabilities import admit_test_run, capability_snapshot
-from tests.factories.fleet_plan_targets import structural_execution_identity
-from tests.factories.journal import start_run, terminalize_run
-from tests.factories.repository_state import baseline_for
-from tests.factories.schedules import persist_active_schedule, schedule_create, scheduled_plan
 
 
 class _EmptyAdmission:
@@ -65,7 +37,9 @@ class _EmptyAdmission:
 
     def plan(self, *args: object, **kwargs: object) -> FleetAdmissionPlan:
         del args, kwargs
-        return FleetAdmissionPlan(durable_revision=self._database.durable_revision(), targets=(), repository_admissions=())
+        return FleetAdmissionPlan(
+            durable_revision=self._database.durable_revision(), targets=(), repository_admissions=()
+        )
 
 
 class _ScopeAdmission:
@@ -92,7 +66,9 @@ class _ScopeAdmission:
             )
         )
         return FleetAdmissionPlan(
-            durable_revision=self._database.durable_revision(), targets=selected, repository_admissions=()
+            durable_revision=self._database.durable_revision(),
+            targets=selected,
+            repository_admissions=(),
         )
 
 

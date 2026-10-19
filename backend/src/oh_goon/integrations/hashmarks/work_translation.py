@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.described_work import ProducerNeutralWorkDescription
+from oh_goon.core.product_identity import stable_id
 from oh_goon.integrations.hashmarks.repository_intelligence import (
     HashmarksEvidenceKind,
-    HashmarksRepositoryIntelligenceInputError,
     VerifiedHashmarksRepositoryEvidence,
 )
 
@@ -23,7 +22,9 @@ def _strings(value: object, *, field: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def describe_hashmarks_work(evidence: VerifiedHashmarksRepositoryEvidence) -> ProducerNeutralWorkDescription:
+def describe_hashmarks_work(
+    evidence: VerifiedHashmarksRepositoryEvidence,
+) -> ProducerNeutralWorkDescription:
     """Translate verified evidence into a producer-neutral description, never authority."""
 
     payload: Mapping[str, Any] = evidence.payload()
@@ -33,10 +34,12 @@ def describe_hashmarks_work(evidence: VerifiedHashmarksRepositoryEvidence) -> Pr
     if evidence.kind is HashmarksEvidenceKind.VERIFICATION:
         command_intent = _strings(payload.get("argv"), field="verification argv")
         if payload.get("available") is False or not command_intent:
-            raise HashmarksWorkTranslationError("verification plan does not describe executable command intent")
+            raise HashmarksWorkTranslationError(
+                "verification plan does not describe executable command intent"
+            )
     else:
         raise HashmarksWorkTranslationError(
-            f"Hashmarks {evidence.kind.value} evidence is informative only and cannot be translated into work"
+            f"Hashmarks {evidence.kind} evidence is informative only and cannot be translated into work"
         )
 
     identity_payload = {
@@ -64,4 +67,3 @@ def describe_hashmarks_work(evidence: VerifiedHashmarksRepositoryEvidence) -> Pr
         command_intent=command_intent,
         ordered_members=ordered_members,
     )
-

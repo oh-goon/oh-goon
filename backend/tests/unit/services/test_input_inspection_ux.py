@@ -1,5 +1,8 @@
 """M140: read-only input inspection comes from the canonical resolver source cut."""
 
+import hashlib
+from pathlib import Path
+
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -26,7 +29,9 @@ def test_nonprojected_root_inputs_have_no_invented_goon_owner():
     for key in plans.keys():
         source = plans.source(key)
         if source.compiled.inputs and not source.compiled.projected_inputs:
-            inspected = resolver.inspect_inputs(source.path, containment_root=plans.root.parent.parent)
+            inspected = resolver.inspect_inputs(
+                source.path, containment_root=plans.root.parent.parent
+            )
             assert all(item.owner_paths == () for item in inspected)
             return
     # Templates may all use projection; the projected-contract regression above remains valid.
@@ -39,15 +44,14 @@ def test_every_shipped_plan_inspection_matches_canonical_materialization():
     for key in plans.keys():
         source = plans.source(key)
         inspected = resolver.inspect_inputs(source.path, containment_root=plans.root.parent.parent)
-        canonical = resolver.input_definitions(source.path, containment_root=plans.root.parent.parent)
+        canonical = resolver.input_definitions(
+            source.path, containment_root=plans.root.parent.parent
+        )
         assert tuple(item.definition for item in inspected) == canonical, key
         assert len({item.definition.name for item in inspected}) == len(inspected), key
         for item in inspected:
             assert all(path and all(segment for segment in path) for path in item.owner_paths), key
-            if item.definition.name in source.compiled.projected_inputs:
-                assert item.owner_paths, key
-            else:
-                assert not item.owner_paths, key
+            assert item.owner_paths, key
 
 
 def test_inspection_is_repeatable_and_does_not_mutate_source_files():
@@ -60,3 +64,26 @@ def test_inspection_is_repeatable_and_does_not_mutate_source_files():
     second = resolver.inspect_inputs(source.path, containment_root=plans.root.parent.parent)
     assert first == second
     assert source.path.read_bytes() == before
+
+
+def test_full_interface_reports_unrouted_inputs_from_one_source_observation(tmp_path, monkeypatch):
+    path = tmp_path / "plan.yml"
+    content = b"version: 1\ngoons: [python/typecheck, python/typecheck]\n"
+    path.write_bytes(content)
+    goons = GoonTemplateStore()
+    resolver = FleetPlanResolver(goon_templates=goons)
+    observed = []
+    original = Path.read_bytes
+
+    def read(source):
+        observed.append(source.resolve())
+        return original(source)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    interface, digest = resolver.inspect_input_interface_with_source(path)
+    assert interface.inputs == ()
+    assert interface.unrouted_inputs == ("project", "dependency_group", "typechecker")
+    assert digest == hashlib.sha256(content).hexdigest()
+    assert observed.count(path.resolve()) == 1
+    assert observed.count((goons.root / "python/typecheck/goon.yml").resolve()) == 1
+    assert resolver.inspect_inputs_with_source(path) == ((), digest)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 import urllib.request
+from collections.abc import Mapping
 
 from oh_goon.api.local_access import LOCAL_ACCESS_HEADER, new_local_access_token
 

@@ -18,7 +18,9 @@ def test_team_run_cli_waits_for_terminal_run_and_returns_success(tmp_path: Path,
     )
     runtime = SimpleNamespace(
         league=SimpleNamespace(
-            configured_team=Mock(return_value=SimpleNamespace(pipeline=SimpleNamespace(sha256="abc123")))
+            configured_team=Mock(
+                return_value=SimpleNamespace(pipeline=SimpleNamespace(sha256="abc123"))
+            )
         ),
         goon=SimpleNamespace(run=Mock(return_value=admitted)),
         runs=SimpleNamespace(wait_for_terminal=Mock(return_value=terminal)),
@@ -48,7 +50,9 @@ def test_team_run_cli_returns_nonzero_for_failed_run(tmp_path: Path) -> None:
     )
     runtime = SimpleNamespace(
         league=SimpleNamespace(
-            configured_team=Mock(return_value=SimpleNamespace(pipeline=SimpleNamespace(sha256="abc123")))
+            configured_team=Mock(
+                return_value=SimpleNamespace(pipeline=SimpleNamespace(sha256="abc123"))
+            )
         ),
         goon=SimpleNamespace(run=Mock(return_value=admitted)),
         runs=SimpleNamespace(wait_for_terminal=Mock(return_value=terminal)),
@@ -78,7 +82,9 @@ def test_team_run_cli_ctrl_c_requests_durable_cancel(capsys) -> None:
     cancel = Mock(return_value=SimpleNamespace(fleet_run_id="run-cancel"))
     runtime = SimpleNamespace(
         league=SimpleNamespace(
-            configured_team=Mock(return_value=SimpleNamespace(pipeline=SimpleNamespace(sha256="abc123")))
+            configured_team=Mock(
+                return_value=SimpleNamespace(pipeline=SimpleNamespace(sha256="abc123"))
+            )
         ),
         goon=SimpleNamespace(run=Mock(return_value=admitted)),
         runs=SimpleNamespace(wait_for_terminal=wait, cancel=cancel),
@@ -94,14 +100,18 @@ def test_shared_plan_templates_cli_uses_canonical_template_fields(capsys) -> Non
     args = build_parser().parse_args(["shared-plan", "templates"])
     runtime = SimpleNamespace(
         shared_plan=SimpleNamespace(
-            templates=Mock(return_value=SimpleNamespace(templates=(
-                SimpleNamespace(
-                    template_key="python/quality",
-                    template_path="templates/plans/python/quality/plan.yml",
-                    description="Quality checks",
-                    sha256="a" * 64,
-                ),
-            )))
+            templates=Mock(
+                return_value=SimpleNamespace(
+                    templates=(
+                        SimpleNamespace(
+                            template_key="python/quality",
+                            template_path="templates/plans/python/quality/plan.yml",
+                            description="Quality checks",
+                            sha256="a" * 64,
+                        ),
+                    )
+                )
+            )
         )
     )
 
@@ -112,22 +122,22 @@ def test_shared_plan_templates_cli_uses_canonical_template_fields(capsys) -> Non
 
 
 def test_shared_plan_from_template_cli_binds_catalog_sha_and_destination(capsys) -> None:
-    args = build_parser().parse_args([
-        "shared-plan", "from-template", "python/quality", "shared-quality"
-    ])
+    args = build_parser().parse_args(
+        ["shared-plan", "from-template", "python/quality", "shared-quality"]
+    )
     document = SimpleNamespace(plan_key="shared-quality", sha256="c" * 64)
     create = Mock(return_value=document)
     runtime = SimpleNamespace(
         shared_plan=SimpleNamespace(
-            templates=Mock(return_value=SimpleNamespace(templates=(
-                SimpleNamespace(template_key="python/quality", sha256="b" * 64),
-            ))),
+            templates=Mock(
+                return_value=SimpleNamespace(
+                    templates=(SimpleNamespace(template_key="python/quality", sha256="b" * 64),)
+                )
+            ),
             create_from_template=create,
         )
     )
 
     assert run_league_command(runtime, args) == 0
-    create.assert_called_once_with(
-        "python/quality", "b" * 64, plan_key="shared-quality"
-    )
+    create.assert_called_once_with("python/quality", "b" * 64, plan_key="shared-quality")
     assert "Saved: shared-quality/plan.yml" in capsys.readouterr().out

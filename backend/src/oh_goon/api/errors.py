@@ -54,8 +54,10 @@ async def validation_exception_handler(
     # Pydantic error contexts can include rejected input data; never return them.
     if request.url.path == "/api/league/shared-plan-input-inspections":
         payload = ApiErrorResponse(
-            code="VALIDATION_ERROR", kind=ErrorKind.INVALID_REQUEST,
-            message="Request validation failed", request_id=request_id(request),
+            code="VALIDATION_ERROR",
+            kind=ErrorKind.INVALID_REQUEST,
+            message="Request validation failed",
+            request_id=request_id(request),
         )
         return JSONResponse(status_code=422, content=payload.model_dump(mode="json"))
     errors = jsonable_encoder(

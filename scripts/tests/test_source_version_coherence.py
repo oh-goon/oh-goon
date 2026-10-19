@@ -5,9 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.repository_tooling.generation.generate_api_types import render_generated_files
+from oh_goon.repository_tooling.generation.generate_api_types import (
+    render_generated_files,
+)
 from oh_goon.repository_tooling.release import package_slim
-from oh_goon.repository_tooling.release.source_version_coherence import source_version_issues
+from oh_goon.repository_tooling.release.source_version_coherence import (
+    source_version_issues,
+)
 
 
 def _write_version_owners(root: Path, version: str = "1.2.3") -> None:
@@ -28,14 +32,18 @@ def _write_version_owners(root: Path, version: str = "1.2.3") -> None:
         "lockfileVersion": 3,
         "packages": {"": {"name": "oh-goon-frontend", "version": version}},
     }
-    (root / "frontend/package-lock.json").write_text(json.dumps(lock) + "\n", encoding="utf-8")
+    (root / "frontend/package-lock.json").write_text(
+        json.dumps(lock) + "\n", encoding="utf-8"
+    )
     openapi = {
         "components": {"schemas": {}},
         "info": {"title": "fixture", "version": version},
         "openapi": "3.1.0",
         "paths": {},
     }
-    (root / "generated/openapi/openapi.json").write_text(json.dumps(openapi) + "\n", encoding="utf-8")
+    (root / "generated/openapi/openapi.json").write_text(
+        json.dumps(openapi) + "\n", encoding="utf-8"
+    )
     (root / "docs/certification/questions/question-metadata.yml").write_text(
         f"schema_version: 2\nsource_version: {version}\n", encoding="utf-8"
     )
@@ -63,15 +71,26 @@ def test_package_slim_rejects_openapi_release_version_drift(tmp_path: Path) -> N
     with pytest.raises(ValueError, match="refuses release identity drift") as exc:
         package_slim.package_slim(tmp_path / "out.zip", root=root)
 
-    assert "generated/openapi/openapi.json version '1.2.2' does not match VERSION '1.2.3'" in str(exc.value)
+    assert (
+        "generated/openapi/openapi.json version '1.2.2' does not match VERSION '1.2.3'"
+        in str(exc.value)
+    )
     assert not (tmp_path / "out.zip").exists()
 
 
 @pytest.mark.parametrize(
     ("owner", "replacement", "expected_owner"),
     [
-        ("backend/pyproject.toml", '[project]\nname="oh-goon"\nversion="9.9.9"\n', "backend/pyproject.toml"),
-        ("frontend/package.json", '{"name":"oh-goon-frontend","version":"9.9.9"}\n', "frontend/package.json"),
+        (
+            "backend/pyproject.toml",
+            '[project]\nname="oh-goon"\nversion="9.9.9"\n',
+            "backend/pyproject.toml",
+        ),
+        (
+            "frontend/package.json",
+            '{"name":"oh-goon-frontend","version":"9.9.9"}\n',
+            "frontend/package.json",
+        ),
         (
             "frontend/package-lock.json",
             '{"name":"oh-goon-frontend","version":"9.9.9","lockfileVersion":3,'
@@ -98,7 +117,9 @@ def test_release_version_coherence_rejects_each_source_owner_drift(
     assert all("9.9.9" in issue for issue in issues)
 
 
-def test_release_version_coherence_rejects_package_lock_root_entry_drift(tmp_path: Path) -> None:
+def test_release_version_coherence_rejects_package_lock_root_entry_drift(
+    tmp_path: Path,
+) -> None:
     root = tmp_path / "root"
     _write_version_owners(root)
     package_lock = root / "frontend/package-lock.json"

@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.product_identity import stable_id
 from oh_goon.core.models.fleet_plan_evidence import (
     CicdRepositoryAdmissionEvidence,
     RequirementsRepositoryAdmissionEvidence,
@@ -22,6 +21,7 @@ from oh_goon.core.models.fleet_plan_requirements import (
     UvProjectRequirement,
 )
 from oh_goon.core.path_authority import RepositoryPathSpace
+from oh_goon.core.product_identity import stable_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,9 +50,7 @@ def inspect_repository_requirements(
     """Check one Goon-owned requirement set without inventing a merged owner."""
     root = repository.resolve()
     issues: list[str] = []
-    needs_pyproject = any(
-        isinstance(item, PyprojectValueRequirement) for item in requirements
-    )
+    needs_pyproject = any(isinstance(item, PyprojectValueRequirement) for item in requirements)
     pyproject = _load_pyproject(root / "pyproject.toml", issues) if needs_pyproject else None
     _validate_repository_requirements(root, pyproject, requirements, issues)
     return tuple(issues)
@@ -224,9 +222,7 @@ def _validate_uv_project_requirement(
         issues.append(f"locked UV project directory is missing: {requirement.project}")
         return
     if not (project / "pyproject.toml").is_file():
-        issues.append(
-            f"locked UV project requires pyproject.toml: {requirement.project}"
-        )
+        issues.append(f"locked UV project requires pyproject.toml: {requirement.project}")
     if not (project / "uv.lock").is_file():
         issues.append(f"locked UV project requires uv.lock: {requirement.project}")
 

@@ -4,8 +4,8 @@ import ast
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture._launch_contract_common import (
-    owned_string_constant_violations,
     forbidden_import_violations,
+    owned_string_constant_violations,
     python_call_paths,
 )
 from oh_goon.repository_tooling.architecture.common import Violation, python_ast

@@ -51,7 +51,9 @@ class ProcessBirthIdentity:
         return cls(pid=pid, boot_id=boot_id, start_ticks=start_ticks, provider=provider)
 
 
-def observe_process_birth(pid: int | None = None, *, proc_root: Path = Path("/proc")) -> ProcessBirthIdentity | None:
+def observe_process_birth(
+    pid: int | None = None, *, proc_root: Path = Path("/proc")
+) -> ProcessBirthIdentity | None:
     """Observe Linux process birth identity without treating absence as lifecycle proof.
 
     Unsupported procfs, permission denial, or a process disappearing during observation
@@ -97,14 +99,14 @@ def observe_process_birth(pid: int | None = None, *, proc_root: Path = Path("/pr
         return None
 
 
-def process_birth_matches(expected: ProcessBirthIdentity, *, proc_root: Path = Path("/proc")) -> bool:
+def process_birth_matches(
+    expected: ProcessBirthIdentity, *, proc_root: Path = Path("/proc")
+) -> bool:
     observed = observe_process_birth(expected.pid, proc_root=proc_root)
     return observed == expected
 
 
-def observe_process_liveness(
-    pid: int, *, proc_root: Path = Path("/proc")
-) -> bool | None:
+def observe_process_liveness(pid: int, *, proc_root: Path = Path("/proc")) -> bool | None:
     """Return executable liveness, distinguishing zombies from running processes.
 
     PID existence is not lifecycle authority on Linux: zombie/dead procfs entries can

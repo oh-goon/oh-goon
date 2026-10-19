@@ -5,22 +5,41 @@
     {
       "id": "python-quality",
       "template_key": "python/quality",
-      "valid_inputs": {"coverage_threshold": "85"},
-      "invalid_inputs": {"coverage_threshold": "101"},
+      "valid_inputs": {
+        "typechecker": "ty"
+      },
+      "invalid_inputs": {
+        "typechecker": "invalid"
+      },
       "expected_rejection_code": "INVALID_INPUT_VALUE"
     },
     {
       "id": "ml-iris-training",
       "template_key": "ml/iris-training",
-      "valid_inputs": {"random_seed": "42", "test_size_percent": "20", "minimum_accuracy_percent": "90", "max_iterations": "300"},
-      "invalid_inputs": {"test_size_percent": "9"},
+      "valid_inputs": {
+        "random_seed": "42",
+        "test_size_percent": "20",
+        "minimum_accuracy_percent": "90",
+        "max_iterations": "300"
+      },
+      "invalid_inputs": {
+        "test_size_percent": "9"
+      },
       "expected_rejection_code": "INVALID_INPUT_VALUE"
     },
     {
       "id": "kubernetes-rollout",
       "template_key": "kubernetes/set-image",
-      "valid_inputs": {"kubernetes_api_hostname": "api.example.test", "namespace": "team-a", "deployment": "my-service", "container": "web", "image": "registry.example.test/my-service@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-      "invalid_inputs": {"namespace": "INVALID_NAMESPACE"},
+      "valid_inputs": {
+        "kubernetes_api_hostname": "api.example.test",
+        "namespace": "team-a",
+        "deployment": "my-service",
+        "container": "web",
+        "image": "registry.example.test/my-service@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "invalid_inputs": {
+        "namespace": "INVALID_NAMESPACE"
+      },
       "expected_rejection_code": "INVALID_INPUT_VALUE"
     }
   ],

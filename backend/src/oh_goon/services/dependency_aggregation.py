@@ -26,14 +26,13 @@ def build_dependency_overview(
         for repository_id, group in by_repository.items()
     }
     current_count = sum(state == "current" for state in states.values())
-    aged_count = sum(state == "aged" for state in states.values())
+    unknown_count = sum(state == "unknown" for state in states.values())
     stale_count = sum(state == "stale" for state in states.values())
     snapshot_rows = [row for row in store.snapshot_rows() if str(row["repository_id"]) in current]
     current_snapshot_ids = {
-        str(row["repository_id"]) for row in snapshot_rows if store.evidence_state(row) == "current"
-    }
-    current_match_ids = {
-        repository_id for repository_id, state in states.items() if state == "current"
+        str(row["repository_id"])
+        for row in snapshot_rows
+        if store.assessment(row).absence_admissible
     }
     version_repositories: dict[str, set[str]] = defaultdict(set)
     for row in rows:
@@ -52,19 +51,13 @@ def build_dependency_overview(
     return DependencyPackageOverview(
         package_name=package,
         observed_repositories=len(by_repository),
-        direct_repositories=sum(
-            any(str(row["relationship"]) == "direct" for row in group)
-            for group in by_repository.values()
-        ),
-        transitive_repositories=sum(
-            all(str(row["relationship"]) == "transitive" for row in group)
-            for group in by_repository.values()
-        ),
         versions=versions,
         freshness=DependencyFreshnessSummary(
             current=current_count,
-            no_matching_dependency=len(current_snapshot_ids - current_match_ids),
-            aged=aged_count,
+            no_matching_dependency=sum(
+                store.absent_from_lock(row, package) for row in snapshot_rows
+            ),
+            unknown=unknown_count,
             stale=stale_count,
             no_current_evidence=len(current) - len(current_snapshot_ids),
         ),

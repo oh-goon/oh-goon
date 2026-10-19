@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -9,9 +9,9 @@ from oh_goon.core.errors import FleetPlanInvalid, WorkspaceStateStale, Workspace
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
-from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations._fleet_plan_sandbox_launch import sandbox_process_launch
 from oh_goon.integrations.fleet_plan_atomic_runtime_authority import bind_atomic_runtime_authority
+from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import (
     IsolatedProcessRequest,
     verify_selected_backend,
@@ -29,7 +29,9 @@ from tests.factories.path_authority import TEST_PATH_AUTHORITY
 
 
 def _manager(tmp_path: Path) -> RepositoryWorkspaceAuthority:
-    return RepositoryWorkspaceAuthority(LocalDatabase(tmp_path / "state" / "oh-goon.db", journal_mode="DELETE"))
+    return RepositoryWorkspaceAuthority(
+        LocalDatabase(tmp_path / "state" / "oh-goon.db", journal_mode="DELETE")
+    )
 
 
 def _allocated_read_snapshot(manager: RepositoryWorkspaceAuthority):
@@ -75,13 +77,17 @@ def test_read_snapshot_materialization_is_clean_identity_bound_and_durable(tmp_p
     assert not (binding.snapshot_path / ".git").exists()
     assert not (binding.snapshot_path / "frontend" / "node_modules").exists()
 
-    reopened = RepositoryWorkspaceAuthority(LocalDatabase(manager._database.path, journal_mode="DELETE"))
+    reopened = RepositoryWorkspaceAuthority(
+        LocalDatabase(manager._database.path, journal_mode="DELETE")
+    )
     rebound = reopened.read_snapshot_binding(workspace)
     assert rebound.identity == binding.identity
     assert rebound.snapshot_path == binding.snapshot_path
 
 
-def test_read_snapshot_reproof_rejects_source_mutation_and_transient_injection(tmp_path: Path) -> None:
+def test_read_snapshot_reproof_rejects_source_mutation_and_transient_injection(
+    tmp_path: Path,
+) -> None:
     manager = _manager(tmp_path)
     workspace, allocated = _allocated_read_snapshot(manager)
     _ready, binding = manager.materialize_read_snapshot(
@@ -152,7 +158,7 @@ def test_bubblewrap_physically_ro_binds_managed_read_snapshot_as_workspace(tmp_p
                 request, launch=launch, atomic_authority=atomic, network_prefix=()
             )
 
-    pairs = list(zip(argv, argv[1:]))
+    pairs = list(zip(argv, argv[1:], strict=False))
     assert (str(read_binding.snapshot_path), "/workspace") in pairs
     index = argv.index(str(read_binding.snapshot_path))
     assert argv[index - 1] == "--ro-bind"
@@ -160,7 +166,10 @@ def test_bubblewrap_physically_ro_binds_managed_read_snapshot_as_workspace(tmp_p
     separator = argv.index("--")
     assert argv[separator + 1 :] == ("/toolchain/bin/true", "/workspace/src/app.py")
     assert env["SOURCE_FILE"] == "/workspace/src/app.py"
-    assert str(source_snapshot_identity(read_binding.snapshot_path).sha256) == read_binding.identity.sha256
+    assert (
+        str(source_snapshot_identity(read_binding.snapshot_path).sha256)
+        == read_binding.identity.sha256
+    )
 
 
 def test_read_snapshot_execution_fails_closed_without_readonly_workspace_capability(
@@ -191,7 +200,6 @@ def test_read_snapshot_execution_fails_closed_without_readonly_workspace_capabil
         )
         with pytest.raises(FleetPlanInvalid, match="physically enforces"):
             verify_selected_backend(_TEST_PROCESS_ISOLATION, request)
-
 
 
 def test_read_snapshot_cannot_be_marked_ready_without_materialization(tmp_path: Path) -> None:
@@ -255,14 +263,25 @@ def test_only_bubblewrap_currently_claims_physical_readonly_workspace_support() 
         api_key="secret",
         image="example/image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         cli_executable=sys.executable,
-        runtime_attestation_file=str(Path(__file__).resolve().parents[2] / "fixtures" / "opensandbox" / "kata-runtime-attestation.json"),
-        runtime_attestation_public_key_file=str(Path(__file__).resolve().parents[2] / "fixtures" / "opensandbox" / "runtime-attestation-ed25519.pub.pem"),
+        runtime_attestation_file=str(
+            Path(__file__).resolve().parents[2]
+            / "fixtures"
+            / "opensandbox"
+            / "kata-runtime-attestation.json"
+        ),
+        runtime_attestation_public_key_file=str(
+            Path(__file__).resolve().parents[2]
+            / "fixtures"
+            / "opensandbox"
+            / "runtime-attestation-ed25519.pub.pem"
+        ),
         runtime=OpenSandboxRuntimeKind.KATA,
         protocol="https",
     )
     remote = OpenSandboxProcessIsolation(settings, transport=object())
     assert remote.capabilities.private_filesystem is True
     assert remote.capabilities.read_only_workspace is False
+
 
 def test_read_snapshot_table_is_evidence_not_parallel_path_identity(tmp_path: Path) -> None:
     manager = _manager(tmp_path)

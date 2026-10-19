@@ -4,6 +4,7 @@ The Game Tape is an explainability artifact, never a scoring, lifecycle, certifi
 runtime permission authority. It revalidates the authoritative inputs and projects their
 existing decisions into investigation-oriented views without inventing new thresholds.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -179,7 +180,9 @@ def _concept_projection(
     return projected
 
 
-def _question_projection(run_ids: list[str], results: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _question_projection(
+    run_ids: list[str], results: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
     per_run = {run: _question_map(results[run]) for run in run_ids}
     first = per_run[run_ids[0]]
     rows: list[dict[str, Any]] = []
@@ -226,7 +229,9 @@ def _question_projection(run_ids: list[str], results: dict[str, dict[str, Any]])
     return rows
 
 
-def _evidence_projection(run_ids: list[str], results: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _evidence_projection(
+    run_ids: list[str], results: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for run in run_ids:
         result = results[run]
@@ -248,11 +253,11 @@ def _evidence_projection(run_ids: list[str], results: dict[str, dict[str, Any]])
                         "critical": bool(claim.get("critical")),
                         "evidence_quality": claim.get("evidence_quality"),
                         "minimum_evidence_authority": claim.get("minimum_evidence_authority"),
-                        "evidence_authority_floor_met": claim.get(
-                            "evidence_authority_floor_met"
-                        ),
+                        "evidence_authority_floor_met": claim.get("evidence_authority_floor_met"),
                         "strongest_evidence_authority": claim.get("strongest_evidence_authority"),
-                        "evidence_authority_classes": list(claim.get("evidence_authority_classes") or []),
+                        "evidence_authority_classes": list(
+                            claim.get("evidence_authority_classes") or []
+                        ),
                         "independent_evidence_authority_classes": claim.get(
                             "independent_evidence_authority_classes"
                         ),
@@ -262,7 +267,9 @@ def _evidence_projection(run_ids: list[str], results: dict[str, dict[str, Any]])
     return rows
 
 
-def _consistency_projection(run_ids: list[str], results: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _consistency_projection(
+    run_ids: list[str], results: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
     rows = []
     for run in run_ids:
         result = results[run]
@@ -295,7 +302,9 @@ def _benchmark_projection(
     integrity = [_load_json(path, label="benchmark integrity result") for path in integrity_paths]
     adversarial = [_load_json(path, label="adversarial result") for path in adversarial_paths]
     integrity_by_run = {str(row.get("candidate_run_identity")): row for row in integrity}
-    adversarial_by_challenge = {str(row.get("challenge_instance_identity")): row for row in adversarial}
+    adversarial_by_challenge = {
+        str(row.get("challenge_instance_identity")): row for row in adversarial
+    }
     rows: list[dict[str, Any]] = []
     for run in run_ids:
         if run not in integrity_by_run:
@@ -321,7 +330,9 @@ def _benchmark_projection(
                 "false_premise_rejection_percent": arow.get("false_premise_rejection_percent"),
                 "canary_consistency_percent": arow.get("canary_consistency_percent"),
                 "fresh_shadow_consistency_percent": arow.get("fresh_shadow_consistency_percent"),
-                "critical_adversarial_failures": list(arow.get("critical_adversarial_failures") or []),
+                "critical_adversarial_failures": list(
+                    arow.get("critical_adversarial_failures") or []
+                ),
             }
         )
     return rows
@@ -353,10 +364,17 @@ def game_tape(
         adversarial_paths=adversarial_paths,
         issued_at_utc=str(certificate["issued_at_utc"]),
     )
-    if recomputed["capability_certificate_identity"] != certificate["capability_certificate_identity"]:
-        raise ValueError("Game Tape capability certificate cannot be reproduced from supplied evidence")
+    if (
+        recomputed["capability_certificate_identity"]
+        != certificate["capability_certificate_identity"]
+    ):
+        raise ValueError(
+            "Game Tape capability certificate cannot be reproduced from supplied evidence"
+        )
     if recomputed != certificate:
-        raise ValueError("Game Tape capability certificate bytes drift from authoritative recomputation")
+        raise ValueError(
+            "Game Tape capability certificate bytes drift from authoritative recomputation"
+        )
 
     recertification: dict[str, Any] | None = None
     if recertification_path is not None:
@@ -366,11 +384,15 @@ def game_tape(
         if recertification.get("previous_capability_certificate_identity") != certificate.get(
             "capability_certificate_identity"
         ):
-            raise ValueError("Game Tape recertification plan is not bound to the capability certificate")
+            raise ValueError(
+                "Game Tape recertification plan is not bound to the capability certificate"
+            )
         if recertification.get("candidate_configuration_identity") != certificate.get(
             "candidate_configuration_identity"
         ):
-            raise ValueError("Game Tape recertification candidate identity does not match certificate")
+            raise ValueError(
+                "Game Tape recertification candidate identity does not match certificate"
+            )
 
     concepts = _concept_projection(run_ids, results, stability)
     questions = _question_projection(run_ids, results)
@@ -399,7 +421,10 @@ def game_tape(
             "certificate_status": certificate.get("certificate_status"),
             "granted_tier": certificate.get("granted_tier"),
             "authorization": certificate.get("authorization"),
-            "runs": {"qualified": certificate.get("passes"), "required": certificate.get("runs_required")},
+            "runs": {
+                "qualified": certificate.get("passes"),
+                "required": certificate.get("runs_required"),
+            },
             "median_composite_understanding": certificate.get("median_composite_understanding"),
             "concepts": {
                 "certified": len(certificate.get("certified_concepts") or []),
@@ -438,10 +463,14 @@ def game_tape(
         "benchmark_integrity_result_identities": [
             row.get("integrity_result_identity") for row in benchmark
         ],
-        "adversarial_result_identities": [row.get("adversarial_result_identity") for row in benchmark],
+        "adversarial_result_identities": [
+            row.get("adversarial_result_identity") for row in benchmark
+        ],
         "capability_certificate_identity": certificate.get("capability_certificate_identity"),
         "recertification_plan_identity": (
-            None if recertification is None else recertification.get("recertification_plan_identity")
+            None
+            if recertification is None
+            else recertification.get("recertification_plan_identity")
         ),
     }
     base = {

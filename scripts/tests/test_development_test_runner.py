@@ -30,15 +30,15 @@ def _fake_environment(
     fake_make.write_text(
         "#!/usr/bin/env bash\n"
         "set -u\n"
-        "target=\"${@: -1}\"\n"
-        "printf '%s\\n' \"$target\" >> \"$OH_GOON_TEST_CALLS\"\n"
-        "if [[ \"${OH_GOON_DIAGNOSTIC_BLOCKED:-0}\" == 1 && \"$target\" == test-python-core-diagnostic ]]; then\n"
-        "  if [[ \"${OH_GOON_WRAPPED_DIAGNOSTIC:-0}\" == 1 ]]; then\n"
-        "    mkdir -p \"$OH_GOON_RUN_LOG_DIR/test\"; printf '3\\n' > \"$OH_GOON_RUN_LOG_DIR/test/hosted-diagnostic-exit.status\"; exit 2; fi\n"
+        'target="${@: -1}"\n'
+        'printf \'%s\\n\' "$target" >> "$OH_GOON_TEST_CALLS"\n'
+        'if [[ "${OH_GOON_DIAGNOSTIC_BLOCKED:-0}" == 1 && "$target" == test-python-core-diagnostic ]]; then\n'
+        '  if [[ "${OH_GOON_WRAPPED_DIAGNOSTIC:-0}" == 1 ]]; then\n'
+        '    mkdir -p "$OH_GOON_RUN_LOG_DIR/test"; printf \'3\\n\' > "$OH_GOON_RUN_LOG_DIR/test/hosted-diagnostic-exit.status"; exit 2; fi\n'
         "  exit 3; fi\n"
-        "if [[ \"${OH_GOON_BACKEND_CAPABILITY_READY:-1}\" == 0 && \"$target\" == backend-dependencies-check ]]; then exit 8; fi\n"
-        "case \" $OH_GOON_FAIL_TARGETS \" in\n"
-        "  *\" $target \"*) exit 9 ;;\n"
+        'if [[ "${OH_GOON_BACKEND_CAPABILITY_READY:-1}" == 0 && "$target" == backend-dependencies-check ]]; then exit 8; fi\n'
+        'case " $OH_GOON_FAIL_TARGETS " in\n'
+        '  *" $target "*) exit 9 ;;\n'
         "esac\n"
         "exit 0\n",
         encoding="utf-8",
@@ -52,7 +52,7 @@ def _fake_environment(
     python3 = bin_dir / "python3"
     python3.write_text(
         "#!/usr/bin/env bash\n"
-        "if [[ \"${OH_GOON_HOST_PYTEST_MISSING:-0}\" == 1 ]]; then exit 1; fi\n"
+        'if [[ "${OH_GOON_HOST_PYTEST_MISSING:-0}" == 1 ]]; then exit 1; fi\n'
         "exit 0\n",
         encoding="utf-8",
     )
@@ -135,7 +135,9 @@ def _all_native_checks() -> list[str]:
     ]
 
 
-def test_development_runner_runs_actual_native_checks_without_readiness_oracles(tmp_path: Path) -> None:
+def test_development_runner_runs_actual_native_checks_without_readiness_oracles(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(tmp_path)
     assert result.returncode == 0
     assert invoked == _all_native_checks()
@@ -159,7 +161,9 @@ def test_native_check_failures_do_not_stop_independent_checks(tmp_path: Path) ->
     assert "Frontend build           PASS" in result.stdout
 
 
-def test_normal_development_does_not_use_backend_readiness_oracle(tmp_path: Path) -> None:
+def test_normal_development_does_not_use_backend_readiness_oracle(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(tmp_path, backend_capability_ready=False)
     assert result.returncode == 0
     assert invoked == _all_native_checks()
@@ -167,7 +171,9 @@ def test_normal_development_does_not_use_backend_readiness_oracle(tmp_path: Path
     assert "Backend dependencies" not in result.stdout
 
 
-def test_frontend_failure_is_native_and_does_not_create_dependency_classifier(tmp_path: Path) -> None:
+def test_frontend_failure_is_native_and_does_not_create_dependency_classifier(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(tmp_path, failing_targets={"frontend-typecheck"})
     assert result.returncode == 1
     assert "frontend-typecheck" in invoked
@@ -188,11 +194,19 @@ def test_frontend_failure_guard_checks_source_integrity_only() -> None:
 
 def test_development_runner_never_acquires_dependencies() -> None:
     text = RUNNER.read_text(encoding="utf-8")
-    for forbidden in ("frontend-install", "make init", "uv sync", "npm ci", "npm install"):
+    for forbidden in (
+        "frontend-install",
+        "make init",
+        "uv sync",
+        "npm ci",
+        "npm install",
+    ):
         assert forbidden not in text
 
 
-def test_fast_development_path_does_not_run_quality_browser_or_certification_gates(tmp_path: Path) -> None:
+def test_fast_development_path_does_not_run_quality_browser_or_certification_gates(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(tmp_path)
     assert result.returncode == 0
     forbidden = {
@@ -218,13 +232,20 @@ def test_predependency_diagnostic_delegates_required_capability_admission() -> N
     assert 'source "$ROOT/scripts/host_python.sh"' in text
     assert 'HOST_PYTHON="$(select_host_python)"' in text
     assert 'command -v "$HOST_PYTHON"' in text
-    assert '"$HOST_PYTHON" -c \'import pytest\'' not in text
-    assert 'run_optional_diagnostic "Host-only diagnostic" test-python-core-diagnostic' in text
+    assert "\"$HOST_PYTHON\" -c 'import pytest'" not in text
+    assert (
+        'run_optional_diagnostic "Host-only diagnostic" test-python-core-diagnostic'
+        in text
+    )
 
 
-def test_native_default_never_probes_or_invokes_separate_host_diagnostic(tmp_path: Path) -> None:
+def test_native_default_never_probes_or_invokes_separate_host_diagnostic(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(
-        tmp_path, failing_targets={"test-python-core-diagnostic"}, host_pytest_available=False
+        tmp_path,
+        failing_targets={"test-python-core-diagnostic"},
+        host_pytest_available=False,
     )
     assert result.returncode == 0
     assert invoked == _all_native_checks()
@@ -232,7 +253,9 @@ def test_native_default_never_probes_or_invokes_separate_host_diagnostic(tmp_pat
     assert "Pre-dependency diagnostic" not in result.stdout
 
 
-def test_explicit_host_diagnostic_still_runs_without_replacing_native_checks(tmp_path: Path) -> None:
+def test_explicit_host_diagnostic_still_runs_without_replacing_native_checks(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(tmp_path, run_hosted_diagnostic=True)
     assert result.returncode == 0
     assert invoked == ["test-python-core-diagnostic", *_all_native_checks()]
@@ -253,9 +276,13 @@ def test_hosted_pass_cannot_mask_native_backend_failure(tmp_path: Path) -> None:
     assert "RESULT: FAILED" in result.stdout
 
 
-def test_explicit_host_unavailability_is_blocked_not_reported_as_skipped(tmp_path: Path) -> None:
+def test_explicit_host_unavailability_is_blocked_not_reported_as_skipped(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(
-        tmp_path, run_hosted_diagnostic=True, diagnostic_blocked=True,
+        tmp_path,
+        run_hosted_diagnostic=True,
+        diagnostic_blocked=True,
         wrapped_diagnostic=True,
     )
     assert result.returncode == 1
@@ -265,25 +292,37 @@ def test_explicit_host_unavailability_is_blocked_not_reported_as_skipped(tmp_pat
     assert "RESULT: FAILED" in result.stdout
 
 
-def test_invalid_host_diagnostic_flag_fails_before_running_checks(tmp_path: Path) -> None:
+def test_invalid_host_diagnostic_flag_fails_before_running_checks(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(tmp_path, diagnostic_option="unexpected")
     assert result.returncode == 2
     assert invoked == []
     assert "OH_GOON_RUN_HOSTED_DIAGNOSTIC must be 0 or 1" in result.stderr
 
 
-def test_constrained_host_uses_existing_backend_materialization_without_acquisition(tmp_path: Path) -> None:
+def test_constrained_host_uses_existing_backend_materialization_without_acquisition(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(
         tmp_path, constrained_host=True, backend_capability_ready=True
     )
     assert result.returncode == 0
-    assert invoked == ["test-python-core-diagnostic", "backend-dependencies-check", *_all_native_checks()]
+    assert invoked == [
+        "test-python-core-diagnostic",
+        "backend-dependencies-check",
+        *_all_native_checks(),
+    ]
     assert "existing local native backend capability detected" in result.stdout
     assert "RESULT: HOSTED-DIAGNOSTIC-PASSED" in result.stdout
 
 
-def test_constrained_host_without_backend_still_runs_native_frontend_checks(tmp_path: Path) -> None:
-    result, invoked = _run(tmp_path, constrained_host=True, backend_capability_ready=False)
+def test_constrained_host_without_backend_still_runs_native_frontend_checks(
+    tmp_path: Path,
+) -> None:
+    result, invoked = _run(
+        tmp_path, constrained_host=True, backend_capability_ready=False
+    )
     assert result.returncode == 0
     assert invoked == [
         "test-python-core-diagnostic",
@@ -311,7 +350,9 @@ def test_constrained_host_cannot_hide_diagnostic_failure(tmp_path: Path) -> None
     assert "RESULT: HOSTED-DIAGNOSTIC-PASSED" not in result.stdout
 
 
-def test_constrained_host_cannot_report_success_when_required_host_capability_is_missing(tmp_path: Path) -> None:
+def test_constrained_host_cannot_report_success_when_required_host_capability_is_missing(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(
         tmp_path,
         constrained_host=True,
@@ -321,11 +362,16 @@ def test_constrained_host_cannot_report_success_when_required_host_capability_is
     assert "backend-dependencies-check" in invoked
     assert "frontend-typecheck" in invoked
     assert result.returncode == 1
-    assert "requested host diagnostic unavailable; native backend checks are separate evidence" in result.stdout
+    assert (
+        "requested host diagnostic unavailable; native backend checks are separate evidence"
+        in result.stdout
+    )
     assert "RESULT: HOSTED-DIAGNOSTIC-PASSED" not in result.stdout
 
 
-def test_make_wrapped_host_unavailability_does_not_affect_default_native_development(tmp_path: Path) -> None:
+def test_make_wrapped_host_unavailability_does_not_affect_default_native_development(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(tmp_path, diagnostic_blocked=True, wrapped_diagnostic=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert invoked == _all_native_checks()
@@ -333,16 +379,23 @@ def test_make_wrapped_host_unavailability_does_not_affect_default_native_develop
     assert "RESULT: PASSED" in result.stdout
 
 
-def test_make_wrapped_host_unavailability_blocks_constrained_mode(tmp_path: Path) -> None:
+def test_make_wrapped_host_unavailability_blocks_constrained_mode(
+    tmp_path: Path,
+) -> None:
     result, _ = _run(
-        tmp_path, diagnostic_blocked=True, wrapped_diagnostic=True,
-        constrained_host=True, backend_capability_ready=False,
+        tmp_path,
+        diagnostic_blocked=True,
+        wrapped_diagnostic=True,
+        constrained_host=True,
+        backend_capability_ready=False,
     )
     assert result.returncode == 1
     assert "Host-only diagnostic     BLOCKED" in result.stdout
 
 
-def test_missing_constrained_host_diagnostic_blocks_even_with_native_backend_ready(tmp_path: Path) -> None:
+def test_missing_constrained_host_diagnostic_blocks_even_with_native_backend_ready(
+    tmp_path: Path,
+) -> None:
     result, invoked = _run(
         tmp_path,
         constrained_host=True,
@@ -351,13 +404,21 @@ def test_missing_constrained_host_diagnostic_blocks_even_with_native_backend_rea
         wrapped_diagnostic=True,
     )
     assert result.returncode == 1
-    assert invoked == ["test-python-core-diagnostic", "backend-dependencies-check", *_all_native_checks()]
+    assert invoked == [
+        "test-python-core-diagnostic",
+        "backend-dependencies-check",
+        *_all_native_checks(),
+    ]
     assert "Host-only diagnostic     BLOCKED" in result.stdout
     assert "Backend fast unit        PASS" in result.stdout
     assert "RESULT: FAILED" in result.stdout
 
 
 def test_genuine_diagnostic_failure_must_not_be_skipped(tmp_path: Path) -> None:
-    result, _ = _run(tmp_path, failing_targets={"test-python-core-diagnostic"}, run_hosted_diagnostic=True)
+    result, _ = _run(
+        tmp_path,
+        failing_targets={"test-python-core-diagnostic"},
+        run_hosted_diagnostic=True,
+    )
     assert result.returncode == 1
     assert "Host-only diagnostic     FAIL" in result.stdout

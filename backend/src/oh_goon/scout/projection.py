@@ -1,20 +1,6 @@
 from __future__ import annotations
 
-from oh_goon.core.execution_observability import RepositoryRunObservation
-from oh_goon.scout.models import (
-    ScoutDetailSection,
-    ScoutFindingCategory,
-    ScoutFindingsPage,
-    ScoutGoonDetail,
-    ScoutGoonLeadersPage,
-    ScoutMetricDefinition,
-    ScoutMetricDictionary,
-    ScoutOverview,
-    ScoutPlanDetail,
-    ScoutRepositoryDetail,
-    ScoutRunSample,
-    ScoutWindow,
-)
+from oh_goon.core.vocabulary import GameTapeStatus
 from oh_goon.scout.aggregation import (
     build_step_peer_index,
     cpu_rank_key,
@@ -39,9 +25,25 @@ from oh_goon.scout.aggregation import (
 from oh_goon.scout.evidence import (
     ScoutEvidenceSnapshot,
     ScoutStepObservation,
+)
+from oh_goon.scout.evidence import (
     project_scout_evidence as project_scout_evidence,
 )
 from oh_goon.scout.findings import all_findings, finding_counts
+from oh_goon.scout.models import (
+    ScoutDetailSection,
+    ScoutFindingCategory,
+    ScoutFindingsPage,
+    ScoutGoonDetail,
+    ScoutGoonLeadersPage,
+    ScoutMetricDefinition,
+    ScoutMetricDictionary,
+    ScoutOverview,
+    ScoutPlanDetail,
+    ScoutRepositoryDetail,
+    ScoutRunSample,
+    ScoutWindow,
+)
 from oh_goon.scout.policy import (
     SCOUT_DEFAULT_LIMIT,
     SCOUT_DETAIL_ENTITY_LIMIT,
@@ -50,7 +52,6 @@ from oh_goon.scout.policy import (
     SCOUT_REPRESENTATIVE_RUN_LIMIT,
     SCOUT_RUN_SPIKE_HISTORY_PERIODS,
 )
-from oh_goon.core.vocabulary import GameTapeStatus
 
 _FAILURE_STATUSES = frozenset({GameTapeStatus.FAILED})
 
@@ -319,9 +320,30 @@ def project_scout_repository(
         plan_total=len(plans),
         goon_total=len(goons),
         step_total=len(step_summaries),
-        plans=_detail_slice(plans, active_section="plans", page_section=page_section, page_offset=page_offset, page_limit=page_limit, default_limit=SCOUT_DETAIL_ENTITY_LIMIT),
-        goons=_detail_slice(tuple(sorted(goons, key=cpu_rank_key, reverse=True)), active_section="goons", page_section=page_section, page_offset=page_offset, page_limit=page_limit, default_limit=SCOUT_DETAIL_ENTITY_LIMIT),
-        steps=_detail_slice(step_summaries, active_section="steps", page_section=page_section, page_offset=page_offset, page_limit=page_limit, default_limit=SCOUT_DETAIL_ENTITY_LIMIT),
+        plans=_detail_slice(
+            plans,
+            active_section="plans",
+            page_section=page_section,
+            page_offset=page_offset,
+            page_limit=page_limit,
+            default_limit=SCOUT_DETAIL_ENTITY_LIMIT,
+        ),
+        goons=_detail_slice(
+            tuple(sorted(goons, key=cpu_rank_key, reverse=True)),
+            active_section="goons",
+            page_section=page_section,
+            page_offset=page_offset,
+            page_limit=page_limit,
+            default_limit=SCOUT_DETAIL_ENTITY_LIMIT,
+        ),
+        steps=_detail_slice(
+            step_summaries,
+            active_section="steps",
+            page_section=page_section,
+            page_offset=page_offset,
+            page_limit=page_limit,
+            default_limit=SCOUT_DETAIL_ENTITY_LIMIT,
+        ),
         representative_runs=tuple(samples[:SCOUT_REPRESENTATIVE_RUN_LIMIT]),
     )
 
@@ -364,9 +386,30 @@ def project_scout_plan(
         repository_total=len(repository_rows),
         goon_total=len(goon_rows),
         step_total=len(step_summaries),
-        repositories=_detail_slice(tuple(sorted(repository_rows, key=cpu_rank_key, reverse=True)), active_section="repositories", page_section=page_section, page_offset=page_offset, page_limit=page_limit, default_limit=SCOUT_DETAIL_ENTITY_LIMIT),
-        goons=_detail_slice(tuple(sorted(goon_rows, key=cpu_rank_key, reverse=True)), active_section="goons", page_section=page_section, page_offset=page_offset, page_limit=page_limit, default_limit=SCOUT_DETAIL_ENTITY_LIMIT),
-        steps=_detail_slice(step_summaries, active_section="steps", page_section=page_section, page_offset=page_offset, page_limit=page_limit, default_limit=SCOUT_DETAIL_ENTITY_LIMIT),
+        repositories=_detail_slice(
+            tuple(sorted(repository_rows, key=cpu_rank_key, reverse=True)),
+            active_section="repositories",
+            page_section=page_section,
+            page_offset=page_offset,
+            page_limit=page_limit,
+            default_limit=SCOUT_DETAIL_ENTITY_LIMIT,
+        ),
+        goons=_detail_slice(
+            tuple(sorted(goon_rows, key=cpu_rank_key, reverse=True)),
+            active_section="goons",
+            page_section=page_section,
+            page_offset=page_offset,
+            page_limit=page_limit,
+            default_limit=SCOUT_DETAIL_ENTITY_LIMIT,
+        ),
+        steps=_detail_slice(
+            step_summaries,
+            active_section="steps",
+            page_section=page_section,
+            page_offset=page_offset,
+            page_limit=page_limit,
+            default_limit=SCOUT_DETAIL_ENTITY_LIMIT,
+        ),
         representative_runs=tuple(
             repository_run_samples(runs, steps)[:SCOUT_REPRESENTATIVE_RUN_LIMIT]
         ),
@@ -458,9 +501,30 @@ def project_scout_goon(
         version_total=len(versions),
         repository_total=len(repository_rows),
         step_total=len(steps),
-        versions=_detail_slice(versions, active_section="versions", page_section=page_section, page_offset=page_offset, page_limit=page_limit, default_limit=SCOUT_DETAIL_ENTITY_LIMIT),
-        repositories=_detail_slice(tuple(sorted(repository_rows, key=cpu_rank_key, reverse=True)), active_section="repositories", page_section=page_section, page_offset=page_offset, page_limit=page_limit, default_limit=SCOUT_DETAIL_ENTITY_LIMIT),
-        steps=_detail_slice(steps, active_section="steps", page_section=page_section, page_offset=page_offset, page_limit=page_limit, default_limit=SCOUT_DETAIL_ENTITY_LIMIT),
+        versions=_detail_slice(
+            versions,
+            active_section="versions",
+            page_section=page_section,
+            page_offset=page_offset,
+            page_limit=page_limit,
+            default_limit=SCOUT_DETAIL_ENTITY_LIMIT,
+        ),
+        repositories=_detail_slice(
+            tuple(sorted(repository_rows, key=cpu_rank_key, reverse=True)),
+            active_section="repositories",
+            page_section=page_section,
+            page_offset=page_offset,
+            page_limit=page_limit,
+            default_limit=SCOUT_DETAIL_ENTITY_LIMIT,
+        ),
+        steps=_detail_slice(
+            steps,
+            active_section="steps",
+            page_section=page_section,
+            page_offset=page_offset,
+            page_limit=page_limit,
+            default_limit=SCOUT_DETAIL_ENTITY_LIMIT,
+        ),
         representative_runs=tuple(unique_samples),
         trend=trend(runs, selected, window),
     )

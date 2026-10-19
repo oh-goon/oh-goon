@@ -1,4 +1,5 @@
 """Validate explicitly retained checkpoint archive evidence before archive sealing."""
+
 from __future__ import annotations
 
 import re

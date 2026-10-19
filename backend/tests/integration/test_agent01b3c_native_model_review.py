@@ -4,6 +4,7 @@ No Hashmarks identity replacement, fake Ollama command, or Fleet execution patch
 The dedicated qualification entrypoint requires both native dependencies; ordinary
 hosted suites skip rather than pretending to qualify installed model inference.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -27,6 +28,8 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 MODEL_ENV = "OH_GOON_AGENT_MODEL"
 REQUIRED_ENV = "OH_GOON_REQUIRE_NATIVE_AGENT_MODEL"
+pytestmark = pytest.mark.certification
+
 
 def _locked_hashmarks_version() -> str:
     """Read the version from the existing uv.lock authority, not a second pin."""
@@ -54,6 +57,7 @@ def _require_real_native_dependencies() -> str:
     if importlib.util.find_spec("hashmarks") is None:
         unavailable("pinned Hashmarks wheel is not installed")
     from hashmarks import __version__
+
     from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 
     locked_version = _locked_hashmarks_version()
@@ -67,8 +71,12 @@ def _require_real_native_dependencies() -> str:
         unavailable("Hashmarks producer implementation identity is unavailable")
     try:
         ready = subprocess.run(
-            ["ollama", "show", model], capture_output=True, text=True, timeout=15,
-            check=False, env={**os.environ, "OLLAMA_HOST": "http://127.0.0.1:11434"},
+            ["ollama", "show", model],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            env={**os.environ, "OLLAMA_HOST": "http://127.0.0.1:11434"},
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         unavailable(f"local Ollama model not ready: {exc}")
@@ -151,12 +159,19 @@ def _native_agent_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model:
 
 @pytest.mark.parametrize("harness", ["local-model-review", "local-model-skill-loop"])
 def test_real_hashmarks_and_installed_ollama_review_survives_restart(
-    actual_model: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: str,
+    actual_model: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    harness: str,
 ):
     plan, repository, opts = _native_agent_source(tmp_path, monkeypatch, actual_model)
     if harness == "local-model-skill-loop":
         goon = tmp_path / "goons" / "agent" / "search" / "goon.yml"
-        goon.write_text(goon.read_text().replace("harness: local-model-review", "harness: local-model-skill-loop"))
+        goon.write_text(
+            goon.read_text().replace(
+                "harness: local-model-review", "harness: local-model-skill-loop"
+            )
+        )
         skill = tmp_path / "skills" / "team" / "search"
         (skill / "SKILL.md").write_text(
             "# Offline agent review\n"
@@ -168,8 +183,11 @@ def test_real_hashmarks_and_installed_ollama_review_survives_restart(
     resolved, frozen, _ = FleetPlanResolver(
         goon_templates=GoonTemplateStore(),
     ).resolve_frozen_local_search_agent(
-        plan, inputs=opts["inputs"], repository_root=opts["agent_repository_root"],
-        skill_root=opts["agent_skill_root"], allowed_acceptance=opts["allowed_agent_acceptance"],
+        plan,
+        inputs=opts["inputs"],
+        repository_root=opts["agent_repository_root"],
+        skill_root=opts["agent_skill_root"],
+        allowed_acceptance=opts["allowed_agent_acceptance"],
     )
     assert frozen.requested_effects.model == actual_model
     write_execution_lock(plan.parent / "goon.lock", build_execution_lock(resolved))
@@ -179,7 +197,10 @@ def test_real_hashmarks_and_installed_ollama_review_survives_restart(
     try:
         runtime.locations.add(repository.parent.parent)
         admitted = runtime.plans.run(
-            plan, repository_ids={repository_id(repository)}, fleet_run_id=run_id, **opts,
+            plan,
+            repository_ids={repository_id(repository)},
+            fleet_run_id=run_id,
+            **opts,
         )
         terminal = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=240)
         detail = runtime.runs.get(admitted.fleet_run_id)
@@ -199,6 +220,9 @@ def test_real_hashmarks_and_installed_ollama_review_survives_restart(
     try:
         persisted = reopened.runs.get(run_id)
         assert persisted.game_tape.status.value == "PASSED"
-        assert persisted.operations[0].evidence.plan.steps[0].stdout_evidence.sha256 == step.stdout_evidence.sha256
+        assert (
+            persisted.operations[0].evidence.plan.steps[0].stdout_evidence.sha256
+            == step.stdout_evidence.sha256
+        )
     finally:
         reopened.shutdown(wait_for_runs=True)

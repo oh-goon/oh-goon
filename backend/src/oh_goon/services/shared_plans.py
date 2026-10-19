@@ -10,7 +10,6 @@ from oh_goon.core.errors import (
     FleetPlanSourceStale,
 )
 from oh_goon.core.execution_lock_identity import build_execution_lock
-from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.goon_plan_source import SharedPlanSource
 from oh_goon.core.models.plan_template import PlanTemplateCatalog
@@ -18,6 +17,7 @@ from oh_goon.core.models.run import (
     FleetRunHistoryPage,
     FleetRunState,
 )
+from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.shared_plan import (
     BlockedSharedPlanRepositoryPreview,
     ReadySharedPlanRepositoryPreview,
@@ -31,8 +31,8 @@ from oh_goon.core.models.shared_plan import (
     SharedPlanRunHistory,
     SharedPlanSummary,
 )
-from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.integrations.fleet_plan_compilation import parse_plan_template
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.runtime.shared_plans import SharedPlanFileStore, normalize_shared_plan_key
@@ -152,9 +152,7 @@ class SharedPlanService:
                     continue
                 if target.source.plan_key != document.plan_key:
                     continue
-                matches.append(
-                    (item.admitted_revision, self._run_fact(item.run, target.source))
-                )
+                matches.append((item.admitted_revision, self._run_fact(item.run, target.source)))
                 if len(matches) == required:
                     break
             if len(matches) == required or page.next_before_revision is None:
@@ -166,9 +164,7 @@ class SharedPlanService:
             plan_key=document.plan_key,
             current_sha256=document.sha256,
             runs=tuple(run for _, run in visible),
-            next_before_revision=(
-                visible[-1][0] if len(matches) > limit and visible else None
-            ),
+            next_before_revision=(visible[-1][0] if len(matches) > limit and visible else None),
         )
 
     def save(
@@ -181,7 +177,14 @@ class SharedPlanService:
         # Validate once before persistence so malformed YAML never becomes selected state.
         # The committed bytes are already the exact content we just validated; do not
         # reload/reparse them after the atomic store write.
-        parse_plan_template(content, source=f"shared:{plan_key}/plan.yml", expected_name=plan_key)
+        compiled = parse_plan_template(
+            content, source=f"shared:{plan_key}/plan.yml", expected_name=plan_key
+        )
+        if any(getattr(step, "source_root", None) is not None for step in compiled.steps):
+            raise FleetPlanInvalid(
+                "Local Goon imports require a file-backed Plan and its catalog; "
+                "Shared Plan storage saves only plan.yml"
+            )
         return self._document(
             self._store.write(plan_key, content, expected_revision=expected_revision),
             validated=True,
@@ -202,7 +205,13 @@ class SharedPlanService:
         )
         self._require_source_revision(document, source_sha256)
         lock = build_execution_lock(plan)
-        return SharedPlanLockPreview(plan_key=document.plan_key, plan_id=plan.plan_id, sha256=document.sha256, execution_digest=lock.digest, content=render_execution_lock(lock))
+        return SharedPlanLockPreview(
+            plan_key=document.plan_key,
+            plan_id=plan.plan_id,
+            sha256=document.sha256,
+            execution_digest=lock.digest,
+            content=render_execution_lock(lock),
+        )
 
     def inspect_inputs(
         self,
@@ -375,7 +384,6 @@ class SharedPlanService:
                 expected_name=document.plan_key,
             )
         return document
-
 
     @staticmethod
     def _require_source_revision(document: SharedPlanDocument, source_sha256: str) -> None:

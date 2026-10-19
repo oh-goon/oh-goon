@@ -5,6 +5,7 @@ constrained environments can distinguish a compatible package already installed 
 the selected host interpreter from an artifact that native uv would need in order
 to materialize the authoritative project ``.venv``.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,7 +21,6 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
-
 
 ROOT = Path(__file__).resolve().parents[4]
 PYPROJECT = ROOT / "backend/pyproject.toml"
@@ -88,8 +88,7 @@ def _release(version: str) -> tuple[int, ...]:
     match = _RELEASE_RE.fullmatch(version.strip())
     if match is None:
         raise HostedCapabilityError(
-            "hosted capability accepts only final numeric releases; "
-            f"observed {version!r}"
+            f"hosted capability accepts only final numeric releases; observed {version!r}"
         )
     return tuple(int(part) for part in match.group(1).split("."))
 
@@ -111,8 +110,7 @@ def _python_supported(version: str, spec: str) -> bool:
     )
     if match is None:
         raise HostedCapabilityError(
-            "hosted capability requires project.requires-python in >=MIN,<MAX form, "
-            f"got {spec!r}"
+            f"hosted capability requires project.requires-python in >=MIN,<MAX form, got {spec!r}"
         )
     observed = _release(version)
     minimum = tuple(int(part) for part in match.group(1).split("."))
@@ -125,7 +123,9 @@ def _native_only_dependencies(payload: dict[str, object]) -> frozenset[str]:
     oh_goon = tool.get("oh-goon") if isinstance(tool, dict) else None
     hosted = oh_goon.get("hosted-diagnostic") if isinstance(oh_goon, dict) else None
     values = hosted.get("native-only-dependencies") if isinstance(hosted, dict) else None
-    if not isinstance(values, list) or not all(isinstance(value, str) and value.strip() for value in values):
+    if not isinstance(values, list) or not all(
+        isinstance(value, str) and value.strip() for value in values
+    ):
         raise HostedCapabilityError(
             "backend/pyproject.toml must define [tool.oh-goon.hosted-diagnostic] "
             "native-only-dependencies as a non-empty string list"
@@ -169,7 +169,8 @@ def _project_contract(
     missing = sorted(set(REQUIRED_HOST_CAPABILITIES) - set(evaluated))
     if missing:
         raise HostedCapabilityError(
-            "backend/pyproject.toml is missing hosted capability requirements: " + ", ".join(missing)
+            "backend/pyproject.toml is missing hosted capability requirements: "
+            + ", ".join(missing)
         )
     return declared, evaluated, _python_range(payload), native_only
 
@@ -183,6 +184,13 @@ def _import_name(distribution: str) -> str:
 
 
 def _default_import_probe(distribution: str, import_name: str) -> None:
+    if distribution == "types-pyyaml":
+        # This PEP 561 distribution contains type data rather than an importable
+        # runtime module. Native package metadata owns its installed location.
+        stubs = importlib.metadata.distribution(distribution).locate_file("yaml-stubs/__init__.pyi")
+        if not stubs.is_file():
+            raise HostedCapabilityError("PyYAML type stubs are not materialized")
+        return
     module = importlib.import_module(import_name)
     origin = getattr(module, "__file__", None)
     if origin is not None:
@@ -235,7 +243,9 @@ def _default_import_probe(distribution: str, import_name: str) -> None:
         certificate_pem = certificate.public_bytes(serialization.Encoding.PEM)
         loaded_certificates = x509.load_pem_x509_certificates(certificate_pem)
         if len(loaded_certificates) != 1 or loaded_certificates[0].serial_number != 1:
-            raise HostedCapabilityError("cryptography X.509 capability probe returned unexpected data")
+            raise HostedCapabilityError(
+                "cryptography X.509 capability probe returned unexpected data"
+            )
 
 
 def _canonical_identity(payload: dict[str, object]) -> str:
@@ -417,7 +427,10 @@ def main() -> int:
     print(f"HOST_DEPENDENCY_CAPABILITY_IDENTITY={payload['identity']}")
     print("Native uv artifact cache: NOT EVALUATED (separate native authority)")
     if payload["result"] != "HOST-CAPABILITY-READY":
-        print("HOSTED DEVELOPMENT DIAGNOSTIC BLOCKED: incompatible host dependency capability", file=sys.stderr)
+        print(
+            "HOSTED DEVELOPMENT DIAGNOSTIC BLOCKED: incompatible host dependency capability",
+            file=sys.stderr,
+        )
         for blocker in payload["blockers"]:
             print(f"- {blocker}", file=sys.stderr)
         return 3
