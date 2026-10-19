@@ -2546,7 +2546,7 @@
     "title": "Dependencies",
     "description": "Find the exact repositories that contain an observed dependency, narrow the population using recorded evidence, then select explicit repositories for a Shared Run.",
     "truthTitle": "Observed facts only",
-    "truthMessage": "Dependency results come from completed Run evidence. Missing or outdated evidence stays visible and is never treated as proof that a repository is unaffected.",
+    "truthMessage": "Dependency facts describe the supplied lock inventory. They do not establish that declarations or the installed environment match it.",
     "discoveryEyebrow": "Fleet discovery",
     "discoveryTitle": "Find a dependency",
     "discoveryDescription": "Search the server-owned observation index instead of opening repositories one by one.",
@@ -2565,11 +2565,11 @@
     "observedRepositories": "observed repositories",
     "coverageTitle": "Observation coverage",
     "currentEvidence": "Current matching evidence",
-    "provenNoMatch": "Current snapshot, no match",
+    "provenNoMatch": "Absent from lock",
     "agedEvidence": "Older matching evidence",
     "staleEvidence": "Stale matching evidence",
     "noCurrentEvidence": "No current dependency evidence",
-    "coverageHelp": "A current complete snapshot with no match is a proven non-match. Aged, stale, or missing snapshots are insufficient current evidence and are not counted as unaffected.",
+    "coverageHelp": "Current evidence matches the recorded lock source. Observation time is shown separately.",
     "versions": "Resolved versions",
     "allVersions": "All versions",
     "relationship": "Relationship",
@@ -2584,7 +2584,8 @@
       "all": "All evidence",
       "current": "Current",
       "aged": "Older",
-      "stale": "Stale"
+      "stale": "Stale",
+      "unknown": "Unknown"
     },
     "populationEyebrow": "Repository population",
     "matchingRepositories": "Matching repositories",
@@ -2634,16 +2635,16 @@
     "rangeIntegrityHelp": "Affected-range matching uses current resolved stable numeric versions only. Uncomparable versions remain visible as unclassified rather than being treated as unaffected.",
     "coverageStates": {
       "matching": "Observed matches",
-      "proven_no_match": "Proven current non-matches",
-      "no_current_evidence": "No current evidence"
+      "no_current_evidence": "No current evidence",
+      "absent_from_lock": "Absent from lock"
     },
     "coverageDescriptions": {
-      "proven_no_match": "These repositories have a current complete dependency snapshot and the package is absent.",
-      "no_current_evidence": "These repositories do not have a current complete dependency snapshot. Refresh evidence before treating them as affected or unaffected."
+      "no_current_evidence": "These repositories do not have a current complete dependency snapshot. Refresh evidence before treating them as affected or unaffected.",
+      "absent_from_lock": "These repositories have current, complete lock evidence in which the package is absent."
     },
     "coveragePopulationTitles": {
-      "proven_no_match": "Repositories with a proven non-match",
-      "no_current_evidence": "Repositories needing current dependency evidence"
+      "no_current_evidence": "Repositories needing current dependency evidence",
+      "absent_from_lock": "Repositories without this package in the lock"
     },
     "coveragePopulationDescription": "This is a server-owned evidence population. Review it, or use the complete population as an explicit New shared run target set.",
     "selectAllPopulation_one": "Use this repository in new shared run",
@@ -2653,13 +2654,28 @@
       "current": "Current snapshot",
       "aged": "Older snapshot",
       "stale": "Stale snapshot",
-      "missing": "No snapshot"
+      "missing": "No snapshot",
+      "unknown": "Unknown lock evidence"
     },
-    "provenNoMatchReason": "A current complete dependency snapshot contains no {{package}} observation.",
+    "provenNoMatchReason": "{{package}} is absent from the current, complete lock inventory.",
     "refreshEvidenceReason": "Current dependency evidence is insufficient. Run the dependency-inventory Plan on an explicit selection to refresh it.",
     "observationDetails": "Observation provenance",
     "searchPaginationLabel": "Dependency search result pages",
-    "repositoryPaginationLabel": "Repository dependency pages"
+    "repositoryPaginationLabel": "Repository dependency pages",
+    "contexts": "Lock contexts",
+    "unknownEvidence": "Unknown matching evidence",
+    "completeness": "Completeness",
+    "completenessStates": {
+      "complete": "Complete",
+      "incomplete": "Incomplete",
+      "unknown": "Unknown"
+    },
+    "availabilityStates": {
+      "available": "Available",
+      "unsupported": "Unsupported lock",
+      "unavailable": "Source unavailable",
+      "missing": "No snapshot"
+    }
   },
   "failures": {
     "eyebrow": "Fleet investigation",

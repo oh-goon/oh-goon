@@ -37,7 +37,7 @@ def test_observed_dependency_population_round_trips_through_durable_selection(
     repository.path.mkdir(parents=True, exist_ok=True)
     (repository.path / ".git").mkdir()
     report = dependency_report(
-        repository, dependency_snapshot(("mlflow", "2.17.2")), state="a" * 40
+        repository, dependency_snapshot(repository.path, ("mlflow", "2.17.2")), state="a" * 40
     )
     with database.transaction(write=True) as connection:
         observations._index_report(connection, report)

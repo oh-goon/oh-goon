@@ -28,7 +28,7 @@ def validate_native_consumer_bundle(
     *,
     expected_producer_implementation_identity: str,
 ) -> Mapping[str, object]:
-    from hashmarks.consumer_conformance import validate_native_consumer_bundle as native_validator
+    from hashmarks import validate_native_consumer_bundle as native_validator
 
     return native_validator(
         envelope,

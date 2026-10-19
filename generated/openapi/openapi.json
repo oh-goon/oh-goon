@@ -2700,11 +2700,6 @@
             "title": "Affected Specifier",
             "type": "string"
           },
-          "aged": {
-            "minimum": 0.0,
-            "title": "Aged",
-            "type": "integer"
-          },
           "no_current_evidence": {
             "minimum": 0.0,
             "title": "No Current Evidence",
@@ -2730,6 +2725,11 @@
             "title": "Stale",
             "type": "integer"
           },
+          "unknown": {
+            "minimum": 0.0,
+            "title": "Unknown",
+            "type": "integer"
+          },
           "version_unclassified": {
             "minimum": 0.0,
             "title": "Version Unclassified",
@@ -2744,7 +2744,7 @@
           "observed_not_affected",
           "version_unclassified",
           "no_matching_dependency",
-          "aged",
+          "unknown",
           "stale",
           "no_current_evidence"
         ],
@@ -2756,21 +2756,14 @@
         "properties": {
           "coverage": {
             "enum": [
-              "proven_no_match",
+              "absent_from_lock",
               "no_current_evidence"
             ],
             "title": "Coverage",
             "type": "string"
           },
-          "evidence_state": {
-            "enum": [
-              "current",
-              "aged",
-              "stale",
-              "missing"
-            ],
-            "title": "Evidence State",
-            "type": "string"
+          "evidence": {
+            "$ref": "#/components/schemas/DependencyEvidenceAssessment"
           },
           "fleet_run_id": {
             "anyOf": [
@@ -2847,7 +2840,7 @@
         "required": [
           "repository",
           "coverage",
-          "evidence_state"
+          "evidence"
         ],
         "title": "DependencyCoverageRepository",
         "type": "object"
@@ -2857,7 +2850,7 @@
         "properties": {
           "coverage": {
             "enum": [
-              "proven_no_match",
+              "absent_from_lock",
               "no_current_evidence"
             ],
             "title": "Coverage",
@@ -2930,14 +2923,70 @@
         "title": "DependencyEvidence",
         "type": "object"
       },
+      "DependencyEvidenceAssessment": {
+        "additionalProperties": false,
+        "description": "Repository facts about the supplied lock, independent of observation age.",
+        "properties": {
+          "absence_admissible": {
+            "default": false,
+            "title": "Absence Admissible",
+            "type": "boolean"
+          },
+          "availability": {
+            "default": "unavailable",
+            "enum": [
+              "available",
+              "unsupported",
+              "unavailable",
+              "missing"
+            ],
+            "title": "Availability",
+            "type": "string"
+          },
+          "completeness": {
+            "default": "unknown",
+            "enum": [
+              "complete",
+              "incomplete",
+              "unknown"
+            ],
+            "title": "Completeness",
+            "type": "string"
+          },
+          "freshness": {
+            "default": "unknown",
+            "enum": [
+              "current",
+              "stale",
+              "unknown"
+            ],
+            "title": "Freshness",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "scope": {
+            "const": "locked-inventory",
+            "default": "locked-inventory",
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "title": "DependencyEvidenceAssessment",
+        "type": "object"
+      },
       "DependencyFleetCoverageOverview": {
         "additionalProperties": false,
         "properties": {
-          "aged_dependency_evidence": {
-            "minimum": 0.0,
-            "title": "Aged Dependency Evidence",
-            "type": "integer"
-          },
           "current_dependency_evidence": {
             "minimum": 0.0,
             "title": "Current Dependency Evidence",
@@ -2962,12 +3011,17 @@
             "minimum": 0.0,
             "title": "Stale Dependency Evidence",
             "type": "integer"
+          },
+          "unknown_dependency_evidence": {
+            "minimum": 0.0,
+            "title": "Unknown Dependency Evidence",
+            "type": "integer"
           }
         },
         "required": [
           "repository_total",
           "current_dependency_evidence",
-          "aged_dependency_evidence",
+          "unknown_dependency_evidence",
           "stale_dependency_evidence",
           "missing_dependency_evidence",
           "no_current_dependency_evidence"
@@ -2978,11 +3032,6 @@
       "DependencyFreshnessSummary": {
         "additionalProperties": false,
         "properties": {
-          "aged": {
-            "minimum": 0.0,
-            "title": "Aged",
-            "type": "integer"
-          },
           "current": {
             "minimum": 0.0,
             "title": "Current",
@@ -3002,12 +3051,17 @@
             "minimum": 0.0,
             "title": "Stale",
             "type": "integer"
+          },
+          "unknown": {
+            "minimum": 0.0,
+            "title": "Unknown",
+            "type": "integer"
           }
         },
         "required": [
           "current",
           "no_matching_dependency",
-          "aged",
+          "unknown",
           "stale",
           "no_current_evidence"
         ],
@@ -3016,37 +3070,25 @@
       },
       "DependencyObservation": {
         "additionalProperties": false,
-        "description": "One typed Python-package fact inside a complete dependency snapshot.",
+        "description": "One producer-selected package in a resolved lock inventory.",
         "properties": {
-          "declared_range": {
-            "anyOf": [
-              {
-                "maxLength": 500,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Declared Range"
-          },
-          "declared_source": {
-            "anyOf": [
-              {
-                "maxLength": 240,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Declared Source"
+          "contexts": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Contexts",
+            "type": "array"
           },
           "ecosystem": {
             "const": "pypi",
             "default": "pypi",
             "title": "Ecosystem",
+            "type": "string"
+          },
+          "node_id": {
+            "minLength": 1,
+            "title": "Node Id",
             "type": "string"
           },
           "package_name": {
@@ -3055,59 +3097,54 @@
             "title": "Package Name",
             "type": "string"
           },
-          "relationship": {
-            "enum": [
-              "direct",
-              "transitive"
-            ],
-            "title": "Relationship",
+          "package_source": {
+            "minLength": 1,
+            "title": "Package Source",
             "type": "string"
           },
+          "relationships": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Relationships",
+            "type": "array"
+          },
           "resolved_source": {
-            "anyOf": [
-              {
-                "maxLength": 240,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolved Source"
+            "const": "uv.lock",
+            "default": "uv.lock",
+            "title": "Resolved Source",
+            "type": "string"
           },
           "resolved_version": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolved Version"
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Resolved Version",
+            "type": "string"
           }
         },
         "required": [
           "package_name",
-          "relationship"
+          "node_id",
+          "resolved_version",
+          "package_source",
+          "contexts"
         ],
         "title": "DependencyObservation",
         "type": "object"
       },
       "DependencyObservationSnapshot": {
         "additionalProperties": false,
-        "description": "Complete replacement snapshot for one repository's PyPI dependency scope.\n\nThis object is Step evidence. Repository/Run/Goon identity is supplied by the\ncanonical OperationReport and resolved Plan provenance that contains it.",
+        "description": "Retained producer observation plus its searchable locked-package projection.\n\nDeclarations and installed environments are outside this scope. Raw adapter\nevidence is retained so the producer can requalify its original source claims.",
         "properties": {
-          "coverage": {
-            "const": "complete",
-            "default": "complete",
-            "title": "Coverage",
-            "type": "string"
+          "adapter_observation": {
+            "additionalProperties": true,
+            "title": "Adapter Observation",
+            "type": "object"
           },
           "dependencies": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/DependencyObservation"
             },
@@ -3121,30 +3158,49 @@
             "title": "Ecosystem",
             "type": "string"
           },
+          "evidence": {
+            "$ref": "#/components/schemas/DependencyEvidenceAssessment"
+          },
           "kind": {
             "const": "dependency",
             "default": "dependency",
             "title": "Kind",
             "type": "string"
           },
+          "producer_implementation_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer Implementation Identity"
+          },
+          "producer_observation": {
+            "additionalProperties": true,
+            "title": "Producer Observation",
+            "type": "object"
+          },
           "schema_version": {
-            "const": 1,
-            "default": 1,
+            "const": 2,
+            "default": 2,
             "title": "Schema Version",
             "type": "integer"
           },
           "sources": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/ObservationSourceEvidence"
             },
             "maxItems": 512,
-            "minItems": 1,
             "title": "Sources",
             "type": "array"
           }
         },
         "required": [
-          "sources"
+          "evidence"
         ],
         "title": "DependencyObservationSnapshot",
         "type": "object"
@@ -3152,11 +3208,6 @@
       "DependencyPackageOverview": {
         "additionalProperties": false,
         "properties": {
-          "direct_repositories": {
-            "minimum": 0.0,
-            "title": "Direct Repositories",
-            "type": "integer"
-          },
           "ecosystem": {
             "const": "pypi",
             "default": "pypi",
@@ -3188,11 +3239,6 @@
             "title": "Package Name",
             "type": "string"
           },
-          "transitive_repositories": {
-            "minimum": 0.0,
-            "title": "Transitive Repositories",
-            "type": "integer"
-          },
           "versions": {
             "items": {
               "$ref": "#/components/schemas/DependencyVersionBucket"
@@ -3205,8 +3251,6 @@
         "required": [
           "package_name",
           "observed_repositories",
-          "direct_repositories",
-          "transitive_repositories",
           "freshness"
         ],
         "title": "DependencyPackageOverview",
@@ -3245,11 +3289,12 @@
       "DependencyRepositoryMatch": {
         "additionalProperties": false,
         "properties": {
-          "declared_ranges": {
+          "contexts": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Declared Ranges",
+            "title": "Contexts",
             "type": "array"
           },
           "ecosystem": {
@@ -3258,14 +3303,8 @@
             "title": "Ecosystem",
             "type": "string"
           },
-          "evidence_state": {
-            "enum": [
-              "current",
-              "aged",
-              "stale"
-            ],
-            "title": "Evidence State",
-            "type": "string"
+          "evidence": {
+            "$ref": "#/components/schemas/DependencyEvidenceAssessment"
           },
           "fleet_run_id": {
             "minLength": 1,
@@ -3299,14 +3338,6 @@
             ],
             "title": "Producer Goon"
           },
-          "relationship": {
-            "enum": [
-              "direct",
-              "transitive"
-            ],
-            "title": "Relationship",
-            "type": "string"
-          },
           "repository": {
             "$ref": "#/components/schemas/RepositoryIdentity"
           },
@@ -3334,9 +3365,8 @@
         "required": [
           "repository",
           "package_name",
-          "relationship",
           "sources",
-          "evidence_state",
+          "evidence",
           "observed_at",
           "fleet_run_id",
           "operation_id",
@@ -3488,7 +3518,7 @@
             "default": "matching",
             "enum": [
               "matching",
-              "proven_no_match",
+              "absent_from_lock",
               "no_current_evidence"
             ],
             "title": "Coverage",
@@ -3499,7 +3529,7 @@
             "enum": [
               "all",
               "current",
-              "aged",
+              "unknown",
               "stale"
             ],
             "title": "Evidence",
@@ -3508,16 +3538,6 @@
           "package_name": {
             "minLength": 1,
             "title": "Package Name",
-            "type": "string"
-          },
-          "relationship": {
-            "default": "all",
-            "enum": [
-              "all",
-              "direct",
-              "transitive"
-            ],
-            "title": "Relationship",
             "type": "string"
           },
           "resolved_version": {
@@ -14914,23 +14934,23 @@
       },
       "ObservationSourceEvidence": {
         "additionalProperties": false,
-        "description": "Exact repository source bytes covered by one complete observation snapshot.",
+        "description": "Producer member revisions retained with one observation.",
         "properties": {
+          "member_revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Member Revision",
+            "type": "string"
+          },
           "path": {
             "maxLength": 240,
             "minLength": 1,
             "title": "Path",
             "type": "string"
-          },
-          "sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Sha256",
-            "type": "string"
           }
         },
         "required": [
           "path",
-          "sha256"
+          "member_revision"
         ],
         "title": "ObservationSourceEvidence",
         "type": "object"
@@ -30481,7 +30501,7 @@
             "required": true,
             "schema": {
               "enum": [
-                "proven_no_match",
+                "absent_from_lock",
                 "no_current_evidence"
               ],
               "title": "Coverage",
@@ -30667,21 +30687,6 @@
           },
           {
             "in": "query",
-            "name": "relationship",
-            "required": false,
-            "schema": {
-              "default": "all",
-              "enum": [
-                "all",
-                "direct",
-                "transitive"
-              ],
-              "title": "Relationship",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
             "name": "evidence",
             "required": false,
             "schema": {
@@ -30689,7 +30694,7 @@
               "enum": [
                 "all",
                 "current",
-                "aged",
+                "unknown",
                 "stale"
               ],
               "title": "Evidence",

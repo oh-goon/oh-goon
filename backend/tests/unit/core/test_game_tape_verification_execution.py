@@ -180,56 +180,11 @@ def test_execution_ledger_ranks_termination_requested_lifecycle_event() -> None:
     assert _STEP_EVENT_STAGE[GameTapeEventType.TERMINATION_REQUESTED] == 6
 
 
-def test_hashmarks_runtime_contract_translates_producer_owned_implementation_provenance(
-    monkeypatch,
-) -> None:
+def test_hashmarks_optional_diagnostics_wait_for_a_public_producer_contract() -> None:
     from oh_goon.integrations.hashmarks import runtime_contract
-
-    expected = "sha256:" + "d" * 64
-    payload = {
-        "schema": "hashmarks.producer-implementation-provenance.v1",
-        "authority": "non-authoritative-explanation",
-        "storage": "derived-not-persisted",
-        "identity_schema": "hashmarks.producer-implementation.v1",
-        "implementation_identity": expected,
-        "input_count": 1,
-        "inputs": [
-            {"path": "codemap/store.py", "bytes": 123, "content_sha256": "sha256:" + "e" * 64}
-        ],
-    }
-    monkeypatch.setattr(runtime_contract, "producer_implementation_provenance", lambda: payload)
-
-    projected = runtime_contract.loaded_hashmarks_producer_provenance()
-
-    assert projected is not None
-    assert projected.implementation_identity == expected
-    assert projected.inputs[0].path == "codemap/store.py"
-    assert projected.inputs[0].byte_count == 123
-
-
-def test_hashmarks_runtime_contract_suppresses_unsafe_producer_provenance_paths(
-    monkeypatch,
-) -> None:
-    from oh_goon.integrations.hashmarks import runtime_contract
-
-    expected = "sha256:" + "d" * 64
-    monkeypatch.setattr(
-        runtime_contract,
-        "producer_implementation_provenance",
-        lambda: {
-            "schema": "hashmarks.producer-implementation-provenance.v1",
-            "authority": "non-authoritative-explanation",
-            "storage": "derived-not-persisted",
-            "identity_schema": "hashmarks.producer-implementation.v1",
-            "implementation_identity": expected,
-            "input_count": 1,
-            "inputs": [
-                {"path": "../host-secret.py", "bytes": 1, "content_sha256": "sha256:" + "e" * 64}
-            ],
-        },
-    )
 
     assert runtime_contract.loaded_hashmarks_producer_provenance() is None
+    assert runtime_contract.loaded_hashmarks_producer_identity().startswith("sha256:")
 
 
 def test_game_tape_binds_non_durable_provenance_only_to_matching_execution_identity() -> None:

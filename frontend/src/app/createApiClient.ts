@@ -130,9 +130,9 @@ export function createApiClient(mutations: MutationController): ApiClient {
       { path: { package_name: packageName }, query: { coverage, offset, limit } },
       options,
     ),
-    dependencyRepositories: (packageName, resolvedVersion, versionPrefix, relationship = "all", evidence = "all", offset = 0, limit = 20, versionSpecifier, advisoryId, options) => readOperation(
+    dependencyRepositories: (packageName, resolvedVersion, versionPrefix, evidence = "all", offset = 0, limit = 20, versionSpecifier, advisoryId, options) => readOperation(
       op.dependency_repositories.operationId,
-      { path: { package_name: packageName }, query: { relationship, evidence, offset, limit, ...(resolvedVersion === undefined ? {} : { resolved_version: resolvedVersion }), ...(versionPrefix === undefined ? {} : { version_prefix: versionPrefix }), ...(versionSpecifier === undefined ? {} : { version_specifier: versionSpecifier }), ...(advisoryId === undefined ? {} : { advisory_id: advisoryId }) } },
+      { path: { package_name: packageName }, query: { evidence, offset, limit, ...(resolvedVersion === undefined ? {} : { resolved_version: resolvedVersion }), ...(versionPrefix === undefined ? {} : { version_prefix: versionPrefix }), ...(versionSpecifier === undefined ? {} : { version_specifier: versionSpecifier }), ...(advisoryId === undefined ? {} : { advisory_id: advisoryId }) } },
       options,
     ),
     repositoryDependencies: (repositoryId, offset = 0, limit = 20, options) => readOperation(

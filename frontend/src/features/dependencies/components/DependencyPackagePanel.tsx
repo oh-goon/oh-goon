@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { StatusBadge } from "@/components/common/StatusBadge";
 import type { ReadResource } from "@/domain/reads/ReadResource";
-import type { DependencyCoverage, DependencyEvidence, DependencyRelationship } from "@/features/dependencies/model";
+import type { DependencyCoverage, DependencyEvidence } from "@/features/dependencies/model";
 import type {
   DependencyAdvisoryOverview,
   DependencyCoverageRepository,
@@ -17,7 +17,6 @@ interface FilterState {
   resolvedVersion: string;
   versionSpecifier: string;
   advisoryId: string;
-  relationship: DependencyRelationship;
   evidence: DependencyEvidence;
   coverage: DependencyCoverage;
   offset: number;
@@ -37,21 +36,20 @@ interface Props extends FilterState {
   onOpenRepository: (repositoryId: string) => void;
 }
 
-function evidenceTone(state: string): "success" | "warning" | "neutral" {
-  return state === "current" ? "success" : state === "aged" ? "warning" : "neutral";
+function evidenceTone(state: string | undefined): "success" | "warning" | "neutral" {
+  return state === "current" ? "success" : state === "unknown" ? "warning" : "neutral";
 }
 
 const resetMatchFilters = {
   resolvedVersion: "",
   versionSpecifier: "",
   advisoryId: "",
-  relationship: "all" as const,
   evidence: "all" as const,
   offset: 0,
 };
 
 export function DependencyPackagePanel({
-  packageName, resolvedVersion, versionSpecifier, advisoryId, relationship, evidence, coverage, offset,
+  packageName, resolvedVersion, versionSpecifier, advisoryId, evidence, coverage, offset,
   overview, advisory, repositories, coverageRepositories, selecting,
   onBack, onFilter, onMaterialize, onOpenEvidence, onOpenRepository,
 }: Props) {
@@ -71,7 +69,7 @@ export function DependencyPackagePanel({
   const pageLength = matching ? matchItems.length : coverageItems.length;
   const loading = overview.status === "read-loading"
     || (matching ? repositories.status === "read-loading" : coverageRepositories.status === "read-loading");
-  const active = coverage !== "matching" || Boolean(resolvedVersion || versionSpecifier || relationship !== "all" || evidence !== "all");
+  const active = coverage !== "matching" || Boolean(resolvedVersion || versionSpecifier || evidence !== "all");
 
   const chooseCoverage = (nextCoverage: DependencyCoverage, nextEvidence: DependencyEvidence = "all") => {
     onFilter({ ...resetMatchFilters, coverage: nextCoverage, evidence: nextEvidence });
@@ -89,8 +87,8 @@ export function DependencyPackagePanel({
       {data ? <>
         <div className="dependency-coverage-grid" role="group" aria-label={t("dependencies.coverageTitle")}>
           <CoverageFact active={matching && evidence === "current"} value={data.freshness.current} label={t("dependencies.currentEvidence")} onClick={() => chooseCoverage("matching", "current")} />
-          <CoverageFact active={coverage === "proven_no_match"} value={data.freshness.no_matching_dependency} label={t("dependencies.provenNoMatch")} onClick={() => chooseCoverage("proven_no_match")} />
-          <CoverageFact active={matching && evidence === "aged"} value={data.freshness.aged} label={t("dependencies.agedEvidence")} onClick={() => chooseCoverage("matching", "aged")} />
+          <CoverageFact active={coverage === "absent_from_lock"} value={data.freshness.no_matching_dependency} label={t("dependencies.provenNoMatch")} onClick={() => chooseCoverage("absent_from_lock")} />
+          <CoverageFact active={matching && evidence === "unknown"} value={data.freshness.unknown} label={t("dependencies.unknownEvidence")} onClick={() => chooseCoverage("matching", "unknown")} />
           <CoverageFact active={matching && evidence === "stale"} value={data.freshness.stale} label={t("dependencies.staleEvidence")} onClick={() => chooseCoverage("matching", "stale")} />
           <CoverageFact active={coverage === "no_current_evidence"} value={data.freshness.no_current_evidence} label={t("dependencies.noCurrentEvidence")} onClick={() => chooseCoverage("no_current_evidence")} />
         </div>
@@ -125,8 +123,7 @@ export function DependencyPackagePanel({
           {versionSpecifier ? <p className="dependency-coverage-help">{t("dependencies.rangeIntegrityHelp")}</p> : null}
         </section>
         <section className="dependency-facet-section">
-          <div className="dependency-filter-row"><div><strong>{t("dependencies.relationship")}</strong><div className="dependency-filter-chips">{(["all", "direct", "transitive"] as const).map((value) => <button type="button" className={relationship === value ? "filter-chip filter-chip--active" : "filter-chip"} key={value} onClick={() => onFilter({ relationship: value, coverage: "matching", offset: 0 })}>{t(`dependencies.relationships.${value}`)}</button>)}</div></div>
-            <div><strong>{t("dependencies.evidence")}</strong><div className="dependency-filter-chips">{(["all", "current", "aged", "stale"] as const).map((value) => <button type="button" className={evidence === value ? "filter-chip filter-chip--active" : "filter-chip"} key={value} onClick={() => onFilter({ evidence: value, coverage: "matching", offset: 0 })}>{t(`dependencies.evidenceStates.${value}`)}</button>)}</div></div></div>
+          <div className="dependency-filter-row"><div><strong>{t("dependencies.evidence")}</strong><div className="dependency-filter-chips">{(["all", "current", "unknown", "stale"] as const).map((value) => <button type="button" className={evidence === value ? "filter-chip filter-chip--active" : "filter-chip"} key={value} onClick={() => onFilter({ evidence: value, coverage: "matching", offset: 0 })}>{t(`dependencies.evidenceStates.${value}`)}</button>)}</div></div></div>
         </section>
       </> : <div className="notice notice--scope"><strong>{t(`dependencies.coverageStates.${coverage}`)}</strong><p>{t(`dependencies.coverageDescriptions.${coverage}`)}</p></div>}
 
@@ -134,7 +131,6 @@ export function DependencyPackagePanel({
         {coverage !== "matching" ? <button type="button" className="filter-chip filter-chip--active" onClick={() => chooseCoverage("matching")}>{t(`dependencies.coverageStates.${coverage}`)} ×</button> : null}
         {resolvedVersion ? <button type="button" className="filter-chip filter-chip--active" onClick={() => onFilter({ resolvedVersion: "", versionSpecifier: "", advisoryId: "", offset: 0 })}>{packageName} {resolvedVersion} ×</button> : null}
         {versionSpecifier ? <button type="button" className="filter-chip filter-chip--active" onClick={() => onFilter({ versionSpecifier: "", advisoryId: "", offset: 0 })}>{advisoryId ? `${advisoryId} · ` : ""}{versionSpecifier} ×</button> : null}
-        {relationship !== "all" ? <button type="button" className="filter-chip filter-chip--active" onClick={() => onFilter({ relationship: "all", offset: 0 })}>{t(`dependencies.relationships.${relationship}`)} ×</button> : null}
         {evidence !== "all" ? <button type="button" className="filter-chip filter-chip--active" onClick={() => onFilter({ evidence: "all", offset: 0 })}>{t(`dependencies.evidenceStates.${evidence}`)} ×</button> : null}
       </div> : null}
     </section>
@@ -161,11 +157,10 @@ function CoverageFact({ value, label, active = false, onClick }: { value: number
 function RepositoryMatchCard({ match, onOpenEvidence, onOpenRepository }: { match: DependencyRepositoryMatch; onOpenEvidence: (runId: string, stepId: string) => void; onOpenRepository: (repositoryId: string) => void }) {
   const { t } = useTranslation();
   const versions = match.resolved_versions ?? [];
-  const declared = match.declared_ranges ?? [];
   return <article className="dependency-repository-card">
-    <header><div><strong>{match.repository.name}</strong><small>{match.repository.path}</small></div><StatusBadge label={t(`dependencies.evidenceStates.${match.evidence_state}`)} tone={evidenceTone(match.evidence_state)} /></header>
-    <div className="dependency-match-summary"><span><b>{t("dependencies.resolved")}</b>{versions.length ? versions.join(", ") : "—"}</span><span><b>{t("dependencies.declared")}</b>{declared.length ? declared.join(", ") : "—"}</span><span><b>{t("dependencies.relationship")}</b>{t(`dependencies.relationships.${match.relationship}`)}</span></div>
-    <details className="dependency-proof"><summary>{t("dependencies.whyMatched")}</summary><dl><div><dt>{t("dependencies.sources")}</dt><dd>{match.sources.join(", ")}</dd></div><div><dt>{t("dependencies.observed")}</dt><dd>{new Date(match.observed_at).toLocaleString()}</dd></div><div><dt>{t("dependencies.run")}</dt><dd><code>{match.fleet_run_id}</code></dd></div><div><dt>{t("dependencies.producer")}</dt><dd>{match.producer_goon ?? "—"}</dd></div><div><dt>{t("dependencies.step")}</dt><dd><code>{match.step_id}</code></dd></div></dl></details>
+    <header><div><strong>{match.repository.name}</strong><small>{match.repository.path}</small></div><StatusBadge label={t(`dependencies.evidenceStates.${match.evidence.freshness}`)} tone={evidenceTone(match.evidence.freshness)} /></header>
+    <div className="dependency-match-summary"><span><b>{t("dependencies.resolved")}</b>{versions.length ? versions.join(", ") : "—"}</span><span><b>{t("dependencies.contexts")}</b>{(match.contexts ?? []).join(", ")}</span></div>
+    <details className="dependency-proof"><summary>{t("dependencies.whyMatched")}</summary><dl><div><dt>{t("dependencies.completeness")}</dt><dd>{t(`dependencies.completenessStates.${match.evidence.completeness}`)}</dd></div><div><dt>{t("dependencies.sources")}</dt><dd>{match.sources.join(", ")}</dd></div><div><dt>{t("dependencies.observed")}</dt><dd>{new Date(match.observed_at).toLocaleString()}</dd></div><div><dt>{t("dependencies.run")}</dt><dd><code>{match.fleet_run_id}</code></dd></div><div><dt>{t("dependencies.producer")}</dt><dd>{match.producer_goon ?? "—"}</dd></div><div><dt>{t("dependencies.step")}</dt><dd><code>{match.step_id}</code></dd></div></dl></details>
     <div className="button-row dependency-repository-actions"><button className="button button--primary button--small" type="button" onClick={() => onOpenEvidence(match.fleet_run_id, match.step_id)}>{t("dependencies.openEvidence")}</button><button className="button button--secondary button--small" type="button" onClick={() => onOpenRepository(match.repository.repository_id)}>{t("dependencies.repositoryDependencies")}</button></div>
   </article>;
 }
@@ -174,9 +169,10 @@ function CoverageRepositoryCard({ item, packageName, onOpenEvidence, onOpenRepos
   const { t } = useTranslation();
   const sources = item.sources ?? [];
   return <article className="dependency-repository-card">
-    <header><div><strong>{item.repository.name}</strong><small>{item.repository.path}</small></div><StatusBadge label={t(`dependencies.snapshotStates.${item.evidence_state}`)} tone={evidenceTone(item.evidence_state)} /></header>
-    <p className="dependency-coverage-help">{item.coverage === "proven_no_match" ? t("dependencies.provenNoMatchReason", { package: packageName }) : t("dependencies.refreshEvidenceReason")}</p>
-    {item.observed_at ? <details className="dependency-proof"><summary>{t("dependencies.observationDetails")}</summary><dl><div><dt>{t("dependencies.sources")}</dt><dd>{sources.length ? sources.join(", ") : "—"}</dd></div><div><dt>{t("dependencies.observed")}</dt><dd>{new Date(item.observed_at).toLocaleString()}</dd></div><div><dt>{t("dependencies.run")}</dt><dd>{item.fleet_run_id ? <code>{item.fleet_run_id}</code> : "—"}</dd></div><div><dt>{t("dependencies.producer")}</dt><dd>{item.producer_goon ?? "—"}</dd></div><div><dt>{t("dependencies.step")}</dt><dd>{item.step_id ? <code>{item.step_id}</code> : "—"}</dd></div></dl></details> : null}
+    <header><div><strong>{item.repository.name}</strong><small>{item.repository.path}</small></div><StatusBadge label={t(`dependencies.snapshotStates.${item.evidence.freshness}`)} tone={evidenceTone(item.evidence.freshness)} />{item.evidence.availability !== "available" ? <StatusBadge label={t(`dependencies.availabilityStates.${item.evidence.availability}`)} tone="warning" /> : null}</header>
+    <p className="dependency-coverage-help">{item.coverage === "absent_from_lock" ? t("dependencies.provenNoMatchReason", { package: packageName }) : t("dependencies.refreshEvidenceReason")}</p>
+    {item.evidence.reason ? <p className="muted">{item.evidence.reason}</p> : null}
+    {item.observed_at ? <details className="dependency-proof"><summary>{t("dependencies.observationDetails")}</summary><dl><div><dt>{t("dependencies.completeness")}</dt><dd>{t(`dependencies.completenessStates.${item.evidence.completeness}`)}</dd></div><div><dt>{t("dependencies.sources")}</dt><dd>{sources.length ? sources.join(", ") : "—"}</dd></div><div><dt>{t("dependencies.observed")}</dt><dd>{new Date(item.observed_at).toLocaleString()}</dd></div><div><dt>{t("dependencies.run")}</dt><dd>{item.fleet_run_id ? <code>{item.fleet_run_id}</code> : "—"}</dd></div><div><dt>{t("dependencies.producer")}</dt><dd>{item.producer_goon ?? "—"}</dd></div><div><dt>{t("dependencies.step")}</dt><dd>{item.step_id ? <code>{item.step_id}</code> : "—"}</dd></div></dl></details> : null}
     <div className="button-row dependency-repository-actions">{item.fleet_run_id && item.step_id ? <button className="button button--primary button--small" type="button" onClick={() => onOpenEvidence(item.fleet_run_id!, item.step_id!)}>{t("dependencies.openEvidence")}</button> : null}<button className="button button--secondary button--small" type="button" onClick={() => onOpenRepository(item.repository.repository_id)}>{t("dependencies.repositoryDependencies")}</button></div>
   </article>;
 }

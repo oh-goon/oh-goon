@@ -8,6 +8,7 @@ pytest.importorskip("hashmarks")
 
 from oh_goon.core.errors import ExecutionAssignmentStale
 from oh_goon.integrations.hashmarks.repository_intelligence import (
+    HashmarksRepositoryIntelligenceInputError,
     bind_hashmarks_repository_evidence,
 )
 from oh_goon.integrations.hashmarks.work_translation import (
@@ -40,6 +41,8 @@ def test_verification_plan_translates_only_command_intent_and_exact_identity() -
     evidence = _verified(
         {
             "schema": "hashmarks.verification-plan.v1",
+            "path": "tests/test_sample.py",
+            "working_directory": ".",
             "available": True,
             "argv": ["pytest", "backend/tests/unit"],
             "network_authority": "declared",
@@ -60,7 +63,16 @@ def test_verification_plan_translates_only_command_intent_and_exact_identity() -
 
 
 def test_informative_context_or_decision_evidence_cannot_become_executable_work() -> None:
-    evidence = _verified({"schema": "hashmarks.task-context-plan.v1", "task": "inspect"})
+    evidence = _verified(
+        {
+            "schema": "hashmarks.task-context-plan.v1",
+            "query": "inspect",
+            "ranking_effect": "none",
+            "token_budget": 512,
+            "limit": 5,
+            "task": "inspect",
+        }
+    )
     with pytest.raises(HashmarksWorkTranslationError, match="informative only") as raised:
         describe_hashmarks_work(evidence)
     assert raised.value.failure_class == "input-selection-admission"
@@ -68,10 +80,24 @@ def test_informative_context_or_decision_evidence_cannot_become_executable_work(
 
 def test_unavailable_or_empty_verification_plan_fails_closed() -> None:
     for payload in (
-        {"schema": "hashmarks.verification-plan.v1", "available": False, "argv": ["pytest"]},
-        {"schema": "hashmarks.verification-plan.v1", "available": True, "argv": []},
+        {
+            "schema": "hashmarks.verification-plan.v1",
+            "path": "tests/test_sample.py",
+            "working_directory": ".",
+            "available": False,
+            "argv": ["pytest"],
+        },
+        {
+            "schema": "hashmarks.verification-plan.v1",
+            "path": "tests/test_sample.py",
+            "working_directory": ".",
+            "available": True,
+            "argv": [],
+        },
     ):
-        with pytest.raises(HashmarksWorkTranslationError):
+        with pytest.raises(
+            (HashmarksWorkTranslationError, HashmarksRepositoryIntelligenceInputError)
+        ):
             describe_hashmarks_work(_verified(payload))
 
 
@@ -110,6 +136,8 @@ def test_assignment_authority_is_explicit_and_hashmarks_cannot_smuggle_it() -> N
         _verified(
             {
                 "schema": "hashmarks.verification-plan.v1",
+                "path": "tests/test_sample.py",
+                "working_directory": ".",
                 "available": True,
                 "argv": ["pytest", "x"],
                 "network_authority": "declared",
@@ -140,7 +168,13 @@ def test_assignment_authority_is_explicit_and_hashmarks_cannot_smuggle_it() -> N
 def test_assignment_rejects_changed_checkpoint_or_repository_generation() -> None:
     work = describe_hashmarks_work(
         _verified(
-            {"schema": "hashmarks.verification-plan.v1", "available": True, "argv": ["pytest"]}
+            {
+                "schema": "hashmarks.verification-plan.v1",
+                "path": "tests/test_sample.py",
+                "working_directory": ".",
+                "available": True,
+                "argv": ["pytest"],
+            }
         )
     )
     with pytest.raises(ExecutionAssignmentStale, match="checkpoint changed"):
@@ -170,6 +204,8 @@ def test_hashmarks_described_work_for_generation_g_cannot_execute_generation_g_p
         _verified(
             {
                 "schema": "hashmarks.verification-plan.v1",
+                "path": "tests/test_sample.py",
+                "working_directory": ".",
                 "available": True,
                 "argv": ["pytest"],
             }

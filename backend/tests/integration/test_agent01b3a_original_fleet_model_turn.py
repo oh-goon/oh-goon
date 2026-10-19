@@ -210,7 +210,7 @@ def test_model_selected_no_match_is_not_false_failure(tmp_path, monkeypatch):
         persisted = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
         assert persisted.game_tape.status.value == "PASSED"
         detail = runtime.runs.get(started.fleet_run_id)
-        assert detail.operations[0].evidence.plan.steps[0].returncode == 1
+        assert detail.operations[0].evidence.plan.steps[0].returncode == 0
     finally:
         runtime.shutdown(wait_for_runs=True)
 

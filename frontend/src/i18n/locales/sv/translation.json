@@ -2546,7 +2546,7 @@
     "title": "Beroenden",
     "description": "Hitta exakt vilka repositories som innehåller ett observerat beroende, avgränsa populationen med registrerade bevis och välj sedan explicita repositories för en Shared Run.",
     "truthTitle": "Endast observerade fakta",
-    "truthMessage": "Beroenderesultat kommer från slutförda Run-bevis. Saknade eller inaktuella bevis förblir synliga och tolkas aldrig som bevis för att ett repository är opåverkat.",
+    "truthMessage": "Beroendefakta beskriver den angivna låsfilen. De visar inte att deklarationer eller den installerade miljön matchar den.",
     "discoveryEyebrow": "Fleet-sökning",
     "discoveryTitle": "Hitta ett beroende",
     "discoveryDescription": "Sök i serverns observationsindex i stället för att öppna repositories ett i taget.",
@@ -2565,11 +2565,11 @@
     "observedRepositories": "observerade repositories",
     "coverageTitle": "Observationstäckning",
     "currentEvidence": "Aktuella matchande bevis",
-    "provenNoMatch": "Aktuell snapshot, ingen träff",
+    "provenNoMatch": "Saknas i låsfilen",
     "agedEvidence": "Äldre matchande bevis",
     "staleEvidence": "Inaktuella matchande bevis",
     "noCurrentEvidence": "Inga aktuella beroendebevis",
-    "coverageHelp": "En aktuell komplett snapshot utan träff är ett bevisat icke-match. Äldre, inaktuella eller saknade snapshots är otillräckliga aktuella bevis och räknas inte som opåverkade.",
+    "coverageHelp": "Aktuella bevis matchar den registrerade låskällan. Observationstid visas separat.",
     "versions": "Upplösta versioner",
     "allVersions": "Alla versioner",
     "relationship": "Relation",
@@ -2584,7 +2584,8 @@
       "all": "Alla bevis",
       "current": "Aktuella",
       "aged": "Äldre",
-      "stale": "Inaktuella"
+      "stale": "Inaktuella",
+      "unknown": "Okänd"
     },
     "populationEyebrow": "Repository-population",
     "matchingRepositories": "Matchande repositories",
@@ -2634,16 +2635,16 @@
     "rangeIntegrityHelp": "Matchning av påverkat intervall använder endast aktuella upplösta stabila numeriska versioner. Versioner som inte kan jämföras säkert visas som oklassificerade i stället för att räknas som opåverkade.",
     "coverageStates": {
       "matching": "Observerade träffar",
-      "proven_no_match": "Bevisade aktuella icke-träffar",
-      "no_current_evidence": "Inga aktuella bevis"
+      "no_current_evidence": "Inga aktuella bevis",
+      "absent_from_lock": "Saknas i låsfilen"
     },
     "coverageDescriptions": {
-      "proven_no_match": "Dessa repositories har en aktuell komplett beroendesnapshot där paketet saknas.",
-      "no_current_evidence": "Dessa repositories saknar en aktuell komplett beroendesnapshot. Uppdatera bevisen innan de behandlas som påverkade eller opåverkade."
+      "no_current_evidence": "Dessa repositories saknar en aktuell komplett beroendesnapshot. Uppdatera bevisen innan de behandlas som påverkade eller opåverkade.",
+      "absent_from_lock": "Dessa repositories har aktuella, kompletta låsbevis där paketet saknas."
     },
     "coveragePopulationTitles": {
-      "proven_no_match": "Repositories med bevisad icke-träff",
-      "no_current_evidence": "Repositories som behöver aktuella beroendebevis"
+      "no_current_evidence": "Repositories som behöver aktuella beroendebevis",
+      "absent_from_lock": "Repositories utan paketet i låsfilen"
     },
     "coveragePopulationDescription": "Detta är en serverägd evidenspopulation. Granska den eller använd hela populationen som explicit målgrupp för Ny delad körning.",
     "selectAllPopulation_one": "Använd detta repository i ny delad körning",
@@ -2653,13 +2654,28 @@
       "current": "Aktuell snapshot",
       "aged": "Äldre snapshot",
       "stale": "Inaktuell snapshot",
-      "missing": "Ingen snapshot"
+      "missing": "Ingen snapshot",
+      "unknown": "Okända låsbevis"
     },
-    "provenNoMatchReason": "En aktuell komplett beroendesnapshot innehåller ingen observation av {{package}}.",
+    "provenNoMatchReason": "{{package}} saknas i det aktuella, kompletta låsinventariet.",
     "refreshEvidenceReason": "Aktuella beroendebevis är otillräckliga. Kör dependency-inventory-Planen på ett explicit urval för att uppdatera dem.",
     "observationDetails": "Observationsproveniens",
     "searchPaginationLabel": "Sidor med beroendesökresultat",
-    "repositoryPaginationLabel": "Sidor med repository-beroenden"
+    "repositoryPaginationLabel": "Sidor med repository-beroenden",
+    "contexts": "Låskontexter",
+    "unknownEvidence": "Okända matchande bevis",
+    "completeness": "Fullständighet",
+    "completenessStates": {
+      "complete": "Komplett",
+      "incomplete": "Ofullständig",
+      "unknown": "Okänd"
+    },
+    "availabilityStates": {
+      "available": "Tillgänglig",
+      "unsupported": "Låsfilen stöds inte",
+      "unavailable": "Källan är otillgänglig",
+      "missing": "Ingen snapshot"
+    }
   },
   "failures": {
     "eyebrow": "Fleet-undersökning",

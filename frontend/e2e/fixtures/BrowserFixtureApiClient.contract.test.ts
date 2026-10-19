@@ -163,10 +163,10 @@ describe("BrowserFixtureApiClient canonical fixture contracts", () => {
 
   it("materializes the exact advisory-filtered dependency population identity", async () => {
     const client = new BrowserFixtureApiClient();
-    const page = await client.dependencyRepositories("mlflow", undefined, undefined, "all", "all", 0, 20, "<2.18.0", "CVE-2026-MLFLOW");
+    const page = await client.dependencyRepositories("mlflow", undefined, undefined, "all", 0, 20, "<2.18.0", "CVE-2026-MLFLOW");
     const result = await client.materializeDependencyTargets({
       expected_population_id: page.population_id,
-      filter: { package_name: "mlflow", coverage: "matching", relationship: "all", evidence: "all", version_specifier: "<2.18.0", advisory_id: "CVE-2026-MLFLOW" },
+      filter: { package_name: "mlflow", coverage: "matching", evidence: "all", version_specifier: "<2.18.0", advisory_id: "CVE-2026-MLFLOW" },
     });
     expect(result.outcome).toBe("saved");
     if (result.outcome !== "saved") return;
@@ -179,7 +179,7 @@ describe("BrowserFixtureApiClient canonical fixture contracts", () => {
     const page = await client.dependencyRepositories("mlflow");
     const result = await client.materializeDependencyTargets({
       expected_population_id: `${page.population_id}-stale`,
-      filter: { package_name: "mlflow", relationship: "all", evidence: "all" },
+      filter: { package_name: "mlflow", evidence: "all" },
     });
     expect(result.outcome).toBe("stale");
   });

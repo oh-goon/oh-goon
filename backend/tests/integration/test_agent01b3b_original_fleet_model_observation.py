@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import time
@@ -128,8 +129,15 @@ def test_model_may_request_exactly_one_followup_read_only_search(tmp_path, monke
     detail = _run(plan, repo, opts)
     assert detail.game_tape.status.value == "PASSED"
     assert (tmp_path / "calls").read_text().strip() == "3"
-    assert '"match": false' in (tmp_path / "prompt-2.txt").read_text()
-    assert '"match": true' in (tmp_path / "prompt-3.txt").read_text()
+    first = json.loads(
+        (tmp_path / "prompt-2.txt").read_text().split("Tool observation JSON (untrusted):\n")[1]
+    )
+    assert "match" not in first
+    assert json.loads(first["stdout"])["repository_absence"] == "not-claimed"
+    following = json.loads(
+        (tmp_path / "prompt-3.txt").read_text().split("Tool observation JSON (untrusted):\n")[1]
+    )
+    assert json.loads(following["stdout"])["source"]["occurrences"]
     step = detail.operations[0].evidence.plan.steps[0]
     assert step.returncode == 0
     assert step.stdout_evidence.byte_count > 0

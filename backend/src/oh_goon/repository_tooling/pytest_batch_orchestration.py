@@ -8,6 +8,8 @@ single timeout/refinement execution engine remain in ``test_batches``.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
+import json
 import sys
 import threading
 import time
@@ -21,9 +23,9 @@ from oh_goon.repository_tooling.pytest_execution_membership import (
     execution_run_identity,
 )
 from oh_goon.repository_tooling.pytest_member_selection import (
-    discover_test_files,
-    discover_test_nodes,
-    statically_pruned_members,
+    NativePytestCollection,
+    collect_native_pytest,
+    write_native_collection,
 )
 from oh_goon.repository_tooling.test_batch_receipts import (
     MemberReceiptStore,
@@ -103,7 +105,7 @@ def _wsl_windows_mounted_workspace(path: Path | None = None) -> bool:
 class _BatchPlan:
     discovered_members: tuple[str, ...]
     members: tuple[str, ...]
-    statically_pruned: tuple[str, ...]
+    native_deselected: tuple[str, ...]
     batches: tuple[Batch, ...]
     scheduled_batches: tuple[Batch, ...]
     reusable_members: frozenset[str]
@@ -114,6 +116,7 @@ class _BatchPlan:
     execution_plan_identity: str
     run_identity: str
     execution_membership_store: ExecutionMembershipStore
+    started: float
 
 
 _BatchFuture = concurrent.futures.Future[tuple[int, str, float, tuple[ExecutionRecoveryEvent, ...]]]
@@ -135,26 +138,19 @@ class _BatchRunState:
     refinement_history: RefinementHistory = field(default_factory=RefinementHistory)
 
 
-def _discover_runnable_members(
-    parser, args
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+def _discover_runnable_members(parser, args) -> NativePytestCollection:
     try:
-        if args.granularity == "tests":
-            if len(args.paths) != 1 or not args.paths[0].is_file():
-                parser.error("tests granularity requires exactly one test file")
-            discovered = discover_test_nodes(args.paths[0])
-        else:
-            discovered = discover_test_files(tuple(args.paths), frozenset(args.exclude))
-    except ValueError as exc:
+        collection = collect_native_pytest(
+            tuple(args.paths),
+            excludes=tuple(args.exclude),
+            marker=args.marker,
+            timeout=min(args.batch_timeout, args.suite_timeout or args.batch_timeout),
+        )
+    except (OSError, ValueError) as exc:
         parser.error(str(exc))
-    if not discovered:
-        parser.error("pytest batch surface discovered no tests")
-    members, pruned = statically_pruned_members(discovered, marker=args.marker)
-    if not members:
-        parser.error("pytest batch surface has no runnable tests after safe static marker pruning")
-    if len(members) != len(set(members)):
-        parser.error("pytest batch admission contains duplicate logical members")
-    return discovered, members, pruned
+    if not collection.selected:
+        parser.error("native pytest collection selected no tests")
+    return collection
 
 
 def _select_batches(parser, args, members: tuple[str, ...]) -> tuple[Batch, ...]:
@@ -220,7 +216,14 @@ def _execution_authority(
 
 
 def _build_batch_plan(parser, args) -> _BatchPlan:
-    discovered, members, pruned = _discover_runnable_members(parser, args)
+    started = time.monotonic()
+    collection = _discover_runnable_members(parser, args)
+    members = tuple(collection.groups(args.granularity))
+    discovered = tuple(item["selector"] for item in (*collection.selected, *collection.deselected))
+    pruned = tuple(item["selector"] for item in collection.deselected)
+    collection_identity = hashlib.sha256(
+        json.dumps(collection.payload(), sort_keys=True).encode()
+    ).hexdigest()
     batches = _select_batches(parser, args, members)
     resume_context = build_resume_context(
         root=Path.cwd(),
@@ -229,9 +232,12 @@ def _build_batch_plan(parser, args) -> _BatchPlan:
         state_root=args.resume_state_root,
         granularity=args.granularity,
         marker=args.marker,
-        extra_context=tuple(args.resume_context),
+        extra_context=(*args.resume_context, "native-pytest-collection:" + collection_identity),
     )
     resume_context.ensure_manifest()
+    write_native_collection(
+        resume_context.receipt_directory / "collection.json", collection.payload()
+    )
     receipt_store = MemberReceiptStore(
         resume_context.receipt_directory, suite_identity=resume_context.suite_identity
     )
@@ -256,6 +262,7 @@ def _build_batch_plan(parser, args) -> _BatchPlan:
         plan_identity,
         run_identity,
         membership_store,
+        started,
     )
 
 
@@ -263,7 +270,7 @@ def _print_batch_plan(args, plan: _BatchPlan) -> None:
     print("=== PYTEST BATCH PLAN ===", flush=True)
     print(
         f"Granularity: {args.granularity} | members={len(plan.members)} | "
-        f"batches={len(plan.batches)} | statically-pruned={len(plan.statically_pruned)}/"
+        f"batches={len(plan.batches)} | native-deselected={len(plan.native_deselected)}/"
         f"{len(plan.discovered_members)} | workers={plan.workers} | "
         f"per-batch-timeout={args.batch_timeout}s | "
         f"suite-timeout={args.suite_timeout if args.suite_timeout is not None else 'none'} | "
@@ -274,9 +281,9 @@ def _print_batch_plan(args, plan: _BatchPlan) -> None:
     )
     if args.resume:
         _print_resume_plan(args, plan)
-    if plan.statically_pruned:
+    if plan.native_deselected:
         print(
-            f"=== PYTEST STATIC MARKER PRUNE === members={len(plan.statically_pruned)} "
+            f"=== PYTEST NATIVE DESELECTION === members={len(plan.native_deselected)} "
             f"marker={args.marker!r}",
             flush=True,
         )
@@ -301,7 +308,7 @@ def _print_resume_plan(args, plan: _BatchPlan) -> None:
 
 
 def _new_run_state(args, plan: _BatchPlan) -> _BatchRunState:
-    started = time.monotonic()
+    started = plan.started
     deadline = started + args.suite_timeout if args.suite_timeout is not None else None
     return _BatchRunState(
         unscheduled=list(plan.scheduled_batches),

@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import time
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,6 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.core.product_identity import repository_id
 
 EXAMPLE = Path(__file__).resolve().parents[3] / "examples" / "standard-atomic"
-EXPECTED_HASHMARKS = "0.25.1"  # backend/pyproject.toml and uv.lock, not a substitute
 
 
 def _require_native_hashmarks() -> None:
@@ -38,7 +38,12 @@ def _require_native_hashmarks() -> None:
 
     from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 
-    assert __version__ == EXPECTED_HASHMARKS, "Installed Hashmarks differs from the project pin"
+    with (Path(__file__).resolve().parents[2] / "uv.lock").open("rb") as stream:
+        packages = tomllib.load(stream)["package"]
+    selected_version = next(row["version"] for row in packages if row["name"] == "hashmarks")
+    assert __version__ == selected_version, (
+        "Installed Hashmarks differs from the native project lock"
+    )
     assert require_loaded_hashmarks_runtime(), (
         "Installed Hashmarks producer has no authoritative identity"
     )

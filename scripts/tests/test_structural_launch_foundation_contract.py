@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.repository_tooling.architecture.common import clear_python_ast_cache
 from oh_goon.repository_tooling.architecture.structural_launch_contract import (
     _check_launch_manifest_foundation,
 )
@@ -54,7 +53,6 @@ def launch_root(tmp_path: Path) -> Path:
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-    clear_python_ast_cache()
     assert _check_launch_manifest_foundation(tmp_path) == []
     return tmp_path
 
@@ -64,7 +62,6 @@ def _replace(root: Path, relative: str, old: str, new: str = "REMOVED") -> None:
     text = path.read_text(encoding="utf-8")
     assert old in text, f"fixture token not found: {relative}: {old}"
     path.write_text(text.replace(old, new), encoding="utf-8")
-    clear_python_ast_cache()
 
 
 def _messages(root: Path) -> list[str]:
@@ -122,7 +119,6 @@ def test_launch_schema_owner_rejects_duplicate_assignment_elsewhere(
         path.read_text(encoding="utf-8") + "\nLAUNCH_MANIFEST_SCHEMA = 'decoy-owner'\n",
         encoding="utf-8",
     )
-    clear_python_ast_cache()
     assert any(
         "must have one natural owner" in message for message in _messages(launch_root)
     )
@@ -143,7 +139,6 @@ def test_launch_schema_owner_rejects_wrong_location_even_with_comment_decoy(
         + "\nLAUNCH_MANIFEST_SCHEMA = 'oh-goon.launch/v1'\n",
         encoding="utf-8",
     )
-    clear_python_ast_cache()
     messages = _messages(launch_root)
     assert any("owner is missing or invalid" in message for message in messages)
     assert any("must have one natural owner" in message for message in messages)
@@ -156,7 +151,6 @@ def test_launch_foundation_rejects_process_authority_in_projection(
     path.write_text(
         path.read_text(encoding="utf-8") + "\nimport subprocess\n", encoding="utf-8"
     )
-    clear_python_ast_cache()
     assert any("must remain read-only" in message for message in _messages(launch_root))
 
 
@@ -169,7 +163,6 @@ def test_launch_foundation_rejects_game_tape_live_runtime_imports(
         + "\nfrom oh_goon.runtime.local_launch_state import LocalLaunchEventStore\n",
         encoding="utf-8",
     )
-    clear_python_ast_cache()
     assert any(
         "never read live launch runtime state" in message
         for message in _messages(launch_root)
@@ -232,7 +225,6 @@ def test_launch_architecture_is_invariant_to_navigation_private_local_rename(
     text = path.read_text(encoding="utf-8")
     assert "requested" in text
     path.write_text(text.replace("requested", "intent_service"), encoding="utf-8")
-    clear_python_ast_cache()
     assert _messages(launch_root) == before
 
 
@@ -243,7 +235,6 @@ def test_launch_foundation_rejects_generic_stop_process_authority(
     path.write_text(
         path.read_text(encoding="utf-8") + "\nimport subprocess\n", encoding="utf-8"
     )
-    clear_python_ast_cache()
     assert any(
         "generic process authority" in message for message in _messages(launch_root)
     )
@@ -258,7 +249,6 @@ def test_launch_foundation_rejects_pid_signal_probe_as_birth_identity(
         + "\ndef _bad_probe():\n    return os.kill(1, 0)\n",
         encoding="utf-8",
     )
-    clear_python_ast_cache()
     assert any(
         "PID existence/signal checks are not process identity" in message
         for message in _messages(launch_root)

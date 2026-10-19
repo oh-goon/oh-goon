@@ -283,50 +283,6 @@ def test_tooling_fast_and_complete_lanes_keep_distinct_semantic_authority() -> N
     assert goon["steps"] == [{"run": "make test-tooling-complete"}]
 
 
-def test_batch_runner_statically_prunes_only_provable_negative_markers(
-    tmp_path: Path,
-) -> None:
-    from oh_goon.repository_tooling import pytest_member_selection
-
-    path = tmp_path / "test_marked.py"
-    path.write_text(
-        "import pytest\npytestmark = pytest.mark.certification\ndef test_one(): pass\n",
-        encoding="utf-8",
-    )
-    members = (path.as_posix(),)
-    runnable, pruned = pytest_member_selection.statically_pruned_members(
-        members, marker="not certification and not process and not slow"
-    )
-    assert runnable == ()
-    assert pruned == members
-
-
-def test_batch_runner_prunes_marked_test_nodes_but_falls_back_for_complex_expression(
-    tmp_path: Path,
-) -> None:
-    from oh_goon.repository_tooling import pytest_member_selection
-
-    path = tmp_path / "test_nodes.py"
-    path.write_text(
-        "import pytest\n"
-        "@pytest.mark.slow\n"
-        "def test_slow(): pass\n"
-        "def test_fast(): pass\n",
-        encoding="utf-8",
-    )
-    members = pytest_member_selection.discover_test_nodes(path)
-    runnable, pruned = pytest_member_selection.statically_pruned_members(
-        members, marker="not certification and not process and not slow"
-    )
-    assert runnable == (f"{path.as_posix()}::test_fast",)
-    assert pruned == (f"{path.as_posix()}::test_slow",)
-    fallback, fallback_pruned = pytest_member_selection.statically_pruned_members(
-        members, marker="not slow or certification"
-    )
-    assert fallback == members
-    assert fallback_pruned == ()
-
-
 def test_repository_understanding_tests_use_normal_import_cache_not_dynamic_execution() -> (
     None
 ):

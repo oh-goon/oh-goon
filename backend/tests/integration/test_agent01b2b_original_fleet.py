@@ -174,7 +174,7 @@ def test_no_match_is_durable_success_through_original_fleet(tmp_path, monkeypatc
         persisted = runtime.runs.get(started.fleet_run_id)
         assert detail.outcome.value == "SUCCESS"
         assert persisted.game_tape.status.value == "PASSED"
-        assert persisted.operations[0].evidence.plan.steps[0].returncode == 1
+        assert persisted.operations[0].evidence.plan.steps[0].returncode == 0
     finally:
         runtime.shutdown(wait_for_runs=True)
 
@@ -297,14 +297,32 @@ def test_original_agent_fleet_cancel_is_durably_recorded(tmp_path, monkeypatch):
 def test_original_agent_fleet_process_failure_is_durably_recorded(tmp_path, monkeypatch):
     plan, repo, opts = _case(tmp_path, monkeypatch)
     _lock(plan, opts)
-    # Fault-inject only the installed command implementation. The canonical
-    # original Fleet Step supervisor, journal and Tape are still exercised.
-    failing_tools = tmp_path / "failing-tools"
-    failing_tools.mkdir()
-    rg = failing_tools / "rg"
-    rg.write_text("#!/bin/sh\necho injected-failing-rg >&2\nexit 17\n")
-    rg.chmod(0o755)
-    monkeypatch.setenv("PATH", str(failing_tools) + os.pathsep + os.environ["PATH"])
+    # Fault-inject the prepared tool implementation while retaining the real
+    # original Fleet supervisor, process launch, journal and Game Tape.
+    import sys
+    from contextlib import contextmanager
+
+    from oh_goon.integrations import fleet_plan_step_execution as execution
+
+    native_prepare = execution.prepare_frozen_readonly_skill_search
+
+    @contextmanager
+    def failing_tool(*args, **kwargs):
+        with native_prepare(*args, **kwargs) as (root, tool):
+            yield (
+                root,
+                tool.model_copy(
+                    update={
+                        "argv": (
+                            sys.executable,
+                            "-c",
+                            "import sys; print('injected-tool-failure', file=sys.stderr); sys.exit(17)",
+                        )
+                    }
+                ),
+            )
+
+    monkeypatch.setattr(execution, "prepare_frozen_readonly_skill_search", failing_tool)
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent.parent)

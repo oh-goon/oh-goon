@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 
@@ -100,7 +101,11 @@ def test_search_first_then_list_paths_works_and_is_limited(tmp_path, monkeypatch
     _lock(plan, opts)
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3d-no-match")
     assert detail.game_tape.status.value == "PASSED"
-    assert '"matched": false' in (tmp_path / "prompt-2.txt").read_text()
+    observation = json.loads(
+        (tmp_path / "prompt-2.txt").read_text().split("Tool observation JSON (untrusted):\n")[1]
+    )
+    assert "matched" not in observation
+    assert json.loads(observation["stdout"])["repository_absence"] == "not-claimed"
     assert '"tool": "list_paths"' in (tmp_path / "prompt-3.txt").read_text()
 
 

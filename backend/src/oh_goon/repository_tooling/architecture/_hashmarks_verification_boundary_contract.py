@@ -142,7 +142,7 @@ def _selection_violations() -> list[Violation]:
             )
         )
 
-    imported_validator = _imported_names(_SELECTION_PRIMITIVES, "hashmarks.consumer_conformance")
+    imported_validator = _imported_names(_SELECTION_PRIMITIVES, "hashmarks")
     if "validate_native_consumer_bundle" not in imported_validator:
         violations.append(
             Violation(

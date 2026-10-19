@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import ast
 import tomllib
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
 
@@ -221,25 +223,30 @@ def python_semantic_facts(path: Path) -> PythonSemanticFacts:
     )
 
 
-@lru_cache(maxsize=None)
-def _python_ast_cached(path_text: str, mtime_ns: int, size: int) -> ast.Module:
-    path = Path(path_text)
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+_PYTHON_SOURCE_SNAPSHOT: ContextVar[dict[Path, ast.Module] | None] = ContextVar(
+    "architecture_python_source_snapshot", default=None
+)
+
+
+@contextmanager
+def python_source_snapshot() -> Iterator[None]:
+    """Read and parse each source once for one architecture invocation."""
+    if _PYTHON_SOURCE_SNAPSHOT.get() is not None:
+        yield
+        return
+    token = _PYTHON_SOURCE_SNAPSHOT.set({})
+    try:
+        yield
+    finally:
+        _PYTHON_SOURCE_SNAPSHOT.reset(token)
 
 
 def python_ast(path: Path) -> ast.Module:
-    """Parse one Python source path once per unchanged file state.
-
-    The stat signature keeps architecture tests correct when fixtures rewrite a file
-    in-process, while avoiding repeated reads/parses across independent contracts.
-    """
-
+    """Return exact invocation-local syntax; no timestamp-based reusable proof."""
     resolved = path.resolve()
-    stat = resolved.stat()
-    return _python_ast_cached(str(resolved), stat.st_mtime_ns, stat.st_size)
-
-
-def clear_python_ast_cache() -> None:
-    """Clear cached parse state for tests that intentionally rewrite source fixtures."""
-
-    _python_ast_cached.cache_clear()
+    snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
+    if snapshot is None:
+        return ast.parse(resolved.read_text(encoding="utf-8"), filename=str(resolved))
+    if resolved not in snapshot:
+        snapshot[resolved] = ast.parse(resolved.read_text(encoding="utf-8"), filename=str(resolved))
+    return snapshot[resolved]

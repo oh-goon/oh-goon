@@ -7,6 +7,7 @@ import importlib.metadata
 
 import argparse
 import json
+import tomllib
 import os
 import subprocess
 import sys
@@ -438,9 +439,13 @@ def test_native_only_policy_changes_once_without_capability_code_change(
 ) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
+    declared = tomllib.loads(original)["project"]["dependencies"]
+    native_requirement = next(
+        value for value in declared if value.partition("@")[0].strip() == "hashmarks"
+    )
     pyproject.write_text(
         original.replace(
-            "hashmarks @ https://github.com/Hugloss/Hashmarks/releases/download/v0.25.1/hashmarks-0.25.1-py3-none-any.whl",
+            native_requirement,
             "native-observer>=1.0.0",
         ).replace(
             'native-only-dependencies = ["hashmarks"]',

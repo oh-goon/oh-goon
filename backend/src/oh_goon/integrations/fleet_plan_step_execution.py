@@ -5,10 +5,11 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
@@ -106,6 +107,11 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
 from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
 from oh_goon.integrations.fleet_plan_step_lifecycle_observation import lifecycle_command_runner
 from oh_goon.integrations.fleet_plan_step_output_observation import observed_command_runner
+from oh_goon.integrations.hashmarks.agent_tools import (
+    PreparedAgentEvidence,
+    prepare_agent_evidence,
+    prompt_observation,
+)
 
 
 class CommandRunner(Protocol):
@@ -635,180 +641,187 @@ def _run_local_model_review(
     transcript: list[str] = []
     max_actions = 4 if step.harness in ("local-model-skill-loop", "local-model-proposal") else 2
     history: list[dict[str, object]] = []
-    for ordinal in range(1, max_actions + 1):
-        if runtime.cancel_requested is not None and runtime.cancel_requested():
-            raise OperationCancelledError("Agent cancelled before search")
-        if action in previous:
-            raise FleetPlanInvalid("model repeated the same search instead of progressing")
-        previous.add(action)
-        with prepare_frozen_readonly_skill_search(
-            handoff,
-            selected_query=action.query,
-            tool_kind=action.tool,
-            selected_path=action.path,
-        ) as (root, tool_step):
-            if tool_step.timeout_seconds != step.timeout_seconds:
-                raise FleetPlanInvalid("Agent Step timeout differs from frozen delivery")
-            result = _execute_command_step(root, tool_step, process, runtime)
-        if action.tool == "read_file" and result.returncode != 0:
-            # The Agent no-match exit semantics apply only to rg searches, never head.
-            # Preserve the physical exit in stderr and publish a failing Step status.
-            return replace(
-                result,
-                returncode=PLAN_CONTRACT_RETURN_CODE,
-                stderr=f"read_file failed (exit {result.returncode}): {result.stderr}",
+    with prepare_agent_evidence(handoff) as prepared:
+        for ordinal in range(1, max_actions + 1):
+            if runtime.cancel_requested is not None and runtime.cancel_requested():
+                raise OperationCancelledError("Agent cancelled before search")
+            if action in previous:
+                raise FleetPlanInvalid("model repeated the same search instead of progressing")
+            previous.add(action)
+            with prepare_frozen_readonly_skill_search(
+                handoff,
+                selected_query=action.query,
+                tool_kind=action.tool,
+                selected_path=action.path,
+                workspace=prepared,
+            ) as (root, tool_step):
+                if tool_step.timeout_seconds != step.timeout_seconds:
+                    raise FleetPlanInvalid("Agent Step timeout differs from frozen delivery")
+                result = _execute_command_step(root, tool_step, process, runtime)
+            if action.tool == "read_file" and result.returncode != 0:
+                # The Agent no-match exit semantics apply only to rg searches, never head.
+                # Preserve the physical exit in stderr and publish a failing Step status.
+                return replace(
+                    result,
+                    returncode=PLAN_CONTRACT_RETURN_CODE,
+                    stderr=f"read_file failed (exit {result.returncode}): {result.stderr}",
+                )
+            if result.returncode not in tool_step.success_codes:
+                return result  # physical failure cannot be reclassified by a model
+            if (
+                action.tool == "read_file"
+                and action.path is not None
+                and action.path.startswith("repo/")
+            ):
+                inspected_paths.add(action.path)
+            disclosed_stdout = (
+                prompt_observation(result.stdout)
+                if action.tool in ("search_text", "list_paths")
+                else result.stdout
             )
-        if result.returncode not in (0, 1):
-            return result  # physical failure cannot be reclassified by a model
-        if (
-            action.tool == "read_file"
-            and action.path is not None
-            and action.path.startswith("repo/")
-        ):
-            inspected_paths.add(action.path)
-        transcript.append(
-            (
-                f"Tool {ordinal}: {action.tool} {action.query or action.path or ''} (exit {result.returncode})\n"
+            transcript.append(
+                (
+                    f"Tool {ordinal}: {action.tool} {action.query or action.path or ''} (exit {result.returncode})\n"
+                    if tool_mode
+                    else f"Search {ordinal}: {action.query!r} (exit {result.returncode})\n"
+                )
+                + f"{result.stdout}\n"
+            )
+            prompt_builder = (
+                frozen_local_model_tool_observation_prompt
                 if tool_mode
-                else f"Search {ordinal}: {action.query!r} (exit {result.returncode})\n"
+                else frozen_local_model_observation_prompt
             )
-            + f"{result.stdout[:2048]}\n"
-        )
-        prompt_builder = (
-            frozen_local_model_tool_observation_prompt
-            if tool_mode
-            else frozen_local_model_observation_prompt
-        )
-        prompt = prompt_builder(
-            task=handoff.task,
-            skill_bytes=skill_bytes,
-            recipient=handoff.requested_effects.recipients[0],
-            **({"action": action} if tool_mode else {"query": action.query}),
-            returncode=result.returncode,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            can_search=ordinal < max_actions,
-            **(
-                {"history": tuple(history)}
-                if step.harness in ("local-model-skill-loop", "local-model-proposal")
-                else {}
-            ),
-            **(
-                {
-                    "allow_file": step.harness
+            prompt = prompt_builder(
+                task=handoff.task,
+                skill_bytes=skill_bytes,
+                recipient=handoff.requested_effects.recipients[0],
+                **({"action": action} if tool_mode else {"query": action.query}),
+                returncode=result.returncode,
+                stdout=disclosed_stdout,
+                stderr=result.stderr,
+                can_search=ordinal < max_actions,
+                **(
+                    {"history": tuple(history)}
+                    if step.harness in ("local-model-skill-loop", "local-model-proposal")
+                    else {}
+                ),
+                **(
+                    {
+                        "allow_file": step.harness
+                        in (
+                            "local-model-files",
+                            "local-model-skill-resources",
+                            "local-model-skill-loop",
+                            "local-model-proposal",
+                        ),
+                        "allow_skill_file": step.harness
+                        in (
+                            "local-model-skill-resources",
+                            "local-model-skill-loop",
+                            "local-model-proposal",
+                        ),
+                        "allow_proposal": step.harness == "local-model-proposal",
+                    }
+                    if tool_mode
+                    else {}
+                ),
+            )
+            prompt = append_untrusted_agent_feedback(prompt, step.feedback_value)
+            if step.harness in ("local-model-skill-loop", "local-model-proposal"):
+                history.append(
+                    {
+                        "tool": action.tool,
+                        "query": action.query,
+                        "path": action.path,
+                        "returncode": result.returncode,
+                        "stdout_excerpt": disclosed_stdout[:350],
+                    }
+                )
+            response = process.command_runner(
+                "ollama",
+                "run",
+                step.model,
+                prompt,
+                cwd=process.paths.tmp,
+                timeout=_command_timeout(step, runtime),
+                cancel_requested=runtime.cancel_requested,
+                env=model_environment,
+                runtime_supervision=runtime.runtime_supervision,
+            )
+            if response.returncode != 0:
+                return replace(
+                    from_command(response),
+                    returncode=PLAN_CONTRACT_RETURN_CODE,
+                    stderr="selected Ollama model review invocation failed",
+                )
+            if step.harness == "local-model-proposal":
+                from oh_goon.core.agent_model_selection import (
+                    _one_json_object,
+                    frozen_patch_proposal_receipt,
+                    parse_local_model_patch_proposal,
+                )
+
+                if _one_json_object(response.stdout).get("decision") == "propose":
+                    proposal = parse_local_model_patch_proposal(
+                        response.stdout,
+                        members=handoff.source.repository.members,
+                        inspected_paths=frozenset(inspected_paths),
+                    )
+                    if runtime.cancel_requested is not None and runtime.cancel_requested():
+                        raise OperationCancelledError("Agent cancelled before proposal publication")
+                    return replace(
+                        result,
+                        returncode=0,
+                        stdout=(
+                            "".join(transcript)
+                            + "Agent proposal only; no repository mutation or tests executed\n"
+                            + frozen_patch_proposal_receipt(
+                                proposal, handoff_identity=handoff.handoff_identity
+                            )
+                        ),
+                    )
+            decision = (
+                parse_local_model_tool_review_decision(
+                    response.stdout,
+                    can_continue=ordinal < max_actions,
+                    allow_file=step.harness
                     in (
                         "local-model-files",
                         "local-model-skill-resources",
                         "local-model-skill-loop",
                         "local-model-proposal",
                     ),
-                    "allow_skill_file": step.harness
+                    allow_skill_file=step.harness
                     in (
                         "local-model-skill-resources",
                         "local-model-skill-loop",
                         "local-model-proposal",
                     ),
-                    "allow_proposal": step.harness == "local-model-proposal",
-                }
-                if tool_mode
-                else {}
-            ),
-        )
-        prompt = append_untrusted_agent_feedback(prompt, step.feedback_value)
-        if step.harness in ("local-model-skill-loop", "local-model-proposal"):
-            history.append(
-                {
-                    "tool": action.tool,
-                    "query": action.query,
-                    "path": action.path,
-                    "returncode": result.returncode,
-                    "stdout_excerpt": result.stdout[:350],
-                }
-            )
-        response = process.command_runner(
-            "ollama",
-            "run",
-            step.model,
-            prompt,
-            cwd=process.paths.tmp,
-            timeout=_command_timeout(step, runtime),
-            cancel_requested=runtime.cancel_requested,
-            env=model_environment,
-            runtime_supervision=runtime.runtime_supervision,
-        )
-        if response.returncode != 0:
-            return replace(
-                from_command(response),
-                returncode=PLAN_CONTRACT_RETURN_CODE,
-                stderr="selected Ollama model review invocation failed",
-            )
-        if step.harness == "local-model-proposal":
-            from oh_goon.core.agent_model_selection import (
-                _one_json_object,
-                frozen_patch_proposal_receipt,
-                parse_local_model_patch_proposal,
-            )
-
-            if _one_json_object(response.stdout).get("decision") == "propose":
-                proposal = parse_local_model_patch_proposal(
-                    response.stdout,
-                    members=handoff.source.repository.members,
-                    inspected_paths=frozenset(inspected_paths),
                 )
-                if runtime.cancel_requested is not None and runtime.cancel_requested():
-                    raise OperationCancelledError("Agent cancelled before proposal publication")
+                if tool_mode
+                else parse_local_model_review_decision(
+                    response.stdout, can_search=ordinal < max_actions
+                )
+            )
+            if runtime.cancel_requested is not None and runtime.cancel_requested():
+                raise OperationCancelledError("Agent cancelled after model review")
+            if decision.decision == "finish":
+                # Model content is a summary, not a PASS authority: only the
+                # physical tool and this validated contract determine success.
                 return replace(
                     result,
                     returncode=0,
-                    stdout=(
-                        "".join(transcript)
-                        + "Agent proposal only; no repository mutation or tests executed\n"
-                        + frozen_patch_proposal_receipt(
-                            proposal, handoff_identity=handoff.handoff_identity
-                        )
-                    ),
+                    stdout="".join(transcript) + f"Model evaluation: {decision.summary}\n",
                 )
-        decision = (
-            parse_local_model_tool_review_decision(
-                response.stdout,
-                can_continue=ordinal < max_actions,
-                allow_file=step.harness
-                in (
-                    "local-model-files",
-                    "local-model-skill-resources",
-                    "local-model-skill-loop",
-                    "local-model-proposal",
-                ),
-                allow_skill_file=step.harness
-                in (
-                    "local-model-skill-resources",
-                    "local-model-skill-loop",
-                    "local-model-proposal",
-                ),
+            action = (
+                decision.action
+                if tool_mode
+                else LocalModelToolAction(tool="search_text", query=decision.query)
             )
-            if tool_mode
-            else parse_local_model_review_decision(
-                response.stdout, can_search=ordinal < max_actions
-            )
-        )
-        if runtime.cancel_requested is not None and runtime.cancel_requested():
-            raise OperationCancelledError("Agent cancelled after model review")
-        if decision.decision == "finish":
-            # Model content is a summary, not a PASS authority: only the
-            # physical tool and this validated contract determine success.
-            return replace(
-                result,
-                returncode=0,
-                stdout="".join(transcript) + f"Model evaluation: {decision.summary}\n",
-            )
-        action = (
-            decision.action
-            if tool_mode
-            else LocalModelToolAction(tool="search_text", query=decision.query)
-        )
-        if action in previous:
-            raise FleetPlanInvalid("model repeated the same search instead of progressing")
-    raise FleetPlanInvalid("model review exceeded the selected tool-action budget")
+            if action in previous:
+                raise FleetPlanInvalid("model repeated the same search instead of progressing")
+        raise FleetPlanInvalid("model review exceeded the selected tool-action budget")
 
 
 def _execute_command_step(
@@ -1202,6 +1215,7 @@ def prepare_frozen_readonly_skill_search(
         "search_text", "list_paths", "list_skill_paths", "read_file"
     ] = "search_text",
     selected_path: str | None = None,
+    workspace: PreparedAgentEvidence | None = None,
 ):
     """Prepare one fixed read-only tool Step from original Resolver-captured bytes.
 
@@ -1310,34 +1324,32 @@ def prepare_frozen_readonly_skill_search(
     elif selected_path is not None:
         raise FleetPlanInvalid("only read_file may select a frozen member path")
 
-    # Only bytes from AG-02 frozen source are materialized; all source path
-    # validation and digests are owned by that already verified capture.
-    with tempfile.TemporaryDirectory(prefix="oh-goon-skill-tool-") as directory:
-        root = Path(directory)
-        for role, tree in (("repo", handoff.source.repository), ("skill", handoff.source.skill)):
-            base = root / role
-            base.mkdir(mode=0o700)
-            for member in tree.members:
-                target = base.joinpath(*member.path.split("/"))
-                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                # Exclusive creation also rejects source member/path collisions.
-                with target.open("xb") as stream:
-                    stream.write(member.data)
-                target.chmod(0o400)
+    context = prepare_agent_evidence(handoff) if workspace is None else nullcontext(workspace)
+    with context as prepared:
+        if prepared.handoff is not handoff:
+            raise FleetPlanInvalid("Agent evidence workspace belongs to a different capture")
+        root = prepared.root
         argv = (
             ("head", "-c", "2048", "--", selected_path)
             if tool_kind == "read_file"
             else ("rg", "--files", "--hidden", "--no-ignore", "--", "skill")
             if tool_kind == "list_skill_paths"
-            else ("rg", "--files", "--", "repo")
-            if tool_kind == "list_paths"
-            else ("rg", "--no-heading", "--line-number", "--fixed-strings", "--", query, "repo")
+            else (
+                sys.executable,
+                "-m",
+                "oh_goon.integrations.hashmarks.agent_tools",
+                "--tool",
+                tool_kind,
+                "--capture-identity",
+                handoff.source.repository.content_identity,
+                *(("--query=" + query,) if query is not None else ()),
+            )
         )
         step = ResolvedCommandStep(
             step_id=handoff.step_id,
             argv=argv,
             timeout_seconds=handoff.timeout_seconds,
-            success_codes=(0, 1),  # no matches is a valid read-only observation
+            success_codes=(0,),  # source scope and absence qualification are in native evidence
         )
         yield root, step
 

@@ -72,7 +72,7 @@ def test_selection_boundary_rejects_schema_layout_runtime_and_missing_structure(
     )
     _write(
         p["primitives"],
-        "from hashmarks.consumer_conformance import validate_native_consumer_bundle\n"
+        "from hashmarks import validate_native_consumer_bundle\n"
         "DOWNSTREAM_CONTRACT_SCHEMA = 'x'\n"
         "layout = {'preferred_granularity': True}\n",
     )
@@ -103,7 +103,7 @@ def test_selection_boundary_is_invariant_to_private_adapter_class_name(
     )
     _write(
         p["primitives"],
-        "from hashmarks.consumer_conformance import validate_native_consumer_bundle\n",
+        "from hashmarks import validate_native_consumer_bundle\n",
     )
     issues = contract._selection_violations()
     assert not any("missing structural evidence fields" in issue.message for issue in issues)

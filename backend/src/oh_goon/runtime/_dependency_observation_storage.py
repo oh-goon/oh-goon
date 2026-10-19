@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from oh_goon.core.models.dependency_fleet import DependencyRelationshipFilter
 from oh_goon.core.models.fleet_observation import DependencyObservationSnapshot
 from oh_goon.core.models.operation import OperationReport
 
@@ -62,27 +61,23 @@ def package_rows(
     *,
     resolved_version: str | None,
     version_prefix: str | None,
-    relationship: DependencyRelationshipFilter,
 ) -> list[sqlite3.Row]:
     where, params = _package_where(
         package_name,
         resolved_version=resolved_version,
         version_prefix=version_prefix,
-        relationship=relationship,
     )
     return list(
         connection.execute(
             f"""
-            SELECT d.*, s.repository_state_id AS snapshot_state_id,
-                   h.repository_state_id AS head_state_id,
-                   h.repository_name, h.repository_path
+            SELECT d.*, h.repository_name, h.repository_path
             FROM dependency_observations d
             JOIN dependency_observation_snapshots s
               ON s.repository_id=d.repository_id AND s.ecosystem=d.ecosystem
             LEFT JOIN repository_observation_heads h ON h.repository_id=d.repository_id
             WHERE {where}
             ORDER BY lower(COALESCE(h.repository_name, d.repository_id)),
-                     d.repository_id, d.resolved_version, d.declared_range
+                     d.repository_id, d.resolved_version
             """,
             params,
         ).fetchall()
@@ -93,15 +88,13 @@ def repository_rows(connection: sqlite3.Connection, repository_id: str) -> list[
     return list(
         connection.execute(
             """
-            SELECT d.*, s.repository_state_id AS snapshot_state_id,
-                   h.repository_state_id AS head_state_id,
-                   h.repository_name, h.repository_path
+            SELECT d.*, h.repository_name, h.repository_path
             FROM dependency_observations d
             JOIN dependency_observation_snapshots s
               ON s.repository_id=d.repository_id AND s.ecosystem=d.ecosystem
             LEFT JOIN repository_observation_heads h ON h.repository_id=d.repository_id
             WHERE d.repository_id=?
-            ORDER BY d.package_name, d.resolved_version, d.declared_range
+            ORDER BY d.package_name, d.resolved_version
             """,
             (repository_id,),
         ).fetchall()
@@ -112,9 +105,7 @@ def snapshot_rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(
         connection.execute(
             """
-            SELECT s.*, s.repository_state_id AS snapshot_state_id,
-                   h.repository_state_id AS head_state_id,
-                   h.repository_name, h.repository_path
+            SELECT s.*, h.repository_name, h.repository_path
             FROM dependency_observation_snapshots s
             LEFT JOIN repository_observation_heads h ON h.repository_id=s.repository_id
             WHERE s.ecosystem='pypi'
@@ -198,8 +189,8 @@ def replace_snapshot(
     connection.executemany(
         """
         INSERT INTO dependency_observations(
-            repository_id, ecosystem, package_name, relationship,
-            declared_range, resolved_version, declared_source, resolved_source,
+            repository_id, ecosystem, package_name, node_id,
+            resolved_version, resolved_source, package_source, contexts_json,
             fleet_run_id, operation_id, producer_goon, step_id, observed_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
@@ -208,11 +199,11 @@ def replace_snapshot(
                 repository_id,
                 item.ecosystem,
                 item.package_name,
-                item.relationship,
-                item.declared_range,
+                item.node_id,
                 item.resolved_version,
-                item.declared_source,
                 item.resolved_source,
+                item.package_source,
+                json.dumps(item.contexts),
                 fleet_run_id,
                 report.provenance.operation_id,
                 producer_goon,
@@ -232,23 +223,17 @@ def _upsert_snapshot_row(
     step_id: str,
     snapshot: DependencyObservationSnapshot,
 ) -> None:
-    state = report.provenance.after or report.provenance.before
     fleet_run_id = report.provenance.fleet_run_id
-    if state is None or fleet_run_id is None:
+    if fleet_run_id is None:
         return
     connection.execute(
         """
         INSERT INTO dependency_observation_snapshots(
-            repository_id, ecosystem, repository_state_id, head_sha,
-            pyproject_sha256, uv_lock_sha256, sources_json, fleet_run_id,
+            repository_id, ecosystem, snapshot_json, fleet_run_id,
             operation_id, producer_goon, step_id, observed_at, dependency_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(repository_id, ecosystem) DO UPDATE SET
-            repository_state_id=excluded.repository_state_id,
-            head_sha=excluded.head_sha,
-            pyproject_sha256=excluded.pyproject_sha256,
-            uv_lock_sha256=excluded.uv_lock_sha256,
-            sources_json=excluded.sources_json,
+            snapshot_json=excluded.snapshot_json,
             fleet_run_id=excluded.fleet_run_id,
             operation_id=excluded.operation_id,
             producer_goon=excluded.producer_goon,
@@ -259,17 +244,7 @@ def _upsert_snapshot_row(
         (
             report.repository.repository_id,
             snapshot.ecosystem,
-            state.state_id,
-            state.head_sha,
-            state.pyproject_sha256,
-            state.uv_lock_sha256,
-            json.dumps(
-                [
-                    item.model_dump(mode="json", exclude_computed_fields=True)
-                    for item in snapshot.sources
-                ],
-                sort_keys=True,
-            ),
+            snapshot.model_dump_json(),
             fleet_run_id,
             report.provenance.operation_id,
             producer_goon,
@@ -285,7 +260,6 @@ def _package_where(
     *,
     resolved_version: str | None,
     version_prefix: str | None,
-    relationship: DependencyRelationshipFilter,
 ) -> tuple[str, tuple[object, ...]]:
     clauses = ["d.ecosystem='pypi'", "d.package_name=?"]
     params: list[object] = [package_name]
@@ -295,7 +269,4 @@ def _package_where(
     if version_prefix is not None:
         clauses.append("d.resolved_version LIKE ?")
         params.append(f"{version_prefix}%")
-    if relationship != "all":
-        clauses.append("d.relationship=?")
-        params.append(relationship)
     return " AND ".join(clauses), tuple(params)

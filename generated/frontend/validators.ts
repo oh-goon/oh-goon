@@ -1,4 +1,4 @@
-// OPENAPI_SHA256: e58c4e4eaf61ba595eb2267060e76b5660adb426f1a920df86748e2b2f677bbd
+// OPENAPI_SHA256: 5815b827a9d050b7f956283ee8c4c56f9032b8f5e9c39e922f64ce15826b536a
 // AUTO-GENERATED static runtime validators compiled from FastAPI/OpenAPI.
 // Component validators live in deterministic internal shards; transport consumes this facade only.
 // This file executes schema-specific checks; it does not interpret JSON Schema at runtime.
@@ -10,8 +10,8 @@ import { fail, validateReference, validateUnion } from "@generated/validatorRunt
 import { validateAdoptUvPreview, validateApiErrorResponse } from "@generated/validatorParts/validatorPart000";
 import { validateBrowseResponse, validateCancellationRequestedPlacementQueueEntry } from "@generated/validatorParts/validatorPart001";
 import { validateCapabilityInfo } from "@generated/validatorParts/validatorPart003";
-import { validateDependencyAdvisoryOverview, validateDependencyCoverageRepositoryPage, validateDependencyFleetCoverageOverview } from "@generated/validatorParts/validatorPart004";
-import { validateDependencyPackageOverview, validateDependencyRepositoryPage, validateDependencySearchResult } from "@generated/validatorParts/validatorPart005";
+import { validateDependencyAdvisoryOverview, validateDependencyCoverageRepositoryPage } from "@generated/validatorParts/validatorPart004";
+import { validateDependencyFleetCoverageOverview, validateDependencyPackageOverview, validateDependencyRepositoryPage, validateDependencySearchResult } from "@generated/validatorParts/validatorPart005";
 import { validateDependencyTargetMaterialization, validateDependencyTargetMaterializeRequest, validateExcludeRepositoryRequest, validateExcludedRepositoryCatalogEntry, validateExclusionRecord } from "@generated/validatorParts/validatorPart006";
 import { validateExecutorControlRequest } from "@generated/validatorParts/validatorPart007";
 import { validateFleetCommandCenter, validateFleetExecutionTimeline, validateFleetExecutorPoolSnapshot, validateFleetExecutorStatus, validateFleetFailureGroupPage, validateFleetFailureInventory } from "@generated/validatorParts/validatorPart008";

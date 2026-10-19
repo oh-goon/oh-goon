@@ -5,7 +5,7 @@ This is NOT Fleet Agent admission, model use, or a completed Game Tape.
 
 from __future__ import annotations
 
-import shutil
+import json
 from pathlib import Path
 
 import pytest
@@ -20,8 +20,6 @@ from oh_goon.integrations.fleet_plan_step_execution import (
 )
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
-
-pytestmark = pytest.mark.skipif(shutil.which("rg") is None, reason="native ripgrep unavailable")
 
 
 def case(
@@ -70,8 +68,16 @@ def runtime(cancel=None):
     return StepRuntime(git=None, extensions=None, tools=None, cancel_requested=cancel)
 
 
-def test_real_frozen_tool_uses_original_step_supervisor_and_old_captured_bytes(tmp_path):
+def test_real_frozen_tool_uses_original_step_supervisor_and_old_captured_bytes(
+    tmp_path, monkeypatch
+):
     handoff, repo, skill = case(tmp_path)
+    import hashmarks
+
+    def index_before_supervision(*_args, **_kwargs):
+        pytest.fail("Native repository intelligence ran before the supervised tool")
+
+    monkeypatch.setattr(hashmarks, "CodeMap", index_before_supervision)
     original_id = handoff.handoff_identity
     (repo / "code.txt").write_text("NO MATCH HERE\n")
     (skill / "SKILL.md").write_text("CHANGED AFTER CAPTURE\n")
@@ -84,7 +90,10 @@ def test_real_frozen_tool_uses_original_step_supervisor_and_old_captured_bytes(t
         assert (root / "skill" / "guide.txt").read_text() == "search is fixed-string\n"
         result = execute_direct_step(root, step, runtime(), step_order=1)
     assert result.returncode == 0
-    assert "code.txt:1:needle in the original file" in result.stdout
+    assert "needle in the original file" in result.stdout
+    assert (
+        json.loads(result.stdout)["capture_identity"] == handoff.source.repository.content_identity
+    )
     assert result.supervisor is not None
     assert not root.exists()
     assert (repo / "code.txt").read_text() == "NO MATCH HERE\n"
@@ -94,9 +103,9 @@ def test_missing_match_is_a_valid_observation(tmp_path):
     handoff, _, _ = case(tmp_path, task="search:no-such-literal")
     with prepare_frozen_readonly_skill_search(handoff) as (root, step):
         result = execute_direct_step(root, step, runtime(), step_order=1)
-    assert result.returncode == 1
-    assert result.stdout == ""
-    assert 1 in step.success_codes
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["repository_absence"] == "not-claimed"
+    assert step.success_codes == (0,)
 
 
 def test_cancelled_tool_uses_original_step_cancel_cut(tmp_path):
@@ -172,7 +181,7 @@ def test_original_delivery_packet_executes_same_frozen_tool_without_reopening_so
     assert not root.exists()
 
 
-def test_original_delivery_no_match_is_success_code_one(tmp_path):
+def test_original_delivery_no_match_preserves_scope_limits(tmp_path):
     handoff, _, _ = case(tmp_path, task="search:absent-literal")
     with prepare_delivered_readonly_skill_search(
         handoff.encode_prework_delivery(),
@@ -180,8 +189,8 @@ def test_original_delivery_no_match_is_success_code_one(tmp_path):
         expected_step_id=handoff.step_id,
     ) as (root, step):
         result = execute_direct_step(root, step, runtime(), step_order=1)
-    assert result.returncode == 1
-    assert 1 in step.success_codes
+    assert result.returncode == 0
+    assert step.success_codes == (0,)
 
 
 def test_original_delivery_cancellation_uses_original_supervisor(tmp_path):

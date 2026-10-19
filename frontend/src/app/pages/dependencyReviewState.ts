@@ -1,4 +1,4 @@
-import type { DependencyCoverage, DependencyEvidence, DependencyRelationship } from "@/features/dependencies/DependenciesFeature";
+import type { DependencyCoverage, DependencyEvidence } from "@/features/dependencies/DependenciesFeature";
 
 export interface DependencyReviewState {
   q: string;
@@ -6,21 +6,18 @@ export interface DependencyReviewState {
   resolvedVersion: string;
   versionSpecifier: string;
   advisoryId: string;
-  relationship: DependencyRelationship;
   evidence: DependencyEvidence;
   coverage: DependencyCoverage;
   offset: number;
   repositoryId: string;
 }
 
-const RELATIONSHIPS = new Set<DependencyRelationship>(["all", "direct", "transitive"]);
-const EVIDENCE = new Set<DependencyEvidence>(["all", "current", "aged", "stale"]);
-const COVERAGE = new Set<DependencyCoverage>(["matching", "proven_no_match", "no_current_evidence"]);
+const EVIDENCE = new Set<DependencyEvidence>(["all", "current", "unknown", "stale"]);
+const COVERAGE = new Set<DependencyCoverage>(["matching", "absent_from_lock", "no_current_evidence"]);
 
 export function dependencyReviewStateFromHash(hash: string): DependencyReviewState {
   const query = hash.split("?", 2)[1] ?? "";
   const params = new URLSearchParams(query);
-  const relationship = params.get("relationship") ?? "all";
   const evidence = params.get("evidence") ?? "all";
   const coverage = params.get("coverage") ?? "matching";
   const offset = Number.parseInt(params.get("offset") ?? "0", 10);
@@ -32,7 +29,6 @@ export function dependencyReviewStateFromHash(hash: string): DependencyReviewSta
     resolvedVersion: matching ? params.get("version")?.trim() ?? "" : "",
     versionSpecifier: matching ? params.get("affected")?.trim() ?? "" : "",
     advisoryId: matching ? params.get("advisory")?.trim() ?? "" : "",
-    relationship: matching && RELATIONSHIPS.has(relationship as DependencyRelationship) ? relationship as DependencyRelationship : "all",
     evidence: matching && EVIDENCE.has(evidence as DependencyEvidence) ? evidence as DependencyEvidence : "all",
     coverage: normalizedCoverage,
     offset: Number.isFinite(offset) && offset >= 0 ? offset : 0,
@@ -47,7 +43,6 @@ export function dependencyQuery(state: Partial<DependencyReviewState>): Record<s
   if (state.resolvedVersion) result.version = state.resolvedVersion;
   if (state.versionSpecifier) result.affected = state.versionSpecifier;
   if (state.advisoryId) result.advisory = state.advisoryId;
-  if (state.relationship && state.relationship !== "all") result.relationship = state.relationship;
   if (state.evidence && state.evidence !== "all") result.evidence = state.evidence;
   if (state.coverage && state.coverage !== "matching") result.coverage = state.coverage;
   if (state.offset && state.offset > 0) result.offset = String(state.offset);

@@ -5,7 +5,6 @@ This tests the Step execution cut, not original Fleet admission or Game Tape.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
@@ -22,8 +21,6 @@ from oh_goon.integrations.fleet_plan_step_execution import (
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_step_resolution import resolve_delivered_local_search_agent_step
-
-pytestmark = pytest.mark.skipif(shutil.which("rg") is None, reason="native ripgrep unavailable")
 
 
 def _case(tmp_path: Path, *, task="search:needle", harness="local-search", effects=""):
@@ -94,12 +91,12 @@ def test_frozen_typed_agent_uses_original_real_step_supervisor(tmp_path):
     assert (repo / "code.txt").read_text() == "not present any more\n"
 
 
-def test_no_match_is_admitted_success_code_one_in_typed_step(tmp_path):
+def test_no_match_is_structured_native_evidence_in_typed_step(tmp_path):
     handoff, _, _ = _case(tmp_path, task="search:absent-literal")
     step = resolve_delivered_local_search_agent_step(handoff)
     result = execute_direct_step(tmp_path, step, _runtime(handoff=handoff), step_order=1)
-    assert result.returncode == 1
-    assert step.success_codes == (0, 1)
+    assert result.returncode == 0
+    assert step.success_codes == (0,)
 
 
 def test_cancellation_uses_existing_step_supervisor(tmp_path):
@@ -158,7 +155,7 @@ def test_agent_shape_cannot_be_relabelled_into_arbitrary_command(tmp_path):
     step = resolve_delivered_local_search_agent_step(handoff)
     for mutation in (
         {"argv": ("bash", "-c", "touch escaped")},
-        {"success_codes": (0,)},
+        {"success_codes": (0, 1)},
         {"working_directory": ".."},
     ):
         with pytest.raises(ValidationError):

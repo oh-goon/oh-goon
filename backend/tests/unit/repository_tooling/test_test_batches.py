@@ -439,53 +439,6 @@ def test_process_owning_batch_runner_proofs_stay_in_process_marked_module() -> N
     )
 
 
-def test_process_marker_selection_is_filename_invariant(tmp_path: Path) -> None:
-    import oh_goon.repository_tooling.pytest_member_selection as selection
-
-    original = tmp_path / "test_original.py"
-    renamed = tmp_path / "test_renamed.py"
-    source = "import pytest\npytestmark = pytest.mark.process\ndef test_process_owned(): pass\n"
-    original.write_text(source, encoding="utf-8")
-    original_member = f"{original.as_posix()}::test_process_owned"
-    runnable, pruned = selection.statically_pruned_members((original_member,), marker="not process")
-    assert runnable == ()
-    assert pruned == (original_member,)
-
-    original.rename(renamed)
-    renamed_member = f"{renamed.as_posix()}::test_process_owned"
-    runnable, pruned = selection.statically_pruned_members((renamed_member,), marker="not process")
-    assert runnable == ()
-    assert pruned == (renamed_member,)
-
-
-def test_static_marker_pruning_parses_each_unique_file_once(monkeypatch, tmp_path: Path) -> None:
-    import oh_goon.repository_tooling.pytest_member_selection as selection
-
-    path = tmp_path / "test_many.py"
-    path.write_text(
-        "import pytest\n@pytest.mark.slow\ndef test_one(): pass\ndef test_two(): pass\n",
-        encoding="utf-8",
-    )
-    real_parse = selection.ast.parse
-    parses: list[str] = []
-
-    def counted_parse(source: str, *, filename: str):
-        parses.append(filename)
-        return real_parse(source, filename=filename)
-
-    monkeypatch.setattr(selection.ast, "parse", counted_parse)
-    members = (
-        f"{path.as_posix()}::test_one",
-        f"{path.as_posix()}::test_two",
-        f"{path.as_posix()}::test_one",
-    )
-    runnable, pruned = selection.statically_pruned_members(members, marker="not slow")
-
-    assert runnable == (f"{path.as_posix()}::test_two",)
-    assert pruned == (f"{path.as_posix()}::test_one", f"{path.as_posix()}::test_one")
-    assert parses == [str(path)]
-
-
 def test_suite_timeout_requires_startup_headroom(monkeypatch, tmp_path: Path) -> None:
     import sys
 
@@ -507,54 +460,3 @@ def test_suite_timeout_requires_startup_headroom(monkeypatch, tmp_path: Path) ->
     )
     with pytest.raises(SystemExit, match="2"):
         batches.main()
-
-
-def test_static_marker_pruning_excludes_simple_file_when_every_test_is_excluded(
-    tmp_path: Path,
-) -> None:
-    import oh_goon.repository_tooling.pytest_member_selection as selection
-
-    path = tmp_path / "test_scale_only.py"
-    path.write_text(
-        "import pytest\n"
-        "@pytest.mark.scale\n"
-        "def test_one(): pass\n"
-        "@pytest.mark.scale\n"
-        "def test_two(): pass\n",
-        encoding="utf-8",
-    )
-    runnable, pruned = selection.statically_pruned_members(
-        (path.as_posix(),), marker="not slow and not process and not scale and not certification"
-    )
-    assert runnable == ()
-    assert pruned == (path.as_posix(),)
-
-
-def test_static_marker_pruning_keeps_file_when_one_test_remains_runnable(tmp_path: Path) -> None:
-    import oh_goon.repository_tooling.pytest_member_selection as selection
-
-    path = tmp_path / "test_mixed.py"
-    path.write_text(
-        "import pytest\n@pytest.mark.scale\ndef test_scale(): pass\ndef test_fast(): pass\n",
-        encoding="utf-8",
-    )
-    runnable, pruned = selection.statically_pruned_members((path.as_posix(),), marker="not scale")
-    assert runnable == (path.as_posix(),)
-    assert pruned == ()
-
-
-def test_static_marker_pruning_keeps_dynamic_collection_shapes(tmp_path: Path) -> None:
-    import oh_goon.repository_tooling.pytest_member_selection as selection
-
-    path = tmp_path / "test_class.py"
-    path.write_text(
-        "import pytest\n"
-        "@pytest.mark.scale\n"
-        "def test_scale(): pass\n"
-        "class TestDynamic:\n"
-        "    def test_fast(self): pass\n",
-        encoding="utf-8",
-    )
-    runnable, pruned = selection.statically_pruned_members((path.as_posix(),), marker="not scale")
-    assert runnable == (path.as_posix(),)
-    assert pruned == ()

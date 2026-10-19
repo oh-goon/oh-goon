@@ -1,6 +1,6 @@
 # python/dependency-inventory
 
-Observe repository dependency manifests through the typed dependency-inventory capability.
+Observe qualified `uv.lock` inventory through Hashmarks. This read-only Step does not run uv, parse declarations or inspect installed packages.
 
 ## Before you run
 

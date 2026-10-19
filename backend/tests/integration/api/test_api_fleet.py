@@ -51,7 +51,7 @@ def test_dependency_discovery_does_not_scan_repository_files_without_observed_ev
     assert coverage.json() == {
         "repository_total": 1,
         "current_dependency_evidence": 0,
-        "aged_dependency_evidence": 0,
+        "unknown_dependency_evidence": 0,
         "stale_dependency_evidence": 0,
         "missing_dependency_evidence": 1,
         "no_current_dependency_evidence": 1,

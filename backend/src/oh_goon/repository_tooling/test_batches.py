@@ -1,7 +1,7 @@
 """Run pytest surfaces as deterministic bounded batches with live heartbeats.
 
 The runner is the repository-owned timeout firewall for known-large pytest surfaces.
-It can shard by test file or by top-level test node and executes bounded batches in
+It can shard by test file or by native collected test node and executes bounded batches in
 parallel.  A caller therefore never needs to first try one monolithic pytest command
 and discover an agent/tool timeout after wasting the full execution window.
 """
@@ -154,6 +154,9 @@ def _run_members(
     if receipt_directory is not None and receipt_suite_identity:
         physical_batch_identity = receipt_batch_identity(members)
         command += ["-p", "oh_goon.repository_tooling.pytest_batch_receipts"]
+        collection_path = receipt_directory / "collection.json"
+        if collection_path.is_file():
+            env["OH_GOON_PYTEST_RECEIPT_COLLECTION"] = str(collection_path)
         env.update(
             {
                 "OH_GOON_PYTEST_RECEIPT_DIRECTORY": str(receipt_directory),

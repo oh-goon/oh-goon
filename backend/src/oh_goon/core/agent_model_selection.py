@@ -154,7 +154,7 @@ def frozen_local_model_observation_prompt(
     observation = json.dumps(
         {
             "query": query,
-            "match": returncode == 0,
+            "returncode": returncode,
             "stdout": stdout[:2048],
             "stderr": stderr[:512],
             "stdout_truncated": len(stdout) > 2048,
@@ -325,7 +325,6 @@ def frozen_local_model_tool_observation_prompt(
             "tool": action.tool,
             "query": action.query,
             "path": action.path,
-            "matched": returncode == 0,
             "returncode": returncode,
             "stdout": stdout[:2048],
             "stderr": stderr[:512],

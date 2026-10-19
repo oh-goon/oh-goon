@@ -168,13 +168,13 @@ def test_workspace_root_is_separate_from_disposable_run_workspace_root(tmp_path:
     assert layout.managed_workspaces != layout.run_workspaces
 
 
-def test_workspace_schema_is_canonical_schema_82_and_preserves_workspace_authority_tables(
+def test_workspace_schema_preserves_workspace_authority_tables(
     tmp_path: Path,
 ) -> None:
     database = _database(tmp_path)
-    assert DATABASE_SCHEMA_VERSION == 87
+    assert DATABASE_SCHEMA_VERSION == 88
     with database.transaction() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 87
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == DATABASE_SCHEMA_VERSION
         tables = {
             row["name"]
             for row in connection.execute(

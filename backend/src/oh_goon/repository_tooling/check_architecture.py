@@ -12,7 +12,7 @@ from oh_goon.repository_tooling.architecture.backend_boundary_contract import (
 from oh_goon.repository_tooling.architecture.co_r01_lifecycle_contract import (
     check_co_r01_lifecycle_edges,
 )
-from oh_goon.repository_tooling.architecture.common import Violation
+from oh_goon.repository_tooling.architecture.common import Violation, python_source_snapshot
 from oh_goon.repository_tooling.architecture.diagnostic_ownership_contract import (
     check_diagnostic_ownership_contract,
 )
@@ -106,7 +106,8 @@ CHECKS: tuple[ArchitectureCheck, ...] = (
 
 
 def main() -> int:
-    failures = [(check.__name__, violation) for check in CHECKS for violation in check()]
+    with python_source_snapshot():
+        failures = [(check.__name__, violation) for check in CHECKS for violation in check()]
     if not failures:
         print("Architecture checks passed")
         return 0

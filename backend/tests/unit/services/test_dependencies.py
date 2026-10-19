@@ -44,7 +44,9 @@ def _index(
     packages: tuple[tuple[str, str], ...],
     state: str,
 ) -> None:
-    report = dependency_report(repository, dependency_snapshot(*packages), state=state)
+    report = dependency_report(
+        repository, dependency_snapshot(repository.path, *packages), state=state
+    )
     with store._database.transaction(write=True) as connection:  # unit-level projection fixture
         store._index_report(connection, report)
 
@@ -164,19 +166,19 @@ def test_coverage_populations_are_reviewable_and_materialize_exact_ids(tmp_path:
     _index(store, matching, (("mlflow", "2.17.2"),), "a" * 40)
     _index(store, non_matching, (("requests", "2.32.0"),), "b" * 40)
 
-    proven = service.coverage_repositories("mlflow", coverage="proven_no_match")
+    proven = service.coverage_repositories("mlflow", coverage="absent_from_lock")
     missing = service.coverage_repositories("mlflow", coverage="no_current_evidence")
 
     assert [item.repository.repository_id for item in proven.items] == [non_matching.repository_id]
-    assert proven.items[0].evidence_state == "current"
+    assert proven.items[0].evidence.freshness == "current"
     assert proven.items[0].sources == ("uv.lock",)
     assert [item.repository.repository_id for item in missing.items] == [unknown.repository_id]
-    assert missing.items[0].evidence_state == "missing"
+    assert missing.items[0].evidence.availability == "missing"
     assert missing.items[0].fleet_run_id is None
 
     proven_selection = service.materialize(
         DependencyTargetMaterializeRequest(
-            filter=DependencyTargetFilter(package_name="mlflow", coverage="proven_no_match"),
+            filter=DependencyTargetFilter(package_name="mlflow", coverage="absent_from_lock"),
             expected_population_id=proven.population_id,
         )
     )
@@ -258,3 +260,13 @@ def test_dependency_search_total_and_offset_describe_full_matching_population(
     assert {item.package_name for item in first.items}.isdisjoint(
         {item.package_name for item in second.items}
     )
+
+
+def test_missing_index_row_cannot_become_native_lock_absence(tmp_path: Path) -> None:
+    repository = RepositoryIdentity(path=tmp_path / "repository")
+    service, store = _service(tmp_path, [repository])
+    _index(store, repository, (("mlflow", "2.17.2"),), "a" * 40)
+    with store._database.transaction(write=True) as connection:
+        connection.execute("DELETE FROM dependency_observations WHERE package_name='mlflow'")
+    assert service.coverage_repositories("mlflow", coverage="absent_from_lock").total == 0
+    assert service.overview("mlflow").freshness.no_matching_dependency == 0

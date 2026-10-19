@@ -11,7 +11,7 @@ from oh_goon.runtime.database import DATABASE_SCHEMA_VERSION, LocalDatabase
 
 def test_prelive_database_uses_one_genesis_schema(tmp_path) -> None:
     database = LocalDatabase(tmp_path / "state.db")
-    assert DATABASE_SCHEMA_VERSION == 87
+    assert DATABASE_SCHEMA_VERSION == 88
     with closing(sqlite3.connect(database.path)) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == DATABASE_SCHEMA_VERSION
 

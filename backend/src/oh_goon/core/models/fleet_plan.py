@@ -483,10 +483,10 @@ class ResolvedLocalSearchAgentStep(ResolvedCommandStep):
         if self.harness.startswith("provider-") != (self.connection is not None):
             raise ValueError("provider Agent requires a frozen connection")
         if (
-            self.argv != ("rg",)
+            self.argv != ("python",)
             or self.uv is not None
             or self.working_directory != "."
-            or self.success_codes != ((0,) if self.harness.startswith("provider-") else (0, 1))
+            or self.success_codes != (0,)
             or self.capabilities.egress.mode != "none"
             or self.capabilities.nested_strict_execution
             or self.capabilities.tools

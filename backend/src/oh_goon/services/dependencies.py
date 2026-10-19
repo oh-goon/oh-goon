@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable
@@ -15,6 +16,7 @@ from oh_goon.core.models.dependency_fleet import (
     DependencyAdvisoryOverview,
     DependencyCoveragePopulation,
     DependencyCoverageRepositoryPage,
+    DependencyEvidenceFilter,
     DependencyFleetCoverageOverview,
     DependencyPackageOverview,
     DependencyRepositoryMatch,
@@ -37,7 +39,7 @@ from oh_goon.services.repositories import RepositoryService
 
 
 class DependencyFleetService:
-    """Search canonical dependency observations without reopening repository files."""
+    """Search retained lock facts with producer-owned source revalidation."""
 
     def __init__(
         self,
@@ -52,59 +54,63 @@ class DependencyFleetService:
         self._advisory = DependencyAdvisoryService(repositories, observations)
 
     def search(self, query: str, *, offset: int = 0, limit: int = 20) -> DependencySearchResult:
-        if offset < 0:
-            raise InvalidRequest("Dependency search offset must be zero or greater")
-        normalized = _package_query(query)
-        current = self._current_repositories()
-        repository_ids_by_package: dict[str, set[str]] = defaultdict(set)
-        versions_by_package: dict[str, set[str]] = defaultdict(set)
-        for row in self._store.package_search_rows(normalized):
-            repository_id = str(row["repository_id"])
-            if repository_id not in current:
-                continue
-            package_name = str(row["package_name"])
-            repository_ids_by_package[package_name].add(repository_id)
-            if row["resolved_version"] is not None:
-                versions_by_package[package_name].add(str(row["resolved_version"]))
-        items = [
-            DependencySearchItem(
-                package_name=package_name,
-                repositories=len(repository_ids),
-                resolved_versions=len(versions_by_package[package_name]),
+        with self._store.assessment_scope():
+            if offset < 0:
+                raise InvalidRequest("Dependency search offset must be zero or greater")
+            normalized = _package_query(query)
+            current = self._current_repositories()
+            repository_ids_by_package: dict[str, set[str]] = defaultdict(set)
+            versions_by_package: dict[str, set[str]] = defaultdict(set)
+            for row in self._store.package_search_rows(normalized):
+                repository_id = str(row["repository_id"])
+                if repository_id not in current:
+                    continue
+                package_name = str(row["package_name"])
+                repository_ids_by_package[package_name].add(repository_id)
+                if row["resolved_version"] is not None:
+                    versions_by_package[package_name].add(str(row["resolved_version"]))
+            items = [
+                DependencySearchItem(
+                    package_name=package_name,
+                    repositories=len(repository_ids),
+                    resolved_versions=len(versions_by_package[package_name]),
+                )
+                for package_name, repository_ids in repository_ids_by_package.items()
+            ]
+            ranked = sorted(
+                items,
+                key=lambda item: (
+                    0 if item.package_name == normalized else 1,
+                    -item.repositories,
+                    item.package_name,
+                ),
             )
-            for package_name, repository_ids in repository_ids_by_package.items()
-        ]
-        ranked = sorted(
-            items,
-            key=lambda item: (
-                0 if item.package_name == normalized else 1,
-                -item.repositories,
-                item.package_name,
-            ),
-        )
-        return DependencySearchResult(
-            query=normalized,
-            total=len(ranked),
-            offset=offset,
-            limit=limit,
-            items=tuple(ranked[offset : offset + limit]),
-        )
+            return DependencySearchResult(
+                query=normalized,
+                total=len(ranked),
+                offset=offset,
+                limit=limit,
+                items=tuple(ranked[offset : offset + limit]),
+            )
 
     def fleet_coverage(self) -> DependencyFleetCoverageOverview:
-        return self._coverage.overview()
+        with self._store.assessment_scope():
+            return self._coverage.overview()
 
     def overview(self, package_name: str) -> DependencyPackageOverview:
-        package = _package_query(package_name)
-        return build_dependency_overview(self._store, package, self._current_repositories())
+        with self._store.assessment_scope():
+            package = _package_query(package_name)
+            return build_dependency_overview(self._store, package, self._current_repositories())
 
     def advisory(
         self, package_name: str, *, advisory_id: str, affected_specifier: str
     ) -> DependencyAdvisoryOverview:
-        return self._advisory.overview(
-            _package_query(package_name),
-            advisory_id=advisory_id,
-            affected_specifier=affected_specifier,
-        )
+        with self._store.assessment_scope():
+            return self._advisory.overview(
+                _package_query(package_name),
+                advisory_id=advisory_id,
+                affected_specifier=affected_specifier,
+            )
 
     def repositories(
         self,
@@ -114,31 +120,30 @@ class DependencyFleetService:
         version_prefix: str | None = None,
         version_specifier: str | None = None,
         advisory_id: str | None = None,
-        relationship: str = "all",
-        evidence: str = "all",
+        evidence: DependencyEvidenceFilter = "all",
         offset: int = 0,
         limit: int = 20,
     ) -> DependencyRepositoryPage:
-        query = DependencyTargetFilter(
-            package_name=_package_query(package_name),
-            resolved_version=resolved_version,
-            version_prefix=version_prefix,
-            version_specifier=version_specifier,
-            advisory_id=advisory_id,
-            relationship=relationship,
-            evidence=evidence,
-        )
-        matches = self._matches(query)
-        repo_ids = tuple(sorted(item.repository.repository_id for item in matches))
-        repository_instance_ids = _repository_instance_map(item.repository for item in matches)
-        return DependencyRepositoryPage(
-            population_id=_population_id(query, repo_ids, repository_instance_ids),
-            package_name=query.package_name,
-            total=len(matches),
-            offset=offset,
-            limit=limit,
-            items=tuple(matches[offset : offset + limit]),
-        )
+        with self._store.assessment_scope():
+            query = DependencyTargetFilter(
+                package_name=_package_query(package_name),
+                resolved_version=resolved_version,
+                version_prefix=version_prefix,
+                version_specifier=version_specifier,
+                advisory_id=advisory_id,
+                evidence=evidence,
+            )
+            matches = self._matches(query)
+            repo_ids = tuple(sorted(item.repository.repository_id for item in matches))
+            repository_instance_ids = _repository_instance_map(item.repository for item in matches)
+            return DependencyRepositoryPage(
+                population_id=_population_id(query, repo_ids, repository_instance_ids),
+                package_name=query.package_name,
+                total=len(matches),
+                offset=offset,
+                limit=limit,
+                items=tuple(matches[offset : offset + limit]),
+            )
 
     def coverage_repositories(
         self,
@@ -148,20 +153,21 @@ class DependencyFleetService:
         offset: int = 0,
         limit: int = 20,
     ) -> DependencyCoverageRepositoryPage:
-        package = _package_query(package_name)
-        query = DependencyTargetFilter(package_name=package, coverage=coverage)
-        items = self._coverage.items(package, coverage)
-        repo_ids = tuple(sorted(item.repository.repository_id for item in items))
-        repository_instance_ids = _repository_instance_map(item.repository for item in items)
-        return DependencyCoverageRepositoryPage(
-            population_id=_population_id(query, repo_ids, repository_instance_ids),
-            package_name=package,
-            coverage=coverage,
-            total=len(items),
-            offset=offset,
-            limit=limit,
-            items=tuple(items[offset : offset + limit]),
-        )
+        with self._store.assessment_scope():
+            package = _package_query(package_name)
+            query = DependencyTargetFilter(package_name=package, coverage=coverage)
+            items = self._coverage.items(package, coverage)
+            repo_ids = tuple(sorted(item.repository.repository_id for item in items))
+            repository_instance_ids = _repository_instance_map(item.repository for item in items)
+            return DependencyCoverageRepositoryPage(
+                population_id=_population_id(query, repo_ids, repository_instance_ids),
+                package_name=package,
+                coverage=coverage,
+                total=len(items),
+                offset=offset,
+                limit=limit,
+                items=tuple(items[offset : offset + limit]),
+            )
 
     def repository(
         self,
@@ -170,58 +176,65 @@ class DependencyFleetService:
         offset: int = 0,
         limit: int = 20,
     ) -> RepositoryDependencyPage:
-        current = self._current_repositories()
-        repository = current.get(repository_id)
-        if repository is None:
-            raise RepositoryNotManaged("Repository is not in the current included League")
-        rows = self._store.repository_rows(repository_id)
-        by_package: dict[str, list[object]] = defaultdict(list)
-        for row in rows:
-            by_package[str(row["package_name"])].append(row)
-        items = [
-            _match_from_rows(self._store, repository, package, group)
-            for package, group in sorted(by_package.items())
-        ]
-        return RepositoryDependencyPage(
-            repository=repository,
-            total=len(items),
-            offset=offset,
-            limit=limit,
-            items=tuple(items[offset : offset + limit]),
-        )
+        with self._store.assessment_scope():
+            current = self._current_repositories()
+            repository = current.get(repository_id)
+            if repository is None:
+                raise RepositoryNotManaged("Repository is not in the current included League")
+            rows = self._store.repository_rows(repository_id)
+            by_package: dict[str, list[sqlite3.Row]] = defaultdict(list)
+            for row in rows:
+                by_package[str(row["package_name"])].append(row)
+            items = [
+                _match_from_rows(self._store, repository, package, group)
+                for package, group in sorted(by_package.items())
+            ]
+            return RepositoryDependencyPage(
+                repository=repository,
+                total=len(items),
+                offset=offset,
+                limit=limit,
+                items=tuple(items[offset : offset + limit]),
+            )
 
     def materialize(
         self, request: DependencyTargetMaterializeRequest
     ) -> DependencyTargetMaterialization:
-        query = request.filter
-        normalized = query.model_copy(update={"package_name": _package_query(query.package_name)})
-        if normalized.coverage == "matching":
-            matches = self._matches(normalized)
-            repo_ids = tuple(sorted(item.repository.repository_id for item in matches))
-            repository_instance_ids = _repository_instance_map(item.repository for item in matches)
-        else:
-            coverage_items = self._coverage.items(normalized.package_name, normalized.coverage)
-            repo_ids = tuple(sorted(item.repository.repository_id for item in coverage_items))
-            repository_instance_ids = _repository_instance_map(
-                item.repository for item in coverage_items
+        with self._store.assessment_scope():
+            query = request.filter
+            normalized = query.model_copy(
+                update={"package_name": _package_query(query.package_name)}
             )
-        selected_at = datetime.now(UTC)
-        query_id = _population_id(normalized, repo_ids, repository_instance_ids)
-        if query_id != request.expected_population_id:
-            raise StateConflict("Dependency target population changed since it was displayed")
-        return self._targets.save(
-            DependencyTargetMaterialization(
-                query_id=query_id,
-                selected_at=selected_at,
-                filter=normalized,
-                total=len(repo_ids),
-                repo_ids=repo_ids,
-                repository_instance_ids=repository_instance_ids,
+            if normalized.coverage == "matching":
+                matches = self._matches(normalized)
+                repo_ids = tuple(sorted(item.repository.repository_id for item in matches))
+                repository_instance_ids = _repository_instance_map(
+                    item.repository for item in matches
+                )
+            else:
+                coverage_items = self._coverage.items(normalized.package_name, normalized.coverage)
+                repo_ids = tuple(sorted(item.repository.repository_id for item in coverage_items))
+                repository_instance_ids = _repository_instance_map(
+                    item.repository for item in coverage_items
+                )
+            selected_at = datetime.now(UTC)
+            query_id = _population_id(normalized, repo_ids, repository_instance_ids)
+            if query_id != request.expected_population_id:
+                raise StateConflict("Dependency target population changed since it was displayed")
+            return self._targets.save(
+                DependencyTargetMaterialization(
+                    query_id=query_id,
+                    selected_at=selected_at,
+                    filter=normalized,
+                    total=len(repo_ids),
+                    repo_ids=repo_ids,
+                    repository_instance_ids=repository_instance_ids,
+                )
             )
-        )
 
     def target_selection(self, query_id: str) -> DependencyTargetMaterialization:
-        return self._targets.get(query_id)
+        with self._store.assessment_scope():
+            return self._targets.get(query_id)
 
     def _matches(self, query: DependencyTargetFilter) -> list[DependencyRepositoryMatch]:
         current = self._current_repositories()
@@ -231,7 +244,6 @@ class DependencyFleetService:
             query.package_name,
             resolved_version=query.resolved_version,
             version_prefix=query.version_prefix,
-            relationship=query.relationship,
             evidence=query.evidence,
         )
         grouped = _group_rows([row for row in rows if str(row["repository_id"]) in current])
@@ -277,34 +289,22 @@ def _match_from_rows(
     rows: list[sqlite3.Row],
 ) -> DependencyRepositoryMatch:
     first = rows[0]
-    relationships = {str(row["relationship"]) for row in rows}
-    relationship = "direct" if "direct" in relationships else "transitive"
-    declared_ranges = tuple(
-        sorted({str(row["declared_range"]) for row in rows if row["declared_range"] is not None})
-    )
     resolved_versions = tuple(
         sorted(
             {str(row["resolved_version"]) for row in rows if row["resolved_version"] is not None}
         )
     )
-    sources = tuple(
-        sorted(
-            {
-                str(source)
-                for row in rows
-                for source in (row["declared_source"], row["resolved_source"])
-                if source is not None
-            }
-        )
+    sources = tuple(sorted({str(row["resolved_source"]) for row in rows}))
+    contexts = tuple(
+        sorted({context for row in rows for context in json.loads(str(row["contexts_json"]))})
     )
     return DependencyRepositoryMatch(
         repository=repository,
         package_name=package_name,
-        relationship=relationship,
-        declared_ranges=declared_ranges,
+        contexts=contexts,
         resolved_versions=resolved_versions,
         sources=sources,
-        evidence_state=store.evidence_state(first),
+        evidence=store.assessment(first),
         observed_at=datetime.fromisoformat(str(first["observed_at"])),
         fleet_run_id=str(first["fleet_run_id"]),
         operation_id=str(first["operation_id"]),

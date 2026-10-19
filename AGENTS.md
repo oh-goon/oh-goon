@@ -112,8 +112,10 @@ with `backend/pyproject.toml` and native `uv.lock`; do not vendor, reacquire,
 repackage, or maintain a parallel release/commit/wheel identity. Bind evidence
 compatibility to the implementation identity reported by the loaded runtime.
 New repository-intelligence capabilities belong in Hashmarks first, including
-CodeMap, action-role/task ranking, decision packets, verification membership,
-failed-target recovery evidence, scout selection, and agent-economics features.
+CodeMap, repository-derived relevance, decision packets, verification membership,
+negative evidence and evidence economics. The coding agent owns hypotheses,
+attempt memory, scout/delegation choices, model routing and solution strategy;
+Oh-Goon retains execution recovery and workflow control.
 
 Hashmarks nominations are flat evidence, not execution batches. Oh-Goon's
 existing Fleet/Step owners handle grouping, concurrency, process launch,

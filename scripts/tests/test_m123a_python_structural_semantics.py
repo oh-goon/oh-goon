@@ -20,14 +20,12 @@ from oh_goon.repository_tooling.architecture._structural_authority_workflow impo
 from oh_goon.repository_tooling.architecture._structural_project_dependency_contract import (
     _check_native_authority_deduplication,
 )
-from oh_goon.repository_tooling.architecture.common import clear_python_ast_cache
 
 
 def _write(root: Path, relative: str, source: str) -> Path:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
-    clear_python_ast_cache()
     return path
 
 

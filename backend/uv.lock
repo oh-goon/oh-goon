@@ -283,15 +283,18 @@ wheels = [
 
 [[package]]
 name = "hashmarks"
-version = "0.25.1"
-source = { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.25.1/hashmarks-0.25.1-py3-none-any.whl" }
+version = "0.30.0"
+source = { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.30.0/hashmarks-0.30.0-py3-none-any.whl" }
 wheels = [
-    { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.25.1/hashmarks-0.25.1-py3-none-any.whl", hash = "sha256:e287aacb91a2f47c810a6e2e09e65fc2c93fd4b49f1bf8e291b63fdf935104a5" },
+    { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.30.0/hashmarks-0.30.0-py3-none-any.whl", hash = "sha256:16b08cd6c047f7087ff218cbd554387af902a84b7045a792e4ac8680784019da" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.2.0" }]
-provides-extras = ["mcp"]
+requires-dist = [
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.2.0" },
+    { name = "tree-sitter-language-pack", marker = "extra == 'syntax'", specifier = ">=0.13,<1" },
+]
+provides-extras = ["mcp", "syntax"]
 
 [[package]]
 name = "hatchling"
@@ -521,7 +524,7 @@ quality = [
 requires-dist = [
     { name = "cryptography", specifier = ">=46.0.4" },
     { name = "fastapi", specifier = ">=0.128.2" },
-    { name = "hashmarks", url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.25.1/hashmarks-0.25.1-py3-none-any.whl" },
+    { name = "hashmarks", url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.30.0/hashmarks-0.30.0-py3-none-any.whl" },
     { name = "httpx2", specifier = ">=2.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pyyaml", specifier = ">=6.0.3" },

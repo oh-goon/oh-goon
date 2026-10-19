@@ -110,7 +110,7 @@ repository evidence; OH-Goon consumes it through its
 Native package-manager failures remain installation failures. An importable
 host package or a test substitute does not replace the locked runtime.
 
-Local model workloads additionally need `rg`, `head`, a running local Ollama
+Local model workloads use Hashmarks for repository evidence, `rg`/`head` for exact captured resource delivery, and a running local Ollama
 server, and an explicitly selected, already installed model. Source
 initialization does not download Ollama or models. Model prompts are delivered
 to the selected local recipient; a Skill file does not select another recipient
@@ -121,7 +121,7 @@ or grant shell, network, or repository-write capabilities.
 | Capability | Current behavior | Boundary |
 | --- | --- | --- |
 | Skill source | `.goonskills.yml` maps local resources and groups remote directories by Git source/ref. Complete captured resources travel with the frozen handoff. | `goon.lock` records remote commits; a cache miss restores the same commit. |
-| Local read-only tools | Selected harnesses can search fixed strings, list repository/Skill paths, and read admitted captured files. | Native tools operate on the attempt's frozen inputs; the model cannot supply arbitrary shell commands or read arbitrary host paths. |
+| Local read-only tools | Selected harnesses can search fixed strings, list repository/Skill paths, and read admitted captured files. | Hashmarks observes the captured repository with explicit bounds and source revisions. Exact resource reads use frozen bytes; the model cannot supply arbitrary shell commands or read arbitrary host paths. |
 | Bounded Skill loop | `local-model-skill-loop` permits up to four admitted tool actions followed by a final model evaluation. | Repeated or invalid requests and requests beyond the action budget fail the Step. |
 | File proposal | `local-model-proposal` can return a bounded replacement bound to one captured file's source digest. | A proposal is data and does not modify the repository. |
 | Explicit apply and test | A later operator-authored command Step can invoke `oh-goon agent apply` for the explicitly selected path, followed by an authored test Step. | The apply owner checks the proposed source identity; the native test's real result remains authoritative. |

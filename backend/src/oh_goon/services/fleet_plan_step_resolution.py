@@ -326,8 +326,8 @@ def resolve_delivered_local_search_agent_step(
             raise FleetPlanInvalid("model Agent requires selected local Ollama recipient and model")
     return ResolvedLocalSearchAgentStep(
         step_id=handoff.step_id,
-        argv=("rg",),
-        success_codes=(0,) if handoff.harness.startswith("provider-") else (0, 1),
+        argv=("python",),
+        success_codes=(0,),
         timeout_seconds=handoff.timeout_seconds,
         delivery_sha256=hashlib.sha256(handoff.encode_prework_delivery()).hexdigest(),
         handoff_identity=handoff.handoff_identity,

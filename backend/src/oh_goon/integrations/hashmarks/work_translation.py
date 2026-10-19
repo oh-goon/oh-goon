@@ -39,7 +39,7 @@ def describe_hashmarks_work(
             )
     else:
         raise HashmarksWorkTranslationError(
-            f"Hashmarks {evidence.kind.value} evidence is informative only and cannot be translated into work"
+            f"Hashmarks {evidence.kind} evidence is informative only and cannot be translated into work"
         )
 
     identity_payload = {

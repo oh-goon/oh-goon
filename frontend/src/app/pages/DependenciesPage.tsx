@@ -40,7 +40,6 @@ export function DependenciesPage({ navigate }: Props) {
     resolvedVersion: state.resolvedVersion,
     versionSpecifier: state.versionSpecifier,
     advisoryId: state.advisoryId,
-    relationship: state.relationship,
     evidence: state.evidence,
     offset: state.offset,
   });
@@ -59,7 +58,6 @@ export function DependenciesPage({ navigate }: Props) {
     populationId,
     packageName: state.packageName,
     coverage: state.coverage,
-    relationship: state.coverage === "matching" ? state.relationship : "all",
     evidence: state.coverage === "matching" ? state.evidence : "all",
     resolvedVersion: state.coverage === "matching" ? state.resolvedVersion : "",
     versionSpecifier: state.coverage === "matching" ? state.versionSpecifier : "",
@@ -80,7 +78,6 @@ export function DependenciesPage({ navigate }: Props) {
     const filter: DependencyTargetFilter = {
       package_name: state.packageName,
       coverage: state.coverage,
-      relationship: matching ? state.relationship : "all",
       evidence: matching ? state.evidence : "all",
       ...(matching && state.resolvedVersion ? { resolved_version: state.resolvedVersion } : {}),
       ...(matching && state.versionSpecifier ? { version_specifier: state.versionSpecifier } : {}),
@@ -112,7 +109,6 @@ export function DependenciesPage({ navigate }: Props) {
       resolvedVersion={state.resolvedVersion}
       versionSpecifier={state.versionSpecifier}
       advisoryId={state.advisoryId}
-      relationship={state.relationship}
       evidence={state.evidence}
       coverage={state.coverage}
       offset={state.offset}
