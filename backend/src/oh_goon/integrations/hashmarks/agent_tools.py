@@ -50,6 +50,7 @@ def repository_observation(
     capture_identity: str,
 ) -> dict[str, Any]:
     from hashmarks import CodeMap
+    from hashmarks.evidence_presentation import present_repository_evidence
 
     state = root / "evidence-state"
     with CodeMap(root / "repo", state_dir=state, artifact_db=state / "artifacts.sqlite3") as native:
@@ -62,6 +63,21 @@ def repository_observation(
                 "path_prefix": "repo/",
                 "repository_absence": "not-claimed",
             }
+            if tool == "task_evidence":
+                if not query:
+                    raise ValueError("Task evidence requires the original task")
+                evidence = native.tasks.evidence(
+                    query,
+                    limit=4,
+                    per_role=1,
+                    token_budget=512,
+                    result_mode="initial",
+                )
+                return {
+                    **envelope,
+                    "evidence": evidence,
+                    "presentation": present_repository_evidence(evidence, format="text"),
+                }
             if tool == "list_paths":
                 paths = [item.rel for item in native.files.iter_files()]
                 return {
@@ -71,7 +87,7 @@ def repository_observation(
                 }
             if tool != "search_text" or not query:
                 raise ValueError("Repository evidence requires a supported tool and query")
-            retrieval = cast(dict[str, Any], native.search.packet(query, limit=4))
+            retrieval = cast(dict[str, Any], native.search.packet(query, limit=2))
             paths = list(dict.fromkeys(item["path"] for item in retrieval["results"]))
             return {
                 **envelope,
@@ -81,18 +97,79 @@ def repository_observation(
                     key: value for key, value in retrieval.items() if key != "results"
                 },
                 "retrieval": retrieval,
-                "source": native.source.scoped_occurrences(paths, query, limit=8, context_lines=1)
+                "source": native.source.scoped_occurrences(paths, query, limit=4, context_lines=1)
                 if paths
                 else None,
             }
 
 
-def prompt_observation(stdout: str) -> str:
-    """Present bounded native facts without cutting JSON or inventing match truth.
+def task_evidence_prompt(
+    stdout: str, *, expected_capture_identity: str, max_chars: int = 6000
+) -> str:
+    """Disclose the native initial presentation intact within a caller budget.
 
-    The original tool packet stays in Step evidence. This disclosure is explicitly
-    partial, preserves native scope/limits, and accounts for omitted rows.
+    The encoded packet remains in supervised Step evidence. This function adds
+    only transport provenance; Hashmarks owns every displayed repository fact,
+    its qualifications and its omission ledger. Oversize facts fail disclosure
+    rather than becoming a silently clipped or consumer-selected observation.
     """
+    from hashmarks.evidence_presentation import present_repository_evidence
+
+    from oh_goon.core.errors import FleetPlanInvalid
+
+    try:
+        packet = json.loads(stdout)
+        if not isinstance(packet, dict) or packet.get("producer") != "Hashmarks":
+            raise ValueError("unexpected producer envelope")
+        if packet.get("producer_implementation_identity") != require_loaded_hashmarks_runtime():
+            raise ValueError("evidence producer differs from the loaded runtime")
+        if (
+            not expected_capture_identity
+            or packet.get("capture_identity") != expected_capture_identity
+        ):
+            raise ValueError("evidence capture differs from the admitted source")
+        evidence = packet["evidence"]
+        if not isinstance(evidence, dict):
+            raise ValueError("native initial evidence is missing")
+        presentation = present_repository_evidence(evidence, format="text")
+        if presentation.get("reference_space") != "decoded-initial-data":
+            raise ValueError("native initial task evidence is required")
+        if packet.get("presentation") != presentation:
+            raise ValueError("presentation differs from the native evidence")
+        projected = {
+            key: packet[key]
+            for key in (
+                "producer",
+                "producer_version",
+                "producer_implementation_identity",
+                "capture_identity",
+                "path_prefix",
+                "repository_absence",
+            )
+        }
+        projected["evidence_packet_identity"] = evidence["evidence_packet_identity"]
+        projected["source_evidence_identity"] = evidence["source_evidence_identity"]
+        projected["presentation"] = presentation
+        encoded = json.dumps(projected, ensure_ascii=True, separators=(",", ":"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise FleetPlanInvalid(f"Invalid Hashmarks task evidence: {exc}") from exc
+    if len(encoded) > max_chars:
+        raise FleetPlanInvalid("Native task evidence presentation exceeds the prompt budget")
+    return encoded
+
+
+def prompt_observation(
+    stdout: str, *, expected_capture_identity: str, max_chars: int = 16000
+) -> str:
+    """Disclose canonical producer projections without reselecting their facts.
+
+    Raw packets remain in supervised Step evidence. Hashmarks owns the retrieval
+    and source projections, including their coverage and omission accounting.
+    Only a plain discovered path list may lose trailing entries to fit transport;
+    repository-evidence presentations either fit intact or fail disclosure.
+    """
+    from hashmarks.evidence_presentation import present_repository_evidence
+
     from oh_goon.core.errors import FleetPlanInvalid
 
     try:
@@ -101,74 +178,58 @@ def prompt_observation(stdout: str) -> str:
         raise FleetPlanInvalid("Hashmarks tool did not return complete evidence JSON") from exc
     if not isinstance(packet, dict) or packet.get("producer") != "Hashmarks":
         raise FleetPlanInvalid("Agent repository tool returned an unexpected evidence envelope")
-    projected = {
-        key: packet[key]
-        for key in ("producer", "capture_identity", "path_prefix", "repository_absence")
-    }
-    projected["projection_coverage"] = "partial"
-    omitted = {"occurrences": 0, "members": 0, "paths": 0}
-    projected["omitted"] = omitted
-    source = packet.get("source")
-    if isinstance(source, dict):
-        fields = (
-            "schema",
-            "observation_scope",
-            "generation",
-            "freshness",
-            "paths",
-            "completeness",
-            "truncation",
-            "negative_evidence",
-            "limits",
-            "observation_identity",
-        )
-        source_projection = {key: source[key] for key in fields if key in source}
-        source_projection["occurrences"] = [
-            {
-                key: row[key]
-                for key in ("path", "member_revision", "line", "column", "context_excerpt")
-                if key in row
-            }
-            for row in source["occurrences"]
-        ]
-        source_projection["members"] = list(source["member_observations"])
-        projected["source"] = source_projection
-        omitted["source_fields"] = len(
-            set(source) - set(fields) - {"occurrences", "member_observations"}
-        )
-    else:
-        projected["source"] = None
-    if "paths" in packet:
-        projected["paths"] = list(packet["paths"])
-        projected["discovery_coverage"] = packet["discovery_coverage"]
-    if "retrieval_state" in packet:
-        projected["retrieval"] = {
-            key: value
-            for key, value in packet["retrieval_state"].items()
-            if key in ("schema", "freshness", "truncated", "negative_evidence", "bound_reasons")
+    try:
+        if packet.get("producer_implementation_identity") != require_loaded_hashmarks_runtime():
+            raise ValueError("evidence producer differs from the loaded runtime")
+        if (
+            not expected_capture_identity
+            or packet.get("capture_identity") != expected_capture_identity
+        ):
+            raise ValueError("evidence capture differs from the admitted source")
+        projected = {
+            key: packet[key]
+            for key in (
+                "producer",
+                "producer_version",
+                "producer_implementation_identity",
+                "capture_identity",
+                "path_prefix",
+                "repository_absence",
+            )
         }
+        for kind in ("retrieval", "source"):
+            native = packet.get(kind)
+            if native is None:
+                projected[kind] = None
+                continue
+            if not isinstance(native, dict):
+                raise ValueError(f"native {kind} evidence is not an object")
+            presentation = present_repository_evidence(native, format="compact")
+            if presentation.get("supported") is not True:
+                raise ValueError(f"native {kind} presentation is unsupported")
+            projected[kind] = presentation
+        if "paths" in packet:
+            projected["paths"] = list(packet["paths"])
+            projected["discovery_coverage"] = packet["discovery_coverage"]
+            projected["omitted_paths"] = 0
+    except (KeyError, TypeError, ValueError) as exc:
+        raise FleetPlanInvalid(f"Invalid Hashmarks repository evidence: {exc}") from exc
     while True:
         encoded = json.dumps(projected, ensure_ascii=True, separators=(",", ":"))
-        if len(encoded) <= 2048:
+        if len(encoded) <= max_chars:
             return encoded
-        source_projection = projected.get("source") or {}
-        for field, owner, count in (
-            ("members", source_projection, "members"),
-            ("occurrences", source_projection, "occurrences"),
-            ("paths", projected, "paths"),
-            ("paths", source_projection, "paths"),
-        ):
-            if owner.get(field):
-                owner[field].pop()
-                omitted[count] += 1
-                break
-        else:
-            raise FleetPlanInvalid("Native repository evidence metadata exceeds the prompt budget")
+        if projected.get("paths"):
+            projected["paths"].pop()
+            projected["omitted_paths"] += 1
+            continue
+        raise FleetPlanInvalid("Native repository evidence presentation exceeds the prompt budget")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tool", choices=("search_text", "list_paths"), required=True)
+    parser.add_argument(
+        "--tool", choices=("task_evidence", "search_text", "list_paths"), required=True
+    )
     parser.add_argument("--query")
     parser.add_argument("--capture-identity", required=True)
     args = parser.parse_args()

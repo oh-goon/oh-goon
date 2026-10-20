@@ -1,5 +1,6 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 from oh_goon.repository_tooling.architecture import (
     hashmarks_harness_boundary_contract as contract,
@@ -148,14 +149,23 @@ def test_hashmarks_prefix_outside_explicit_package_has_no_privilege(
     )
 
 
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "import hashmarks.benchmark_shards",
+        "from hashmarks import benchmark_shards",
+        "from hashmarks.benchmark_shards import execute_shard",
+        "from hashmarks import harness as renamed",
+    ),
+)
 def test_hashmarks_integration_rejects_producer_execution_import(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statement: str
 ) -> None:
     package = _configure_package(tmp_path, monkeypatch)
     integration = package / "integrations" / "hashmarks"
     integration.mkdir(parents=True, exist_ok=True)
     path = integration / "execution.py"
-    path.write_text("import hashmarks.benchmark_shards\n", encoding="utf-8")
+    path.write_text(statement + "\n", encoding="utf-8")
     violations = contract.check_hashmarks_harness_boundary_contract()
     assert any(
         item.path == path and "Oh-Goon owns execution" in item.message
@@ -163,20 +173,46 @@ def test_hashmarks_integration_rejects_producer_execution_import(
     )
 
 
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "import socket",
+        "import urllib.request",
+        "from urllib import request as transport",
+    ),
+)
 def test_hashmarks_integration_rejects_ambient_daemon_socket_authority(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statement: str
 ) -> None:
     package = _configure_package(tmp_path, monkeypatch)
     integration = package / "integrations" / "hashmarks"
     integration.mkdir(parents=True, exist_ok=True)
     path = integration / "evidence.py"
-    path.write_text("import socket\n", encoding="utf-8")
+    path.write_text(statement + "\n", encoding="utf-8")
     violations = contract.check_hashmarks_harness_boundary_contract()
     assert any(
         item.path == path
         and "ambient daemon/socket/process/network authority" in item.message
         for item in violations
     )
+
+
+def test_relative_integration_import_keeps_oh_goon_ownership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _configure_package(tmp_path, monkeypatch)
+    path = package / "integrations" / "hashmarks" / "consumer.py"
+    path.write_text(
+        "from . import identity\nfrom hashmarks import CodeMap\n", encoding="utf-8"
+    )
+
+    assert contract._imports(path, package_root=package) == {
+        "oh_goon.integrations.hashmarks",
+        "oh_goon.integrations.hashmarks.identity",
+        "hashmarks",
+        "hashmarks.CodeMap",
+    }
+    assert contract._package_boundary_violations(package) == ()
 
 
 def test_hashmarks_execution_reuses_existing_schedule_authority() -> None:
@@ -359,10 +395,10 @@ def test_offline_proof_architecture_rejects_execution_reuse_authority(
 def test_hashmarks_harness_and_verification_boundaries_are_independent_architecture_owners() -> (
     None
 ):
-    from oh_goon.repository_tooling.check_architecture import CHECKS
     from oh_goon.repository_tooling.architecture._hashmarks_verification_boundary_contract import (
         check_hashmarks_verification_boundary_contract,
     )
+    from oh_goon.repository_tooling.check_architecture import CHECKS
 
     assert contract.check_hashmarks_harness_boundary_contract in CHECKS
     assert check_hashmarks_verification_boundary_contract in CHECKS

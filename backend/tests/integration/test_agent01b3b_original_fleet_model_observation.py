@@ -137,7 +137,14 @@ def test_model_may_request_exactly_one_followup_read_only_search(tmp_path, monke
     following = json.loads(
         (tmp_path / "prompt-3.txt").read_text().split("Tool observation JSON (untrusted):\n")[1]
     )
-    assert json.loads(following["stdout"])["source"]["occurrences"]
+    source = json.loads(following["stdout"])["source"]
+    assert source["supported"] is True
+    assert source["coverage"] == "projection-only"
+    assert any(
+        finding["kind"] == "occurrences" and finding["details"]["literal"] == "Fleet"
+        for group in source["groups"]
+        for finding in group["findings"]
+    )
     step = detail.operations[0].evidence.plan.steps[0]
     assert step.returncode == 0
     assert step.stdout_evidence.byte_count > 0
@@ -279,8 +286,9 @@ def test_observation_prompt_is_bounded_and_no_additional_disclosure():
         can_search=True,
     )
     assert "stdout_truncated" in prompt and "stderr_truncated" in prompt
-    assert "x" * 2048 in prompt and "x" * 2049 not in prompt
-    assert len(prompt) < 9_000
+    assert "x" * 10_000 in prompt
+    assert '"stdout_truncated": false' in prompt
+    assert len(prompt) < 28_000
     with pytest.raises(FleetPlanInvalid):
         frozen_local_model_observation_prompt(
             task="Review",
@@ -330,9 +338,11 @@ def test_nonzero_physical_tool_failure_cannot_be_turned_into_model_success(
     _lock(plan, opts)
     actual = execution._execute_command_step
 
-    def physical_failure(*args, **kwargs):
-        result = actual(*args, **kwargs)
-        return replace(result, returncode=2, stderr="underlying ripgrep failed")
+    def physical_failure(repository, step, process, runtime):
+        result = actual(repository, step, process, runtime)
+        if "--tool" in step.argv and step.argv[step.argv.index("--tool") + 1] == "search_text":
+            return replace(result, returncode=2, stderr="Hashmarks retrieval failed")
+        return result
 
     monkeypatch.setattr(execution, "_execute_command_step", physical_failure)
     detail = _run(plan, repo, opts)

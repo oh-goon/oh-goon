@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -31,6 +32,60 @@ from tests.hashmarks_test_support import (
 )
 
 pytestmark = pytest.mark.dependency_complete
+
+
+@pytest.mark.process
+def test_native_collection_handoff_preserves_exact_selectors_and_missing_revision_claims(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hashmarks import CodeMap, validate_native_consumer_bundle
+
+    from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
+
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "backend" / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8"
+    )
+    (tmp_path / "tests").mkdir()
+    test_file = tmp_path / "tests" / "test_native.py"
+    test_file.write_text(
+        "import pytest\nfrom pathlib import Path\nclass TestGroup:\n"
+        "    @pytest.mark.parametrize('value', [1], ids=['a::b'])\n"
+        "    def test_value(self, value): Path('executed').touch()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    collected = collect_native_pytest((Path("tests"),))
+    report = {
+        "schema": "hashmarks.verification-membership-report.v1",
+        "selection_kind": "native-collected",
+        "producer": {"name": "Oh-Goon native pytest collection"},
+        "provenance": {"collection": "collect-only"},
+        "scope": {"paths": ["tests"], "configuration": "backend/pyproject.toml"},
+        "status": "succeeded",
+        "completeness": "complete",
+        "truncation": "complete",
+        "members": [
+            {"path": row["file"], "test_symbol": row["selector"].partition("::")[2]}
+            for row in collected.selected
+        ],
+        # The native collector did not report collection-time Hashmarks revisions.
+        # Current source must not fill that missing historical claim.
+        "inputs": [{"path": "backend/pyproject.toml", "member_revision": None}],
+    }
+    with CodeMap(tmp_path, state_dir=tmp_path / ".hashmarks") as native:
+        native.index.sync()
+        observed = native.verification.observe_membership(report)
+    validated = validate_native_consumer_bundle(observed)
+
+    assert validated["valid"] is True, validated["reasons"]
+    normalized = cast(dict[str, Any], validated["normalized"])
+    assert normalized["source_equivalence"]["state"] == "unknown"
+    assert [member["path"] + "::" + member["test_symbol"] for member in normalized["members"]] == [
+        row["selector"] for row in collected.selected
+    ]
+    assert normalized["report"]["completeness"] == "complete"
+    assert not (tmp_path / "executed").exists()
 
 
 def _sha(char: str) -> str:

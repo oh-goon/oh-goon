@@ -14,7 +14,7 @@ Hashmarks owns repository identity/freshness, CodeMap relationships, static cros
 
 Oh-Goon owns process launch and process-tree cleanup, deadlines, bounded concurrency, retry/resume admission, environment recovery, Fleet scheduling, execution/refinement grouping, result authority, execution provenance, certification provenance, Repository Understanding qualification, certificates, and Game Tape.
 
-A thin Oh-Goon adapter may consume Hashmarks evidence. It must never call Hashmarks execution-loop helpers such as `execute_shard`, `run_next`, or `run_warmup`, and it must never build a second CodeMap/impact/verification-selection engine.
+A thin Oh-Goon adapter consumes required Hashmarks evidence. Runtime startup verifies the loaded producer before database creation, recovery or execution. Missing or invalid producer authority fails startup; there is no local repository-intelligence fallback. The adapter must never call Hashmarks execution-loop helpers such as `execute_shard`, `run_next`, or `run_warmup`, and it must never build a second CodeMap/impact/verification-selection engine.
 
 ## Current admitted contract
 
@@ -33,6 +33,11 @@ implementation, admitted repository and source, freshness, repository-evidence
 scope, and external execution ownership. Safe structured pytest projection and
 duplicate executable-target rejection belong to Oh-Goon execution; they do not
 justify copying Hashmarks validation or recomputing producer identities.
+
+The public validator's detached, typed selection projection is the consumption
+boundary. It includes opaque contract/evidence identities as well as membership
+and provenance. The adapter resolves the loaded implementation once per admission
+and consumes that projection; it does not reopen producer fields after validation.
 
 The admitted `repository_provenance_identity` is carried unchanged into
 execution-plan references and the terminal receipt. Regrouping may change an
@@ -105,6 +110,10 @@ Hashmarks selects membership and repository evidence. Oh-Goon chooses whether, w
 The data-only dependency Step uses the native uv adapter and dependency qualification
 contract. Its inventory and absence claims describe the supplied lock, not authored
 requirements or an installed environment. See [dependency observations](DEPENDENCY_OBSERVATIONS.md).
+Hashmarks qualifies the declared input scope, per-context inventory coverage and
+negative evidence. Source correspondence, currentness of that input scope, and
+repository-wide CodeMap freshness remain separate facts. Oh-Goon applies its own
+admission policy to those facts rather than deriving producer qualification again.
 
 Ordinary pytest batches collect through native pytest hooks and retain exact selected
 node IDs. They do not need a Hashmarks relevance nomination. A Hashmarks-selected
@@ -114,12 +123,42 @@ Built-in Agent repository discovery/search uses named CodeMap owners over the or
 captured bytes. Each local tool session owns one disposable materialization/index;
 source observations retain native bounds and revisions. Index preparation runs inside
 the original supervised tool process, under its timeout and cancellation budget.
+Every model-backed Agent request starts with Hashmarks task evidence over that
+captured repository, including provider review, adjudication and proposal. The
+producer owns relevance, ambiguity, verification nominations, source observations
+and their presentation. Oh-Goon binds the capture and loaded implementation,
+places that evidence before repository text in model context, and retains the
+original packet with Step evidence. Follow-up tool evidence uses the same
+producer boundary and native presentation, retaining retrieval locators, source
+observations and their producer qualifications. Local model context has an
+explicit combined bound; oversized native disclosure fails before a model call
+instead of cutting JSON or discarding qualifications. Exact captured file reads
+retain their separate 2,048-byte delivery bound.
+Evidence failure stops the Step before model disclosure;
+there is no option to skip evidence or replace it with a local selector.
 A bounded result cannot prove
 repository-wide absence or replace the complete scope of a provider review. Exact
 reads of captured repository and Skill resources remain byte delivery.
 
-A coherent full-tree identity plus materialization-count observation and complete
-architecture semantic coverage still need equivalent public producer contracts.
-Existing exact syntax guards remain repository policy. Detailed producer implementation
-provenance is unavailable until a supported public diagnostic API exists; the public
-loaded implementation identity remains authoritative.
+Filesystem identity uses Hashmarks' public local directory observation. It returns
+native input-root identity and separately named physical materialization counts;
+ordinary selected-input counts can omit entries that physical storage still owns.
+Each requested child has its own native contents scope. Directory member revisions
+use another hash domain and cannot substitute for child input-root identity.
+Oh-Goon chooses exclusions, owns cancellation and scratch cleanup, and retains
+source copying, path containment and execution-boundary re-verification.
+The integration inherits Hashmarks' default bound of 100,000 physical entries;
+exceeding it fails identity admission without returning partial evidence.
+
+Make/shell declarations, Python manifests, byte-range receipts and ECMAScript
+syntax are supported repository observations. Their explicit coverage does not
+yet replace every architecture guard: authored shell text does not establish
+native expansion or effective environment, and bounded source syntax does not
+establish complete alias closure or runtime call targets. Existing exact syntax
+guards and policy lists remain Oh-Goon repository policy until equivalent producer
+facts pass the same negative-boundary tests. Qualification grading and SECRET
+answer truth remain outside repository retrieval.
+
+Detailed producer implementation provenance is unavailable until a supported
+public diagnostic API exists; the public loaded implementation identity remains
+authoritative.

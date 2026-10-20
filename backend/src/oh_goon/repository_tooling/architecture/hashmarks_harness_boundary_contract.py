@@ -31,14 +31,29 @@ _HASHMARKS_EXECUTION_IMPORT_PREFIXES = (
 )
 
 
-def _imports(path: Path, *, tree: ast.AST | None = None) -> set[str]:
+def _imports(
+    path: Path, *, tree: ast.AST | None = None, package_root: Path | None = None
+) -> set[str]:
     tree = python_ast(path) if tree is None else tree
     result: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             result.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            result.add(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level:
+                root = (package_root or BACKEND_PACKAGE_ROOT).resolve()
+                try:
+                    package = path.resolve().parent.relative_to(root.parent).parts
+                except ValueError:
+                    continue
+                if node.level > len(package):
+                    continue
+                parent = package[: len(package) - node.level + 1]
+                module = ".".join((*parent, module)) if module else ".".join(parent)
+            if module:
+                result.add(module)
+                result.update(f"{module}.{alias.name}" for alias in node.names if alias.name != "*")
     return result
 
 
@@ -70,7 +85,12 @@ def _package_source_state(package_root: Path) -> tuple[tuple[str, int, int, int]
 def _hashmarks_integration_violations(path: Path, path_imports: set[str]) -> list[Violation]:
     violations: list[Violation] = []
     ambient = sorted(
-        module for module in path_imports if module in _HASHMARKS_AMBIENT_CONTROL_PLANE_IMPORTS
+        module
+        for module in path_imports
+        if any(
+            module == owner or module.startswith(owner + ".")
+            for owner in _HASHMARKS_AMBIENT_CONTROL_PLANE_IMPORTS
+        )
     )
     if ambient:
         violations.append(
@@ -102,7 +122,7 @@ def _package_boundary_violations_cached(
     violations: list[Violation] = []
     for relative, _size, _mtime_ns, _ctime_ns in state:
         path = package_root / relative
-        path_imports = _imports(path)
+        path_imports = _imports(path, package_root=package_root)
         if _is_hashmarks_integration(path, package_root=package_root):
             violations.extend(_hashmarks_integration_violations(path, path_imports))
             continue

@@ -111,6 +111,11 @@ Consume supported Hashmarks Python APIs only through
 with `backend/pyproject.toml` and native `uv.lock`; do not vendor, reacquire,
 repackage, or maintain a parallel release/commit/wheel identity. Bind evidence
 compatibility to the implementation identity reported by the loaded runtime.
+Hashmarks is required: runtime startup must establish its loaded identity before
+stateful work. Agent model requests receive producer task evidence from the
+exact captured repository before reasoning, without an opt-out or local evidence
+fallback. Preserve producer qualifications and provenance in prompt delivery;
+bounded evidence does not reduce an admitted review scope.
 New repository-intelligence capabilities belong in Hashmarks first, including
 CodeMap, repository-derived relevance, decision packets, verification membership,
 negative evidence and evidence economics. The coding agent owns hypotheses,

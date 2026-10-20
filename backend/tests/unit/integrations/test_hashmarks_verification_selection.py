@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("hashmarks")
+from hashmarks import validate_native_consumer_bundle
 from hashmarks.verification_selection import (
     VerificationSelectionEnvelopeState,
     downstream_consumption_contract,
@@ -238,14 +239,11 @@ def test_oh_goon_consumer_boundary_rejects_forbidden_authority_after_native_vali
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     contract, envelope = _native_payloads()
-    contract["authority"] = "execution-authority"
+    conformance = validate_native_consumer_bundle(envelope, contract)
+    conformance["normalized"]["authority"] = "execution-authority"  # type: ignore[index]
     monkeypatch.setattr(
         "oh_goon.integrations.hashmarks.verification_selection_primitives.validate_native_consumer_bundle",
-        lambda *_args, **_kwargs: {
-            "valid": True,
-            "producer_implementation_identity": envelope["producer"]["implementation_identity"],
-            "execution_authority": "external",
-        },
+        lambda *_args, **_kwargs: conformance,
     )
     with pytest.raises(
         HashmarksVerificationSelectionInputError, match="repository intelligence only"
@@ -257,14 +255,11 @@ def test_oh_goon_consumer_boundary_rejects_producer_execution_layout_after_nativ
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     contract, envelope = _native_payloads()
-    contract["execution_layout"] = "producer-shards"
+    conformance = validate_native_consumer_bundle(envelope, contract)
+    conformance["normalized"]["execution_layout"] = "producer-shards"  # type: ignore[index]
     monkeypatch.setattr(
         "oh_goon.integrations.hashmarks.verification_selection_primitives.validate_native_consumer_bundle",
-        lambda *_args, **_kwargs: {
-            "valid": True,
-            "producer_implementation_identity": envelope["producer"]["implementation_identity"],
-            "execution_authority": "external",
-        },
+        lambda *_args, **_kwargs: conformance,
     )
     with pytest.raises(HashmarksVerificationSelectionInputError, match="physical execution layout"):
         _load(tmp_path, contract, envelope)
@@ -274,18 +269,46 @@ def test_oh_goon_consumer_boundary_rejects_nonexternal_execution_authority(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     contract, envelope = _native_payloads()
+    conformance = validate_native_consumer_bundle(envelope, contract)
+    conformance["execution_authority"] = "producer"
     monkeypatch.setattr(
         "oh_goon.integrations.hashmarks.verification_selection_primitives.validate_native_consumer_bundle",
-        lambda *_args, **_kwargs: {
-            "valid": True,
-            "producer_implementation_identity": envelope["producer"]["implementation_identity"],
-            "execution_authority": "producer",
-        },
+        lambda *_args, **_kwargs: conformance,
     )
     with pytest.raises(
         HashmarksVerificationSelectionInputError, match="execution authority external"
     ):
         _load(tmp_path, contract, envelope)
+
+
+def test_admission_uses_detached_native_projection_and_one_loaded_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.integrations.hashmarks import verification_selection_primitives as primitives
+
+    contract, envelope = _native_payloads()
+    resolutions = []
+
+    def loaded_identity():
+        resolutions.append(TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY)
+        return TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+
+    def validate_and_release_inputs(raw_envelope, raw_contract, **kwargs):
+        checked = validate_native_consumer_bundle(raw_envelope, raw_contract, **kwargs)
+        assert checked["valid"] is True
+        raw_envelope.clear()
+        raw_contract.clear()
+        return checked
+
+    monkeypatch.setattr(primitives, "require_loaded_hashmarks_runtime", loaded_identity)
+    monkeypatch.setattr(primitives, "validate_native_consumer_bundle", validate_and_release_inputs)
+
+    selection = _load(tmp_path, contract, envelope)
+
+    assert resolutions == [TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY]
+    assert selection.selected_test_nodes == ("tests/test_a.py::test_a", "tests/test_b.py")
+    assert selection.producer_contract_identity == contract["contract_identity"]
+    assert selection.evidence_hashes == (("ownership", "sha256:" + "2" * 64),)
 
 
 @pytest.mark.parametrize(

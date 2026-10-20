@@ -28,9 +28,10 @@ def loaded_hashmarks_version() -> str:
 def loaded_hashmarks_producer_identity() -> str:
     try:
         return native_producer_implementation_identity()
-    except ValueError as exc:
+    except (ImportError, OSError, ValueError) as exc:
         raise HashmarksRuntimeContractError(
-            "Hashmarks runtime is not materialized as an installed package"
+            "Hashmarks is required for Oh-Goon repository evidence; the loaded runtime "
+            "cannot establish its producer identity. Run make init with the committed dependency lock."
         ) from exc
 
 

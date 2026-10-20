@@ -25,8 +25,10 @@ from oh_goon.core.agent_model_selection import (
     parse_local_model_tool_action,
     parse_local_model_tool_review_decision,
     parse_one_local_model_query,
+    prepend_repository_evidence,
 )
 from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
+from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
     ResolvedCommandStep,
@@ -111,6 +113,7 @@ from oh_goon.integrations.hashmarks.agent_tools import (
     PreparedAgentEvidence,
     prepare_agent_evidence,
     prompt_observation,
+    task_evidence_prompt,
 )
 
 
@@ -354,8 +357,6 @@ def _execute_typed_step(
                 or hashlib.sha256(packet).hexdigest() != step.delivery_sha256
             ):
                 raise FleetPlanInvalid("Agent Step delivery does not match resolved source digest")
-            from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
-
             handoff = FrozenAgentStepHandoff.decode_prework_delivery(
                 packet,
                 expected_handoff_identity=step.handoff_identity,
@@ -366,185 +367,58 @@ def _execute_typed_step(
                 raise FleetPlanInvalid(
                     "Agent model differs from admitted frozen recipient selection"
                 )
+            if handoff.timeout_seconds != step.timeout_seconds:
+                raise FleetPlanInvalid("Agent Step timeout differs from frozen delivery")
             if step.feedback_reference is not None and step.feedback_value is None:
                 raise FleetPlanInvalid(
                     "Agent feedback was not bound by the original Fleet sequencer"
                 )
-            if step.harness.startswith("provider-"):
-                from oh_goon.integrations.agent_review_execution import execute_provider_agent
-
-                return execute_provider_agent(
-                    step, handoff, process, runtime, timeout=_command_timeout(step, runtime)
-                )
-            selected_query = None
-            if step.harness in (
-                "local-model-search",
-                "local-model-review",
-                "local-model-tools",
-                "local-model-files",
-                "local-model-skill-resources",
-                "local-model-skill-loop",
-                "local-model-proposal",
-            ):
-                if handoff.requested_effects.recipients != ("ollama_local",):
-                    raise FleetPlanInvalid("model recipient differs from frozen authorized choice")
-                skill_member = next(
-                    (
-                        member
-                        for member in handoff.source.skill.members
-                        if member.path == "SKILL.md"
+            if step.harness == "local-search":
+                with prepare_frozen_readonly_skill_search(handoff) as (root, tool_step):
+                    return _execute_command_step(root, tool_step, process, runtime)
+            with prepare_agent_evidence(handoff) as prepared:
+                observation_step = ResolvedCommandStep(
+                    step_id=handoff.step_id,
+                    argv=(
+                        sys.executable,
+                        "-m",
+                        "oh_goon.integrations.hashmarks.agent_tools",
+                        "--tool",
+                        "task_evidence",
+                        "--capture-identity",
+                        handoff.source.repository.content_identity,
+                        "--query=" + handoff.task,
                     ),
-                    None,
+                    timeout_seconds=handoff.timeout_seconds,
+                    success_codes=(0,),
                 )
-                if skill_member is None:
-                    raise FleetPlanInvalid("local model turn requires frozen SKILL.md")
-                prompt_builder = (
-                    frozen_local_model_tool_prompt
-                    if step.harness
-                    in (
-                        "local-model-tools",
-                        "local-model-files",
-                        "local-model-skill-resources",
-                        "local-model-skill-loop",
-                        "local-model-proposal",
-                    )
-                    else frozen_local_model_prompt
-                )
-                prompt = prompt_builder(
-                    task=handoff.task,
-                    skill_bytes=skill_member.data,
-                    recipient=handoff.requested_effects.recipients[0],
-                    **(
-                        {
-                            "allow_file": step.harness
-                            in (
-                                "local-model-files",
-                                "local-model-skill-resources",
-                                "local-model-skill-loop",
-                                "local-model-proposal",
-                            ),
-                            "allow_skill_file": step.harness
-                            in (
-                                "local-model-skill-resources",
-                                "local-model-skill-loop",
-                                "local-model-proposal",
-                            ),
-                        }
-                        if step.harness
-                        in (
-                            "local-model-tools",
-                            "local-model-files",
-                            "local-model-skill-resources",
-                            "local-model-skill-loop",
-                            "local-model-proposal",
-                        )
-                        else {}
-                    ),
-                )
-                prompt = append_untrusted_agent_feedback(prompt, step.feedback_value)
-                model_environment = {**process.environment, "OLLAMA_HOST": "http://127.0.0.1:11434"}
-                # Non-pulling local model existence check before model disclosure.
-                check = process.command_runner(
-                    "ollama",
-                    "show",
-                    step.model,
-                    cwd=process.paths.tmp,
-                    timeout=_command_timeout(step, runtime),
-                    cancel_requested=runtime.cancel_requested,
-                    env=model_environment,
-                    runtime_supervision=runtime.runtime_supervision,
-                )
-                if check.returncode != 0:
-                    return replace(
-                        from_command(check),
-                        returncode=PLAN_CONTRACT_RETURN_CODE,
-                        stderr="selected Ollama model is not installed locally",
-                    )
-                answer = process.command_runner(
-                    "ollama",
-                    "run",
-                    step.model,
-                    prompt,
-                    cwd=process.paths.tmp,
-                    timeout=_command_timeout(step, runtime),
-                    cancel_requested=runtime.cancel_requested,
-                    env=model_environment,
-                    runtime_supervision=runtime.runtime_supervision,
-                )
-                if answer.returncode != 0:
-                    return replace(
-                        from_command(answer),
-                        returncode=PLAN_CONTRACT_RETURN_CODE,
-                        stderr="selected Ollama model invocation failed",
-                    )
-                selected_action = (
-                    parse_local_model_tool_action(
-                        answer.stdout,
-                        allow_file=step.harness
-                        in (
-                            "local-model-files",
-                            "local-model-skill-resources",
-                            "local-model-skill-loop",
-                            "local-model-proposal",
-                        ),
-                        allow_skill_file=step.harness
-                        in (
-                            "local-model-skill-resources",
-                            "local-model-skill-loop",
-                            "local-model-proposal",
-                        ),
-                    )
-                    if step.harness
-                    in (
-                        "local-model-tools",
-                        "local-model-files",
-                        "local-model-skill-resources",
-                        "local-model-skill-loop",
-                        "local-model-proposal",
-                    )
-                    else None
-                )
-                selected_query = (
-                    selected_action.query
-                    if selected_action is not None
-                    else parse_one_local_model_query(answer.stdout)
-                )
+                evidence = _execute_command_step(prepared.root, observation_step, process, runtime)
+                if evidence.returncode != 0:
+                    return evidence
                 if runtime.cancel_requested is not None and runtime.cancel_requested():
-                    raise OperationCancelledError("Agent cancelled after model selection")
-                if step.harness in (
-                    "local-model-review",
-                    "local-model-tools",
-                    "local-model-files",
-                    "local-model-skill-resources",
-                    "local-model-skill-loop",
-                    "local-model-proposal",
-                ):
-                    return _run_local_model_review(
-                        handoff=handoff,
-                        step=step,
-                        process=process,
-                        runtime=runtime,
-                        first_query=selected_query,
-                        model_environment=model_environment,
-                        skill_bytes=skill_member.data,
-                        first_action=selected_action,
-                    )
-            with prepare_frozen_readonly_skill_search(
-                handoff,
-                selected_query=selected_query,
-            ) as (root, tool_step):
-                if tool_step.timeout_seconds != step.timeout_seconds:
-                    raise FleetPlanInvalid("Agent Step timeout differs from frozen delivery")
-                outcome = _execute_command_step(root, tool_step, process, runtime)
-                if selected_query is not None:
-                    outcome = replace(
-                        outcome,
-                        stdout=(
-                            f"Agent local-model-search selected literal: {selected_query}\n"
-                            + outcome.stdout
-                        ),
-                    )
-                return outcome
+                    raise OperationCancelledError("Agent cancelled after repository observation")
+                disclosure = task_evidence_prompt(
+                    evidence.stdout,
+                    expected_capture_identity=handoff.source.repository.content_identity,
+                )
+                outcome = _execute_model_agent(
+                    handoff=handoff,
+                    step=step,
+                    process=process,
+                    runtime=runtime,
+                    workspace=prepared,
+                    repository_evidence=disclosure,
+                )
+                # Provider stdout remains the native typed review/proposal record.
+                # Retain the complete initial producer packet on the same Step's
+                # evidence output without changing that publication contract.
+                return replace(
+                    outcome,
+                    stderr="Hashmarks initial repository evidence (untrusted data):\n"
+                    + evidence.stdout
+                    + "\n"
+                    + outcome.stderr,
+                )
         if isinstance(step, ResolvedCommandStep):
             return _execute_command_step(repository, step, process, runtime)
         if isinstance(step, ResolvedDependencyInventoryStep):
@@ -607,16 +481,209 @@ def _execute_typed_step(
         raise
 
 
-def _run_local_model_review(
+def _execute_model_agent(
     *,
-    handoff,
+    handoff: FrozenAgentStepHandoff,
     step: ResolvedLocalSearchAgentStep,
     process: _StepProcess,
     runtime: StepRuntime,
-    first_query: str,
+    workspace: PreparedAgentEvidence,
+    repository_evidence: str,
+) -> StepOutcome:
+    """Consume one mandatory producer observation inside the original Agent Step."""
+    if step.harness.startswith("provider-"):
+        from oh_goon.integrations.agent_review_execution import execute_provider_agent
+
+        return execute_provider_agent(
+            step,
+            handoff,
+            process,
+            runtime,
+            timeout=_command_timeout(step, runtime),
+            repository_evidence=repository_evidence,
+        )
+    selected_query = None
+    if step.harness in (
+        "local-model-search",
+        "local-model-review",
+        "local-model-tools",
+        "local-model-files",
+        "local-model-skill-resources",
+        "local-model-skill-loop",
+        "local-model-proposal",
+    ):
+        if handoff.requested_effects.recipients != ("ollama_local",):
+            raise FleetPlanInvalid("model recipient differs from frozen authorized choice")
+        skill_member = next(
+            (member for member in handoff.source.skill.members if member.path == "SKILL.md"),
+            None,
+        )
+        if skill_member is None:
+            raise FleetPlanInvalid("local model turn requires frozen SKILL.md")
+        prompt_builder = (
+            frozen_local_model_tool_prompt
+            if step.harness
+            in (
+                "local-model-tools",
+                "local-model-files",
+                "local-model-skill-resources",
+                "local-model-skill-loop",
+                "local-model-proposal",
+            )
+            else frozen_local_model_prompt
+        )
+        prompt = prompt_builder(
+            task=handoff.task,
+            skill_bytes=skill_member.data,
+            recipient=handoff.requested_effects.recipients[0],
+            **(
+                {
+                    "allow_file": step.harness
+                    in (
+                        "local-model-files",
+                        "local-model-skill-resources",
+                        "local-model-skill-loop",
+                        "local-model-proposal",
+                    ),
+                    "allow_skill_file": step.harness
+                    in (
+                        "local-model-skill-resources",
+                        "local-model-skill-loop",
+                        "local-model-proposal",
+                    ),
+                }
+                if step.harness
+                in (
+                    "local-model-tools",
+                    "local-model-files",
+                    "local-model-skill-resources",
+                    "local-model-skill-loop",
+                    "local-model-proposal",
+                )
+                else {}
+            ),
+        )
+        prompt = prepend_repository_evidence(prompt, repository_evidence=repository_evidence)
+        prompt = append_untrusted_agent_feedback(prompt, step.feedback_value)
+        model_environment = {**process.environment, "OLLAMA_HOST": "http://127.0.0.1:11434"}
+        # Non-pulling local model existence check before model disclosure.
+        check = process.command_runner(
+            "ollama",
+            "show",
+            step.model,
+            cwd=process.paths.tmp,
+            timeout=_command_timeout(step, runtime),
+            cancel_requested=runtime.cancel_requested,
+            env=model_environment,
+            runtime_supervision=runtime.runtime_supervision,
+        )
+        if check.returncode != 0:
+            return replace(
+                from_command(check),
+                returncode=PLAN_CONTRACT_RETURN_CODE,
+                stderr="selected Ollama model is not installed locally",
+            )
+        answer = process.command_runner(
+            "ollama",
+            "run",
+            step.model,
+            prompt,
+            cwd=process.paths.tmp,
+            timeout=_command_timeout(step, runtime),
+            cancel_requested=runtime.cancel_requested,
+            env=model_environment,
+            runtime_supervision=runtime.runtime_supervision,
+        )
+        if answer.returncode != 0:
+            return replace(
+                from_command(answer),
+                returncode=PLAN_CONTRACT_RETURN_CODE,
+                stderr="selected Ollama model invocation failed",
+            )
+        selected_action = (
+            parse_local_model_tool_action(
+                answer.stdout,
+                allow_file=step.harness
+                in (
+                    "local-model-files",
+                    "local-model-skill-resources",
+                    "local-model-skill-loop",
+                    "local-model-proposal",
+                ),
+                allow_skill_file=step.harness
+                in (
+                    "local-model-skill-resources",
+                    "local-model-skill-loop",
+                    "local-model-proposal",
+                ),
+            )
+            if step.harness
+            in (
+                "local-model-tools",
+                "local-model-files",
+                "local-model-skill-resources",
+                "local-model-skill-loop",
+                "local-model-proposal",
+            )
+            else None
+        )
+        selected_query = (
+            selected_action.query
+            if selected_action is not None
+            else parse_one_local_model_query(answer.stdout)
+        )
+        if runtime.cancel_requested is not None and runtime.cancel_requested():
+            raise OperationCancelledError("Agent cancelled after model selection")
+        if step.harness in (
+            "local-model-review",
+            "local-model-tools",
+            "local-model-files",
+            "local-model-skill-resources",
+            "local-model-skill-loop",
+            "local-model-proposal",
+        ):
+            return _run_local_model_review(
+                handoff=handoff,
+                step=step,
+                process=process,
+                runtime=runtime,
+                first_query=selected_query,
+                model_environment=model_environment,
+                skill_bytes=skill_member.data,
+                first_action=selected_action,
+                workspace=workspace,
+                repository_evidence=repository_evidence,
+            )
+    with prepare_frozen_readonly_skill_search(
+        handoff,
+        selected_query=selected_query,
+        workspace=workspace,
+    ) as (root, tool_step):
+        if tool_step.timeout_seconds != step.timeout_seconds:
+            raise FleetPlanInvalid("Agent Step timeout differs from frozen delivery")
+        outcome = _execute_command_step(root, tool_step, process, runtime)
+        if selected_query is not None:
+            outcome = replace(
+                outcome,
+                stdout=(
+                    f"Agent local-model-search selected query: {selected_query}\n" + outcome.stdout
+                ),
+            )
+        return outcome
+
+
+def _run_local_model_review(
+    *,
+    handoff: FrozenAgentStepHandoff,
+    step: ResolvedLocalSearchAgentStep,
+    process: _StepProcess,
+    runtime: StepRuntime,
+    first_query: str | None,
     model_environment: Mapping[str, str],
     skill_bytes: bytes,
     first_action: LocalModelToolAction | None = None,
+    workspace: PreparedAgentEvidence,
+    repository_evidence: str,
 ) -> StepOutcome:
     """Bounded read-only model/tool turns within ONE original admitted Fleet Step/attempt.
 
@@ -641,187 +708,190 @@ def _run_local_model_review(
     transcript: list[str] = []
     max_actions = 4 if step.harness in ("local-model-skill-loop", "local-model-proposal") else 2
     history: list[dict[str, object]] = []
-    with prepare_agent_evidence(handoff) as prepared:
-        for ordinal in range(1, max_actions + 1):
-            if runtime.cancel_requested is not None and runtime.cancel_requested():
-                raise OperationCancelledError("Agent cancelled before search")
-            if action in previous:
-                raise FleetPlanInvalid("model repeated the same search instead of progressing")
-            previous.add(action)
-            with prepare_frozen_readonly_skill_search(
-                handoff,
-                selected_query=action.query,
-                tool_kind=action.tool,
-                selected_path=action.path,
-                workspace=prepared,
-            ) as (root, tool_step):
-                if tool_step.timeout_seconds != step.timeout_seconds:
-                    raise FleetPlanInvalid("Agent Step timeout differs from frozen delivery")
-                result = _execute_command_step(root, tool_step, process, runtime)
-            if action.tool == "read_file" and result.returncode != 0:
-                # The Agent no-match exit semantics apply only to rg searches, never head.
-                # Preserve the physical exit in stderr and publish a failing Step status.
-                return replace(
-                    result,
-                    returncode=PLAN_CONTRACT_RETURN_CODE,
-                    stderr=f"read_file failed (exit {result.returncode}): {result.stderr}",
-                )
-            if result.returncode not in tool_step.success_codes:
-                return result  # physical failure cannot be reclassified by a model
-            if (
-                action.tool == "read_file"
-                and action.path is not None
-                and action.path.startswith("repo/")
-            ):
-                inspected_paths.add(action.path)
-            disclosed_stdout = (
-                prompt_observation(result.stdout)
-                if action.tool in ("search_text", "list_paths")
-                else result.stdout
+    for ordinal in range(1, max_actions + 1):
+        if runtime.cancel_requested is not None and runtime.cancel_requested():
+            raise OperationCancelledError("Agent cancelled before search")
+        if action in previous:
+            raise FleetPlanInvalid("model repeated the same search instead of progressing")
+        previous.add(action)
+        with prepare_frozen_readonly_skill_search(
+            handoff,
+            selected_query=action.query,
+            tool_kind=action.tool,
+            selected_path=action.path,
+            workspace=workspace,
+        ) as (root, tool_step):
+            if tool_step.timeout_seconds != step.timeout_seconds:
+                raise FleetPlanInvalid("Agent Step timeout differs from frozen delivery")
+            result = _execute_command_step(root, tool_step, process, runtime)
+        if action.tool == "read_file" and result.returncode != 0:
+            # The Agent no-match exit semantics apply only to rg searches, never head.
+            # Preserve the physical exit in stderr and publish a failing Step status.
+            return replace(
+                result,
+                returncode=PLAN_CONTRACT_RETURN_CODE,
+                stderr=f"read_file failed (exit {result.returncode}): {result.stderr}",
             )
-            transcript.append(
-                (
-                    f"Tool {ordinal}: {action.tool} {action.query or action.path or ''} (exit {result.returncode})\n"
-                    if tool_mode
-                    else f"Search {ordinal}: {action.query!r} (exit {result.returncode})\n"
-                )
-                + f"{result.stdout}\n"
+        if result.returncode not in tool_step.success_codes:
+            return result  # physical failure cannot be reclassified by a model
+        if (
+            action.tool == "read_file"
+            and action.path is not None
+            and action.path.startswith("repo/")
+        ):
+            inspected_paths.add(action.path)
+        disclosed_stdout = (
+            prompt_observation(
+                result.stdout,
+                expected_capture_identity=handoff.source.repository.content_identity,
             )
-            prompt_builder = (
-                frozen_local_model_tool_observation_prompt
+            if action.tool in ("search_text", "list_paths")
+            else result.stdout
+        )
+        transcript.append(
+            (
+                f"Tool {ordinal}: {action.tool} {action.query or action.path or ''} (exit {result.returncode})\n"
                 if tool_mode
-                else frozen_local_model_observation_prompt
+                else f"Search {ordinal}: {action.query!r} (exit {result.returncode})\n"
             )
-            prompt = prompt_builder(
-                task=handoff.task,
-                skill_bytes=skill_bytes,
-                recipient=handoff.requested_effects.recipients[0],
-                **({"action": action} if tool_mode else {"query": action.query}),
-                returncode=result.returncode,
-                stdout=disclosed_stdout,
-                stderr=result.stderr,
-                can_search=ordinal < max_actions,
-                **(
-                    {"history": tuple(history)}
-                    if step.harness in ("local-model-skill-loop", "local-model-proposal")
-                    else {}
-                ),
-                **(
-                    {
-                        "allow_file": step.harness
-                        in (
-                            "local-model-files",
-                            "local-model-skill-resources",
-                            "local-model-skill-loop",
-                            "local-model-proposal",
-                        ),
-                        "allow_skill_file": step.harness
-                        in (
-                            "local-model-skill-resources",
-                            "local-model-skill-loop",
-                            "local-model-proposal",
-                        ),
-                        "allow_proposal": step.harness == "local-model-proposal",
-                    }
-                    if tool_mode
-                    else {}
-                ),
-            )
-            prompt = append_untrusted_agent_feedback(prompt, step.feedback_value)
-            if step.harness in ("local-model-skill-loop", "local-model-proposal"):
-                history.append(
-                    {
-                        "tool": action.tool,
-                        "query": action.query,
-                        "path": action.path,
-                        "returncode": result.returncode,
-                        "stdout_excerpt": disclosed_stdout[:350],
-                    }
-                )
-            response = process.command_runner(
-                "ollama",
-                "run",
-                step.model,
-                prompt,
-                cwd=process.paths.tmp,
-                timeout=_command_timeout(step, runtime),
-                cancel_requested=runtime.cancel_requested,
-                env=model_environment,
-                runtime_supervision=runtime.runtime_supervision,
-            )
-            if response.returncode != 0:
-                return replace(
-                    from_command(response),
-                    returncode=PLAN_CONTRACT_RETURN_CODE,
-                    stderr="selected Ollama model review invocation failed",
-                )
-            if step.harness == "local-model-proposal":
-                from oh_goon.core.agent_model_selection import (
-                    _one_json_object,
-                    frozen_patch_proposal_receipt,
-                    parse_local_model_patch_proposal,
-                )
-
-                if _one_json_object(response.stdout).get("decision") == "propose":
-                    proposal = parse_local_model_patch_proposal(
-                        response.stdout,
-                        members=handoff.source.repository.members,
-                        inspected_paths=frozenset(inspected_paths),
-                    )
-                    if runtime.cancel_requested is not None and runtime.cancel_requested():
-                        raise OperationCancelledError("Agent cancelled before proposal publication")
-                    return replace(
-                        result,
-                        returncode=0,
-                        stdout=(
-                            "".join(transcript)
-                            + "Agent proposal only; no repository mutation or tests executed\n"
-                            + frozen_patch_proposal_receipt(
-                                proposal, handoff_identity=handoff.handoff_identity
-                            )
-                        ),
-                    )
-            decision = (
-                parse_local_model_tool_review_decision(
-                    response.stdout,
-                    can_continue=ordinal < max_actions,
-                    allow_file=step.harness
+            + f"{result.stdout}\n"
+        )
+        prompt_builder = (
+            frozen_local_model_tool_observation_prompt
+            if tool_mode
+            else frozen_local_model_observation_prompt
+        )
+        prompt = prompt_builder(
+            task=handoff.task,
+            skill_bytes=skill_bytes,
+            recipient=handoff.requested_effects.recipients[0],
+            **({"action": action} if tool_mode else {"query": action.query}),
+            returncode=result.returncode,
+            stdout=disclosed_stdout,
+            stderr=result.stderr,
+            can_search=ordinal < max_actions,
+            **(
+                {"history": tuple(history)}
+                if step.harness in ("local-model-skill-loop", "local-model-proposal")
+                else {}
+            ),
+            **(
+                {
+                    "allow_file": step.harness
                     in (
                         "local-model-files",
                         "local-model-skill-resources",
                         "local-model-skill-loop",
                         "local-model-proposal",
                     ),
-                    allow_skill_file=step.harness
+                    "allow_skill_file": step.harness
                     in (
                         "local-model-skill-resources",
                         "local-model-skill-loop",
                         "local-model-proposal",
                     ),
-                )
+                    "allow_proposal": step.harness == "local-model-proposal",
+                }
                 if tool_mode
-                else parse_local_model_review_decision(
-                    response.stdout, can_search=ordinal < max_actions
-                )
+                else {}
+            ),
+        )
+        prompt = prepend_repository_evidence(prompt, repository_evidence=repository_evidence)
+        prompt = append_untrusted_agent_feedback(prompt, step.feedback_value)
+        if step.harness in ("local-model-skill-loop", "local-model-proposal"):
+            history.append(
+                {
+                    "tool": action.tool,
+                    "query": action.query,
+                    "path": action.path,
+                    "returncode": result.returncode,
+                    "stdout_excerpt": disclosed_stdout[:350],
+                }
             )
-            if runtime.cancel_requested is not None and runtime.cancel_requested():
-                raise OperationCancelledError("Agent cancelled after model review")
-            if decision.decision == "finish":
-                # Model content is a summary, not a PASS authority: only the
-                # physical tool and this validated contract determine success.
+        response = process.command_runner(
+            "ollama",
+            "run",
+            step.model,
+            prompt,
+            cwd=process.paths.tmp,
+            timeout=_command_timeout(step, runtime),
+            cancel_requested=runtime.cancel_requested,
+            env=model_environment,
+            runtime_supervision=runtime.runtime_supervision,
+        )
+        if response.returncode != 0:
+            return replace(
+                from_command(response),
+                returncode=PLAN_CONTRACT_RETURN_CODE,
+                stderr="selected Ollama model review invocation failed",
+            )
+        if step.harness == "local-model-proposal":
+            from oh_goon.core.agent_model_selection import (
+                _one_json_object,
+                frozen_patch_proposal_receipt,
+                parse_local_model_patch_proposal,
+            )
+
+            if _one_json_object(response.stdout).get("decision") == "propose":
+                proposal = parse_local_model_patch_proposal(
+                    response.stdout,
+                    members=handoff.source.repository.members,
+                    inspected_paths=frozenset(inspected_paths),
+                )
+                if runtime.cancel_requested is not None and runtime.cancel_requested():
+                    raise OperationCancelledError("Agent cancelled before proposal publication")
                 return replace(
                     result,
                     returncode=0,
-                    stdout="".join(transcript) + f"Model evaluation: {decision.summary}\n",
+                    stdout=(
+                        "".join(transcript)
+                        + "Agent proposal only; no repository mutation or tests executed\n"
+                        + frozen_patch_proposal_receipt(
+                            proposal, handoff_identity=handoff.handoff_identity
+                        )
+                    ),
                 )
-            action = (
-                decision.action
-                if tool_mode
-                else LocalModelToolAction(tool="search_text", query=decision.query)
+        decision = (
+            parse_local_model_tool_review_decision(
+                response.stdout,
+                can_continue=ordinal < max_actions,
+                allow_file=step.harness
+                in (
+                    "local-model-files",
+                    "local-model-skill-resources",
+                    "local-model-skill-loop",
+                    "local-model-proposal",
+                ),
+                allow_skill_file=step.harness
+                in (
+                    "local-model-skill-resources",
+                    "local-model-skill-loop",
+                    "local-model-proposal",
+                ),
             )
-            if action in previous:
-                raise FleetPlanInvalid("model repeated the same search instead of progressing")
-        raise FleetPlanInvalid("model review exceeded the selected tool-action budget")
+            if tool_mode
+            else parse_local_model_review_decision(
+                response.stdout, can_search=ordinal < max_actions
+            )
+        )
+        if runtime.cancel_requested is not None and runtime.cancel_requested():
+            raise OperationCancelledError("Agent cancelled after model review")
+        if decision.decision == "finish":
+            # Model content is a summary, not a PASS authority: only the
+            # physical tool and this validated contract determine success.
+            return replace(
+                result,
+                returncode=0,
+                stdout="".join(transcript) + f"Model evaluation: {decision.summary}\n",
+            )
+        action = (
+            decision.action
+            if tool_mode
+            else LocalModelToolAction(tool="search_text", query=decision.query)
+        )
+        if action in previous:
+            raise FleetPlanInvalid("model repeated the same search instead of progressing")
+    raise FleetPlanInvalid("model review exceeded the selected tool-action budget")
 
 
 def _execute_command_step(

@@ -51,8 +51,14 @@ def test_provider_receives_readable_skill_text_and_the_complete_resource_closure
     resource.write_bytes(b"\xff\x00\x01")
     plan, deliveries, _ = resolver.resolve_frozen_agents(path, **options)
     step = plan.steps[0]
-    payload = provider_agent_request(step, deliveries[step.step_id])
+    payload = provider_agent_request(
+        step,
+        deliveries[step.step_id],
+        repository_evidence="Producer-qualified repository orientation",
+    )
     source = json.loads(payload["messages"][1]["content"])
+    assert next(iter(source)) == "repository_evidence"
+    assert source["repository_evidence"] == "Producer-qualified repository orientation"
     members = {item["path"]: item for item in source["skill"]}
     assert members["skill/SKILL.md"]["encoding"] == "utf-8"
     assert "Inspect code.txt" in members["skill/SKILL.md"]["content"]
@@ -79,7 +85,12 @@ def test_oversized_complete_source_fails_before_provider_process_or_scratch_payl
     )
     with pytest.raises(FleetPlanInvalid, match="complete Agent source"):
         execute_provider_agent(
-            step, deliveries[step.step_id], process, SimpleNamespace(), timeout=1
+            step,
+            deliveries[step.step_id],
+            process,
+            SimpleNamespace(),
+            timeout=1,
+            repository_evidence="Producer-qualified repository orientation",
         )
     assert not list(scratch.iterdir())
 
@@ -104,6 +115,11 @@ def test_provider_credentials_cannot_export_process_local_control_plane_authorit
     )
     with pytest.raises(FleetPlanInvalid, match="control-plane"):
         execute_provider_agent(
-            step, deliveries[step.step_id], process, SimpleNamespace(), timeout=1
+            step,
+            deliveries[step.step_id],
+            process,
+            SimpleNamespace(),
+            timeout=1,
+            repository_evidence="Producer-qualified repository orientation",
         )
     assert not list(scratch.iterdir())

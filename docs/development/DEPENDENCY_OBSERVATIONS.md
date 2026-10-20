@@ -39,6 +39,16 @@ retained source claims once per repository in that request. Git HEAD/dirty state
 and observation age do not establish source freshness. A missing or changed lock
 cannot support absence; a manifest-only edit does not change what the lock contains.
 
+Hashmarks' `dependencies.assessment()` validates the retained producer packet and
+reobserves its explicit input paths through the native Source owner. It reports
+selected-input freshness, producer source equivalence and repository-wide index
+freshness separately. Oh Goon translates the producer's selected-input facts and
+qualified inventory absence; it does not derive freshness from source equivalence
+or recompute completeness from whichever coverage rows happen to be present.
+Every producer-declared context must have complete, untruncated inventory coverage
+before absence can be used. Missing revision claims and unavailable input evidence
+remain unproven even when today's lock can be read.
+
 ## Freshness, completeness and availability
 
 These are independent facts. `current`, `stale` and `unknown` describe the selected

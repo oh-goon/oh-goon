@@ -224,13 +224,13 @@ def test_tool_protocol_is_bounded_and_local_recipient_only():
         recipient="ollama_local",
         action=LocalModelToolAction(tool="list_paths"),
         returncode=0,
-        stdout="x" * 15_000,
+        stdout="x" * 16_000,
         stderr="y" * 3_000,
         can_search=False,
     )
-    assert "x" * 2048 in prompt and "x" * 2049 not in prompt
-    assert '"stdout_truncated": true' in prompt
-    assert len(prompt) <= 9_000
+    assert "x" * 16_000 in prompt
+    assert '"stdout_truncated": false' in prompt
+    assert len(prompt) <= 28_000
     with pytest.raises(FleetPlanInvalid):
         frozen_local_model_tool_observation_prompt(
             task="Review",
@@ -298,9 +298,11 @@ def test_physical_file_listing_failure_cannot_be_relabelled_success(tmp_path, mo
     _lock(plan, opts)
     original = execution._execute_command_step
 
-    def failing_tool(*args, **kwargs):
-        result = original(*args, **kwargs)
-        return replace(result, returncode=2, stderr="rg --files failed")
+    def failing_tool(repository, step, process, runtime):
+        result = original(repository, step, process, runtime)
+        if "--tool" in step.argv and step.argv[step.argv.index("--tool") + 1] == "list_paths":
+            return replace(result, returncode=2, stderr="Hashmarks repository discovery failed")
+        return result
 
     monkeypatch.setattr(execution, "_execute_command_step", failing_tool)
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3d-list-failed")
