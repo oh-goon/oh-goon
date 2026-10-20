@@ -30,12 +30,12 @@ def _hashmarks_public_api_references(path: Path) -> set[str]:
     }
 
 
-def _has_verified_snapshot_call(path: Path) -> bool:
+def _has_verified_observation_call(path: Path) -> bool:
     tree = python_ast(path)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue
-        if node.func.attr != "snapshot":
+        if node.func.attr != "observe_directory":
             continue
         if any(keyword.arg == "verify" for keyword in node.keywords):
             return True
@@ -53,11 +53,11 @@ def check_filesystem_identity_contract() -> list[Violation]:
                     f"Hashmarks identity adapter must import public Hashmarks API {required!r}",
                 )
             )
-    if not _has_verified_snapshot_call(ADAPTER):
+    if not _has_verified_observation_call(ADAPTER):
         violations.append(
             Violation(
                 ADAPTER,
-                "Hashmarks identity adapter must request verification from the public snapshot API",
+                "Hashmarks identity adapter must request verified public directory observation",
             )
         )
 

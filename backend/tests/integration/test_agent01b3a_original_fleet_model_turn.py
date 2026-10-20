@@ -92,7 +92,9 @@ def test_bounded_model_selected_search_is_original_fleet_success_and_durable(tmp
         prompt = (tmp_path / "model-prompt.txt").read_text()
         assert "Select one useful search" in prompt
         assert "Offline read-only skill" in prompt
-        assert "needle from real original Fleet" not in prompt  # no repository disclosure
+        assert prompt.startswith("Hashmarks repository evidence")
+        assert "repository_absence" in prompt
+        assert "capture_identity" in prompt
     finally:
         runtime.shutdown(wait_for_runs=True)
 
@@ -135,9 +137,13 @@ def test_bad_or_unavailable_model_does_not_dispatch_search_or_pass_game_tape(
     import oh_goon.integrations.fleet_plan_step_execution as steps
 
     original = steps._execute_command_step
+    initial_observations = []
 
-    def reject_tool(*args, **kwargs):
-        pytest.fail("bad model launched the repository tool")
+    def reject_tool(repository, step, process, runtime):
+        if "--tool" in step.argv and step.argv[step.argv.index("--tool") + 1] == "task_evidence":
+            initial_observations.append(step.argv)
+            return original(repository, step, process, runtime)
+        pytest.fail("bad model launched a follow-up repository tool")
 
     monkeypatch.setattr(steps, "_execute_command_step", reject_tool)
     runtime = ApplicationRuntime.build(standard_local=True)
@@ -151,6 +157,7 @@ def test_bad_or_unavailable_model_does_not_dispatch_search_or_pass_game_tape(
         )
         ended = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
         assert ended.game_tape.status.value != "PASSED"
+        assert len(initial_observations) == 1
         assert runtime.runs.get(started.fleet_run_id).game_tape.status.value != "PASSED"
         assert (tmp_path / "model-calls.log").read_text().splitlines() == (
             ["show"] if show_status else ["show", "run"]

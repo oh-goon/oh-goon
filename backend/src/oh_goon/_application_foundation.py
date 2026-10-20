@@ -13,6 +13,7 @@ from oh_goon.engine.git import GitService
 from oh_goon.engine.runner import EngineRunner
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.integrations.fleet_plans import FleetPlanRunner
+from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.integrations.migration import MigrationRunner
 from oh_goon.integrations.recipes import UvRecipeRunner
 from oh_goon.runtime._executor_configuration import (
@@ -205,6 +206,9 @@ def build_runtime_foundation(
         )
     if standard_local and fleet_provisioner is not None:
         raise TrustProtocolError("standard host execution cannot use deployment Fleet enrollment")
+    # Repository evidence has one required producer in every execution profile.
+    # Reject an unavailable runtime before opening state or recovering effects.
+    require_loaded_hashmarks_runtime()
     local = _build_local_state_foundation()
     database = local.database
     lifecycle = RuntimeLifecycle()

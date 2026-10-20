@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import pytest
-
 from pathlib import Path
-from oh_goon.repository_tooling.architecture.common import Violation
+
+import pytest
 
 from oh_goon.repository_tooling.architecture import filesystem_identity_contract
 from oh_goon.repository_tooling.architecture._structural_project_dependency_contract import (
     _check_release_stamp_and_goon_network,
 )
+from oh_goon.repository_tooling.architecture.common import Violation
 
 
 def test_release_architecture_ignores_private_rollback_helper_name(
@@ -39,7 +39,7 @@ def test_hashmarks_version_alias_is_not_architecture_authority(
     adapter.write_text(
         "from hashmarks import RepositoryIdentity, __version__ as HM_RELEASE_VERSION, hash_file\n"
         "def identify(identity, verify):\n"
-        "    return identity.snapshot('*', verify=verify)\n",
+        "    return identity.observe_directory(verify=verify)\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(filesystem_identity_contract, "ADAPTER", adapter)
@@ -57,7 +57,7 @@ def test_hashmarks_version_lookup_location_is_not_identity_architecture_authorit
         "    if path.is_file():\n"
         "        return hash_file(path)\n"
         "    with RepositoryIdentity(path) as identity:\n"
-        "        return identity.snapshot('*', verify=verify)\n",
+        "        return identity.observe_directory(verify=verify)\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(filesystem_identity_contract, "ADAPTER", adapter)
@@ -346,9 +346,7 @@ def test_browser_native_argv_spelling_is_not_architecture_authority(
         "['npm', 'ls', '--package-lock-only', '--json', '@playwright/test']",
     ):
         browser.write_text(
-            "import subprocess\n"
-            "def select():\n"
-            f"    subprocess.run({command}, check=False)\n",
+            f"import subprocess\ndef select():\n    subprocess.run({command}, check=False)\n",
             encoding="utf-8",
         )
         assert [

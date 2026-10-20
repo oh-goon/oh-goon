@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from oh_goon.repository_tooling.architecture.common import Violation
+from pathlib import Path
 
 import pytest
-
-from pathlib import Path
 
 from oh_goon.repository_tooling.architecture import filesystem_identity_contract
 from oh_goon.repository_tooling.architecture._structural_authority_certification import (
@@ -20,6 +18,7 @@ from oh_goon.repository_tooling.architecture._structural_authority_workflow impo
 from oh_goon.repository_tooling.architecture._structural_project_dependency_contract import (
     _check_native_authority_deduplication,
 )
+from oh_goon.repository_tooling.architecture.common import Violation
 
 
 def _write(root: Path, relative: str, source: str) -> Path:
@@ -53,7 +52,7 @@ def _valid_hashmarks_adapter(root: Path) -> Path:
         "    if path.is_file():\n"
         "        return hm.hash_file(path)\n"
         "    with hm.RepositoryIdentity(path) as identity:\n"
-        "        return identity.snapshot('*', verify=True)\n",
+        "        return identity.observe_directory(verify=True)\n",
     )
 
 
@@ -72,8 +71,7 @@ def test_subprocess_comments_are_not_self_cli_authority(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "backend/src/oh_goon/cli_self.py",
-        "# subprocess.run and subprocess.Popen are forbidden here.\n"
-        "def verify():\n    return 0\n",
+        "# subprocess.run and subprocess.Popen are forbidden here.\ndef verify():\n    return 0\n",
     )
     assert _check_self_verification_accelerator(tmp_path) == []
 

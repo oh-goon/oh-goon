@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import os
-import shutil
-import stat
 import tempfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -53,10 +50,10 @@ def identify_tree_and_children(
 ) -> HashmarksIdentityResult:
     """Use only Hashmarks' public identity API for canonical filesystem identity.
 
-    Oh-Goon owns filesystem admission, exclusions, cancellation, and inventory evidence.
-    Hashmarks owns content hashing and Merkle identity.  Directory inputs are expressed
-    as explicit public ``InputManifest`` members so Oh-Goon can apply its own exclusion
-    policy without reaching into Hashmarks implementation classes.
+    Oh-Goon owns filesystem admission, exclusions, and cancellation. Hashmarks owns
+    native contents identity and physical materialization counts. Each requested
+    child retains its own input-root observation; a directory member revision is
+    a different native identity and cannot replace that observation.
     """
 
     resolved = path.resolve()
@@ -125,173 +122,32 @@ def _identify_one(
             entry_count=1,
         )
 
-    exclusions = tuple(exclude_paths)
-    byte_count, entry_count = _inventory(
-        path,
-        cancel_requested=cancel_requested,
-        exclude_paths=exclusions,
-        progress=progress,
+    exclusions = tuple(
+        value for item in exclude_paths if (value := _normalize_exclusion(path, item))
     )
-    state_dir = Path(tempfile.mkdtemp(prefix="oh-goon-hashmarks-state-"))
-    view: Path | None = None
-    try:
+    with tempfile.TemporaryDirectory(prefix="oh-goon-hashmarks-state-") as directory:
         from hashmarks import RepositoryIdentity
 
-        workspace = path
-        if exclusions:
-            view = _filtered_identity_view(
-                path,
-                exclusions,
-                cancel_requested=cancel_requested,
-            )
-            workspace = view
         with RepositoryIdentity(
-            workspace,
+            path,
             mode="local",
-            state_dir=state_dir,
+            state_dir=Path(directory),
             local_observer="reconcile",
         ) as identity:
-            snapshot = identity.snapshot(
-                "*",
-                require_matches=False,
+            observation = identity.observe_directory(
+                exclude_paths=exclusions,
                 verify=verify,
+                checkpoint=lambda: _check_cancel(cancel_requested, path),
+                progress=(lambda counts: progress(counts.entry_count, counts.regular_file_bytes))
+                if progress is not None
+                else None,
             )
         _check_cancel(cancel_requested, path)
         return HashmarksTreeIdentity(
-            sha256=snapshot.hash,
-            byte_count=byte_count,
-            entry_count=entry_count,
+            sha256=observation.inputs.snapshot.hash,
+            byte_count=observation.materialization_counts.regular_file_bytes,
+            entry_count=observation.materialization_counts.entry_count,
         )
-    finally:
-        if view is not None:
-            shutil.rmtree(view, ignore_errors=True)
-        shutil.rmtree(state_dir, ignore_errors=True)
-
-
-def _filtered_identity_view(
-    root: Path,
-    exclude_paths: Iterable[str | Path],
-    *,
-    cancel_requested: Cancel,
-) -> Path:
-    excluded = {_normalize_exclusion(root, item) for item in exclude_paths}
-    try:
-        view = Path(tempfile.mkdtemp(prefix=".oh-goon-hashmarks-view-", dir=root.parent))
-    except OSError:
-        view = Path(tempfile.mkdtemp(prefix="oh-goon-hashmarks-view-"))
-
-    try:
-        _populate_filtered_view(
-            root,
-            view,
-            Path(),
-            excluded=excluded,
-            cancel_requested=cancel_requested,
-            identity_root=root,
-        )
-        return view
-    except BaseException:
-        shutil.rmtree(view, ignore_errors=True)
-        raise
-
-
-def _populate_filtered_view(
-    source: Path,
-    destination: Path,
-    relative_directory: Path,
-    *,
-    excluded: set[str],
-    cancel_requested: Cancel,
-    identity_root: Path,
-) -> None:
-    _check_cancel(cancel_requested, identity_root)
-    with os.scandir(source) as scan:
-        entries = sorted(scan, key=lambda entry: entry.name)
-    for entry in entries:
-        relative = relative_directory / entry.name
-        if not _excluded(relative, excluded):
-            _copy_filtered_view_entry(
-                entry,
-                destination / entry.name,
-                relative,
-                excluded=excluded,
-                cancel_requested=cancel_requested,
-                identity_root=identity_root,
-            )
-
-
-def _copy_filtered_view_entry(
-    entry: os.DirEntry[str],
-    destination: Path,
-    relative: Path,
-    *,
-    excluded: set[str],
-    cancel_requested: Cancel,
-    identity_root: Path,
-) -> None:
-    source = Path(entry.path)
-    if entry.is_symlink():
-        destination.symlink_to(os.readlink(source))
-        return
-    if entry.is_file(follow_symlinks=False):
-        try:
-            os.link(source, destination, follow_symlinks=False)
-        except OSError:
-            shutil.copy2(source, destination, follow_symlinks=False)
-        return
-    if entry.is_dir(follow_symlinks=False):
-        destination.mkdir()
-        _populate_filtered_view(
-            source,
-            destination,
-            relative,
-            excluded=excluded,
-            cancel_requested=cancel_requested,
-            identity_root=identity_root,
-        )
-        return
-    raise FleetPlanInvalid(f"Snapshot contains unsupported filesystem entry: {relative.as_posix()}")
-
-
-def _inventory(
-    path: Path,
-    *,
-    cancel_requested: Cancel,
-    exclude_paths: Iterable[str | Path],
-    progress: Callable[[int, int], None] | None,
-) -> tuple[int, int]:
-    if path.is_file():
-        _check_cancel(cancel_requested, path)
-        return int(path.stat().st_size), 1
-
-    root = path.resolve()
-    excluded = {_normalize_exclusion(root, item) for item in exclude_paths}
-    byte_count = 0
-    entry_count = 0
-    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
-        _check_cancel(cancel_requested, root)
-        current_path = Path(current)
-        relative_current = current_path.relative_to(root)
-        directories[:] = [
-            name for name in sorted(directories) if not _excluded(relative_current / name, excluded)
-        ]
-        for name in (*directories, *sorted(files)):
-            relative = relative_current / name
-            if _excluded(relative, excluded):
-                continue
-            entry = current_path / name
-            entry_count += 1
-            if not entry.is_symlink():
-                info = entry.stat()
-                if stat.S_ISREG(info.st_mode):
-                    byte_count += int(info.st_size)
-                elif not stat.S_ISDIR(info.st_mode):
-                    raise FleetPlanInvalid(
-                        f"Snapshot contains unsupported filesystem entry: {relative.as_posix()}"
-                    )
-            if progress is not None:
-                progress(entry_count, byte_count)
-    return byte_count, entry_count
 
 
 def _normalize_exclusion(root: Path, item: str | Path) -> str:
@@ -302,11 +158,6 @@ def _normalize_exclusion(root: Path, item: str | Path) -> str:
         except ValueError:
             return ""
     return candidate.as_posix().strip("/")
-
-
-def _excluded(relative: Path, excluded: set[str]) -> bool:
-    rel = relative.as_posix()
-    return any(value and (rel == value or rel.startswith(value + "/")) for value in excluded)
 
 
 def _check_cancel(cancel_requested: Cancel, path: Path) -> None:

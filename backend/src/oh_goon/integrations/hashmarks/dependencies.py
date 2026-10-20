@@ -6,7 +6,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 from oh_goon.core.dependency_identity import normalize_package_name
 from oh_goon.core.models.fleet_observation import (
@@ -26,43 +26,16 @@ class LockedInventoryAssessment:
     packages: frozenset[str] | None = None
 
 
-def _assessment(observation: Mapping[str, Any]) -> DependencyEvidenceAssessment:
-    inputs = observation["repository_inputs"]
-    equivalence = {item["source_equivalence"] for item in inputs}
-    freshness: Literal["current", "stale", "unknown"] = (
-        "stale"
-        if "mismatch" in equivalence
-        else "current"
-        if inputs and equivalence == {"proven"}
-        else "unknown"
-    )
-    coverage = [row for row in observation["coverage"] if row["kind"] == "resolved-inventory"]
-    complete = bool(coverage) and all(
-        row["completeness"] == "complete" and row["truncation"] == "complete" for row in coverage
-    )
-    completeness: Literal["complete", "incomplete", "unknown"] = (
-        "complete"
-        if complete
-        else "incomplete"
-        if any(
-            row["completeness"] == "incomplete" or row["truncation"] == "truncated"
-            for row in coverage
-        )
-        else "unknown"
-    )
-    negative = [
-        row for row in observation["negative_evidence"] if row["kind"] == "resolved-inventory"
-    ]
-    available = all(item["repository_state"] == "known-present" for item in inputs)
+def _assessment(assessment: Mapping[str, Any]) -> DependencyEvidenceAssessment:
+    """Translate producer-qualified facts without deriving repository semantics."""
+    source = assessment["source_scope"]
+    inventory = assessment["resolved_inventory"]
+    freshness = source["freshness"]
     return DependencyEvidenceAssessment(
         freshness=freshness,
-        completeness=completeness,
-        availability="available" if available else "unavailable",
-        absence_admissible=available
-        and freshness == "current"
-        and complete
-        and bool(negative)
-        and all(row["state"] == "admissible-within-declared-scope" for row in negative),
+        completeness=inventory["completeness"],
+        availability=source["availability"],
+        absence_admissible=inventory["negative_evidence"] == "admissible-within-declared-scope",
         reason=None if freshness == "current" else "lock-source-" + freshness,
     )
 
@@ -99,7 +72,7 @@ def observe_locked_dependencies(repository: Path) -> DependencyObservationSnapsh
                 )
                 captured.unlink()
                 observation = cast(dict[str, Any], native.dependencies.observe(adapter))
-        assessment = _assessment(observation)
+                assessment = _assessment(native.dependencies.assessment(observation))
         selections = {row["node_id"]: row for row in observation["selections"]}
         components = {row["component_id"]: row for row in observation["components"]}
         members: dict[str, set[str]] = {}
@@ -166,17 +139,8 @@ def assess_locked_dependencies(
             with CodeMap(
                 repository, state_dir=state, artifact_db=state / "artifacts.sqlite3"
             ) as native:
-                native.dependencies.derivation_authority(snapshot.producer_observation)
-                current = cast(
-                    dict[str, Any], native.dependencies.observe(snapshot.adapter_observation)
-                )
-                if (
-                    current["resolution_identity"]
-                    != snapshot.producer_observation["resolution_identity"]
-                ):
-                    return LockedInventoryAssessment(
-                        DependencyEvidenceAssessment(reason="retained-adapter-evidence-mismatch")
-                    )
+                current = snapshot.producer_observation
+                assessment = native.dependencies.assessment(current)
                 selections = {row["node_id"]: row for row in current["selections"]}
                 components = {row["component_id"]: row for row in current["components"]}
                 packages = frozenset(
@@ -185,6 +149,6 @@ def assess_locked_dependencies(
                     )
                     for row in current["inventory"]
                 )
-                return LockedInventoryAssessment(_assessment(current), packages)
+                return LockedInventoryAssessment(_assessment(assessment), packages)
     except (OSError, RuntimeError, ValueError) as exc:
         return LockedInventoryAssessment(DependencyEvidenceAssessment(reason=str(exc)))

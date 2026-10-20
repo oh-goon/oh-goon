@@ -8,6 +8,7 @@ UNQUALIFIED, not a fixture PASS or a reason to create another execution path.
 
 from __future__ import annotations
 
+import sys
 import uuid
 
 import pytest
@@ -79,7 +80,8 @@ def test_native_skill_and_repository_review_persists_real_evidence(
     write_execution_lock(plan.parent / "goon.lock", build_execution_lock(resolved))
     run_id = "agent01b3h-native-" + uuid.uuid4().hex[:12]
     # Test-only observation of the ORIGINAL Step dispatcher. The delegate still
-    # executes all four native subprocesses through its unchanged supervisor.
+    # executes the required initial evidence and four selected tools through
+    # its unchanged supervisor.
     launched_tools: list[tuple[str, ...]] = []
     original_execute = step_execution._execute_command_step
 
@@ -101,9 +103,27 @@ def test_native_skill_and_repository_review_persists_real_evidence(
         )
         assert terminal.outcome.value == "SUCCESS"
         assert launched_tools == [
+            (
+                sys.executable,
+                "-m",
+                "oh_goon.integrations.hashmarks.agent_tools",
+                "--tool",
+                "task_evidence",
+                "--capture-identity",
+                frozen.source.repository.content_identity,
+                "--query=" + frozen.task,
+            ),
             ("rg", "--files", "--hidden", "--no-ignore", "--", "skill"),
             ("head", "-c", "2048", "--", "skill/references/checklist.md"),
-            ("rg", "--files", "--", "repo"),
+            (
+                sys.executable,
+                "-m",
+                "oh_goon.integrations.hashmarks.agent_tools",
+                "--tool",
+                "list_paths",
+                "--capture-identity",
+                frozen.source.repository.content_identity,
+            ),
             ("head", "-c", "2048", "--", "repo/marker.txt"),
         ], f"AGENT-01B3H NATIVE UNQUALIFIED: actual tool order was {launched_tools!r}"
         step = detail.operations[0].evidence.plan.steps[0]
