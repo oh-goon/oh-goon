@@ -144,6 +144,9 @@ def add_plan_commands(
     plan_run.add_argument(
         "--agent-providers-file", type=Path, help="Explicit provider configuration file"
     )
+    from oh_goon.cli_ai import add_native_plan_arguments
+
+    add_native_plan_arguments(plan_run)
     plan_run.add_argument(
         "--repair-timeout",
         type=float,

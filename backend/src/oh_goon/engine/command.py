@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import codecs
+import errno
 import hashlib
 import io
 import json
 import os
+import select
 import subprocess
 import sys
 import time
@@ -13,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Thread
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
@@ -39,9 +41,17 @@ from oh_goon.runtime import exec_guard_protocol
 from oh_goon.runtime.recovery_evidence import ExecutionRecoveryEvent
 from oh_goon.runtime.termination import ProcessTreeTerminationReceipt, TerminationRequest
 
+if TYPE_CHECKING:
+    from oh_goon.core.models.fleet_plan_evidence import (
+        PlanOutputEvidence,
+        PlanStandardIsolationEvidence,
+    )
+
 POLL_INTERVAL_SECONDS = 0.1
 TERMINATION_GRACE_SECONDS = 1.0
 OUTPUT_DRAIN_TIMEOUT_SECONDS = 5.0
+MAX_COMMAND_INPUT_BYTES = 1024 * 1024
+_TERMINAL_CHUNK_BYTES = 64 * 1024
 _EXEC_GUARD_PATH = Path(__file__).resolve().parents[1] / "runtime" / "exec_guard.py"
 
 
@@ -82,6 +92,9 @@ class CommandResult:
     runtime_authority: RuntimeAuthorityReceipt | None = None
     execution_authority_economics: tuple[ExecutionAuthorityEconomicsReceipt, ...] = ()
     physical_execution_id: str | None = None
+    standard_isolation: PlanStandardIsolationEvidence | None = None
+    # Tail capture retains diagnostic text; this evidence covers the whole raw stream.
+    stdout_evidence: PlanOutputEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,10 +123,17 @@ class CommandTimeoutExpired(subprocess.TimeoutExpired):
         stderr=None,
         supervisor: CommandSupervisorReceipt,
         runtime_authority: RuntimeAuthorityReceipt | None = None,
+        duration_ms: int = 0,
+        physical_execution_id: str | None = None,
+        standard_isolation: PlanStandardIsolationEvidence | None = None,
     ):
         super().__init__(cmd, timeout, output=output, stderr=stderr)
         self.supervisor = supervisor
         self.runtime_authority = runtime_authority
+        self.duration_ms = duration_ms
+        self.physical_execution_id = physical_execution_id
+        self.standard_isolation = standard_isolation
+        self.stdout_evidence: PlanOutputEvidence | None = None
 
 
 class CommandSupervisionTerminated(RuntimeError):
@@ -142,10 +162,21 @@ class CommandCancelledError(RuntimeError):
         *,
         supervisor: CommandSupervisorReceipt,
         runtime_authority: RuntimeAuthorityReceipt | None = None,
+        duration_ms: int = 0,
+        physical_execution_id: str | None = None,
+        stdout: str = "",
+        stderr: str = "",
+        standard_isolation: PlanStandardIsolationEvidence | None = None,
     ) -> None:
         super().__init__(message)
         self.supervisor = supervisor
         self.runtime_authority = runtime_authority
+        self.duration_ms = duration_ms
+        self.physical_execution_id = physical_execution_id
+        self.stdout = stdout
+        self.stderr = stderr
+        self.standard_isolation = standard_isolation
+        self.stdout_evidence: PlanOutputEvidence | None = None
 
 
 class CommandAuthorityTerminatedError(RuntimeError):
@@ -192,6 +223,49 @@ CommandProcessObserver = Callable[[CommandProcessLifecycleEvent], None]
 CommandTerminationObserver = Callable[[], TerminationSignal | None]
 
 
+def _validate_terminal_size(size: tuple[int, int]) -> None:
+    if (
+        type(size) is not tuple
+        or len(size) != 2
+        or any(type(value) is not int or not 1 <= value <= 65535 for value in size)
+    ):
+        raise ValueError("terminal size must be (rows, columns) between 1 and 65535")
+
+
+@dataclass(frozen=True, slots=True)
+class CommandTerminal:
+    """Nonblocking terminal transport; its caller owns the user-facing terminal.
+
+    Input returns at most the requested bytes, None while idle, or empty bytes
+    to disconnect and cancel. Output preserves raw PTY bytes, including ANSI and
+    carriage returns. Callbacks must not block the command supervisor/readers.
+    The engine owns the private PTY; user terminal descriptors never reach children.
+    """
+
+    read_input: Callable[[int], bytes | None]
+    write_output: Callable[[bytes], None]
+    initial_size: tuple[int, int] = (24, 80)
+    current_size: Callable[[], tuple[int, int] | None] | None = None
+
+    def __post_init__(self) -> None:
+        _validate_terminal_size(self.initial_size)
+        if (
+            not callable(self.read_input)
+            or not callable(self.write_output)
+            or (self.current_size is not None and not callable(self.current_size))
+        ):
+            raise ValueError("terminal transport requires callable input, output and size hooks")
+
+
+def _resize_terminal(descriptor: int, size: tuple[int, int]) -> None:
+    import fcntl
+    import struct
+    import termios
+
+    _validate_terminal_size(size)
+    fcntl.ioctl(descriptor, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
+
+
 def _process_identity(pid: int) -> str | None:
     """Best available OS identity for one local process, stronger than PID alone."""
     if os.name == "nt":
@@ -220,30 +294,55 @@ def _spawn_command_process(
     parent_death_signal: bool,
     runtime_authority: RuntimeAuthorityBinding | None,
     pass_fds: tuple[int, ...],
+    terminal_slave: int | None = None,
+    input_data: bytes | None = None,
+    preserve_native_executable_path: bool = False,
 ) -> tuple[subprocess.Popen[str], RuntimeAuthorityReceipt]:
     """Bind exact runtime authority and transfer it into one owned process birth."""
 
     try:
-        lease = bind_command_runtime_authority(argv, child_env, cwd, runtime_authority)
+        lease = (
+            bind_command_runtime_authority(
+                argv, child_env, cwd, runtime_authority, preserve_native_executable_path=True
+            )
+            if preserve_native_executable_path
+            else bind_command_runtime_authority(argv, child_env, cwd, runtime_authority)
+        )
     except OSError as exc:
         raise OSError(exc.errno, exc.strerror, argv[0]) from exc
     popen_argv: Sequence[str] = lease.launch_argv
-    popen_executable = lease.execution_path
-    guarded_parent_death = os.name != "nt" and parent_death_signal
+    popen_executable = (
+        lease.receipt.executable_path if preserve_native_executable_path else lease.execution_path
+    )
+    guarded_parent_death = os.name != "nt" and (parent_death_signal or terminal_slave is not None)
     if guarded_parent_death:
         popen_argv = (sys.executable, "-S", str(_EXEC_GUARD_PATH), *lease.launch_argv)
         popen_executable = None
         child_env[exec_guard_protocol.PARENT_PID_ENV] = str(os.getpid())
         if lease.execution_descriptor is not None:
             child_env[exec_guard_protocol.EXEC_FD_ENV] = str(lease.execution_descriptor)
+        elif lease.receipt.execution_materialization_identity is None:
+            # Native env shebangs remain native path execution. Observation
+            # cannot become a fabricated sealed execution-descriptor claim.
+            child_env[exec_guard_protocol.OBSERVED_EXECUTABLE_ENV] = lease.receipt.executable_path
+        else:
+            lease.close()
+            raise ValueError("atomic command authority lacks its execution descriptor")
+        if terminal_slave is not None:
+            child_env[exec_guard_protocol.CONTROLLING_TERMINAL_ENV] = "1"
     inherited_fds = tuple(dict.fromkeys((*pass_fds, *lease.pass_fds)))
     try:
         try:
             process = subprocess.Popen(
                 popen_argv,
                 executable=popen_executable,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
+                stdin=terminal_slave
+                if terminal_slave is not None
+                else (subprocess.PIPE if input_data is not None else None),
+                stdout=terminal_slave if terminal_slave is not None else subprocess.PIPE,
+                stderr=terminal_slave
+                if terminal_slave is not None
+                else (subprocess.STDOUT if merge_stderr else subprocess.PIPE),
                 text=True,
                 cwd=cwd,
                 env=child_env,
@@ -270,6 +369,8 @@ class _StartedCommand:
     process_identity: str | None
     capture: CommandCapture
     readers: tuple[Thread, Thread]
+    terminal_master: int | None
+    output_errors: list[BaseException]
 
 
 def _start_supervised_command(
@@ -284,6 +385,10 @@ def _start_supervised_command(
     runtime_authority: RuntimeAuthorityBinding | None,
     pass_fds: tuple[int, ...],
     max_capture_bytes_per_stream: int | None,
+    terminal: CommandTerminal | None,
+    input_data: bytes | None,
+    preserve_native_executable_path: bool,
+    retain_output_tail: bool,
 ) -> _StartedCommand:
     child_env = sanitized_child_environment(argv, env)
     physical_execution_id = new_physical_execution_id()
@@ -293,15 +398,41 @@ def _start_supervised_command(
                 kind="PROCESS_STARTING", physical_execution_id=physical_execution_id
             )
         )
-    process, authority_receipt = _spawn_command_process(
-        argv,
-        cwd=cwd,
-        child_env=child_env,
-        merge_stderr=merge_stderr,
-        parent_death_signal=parent_death_signal,
-        runtime_authority=runtime_authority,
-        pass_fds=pass_fds,
-    )
+    terminal_master = terminal_slave = None
+    try:
+        if terminal is not None:
+            terminal_master, terminal_slave = os.openpty()
+            _resize_terminal(terminal_slave, terminal.initial_size)
+            os.set_blocking(terminal_master, False)
+        process, authority_receipt = _spawn_command_process(
+            argv,
+            cwd=cwd,
+            child_env=child_env,
+            merge_stderr=merge_stderr,
+            parent_death_signal=parent_death_signal,
+            runtime_authority=runtime_authority,
+            pass_fds=pass_fds,
+            terminal_slave=terminal_slave,
+            input_data=input_data,
+            preserve_native_executable_path=preserve_native_executable_path,
+        )
+    except BaseException:
+        if terminal_master is not None:
+            os.close(terminal_master)
+        raise
+    finally:
+        if terminal_slave is not None:
+            os.close(terminal_slave)
+    try:
+        if terminal_master is not None:
+            process.stdout = os.fdopen(terminal_master, "r", encoding="utf-8", errors="replace")
+        if process.stdin is not None:
+            os.set_blocking(process.stdin.fileno(), False)
+    except BaseException:
+        _terminate_process_group(process)
+        if terminal_master is not None and process.stdout is None:
+            os.close(terminal_master)
+        raise
     process_identity = None
     if process_observer is not None:
         try:
@@ -317,20 +448,40 @@ def _start_supervised_command(
         except BaseException:
             _terminate_process_group(process)
             raise
-    if max_capture_bytes_per_stream is not None and max_capture_bytes_per_stream < 1:
-        raise ValueError("max_capture_bytes_per_stream must be positive when provided")
-    capture = CommandCapture(max_capture_bytes_per_stream)
-    stdout_reader = _reader(process.stdout, "stdout", capture.stdout, stream_output)
+    capture = CommandCapture(
+        max_capture_bytes_per_stream,
+        terminal=terminal is not None,
+        retain_output_tail=retain_output_tail,
+    )
+    output_errors: list[BaseException] = []
+    stdout_reader = (
+        _terminal_reader(
+            cast(io.TextIOWrapper, process.stdout),
+            terminal,
+            capture.stdout,
+            stream_output,
+            output_errors,
+        )
+        if terminal is not None
+        else _reader(process.stdout, "stdout", capture.stdout, stream_output, output_errors)
+    )
     stderr_reader = (
-        _reader(process.stderr, "stderr", capture.stderr, stream_output)
-        if not merge_stderr
+        _reader(process.stderr, "stderr", capture.stderr, stream_output, output_errors)
+        if not merge_stderr and terminal is None
         else Thread(target=lambda: None, name="oh-goon-stderr-merged", daemon=True)
     )
     readers = (stdout_reader, stderr_reader)
     for reader in readers:
         reader.start()
     return _StartedCommand(
-        process, authority_receipt, physical_execution_id, process_identity, capture, readers
+        process,
+        authority_receipt,
+        physical_execution_id,
+        process_identity,
+        capture,
+        readers,
+        terminal_master,
+        output_errors,
     )
 
 
@@ -350,10 +501,38 @@ def run_command(
     pass_fds: tuple[int, ...] = (),
     max_capture_bytes_per_stream: int | None = None,
     runtime_supervision: CommandRuntimeSupervision | None = None,
+    terminal: CommandTerminal | None = None,
+    input_data: bytes | None = None,
+    preserve_native_executable_path: bool = False,
+    retain_output_tail: bool = False,
 ) -> CommandResult:
-    """Run one command while optionally projecting transient output as it is read."""
+    """Run one owned command with optional live output and terminal transport.
+
+    Native agents that respawn their executable may explicitly retain the original
+    executable path. That mode reports observation, never atomic materialization.
+    Terminal output and explicit tail capture retain a bounded diagnostic tail;
+    stdout_evidence hashes and counts the original complete raw stream.
+    """
 
     argv = tuple(args)
+    if type(preserve_native_executable_path) is not bool:
+        raise ValueError("native executable path preservation must be a boolean")
+    if type(retain_output_tail) is not bool:
+        raise ValueError("command output tail retention must be a boolean")
+    if terminal is not None and (type(terminal) is not CommandTerminal or os.name == "nt"):
+        raise ValueError("command PTY transport requires POSIX and CommandTerminal")
+    if input_data is not None and (
+        type(input_data) is not bytes or len(input_data) > MAX_COMMAND_INPUT_BYTES
+    ):
+        raise ValueError("command input_data must be immutable bytes within 1 MiB")
+    if terminal is not None and input_data is not None:
+        raise ValueError("terminal and input_data are mutually exclusive")
+    if max_capture_bytes_per_stream is not None and max_capture_bytes_per_stream < 1:
+        raise ValueError("max_capture_bytes_per_stream must be positive when provided")
+    if runtime_supervision is not None and timeout is not None:
+        raise ValueError(
+            "runtime_supervision and fixed timeout cannot both own the runtime deadline"
+        )
     started_command = _start_supervised_command(
         argv,
         cwd=cwd,
@@ -365,6 +544,10 @@ def run_command(
         runtime_authority=runtime_authority,
         pass_fds=pass_fds,
         max_capture_bytes_per_stream=max_capture_bytes_per_stream,
+        terminal=terminal,
+        input_data=input_data,
+        preserve_native_executable_path=preserve_native_executable_path,
+        retain_output_tail=retain_output_tail,
     )
     process = started_command.process
     authority_receipt = started_command.authority_receipt
@@ -380,14 +563,16 @@ def run_command(
         if runtime_supervision is not None
         else None
     )
-    if watchdog is not None and timeout is not None:
-        raise ValueError(
-            "runtime_supervision and fixed timeout cannot both own the runtime deadline"
-        )
+    input_offset = 0
+    pending_terminal_input = b""
+    terminal_size = terminal.initial_size if terminal is not None else None
     leader_exited_before_group_quiescence = False
     completion_cleanup_requested = False
+    failure: BaseException | None = None
     try:
         while True:
+            if started_command.output_errors:
+                raise started_command.output_errors[0]
             if termination_requested is not None:
                 signal = termination_requested()
                 if signal is not None:
@@ -419,6 +604,64 @@ def run_command(
                 )
             _raise_if_output_limited(process, readers, capture, authority_receipt)
             leader_running = process.poll() is None
+            if leader_running and input_data is not None and process.stdin is not None:
+                if not process.stdin.closed:
+                    try:
+                        input_offset += os.write(
+                            process.stdin.fileno(),
+                            memoryview(input_data)[
+                                input_offset : input_offset + _TERMINAL_CHUNK_BYTES
+                            ],
+                        )
+                    except BlockingIOError:
+                        pass
+                    except BrokenPipeError:
+                        process.stdin.close()
+                    if input_offset == len(input_data) and not process.stdin.closed:
+                        process.stdin.close()
+            if leader_running and terminal is not None:
+                master = started_command.terminal_master
+                assert master is not None
+                if terminal.current_size is not None:
+                    size = terminal.current_size()
+                    if size is not None and size != terminal_size:
+                        _resize_terminal(master, size)
+                        terminal_size = size
+                if not pending_terminal_input:
+                    available = terminal.read_input(_TERMINAL_CHUNK_BYTES)
+                    if available is not None and (
+                        type(available) is not bytes or len(available) > _TERMINAL_CHUNK_BYTES
+                    ):
+                        raise ValueError("terminal input must return bounded bytes or None")
+                    if available == b"":
+                        raise _cancel_command(
+                            process,
+                            readers,
+                            args,
+                            authority_receipt,
+                            physical_execution_id=physical_execution_id,
+                            process_identity=process_identity,
+                            process_observer=process_observer,
+                        )
+                    pending_terminal_input = available or b""
+                if pending_terminal_input:
+                    try:
+                        count = os.write(master, pending_terminal_input)
+                        pending_terminal_input = pending_terminal_input[count:]
+                    except BlockingIOError:
+                        pass
+                    except OSError as exc:
+                        if exc.errno not in (errno.EIO, errno.EBADF):
+                            raise
+                        raise _cancel_command(
+                            process,
+                            readers,
+                            args,
+                            authority_receipt,
+                            physical_execution_id=physical_execution_id,
+                            process_identity=process_identity,
+                            process_observer=process_observer,
+                        ) from exc
             descendants_running = (
                 not leader_running
                 and require_process_group_quiescence
@@ -513,6 +756,8 @@ def run_command(
             else:
                 time.sleep(wait)
         forced_termination = _finish_process_output(process, readers)
+        if started_command.output_errors:
+            raise started_command.output_errors[0]
         _raise_if_output_limited(
             process, readers, capture, authority_receipt, already_finished=True
         )
@@ -522,8 +767,11 @@ def run_command(
             returncode=process.returncode,
             runtime_authority=authority_receipt,
             physical_execution_id=physical_execution_id,
-            stdout=stdout_capture.text.rstrip(),
+            stdout=stdout_capture.text
+            if terminal is not None or retain_output_tail
+            else stdout_capture.text.rstrip(),
             stderr=stderr_capture.text.rstrip(),
+            stdout_evidence=stdout_capture.evidence,
             duration_ms=int((time.monotonic() - started) * 1000),
             supervisor=CommandSupervisorReceipt(
                 leader_exited_before_group_quiescence=leader_exited_before_group_quiescence,
@@ -545,7 +793,16 @@ def run_command(
                 ),
             ),
         )
-    except BaseException:
+    except BaseException as exc:
+        failure = exc
+        if isinstance(exc, (CommandTimeoutExpired, CommandCancelledError)):
+            exc.duration_ms = int((time.monotonic() - started) * 1000)
+            exc.physical_execution_id = physical_execution_id
+            if isinstance(exc, CommandTimeoutExpired):
+                exc.output = stdout_capture.text
+            else:
+                exc.stdout = stdout_capture.text
+            exc.stderr = stderr_capture.text
         if process.poll() is None:
             _terminate_process_group(process)
         raise
@@ -553,6 +810,18 @@ def run_command(
         if any(reader.is_alive() for reader in readers):
             _terminate_process_group(process)
             _finish_process_output(process, readers)
+        if (terminal is not None or retain_output_tail) and isinstance(
+            failure, (CommandTimeoutExpired, CommandCancelledError)
+        ):
+            failure.stdout_evidence = stdout_capture.evidence
+            if isinstance(failure, CommandTimeoutExpired):
+                failure.output = stdout_capture.text
+            else:
+                failure.stdout = stdout_capture.text
+        if terminal is not None and process.stdout is not None and not process.stdout.closed:
+            process.stdout.close()
+        if process.stdin is not None and not process.stdin.closed:
+            process.stdin.close()
         _report_terminal_process_state(
             process, process_observer, physical_execution_id, process_identity
         )
@@ -814,11 +1083,52 @@ def _output_limit_error(
     )
 
 
+def _terminal_reader(
+    pipe: io.TextIOWrapper,
+    terminal: CommandTerminal,
+    capture: TextCapture,
+    observer: CommandOutputObserver | None,
+    errors: list[BaseException],
+) -> Thread:
+    def read() -> None:
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        try:
+            while not pipe.closed:
+                try:
+                    ready, _, _ = select.select([pipe], [], [], POLL_INTERVAL_SECONDS)
+                    if not ready:
+                        continue
+                    raw = os.read(pipe.fileno(), _TERMINAL_CHUNK_BYTES)
+                except (OSError, ValueError) as exc:
+                    if pipe.closed or (isinstance(exc, OSError) and exc.errno == errno.EIO):
+                        break
+                    raise
+                if not raw:
+                    break
+                text = decoder.decode(raw)
+                capture.append(text, stream="stdout", raw=raw)
+                terminal.write_output(raw)
+                if text:
+                    if observer is not None:
+                        try:
+                            observer("stdout", text)
+                        except Exception:
+                            pass
+            tail = decoder.decode(b"", final=True)
+            if tail:
+                capture.append(tail, stream="stdout", raw=b"")
+        except BaseException as exc:
+            errors.append(exc)
+
+    return Thread(target=read, name="oh-goon-terminal-output", daemon=True)
+
+
 def _reader(
     pipe,
     stream: Literal["stdout", "stderr"],
     capture: TextCapture,
     observer: CommandOutputObserver | None,
+    errors: list[BaseException],
 ) -> Thread:
     def read() -> None:
         if pipe is None:
@@ -843,8 +1153,8 @@ def _reader(
                         break
                     raise
                 chunk = decoder.decode(raw, final=not raw)
+                capture.append(chunk, stream=stream, raw=raw)
                 if chunk:
-                    capture.append(chunk, stream=stream)
                     if observer is not None:
                         try:
                             observer(stream, chunk)
@@ -853,8 +1163,15 @@ def _reader(
                             pass
                 if not raw:
                     break
+        except BaseException as exc:
+            # A partial transcript is not a successfully transferred command
+            # result. The original supervisor owns cleanup and propagation.
+            errors.append(exc)
         finally:
-            if not pipe.closed:
-                pipe.close()
+            try:
+                if not pipe.closed:
+                    pipe.close()
+            except BaseException as exc:
+                errors.append(exc)
 
     return Thread(target=read, name=f"oh-goon-{stream}", daemon=True)

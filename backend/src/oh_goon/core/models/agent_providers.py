@@ -13,8 +13,11 @@ from pydantic import ConfigDict, Field, JsonValue, SecretStr, field_validator, m
 
 from oh_goon.core.errors import InvalidRequest
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 
 ProviderApi = Literal["ollama", "openai-chat-completions", "openai-responses", "anthropic-messages"]
+NativeAgentName = Literal["opencode", "pi", "codex"]
+DEFAULT_NATIVE_AGENT_PROFILE = "isolated-managed"
 _NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}\Z")
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
@@ -172,6 +175,76 @@ class ResolvedAgentModel:
     headers: tuple[tuple[str, SecretStr], ...] = field(repr=False)
 
 
+class NativeAgentDefinition(ImmutableModel):
+    """Caller-selected native program and public resources, never model settings.
+
+    A configuration directory is an explicit public native configuration input.
+    Native code owns its contents; Oh-Goon neither discovers nor copies them.
+    """
+
+    executable: str | None = Field(default=None, min_length=1, max_length=4096)
+    runtime_roots: tuple[str, ...] = Field(default=(), max_length=32)
+    configuration_directory: str | None = Field(default=None, min_length=1, max_length=4096)
+    arguments: tuple[str, ...] = Field(default=(), max_length=64)
+
+    @field_validator("executable", "configuration_directory")
+    @classmethod
+    def native_path(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or "\x00" in value):
+            raise ValueError("native paths must be nonblank without NUL")
+        return value
+
+    @field_validator("runtime_roots")
+    @classmethod
+    def native_roots(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value) or any(
+            not root.strip() or "\x00" in root or len(root) > 4096 for root in value
+        ):
+            raise ValueError("native runtime roots must be distinct bounded paths")
+        return value
+
+    @field_validator("arguments")
+    @classmethod
+    def native_arguments(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any("\x00" in argument or len(argument) > 4096 for argument in value):
+            raise ValueError("native arguments must be bounded without NUL")
+        return value
+
+
+class NativeAgentProfile(ImmutableModel):
+    """Existing backend and resource policy selected for one native workload."""
+
+    backend: Literal["local", "bubblewrap"] = "local"
+    allowed_agents: tuple[NativeAgentName, ...] = ("opencode", "pi", "codex")
+    workspace_roots: tuple[str, ...] = Field(default=(), max_length=32)
+    timeout_seconds: float = Field(default=7200.0, gt=0, le=21600, allow_inf_nan=False, strict=True)
+    resources: CicdResourcePolicy = Field(default_factory=CicdResourcePolicy)
+    inference_profile: str | None = None
+
+    @field_validator("allowed_agents")
+    @classmethod
+    def unique_agents(cls, value: tuple[NativeAgentName, ...]) -> tuple[NativeAgentName, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("allowed native agents must be unique")
+        return value
+
+    @field_validator("workspace_roots")
+    @classmethod
+    def workspace_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value) or any(
+            not root.strip() or "\x00" in root or len(root) > 4096 for root in value
+        ):
+            raise ValueError("native workspace roots must be distinct bounded paths")
+        return value
+
+    @field_validator("inference_profile")
+    @classmethod
+    def native_inference_profile(cls, value: str | None) -> str | None:
+        if value is not None and _NAME.fullmatch(value) is None:
+            raise ValueError("native inference must name a model profile")
+        return value
+
+
 class AgentProvidersConfig(ImmutableModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True, serialize_by_alias=True)
 
@@ -180,10 +253,19 @@ class AgentProvidersConfig(ImmutableModel):
     default_model: str | None = None
     providers: dict[str, AgentProvider] = Field(default_factory=dict, max_length=64)
     models: dict[str, AgentModel] = Field(default_factory=dict, max_length=256)
+    native_agents: dict[NativeAgentName, NativeAgentDefinition] = Field(
+        default_factory=dict, max_length=3, exclude_if=lambda value: not value
+    )
+    native_profiles: dict[str, NativeAgentProfile] = Field(
+        default_factory=dict, max_length=64, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def validate_references(self) -> AgentProvidersConfig:
-        if any(_NAME.fullmatch(name) is None for name in (*self.providers, *self.models)):
+        if any(
+            _NAME.fullmatch(name) is None
+            for name in (*self.providers, *self.models, *self.native_profiles)
+        ):
             raise ValueError(
                 "provider and model profile names must use letters, numbers, underscores or hyphens"
             )
@@ -191,6 +273,11 @@ class AgentProvidersConfig(ImmutableModel):
             raise ValueError("every model profile must reference a declared provider")
         if self.default_model is not None and self.default_model not in self.models:
             raise ValueError("default_model must reference a declared model profile")
+        if any(
+            profile.inference_profile is not None and profile.inference_profile not in self.models
+            for profile in self.native_profiles.values()
+        ):
+            raise ValueError("native inference must reference a declared model profile")
         return self
 
     def resolve(self, profile: str | None, *, environment: Mapping[str, str]) -> ResolvedAgentModel:
@@ -267,6 +354,20 @@ class AgentConnection(ImmutableModel):
             providers={self.provider_name: self.provider},
             models={self.profile: self.selection},
         ).resolve(self.profile, environment=environment)
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedNativeAgent:
+    """Resolved host facts transported unchanged to the existing execution owner."""
+
+    agent: NativeAgentName
+    profile_name: str
+    definition: NativeAgentDefinition
+    profile: NativeAgentProfile
+    executable_sha256: str
+    connection: AgentConnection | None = None
+    interactive: bool = False
+    backend_configuration_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

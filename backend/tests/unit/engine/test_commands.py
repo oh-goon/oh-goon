@@ -13,6 +13,7 @@ from oh_goon.engine.command import (
     CommandCancelledError,
     CommandOutputLimitExceeded,
     CommandProcessLifecycleEvent,
+    CommandTimeoutExpired,
     _terminate_process_group,
     run_command,
 )
@@ -478,12 +479,12 @@ while not pid_file.exists(): time.sleep(0.01)
 @pytest.mark.process
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
 def test_strict_quiescence_timeout_still_records_deadline_cleanup() -> None:
-    with pytest.raises(subprocess.TimeoutExpired) as caught:
+    with pytest.raises(CommandTimeoutExpired) as caught:
         run_command(
             sys.executable,
             "-S",
             "-c",
-            "import time; time.sleep(30)",
+            "import sys,time; print('partial output',flush=True); print('partial error',file=sys.stderr,flush=True); time.sleep(30)",
             timeout=0.3,
             require_process_group_quiescence=True,
         )
@@ -492,6 +493,11 @@ def test_strict_quiescence_timeout_still_records_deadline_cleanup() -> None:
     assert receipt.cleanup_reason == "timeout"
     assert len(receipt.recovery_events) == 1
     assert receipt.recovery_events[0].reason_code == "deadline_expired"
+    assert caught.value.duration_ms >= 300
+    assert caught.value.physical_execution_id is not None
+    assert caught.value.output == "partial output\n"
+    assert caught.value.stderr == "partial error\n"
+    assert receipt.final_process_group_quiescent
 
 
 def test_explicit_environment_requires_path_for_bare_executable() -> None:
@@ -561,3 +567,16 @@ def test_live_stream_decoding_preserves_split_unicode_and_newline() -> None:
     assert result.returncode == 0
     assert result.stdout == "café\ndone"
     assert "".join(observed).rstrip("\n") == result.stdout
+
+
+@pytest.mark.parametrize("descriptor", [1, 2], ids=["stdout", "stderr"])
+def test_reader_decode_failure_cannot_return_a_successful_prefix(descriptor: int) -> None:
+    with pytest.raises(UnicodeDecodeError):
+        run_command(
+            sys.executable,
+            "-S",
+            "-c",
+            f"import os,time; os.write({descriptor},b'valid prefix\\n'); "
+            f"time.sleep(0.1); os.write({descriptor},b'\\xff')",
+            timeout=3,
+        )

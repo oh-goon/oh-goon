@@ -38,7 +38,6 @@ def run_lock_with_owner(
 
 def run_stateless_lock(args: argparse.Namespace) -> int:
     """Skip app DB/Fleet initialization, not the original atomic lock writer."""
-    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
 
     def canonical_lock(
         plan: Path,
@@ -47,8 +46,17 @@ def run_stateless_lock(args: argparse.Namespace) -> int:
         output: Path | None,
     ) -> ExecutionLock:
         selected = bool(
-            args.agent_repository_root or args.agent_skill_root or args.allow_agent_acceptance
+            args.agent_repository_root
+            or args.agent_skill_root
+            or args.allow_agent_acceptance
+            or args.native_agent
         )
+        native, git = None, None
+        if args.native_agent is not None:
+            from oh_goon.cli_ai import native_plan_selection
+
+            native, _, git = native_plan_selection(args)
+        resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(), git_service=git)
         if not selected:
             return _generate_execution_lock(
                 resolver, plan, extensions_path=None, inputs=inputs, output=output
@@ -72,16 +80,30 @@ def run_stateless_lock(args: argparse.Namespace) -> int:
 
         destination = output or (plan.parent / LOCK_FILE_NAME)
         existing = load_execution_lock(destination) if destination.exists() else None
-        resolved, _, _ = resolver.resolve_frozen_agents(
+        resolved, handoffs, _ = resolver.resolve_frozen_agents(
             plan,
             inputs=inputs or {},
             repository_root=args.agent_repository_root,
             skill_root=args.agent_skill_root,
             allowed_acceptance=tuple(args.allow_agent_acceptance),
-            connection=lambda: agent_connection_from_args(args),
+            connection=(lambda: agent_connection_from_args(args)) if native is None else None,
+            native_agent=native,
+            repository=args.native_workspace if native is not None else None,
+            git_service=git,
             locked_skills=existing.skill_sources if existing else None,
             update_skills=args.update_skills,
         )
+        if native is not None:
+            captured = next(iter(handoffs.values())).source
+            repository = (
+                args.agent_repository_root / captured.repository_reference.removeprefix("local:")
+            ).resolve(strict=True)
+            if repository != args.native_workspace:
+                from oh_goon.core.errors import FleetPlanInvalid
+
+                raise FleetPlanInvalid(
+                    "Captured Agent repository differs from the explicit native workspace"
+                )
         from oh_goon.core.execution_lock_identity import build_execution_lock
 
         lock = build_execution_lock(resolved)

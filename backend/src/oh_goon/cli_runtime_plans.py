@@ -7,6 +7,8 @@ import sys
 import time
 from collections.abc import Callable
 from contextvars import ContextVar
+from pathlib import Path
+from typing import TypedDict
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_agent_providers import agent_connection_from_args
@@ -22,6 +24,7 @@ from oh_goon.cli_plan_definition_commands import (
 from oh_goon.cli_plan_inputs import plan_inputs
 from oh_goon.cli_plan_run_readback import run_plan_readback
 from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
+from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
@@ -31,8 +34,22 @@ from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
+from oh_goon.services.fleet_plan_resolution_context import AgentConnectionSelection
 
 PlanHandler = Callable[[ApplicationRuntime, argparse.Namespace], int]
+
+
+class _AgentReviewRepairOptions(TypedDict, total=False):
+    review_write_roots: tuple[str, ...]
+    agent_connection: AgentConnection
+    native_agent: ResolvedNativeAgent
+    native_workspace: Path
+
+
+class _AgentRunSelection(TypedDict, total=False):
+    agent_connection: AgentConnectionSelection
+    native_agent: ResolvedNativeAgent
+    native_workspace: Path
 
 
 def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int | None:
@@ -103,6 +120,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         # The frozen target transports the identity; the original Fleet owners
         # reprove it before admission and again on the worker before any work.
         repair_budget = _selected_repair_budget(args)
+        native = getattr(args, "_native_agent", None)
         selected_inputs = plan_inputs(args)
         snapshot = getattr(args, "_caller_input_file_snapshot", None)
         source_identity = (
@@ -110,11 +128,18 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         )
         if repair_budget is not None:
             review = getattr(args, "review_passes", None) is not None
-            review_options = {}
+            review_options: _AgentReviewRepairOptions = {}
             if review:
-                review_options = dict(
-                    review_write_roots=tuple(args.repair_write_root),
-                    agent_connection=agent_connection_from_args(args),
+                review_options = dict(review_write_roots=tuple(args.repair_write_root))
+                if native is not None:
+                    review_options.update(
+                        native_agent=native, native_workspace=args.native_workspace
+                    )
+                else:
+                    review_options["agent_connection"] = agent_connection_from_args(args)
+            elif native is not None:
+                raise FleetPlanInvalid(
+                    "Native repair requires the complete --review-passes campaign"
                 )
             result = runtime.plans.repair(
                 args.plan,
@@ -131,6 +156,11 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 **review_options,
             )
             return _print_agent_repair_result(result, as_json=as_json)
+        native_options: _AgentRunSelection = (
+            dict(native_agent=native, native_workspace=args.native_workspace)
+            if native is not None
+            else dict(agent_connection=lambda: agent_connection_from_args(args))
+        )
         admitted = runtime.plans.run(
             args.plan,
             extensions_path=args.extensions,
@@ -145,7 +175,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             agent_repository_root=args.agent_repository_root,
             agent_skill_root=args.agent_skill_root,
             allowed_agent_acceptance=tuple(args.allow_agent_acceptance or ()),
-            agent_connection=lambda: agent_connection_from_args(args),
+            **native_options,
         )
         plan_id = admitted.target.plan.plan_id if admitted.target is not None else None
         if not args.wait:

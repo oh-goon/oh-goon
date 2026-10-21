@@ -9,6 +9,7 @@ from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
 )
 from oh_goon.core.models.execution_identity import ResolvedExecutionReference
+from oh_goon.core.models.fleet_observation import NativeAgentObservation
 from oh_goon.core.models.fleet_plan_diagnostics import PlanConfigurationEvidence
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanArtifactEvidence,
@@ -147,6 +148,9 @@ class GameTapeStepExecution(ImmutableModel):
     output_names: tuple[str, ...] = Field(default_factory=tuple, max_length=16)
     artifacts: tuple[PlanArtifactEvidence, ...] = Field(default_factory=tuple, max_length=64)
     outputs: tuple[PublishedPlanOutputEvidence, ...] = Field(default_factory=tuple, max_length=16)
+    native_agent_observations: tuple[NativeAgentObservation, ...] = Field(
+        default_factory=tuple, max_length=8
+    )
     reason: str | None = Field(default=None, max_length=500)
     why: GameTapeWhy
     failure: GameTapeFailureFingerprint | None = None

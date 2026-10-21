@@ -7,11 +7,13 @@ from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.capability_registry import capability_definitions
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
 from oh_goon.engine.runner import EngineRunner
 from oh_goon.integrations.fleet_content_store import FleetContentStore
+from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
 from oh_goon.integrations.fleet_plans import FleetPlanRunner
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.integrations.migration import MigrationRunner
@@ -34,6 +36,7 @@ from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.runtime.scope_mutation_guard import DurableScopeMutationGuard
 from oh_goon.runtime.state import LocalState
+from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from oh_goon.services.capability_executor import CapabilityExecutor
 from oh_goon.services.direct_effect_admission import DirectEffectAdmission
 from oh_goon.services.effect_recovery import RepositoryEffectRecovery
@@ -76,6 +79,9 @@ class RuntimeFoundation:
     require_authenticated_fleet: bool = True
     require_compiled_fleet_contract: bool = True
     standard_local_fleet: bool = False
+    terminal: CommandTerminal | None = None
+    standard_process_isolation: ProcessIsolationBackend | None = None
+    git_service: GitService | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +103,8 @@ def _build_capability_runtime(
     run_parent: Path,
     live_output: GameTapeLiveOutputStore,
     diagnostics: DiagnosticRouter,
+    terminal: CommandTerminal | None = None,
+    standard_process_isolation: ProcessIsolationBackend | None = None,
 ) -> tuple[FleetExecutorPool, CapabilityExecutor, FleetContentStore]:
     executor_pool = FleetExecutorPool(database, configuration)
     process_isolation_backends = (
@@ -119,6 +127,9 @@ def _build_capability_runtime(
             output_observer_factory=live_output.observer,
             lifecycle_observer_factory=Journal(database).execution_lifecycle_observer,
             diagnostics=diagnostics,
+            terminal=terminal,
+            standard_process_isolation=standard_process_isolation,
+            workspace_pin=RepositoryWorkspaceAuthority.pin_repository_subject,
         ),
     }
     _require_complete_runner_wiring(runners)
@@ -191,6 +202,9 @@ def build_runtime_foundation(
     *,
     fleet_provisioner: FleetPreworkProvisioner | None = None,
     standard_local: bool = False,
+    terminal: CommandTerminal | None = None,
+    standard_process_isolation: ProcessIsolationBackend | None = None,
+    git_service: GitService | None = None,
 ) -> RuntimeFoundation:
     """Compose the selected local or strict Fleet execution profile.
 
@@ -211,11 +225,20 @@ def build_runtime_foundation(
     require_loaded_hashmarks_runtime()
     local = _build_local_state_foundation()
     database = local.database
+    state_paths = ApplicationStatePathLayout.from_database(database.path)
+    if standard_process_isolation is not None:
+        from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+
+        if isinstance(standard_process_isolation, BubblewrapProcessIsolation):
+            standard_process_isolation.bind_application_state(
+                private_paths=database.private_paths + state_paths.private_control_paths,
+                read_only_paths=(state_paths.extensions, state_paths.plan_tools),
+            )
     lifecycle = RuntimeLifecycle()
     effect_attempts = RepositoryEffectAttemptStore(database)
     schedule_definitions = ScheduleDefinitionStore(database)
     schedule_executions = ScheduleExecutionStore(database)
-    git = GitService()
+    git = git_service or GitService()
     effect_settlement = RepositoryEffectSettlement(database, local.journal, effect_attempts)
     effect_reconciler = RepositoryReconciler(git)
     effect_recovery, auditor, runtime_safety = _prove_startup_safety(
@@ -226,7 +249,6 @@ def build_runtime_foundation(
         effect_reconciler,
         effect_settlement,
     )
-    state_paths = ApplicationStatePathLayout.from_database(database.path)
     diagnostics = DiagnosticRouter(
         (
             StderrDiagnosticSink(),
@@ -264,6 +286,8 @@ def build_runtime_foundation(
         run_parent=state_paths.run_workspaces,
         live_output=live_output,
         diagnostics=diagnostics,
+        terminal=terminal,
+        standard_process_isolation=standard_process_isolation,
     )
     repository_effects = RepositoryEffectExecution(
         capability_executor,
@@ -304,4 +328,7 @@ def build_runtime_foundation(
         require_authenticated_fleet=not standard_local,
         require_compiled_fleet_contract=not standard_local,
         standard_local_fleet=standard_local,
+        terminal=terminal,
+        standard_process_isolation=standard_process_isolation,
+        git_service=git,
     )

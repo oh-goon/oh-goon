@@ -10,6 +10,12 @@
       "agent": []
     },
     "agents/agentic-review-repair-loop": {},
+    "agents/native-coding": {
+      "agent": []
+    },
+    "agents/native-review": {
+      "agent": []
+    },
     "agents/regression": {
       "check": []
     },

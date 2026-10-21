@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+import { LONG_NATIVE_INPUT_IDENTITY } from "./fixtures/identities";
+import { FAILED_RUN_ID } from "./fixtures/runIds";
+import { gameTapeInspector, gameTapeRegion } from "./helpers/locators";
 import { openFixture, openRunFixture } from "./helpers/navigation";
 import { expectHeadingClearOfFixedChrome, expectNoDocumentHorizontalOverflow, expectNoSilentTextClipping, expectPrimaryActionsClearOfFixedChrome, setReflowZoomEquivalent } from "./helpers/visibility";
 
@@ -93,5 +96,44 @@ test("Game Tape reflows at the 200% layout zoom equivalent without document over
   expect(scrollOwnership.scrollWidth).toBeGreaterThan(scrollOwnership.clientWidth);
   await expectNoSilentTextClipping(page);
   await expectPrimaryActionsClearOfFixedChrome(page);
+});
+
+test("native Agent claims remain disclosable on mobile without changing recorded failure", async ({ page }) => {
+  await openRunFixture(page, { runId: FAILED_RUN_ID });
+  await gameTapeRegion(page).getByRole("button", { name: "Jump to Failed Step" }).click();
+  const inspector = gameTapeInspector(page);
+  await expect(inspector).toHaveAttribute("data-status", "FAILED");
+  await expect(inspector.getByText("exit 1 · FIXTURE_LONG_FAILURE", { exact: true })).toBeVisible();
+  const claims = inspector.getByRole("region", { name: "Native agent observations", exact: true });
+  await expect(claims.getByText(/Native events are agent claims\. Process exit, cancellation and verification retain their recorded Step results/)).toBeVisible();
+  const identity = claims.getByText(LONG_NATIVE_INPUT_IDENTITY, { exact: true });
+  await expect(identity).toBeHidden();
+  await claims.locator("summary", { hasText: "pi · isolated-managed · report" }).click();
+  await expect(identity).toBeVisible();
+  await expect(claims.getByText("Native conversation settled", { exact: true }).locator("..").getByText("yes", { exact: true })).toBeVisible();
+  await expect(claims.getByText("Native protocol reported failure", { exact: true }).locator("..").getByText("no", { exact: true })).toBeVisible();
+  await expect(claims).toContainText("pi: auto_compaction_end");
+  await expect(claims).toContainText("6003");
+  await expect(claims).toContainText("5874");
+  await expect(inspector).toHaveAttribute("data-status", "FAILED");
+  await expect(inspector.getByText("exit 1 · FIXTURE_LONG_FAILURE", { exact: true })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await identity.scrollIntoViewIfNeeded();
+  await expect(identity).toBeVisible();
+  const readable = await identity.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    if (range.getClientRects().length > 1) return true;
+    let owner: HTMLElement | null = element as HTMLElement;
+    while (owner && !owner.classList.contains("game-tape-inspector")) {
+      if (["auto", "scroll"].includes(getComputedStyle(owner).overflowX) && owner.scrollWidth > owner.clientWidth + 1) return true;
+      owner = owner.parentElement;
+    }
+    return false;
+  });
+  expect(readable, "Full native identity must wrap or remain reachable through local scrolling").toBe(true);
+  await expectNoDocumentHorizontalOverflow(page);
+  await expectNoSilentTextClipping(page);
 });
 

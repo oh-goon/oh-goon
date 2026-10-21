@@ -65,7 +65,7 @@ def step_evidence(
         "started_at": started_at,
         "finished_at": finished_at,
         "argv": canonical_argv(step, outcome),
-        "stdout_evidence": output_evidence(outcome.stdout),
+        "stdout_evidence": outcome.stdout_evidence or output_evidence(outcome.stdout),
         "stderr_evidence": output_evidence(outcome.stderr),
         "duration_ms": outcome.duration_ms,
         "repository_state_before": repository_state_before,
@@ -144,7 +144,7 @@ def attempt_evidence(
         attempt=attempt,
         argv=canonical_argv(step, outcome),
         returncode=outcome.returncode,
-        stdout_evidence=output_evidence(outcome.stdout),
+        stdout_evidence=outcome.stdout_evidence or output_evidence(outcome.stdout),
         stderr_evidence=output_evidence(outcome.stderr),
         duration_ms=outcome.duration_ms,
         repository_state_before=repository_state_before,
@@ -154,8 +154,13 @@ def attempt_evidence(
         cache_input=cache_input,
         cache_output=cache_output,
         retained_cache=retained_cache,
-        egress=_egress_evidence(step, effective_egress),
-        resources=resources,
+        egress=PlanEgressEvidence(mode="none")
+        if outcome.standard_isolation is not None
+        else _egress_evidence(step, effective_egress),
+        resources=outcome.standard_isolation.resources
+        if outcome.standard_isolation is not None
+        else resources,
+        standard_isolation=outcome.standard_isolation,
         retry=retry,
         release_effect=release_effect,
         release_verification=release_verification,

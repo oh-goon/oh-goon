@@ -747,7 +747,60 @@ def _check_original_agent_mount_gate(package: Path) -> list[Violation]:
     def first_guard(functions: list[ast.FunctionDef]) -> bool:
         if len(functions) != 1 or not functions[0].body:
             return False
-        node = functions[0].body[0]
+        body = functions[0].body
+        node = body[0]
+        if isinstance(node, ast.If):
+            # An ordinary typed request has its own proportional physical
+            # branch in this same backend. It cannot loosen or skip custody
+            # for the original strict request; only pure typed dispatch may
+            # precede the strict guard.
+            function = functions[0]
+            arguments = function.args.args
+            if len(arguments) < 2 or len(backends) != 1:
+                return False
+            receiver, request = arguments[0].arg, arguments[1].arg
+            test = node.test
+            returned = node.body[0] if len(node.body) == 1 else None
+            call = returned.value if isinstance(returned, ast.Return) else None
+            if not (
+                isinstance(test, ast.Call)
+                and isinstance(test.func, ast.Name)
+                and test.func.id == "isinstance"
+                and len(test.args) == 2
+                and not test.keywords
+                and isinstance(test.args[0], ast.Name)
+                and test.args[0].id == request
+                and isinstance(test.args[1], ast.Name)
+                and test.args[1].id == "StandardIsolatedProcessRequest"
+                and not node.orelse
+                and isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == receiver
+                and len(call.args) == 1
+                and isinstance(call.args[0], ast.Name)
+                and call.args[0].id == request
+            ):
+                return False
+            target = next(
+                (
+                    method
+                    for method in backends[0].body
+                    if isinstance(method, ast.FunctionDef) and method.name == call.func.attr
+                ),
+                None,
+            )
+            if target is None or len(target.args.args) < 2:
+                return False
+            annotation = target.args.args[1].annotation
+            if (
+                not isinstance(annotation, ast.Name)
+                or annotation.id != "StandardIsolatedProcessRequest"
+            ):
+                return False
+            if len(body) < 2:
+                return False
+            node = body[1]
         return (
             isinstance(node, ast.Expr)
             and isinstance(node.value, ast.Call)

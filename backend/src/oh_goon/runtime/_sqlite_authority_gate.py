@@ -44,7 +44,7 @@ if hasattr(os, "register_at_fork"):
     )
 
 
-def _gate_path(database_path: Path) -> Path:
+def sqlite_authority_gate_path(database_path: Path) -> Path:
     database = database_path.expanduser().resolve()
     root = ensure_private_directory(database.parent / _GATE_DIRECTORY)
     identity = hashlib.sha256(str(database).encode("utf-8")).hexdigest()[:24]
@@ -155,7 +155,7 @@ def sqlite_authority_gate(database_path: Path, *, write: bool) -> Iterator[None]
     lock bytes are not durable product state, and kernel ownership dies with the process.
     """
 
-    path = _gate_path(database_path)
+    path = sqlite_authority_gate_path(database_path)
     key = str(path)
     holds = _thread_holds()
     held = holds.get(key)

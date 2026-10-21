@@ -23,6 +23,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     _add_agent_commands(subparsers)
+    from oh_goon.cli_ai import add_ai_command
+
+    add_ai_command(subparsers)
     _add_local_app_commands(subparsers)
     _add_local_state_commands(subparsers)
     _add_storage_commands(subparsers)
@@ -144,6 +147,9 @@ def _add_direct_repository_commands(
     lock.add_argument("--allow-agent-acceptance", action="append")
     lock.add_argument("--agent-model-profile")
     lock.add_argument("--agent-providers-file", type=Path)
+    from oh_goon.cli_ai import add_native_plan_arguments
+
+    add_native_plan_arguments(lock)
     lock.add_argument(
         "--update-skills",
         action="store_true",

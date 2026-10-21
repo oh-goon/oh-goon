@@ -12,7 +12,7 @@ import os
 import stat
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models import agent_source
@@ -46,6 +46,7 @@ def capture_agent_sources(
     previous_source: agent_source.FrozenAgentSourceCapture | None = None,
     cancel_requested: Callable[[], bool] | None = None,
     tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
+    expected_repository: Path | None = None,
 ) -> agent_source.FrozenAgentSourceCapture:
     """Capture bytes ONCE via the existing AG-01 reader, without effects.
 
@@ -74,13 +75,14 @@ def capture_agent_sources(
         _captured=captured,
         cancel_requested=cancel_requested,
         tree_cache=tree_cache,
+        expected_repository=expected_repository,
     )
     frozen = agent_source.FrozenAgentSourceCapture(
         plan_source_sha256=plan_source_sha256,
         plan_graph_identity=plan_graph_identity,
-        acceptance_profile=str(preview["acceptance"]["profile"]),
-        repository_reference=str(preview["repository"]["reference"]),
-        resolved_skill_reference=str(preview["skill"]["reference"]),
+        acceptance_profile=str(cast(dict[str, object], preview["acceptance"])["profile"]),
+        repository_reference=str(cast(dict[str, object], preview["repository"])["reference"]),
+        resolved_skill_reference=str(cast(dict[str, object], preview["skill"])["reference"]),
         authored_skill_reference=str(preview["authored_skill_reference"]),
         repository=captured["repository"],
         skill=captured["skill"],
@@ -145,6 +147,7 @@ def explain_agent_sources(
     _captured: dict[str, agent_source.FrozenSourceTree] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
     tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
+    expected_repository: Path | None = None,
 ) -> dict[str, object]:
     """Project immutable read-only identities without admitting or executing work."""
     repo_ref, authored_skill_ref, accepted = agent_source_references(definitions, values)
@@ -191,6 +194,7 @@ def explain_agent_sources(
         captured=_captured,
         cancel_requested=cancel_requested,
         tree_cache=tree_cache,
+        expected_directory=expected_repository,
     )
     skill = _snapshot_authorized_tree(
         prepared.root if prepared else skill_root,
@@ -232,6 +236,7 @@ def _snapshot_authorized_tree(
     captured: dict[str, agent_source.FrozenSourceTree] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
     tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
+    expected_directory: Path | None = None,
 ) -> dict[str, Any]:
     """Read exactly once from an fd-anchored authorized tree.
 
@@ -241,6 +246,13 @@ def _snapshot_authorized_tree(
     """
     if cancel_requested is not None and cancel_requested():
         raise OperationCancelledError("Agent source capture cancelled")
+    if (
+        expected_directory is not None
+        and (root / reference.removeprefix("local:")).resolve(strict=True) != expected_directory
+    ):
+        raise FleetPlanInvalid(
+            "Captured Agent repository differs from the explicit native workspace"
+        )
     cache_key = (label, str(root) + "\0" + reference)
     if tree_cache is not None and cache_key in tree_cache:
         frozen = tree_cache[cache_key]

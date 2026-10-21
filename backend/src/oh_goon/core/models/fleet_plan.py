@@ -4,10 +4,10 @@ import re
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from oh_goon.core.fleet_plan_validation import validate_resolved_plan
-from oh_goon.core.models.agent_providers import AgentConnection
+from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan_composition import (
@@ -234,6 +234,10 @@ class AgentStepRequestedEffects(ImmutableModel):
         return self
 
 
+AgentResultRole = Literal["report", "review", "adjudication", "proposal"]
+MAX_AGENT_TASK_CHARS = 4000
+
+
 class AgentPlanStep(ImmutableModel):
     """AG-02B typed *authoring* intent; not a runnable or admitted Step.
 
@@ -245,7 +249,8 @@ class AgentPlanStep(ImmutableModel):
     kind: Literal["agent"] = "agent"
     step_id: str = Field(min_length=1, max_length=80)
     harness: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
-    task: str = Field(min_length=1, max_length=4000)
+    role: AgentResultRole = Field(default="report", exclude_if=lambda value: value == "report")
+    task: str = Field(min_length=1, max_length=MAX_AGENT_TASK_CHARS)
     # Only a named earlier original Fleet Step output may become untrusted model feedback.
     feedback: str | None = Field(default=None, max_length=240)
     when: StepCondition | None = None
@@ -472,7 +477,12 @@ class ResolvedLocalSearchAgentStep(ResolvedCommandStep):
         "provider-review",
         "provider-adjudicate",
         "provider-proposal",
+        "native",
     ] = "local-search"
+    role: AgentResultRole = Field(default="report", exclude_if=lambda value: value == "report")
+    native_agent: ResolvedNativeAgent | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
     connection: AgentConnection | None = Field(default=None, exclude_if=lambda value: value is None)
     review_context: str | None = Field(
@@ -481,6 +491,13 @@ class ResolvedLocalSearchAgentStep(ResolvedCommandStep):
 
     @model_validator(mode="after")
     def validate_readonly_tool_shape(self) -> "ResolvedLocalSearchAgentStep":
+        if self.harness == "native":
+            if self.native_agent is None:
+                raise ValueError("native Agent requires its exact resolved implementation")
+            if self.connection is not None or self.model is not None:
+                raise ValueError("native Agent retains its native model configuration")
+        elif self.native_agent is not None or self.role != "report":
+            raise ValueError("native role and implementation require a native Agent harness")
         if self.harness.startswith("provider-") != (self.connection is not None):
             raise ValueError("provider Agent requires a frozen connection")
         if (
@@ -693,6 +710,9 @@ class ResolvedFleetPlan(ImmutableModel):
     name: str
     description: str = ""
     execution: PlanExecutionPolicy
+    native_agent: ResolvedNativeAgent | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     requirements: tuple[RepositoryRequirement, ...] = Field(default_factory=tuple, max_length=64)
     imports: tuple[ResolvedImport, ...] = Field(default_factory=tuple, max_length=100)
     steps: tuple[ResolvedPlanStep, ...] = Field(min_length=1, max_length=50)
@@ -717,6 +737,7 @@ class ResolvedFleetPlan(ImmutableModel):
         step_sources: tuple[ResolvedStepSource, ...] = (),
         skill_sources: tuple[LockedSkillSource, ...] = (),
         configuration: PlanConfigurationEvidence | None = None,
+        native_agent: ResolvedNativeAgent | None = None,
     ) -> ResolvedFleetPlan:
         payload = {
             "contract_version": FLEET_PLAN_CONTRACT_VERSION,
@@ -730,6 +751,15 @@ class ResolvedFleetPlan(ImmutableModel):
                 item.model_dump(mode="json", exclude_computed_fields=True) for item in imports
             ],
             "steps": [step.model_dump(mode="json", exclude_computed_fields=True) for step in steps],
+            **(
+                {
+                    "native_agent": TypeAdapter(ResolvedNativeAgent).dump_python(
+                        native_agent, mode="json"
+                    )
+                }
+                if native_agent is not None
+                else {}
+            ),
             **(
                 {"skill_sources": [item.model_dump(mode="json") for item in skill_sources]}
                 if skill_sources
@@ -747,6 +777,7 @@ class ResolvedFleetPlan(ImmutableModel):
             step_sources=step_sources,
             skill_sources=skill_sources,
             configuration=configuration,
+            native_agent=native_agent,
         )
 
     @model_validator(mode="after")

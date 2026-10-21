@@ -112,6 +112,46 @@
         "title": "AgentConnection",
         "type": "object"
       },
+      "AgentHarnessObservation": {
+        "additionalProperties": false,
+        "description": "Bounded native-agent claim, distinct from supervisor and producer facts.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "agent",
+              "tool",
+              "context"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "native_event_id": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Event Id"
+          },
+          "summary": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "summary"
+        ],
+        "title": "AgentHarnessObservation",
+        "type": "object"
+      },
       "AgentModel": {
         "additionalProperties": false,
         "properties": {
@@ -2416,7 +2456,8 @@
               "discriminator": {
                 "mapping": {
                   "agent_review": "#/components/schemas/AgentReviewObservation",
-                  "dependency": "#/components/schemas/DependencyObservationSnapshot"
+                  "dependency": "#/components/schemas/DependencyObservationSnapshot",
+                  "native_agent": "#/components/schemas/NativeAgentObservation"
                 },
                 "propertyName": "kind"
               },
@@ -2426,6 +2467,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/AgentReviewObservation"
+                },
+                {
+                  "$ref": "#/components/schemas/NativeAgentObservation"
                 }
               ]
             },
@@ -4568,7 +4612,8 @@
               "discriminator": {
                 "mapping": {
                   "agent_review": "#/components/schemas/AgentReviewObservation",
-                  "dependency": "#/components/schemas/DependencyObservationSnapshot"
+                  "dependency": "#/components/schemas/DependencyObservationSnapshot",
+                  "native_agent": "#/components/schemas/NativeAgentObservation"
                 },
                 "propertyName": "kind"
               },
@@ -4578,6 +4623,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/AgentReviewObservation"
+                },
+                {
+                  "$ref": "#/components/schemas/NativeAgentObservation"
                 }
               ]
             },
@@ -11650,6 +11698,14 @@
             "title": "Kind",
             "type": "string"
           },
+          "native_agent_observations": {
+            "items": {
+              "$ref": "#/components/schemas/NativeAgentObservation"
+            },
+            "maxItems": 8,
+            "title": "Native Agent Observations",
+            "type": "array"
+          },
           "order": {
             "minimum": 1.0,
             "title": "Order",
@@ -14932,6 +14988,231 @@
         "title": "NamedGitPositionEvidence",
         "type": "object"
       },
+      "NativeAgentDefinition": {
+        "additionalProperties": false,
+        "description": "Caller-selected native program and public resources, never model settings.\n\nA configuration directory is an explicit public native configuration input.\nNative code owns its contents; Oh-Goon neither discovers nor copies them.",
+        "properties": {
+          "arguments": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Arguments",
+            "type": "array"
+          },
+          "configuration_directory": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Directory"
+          },
+          "executable": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executable"
+          },
+          "runtime_roots": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Runtime Roots",
+            "type": "array"
+          }
+        },
+        "title": "NativeAgentDefinition",
+        "type": "object"
+      },
+      "NativeAgentObservation": {
+        "additionalProperties": false,
+        "description": "Native protocol claims bound to the original source and Step occurrence.\n\nActual process results, resources, cancellation and verification remain in\nthe original Step evidence. A settled native conversation is not APP PASS.",
+        "properties": {
+          "agent": {
+            "enum": [
+              "opencode",
+              "pi",
+              "codex"
+            ],
+            "title": "Agent",
+            "type": "string"
+          },
+          "authority": {
+            "const": "UNTRUSTED_HARNESS_CLAIM",
+            "default": "UNTRUSTED_HARNESS_CLAIM",
+            "title": "Authority",
+            "type": "string"
+          },
+          "events": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AgentHarnessObservation"
+            },
+            "maxItems": 128,
+            "title": "Events",
+            "type": "array"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "boolean"
+          },
+          "implementation_identity": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Implementation Identity",
+            "type": "string"
+          },
+          "input_identity": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Input Identity",
+            "type": "string"
+          },
+          "kind": {
+            "const": "native_agent",
+            "default": "native_agent",
+            "title": "Kind",
+            "type": "string"
+          },
+          "native_event_count": {
+            "minimum": 0.0,
+            "title": "Native Event Count",
+            "type": "integer"
+          },
+          "occurrence": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Occurrence",
+            "type": "string"
+          },
+          "omitted_observations": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Observations",
+            "type": "integer"
+          },
+          "profile": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Profile",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "report",
+              "review",
+              "adjudication",
+              "proposal"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "settled": {
+            "title": "Settled",
+            "type": "boolean"
+          },
+          "source_identity": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Source Identity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "implementation_identity",
+          "profile",
+          "input_identity",
+          "occurrence",
+          "source_identity",
+          "role",
+          "native_event_count",
+          "settled",
+          "failed"
+        ],
+        "title": "NativeAgentObservation",
+        "type": "object"
+      },
+      "NativeAgentProfile": {
+        "additionalProperties": false,
+        "description": "Existing backend and resource policy selected for one native workload.",
+        "properties": {
+          "allowed_agents": {
+            "default": [
+              "opencode",
+              "pi",
+              "codex"
+            ],
+            "items": {
+              "enum": [
+                "opencode",
+                "pi",
+                "codex"
+              ],
+              "type": "string"
+            },
+            "title": "Allowed Agents",
+            "type": "array"
+          },
+          "backend": {
+            "default": "local",
+            "enum": [
+              "local",
+              "bubblewrap"
+            ],
+            "title": "Backend",
+            "type": "string"
+          },
+          "inference_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inference Profile"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/CicdResourcePolicy"
+          },
+          "timeout_seconds": {
+            "default": 7200.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 21600.0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          },
+          "workspace_roots": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Workspace Roots",
+            "type": "array"
+          }
+        },
+        "title": "NativeAgentProfile",
+        "type": "object"
+      },
       "NoDependencyUpdates": {
         "additionalProperties": false,
         "properties": {
@@ -18195,6 +18476,60 @@
         "title": "PlanSnapshotEvidence",
         "type": "object"
       },
+      "PlanStandardIsolationEvidence": {
+        "additionalProperties": false,
+        "description": "Observed ordinary sandbox execution, without strict source/runtime custody.",
+        "properties": {
+          "backend": {
+            "$ref": "#/components/schemas/PlanIsolationBackendEvidence"
+          },
+          "broker_socket_mounted": {
+            "title": "Broker Socket Mounted",
+            "type": "boolean"
+          },
+          "host_and_external_ip_networking": {
+            "const": "denied",
+            "default": "denied",
+            "title": "Host And External Ip Networking",
+            "type": "string"
+          },
+          "private_configuration_overlay": {
+            "default": false,
+            "title": "Private Configuration Overlay",
+            "type": "boolean"
+          },
+          "resource_owner": {
+            "enum": [
+              "none",
+              "systemd_user_scope"
+            ],
+            "title": "Resource Owner",
+            "type": "string"
+          },
+          "resources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanResourceEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "workspace_read_only": {
+            "title": "Workspace Read Only",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "backend",
+          "workspace_read_only",
+          "broker_socket_mounted",
+          "resource_owner"
+        ],
+        "title": "PlanStandardIsolationEvidence",
+        "type": "object"
+      },
       "PlanStepAttemptEvidence": {
         "additionalProperties": false,
         "properties": {
@@ -18354,6 +18689,16 @@
           "returncode": {
             "title": "Returncode",
             "type": "integer"
+          },
+          "standard_isolation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanStandardIsolationEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "stderr_evidence": {
             "$ref": "#/components/schemas/PlanOutputEvidence"
@@ -21863,6 +22208,16 @@
             "title": "Name",
             "type": "string"
           },
+          "native_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolvedNativeAgent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "plan_id": {
             "title": "Plan Id",
             "type": "string"
@@ -22657,7 +23012,8 @@
               "local-model-proposal",
               "provider-review",
               "provider-adjudicate",
-              "provider-proposal"
+              "provider-proposal",
+              "native"
             ],
             "title": "Harness",
             "type": "string"
@@ -22686,6 +23042,16 @@
               }
             ],
             "title": "Model"
+          },
+          "native_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolvedNativeAgent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "on_failure": {
             "$ref": "#/components/schemas/StepFailurePolicy",
@@ -22720,6 +23086,17 @@
               }
             ],
             "title": "Review Context"
+          },
+          "role": {
+            "default": "report",
+            "enum": [
+              "report",
+              "review",
+              "adjudication",
+              "proposal"
+            ],
+            "title": "Role",
+            "type": "string"
           },
           "source_step_id": {
             "maxLength": 80,
@@ -22815,6 +23192,69 @@
           "source_step_id"
         ],
         "title": "ResolvedLocalSearchAgentStep",
+        "type": "object"
+      },
+      "ResolvedNativeAgent": {
+        "description": "Resolved host facts transported unchanged to the existing execution owner.",
+        "properties": {
+          "agent": {
+            "enum": [
+              "opencode",
+              "pi",
+              "codex"
+            ],
+            "title": "Agent",
+            "type": "string"
+          },
+          "backend_configuration_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backend Configuration Id"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentConnection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "definition": {
+            "$ref": "#/components/schemas/NativeAgentDefinition"
+          },
+          "executable_sha256": {
+            "title": "Executable Sha256",
+            "type": "string"
+          },
+          "interactive": {
+            "default": false,
+            "title": "Interactive",
+            "type": "boolean"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/NativeAgentProfile"
+          },
+          "profile_name": {
+            "title": "Profile Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "profile_name",
+          "definition",
+          "profile",
+          "executable_sha256"
+        ],
+        "title": "ResolvedNativeAgent",
         "type": "object"
       },
       "ResolvedOciBuildStep": {
@@ -28203,7 +28643,8 @@
               "discriminator": {
                 "mapping": {
                   "agent_review": "#/components/schemas/AgentReviewObservation",
-                  "dependency": "#/components/schemas/DependencyObservationSnapshot"
+                  "dependency": "#/components/schemas/DependencyObservationSnapshot",
+                  "native_agent": "#/components/schemas/NativeAgentObservation"
                 },
                 "propertyName": "kind"
               },
@@ -28213,6 +28654,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/AgentReviewObservation"
+                },
+                {
+                  "$ref": "#/components/schemas/NativeAgentObservation"
                 }
               ]
             },

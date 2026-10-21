@@ -180,6 +180,8 @@ def bind_command_runtime_authority(
     child_env: Mapping[str, str],
     cwd: Path | None,
     binding: RuntimeAuthorityBinding | None,
+    *,
+    preserve_native_executable_path: bool = False,
 ) -> CommandRuntimeAuthorityLease:
     if not argv:
         raise ValueError("command argv must be nonempty")
@@ -187,7 +189,7 @@ def bind_command_runtime_authority(
     executable_path = _resolve_runtime_executable(argv[0], path_value, cwd)
     _require_runtime_executable_access(executable_path, display_name=argv[0])
     admitted = binding or RuntimeAuthorityBinding()
-    if atomic_execution_bytes_supported():
+    if atomic_execution_bytes_supported() and not preserve_native_executable_path:
         return _bind_atomic_command_runtime(
             argv,
             child_env=child_env,

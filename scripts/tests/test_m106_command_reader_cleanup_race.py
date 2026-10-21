@@ -31,6 +31,7 @@ class _CloseWhileReadIsBlocked:
 def test_owned_pipe_close_does_not_escape_from_output_reader_thread() -> None:
     pipe = _CloseWhileReadIsBlocked()
     capture = TextCapture(limit_bytes=None, overflow=Event())
+    errors: list[BaseException] = []
     uncaught: list[BaseException | None] = []
     previous_hook = threading.excepthook
 
@@ -39,7 +40,7 @@ def test_owned_pipe_close_does_not_escape_from_output_reader_thread() -> None:
 
     threading.excepthook = record_uncaught
     try:
-        reader = _reader(pipe, "stdout", capture, observer=None)
+        reader = _reader(pipe, "stdout", capture, observer=None, errors=errors)
         reader.start()
         assert pipe.entered.wait(timeout=1), "reader never entered pipe.read()"
         pipe.close()
@@ -49,3 +50,4 @@ def test_owned_pipe_close_does_not_escape_from_output_reader_thread() -> None:
         threading.excepthook = previous_hook
 
     assert uncaught == []
+    assert errors == []

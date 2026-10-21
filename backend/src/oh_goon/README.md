@@ -56,7 +56,7 @@ service or reacquiring source paths.
 and bounded untrusted submission data. It reuses the original frozen source
 contract and remains separate from execution admission and typed role-result
 acceptance. The [Agent runtime inventory](../../../docs/development/AGENT_RUNTIME_OWNERS.md)
-describes its current scope and the remaining native adapter integration.
+describes its native consumers and the retained typed result owners.
 
 ### [engine/](engine/)
 
@@ -65,6 +65,12 @@ Native local command/Git/project execution primitives and the focused operation 
 ### [integrations/](integrations/)
 
 Concrete effect boundaries: filesystem/process/container/isolation/VCS/OCI/Kubernetes/OpenSandbox and other host/external operations. These modules implement effects already admitted/resolved elsewhere; they should not become a second policy or plan-resolution authority.
+
+Native Agent Steps start in `fleet_plan_native_steps.py`; command/event translation
+is in `agent_native_execution.py`. Ordinary isolated profiles reuse
+`fleet_plan_process_isolation.py` and the existing Bubblewrap backend. The private
+inference broker/relay carry only the selected model protocol. All native processes,
+PTY transport and cancellation still use the original engine command owner.
 
 ### [runtime/](runtime/)
 

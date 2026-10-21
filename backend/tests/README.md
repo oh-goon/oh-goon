@@ -17,6 +17,12 @@ cli*.py and application.py              tests/unit/entrypoints/
 
 There are no flat `tests/unit/test_*.py` files. If a test proves a service that calls runtime and integrations, it still belongs in `services/` when the service behavior is the subject.
 
+Tests requiring the real `httpx2` transport live in
+[`tests/dependency_complete/`](dependency_complete/), including the native model
+broker and receiver transport tests. This keeps dependency-complete HTTP imports
+out of ordinary unit collection. Full backend validation includes this surface;
+portable native argument and event contracts remain in `tests/unit/integrations/`.
+
 The scoped [Scout package](../src/oh_goon/scout/) keeps projection tests in `tests/unit/core/`, persistence tests in `tests/unit/runtime/`, public use-case tests in `tests/unit/services/`, and HTTP integration in `tests/integration/api/`. [Native issuer](../src/oh_goon/native_issuer/) behavior uses `tests/unit/services/`. Repository-tooling regressions, including architecture checks and installed-wheel/source qualification, belong in root [scripts/tests/](../../scripts/tests/); their Python implementation living under the backend does not make them backend product tests.
 
 ## Backend integration tests

@@ -4,14 +4,30 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import stat
 import sys
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 from pydantic import ValidationError
 
-from oh_goon.core.models.agent_providers import AgentProviderError, AgentProvidersConfig
+from oh_goon.core.models.agent_providers import (
+    DEFAULT_NATIVE_AGENT_PROFILE,
+    AgentConnection,
+    AgentProviderError,
+    AgentProvidersConfig,
+    NativeAgentDefinition,
+    NativeAgentName,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
+from oh_goon.integrations.agent_native_execution import (
+    native_executable_sha256,
+    validate_native_agent_arguments,
+)
 from oh_goon.integrations.exact_file_write import (
     exact_file_write_lock,
     prepared_text_file,
@@ -84,7 +100,153 @@ def load_agent_providers(path: Path) -> AgentProvidersConfig:
         else provider
         for name, provider in config.providers.items()
     }
-    return config.model_copy(update={"providers": providers})
+    native_agents = {
+        name: definition.model_copy(
+            update={
+                "executable": _configuration_path(path, definition.executable),
+                "runtime_roots": tuple(
+                    str((path.parent / Path(root).expanduser()).resolve())
+                    for root in definition.runtime_roots
+                ),
+                "configuration_directory": _configuration_path(
+                    path, definition.configuration_directory
+                ),
+            }
+        )
+        for name, definition in config.native_agents.items()
+    }
+    native_profiles = {
+        name: profile.model_copy(
+            update={
+                "workspace_roots": tuple(
+                    str((path.parent / Path(root).expanduser()).resolve())
+                    for root in profile.workspace_roots
+                )
+            }
+        )
+        for name, profile in config.native_profiles.items()
+    }
+    return config.model_copy(
+        update={
+            "providers": providers,
+            "native_agents": native_agents,
+            "native_profiles": native_profiles,
+        }
+    )
+
+
+def _configuration_path(catalog: Path, value: str | None) -> str | None:
+    return None if value is None else str((catalog.parent / Path(value).expanduser()).resolve())
+
+
+def resolve_native_agent(
+    config: AgentProvidersConfig,
+    agent: str,
+    profile_name: str,
+    *,
+    workspace: Path,
+    environment: Mapping[str, str],
+) -> ResolvedNativeAgent:
+    """Resolve one native program through OS lookup and explicit caller policy.
+
+    The caller loads its catalog once, or explicitly selects an empty native
+    catalog. This function never reads another catalog, native agent settings,
+    credentials, package metadata or model inventory and never installs a tool.
+    A workspace path is checked against policy, not promoted to workspace authority.
+    """
+    if agent not in ("opencode", "pi", "codex"):
+        raise AgentProviderError("Select a supported native agent: opencode, pi or codex")
+    name = cast(NativeAgentName, agent)
+    profile = config.native_profiles.get(profile_name)
+    if profile is None:
+        if profile_name == "local":
+            profile = NativeAgentProfile(backend="local")
+        elif profile_name == "isolated-offline":
+            profile = NativeAgentProfile(backend="bubblewrap")
+        elif profile_name == DEFAULT_NATIVE_AGENT_PROFILE:
+            profile = NativeAgentProfile(
+                backend="bubblewrap", inference_profile=config.default_model
+            )
+        else:
+            raise AgentProviderError("Select a configured native execution profile")
+    if name not in profile.allowed_agents:
+        raise AgentProviderError("Selected native agent is not allowed by the execution profile")
+    try:
+        selected_workspace = workspace.resolve(strict=True)
+        if not selected_workspace.is_dir():
+            raise OSError("not a directory")
+        workspace_roots = tuple(
+            _existing_native_path(root, directory=True) for root in profile.workspace_roots
+        )
+    except OSError:
+        raise AgentProviderError(
+            "Selected native workspace or policy root is unavailable"
+        ) from None
+    if workspace_roots and not any(
+        selected_workspace.is_relative_to(root) for root in workspace_roots
+    ):
+        raise AgentProviderError(
+            "Selected native workspace is outside the profile's workspace roots"
+        )
+    definition = config.native_agents.get(name, NativeAgentDefinition())
+    validate_native_agent_arguments(name, definition.arguments)
+    executable = definition.executable
+    if executable is None:
+        executable = shutil.which(name, path=environment.get("PATH", ""))
+        if executable is None:
+            raise AgentProviderError("Selected native agent is not installed on the supplied PATH")
+    try:
+        selected_executable = _existing_native_path(executable, directory=False)
+        runtime_roots = tuple(_existing_native_path(root) for root in definition.runtime_roots)
+        configuration = (
+            _existing_native_path(definition.configuration_directory, directory=True)
+            if definition.configuration_directory is not None
+            else None
+        )
+        digest = native_executable_sha256(selected_executable)
+    except OSError:
+        raise AgentProviderError(
+            "Selected native executable or public resource is unavailable"
+        ) from None
+    frozen_definition = definition.model_copy(
+        deep=True,
+        update={
+            "executable": str(selected_executable),
+            "runtime_roots": tuple(str(root) for root in runtime_roots),
+            "configuration_directory": str(configuration) if configuration is not None else None,
+        },
+    )
+    frozen_profile = profile.model_copy(
+        deep=True, update={"workspace_roots": tuple(str(root) for root in workspace_roots)}
+    )
+    connection = (
+        AgentConnection.select(config, profile.inference_profile)
+        if profile.inference_profile is not None
+        else None
+    )
+    return ResolvedNativeAgent(
+        agent=name,
+        profile_name=profile_name,
+        definition=frozen_definition,
+        profile=frozen_profile,
+        executable_sha256=digest,
+        connection=connection,
+    )
+
+
+def _existing_native_path(value: str, *, directory: bool | None = None) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise OSError("native paths must already be resolved")
+    path = path.resolve(strict=True)
+    mode = path.stat().st_mode
+    if directory is True and not stat.S_ISDIR(mode):
+        raise OSError("not a directory")
+    if directory is False and not stat.S_ISREG(mode):
+        raise OSError("not a regular executable")
+    if directory is None and not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+        raise OSError("not a native file or directory")
+    return path
 
 
 def create_agent_providers(path: Path, config: AgentProvidersConfig) -> Path:

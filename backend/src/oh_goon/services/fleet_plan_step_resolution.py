@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING
 from oh_goon.core.errors import FleetExtensionInvalid, FleetPlanInvalid
 from oh_goon.core.fleet_plan_git import resolve_git_step
 from oh_goon.core.fleet_plan_values import PipelineValueCompiler
+from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.fleet_plan import (
     AgentPlanStep,
+    AgentResultRole,
     CommandPlanStep,
     ExtensionPlanStep,
     GitPlanStep,
@@ -44,6 +46,33 @@ from oh_goon.services.fleet_plan_resolution_context import FleetPlanResolutionCo
 
 if TYPE_CHECKING:
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+
+
+def bind_native_agent_effects(
+    step: AgentPlanStep, native_agent: ResolvedNativeAgent | None
+) -> AgentPlanStep:
+    """Bind the existing provider marker once before freezing native Step meaning."""
+    if step.harness != "native" or native_agent is None:
+        return step
+    expected = (
+        (native_agent.connection.provider_name,) if native_agent.connection is not None else ()
+    )
+    recipients = step.requested_effects.recipients
+    if recipients == ("configured_model",):
+        if not expected:
+            raise FleetPlanInvalid(
+                "Native configured_model requires its selected managed inference connection"
+            )
+        return step.model_copy(
+            update={
+                "requested_effects": step.requested_effects.model_copy(
+                    update={"recipients": expected}
+                )
+            }
+        )
+    if recipients != expected:
+        raise FleetPlanInvalid("native inference disclosure differs from the selected recipient")
+    return step
 
 
 def resolve_plan_step(
@@ -88,7 +117,9 @@ def resolve_plan_step(
         connection = context.agent_connection if step.harness.startswith("provider-") else None
         if step.harness.startswith("provider-") and callable(connection):
             connection = connection()
-        resolved = resolve_delivered_local_search_agent_step(handoff, connection=connection)
+        resolved = resolve_delivered_local_search_agent_step(
+            handoff, connection=connection, native_agent=context.native_agent, role=step.role
+        )
         if step.feedback is not None:
             from oh_goon.core.fleet_plan_output_refs import step_output_reference
             from oh_goon.core.models.fleet_plan_step_primitives import StepStatusCondition
@@ -262,6 +293,8 @@ def resolve_delivered_local_search_agent_step(
     handoff: "FrozenAgentStepHandoff",
     *,
     connection=None,
+    native_agent: ResolvedNativeAgent | None = None,
+    role: AgentResultRole = "report",
 ) -> ResolvedLocalSearchAgentStep:
     """Preserve the typed Agent Step across the original resolved-Step boundary.
 
@@ -275,6 +308,42 @@ def resolve_delivered_local_search_agent_step(
         raise FleetPlanInvalid("resolved Agent Step requires original frozen handoff")
     handoff.verify()
     requested = handoff.requested_effects
+    if handoff.harness == "native":
+        if not isinstance(native_agent, ResolvedNativeAgent):
+            raise FleetPlanInvalid("native Agent requires an explicitly resolved native selection")
+        if (
+            role not in {"report", "review", "adjudication", "proposal"}
+            or requested.capabilities.egress.mode != "none"
+            or requested.capabilities.nested_strict_execution
+            or requested.capabilities.tools
+            or requested.model is not None
+        ):
+            raise FleetPlanInvalid("native Agent has unsupported role, egress or model overrides")
+        if role != "report" and requested.repository_access != "read_only":
+            raise FleetPlanInvalid("native phase results require read-only proposal/review effects")
+        if role != "report" and native_agent.interactive:
+            raise FleetPlanInvalid("native phase results require headless structured output")
+        if requested.repository_access == "read_only" and native_agent.profile.backend == "local":
+            raise FleetPlanInvalid("native read-only effects require physical workspace isolation")
+        expected_recipients = (
+            (native_agent.connection.provider_name,) if native_agent.connection is not None else ()
+        )
+        if requested.recipients != expected_recipients:
+            raise FleetPlanInvalid(
+                "native inference disclosure differs from the selected recipient"
+            )
+        return ResolvedLocalSearchAgentStep(
+            step_id=handoff.step_id,
+            argv=("python",),
+            success_codes=(0,),
+            timeout_seconds=handoff.timeout_seconds,
+            delivery_sha256=hashlib.sha256(handoff.encode_prework_delivery()).hexdigest(),
+            handoff_identity=handoff.handoff_identity,
+            source_step_id=handoff.step_id,
+            harness="native",
+            role=role,
+            native_agent=native_agent,
+        )
     if (
         handoff.harness
         not in (

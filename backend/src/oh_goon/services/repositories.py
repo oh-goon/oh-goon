@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 
 from oh_goon.core.errors import RepositoryNotManaged, StateConflict
@@ -82,5 +83,5 @@ class RepositoryService:
             raise StateConflict("Repository instance changed since the scope state was displayed")
         return entry, captured.durable_revision, str(entry.repository.path) in captured.exclusions
 
-    def exclusions(self) -> list[dict[str, str]]:
+    def exclusions(self) -> builtins.list[dict[str, str]]:
         return self._state.exclusions()

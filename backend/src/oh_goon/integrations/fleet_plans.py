@@ -30,6 +30,7 @@ from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import EffectBoundaryKind, OperationAction, Verdict
 from oh_goon.core.vocabulary.result_semantics import CanonicalResultStatus
+from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
@@ -82,6 +83,9 @@ class FleetPlanRunner:
         output_observer_factory: StepOutputObserverFactory | None = None,
         lifecycle_observer_factory: StepLifecycleObserverFactory | None = None,
         diagnostics: DiagnosticEmitter | None = None,
+        terminal: CommandTerminal | None = None,
+        standard_process_isolation: ProcessIsolationBackend | None = None,
+        workspace_pin=None,
     ) -> None:
         self._git = git
         self._content_store = content_store
@@ -96,6 +100,9 @@ class FleetPlanRunner:
             content_store=content_store,
             run_parent=run_parent,
             diagnostics=diagnostics,
+            terminal=terminal,
+            standard_process_isolation=standard_process_isolation,
+            workspace_pin=workspace_pin,
         )
 
     def effect_boundary(self, target: OperationTarget | None) -> EffectBoundaryKind:
@@ -188,6 +195,7 @@ class FleetPlanRunner:
             attempt.repository.path,
             target.plan,
             cancel_requested=request.cancel_requested,
+            termination_requested=request.termination_requested,
             output_observer=self._output_observer(request),
             fleet_run_id=attempt.fleet_run_id,
             repository_id=attempt.repository.repository_id,
@@ -202,7 +210,12 @@ class FleetPlanRunner:
             if target.agent_repair is not None
             else None,
         )
-        after = self._git.fingerprint(attempt.repository.path, request.cancel_requested)
+        after = self._steps.observe_repository(
+            attempt.repository.path,
+            target.plan,
+            request.cancel_requested,
+            termination_requested=request.termination_requested,
+        ).fingerprint
         return self._operation_execution(request, execution, after=after)
 
     def _agent_delivery_for(self, target: FleetPlanTarget, repository_id: str):

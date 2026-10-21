@@ -1,0 +1,14 @@
+version: 1
+inputs:
+  repo: {type: repository_reference}
+  skill: {type: skill_reference}
+  goal: {default: Follow the selected Skill.}
+  acceptance: {type: acceptance_profile, default: native-coding}
+steps:
+- uses: agent
+  harness: native
+  role: report
+  task: ${{ inputs.goal }}
+  requested_effects:
+    repository_access: write
+    recipients: [configured_model]

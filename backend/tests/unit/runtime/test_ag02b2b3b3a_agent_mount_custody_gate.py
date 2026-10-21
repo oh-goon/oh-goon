@@ -132,10 +132,19 @@ def test_shared_guard_is_on_original_intent_projection_and_bwrap_pre_effect_cut(
         if isinstance(n, ast.ClassDef) and n.name == "BubblewrapProcessIsolation"
     )
     execute = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "execute")
-    assert isinstance(execute.body[0], ast.Expr)
-    assert isinstance(execute.body[0].value, ast.Call)
-    assert isinstance(execute.body[0].value.func, ast.Name)
-    assert execute.body[0].value.func.id == "require_original_agent_source_mount_authority"
+    # Ordinary namespace requests dispatch separately. The original strict
+    # request must still cross its shared guard before backend verification;
+    # the behavioral negatives above prove refusal before native effects.
+    strict_calls = [
+        statement.value.func.id
+        for statement in execute.body
+        if isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Name)
+    ]
+    assert strict_calls.index("require_original_agent_source_mount_authority") < strict_calls.index(
+        "verify_selected_backend"
+    )
     prepare = next(
         n for n in bwrap.body if isinstance(n, ast.FunctionDef) and n.name == "_prepare_mounts"
     )
@@ -174,6 +183,15 @@ def test_x0_architecture_rejects_mutation_of_original_pre_effect_path(tmp_path):
     baseline = (injected / names[1]).read_text()
     (injected / names[1]).write_text(
         baseline.replace("        require_original_agent_source_mount_authority(request)\n", "", 1)
+    )
+    assert any(
+        "before effects" in issue.message for issue in _check_original_agent_mount_gate(tmp_path)
+    )
+    (injected / names[1]).write_text(baseline)
+    (injected / names[1]).write_text(
+        baseline.replace(
+            "isinstance(request, StandardIsolatedProcessRequest)", "isinstance(request, object)", 1
+        )
     )
     assert any(
         "before effects" in issue.message for issue in _check_original_agent_mount_gate(tmp_path)

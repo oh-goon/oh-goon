@@ -11,7 +11,7 @@ import type {
   ResolvedExecutionReference,
 } from "@generated/models";
 
-import { LONG_GOON_NAME, LONG_STEP_NAME } from "./identities";
+import { LONG_GOON_NAME, LONG_NATIVE_INPUT_IDENTITY, LONG_STEP_NAME } from "./identities";
 import { FIXTURE_FLEET_PLAN_TARGET, FIXTURE_SHA } from "./plans";
 import { FIXTURE_FINISHED, FIXTURE_NOW } from "./time";
 
@@ -229,6 +229,22 @@ function fixtureStep(
     stderr_evidence: null,
     reason: failed ? "The exact Step failure text is intentionally long so browser visibility tests can verify wrapping, zoom and evidence readability." : null,
     failure: failed ? { exit_code: 1, reason_code: "FIXTURE_LONG_FAILURE", signature_id: "fixture-failure-signature", raw_log_available: false, evidence_stream: "stderr", evidence_line_count: 1, evidence_byte_count: 128, evidence_sha256: FIXTURE_SHA, attempt: 1 } : null,
+    native_agent_observations: failed ? [{
+      kind: "native_agent",
+      agent: "pi",
+      implementation_identity: `pi:sha256:${FIXTURE_SHA}`,
+      profile: "isolated-managed",
+      input_identity: LONG_NATIVE_INPUT_IDENTITY,
+      occurrence: stepId,
+      source_identity: `sha256:${FIXTURE_SHA}`,
+      role: "report",
+      events: [{ kind: "context", summary: "pi: auto_compaction_end", native_event_id: null }],
+      native_event_count: 6003,
+      omitted_observations: 5874,
+      settled: true,
+      failed: false,
+      authority: "UNTRUSTED_HARNESS_CLAIM",
+    }] : [],
   };
 }
 

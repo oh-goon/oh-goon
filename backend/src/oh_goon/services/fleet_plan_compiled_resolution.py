@@ -42,7 +42,7 @@ from oh_goon.services.fleet_plan_input_resolution import (
     resolve_input_sources,
 )
 from oh_goon.services.fleet_plan_resolution_context import FleetPlanResolutionContext
-from oh_goon.services.fleet_plan_step_resolution import resolve_plan_step
+from oh_goon.services.fleet_plan_step_resolution import bind_native_agent_effects, resolve_plan_step
 
 
 def resolve_compiled_steps(
@@ -105,6 +105,8 @@ def resolve_compiled_steps(
         step = qualify_step_dependencies(
             step, prefix, goon_aliases, preserved_step_ids=external_step_ids
         )
+        if isinstance(step, AgentPlanStep):
+            step = bind_native_agent_effects(step, context.native_agent)
         agent_handoff = None
         if isinstance(step, AgentPlanStep) and context.agent_capture is not None:
             assert isinstance(raw_step, AgentPlanStep)

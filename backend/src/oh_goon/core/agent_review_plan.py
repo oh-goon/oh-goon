@@ -5,11 +5,30 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.fleet_plan import (
+    AgentResultRole,
+    ResolvedLocalSearchAgentStep,
+    ResolvedPlanStep,
+)
 
 if TYPE_CHECKING:
     from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 
 PHASES = ("review", "adjudicate", "repair", "regression", "verification")
+
+
+def agent_phase_role(step: ResolvedPlanStep) -> AgentResultRole | None:
+    """Native author role and historical provider harnesses share one phase meaning."""
+    if not isinstance(step, ResolvedLocalSearchAgentStep):
+        return None
+    if step.harness == "native":
+        return step.role
+    roles: dict[str, AgentResultRole] = {
+        "provider-review": "review",
+        "provider-adjudicate": "adjudication",
+        "provider-proposal": "proposal",
+    }
+    return roles.get(step.harness)
 
 
 def agent_review_phases(plan: ResolvedFleetPlan) -> dict[str, tuple[str, ...]]:
@@ -40,22 +59,18 @@ def agent_review_phases(plan: ResolvedFleetPlan) -> dict[str, tuple[str, ...]]:
         )
     steps = {step.step_id: step for step in plan.steps}
     for phase in ("review", "adjudicate"):
-        expected = "provider-review" if phase == "review" else "provider-adjudicate"
-        if any(getattr(steps[item], "harness", None) != expected for item in selected[phase]):
+        expected = "review" if phase == "review" else "adjudication"
+        if any(agent_phase_role(steps[item]) != expected for item in selected[phase]):
             raise FleetPlanInvalid(f"{phase} phase requires read-only {expected} Agent Steps")
     if len(selected["adjudicate"]) != 1:
         raise FleetPlanInvalid("adjudicate phase requires exactly one Agent Step")
     repair = [steps[item] for item in selected["repair"]]
-    if (
-        len(repair) != 2
-        or getattr(repair[0], "harness", None) != "provider-proposal"
-        or repair[1].kind != "command"
-    ):
+    if len(repair) != 2 or agent_phase_role(repair[0]) != "proposal" or repair[1].kind != "command":
         raise FleetPlanInvalid(
             "repair phase requires one read-only proposal Agent followed by native batch apply"
         )
     for phase in ("regression", "verification"):
-        if any(steps[item].kind == "agent" for item in selected[phase]):
+        if any(isinstance(steps[item], ResolvedLocalSearchAgentStep) for item in selected[phase]):
             raise FleetPlanInvalid(f"{phase} requires native verification Steps")
     for step in plan.steps:
         if (

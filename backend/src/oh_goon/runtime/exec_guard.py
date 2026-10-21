@@ -49,6 +49,20 @@ def _ensure_owned_session() -> None:
         os.setsid()
 
 
+def _attach_controlling_terminal() -> None:
+    """Acquire only the private slave already wired by the command owner."""
+    requested = os.environ.pop(exec_guard_protocol.CONTROLLING_TERMINAL_ENV, None)
+    if requested is None:
+        return
+    if requested != "1" or not os.isatty(0):
+        raise SystemExit("exec guard controlling terminal is invalid")
+    import fcntl
+    import termios
+
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+    os.tcsetpgrp(0, os.getpgrp())
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
@@ -64,7 +78,17 @@ def main(argv: list[str] | None = None) -> int:
     if expected_parent_pid <= 0:
         raise SystemExit("exec guard parent identity is invalid")
     _set_parent_death_signal(expected_parent_pid=expected_parent_pid)
+    _attach_controlling_terminal()
     raw_exec_fd = os.environ.pop(exec_guard_protocol.EXEC_FD_ENV, None)
+    observed_path = os.environ.pop(exec_guard_protocol.OBSERVED_EXECUTABLE_ENV, None)
+    if observed_path is not None:
+        if raw_exec_fd is not None or not os.path.isabs(observed_path) or "\x00" in observed_path:
+            raise SystemExit("exec guard observational execution path is invalid")
+        # The original command owner resolved this path. Let the kernel and
+        # native /usr/bin/env retain shebang/PATH semantics; this is not atomic
+        # execution or a second interpreter resolver.
+        os.execvpe(observed_path, args, os.environ)
+        raise AssertionError("os.execvpe returned")  # pragma: no cover
     if sys.platform.startswith("linux") and raw_exec_fd is None:
         raise SystemExit("exec guard execution descriptor is missing")
     if raw_exec_fd is not None:

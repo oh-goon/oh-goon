@@ -5,9 +5,20 @@ from types import SimpleNamespace
 import pytest
 
 from oh_goon.core import local_access_protocol
+from oh_goon.core.agent_review_plan import agent_phase_role
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.agent_providers import (
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
+from oh_goon.core.models.agent_review import AgentReviewRecord, review_scope
+from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
+from oh_goon.engine.command import CommandResult
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
 from oh_goon.integrations.agent_review_execution import (
+    accept_agent_phase_output,
+    agent_phase_output_contract,
     execute_provider_agent,
     provider_agent_request,
 )
@@ -93,6 +104,246 @@ def test_oversized_complete_source_fails_before_provider_process_or_scratch_payl
             repository_evidence="Producer-qualified repository orientation",
         )
     assert not list(scratch.iterdir())
+
+
+def native_phase_case(tmp_path):
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+    )
+    resolver, path, repo, options = agent_review_case(tmp_path, native_agent=selected)
+    plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    return plan, handoffs, repo
+
+
+def review_record(step, handoff):
+    member = next(
+        member for member in handoff.source.repository.members if member.path == "code.txt"
+    )
+    return AgentReviewRecord(
+        reviewer=step.step_id,
+        candidate_identity=handoff.source.repository.content_identity,
+        scope_identity=review_scope(handoff),
+        skill_identity=handoff.source.skill.content_identity,
+        verdict="FINDING",
+        summary="Reproduced defect",
+        reviewed_paths=tuple("repo/" + member.path for member in handoff.source.repository.members),
+        findings=[
+            dict(
+                finding_id="f1",
+                explanation="broken source",
+                evidence=[dict(path="repo/code.txt", sha256=member.sha256, line=1)],
+            )
+        ],
+    )
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_shared_phase_acceptor_preserves_existing_review_contract(tmp_path, native):
+    if native:
+        plan, handoffs, _ = native_phase_case(tmp_path)
+    else:
+        resolver, path, _, options = agent_review_case(tmp_path)
+        plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    step = plan.steps[0]
+    handoff = handoffs[step.step_id]
+    record = review_record(step, handoff)
+    result = accept_agent_phase_output(
+        step,
+        handoff,
+        StepOutcome(argv=("selected",), returncode=0, stdout=record.model_dump_json()),
+    )
+    assert result.returncode == 0
+    assert isinstance(result.observations[0], AgentReviewObservation)
+    assert result.observations[0].record == record
+    assert 'schema="oh-goon.agent-review/v1"' in agent_phase_output_contract(step)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["candidate_identity", "scope_identity", "skill_identity", "reviewer", "reviewed_paths"],
+)
+def test_native_review_rejects_wrong_source_skill_occurrence_and_omission(tmp_path, field):
+    plan, handoffs, _ = native_phase_case(tmp_path)
+    step = plan.steps[0]
+    handoff = handoffs[step.step_id]
+    record = review_record(step, handoff).model_copy(
+        update={field: () if field == "reviewed_paths" else "other"}
+    )
+    with pytest.raises(FleetPlanInvalid):
+        accept_agent_phase_output(
+            step, handoff, StepOutcome(argv=("pi",), returncode=0, stdout=record.model_dump_json())
+        )
+
+
+def test_native_review_appends_typed_claim_without_losing_native_observations(tmp_path):
+    plan, handoffs, _ = native_phase_case(tmp_path)
+    step = plan.steps[0]
+    handoff = handoffs[step.step_id]
+    native = NativeAgentObservation(
+        agent="pi",
+        implementation_identity="pi:sha256:" + "a" * 64,
+        profile="isolated",
+        input_identity="input",
+        occurrence=step.step_id,
+        source_identity=handoff.source.repository.content_identity,
+        role="review",
+        native_event_count=1,
+        settled=True,
+        failed=False,
+    )
+    outcome = StepOutcome(
+        argv=("pi",),
+        returncode=0,
+        stdout=review_record(step, handoff).model_dump_json(),
+        observations=(native,),
+    )
+    result = accept_agent_phase_output(step, handoff, outcome)
+    assert result.observations[0] is native
+    assert len(result.observations) == 2
+    assert isinstance(result.observations[1], AgentReviewObservation)
+
+
+def test_failed_native_process_cannot_publish_a_false_clean_phase_result(tmp_path):
+    plan, handoffs, _ = native_phase_case(tmp_path)
+    step = plan.steps[0]
+    outcome = StepOutcome(
+        argv=("pi",),
+        returncode=17,
+        stdout='{"verdict":"CLEAN"}',
+        stderr="native failure",
+        physical_execution_id="original",
+    )
+    assert accept_agent_phase_output(step, handoffs[step.step_id], outcome) is outcome
+
+
+def test_provider_adapter_still_rejects_untyped_clean_after_zero_exit(tmp_path):
+    resolver, path, _, options = agent_review_case(tmp_path)
+    plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    step = plan.steps[0]
+    scratch = tmp_path / "provider-scratch"
+    scratch.mkdir()
+    process = SimpleNamespace(
+        host_environment={},
+        environment={},
+        paths=SimpleNamespace(tmp=scratch),
+        command_runner=lambda *args, **kwargs: CommandResult(
+            0, '{"verdict":"CLEAN"}', "", argv=("provider",)
+        ),
+    )
+    runtime = SimpleNamespace(cancel_requested=None, runtime_supervision=None)
+    with pytest.raises(FleetPlanInvalid, match="record schema"):
+        execute_provider_agent(
+            step,
+            handoffs[step.step_id],
+            process,
+            runtime,
+            timeout=1,
+            repository_evidence="Producer-qualified evidence",
+        )
+    assert not list(scratch.iterdir())
+
+
+@pytest.mark.parametrize("attack", [None, "bad_queue", "omitted_finding"])
+def test_native_adjudication_uses_original_exact_finding_partition(tmp_path, attack):
+    plan, handoffs, _ = native_phase_case(tmp_path)
+    review = review_record(plan.steps[0], handoffs[plan.steps[0].step_id])
+    step = next(step for step in plan.steps if agent_phase_role(step) == "adjudication")
+    step = step.model_copy(
+        update={"review_context": json.dumps({"reviews": [review.model_dump(mode="json")]})}
+    )
+    record = dict(
+        schema="oh-goon.agent-adjudication/v1",
+        candidate_identity=review.candidate_identity,
+        scope_identity=review.scope_identity,
+        dispositions=[
+            dict(
+                reviewer=review.reviewer, finding_id="f1", decision="repair", rationale="one defect"
+            )
+        ],
+        queue=[
+            dict(
+                queue_id="q1",
+                findings=[dict(reviewer=review.reviewer, finding_id="f1")],
+                rationale="one causal root",
+                regression_expectation="reproduce defect",
+            )
+        ],
+    )
+    if attack == "bad_queue":
+        record["queue"][0]["findings"] = []
+    elif attack == "omitted_finding":
+        record["dispositions"] = []
+    outcome = StepOutcome(argv=("pi",), returncode=0, stdout=json.dumps(record))
+    if attack:
+        with pytest.raises(FleetPlanInvalid):
+            accept_agent_phase_output(step, handoffs[step.step_id], outcome)
+    else:
+        result = accept_agent_phase_output(step, handoffs[step.step_id], outcome)
+        assert isinstance(result.observations[0], AgentReviewObservation)
+        assert result.observations[0].record.queue[0].queue_id == "q1"
+
+
+@pytest.mark.parametrize(
+    "attack", [None, "wrong_candidate", "wrong_preimage", "bad_queue", "omitted_regression"]
+)
+def test_native_proposal_retains_preimage_and_regression_queue_checks(tmp_path, attack):
+    plan, handoffs, repo = native_phase_case(tmp_path)
+    step = next(step for step in plan.steps if agent_phase_role(step) == "proposal")
+    handoff = handoffs[step.step_id]
+    member = next(
+        member for member in handoff.source.repository.members if member.path == "code.txt"
+    )
+    step = step.model_copy(
+        update={
+            "review_context": json.dumps(
+                {"adjudication": {"queue": [{"queue_id": "q1"}, {"queue_id": "q2"}]}}
+            )
+        }
+    )
+    record = dict(
+        schema="agent-patch-batch-v1",
+        candidate_identity=handoff.source.repository.content_identity,
+        summary="repair the captured defect",
+        operations=[
+            dict(
+                action="update",
+                path="repo/code.txt",
+                source_sha256=member.sha256,
+                replacement="repaired\n",
+            ),
+            dict(
+                action="create",
+                path="repo/regression.txt",
+                source_sha256=None,
+                replacement="exit 0\n",
+            ),
+        ],
+        regressions=[
+            dict(queue_id=queue, path="repo/regression.txt", expectation="reproduce defect")
+            for queue in ("q1", "q2")
+        ],
+    )
+    if attack == "wrong_candidate":
+        record["candidate_identity"] = "other"
+    elif attack == "wrong_preimage":
+        record["operations"][0]["source_sha256"] = "f" * 64
+    elif attack == "bad_queue":
+        record["regressions"][0]["queue_id"] = "other"
+    elif attack == "omitted_regression":
+        record["regressions"].pop()
+    outcome = StepOutcome(argv=("pi",), returncode=0, stdout=json.dumps(record))
+    if attack:
+        with pytest.raises(FleetPlanInvalid):
+            accept_agent_phase_output(step, handoff, outcome)
+    else:
+        result = accept_agent_phase_output(step, handoff, outcome)
+        assert json.loads(result.stdout) == record
+    assert (repo / "code.txt").read_text() == "broken\n"
+    assert not (repo / "regression.txt").exists()
 
 
 @pytest.mark.parametrize("field", ["api_key_env", "headers_from_env"])

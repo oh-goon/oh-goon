@@ -824,6 +824,18 @@
       "selectStep": "Select a Step for evidence",
       "selectStepHelp": "Select a Step in the list to review its recorded outcome, exact failure evidence and any available raw output."
     },
+    "nativeAgent": {
+      "title": "Native agent observations",
+      "claimRule": "Native events are agent claims. Process exit, cancellation and verification retain their recorded Step results. Prompt and response text is not retained here.",
+      "implementation": "Agent implementation",
+      "input": "Harness input",
+      "source": "Captured source",
+      "occurrence": "Step occurrence",
+      "settled": "Native conversation settled",
+      "failed": "Native protocol reported failure",
+      "events": "Native events observed",
+      "omitted": "Observations omitted by the bound"
+    },
     "inspector": {
       "title": "Step inspector",
       "identity": "Execution identity",

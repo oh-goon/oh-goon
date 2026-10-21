@@ -61,7 +61,7 @@ def test_resolved_watchdog_deadline_owns_hard_timeout() -> None:
             sys.executable,
             "-S",
             "-c",
-            "import time; time.sleep(30)",
+            "import time; print('watchdog partial output',flush=True); time.sleep(30)",
             timeout=None,
             runtime_supervision=supervision(
                 runtime_policy=policy(max_runtime_seconds=1, heartbeat_timeout_seconds=2)
@@ -69,6 +69,9 @@ def test_resolved_watchdog_deadline_owns_hard_timeout() -> None:
             process_observer=observed.append,
         )
     assert raised.value.supervisor.termination_receipt is not None
+    assert raised.value.duration_ms >= 1000
+    assert raised.value.physical_execution_id is not None
+    assert raised.value.output == "watchdog partial output\n"
     termination = next(event for event in observed if event.kind == "TERMINATION_REQUESTED")
     assert termination.termination_reason == "max_runtime_exceeded"
 

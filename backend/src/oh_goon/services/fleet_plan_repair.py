@@ -346,6 +346,17 @@ class AgentReviewRepairCampaign:
         return review_scope(next(iter(self.handoffs.values())))
 
     def _validate_apply(self) -> None:
+        for step in self.original.steps:
+            if isinstance(step, ResolvedLocalSearchAgentStep) and step.harness == "native":
+                native_selection = step.native_agent
+                if (
+                    native_selection is None
+                    or native_selection.profile.backend != "bubblewrap"
+                    or native_selection.interactive
+                ):
+                    raise FleetPlanInvalid(
+                        "native review phases require headless isolated read-only Agent execution"
+                    )
         proposal, apply = (
             next(s for s in self.original.steps if s.step_id == identifier)
             for identifier in self.phases["repair"]
@@ -432,6 +443,7 @@ class AgentReviewRepairCampaign:
             requirements=self.original.requirements,
             step_sources=tuple(s for s in self.original.step_sources if s.step_id in members),
             skill_sources=self.original.skill_sources,
+            native_agent=self.original.native_agent,
         )
 
     def _recapture(self, *, require_unchanged: bool) -> str:

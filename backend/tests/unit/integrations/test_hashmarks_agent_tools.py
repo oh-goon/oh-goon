@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,10 +10,68 @@ from hashmarks.evidence_presentation import present_repository_evidence
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations.hashmarks.agent_tools import (
+    main,
     prompt_observation,
     repository_observation,
     task_evidence_prompt,
 )
+
+
+def test_query_file_transport_delivers_private_task_without_argv_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    captured = tmp_path / "captured"
+    (captured / "repo").mkdir(parents=True)
+    (captured / "repo" / "widget.py").write_text("def handle_widget():\n    return 1\n")
+    query = tmp_path / "query.txt"
+    query.write_text("Review handle_widget, private-task-canary")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agent_tools",
+            "--root",
+            str(captured),
+            "--query-file",
+            str(query),
+            "--tool",
+            "task_evidence",
+            "--capture-identity",
+            "frozen",
+        ],
+    )
+    assert "private-task-canary" not in " ".join(sys.argv)
+    assert main() == 0
+    packet = json.loads(capsys.readouterr().out)
+    assert packet["capture_identity"] == "frozen"
+    assert packet["producer"] == "Hashmarks"
+    assert "handle_widget" in packet["presentation"]["text"]
+
+
+@pytest.mark.parametrize("data", [b"x" * 65537, b"\xff", b"\x00", b"  "])
+def test_invalid_query_file_is_rejected_before_index_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], data: bytes
+) -> None:
+    query = tmp_path / "query.txt"
+    query.write_bytes(data)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agent_tools",
+            "--root",
+            str(tmp_path),
+            "--query-file",
+            str(query),
+            "--tool",
+            "task_evidence",
+            "--capture-identity",
+            "frozen",
+        ],
+    )
+    assert main() == 65
+    assert "unavailable" in capsys.readouterr().out
+    assert not (tmp_path / "evidence-state").exists()
 
 
 def test_initial_task_evidence_uses_native_packet_and_readable_qualified_projection(
@@ -49,6 +108,41 @@ def test_initial_task_evidence_uses_native_packet_and_readable_qualified_project
     assert "omissions do not establish absence" in text
     assert "tests were not executed" in text
     assert json.dumps(packet, sort_keys=True) == original
+
+
+def test_native_followup_can_keep_index_state_outside_read_only_capture(tmp_path: Path) -> None:
+    captured = tmp_path / "captured"
+    repo = captured / "repo"
+    repo.mkdir(parents=True)
+    source = repo / "code.py"
+    original = b"def handle_widget():\n    return 1\n"
+    source.write_bytes(original)
+    source.chmod(0o400)
+    repo.chmod(0o500)
+    captured.chmod(0o500)
+    state = tmp_path / "disposable-index"
+    try:
+        packet = repository_observation(
+            captured,
+            tool="search_text",
+            query="handle_widget",
+            capture_identity="captured-source",
+            state_directory=state,
+        )
+        disclosed = json.loads(
+            prompt_observation(json.dumps(packet), expected_capture_identity="captured-source")
+        )
+        assert disclosed["producer"] == "Hashmarks"
+        assert disclosed["capture_identity"] == "captured-source"
+        assert disclosed["retrieval"] == present_repository_evidence(
+            packet["retrieval"], format="compact"
+        )
+        assert state.is_dir()
+        assert not (captured / "evidence-state").exists()
+        assert source.read_bytes() == original
+    finally:
+        captured.chmod(0o700)
+        repo.chmod(0o700)
 
 
 def test_ambiguous_task_evidence_preserves_producer_qualifications_and_fits_budget(

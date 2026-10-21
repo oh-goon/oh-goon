@@ -824,6 +824,18 @@
       "selectStep": "Välj ett Step för evidens",
       "selectStepHelp": "Välj ett Step i listan för att se registrerat utfall, exakt felbevis och tillgänglig rå output."
     },
+    "nativeAgent": {
+      "title": "Observationer från agenten",
+      "claimRule": "Agenthändelser är agentens egna uppgifter. Processavslut, avbrott och verifiering behåller sina registrerade stegresultat. Prompt- och svarstext sparas inte här.",
+      "implementation": "Agentimplementation",
+      "input": "Indata till agentkontraktet",
+      "source": "Fångad källkod",
+      "occurrence": "Stegförekomst",
+      "settled": "Agentsamtalet avslutat",
+      "failed": "Agentprotokollet rapporterade fel",
+      "events": "Observerade agenthändelser",
+      "omitted": "Observationer utelämnade av gränsen"
+    },
     "inspector": {
       "title": "Steginspektör",
       "identity": "Körningsidentitet",

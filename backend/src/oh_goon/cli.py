@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from oh_goon.engine.git import GitService
+    from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
     from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
 from oh_goon.api.local_access import ensure_local_access_token
@@ -20,7 +22,7 @@ from oh_goon.cli_status import run_status_command
 from oh_goon.cli_stop import run_stop_command
 from oh_goon.cli_storage import run_storage_command
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
-from oh_goon.core.errors import DatabaseSchemaMismatch
+from oh_goon.core.errors import DatabaseSchemaMismatch, FleetDomainError
 from oh_goon.runtime.database import DatabasePathIdentityLost
 from oh_goon.runtime.storage_health import storage_unavailable_reason
 
@@ -130,10 +132,18 @@ def _build_application_runtime(
     *,
     fleet_provisioner: FleetPreworkProvisioner | None = None,
     standard_local: bool | None = None,
+    standard_process_isolation: ProcessIsolationBackend | None = None,
+    git_service: GitService | None = None,
 ) -> ApplicationRuntime | None:
     try:
         if fleet_provisioner is not None:
             return ApplicationRuntime.build(fleet_provisioner=fleet_provisioner)
+        if git_service is not None:
+            return ApplicationRuntime.build(
+                standard_local=standard_local,
+                standard_process_isolation=standard_process_isolation,
+                git_service=git_service,
+            )
         return ApplicationRuntime.build(standard_local=standard_local)
     except DatabaseSchemaMismatch as exc:
         print(str(exc))
@@ -186,6 +196,11 @@ def main(
     """
     parser = build_parser()
     args = parser.parse_args(argv)
+    if not getattr(args, "native_agent", None) and (
+        getattr(args, "native_workspace", None) is not None
+        or getattr(args, "native_profile", None) is not None
+    ):
+        parser.error("--native-workspace and --native-profile require --native-agent")
     if fleet_provisioner is not None:
         from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
@@ -214,6 +229,11 @@ def main(
         from oh_goon.cli_templates import run_template_command
 
         return run_template_command(args)
+
+    if args.command == "ai":
+        from oh_goon.cli_ai import run_ai_command
+
+        return run_ai_command(args)
 
     if args.command == "agent" and args.agent_command == "providers":
         from oh_goon.cli_agent_providers import run_provider_command
@@ -265,9 +285,26 @@ def main(
     if direct_result is not None:
         return direct_result
 
-    runtime = _build_application_runtime(
-        fleet_provisioner=fleet_provisioner, standard_local=standard_local
-    )
+    if args.command == "plan" and args.plan_command == "run" and args.native_agent is not None:
+        if not standard_local or not args.wait:
+            parser.error("native Agent execution requires ordinary waited execution")
+        try:
+            from oh_goon.cli_ai import native_plan_selection
+
+            selected, isolation, git = native_plan_selection(args)
+        except (FleetDomainError, OSError, ValueError) as exc:
+            import sys
+
+            print(str(exc), file=sys.stderr)
+            return 2
+        args._native_agent = selected
+        runtime = _build_application_runtime(
+            standard_local=standard_local, standard_process_isolation=isolation, git_service=git
+        )
+    else:
+        runtime = _build_application_runtime(
+            fleet_provisioner=fleet_provisioner, standard_local=standard_local
+        )
     if runtime is None:
         return 2
     result = _execute_stateful_command(runtime, args)

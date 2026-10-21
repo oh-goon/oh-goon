@@ -100,6 +100,45 @@ class AgentReviewObservation(ImmutableModel):
     record: AgentReviewRecord | AgentAdjudicationRecord
 
 
+class AgentHarnessObservation(ImmutableModel):
+    """Bounded native-agent claim, distinct from supervisor and producer facts."""
+
+    kind: Literal["agent", "tool", "context"]
+    summary: str = Field(min_length=1, max_length=4000)
+    native_event_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+    @field_validator("summary", "native_event_id")
+    @classmethod
+    def nonblank_text(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("Agent harness observation text must be nonblank")
+        return value
+
+
+class NativeAgentObservation(ImmutableModel):
+    """Native protocol claims bound to the original source and Step occurrence.
+
+    Actual process results, resources, cancellation and verification remain in
+    the original Step evidence. A settled native conversation is not APP PASS.
+    """
+
+    kind: Literal["native_agent"] = "native_agent"
+    agent: Literal["opencode", "pi", "codex"]
+    implementation_identity: str = Field(min_length=1, max_length=160)
+    profile: str = Field(min_length=1, max_length=64)
+    input_identity: str = Field(min_length=1, max_length=160)
+    occurrence: str = Field(min_length=1, max_length=240)
+    source_identity: str = Field(min_length=1, max_length=160)
+    role: Literal["report", "review", "adjudication", "proposal"]
+    events: tuple[AgentHarnessObservation, ...] = Field(default=(), max_length=128)
+    native_event_count: int = Field(ge=0)
+    omitted_observations: int = Field(default=0, ge=0)
+    settled: bool
+    failed: bool
+    authority: Literal["UNTRUSTED_HARNESS_CLAIM"] = "UNTRUSTED_HARNESS_CLAIM"
+
+
 FleetObservationEvidence = Annotated[
-    DependencyObservationSnapshot | AgentReviewObservation, Field(discriminator="kind")
+    DependencyObservationSnapshot | AgentReviewObservation | NativeAgentObservation,
+    Field(discriminator="kind"),
 ]

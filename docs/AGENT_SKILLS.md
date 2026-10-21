@@ -12,7 +12,13 @@ and Game Tape records their outcomes.
 
 The workflow below uses built-in bounded model adapters. The
 [runtime ownership inventory](development/AGENT_RUNTIME_OWNERS.md) maps their
-current call paths and the separate design for replaceable native coding agents.
+current call paths and the native coding-agent integration. To run installed
+OpenCode, Pi or Codex, use the [managed launcher](AGENT_PROVIDERS.md#run-a-native-coding-agent).
+The shipped [native coding Plan](../templates/plans/agents/native-coding/README.md)
+and [native review Plan](../templates/plans/agents/native-review/README.md) select
+the implementation independently of their authored roles. Native configuration,
+reasoning, tools and compaction remain owned by that implementation; Skills and
+agent claims retain the same authority limits described here.
 
 Reusable review and development Skills are maintained in
 [agentsCookbook](https://github.com/Hugloss/agentsCookbook). OH-Goon accepts

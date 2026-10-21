@@ -5,6 +5,11 @@ import pytest
 from oh_goon.core.agent_review_plan import agent_review_phases
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.models.agent_providers import (
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
 from oh_goon.core.models.agent_review import (
     AgentAdjudicationRecord,
     AgentReviewRecord,
@@ -13,6 +18,7 @@ from oh_goon.core.models.agent_review import (
 )
 from oh_goon.services.fleet_plan_repair import AgentReviewRepairCampaign
 from tests.factories.agent_review import agent_review_case
+from tests.factories.shipped_templates import PLAN_TEMPLATES
 
 
 def test_shipped_loop_freezes_occurrences_and_shares_one_candidate(tmp_path):
@@ -181,3 +187,360 @@ def test_review_record_requires_source_bound_evidence_and_exact_occurrence(tmp_p
     queued.verify((multiple,))
     with pytest.raises(FleetPlanInvalid, match="partition"):
         queued.model_copy(update={"queue": adjudication.queue}).verify((multiple,))
+
+
+def test_same_native_workflow_keeps_phase_occurrences_when_implementation_changes(tmp_path):
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+    )
+    resolver, path, _, options = agent_review_case(tmp_path, native_agent=selected)
+    plan, deliveries, _ = resolver.resolve_frozen_agents(path, **options)
+    changed = replace(
+        selected, agent="opencode", definition=NativeAgentDefinition(executable="/native/opencode")
+    )
+    options["native_agent"] = changed
+    another, another_deliveries, _ = resolver.resolve_frozen_agents(
+        path, previous=deliveries, **options
+    )
+    assert agent_review_phases(plan) == agent_review_phases(another)
+    assert tuple(deliveries) == tuple(another_deliveries)
+    assert {key: value.handoff_identity for key, value in deliveries.items()} == {
+        key: value.handoff_identity for key, value in another_deliveries.items()
+    }
+    assert {step.native_agent.agent for step in another.steps if step.kind == "agent"} == {
+        "opencode"
+    }
+    assert plan.plan_id != another.plan_id
+    campaign = AgentReviewRepairCampaign(
+        another,
+        another_deliveries,
+        resolver=resolver,
+        plan_path=path,
+        capture_options=options,
+        passes=3,
+        write_roots=("code.txt",),
+    )
+    assert (
+        tuple(step.step_id for step in campaign.plan.steps)
+        == agent_review_phases(another)["review"]
+    )
+    assert all(step.role == "review" and step.harness == "native" for step in campaign.plan.steps)
+    campaign._recapture(require_unchanged=True)
+    assert all(
+        step.native_agent.agent == "opencode"
+        for step in campaign.original.steps
+        if step.kind == "agent"
+    )
+    campaign.phase = "verification"
+    verification = campaign._select_phase()
+    assert all(step.kind != "agent" for step in verification.steps)
+    assert verification.native_agent == another.native_agent
+
+
+def test_native_workspace_mismatch_rejects_before_source_bytes(tmp_path, monkeypatch):
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+    )
+    resolver, path, _, options = agent_review_case(tmp_path, native_agent=selected)
+    other = tmp_path / "repos/other"
+    other.mkdir()
+    from unittest.mock import Mock
+
+    read = Mock(side_effect=AssertionError("workspace mismatch reached byte acquisition"))
+    monkeypatch.setattr("oh_goon.services.agent_authoring_sources.os.read", read)
+    with pytest.raises(FleetPlanInvalid, match="explicit native workspace"):
+        resolver.resolve_frozen_agents(path, **{**options, "repository": other})
+    read.assert_not_called()
+
+
+@pytest.mark.parametrize("attack", ["legacy", "missing_workspace", "missing_git_scope"])
+def test_native_repair_rejects_unsupported_ingress_before_capture_or_run(tmp_path, attack):
+    from unittest.mock import Mock
+
+    from oh_goon.core.models.agent_providers import (
+        AgentConnection,
+        AgentModel,
+        AgentProvider,
+        AgentProvidersConfig,
+    )
+    from oh_goon.core.models.agent_repair import AgentRepairBudget
+    from oh_goon.services.fleet_plans import FleetPlanService
+
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap", inference_profile="approved"),
+        executable_sha256="a" * 64,
+        connection=AgentConnection.select(
+            AgentProvidersConfig(
+                default_model="approved",
+                providers={
+                    "host": AgentProvider(
+                        api="openai-chat-completions", base_url="http://127.0.0.1:12345/v1"
+                    )
+                },
+                models={"approved": AgentModel(provider="host", model="test")},
+            )
+        ),
+    )
+    resolver, path, repo, options = agent_review_case(tmp_path, native_agent=selected)
+    resolver.resolve_frozen_agents = Mock(
+        side_effect=AssertionError("unsupported ingress reached capture")
+    )
+    runs = Mock()
+    service = FleetPlanService(
+        resolver, runs, Mock(), Mock(), Mock(), standard_local_fleet=True, content_store=Mock()
+    )
+    expected = {
+        "legacy": "complete review campaign",
+        "missing_workspace": "one explicit workspace",
+        "missing_git_scope": "scoped Git",
+    }[attack]
+    with pytest.raises(FleetPlanInvalid, match=expected):
+        service.repair(
+            path,
+            budget=AgentRepairBudget(max_attempts=2, timeout_seconds=30, step_timeout_seconds=10),
+            repository_id="selected",
+            inputs=options["inputs"],
+            agent_repository_root=options["repository_root"],
+            agent_skill_root=options["skill_root"],
+            allowed_agent_acceptance=options["allowed_acceptance"],
+            native_agent=selected,
+            native_workspace=None if attack == "missing_workspace" else repo,
+            review_write_roots=None if attack == "legacy" else ("code.txt",),
+        )
+    resolver.resolve_frozen_agents.assert_not_called()
+    runs.start_prepared_plan.assert_not_called()
+
+
+def test_native_git_input_uses_the_original_injected_observation_runner(tmp_path):
+    from unittest.mock import Mock
+
+    import yaml
+
+    from oh_goon.engine.command import CommandResult
+    from oh_goon.engine.git import GitService
+
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+    )
+    resolver, path, repo, options = agent_review_case(tmp_path, native_agent=selected)
+    source = yaml.safe_load(path.read_text())
+    source["goons"][0] = {
+        "import": source["goons"][0],
+        "with": {"goal": {"from": {"git": "branch"}}},
+    }
+    path.write_text(yaml.safe_dump(source))
+    observe = Mock(
+        return_value=CommandResult(0, "# branch.oid (initial)\0# branch.head scoped-goal\0", "")
+    )
+    git = GitService(
+        command_runner=Mock(side_effect=AssertionError("Git observation escaped its native scope")),
+        observation_runner=observe,
+    )
+    _, handoffs, _ = resolver.resolve_frozen_agents(path, git_service=git, **options)
+    assert {handoff.task for handoff in handoffs.values()} == {"scoped-goal"}
+    observe.assert_called_once()
+
+
+@pytest.mark.parametrize("agent", ["pi", "opencode"])
+def test_native_configured_model_marker_freezes_one_literal_recipient_before_capture(
+    tmp_path, agent
+):
+    from oh_goon.core.models.agent_providers import (
+        AgentConnection,
+        AgentModel,
+        AgentProvider,
+        AgentProvidersConfig,
+    )
+
+    connection = AgentConnection.select(
+        AgentProvidersConfig(
+            default_model="approved",
+            providers={
+                "company": AgentProvider(
+                    api="openai-chat-completions", base_url="http://127.0.0.1:12345/v1"
+                )
+            },
+            models={"approved": AgentModel(provider="company", model="native-model")},
+        )
+    )
+    selected = ResolvedNativeAgent(
+        agent=agent,
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable=f"/native/{agent}"),
+        profile=NativeAgentProfile(backend="bubblewrap", inference_profile="approved"),
+        executable_sha256="a" * 64,
+        connection=connection,
+    )
+    resolver, path, _, options = agent_review_case(tmp_path, native_agent=selected)
+    authored = tmp_path / "native-goons/agents/review/goon.yml"
+    assert "recipients: [configured_model]" in authored.read_text()
+    plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    assert {handoff.requested_effects.recipients for handoff in handoffs.values()} == {("company",)}
+    assert "recipients: [configured_model]" in authored.read_text()
+    again, reused, _ = resolver.resolve_frozen_agents(path, previous=handoffs, **options)
+    assert reused == handoffs and again == plan
+
+
+def test_native_wrong_literal_recipient_rejects_before_source_capture(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    from oh_goon.core.models.agent_providers import (
+        AgentConnection,
+        AgentModel,
+        AgentProvider,
+        AgentProvidersConfig,
+    )
+
+    connection = AgentConnection.select(
+        AgentProvidersConfig(
+            default_model="approved",
+            providers={
+                "company": AgentProvider(
+                    api="openai-chat-completions", base_url="http://127.0.0.1:12345/v1"
+                )
+            },
+            models={"approved": AgentModel(provider="company", model="native-model")},
+        )
+    )
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap", inference_profile="approved"),
+        executable_sha256="a" * 64,
+        connection=connection,
+    )
+    resolver, path, _, options = agent_review_case(tmp_path, native_agent=selected)
+    authored = tmp_path / "native-goons/agents/review/goon.yml"
+    authored.write_text(authored.read_text().replace("[configured_model]", "[wrong-company]"))
+    capture = Mock(side_effect=AssertionError("Wrong disclosure reached source-byte capture"))
+    monkeypatch.setattr("oh_goon.services.agent_authoring_sources.capture_agent_sources", capture)
+    with pytest.raises(FleetPlanInvalid, match="disclosure differs"):
+        resolver.resolve_frozen_agents(path, **options)
+    capture.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "plan_key,role,access",
+    [("agents/native-coding", "report", "write"), ("agents/native-review", "review", "read_only")],
+)
+def test_shipped_native_plan_swaps_pi_opencode_without_reauthoring_and_keeps_verification_profile(
+    tmp_path, plan_key, role, access
+):
+    from oh_goon.core.models.agent_providers import (
+        AgentConnection,
+        AgentModel,
+        AgentProvider,
+        AgentProvidersConfig,
+    )
+    from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+
+    resolver, path, repo, options = agent_review_case(tmp_path, plan_template=plan_key)
+    options.pop("connection")
+    options["inputs"] = {"repo": "local:repo", "skill": "local:skills/repair"}
+    if role == "report":
+        options["inputs"]["verification_command"] = "check"
+    acceptance = "native-coding" if role == "report" else "agentic-review"
+    options["allowed_acceptance"] = (acceptance,)
+    options["repository"] = repo
+    connection = AgentConnection.select(
+        AgentProvidersConfig(
+            default_model="approved",
+            providers={
+                "company": AgentProvider(
+                    api="openai-chat-completions", base_url="http://127.0.0.1:12345/v1"
+                )
+            },
+            models={"approved": AgentModel(provider="company", model="native-model")},
+        )
+    )
+    selection = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated-managed",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap", inference_profile="approved"),
+        executable_sha256="a" * 64,
+        connection=connection,
+    )
+    options["native_agent"] = selection
+    authored = path.read_bytes()
+    assert authored.decode() == PLAN_TEMPLATES.source(plan_key).content
+    first, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    step = first.steps[0]
+    assert step.harness == "native" and step.role == role
+    assert handoffs[step.step_id].requested_effects.repository_access == access
+    assert handoffs[step.step_id].requested_effects.recipients == ("company",)
+    assert handoffs[step.step_id].source.acceptance_profile == acceptance
+    options["native_agent"] = replace(
+        selection, agent="opencode", definition=NativeAgentDefinition(executable="/native/opencode")
+    )
+    second, again, _ = resolver.resolve_frozen_agents(path, previous=handoffs, **options)
+    assert again == handoffs and path.read_bytes() == authored
+    assert first.plan_id != second.plan_id
+    assert second.native_agent.agent == "opencode"
+    if role == "report":
+        assert len(second.steps) == 2 and second.steps[1].argv == ("./check",)
+        verification = ResolvedFleetPlan.create(
+            name=second.name,
+            description=second.description,
+            steps=(second.steps[1],),
+            execution=second.execution,
+            native_agent=second.native_agent,
+        )
+        assert verification.native_agent == options["native_agent"]
+        ordinary = ResolvedFleetPlan.create(
+            name=verification.name,
+            description=verification.description,
+            steps=verification.steps,
+            execution=verification.execution,
+        )
+        assert build_execution_lock(verification).digest != build_execution_lock(ordinary).digest
+    else:
+        assert len(second.steps) == 1
+
+
+@pytest.mark.parametrize("attack", ["wrong_role", "local", "interactive"])
+def test_native_phase_constraints_fail_before_first_phase(tmp_path, attack):
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+    )
+    if attack == "local":
+        selected = replace(selected, profile=NativeAgentProfile(backend="local"))
+    elif attack == "interactive":
+        selected = replace(selected, interactive=True)
+    resolver, path, _, options = agent_review_case(tmp_path, native_agent=selected)
+    with pytest.raises(FleetPlanInvalid):
+        plan, deliveries, _ = resolver.resolve_frozen_agents(path, **options)
+        if attack == "wrong_role":
+            first, *rest = plan.steps
+            plan = plan.model_copy(
+                update={"steps": (first.model_copy(update={"role": "report"}), *rest)}
+            )
+        AgentReviewRepairCampaign(
+            plan,
+            deliveries,
+            resolver=resolver,
+            plan_path=path,
+            capture_options=options,
+            passes=3,
+            write_roots=("code.txt",),
+        )

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
     ResolvedExtensionStep,
@@ -27,10 +30,11 @@ from oh_goon.core.path_authority import StrictHostPathAuthority, canonical_path
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.ports.step_output import StepOutputObserver
+from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
-from oh_goon.engine.git import GitService
+from oh_goon.engine.git import GitObservation, GitService
 from oh_goon.integrations._fleet_plan_host_resources import preflight_run_capabilities
 from oh_goon.integrations._fleet_plan_step_dataflow import (
     validate_step_declared_paths,
@@ -50,6 +54,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     TrustedLocalRunScope,
     admitted_tl1_run_context,
     isolation_backend_evidence,
+    native_profile_command_runner,
     select_bound_process_isolation_backend,
 )
 from oh_goon.integrations.fleet_plan_run import PreparedPlanRun
@@ -87,6 +92,9 @@ class FleetPlanRunExecutor:
         content_store: FleetContentStore | None = None,
         run_parent: Path | None = None,
         diagnostics: DiagnosticEmitter | None = None,
+        terminal: CommandTerminal | None = None,
+        standard_process_isolation: ProcessIsolationBackend | None = None,
+        workspace_pin=None,
     ) -> None:
         self._git = git
         self._extensions = extensions
@@ -96,6 +104,9 @@ class FleetPlanRunExecutor:
         self._content_store = content_store
         self._run_parent = canonical_path(run_parent) if run_parent is not None else None
         self._diagnostics = diagnostics
+        self._terminal = terminal
+        self._standard_process_isolation = standard_process_isolation
+        self._workspace_pin = workspace_pin
 
     def prepare_direct_run(
         self,
@@ -186,6 +197,7 @@ class FleetPlanRunExecutor:
         plan: ResolvedFleetPlan,
         *,
         cancel_requested: Callable[[], bool] | None,
+        termination_requested: Callable[[], TerminationSignal | None] | None = None,
         output_observer: StepOutputObserver | None = None,
         fleet_run_id: str | None = None,
         repository_id: str | None = None,
@@ -202,13 +214,58 @@ class FleetPlanRunExecutor:
             fleet_run_id,
             repository_id,
             lifecycle_observer,
+            termination_requested=termination_requested,
             agent_delivery_for=agent_delivery_for,
             execution_limits=execution_limits,
+        )
+        runtime = replace(
+            runtime,
+            git=self.git_for_plan(repository, plan, termination_requested=termination_requested),
+            execution_policy=plan.execution,
+            execution_identity=ExecutionIdentity(digest=build_execution_lock(plan).digest),
+            native_profile=plan.native_agent,
         )
         sequence = FleetPlanStepSequence(repository, runtime, output_observer)
         for step in plan.steps:
             sequence.run_direct(step)
         return self._outcome(sequence)
+
+    def git_for_plan(
+        self,
+        repository: Path,
+        plan: ResolvedFleetPlan,
+        *,
+        termination_requested: Callable[[], TerminationSignal | None] | None = None,
+    ) -> GitService:
+        """Keep native Git hooks within this Plan's frozen physical profile."""
+        if plan.native_agent is None:
+            return self._git
+        runner = native_profile_command_runner(
+            repository,
+            plan.native_agent,
+            self._standard_process_isolation,
+            self._workspace_pin,
+            termination_requested=termination_requested,
+        )
+        return replace(
+            self._git,
+            command_runner=runner,
+            observation_runner=partial(runner, read_only_workspace=True)
+            if plan.native_agent.profile.backend == "bubblewrap"
+            else runner,
+        )
+
+    def observe_repository(
+        self,
+        repository: Path,
+        plan: ResolvedFleetPlan,
+        cancel_requested: Callable[[], bool] | None,
+        *,
+        termination_requested: Callable[[], TerminationSignal | None] | None = None,
+    ) -> GitObservation:
+        return self.git_for_plan(
+            repository, plan, termination_requested=termination_requested
+        ).observe(repository, cancel_requested)
 
     def execute_strict_run(
         self,
@@ -291,6 +348,9 @@ class FleetPlanRunExecutor:
             trusted_local_scope=trusted_local_scope,
             agent_delivery_for=agent_delivery_for,
             execution_limits=execution_limits,
+            terminal=self._terminal,
+            standard_process_isolation=self._standard_process_isolation,
+            workspace_pin=self._workspace_pin,
         )
 
     @staticmethod
@@ -313,6 +373,7 @@ class FleetPlanRunExecutor:
         *,
         cancel_requested: Callable[[], bool] | None,
     ) -> None:
+        self.git_for_plan(repository, plan)
         for step in plan.steps:
             self._preflight_common(repository, step, cancel_requested=cancel_requested)
             step_working_directory(repository, step)
