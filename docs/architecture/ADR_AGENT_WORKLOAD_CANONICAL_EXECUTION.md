@@ -1,10 +1,34 @@
 # ADR — Agent Workloads Use the Canonical OH-Goon Execution Path
 
-- **Status:** Accepted as a design decision (not yet merged into OH-Goon source)
+- **Status:** Retained design record. The shared-execution-owner decision remains adopted; the implementation proposal and qualification assumptions below are historical.
 - **Date:** 2026-10-13
 - **Scope:** OH-Goon Plan/Goon/Step, Resolver, Enforcer, LACE, execution controller, sandbox backends, journal, Game Tape, agentic loops
-- **Suggested repository destination:** `docs/architecture/ADR_AGENT_WORKLOAD_CANONICAL_EXECUTION.md`
-- **Related:** X0 single-owner/single-execution-path invariant; B12E Enforcer/LACE physical-containment consolidation; AG-A–AG-F agentic-workload roadmap
+- **Original context:** X0 single-owner/single-execution-path invariant; B12E Enforcer/LACE physical-containment consolidation; AG-A–AG-F agentic-workload roadmap
+
+## Current interpretation
+
+Use [Agent Skills](../AGENT_SKILLS.md) for shipped behavior and the
+[Agent runtime ownership inventory](../development/AGENT_RUNTIME_OWNERS.md) for
+the live source paths and replaceable-agent design questions. The original
+proposal below is retained as design history; it is not another implementation
+roadmap or current qualification record.
+
+The current Agent Step and bounded review/repair workflows are implemented.
+Outer review/repair phases use distinct linked Fleet Runs with caller-bound
+budgets; the original single-Run iteration proposal below was superseded.
+External native coding-agent adapters remain design work.
+
+Ordinary Agent execution currently uses the existing standard-local host path,
+without a kernel-isolation or deep-custody claim. Strict Agent Step execution is
+currently rejected; selected strict source-custody/prework and installed-model
+qualification are separate capabilities. The historical gate/status and cost
+statements below do not add privileged qualification prerequisites to ordinary
+local use. See the [execution-first decision](ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md).
+
+The enduring constraint is one canonical execution, recovery and result path.
+Current authority belongs to the [contributor contract](../../AGENTS.md) and
+[architecture](../ARCHITECTURE.md); where this historical proposal differs,
+the current owners govern.
 
 ## Decision
 

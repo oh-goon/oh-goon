@@ -16,7 +16,7 @@ from oh_goon.repository_tooling.architecture.x0_single_execution_contract import
 
 @pytest.fixture
 def baseline(tmp_path: Path) -> Path:
-    """Clone only the frozen source-owner surfaces and accepted ADR, not live state."""
+    """Clone canonical source-owner surfaces and the explanatory ADR, not live state."""
     for relative in (
         "docs/architecture/ADR_AGENT_WORKLOAD_CANONICAL_EXECUTION.md",
         "backend/pyproject.toml",
@@ -178,16 +178,20 @@ def test_canonical_call_edge_mutant_cannot_silently_fork(
     assert any("canonical call edge" in m for m in _check(baseline))
 
 
-def test_accepted_adr_cannot_be_renamed_to_weaken_security(baseline: Path) -> None:
+def test_adr_prose_changes_preserve_structural_authority_checks(baseline: Path) -> None:
     adr = baseline / "docs/architecture/ADR_AGENT_WORKLOAD_CANONICAL_EXECUTION.md"
     adr.write_text(
-        adr.read_text().replace(
-            "We will not build an agent runtime", "We may build an agent runtime", 1
-        )
+        adr.read_text(encoding="utf-8").replace("\n\n", "\n\n\n")
+        + "\nThis retained record explains ownership; executable structure remains authoritative.\n",
+        encoding="utf-8",
     )
-    assert any(
-        "accepted agent canonical-execution ADR changed" in m for m in _check(baseline)
-    )
+    assert _check(baseline) == []
+
+    candidate = baseline / "backend/src/oh_goon/services/agent_host.py"
+    candidate.write_text("class AgentRunExecutor:\n    pass\n", encoding="utf-8")
+    assert _check(baseline) == [
+        "X0 AG-00 agent-specific authority owner forbidden: AgentRunExecutor"
+    ]
 
 
 def test_agent_adr_missing_after_enrollment_fails_closed(baseline: Path) -> None:

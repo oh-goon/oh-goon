@@ -136,6 +136,10 @@ print(reply.text)
 
 The native Agent Step consumes this same resolved connection through the existing Fleet owners. Its captured source, permitted writes and native verification remain governed by the selected Plan.
 
+These profiles configure the current direct-model transport. The
+[Agent runtime inventory](development/AGENT_RUNTIME_OWNERS.md) distinguishes that
+transport from a future selected coding agent's native model/configuration owner.
+
 ## Protocol references
 
 Configuration is inspired by [OpenCode providers](https://opencode.ai/docs/providers/) and [Pi](https://pi.dev/); their configuration files are not imported or merged. Wire contracts follow [Ollama chat](https://docs.ollama.com/api/chat), [LiteLLM proxy usage](https://docs.litellm.ai/docs/proxy/user_keys), [OpenRouter](https://openrouter.ai/docs/api_reference/overview), [OpenAI Responses and text generation](https://developers.openai.com/api/docs/guides/text), and [Anthropic Messages](https://platform.claude.com/docs/en/api/messages/create).
