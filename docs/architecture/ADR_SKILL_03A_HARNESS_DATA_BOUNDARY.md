@@ -1,5 +1,22 @@
 # ADR — SKILL-3A: harness data adaptation is not execution admission
 
+## Current interpretation
+
+This is the retained design record for the original prework adapter. Its passive
+implementation has moved once to
+[core/agent_harness_contract.py](../../backend/src/oh_goon/core/agent_harness_contract.py)
+and its input/submission contract has been extended through A2. There is no
+services-layer facade. Use the
+[Agent runtime ownership inventory](../development/AGENT_RUNTIME_OWNERS.md#harness-data-contract-a2)
+for that contract and its integration limits.
+
+The original services location and runtime-refusal assumptions below are
+historical. Built-in standard-local Agent execution now exists; the extended
+contract is not yet wired into it, and external native adapters remain separate
+work. Neither prework preparation nor a harness submission grants execution,
+disclosure or verification authority. Ordinary local execution does not acquire
+the historical strict/native prerequisites below.
+
 ## Problem
 
 SKILL-2 produces complete, immutable AG-02 prework packets and original Step
