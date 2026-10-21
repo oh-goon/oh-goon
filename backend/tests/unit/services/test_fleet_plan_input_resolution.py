@@ -82,6 +82,192 @@ steps:
         )
 
 
+def test_configuration_evidence_records_selection_without_reading_unused_sources(tmp_path: Path):
+    resolver = _resolver(
+        tmp_path,
+        """version: 1
+inputs:
+  value:
+    type: string
+    default: private-default
+steps:
+- run: echo ok
+""",
+    )
+    (tmp_path / "null.yml").write_text("value: null\n")
+    (tmp_path / "unused.yml").write_text("broken: [not valid")
+    path = _plan(
+        tmp_path,
+        """    value:
+      from:
+      - env: ABSENT
+      - env: EMPTY
+      - yaml: {path: null.yml, key: value}
+      - env: CHOSEN
+      - yaml: {path: unused.yml, key: value}
+""",
+    )
+    plan = resolver.resolve(
+        path, repository=tmp_path, environment={"EMPTY": "", "CHOSEN": "private-caller"}
+    )
+    evidence = plan.configuration
+    assert evidence is not None
+    entry = next(item for item in evidence.entries if item.name == "value")
+    assert [(item.kind, item.state) for item in entry.binding.candidates] == [
+        ("env", "missing"),
+        ("env", "empty"),
+        ("yaml", "null"),
+        ("env", "selected"),
+        ("yaml", "not_evaluated"),
+    ]
+    assert entry.binding.kind == "external_source"
+    assert entry.line == 3
+    assert entry.source_sha256 == plan.imports[0].source_sha256
+    rendered = evidence.model_dump_json()
+    assert "private-default" not in rendered and "private-caller" not in rendered
+    assert "unused.yml" not in rendered
+
+
+def test_configuration_distinguishes_optional_omission_default_null_and_caller_null(tmp_path):
+    path = tmp_path / "goon.yml"
+    path.write_text("""version: 1
+inputs:
+  omitted: {type: string, optional: true}
+  null_default: {type: string, default: null}
+  caller_null: {type: string, optional: true}
+steps:
+- run: echo ok
+""")
+    plan = FleetPlanResolver().resolve(path, inputs={"caller_null": None})
+    assert plan.configuration is not None
+    entries = {item.name: item for item in plan.configuration.entries}
+    assert entries["omitted"].binding.kind == "optional_omission"
+    assert entries["omitted"].default_declared is False
+    assert entries["null_default"].binding.kind == "default"
+    assert entries["null_default"].default_declared is True
+    assert entries["caller_null"].binding.kind == "caller"
+    assert all(entry.value_state == "null" for entry in entries.values())
+
+
+def test_configuration_preserves_scalar_and_typed_defaults_without_exposing_values(tmp_path):
+    path = tmp_path / "goon.yml"
+    path.write_text("""version: 1
+inputs:
+  shorthand: private-scalar-default-canary
+  empty: ''
+  quoted_null: 'null'
+  quoted_false: 'false'
+  required_null: null
+  declared_null: {type: string, default: null}
+  typed_false: {type: boolean, default: false}
+  typed_zero: {type: integer, default: 0}
+steps:
+- run: echo ok
+""")
+    resolver = FleetPlanResolver()
+    with pytest.raises(FleetPlanInvalid, match="requires inputs: required_null"):
+        resolver.resolve(path)
+    plan = resolver.resolve(path, inputs={"required_null": "private-caller-canary"})
+    assert plan.configuration is not None
+    entries = {entry.name: entry for entry in plan.configuration.entries}
+    for name in entries.keys() - {"required_null"}:
+        assert entries[name].default_declared is True
+        assert entries[name].required is False
+        assert entries[name].binding.kind == "default"
+    assert entries["required_null"].default_declared is False
+    assert entries["required_null"].required is True
+    assert entries["required_null"].binding.kind == "caller"
+    assert entries["empty"].value_state == "empty"
+    assert entries["declared_null"].value_state == "null"
+    assert all(
+        entries[name].value_state == "defined"
+        for name in ("shorthand", "quoted_null", "quoted_false", "typed_false", "typed_zero")
+    )
+    assert "private-scalar-default-canary" not in plan.configuration.model_dump_json()
+    assert "private-caller-canary" not in plan.configuration.model_dump_json()
+
+
+@pytest.mark.parametrize("scalar", ["false", "true", "0", "12"])
+def test_scalar_non_string_shorthand_preserves_existing_input_type_rejection(tmp_path, scalar):
+    path = tmp_path / "goon.yml"
+    path.write_text(f"version: 1\ninputs:\n  value: {scalar}\nsteps:\n- run: echo ok\n")
+    with pytest.raises(FleetPlanInvalid, match="default must be a string"):
+        FleetPlanResolver().resolve(path)
+
+
+def test_configuration_lineage_preserves_occurrences_and_parent_input_edges(tmp_path: Path):
+    resolver = _resolver(
+        tmp_path,
+        """version: 1
+inputs:
+  value: {type: string, default: secret-default}
+env:
+  PRIVATE_LITERAL: {value: secret-env-value}
+  EMPTY: {value: ''}
+steps:
+- run: echo ok
+""",
+    )
+    path = tmp_path / "plan.yml"
+    path.write_text("""version: 1
+goons:
+- import: general/leaf
+  as: first
+  with: {value: '${{ inputs.renamed }}'}
+- import: general/leaf
+  as: second
+""")
+    plan = resolver.resolve(path, inputs={"renamed": "secret-override"})
+    assert plan.configuration is not None
+    entries = {
+        (item.scope, item.namespace.value, item.name): item for item in plan.configuration.entries
+    }
+    assert entries[(None, "input", "renamed")].binding.kind == "caller"
+    assert entries[("first", "input", "value")].binding.parent_input == "renamed"
+    assert entries[("first", "input", "value")].binding.parent_scope is None
+    assert entries[("second", "input", "value")].binding.parent_input == "value"
+    assert entries[(None, "input", "value")].binding.kind == "default"
+    assert entries[("first", "env", "EMPTY")].value_state == "empty"
+    assert all(
+        secret not in plan.configuration.model_dump_json()
+        for secret in (
+            "secret-default",
+            "secret-override",
+            "secret-env-value",
+        )
+    )
+
+
+def test_configuration_evidence_is_bounded_without_changing_workload_membership(tmp_path: Path):
+    names = [f"value_{index}" for index in range(32)]
+    definitions = "\n".join(f"  {name}: {{type: string, default: safe}}" for name in names)
+    environment = "env:\n" + "".join(f"  ENV_{index}: {{value: safe}}\n" for index in range(32))
+    resolver = _resolver(
+        tmp_path, f"version: 1\ninputs:\n{definitions}\n{environment}steps:\n- run: echo ok\n"
+    )
+    _package(
+        tmp_path / "goons",
+        "general/group",
+        "version: 1\ninputs: ["
+        + ", ".join(names)
+        + "]\n"
+        + environment
+        + "goons:\n- import: general/leaf\n  pass: ["
+        + ", ".join(names)
+        + "]\n",
+    )
+    path = tmp_path / "plan.yml"
+    path.write_text(
+        "version: 1\ngoons:\n"
+        + "".join(f"- import: general/group\n  as: occurrence-{index}\n" for index in range(33))
+    )
+    plan = resolver.resolve(path)
+    assert len(plan.steps) == 33
+    assert plan.configuration is not None
+    assert len(plan.configuration.entries) == 4096
+    assert plan.configuration.omitted_entries == 128
+
+
 def test_environment_fallback_uses_first_defined_then_goon_default(tmp_path: Path) -> None:
     resolver = _resolver(
         tmp_path,

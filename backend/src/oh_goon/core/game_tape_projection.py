@@ -68,6 +68,9 @@ def project_game_tape(detail: FleetRunDetail) -> GameTape:
         repository_failures,
     )
     return GameTape(
+        journal_revision=detail.journal_revision,
+        terminal=detail.run.status.terminal,
+        configuration=plan.configuration if plan is not None else None,
         fleet_run_id=detail.run.fleet_run_id,
         run_source=detail.run.source,
         execution=detail.execution,

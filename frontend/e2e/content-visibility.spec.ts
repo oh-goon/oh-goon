@@ -30,8 +30,7 @@ for (const route of ["overview", "repositories", "shared-runs", "schedules", "ru
 }
 
 for (const route of ["overview", "repositories", "shared-runs", "schedules", "runs"] as const) {
-  test(`${route} preserves information access at the 200% layout zoom reflow equivalent`, async ({ page, browserName }) => {
-    test.skip(browserName !== "chromium", "The deterministic 200% reflow equivalent is normalized in Chromium; Firefox/WebKit are covered by the release browser matrix.");
+  test(`${route} preserves information access at the 200% layout zoom reflow equivalent`, async ({ page }) => {
     await openFixture(page, route);
     await setReflowZoomEquivalent(page, 2);
     await expectNoDocumentHorizontalOverflow(page);
@@ -73,8 +72,7 @@ test("selected Flow context keeps long Repository/Goon/Step identity readable", 
   await expectNoSilentTextClipping(page);
 });
 
-test("Game Tape reflows at the 200% layout zoom equivalent without document overflow", async ({ page, browserName }) => {
-  test.skip(browserName !== "chromium", "The deterministic 200% reflow equivalent is normalized in Chromium; Firefox/WebKit are covered by the release browser matrix.");
+test("Game Tape reflows at the 200% layout zoom equivalent without document overflow", async ({ page }) => {
   await openRunFixture(page);
   await setReflowZoomEquivalent(page, 2);
   await expectNoDocumentHorizontalOverflow(page);

@@ -666,6 +666,7 @@ class FleetPlanResolver:
             plan_id=plan.plan_id,
             name=plan.name,
             root=str(root),
+            configuration=plan.configuration,
             values=tuple(value_trace),
             entries=tuple(trace),
         )
@@ -904,7 +905,7 @@ class FleetPlanResolver:
             extensions=self._extensions,
             tools=self._tools,
             diagnostics=FleetPlanResolutionDiagnostics(
-                plan_root=plan_root, entries=trace, values=value_trace
+                plan_root=plan_root, entries=trace, values=value_trace, source_graph=source_graph
             ),
             source_graph=source_graph,
             agent_handoff=agent_handoff,
@@ -963,6 +964,7 @@ class FleetPlanResolver:
                 steps=steps,
                 step_sources=scope.step_sources,
                 skill_sources=skill_sources,
+                configuration=context.diagnostics.evidence(),
             )
         except ValidationError as exc:
             raise FleetPlanInvalid(f"Invalid resolved Fleet Plan: {exc}") from exc

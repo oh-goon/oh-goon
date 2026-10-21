@@ -127,6 +127,27 @@ def test_oci_kubernetes_producer_output_is_identity_not_runtime_value():
         "producer_import_instance_id": "oci-publish-image",
         "output": "OCI_REFERENCE",
     }
+    plan = _resolver().resolve(
+        _source("oci/release-deploy"),
+        inputs={
+            "base_registry_hostname": "example.com",
+            "publish_registry_hostname": "example.com",
+            "publish_repository": "example",
+            "kubernetes_api_hostname": "example.com",
+            "namespace": "staging",
+            "deployment": "app",
+            "container": "app",
+        },
+    )
+    assert plan.configuration is not None
+    captured = next(
+        entry
+        for entry in plan.configuration.entries
+        if entry.scope == "kubernetes-release" and entry.name == "image"
+    )
+    assert captured.binding.producer == "oci-publish-image"
+    assert captured.binding.output == "OCI_REFERENCE"
+    assert captured.value_state == "deferred"
     # Root namespace is forwarded to both distinct Kubernetes child instances.
     recipients = routed["inputs"][[x["name"] for x in routed["inputs"]].index("namespace")][
         "recipients"

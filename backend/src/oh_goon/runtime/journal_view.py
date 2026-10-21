@@ -167,7 +167,11 @@ class JournalReadView:
 
     def run_detail(self, fleet_run_id: str) -> FleetRunDetail | None:
         detail = self._index.run_detail(fleet_run_id)
-        return detail.model_copy(deep=True) if detail is not None else None
+        return (
+            detail.model_copy(deep=True, update={"journal_revision": self.revision})
+            if detail is not None
+            else None
+        )
 
     def required_run_detail(self, fleet_run_id: str) -> FleetRunDetail:
         """Return one canonical Fleet run or fail instead of projecting missing data."""

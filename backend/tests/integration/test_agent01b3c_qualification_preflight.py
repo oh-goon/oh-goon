@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -31,16 +33,34 @@ def test_native_model_absence_is_not_a_qualification_pass(monkeypatch, selected)
 
 def test_native_script_missing_ollama_fails_before_dependency_materialization(tmp_path):
     script = Path(__file__).resolve().parents[3] / "scripts" / "qualify_agent_local_model.sh"
-    # Even in a hosted environment that has no Ollama, it is a runnable native
-    # entrypoint, and refusal must precede network/uv dependency operations.
-    if os.name != "posix" or native.shutil.which("ollama") is not None:
-        pytest.skip("requires Linux host without Ollama; no simulated binary")
+    if sys.platform != "linux":
+        pytest.skip("requires Linux/WSL native script")
+    native_path = tmp_path / "native-bin"
+    native_path.mkdir()
+    for name in ("uname", "dirname", "uv", "git", "rg"):
+        executable = shutil.which(name)
+        assert executable is not None, f"required native fixture executable missing: {name}"
+        (native_path / name).symlink_to(Path(executable).resolve())
+    bash = shutil.which("bash")
+    assert bash is not None, "required native fixture executable missing: bash"
+    environment = tmp_path / "unmaterialized-environment"
+    cache = tmp_path / "unused-cache"
     completed = subprocess.run(
-        ["bash", str(script), "qwen3:0.6b"],
+        [str(Path(bash).resolve()), str(script), "qwen3:0.6b"],
         capture_output=True,
         text=True,
         timeout=15,
+        env={
+            **os.environ,
+            "PATH": str(native_path),
+            "UV_PROJECT_ENVIRONMENT": str(environment),
+            "UV_CACHE_DIR": str(cache),
+            "UV_OFFLINE": "1",
+            "UV_PYTHON_DOWNLOADS": "never",
+        },
     )
     assert completed.returncode == 2
     assert "UNQUALIFIED: required native executable missing: ollama" in completed.stderr
     assert "Materializing authoritative locked backend dependencies" not in completed.stdout
+    assert not environment.exists()
+    assert not cache.exists()

@@ -130,6 +130,9 @@ export function runDetail(run: FleetRunState, tapeStatus: FleetRunDetail["game_t
     ui_execution_authority: false,
   };
   const tape = {
+    schema_name: "oh-goon.game-tape/v1" as const,
+    configuration: runTarget.plan.configuration ?? null,
+    terminal: "finished_at" in run,
     execution: FIXTURE_DIRECT_EXECUTION,
     fleet_run_id: run.fleet_run_id,
     status: tapeStatus,

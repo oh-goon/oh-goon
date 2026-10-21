@@ -21,6 +21,10 @@ def structural_fleet_plan_target(
     return FleetPlanTarget(
         kind="fleet_plan",
         plan=plan,
-        source=source or PlanFileSource(sha256="0" * 64),
+        source=source
+        or PlanFileSource(
+            sha256=(plan.configuration.root_source_sha256 if plan.configuration else None)
+            or "0" * 64
+        ),
         identity=structural_execution_identity(plan),
     )

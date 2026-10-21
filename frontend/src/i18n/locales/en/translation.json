@@ -1285,6 +1285,51 @@
       "retryable": "Retryable",
       "nextAction": "Safe next action:",
       "rule": "This explanation is derived from the durable run failure; it is not a separate execution authority."
+    },
+    "configuration": {
+      "title": "Configuration explanation",
+      "privacy": "Values are withheld. These decisions were captured during resolution; this view grants no execution authority.",
+      "unavailable": "Configuration lineage was not retained for this Run.",
+      "root": "<root>",
+      "parent": "Parent input:",
+      "producer": "Producer:",
+      "source": "Definition source SHA-256:",
+      "bindingSource": "Binding source SHA-256:",
+      "candidates": "Sources in authored order",
+      "empty": "No input or environment decisions were captured.",
+      "pagination": "Configuration decision pages",
+      "page": "Page {{page}} of {{total}}",
+      "omitted": "Additional decisions omitted from bounded evidence: {{count}}",
+      "origins": {
+        "default": "Owning Goon default",
+        "caller": "Caller input",
+        "cli": "Explicit CLI input",
+        "caller_file": "Caller input file",
+        "literal": "Explicit binding",
+        "host": "Explicit host environment binding",
+        "parent_input": "Forwarded parent input",
+        "expression": "Compiled expression",
+        "external_source": "First defined external source",
+        "producer_workspace": "Producer workspace reference",
+        "deferred_goon_output": "Deferred Goon output",
+        "deferred_step_output": "Deferred Step output",
+        "optional_omission": "Optional input omitted"
+      },
+      "states": {
+        "null": "Null",
+        "empty": "Empty",
+        "defined": "Defined",
+        "deferred": "Deferred binding"
+      },
+      "candidateStates": {
+        "missing": "Missing",
+        "null": "Null; next source considered",
+        "empty": "Empty; next source considered",
+        "selected": "Selected",
+        "not_evaluated": "Not evaluated"
+      },
+      "inputType": "Input type: {{type}}",
+      "callerFileSource": "Caller input file SHA-256:"
     }
   },
   "attention": {

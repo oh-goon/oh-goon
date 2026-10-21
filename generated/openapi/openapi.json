@@ -6914,6 +6914,18 @@
             "$ref": "#/components/schemas/GameTape",
             "readOnly": true
           },
+          "journal_revision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Journal Revision"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/OperationReport"
@@ -7938,6 +7950,16 @@
             ],
             "title": "Application Launch"
           },
+          "configuration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanConfigurationEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "enforcer_receipt_available": {
             "default": false,
             "title": "Enforcer Receipt Available",
@@ -7995,6 +8017,18 @@
             "title": "Issue Focus",
             "type": "array"
           },
+          "journal_revision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Journal Revision"
+          },
           "observability": {
             "$ref": "#/components/schemas/GameTapeObservabilityReceipt",
             "description": "Expose the current Game Tape evidence-lifecycle policy without storing a per-run copy.",
@@ -8039,6 +8073,12 @@
               }
             ]
           },
+          "schema_name": {
+            "const": "oh-goon.game-tape/v1",
+            "default": "oh-goon.game-tape/v1",
+            "title": "Schema Name",
+            "type": "string"
+          },
           "status": {
             "$ref": "#/components/schemas/GameTapeStatus"
           },
@@ -8054,6 +8094,11 @@
             "$ref": "#/components/schemas/GameTapeTeamComposition",
             "description": "Derive team composition from repository execution truth already owned by the tape.",
             "readOnly": true
+          },
+          "terminal": {
+            "default": false,
+            "title": "Terminal",
+            "type": "boolean"
           },
           "why_not": {
             "anyOf": [
@@ -16219,6 +16264,299 @@
         "title": "PlanArtifactDeclaration",
         "type": "object"
       },
+      "PlanConfigurationBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "candidates": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PlanInputSourceObservation"
+            },
+            "maxItems": 8,
+            "title": "Candidates",
+            "type": "array"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "kind": {
+            "enum": [
+              "default",
+              "optional_omission",
+              "caller",
+              "cli",
+              "caller_file",
+              "literal",
+              "host",
+              "parent_input",
+              "expression",
+              "external_source",
+              "producer_workspace",
+              "deferred_goon_output",
+              "deferred_step_output"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          },
+          "parent_input": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Input"
+          },
+          "parent_scope": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Scope"
+          },
+          "producer": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer"
+          },
+          "source_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sha256"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "PlanConfigurationBinding",
+        "type": "object"
+      },
+      "PlanConfigurationEntry": {
+        "additionalProperties": false,
+        "description": "Safe compile-time explanation. Values, declarations and native argv are absent.",
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/PlanConfigurationBinding"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "default_declared": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Declared"
+          },
+          "input_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanInputType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "line": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "name": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,127}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "$ref": "#/components/schemas/PlanValueNamespace"
+          },
+          "required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "source_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sha256"
+          },
+          "value_state": {
+            "enum": [
+              "null",
+              "empty",
+              "defined",
+              "deferred"
+            ],
+            "title": "Value State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "name",
+          "value_state",
+          "binding"
+        ],
+        "title": "PlanConfigurationEntry",
+        "type": "object"
+      },
+      "PlanConfigurationEvidence": {
+        "additionalProperties": false,
+        "description": "Bounded explanation retained with the Plan, outside executable identity.",
+        "properties": {
+          "caller_file_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller File Sha256"
+          },
+          "entries": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PlanConfigurationEntry"
+            },
+            "maxItems": 4096,
+            "title": "Entries",
+            "type": "array"
+          },
+          "omitted_entries": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Entries",
+            "type": "integer"
+          },
+          "root_source_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Source Sha256"
+          },
+          "schema_name": {
+            "const": "oh-goon.plan-configuration/v1",
+            "default": "oh-goon.plan-configuration/v1",
+            "title": "Schema Name",
+            "type": "string"
+          }
+        },
+        "title": "PlanConfigurationEvidence",
+        "type": "object"
+      },
       "PlanContentObjectEvidence": {
         "additionalProperties": false,
         "description": "Portable content identity derived from one canonical retained-content fact.",
@@ -17330,6 +17668,68 @@
         "title": "PlanInputDefinition",
         "type": "object"
       },
+      "PlanInputSourceObservation": {
+        "additionalProperties": false,
+        "description": "Outcome of the original source selection; never contains a source value/path.",
+        "properties": {
+          "git_field": {
+            "anyOf": [
+              {
+                "enum": [
+                  "commit_sha",
+                  "commit_short_sha",
+                  "branch"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Field"
+          },
+          "kind": {
+            "enum": [
+              "env",
+              "yaml",
+              "toml",
+              "text",
+              "git"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "state": {
+            "enum": [
+              "missing",
+              "null",
+              "empty",
+              "selected",
+              "not_evaluated"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "state"
+        ],
+        "title": "PlanInputSourceObservation",
+        "type": "object"
+      },
       "PlanInputType": {
         "enum": [
           "string",
@@ -18374,6 +18774,14 @@
         ],
         "title": "PlanToolEvidence",
         "type": "object"
+      },
+      "PlanValueNamespace": {
+        "enum": [
+          "input",
+          "env"
+        ],
+        "title": "PlanValueNamespace",
+        "type": "string"
       },
       "PolicySnapshot": {
         "additionalProperties": false,
@@ -21389,6 +21797,16 @@
         "additionalProperties": false,
         "description": "Fully bound immutable execution plan.  Runtime never re-reads YAML/TOML.",
         "properties": {
+          "configuration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanConfigurationEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "contract_version": {
             "default": 44,
             "enum": [

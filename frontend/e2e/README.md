@@ -23,6 +23,11 @@ The installed-production runtime journey remains a separate three-engine gate.
 This keeps actual browser coverage without repeating every product scenario five
 times.
 
+The 200% reflow-equivalent checks halve the CSS viewport through Playwright's
+shared viewport API. They run in all three desktop engines and the Chromium
+mobile/tablet projects, with the same overflow, clipping and fixed chrome
+assertions.
+
 ## Fixture rules
 
 - Use realistic long repository, Plan, Goon, Step, error and evidence text.

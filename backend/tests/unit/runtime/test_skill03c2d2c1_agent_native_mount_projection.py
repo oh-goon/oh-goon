@@ -24,8 +24,11 @@ from oh_goon.integrations.fleet_plan_local_lace_intent import (
     prepared_original_native_mounts,
 )
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
+from tests.factories.fleet_plan_executor import agent_staging_scratch as agent_staging_scratch
 from tests.unit.integrations.test_b12c_live_prework_resource_bridge import _request
 from tests.unit.runtime.test_skill03c2d2b_original_tool_grant import _grant, _staged
+
+pytestmark = pytest.mark.usefixtures("agent_staging_scratch")
 
 
 def _source(tmp_path):

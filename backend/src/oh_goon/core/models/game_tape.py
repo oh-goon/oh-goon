@@ -9,6 +9,7 @@ from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
 )
 from oh_goon.core.models.execution_identity import ResolvedExecutionReference
+from oh_goon.core.models.fleet_plan_diagnostics import PlanConfigurationEvidence
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanArtifactEvidence,
     PlanOutputEvidence,
@@ -457,6 +458,10 @@ class GameTapeEvent(ImmutableModel):
 class GameTape(ImmutableModel):
     """Read-only projection of canonical Fleet admission and execution evidence."""
 
+    schema_name: Literal["oh-goon.game-tape/v1"] = "oh-goon.game-tape/v1"
+    journal_revision: int | None = Field(default=None, ge=0)
+    terminal: bool = False
+    configuration: PlanConfigurationEvidence | None = None
     fleet_run_id: str = Field(min_length=1)
     run_source: FleetRunSource = FleetRunSource.MANUAL
     execution: FleetExecutionAdmission

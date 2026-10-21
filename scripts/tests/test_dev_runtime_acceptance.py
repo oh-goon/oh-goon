@@ -39,6 +39,7 @@ def test_acceptance_refuses_to_compete_for_owned_runtime_port(
 def test_acceptance_delegates_process_start_failure_to_native_launch_owner(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(dev_runtime_acceptance, "_port_is_free", lambda _port: True)
     monkeypatch.setattr(
         dev_runtime_acceptance,
         "prepare_local_runtime_environment",

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from oh_goon.core.fleet_plan_composition import evaluate_inclusion
+from oh_goon.core.fleet_plan_output_refs import step_output_reference
 from oh_goon.core.fleet_plan_values import PipelineValueCompiler
 from oh_goon.core.models.fleet_plan import CompiledExecutionTemplate, PlanStep, ResolvedPlanStep
 from oh_goon.core.models.fleet_plan_composition import (
@@ -12,6 +14,9 @@ from oh_goon.core.models.fleet_plan_composition import (
     PlanStepInclusion,
 )
 from oh_goon.core.models.fleet_plan_diagnostics import (
+    PlanConfigurationBinding,
+    PlanConfigurationEntry,
+    PlanConfigurationEvidence,
     PlanResolutionDisposition,
     PlanResolutionEntry,
     PlanValueNamespace,
@@ -19,15 +24,34 @@ from oh_goon.core.models.fleet_plan_diagnostics import (
     relative_diagnostic_path,
 )
 from oh_goon.integrations.fleet_plan_compilation import qualified_step_id
+from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
 
 
-@dataclass(frozen=True)
+@dataclass
 class FleetPlanResolutionDiagnostics:
-    """Own optional compile-time provenance without changing executable plan semantics."""
+    """Capture bounded safe lineage; optional legacy explain values stay transient."""
 
     plan_root: Path
     entries: list[PlanResolutionEntry] | None
     values: list[PlanValueResolutionEntry] | None
+    source_graph: FleetPlanSourceGraph | None = None
+    configuration: list[PlanConfigurationEntry] = field(default_factory=list)
+    omitted_entries: int = 0
+
+    def evidence(self) -> PlanConfigurationEvidence:
+        return PlanConfigurationEvidence(
+            root_source_sha256=(
+                self.source_graph.root.source_sha256 if self.source_graph else None
+            ),
+            entries=tuple(self.configuration),
+            omitted_entries=self.omitted_entries,
+        )
+
+    def _record(self, entry: PlanConfigurationEntry) -> None:
+        if len(self.configuration) < 4096:
+            self.configuration.append(entry)
+        else:
+            self.omitted_entries += 1
 
     def trace_pipeline_values(
         self,
@@ -38,7 +62,68 @@ class FleetPlanResolutionDiagnostics:
         input_values: dict[str, PlanInputValue],
         input_origins: dict[str, str],
         compiler: PipelineValueCompiler,
+        input_bindings: Mapping[str, PlanConfigurationBinding] | None = None,
     ) -> None:
+        node = self.source_graph.node(plan_path) if self.source_graph else None
+        for definition in compiled.inputs:
+            name = definition.name
+            value = input_values[name]
+            binding = (input_bindings or {}).get(name) or PlanConfigurationBinding(
+                kind="caller" if input_origins.get(name) == "supplied" else "default"
+            )
+            position = node.value_positions.get(f"inputs/{name}") if node else None
+            default_declared = (
+                f"inputs/{name}/default" in node.value_positions
+                if node is not None and position is not None
+                else None
+            )
+            if binding.kind == "default" and default_declared is False and value is None:
+                binding = binding.model_copy(update={"kind": "optional_omission"})
+            self._record(
+                PlanConfigurationEntry(
+                    scope=prefix or None,
+                    namespace=PlanValueNamespace.INPUT,
+                    name=name,
+                    input_type=definition.input_type,
+                    required=definition.required,
+                    default_declared=default_declared,
+                    value_state=(
+                        "deferred"
+                        if binding.kind
+                        in {"producer_workspace", "deferred_goon_output", "deferred_step_output"}
+                        or (isinstance(value, str) and step_output_reference(value) is not None)
+                        else "null"
+                        if value is None
+                        else "empty"
+                        if value == ""
+                        else "defined"
+                    ),
+                    binding=binding,
+                    source_sha256=node.source_sha256 if node else None,
+                    line=position.line if position else None,
+                    column=position.column if position else None,
+                )
+            )
+        for env_definition in compiled.env:
+            position = node.value_positions.get(f"env/{env_definition.name}") if node else None
+            self._record(
+                PlanConfigurationEntry(
+                    scope=prefix or None,
+                    namespace=PlanValueNamespace.ENV,
+                    name=env_definition.name,
+                    value_state=(
+                        "deferred"
+                        if env_definition.source.kind == "host"
+                        else "empty"
+                        if env_definition.source.value == ""
+                        else "defined"
+                    ),
+                    binding=PlanConfigurationBinding(kind=env_definition.source.kind),
+                    source_sha256=node.source_sha256 if node else None,
+                    line=position.line if position else None,
+                    column=position.column if position else None,
+                )
+            )
         if self.values is None:
             return
         source = relative_diagnostic_path(plan_path, self.plan_root)
@@ -64,16 +149,16 @@ class FleetPlanResolutionDiagnostics:
                     contains_host_value=contains_host_value,
                 )
             )
-        for definition in compiled.env:
-            resolved_value = compiler.describe_env(definition.name)
+        for env_definition in compiled.env:
+            resolved_value = compiler.describe_env(env_definition.name)
             self.values.append(
                 PlanValueResolutionEntry(
                     source=source,
                     scope=scope,
                     namespace=PlanValueNamespace.ENV,
-                    name=definition.name,
-                    origin=definition.source.kind,
-                    declared=definition.source.model_dump_json(),
+                    name=env_definition.name,
+                    origin=env_definition.source.kind,
+                    declared=env_definition.source.model_dump_json(),
                     resolved=resolved_value.trace_template(),
                     contains_host_value=resolved_value.has_host_source,
                 )

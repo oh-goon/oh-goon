@@ -17,6 +17,7 @@ from oh_goon.core.models.fleet_plan_composition import (
     PlanStepInclusion,
     validate_template_contract,
 )
+from oh_goon.core.models.fleet_plan_diagnostics import PlanConfigurationEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import (
     ExecutionPurpose,
     PlanExecutionPolicy,
@@ -696,6 +697,9 @@ class ResolvedFleetPlan(ImmutableModel):
     imports: tuple[ResolvedImport, ...] = Field(default_factory=tuple, max_length=100)
     steps: tuple[ResolvedPlanStep, ...] = Field(min_length=1, max_length=50)
     step_sources: tuple[ResolvedStepSource, ...] = Field(default_factory=tuple, max_length=50)
+    configuration: PlanConfigurationEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     skill_sources: tuple[LockedSkillSource, ...] = Field(
         default_factory=tuple, max_length=128, exclude_if=lambda value: not value
     )
@@ -712,6 +716,7 @@ class ResolvedFleetPlan(ImmutableModel):
         imports: tuple[ResolvedImport, ...] = (),
         step_sources: tuple[ResolvedStepSource, ...] = (),
         skill_sources: tuple[LockedSkillSource, ...] = (),
+        configuration: PlanConfigurationEvidence | None = None,
     ) -> ResolvedFleetPlan:
         payload = {
             "contract_version": FLEET_PLAN_CONTRACT_VERSION,
@@ -741,6 +746,7 @@ class ResolvedFleetPlan(ImmutableModel):
             steps=steps,
             step_sources=step_sources,
             skill_sources=skill_sources,
+            configuration=configuration,
         )
 
     @model_validator(mode="after")

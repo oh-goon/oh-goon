@@ -8,7 +8,7 @@ import type {
   SharedPlanDocument,
   SharedPlanSource,
 } from "@generated/models";
-import { FleetRunStatus } from "@generated/enums";
+import { FleetRunStatus, PlanInputType, PlanValueNamespace } from "@generated/enums";
 
 export const FIXTURE_SHA = "a".repeat(64);
 export const FIXTURE_PLAN_ID = "plan:python-production-quality-security:fixture";
@@ -118,7 +118,12 @@ export class FixturePlanRegistry {
       kind: "fleet_plan",
       source,
       identity: { digest: `sha256:${record.sha256}` },
-      plan: { ...BASE_RESOLVED_PLAN, plan_id: record.sharedPlanId, name: record.name },
+      plan: { ...BASE_RESOLVED_PLAN, plan_id: record.sharedPlanId, name: record.name,
+        configuration: { schema_name: "oh-goon.plan-configuration/v1", root_source_sha256: record.sha256, entries: [{
+          scope: null, namespace: PlanValueNamespace.INPUT, name: "project", input_type: PlanInputType.STRING,
+          value_state: "defined", source_sha256: record.sha256, binding: { kind: "default" },
+        }], omitted_entries: 0 },
+      },
     };
   }
 

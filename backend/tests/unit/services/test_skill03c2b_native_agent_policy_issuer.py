@@ -38,6 +38,7 @@ def enrolled_admin_source(tmp_path, monkeypatch, policy):
     monkeypatch.setattr(native_compiler, "_require_admin_policy_ancestry", lambda *a, **k: ())
     path = tmp_path / "admin-agent-effects.json"
     path.write_bytes(policy.encoded)
+    path.chmod(0o644)
     return DeploymentAgentPolicySource.enroll(path, owner_uid=os.geteuid())
 
 

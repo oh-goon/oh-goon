@@ -9,6 +9,7 @@ import argparse
 import json
 
 from oh_goon.application import ApplicationRuntime
+from oh_goon.cli_plan_summary import configuration_summary
 from oh_goon.core.errors import FleetDomainError
 
 
@@ -84,6 +85,13 @@ def _tape(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     else:
         print(f"Fleet Run ID: {tape.fleet_run_id}")
         print(f"Game Tape status: {tape.status.value}")
+        print(f"Journal revision: {tape.journal_revision}")
+        for line in configuration_summary(tape.configuration):
+            print(line)
+        if tape.why_not is not None:
+            print(f"Failure: {tape.why_not.code} stage={tape.why_not.stage}")
+            print(tape.why_not.message)
+            print(f"Next action: {tape.why_not.safe_next_action}")
         for repo in tape.repositories:
             print(f"Repository: {repo.repository.name} ({repo.repository_execution_id})")
             for step in repo.steps:
@@ -91,6 +99,8 @@ def _tape(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                     f"  {step.order}: {step.step_id} [{step.status.value}] "
                     f"({step.step_execution_id})"
                 )
+                if step.reason is not None:
+                    print(f"    Recorded reason: {step.reason}")
         print(
             "For durable output evidence use 'plan outputs'; for transient bytes use 'plan logs'."
         )

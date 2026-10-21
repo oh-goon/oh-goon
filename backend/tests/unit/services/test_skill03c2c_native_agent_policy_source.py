@@ -34,6 +34,7 @@ def _source(tmp_path: Path, monkeypatch, *, content: bytes):
     monkeypatch.setattr(native, "_require_admin_policy_ancestry", lambda *a, **k: ())
     path = tmp_path / "admin-ceilings.json"
     path.write_bytes(content)
+    path.chmod(0o644)
     return path, DeploymentAgentPolicySource.enroll(path, owner_uid=os.geteuid())
 
 
@@ -102,6 +103,7 @@ def test_original_enrollment_and_compilation_refuse_source_substitution(
     elif tamper == "same-bytes-new-inode":
         replacement = path.with_suffix(".next")
         replacement.write_bytes(ceiling.encoded)
+        replacement.chmod(0o644)
         os.replace(replacement, path)
     elif tamper == "mode-writable":
         path.chmod(0o666)
@@ -188,6 +190,7 @@ def test_deployment_document_drift_during_native_observation_aborts_without_admi
             # physical facts, but the admin source changed while they worked.
             replacement = path.with_suffix(".swapped")
             replacement.write_bytes(path.read_bytes())
+            replacement.chmod(0o644)
             os.replace(replacement, path)
         return result
 

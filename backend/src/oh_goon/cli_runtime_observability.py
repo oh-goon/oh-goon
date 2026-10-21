@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 from oh_goon.application import ApplicationRuntime
+from oh_goon.cli_plan_summary import configuration_summary
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.run import FailedFleetRun
 from oh_goon.services.plan_success_evidence import has_exact_plan_success
@@ -39,22 +40,27 @@ def _print_explain_run_detail(runtime: ApplicationRuntime, args: argparse.Namesp
     except FleetDomainError:
         print(f"Unknown fleet run: {args.fleet_run_id}")
         return 2
+    tape = detail.game_tape
+    if getattr(args, "as_json", False):
+        print(tape.model_dump_json(indent=2))
+        return 0
     print(f"Run: {detail.run.fleet_run_id}")
     print(f"Capability: {detail.run.capability.capability_id}")
     print(f"Safety: {detail.run.capability.safety.value}")
     print(f"Action: {detail.run.action.value}")
     print(
-        f"Target: {detail.run.target.model_dump_json() if detail.run.target is not None else 'None'}"
+        f"Target: {tape.execution_reference.model_dump_json() if tape.execution_reference else 'None'}"
     )
+    for line in configuration_summary(tape.configuration):
+        print(line)
     print(f"Status: {detail.run.status.value}")
     print(f"Progress: {detail.run.progress.completed}/{detail.run.progress.total}")
-    _print_explain_run_lifecycle(runtime, detail)
+    _print_explain_run_lifecycle(detail)
     _print_explain_run_operations(detail)
     return 0
 
 
-def _print_explain_run_lifecycle(runtime: ApplicationRuntime, detail) -> None:
-    batch = runtime.runs.events(detail.run.fleet_run_id, 0)
+def _print_explain_run_lifecycle(detail) -> None:
     if isinstance(detail.run, FailedFleetRun):
         print(
             f"Failure: {detail.run.failure.code} "
@@ -62,7 +68,7 @@ def _print_explain_run_lifecycle(runtime: ApplicationRuntime, detail) -> None:
         )
         print(f"Failure message: {detail.run.failure.message}")
     print("Lifecycle:")
-    for event in batch.events:
+    for event in detail.lifecycle_events:
         suffix = f" operation={event.operation_id}" if hasattr(event, "operation_id") else ""
         print(f"  {event.sequence:>3}  {event.event_type.value}{suffix}")
 

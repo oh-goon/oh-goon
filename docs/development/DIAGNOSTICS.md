@@ -73,6 +73,19 @@ These paths keep their existing behavior. For example, a live-output projection 
 
 ## Relationship to command logs and Game Tape
 
+Configuration explanation is a canonical read projection. The resolver captures
+a bounded value-free trace in the target; Journal admission retains it. Game
+Tape exposes it with the verified cut's `journal_revision`, canonical status,
+terminal scope and existing native execution evidence. The JSON read format
+identifies itself as `oh-goon.game-tape/v1`. CLI and UI render these facts; they
+do not probe, repair, retry or infer a permission cause from stderr.
+
+Read-only authoring diagnostics can accept or reject before a Run exists. They
+create no synthetic Run, Step, process or teardown event. Optional export/sink
+failures remain passive diagnostics. Failure of required canonical evidence
+retains its lifecycle owner and cannot be swallowed as diagnostic degradation.
+Neither JSONL diagnostics nor JSON exports become another authoritative store.
+
 The strong setup/test/certification command logs remain useful and keep their current owner/command/failure-class semantics. They are not converted into execution truth. Saved `test`/`certify` sessions now record completion UTC and duration as well as start, exact command and exit result.
 
 Game Tape remains the one-run execution debugger. It owns durable execution evidence and the short-lived live-output projection. Diagnostic events may point at a Run/repository/Step identity, but they cannot manufacture missing Step output or rewrite Game Tape lifecycle facts.

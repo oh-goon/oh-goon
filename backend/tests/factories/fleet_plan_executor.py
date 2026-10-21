@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     ProcessIsolationBackend,
     isolation_backend_evidence,
 )
-from oh_goon.integrations.fleet_plan_run import PreparedPlanRun
+from oh_goon.integrations.fleet_plan_run import PreparedPlanRun, _prepare_private_tree_for_removal
 from oh_goon.integrations.fleet_plan_run_execution import (
     FleetPlanRunExecutor as ProductionFleetPlanRunExecutor,
 )
@@ -80,6 +80,18 @@ class _PreparedRunProcessIsolation:
 
 
 _TEST_PROCESS_ISOLATION = _PreparedRunProcessIsolation()
+
+
+@pytest.fixture
+def agent_staging_scratch(tmp_path: Path) -> Iterator[None]:
+    """Retire read-only hosted Agent fixtures after their local leases have ended.
+
+    This restores directory delete permission only in this test's pytest-owned
+    scratch. It neither follows staged symlinks nor clears kernel custody flags.
+    Assertions still observe the sealed modes; cleanup failures remain errors.
+    """
+    yield
+    _prepare_private_tree_for_removal(tmp_path)
 
 
 def source_authority_for_test(repository: RepositoryIdentity) -> RepositorySourceAuthority:

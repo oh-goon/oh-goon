@@ -14,9 +14,12 @@ from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
 from oh_goon.services.agent_authoring_sources import reserve_verified_agent_source_in
+from tests.factories.fleet_plan_executor import agent_staging_scratch as agent_staging_scratch
 from tests.unit.runtime.test_ag02b2b1_original_agent_source_reservation import fixture
 from tests.unit.runtime.test_ag02b2b3_original_agent_attempt_staging import attempt
 from tests.unit.runtime.test_b12_local_resource_intent import _resources
+
+pytestmark = pytest.mark.usefixtures("agent_staging_scratch")
 
 TOOL_STEP = """- uses: agent
   harness: opencode

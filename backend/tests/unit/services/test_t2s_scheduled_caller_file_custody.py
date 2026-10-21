@@ -149,14 +149,14 @@ def test_real_catalog_values_file_parameter_is_frozen_in_scheduled_execution(tmp
 
     source, identity = _fresh(tmp_path, "inputs:\n  typechecker: ty\n")
     template = PLAN_TEMPLATES.source("python/quality").path
-    resolved = FleetPlanResolver(goon_templates=GOON_TEMPLATES).resolve(
+    resolved, source_sha256 = FleetPlanResolver(goon_templates=GOON_TEMPLATES).resolve_with_source(
         template,
         inputs={"typechecker": "ty"},
     )
     baseline = FleetPlanTarget(
         kind="fleet_plan",
         plan=resolved,
-        source=PlanFileSource(sha256="0" * 64),
+        source=PlanFileSource(sha256=source_sha256),
         identity=ExecutionIdentity(digest=build_execution_lock(resolved).digest),
     )
     service = object.__new__(FleetPlanService)

@@ -210,6 +210,36 @@ source fields and retain their existing serialization.
 
 ## Routing presentation
 
+### Retained configuration decisions
+
+The original resolver captures bounded, value-free `PlanConfigurationEvidence`
+on the resolved Plan. It records each input/environment name and occurrence,
+source digest and available YAML marks, selected origin, structural parent or
+producer edge, and external-source candidate outcomes. Missing, null and empty
+external candidates retain their existing fallthrough behavior. Candidates
+after the first defined source are `not_evaluated` without being read. CLI
+collection records CLI versus caller-file selection before the existing immutable
+target is prepared; Schedules retain that selection without reopening the file.
+
+The Journal retains this metadata with the target in `RUN_ADMITTED`. It is outside
+semantic Plan/lock identity; the target verifies known source/occurrence digests.
+Marks come from the same parsed syntax tree as compilation. A projected root
+input may have no root YAML mark. The trace retains at most 4096 decisions and
+reports the omitted count without changing execution membership. Values,
+defaults, patterns, file contents and native argv are not copied into this trace.
+
+`plan validate --diagnostics [--json]` and `plan explain --diagnostics [--json]`
+return safe accepted/rejected authoring explanations without admission.
+Successful diagnostics say `resolved_not_executed`. Ordinary legacy explain and
+`--routes` retain their scopes. `plan tape RUN_ID [--json]` and
+`dev explain-run RUN_ID --json` expose retained configuration through Game Tape,
+without rereading source or resolving current values. Missing historical lineage
+is unavailable, not reconstructed.
+
+This does not add a generic preflight, native feasibility probes, new input
+contracts or execution authority. Existing admission, preparation and native
+execution owners retain their decisions.
+
 `plan explain --routes [--json]` projects exact compiled import occurrences,
 active root-input recipient bindings and producer reference identities from
 **one existing resolved source cut**. The report exposes neither values nor

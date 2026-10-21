@@ -23,11 +23,11 @@ if ! ollama show "$MODEL" >/dev/null 2>&1; then
   exit 2
 fi
 printf 'Materializing authoritative locked backend dependencies, including real Hashmarks ...\n'
-if ! uv sync --locked --project backend --group dev; then
+if ! uv sync --locked --project backend --group dev --group quality --group build; then
   printf 'UNQUALIFIED: pinned dependencies unavailable; do not substitute Hashmarks or claim a native pass\n' >&2
   exit 2
 fi
-OUT="${OH_GOON_AGENT_QUALIFICATION_OUT:-$ROOT/.qualification/agent01b3h}"
+OUT="${OH_GOON_AGENT_QUALIFICATION_OUT:-${XDG_STATE_HOME:-$HOME/.local/state}/oh-goon/qualification/agent-local-model}"
 mkdir -p "$OUT"
 {
   printf 'Model: %s\n' "$MODEL"
@@ -40,7 +40,7 @@ printf 'Running real Hashmarks, real model inference, original Fleet / Game Tape
 export OH_GOON_REQUIRE_NATIVE_AGENT_MODEL=1
 export OH_GOON_AGENT_MODEL="$MODEL"
 export OH_GOON_REQUIRE_NATIVE_HASHMARKS=1
-uv run --locked --no-sync --project backend --group dev \
+uv run --locked --no-sync --project backend --group dev --group quality --group build \
   python -m pytest -q backend/tests/integration/test_agent01b3c_native_model_review.py \
   backend/tests/integration/test_agent01b3h_native_skill_cycle.py \
   --junitxml="$OUT/native-agent-model.xml" 2>&1 | tee "$OUT/native-agent-model.log"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
@@ -945,9 +946,19 @@ def test_private_attempt_teardown_handles_read_only_materialized_directories(
     (readonly / "payload.bin").write_bytes(b"sealed")
     readonly.chmod(0o500)
     (readonly.parent).chmod(0o500)
+    foreign = tmp_path / "outside-attempt"
+    foreign.mkdir()
+    (foreign / "untouched.bin").write_bytes(b"foreign")
+    foreign.chmod(0o500)
+    (attempt / "workspace" / "foreign-link").symlink_to(foreign, target_is_directory=True)
 
-    result = _teardown_step_attempts(layout, "dependency-materialize")
+    try:
+        result = _teardown_step_attempts(layout, "dependency-materialize")
 
-    assert isinstance(result, CompletedPlanStepTeardownEvidence)
-    assert result.attempt_roots_observed == 1
-    assert not layout.step_attempts_root("dependency-materialize").exists()
+        assert isinstance(result, CompletedPlanStepTeardownEvidence)
+        assert result.attempt_roots_observed == 1
+        assert not layout.step_attempts_root("dependency-materialize").exists()
+        assert stat.S_IMODE(foreign.stat().st_mode) == 0o500
+        assert (foreign / "untouched.bin").read_bytes() == b"foreign"
+    finally:
+        foreign.chmod(0o700)

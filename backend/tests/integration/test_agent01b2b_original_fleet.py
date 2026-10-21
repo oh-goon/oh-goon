@@ -235,10 +235,12 @@ def test_agent_delivery_reference_must_match_resolved_identity(tmp_path, monkeyp
     plan, _, opts = _case(tmp_path, monkeypatch)
     frozen, _ = _lock(plan, opts)
     step = frozen.steps[0]
+    assert frozen.configuration is not None
+    assert frozen.configuration.root_source_sha256 is not None
     target = FleetPlanTarget(
         kind="fleet_plan",
         plan=frozen,
-        source=PlanFileSource(sha256="a" * 64),
+        source=PlanFileSource(sha256=frozen.configuration.root_source_sha256),
         identity=ExecutionIdentity(digest=build_execution_lock(frozen).digest),
         agent_deliveries=(
             AgentStepDeliveryReference(

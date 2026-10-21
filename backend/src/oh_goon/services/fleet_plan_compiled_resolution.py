@@ -5,11 +5,16 @@ from pathlib import Path
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_composition import (
     bind_inputs,
+    input_reference,
     qualify_step_dependencies,
     render_step,
     resolve_output_references,
 )
-from oh_goon.core.fleet_plan_output_refs import goon_workspace_reference
+from oh_goon.core.fleet_plan_output_refs import (
+    goon_output_reference,
+    goon_workspace_reference,
+    step_output_reference,
+)
 from oh_goon.core.models.fleet_plan import (
     AgentPlanStep,
     CompiledExecutionTemplate,
@@ -19,6 +24,10 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedStepSource,
 )
 from oh_goon.core.models.fleet_plan_composition import PlanInputType, PlanInputValue
+from oh_goon.core.models.fleet_plan_diagnostics import (
+    PlanConfigurationBinding,
+    PlanInputSourceObservation,
+)
 from oh_goon.integrations.fleet_plan_compilation import qualified_step_id
 from oh_goon.services.fleet_plan_composition_scope import (
     ResolvedCompositionScope,
@@ -46,6 +55,7 @@ def resolve_compiled_steps(
     input_values: dict[str, PlanInputValue],
     input_origins: dict[str, str],
     external_step_ids: frozenset[str] = frozenset(),
+    input_bindings: dict[str, PlanConfigurationBinding] | None = None,
 ) -> ResolvedCompositionScope:
     value_compiler = prepare_composition_scope(
         context.diagnostics,
@@ -55,6 +65,7 @@ def resolve_compiled_steps(
         input_values=input_values,
         input_origins=input_origins,
         external_step_ids=external_step_ids,
+        input_bindings=input_bindings,
     )
     resolved: list[ResolvedPlanStep] = []
     step_sources: list[ResolvedStepSource] = []
@@ -75,6 +86,7 @@ def resolve_compiled_steps(
             continue
         step = render_pipeline_step(render_step(raw_step, input_values), value_compiler)
         if isinstance(step, CompiledGoonImportStep):
+            assert isinstance(raw_step, CompiledGoonImportStep)
             child_steps, child_imports, child_sources = resolve_goon_edge(
                 context,
                 plan_path,
@@ -84,6 +96,7 @@ def resolve_compiled_steps(
                 goon_aliases=goon_aliases,
                 goon_workspaces=goon_workspaces,
                 external_step_ids=external_step_ids,
+                authored_step=raw_step,
             )
             resolved.extend(child_steps)
             step_sources.extend(child_sources)
@@ -92,8 +105,10 @@ def resolve_compiled_steps(
         step = qualify_step_dependencies(
             step, prefix, goon_aliases, preserved_step_ids=external_step_ids
         )
-        agent_handoff = (
-            context.agent_capture(
+        agent_handoff = None
+        if isinstance(step, AgentPlanStep) and context.agent_capture is not None:
+            assert isinstance(raw_step, AgentPlanStep)
+            agent_handoff = context.agent_capture(
                 plan_path,
                 # Rendering revalidates numeric defaults. Preserve the authored
                 # timeout scalar so existing immutable deliveries keep their bytes.
@@ -102,9 +117,6 @@ def resolve_compiled_steps(
                 compiled.inputs,
                 input_values,
             )
-            if isinstance(step, AgentPlanStep) and context.agent_capture is not None
-            else None
-        )
         resolved_step = resolve_plan_step(
             context,
             step,
@@ -139,11 +151,11 @@ def resolve_goon_edge(
     goon_aliases: dict[str, dict[str, str]],
     goon_workspaces: dict[str, str],
     external_step_ids: frozenset[str],
+    authored_step: CompiledGoonImportStep,
 ) -> tuple[
     tuple[ResolvedPlanStep, ...],
     tuple[ResolvedImport, ...],
     tuple[ResolvedStepSource, ...],
-    tuple,
 ]:
     source = context.source_graph.goon(plan_path, step)
     child_path = source.path
@@ -156,7 +168,7 @@ def resolve_goon_edge(
         chain = " -> ".join(str(path) for path in (*stack, child_path))
         raise FleetPlanInvalid(f"Invalid Goon composition cycle: {chain}")
     child_prefix = qualified_step_id(prefix, step.step_id)
-    child_inputs, child_origins, child_external_step_ids = child_goon_bindings(
+    child_inputs, child_origins, child_external_step_ids, child_bindings = child_goon_bindings(
         context,
         child,
         child_path,
@@ -165,6 +177,8 @@ def resolve_goon_edge(
         goon_aliases=goon_aliases,
         goon_workspaces=goon_workspaces,
         external_step_ids=external_step_ids,
+        authored_step=authored_step,
+        parent_path=plan_path,
     )
     scope = resolve_compiled_steps(
         context,
@@ -175,6 +189,7 @@ def resolve_goon_edge(
         input_values=child_inputs,
         input_origins=child_origins,
         external_step_ids=child_external_step_ids,
+        input_bindings=child_bindings,
     )
     bind_goon_alias(step, scope, goon_aliases, goon_workspaces)
     parent = ResolvedImport(
@@ -214,11 +229,17 @@ def child_goon_bindings(
     goon_aliases: dict[str, dict[str, str]],
     goon_workspaces: dict[str, str],
     external_step_ids: frozenset[str],
-):
+    authored_step: CompiledGoonImportStep,
+    parent_path: Path,
+) -> tuple[
+    dict[str, PlanInputValue], dict[str, str], frozenset[str], dict[str, PlanConfigurationBinding]
+]:
     explicit: dict[str, PlanInputValue] = {}
     origins: dict[str, str] = {}
     referenced_workspaces: set[str] = set()
     definitions = {item.name: item for item in child.inputs}
+    authored = {item.name: item for item in authored_step.inputs}
+    bindings: dict[str, PlanConfigurationBinding] = {}
     for item in step.inputs:
         definition = definitions.get(item.name)
         if definition is None:
@@ -226,13 +247,21 @@ def child_goon_bindings(
                 f"Goon import {step.goon!r} received unknown input {item.name!r}"
             )
         if item.sources:
+            observations: list[PlanInputSourceObservation] = []
             found, value, origin = resolve_input_sources(
-                item.sources, context=context.input_resolution, input_name=item.name
+                item.sources,
+                context=context.input_resolution,
+                input_name=item.name,
+                observations=observations,
+            )
+            bindings[item.name] = PlanConfigurationBinding(
+                kind="external_source" if found else "default", candidates=tuple(observations)
             )
             if found:
                 explicit[item.name] = value
                 origins[item.name] = origin
             continue
+        bindings[item.name] = _configuration_binding(authored[item.name].value, prefix)
         workspace_goon = (
             goon_workspace_reference(item.value) if isinstance(item.value, str) else None
         )
@@ -263,10 +292,55 @@ def child_goon_bindings(
         origins[item.name] = "bound"
     inputs = bind_inputs(child, explicit, context=str(child_path))
     origins.update({name: "default" for name in inputs if name not in origins})
+    node = context.source_graph.node(parent_path)
+    for name, binding in bindings.items():
+        position = node.value_positions.get(f"binding/{authored_step.step_id}/{name}")
+        if position is None:
+            position = node.value_positions.get(f"import/{authored_step.step_id}")
+        bindings[name] = binding.model_copy(
+            update={
+                "source_sha256": node.source_sha256,
+                "parent_scope": prefix or None,
+                "line": position.line if position else None,
+                "column": position.column if position else None,
+            }
+        )
     external = set(external_step_ids)
     external.update(referenced_step_ids(explicit))
     external.update(referenced_workspaces)
-    return inputs, origins, frozenset(external)
+    return inputs, origins, frozenset(external), bindings
+
+
+def _configuration_binding(value: PlanInputValue, prefix: str) -> PlanConfigurationBinding:
+    """Describe the already compiled edge without retaining its literal value."""
+    if isinstance(value, str):
+        parent = input_reference(value)
+        if parent is not None:
+            return PlanConfigurationBinding(
+                kind="parent_input", parent_scope=prefix or None, parent_input=parent
+            )
+        workspace = goon_workspace_reference(value)
+        if workspace:
+            return PlanConfigurationBinding(
+                kind="producer_workspace", producer=qualified_step_id(prefix, workspace)
+            )
+        goon_output = goon_output_reference(value)
+        if goon_output:
+            return PlanConfigurationBinding(
+                kind="deferred_goon_output",
+                producer=qualified_step_id(prefix, goon_output[0]),
+                output=goon_output[1],
+            )
+        step_output = step_output_reference(value)
+        if step_output:
+            return PlanConfigurationBinding(
+                kind="deferred_step_output",
+                producer=qualified_step_id(prefix, step_output[0]),
+                output=step_output[1],
+            )
+        if "${{" in value:
+            return PlanConfigurationBinding(kind="expression")
+    return PlanConfigurationBinding(kind="literal")
 
 
 def _resolved_step_source(

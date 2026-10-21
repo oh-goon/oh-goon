@@ -12,10 +12,13 @@ from oh_goon.core.ports.original_mount_intent import (
     OriginalMountIntentDescriptor,
     OriginalSandboxMount,
 )
+from tests.factories.fleet_plan_executor import agent_staging_scratch as agent_staging_scratch
 from tests.unit.runtime.test_ag02b2b3_original_agent_attempt_staging import (
     attempt,
     original_handoff,
 )
+
+pytestmark = pytest.mark.usefixtures("agent_staging_scratch")
 
 
 def prepared(tmp_path: Path):

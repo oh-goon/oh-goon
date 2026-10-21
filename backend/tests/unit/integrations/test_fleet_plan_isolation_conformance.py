@@ -302,7 +302,9 @@ def test_remote_runner_executes_opened_executable_after_path_replacement(
         pytest.skip("chroot requires root privileges")
     repository = tmp_path / "repo-atomic-remote"
     seed_cicd_repository(repository)
-    step = ResolvedCommandStep(timeout_seconds=3600, step_id="atomic-runtime", argv=("true",))
+    step = ResolvedCommandStep(
+        timeout_seconds=3600, step_id="atomic-runtime", argv=("sh", "-c", ":")
+    )
 
     with prepare_physical_test_run(
         RepositoryIdentity(path=repository),

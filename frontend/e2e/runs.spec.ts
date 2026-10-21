@@ -5,6 +5,21 @@ import { DEFAULT_RUN_ID, FAILED_RUN_ID } from "./fixtures/runIds";
 import { openFixture, openRunFixture } from "./helpers/navigation";
 import { gameTapeFlow, gameTapeFlowSearch, gameTapeInspector, gameTapeRegion, runHistoryRegion } from "./helpers/locators";
 
+test("Run configuration explanation exposes captured provenance through a read-only disclosure", async ({ page }) => {
+  await openRunFixture(page);
+  const tape = gameTapeRegion(page);
+  await tape.getByRole("button", { name: "Overview", exact: true }).click();
+  await tape.locator("summary", { hasText: "Configuration explanation" }).click();
+  const explanation = tape.locator("details", { has: page.locator("summary", { hasText: "Configuration explanation" }) });
+  await expect(explanation.getByText("<root>.input.project", { exact: true })).toBeVisible();
+  await expect(explanation.getByText("Owning Goon default", { exact: false })).toBeVisible();
+  await expect(explanation.getByText(/Values are withheld/)).toBeVisible();
+  await expect(explanation.getByRole("button")).toHaveCount(0);
+  await page.setViewportSize({ width: 375, height: 800 });
+  await expect(explanation.getByText("<root>.input.project", { exact: true })).toBeVisible();
+  expect(await explanation.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+});
+
 test("Runs opens as history without implicitly selecting the latest Run", async ({ page }) => {
   await openFixture(page, "runs");
   await expect(runHistoryRegion(page)).toBeVisible();
