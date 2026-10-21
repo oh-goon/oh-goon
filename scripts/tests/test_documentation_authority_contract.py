@@ -24,6 +24,7 @@ def test_source_navigation_links_resolve_to_current_owners() -> None:
         ROOT / "docs/development/AGENT_RUNTIME_OWNERS.md",
         ROOT / "docs/development/HASHMARKS_EXECUTION_LAYER.md",
         ROOT / "docs/architecture/ADR_AGENT_WORKLOAD_CANONICAL_EXECUTION.md",
+        ROOT / "docs/architecture/ADR_SKILL_03A_HARNESS_DATA_BOUNDARY.md",
     )
     broken = []
     for document in documents:

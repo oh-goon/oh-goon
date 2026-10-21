@@ -1,9 +1,11 @@
 # Agent runtime ownership
 
 This is the source inventory and design input for [issue #4](https://github.com/oh-goon/oh-goon/issues/4).
-It describes the implementation inspected at [26c1ed0](https://github.com/oh-goon/oh-goon/commit/26c1ed0bc5e75f2a3959760dd8c3a5ffa63320e4).
-The contract questions below are proposed work, not implemented native-agent support or
-qualification evidence. Current operator behavior is documented in [Agent Skills](../AGENT_SKILLS.md)
+The live execution inventory describes the implementation inspected at
+[26c1ed0](https://github.com/oh-goon/oh-goon/commit/26c1ed0bc5e75f2a3959760dd8c3a5ffa63320e4).
+The passive harness contract below incorporates A2; it does not change that runtime
+or establish native-agent support or qualification. The remaining integration
+questions are proposed work. Current operator behavior is documented in [Agent Skills](../AGENT_SKILLS.md)
 and [Agent providers](../AGENT_PROVIDERS.md). The [contributor contract](../../AGENTS.md)
 and [Hashmarks handoff](HASHMARKS_EXECUTION_LAYER.md) retain their authority.
 
@@ -57,7 +59,7 @@ the executable authorities.
 | `provider-review`, `provider-adjudicate`, `provider-proposal` | [agent_review_execution.py](../../backend/src/oh_goon/integrations/agent_review_execution.py) constructs complete captured-source/Skill requests and role instructions, launches one supervised HTTP child, and accepts typed phase output. Proposal has no write tool. | **ADAPT** harness-facing transport/presentation. **KEEP** complete-scope requirements and typed result admission; output schemas are product contracts, not duplicated reasoning. |
 | Direct model transport | [AgentProviderClient](../../backend/src/oh_goon/integrations/agent_provider_client.py) performs one bounded, nonstreaming text request. It owns no reasoning loop, retry/fallback strategy or repository discovery. | **KEEP** while direct-model Steps and explicit provider diagnostics have consumers. It is **NOT AN OWNER** of workflow, compaction or coding strategy. |
 | Provider/model configuration | [runtime/agent_providers.py](../../backend/src/oh_goon/runtime/agent_providers.py) and [AgentConnection](../../backend/src/oh_goon/core/models/agent_providers.py) load one selected catalog, freeze public selection and resolve explicit credential references. | **KEEP** the current direct-model configuration. **ADAPT** future native-agent selection without importing or reinterpreting the agent's native configuration. |
-| Pure generic harness contract | [AgentHarnessInput / AgentHarnessSubmission](../../backend/src/oh_goon/services/agent_harness_contract.py) project prework bytes and parse a generic untrusted report. Repository runtime call sites do not invoke its prepare/decode functions; the Step currently decodes the original handoff directly. | **ADAPT** this existing contract in place before runtime use. Its DTOs are **NOT AN OWNER** of execution or accepted phase results. Do not introduce another canonical protocol beside it and the live typed records. |
+| Passive harness contract | [AgentHarnessInput / AgentHarnessSubmission](../../backend/src/oh_goon/core/agent_harness_contract.py) bind frozen prework and selected intent, check declared capability support and decode bounded untrusted submissions. Repository runtime call sites do not invoke its prepare/decode functions; the Step currently decodes the original handoff directly. | **KEEP** one passive core contract. **ADAPT** future native invocation to it while preserving the live typed acceptors. Its DTOs are **NOT AN OWNER** of execution or accepted phase results. |
 | Explicit provider diagnostic | [cli_agent_providers.py](../../backend/src/oh_goon/cli_agent_providers.py) sends caller-supplied text through `AgentProviderClient.complete` and reports a model reply. It does not attach repository/Skill context or admit an Agent workflow. | **KEEP** the diagnostic; it is **NOT AN OWNER** of Agent execution, verification or certification. |
 
 These classifications apply to responsibilities, not whole-file deletion. The
@@ -66,6 +68,58 @@ contain no general native-style context-compaction or model-routing subsystem.
 [agent_model_selection.py](../../backend/src/oh_goon/core/agent_model_selection.py)
 combines replaceable prompt/protocol code with source, disclosure and untrusted-output
 checks that remain necessary at the appropriate existing owner.
+
+## Harness data contract (A2)
+
+The existing contract now lives in
+[core/agent_harness_contract.py](../../backend/src/oh_goon/core/agent_harness_contract.py),
+with the `prepare_agent_harness_input` and `decode_agent_harness_submission`
+entry points. It has no services-layer facade, runner, source loader or authority
+issuer. Preparation consumes the original frozen delivery; it does not recapture
+source or introduce another delivery codec.
+
+The input binds the selected harness identity and capability selection, the exact
+resolved occurrence, original execution policy/backend and execution identity,
+and optional existing `FleetPlanRunLimits`. Repository candidate, review scope
+and Skill identities derive from the same handoff. The `input_identity` binds
+these selections without replacing the original source or execution identities.
+Disclosure recipients must match the handoff's requested recipients exactly;
+that request is not a disclosure grant.
+
+The selected descriptor must support frozen-source input, mandatory Hashmarks
+evidence and the selected result role. Required and optional capability selections
+are explicit. Missing required support rejects preparation; optional support is
+the requested/supported intersection, and unavailable options remain explicit.
+There is no fallback implementation. Observations and artifact references are
+accepted only when both supported and selected. These
+checks establish compatibility of the supplied data, not the presence of an
+executable adapter or actual producer evidence.
+
+Native model settings, prompting and context behavior remain owned by the selected
+agent. An optional native-configuration identity is an opaque supplied digest;
+Oh-Goon does not parse or discover native configuration through this contract.
+No credentials or native host paths belong in it. All input remains
+`PREWORK_NOT_ADMITTED`; preparing or decoding it does not authorize a model
+request, tool launch, repository write or strict execution.
+
+The canonical v2 submission envelope is bounded to 1 MiB and distinguishes
+`COMPLETED`, `FAILED` and `INCOMPLETE` reports. Its generic verdicts remain claims.
+A phase payload is bounded to 65,536 UTF-8 bytes and is exposed unchanged for the
+existing review, adjudication or proposal acceptor; decoding the envelope does
+not accept that role result. Generic `CLEAN` cannot replace an accepted complete
+review or successful native verification.
+
+Structured observations are bounded untrusted claims. Artifact references use
+the existing `PlanContentObjectEvidence` content metadata; they do not grant a
+host-path/URL read, create retention authority or prove that bytes were retained.
+Actual observations, artifact collection and durable promotion remain with their
+existing execution/content owners.
+
+A2 completes this passive data contract. A3 must consume the preparer before a
+native Agent Step starts and verify the resolved intent at its receiver. It must
+also demonstrate actual native capabilities and mandatory Hashmarks delivery.
+The current runtime, Hashmarks consumption and typed result owners are unchanged;
+ordinary local execution gains no strict qualification prerequisite.
 
 ## Results, limits and observations
 
@@ -86,22 +140,24 @@ remain authoritative. [Game Tape](GAME_TAPE.md) explains historical versus live
 visibility; a missing model identity, internal tool event or transcript remains
 unavailable rather than being reconstructed from an agent claim.
 
-## Contract questions before a native adapter
+## Integration questions before a native adapter
 
-The next contract change should answer these questions in the existing owners:
+Native adapter integration must answer these questions in the existing owners:
 
 1. **Role versus implementation selection.** The current outer validator requires
    exact `provider-review`, `provider-adjudicate` and `provider-proposal` harness
    names. Separate phase/output capability from selected implementation while
    retaining phase ordering, exact accounting and original admission. Adding two
    launch commands alone cannot establish swapping the same workflow.
-2. **One source and result handoff.** Connect the existing generic harness input
-   to the real frozen delivery without a second capture/codec/identity. Reconcile
-   its submission with the live review, adjudication and proposal records; keep
-   the existing acceptors and effect owner authoritative.
-3. **Required capabilities and effects.** Specify supported read-only roles,
-   source/Skill delivery, observations and optional native features. Unsupported
-   requests reject before the Step. Read-only proposal and direct editing need
+2. **One source and result handoff.** Consume the shared preparer through the
+   original Step and send its phase payloads unchanged to the existing review,
+   adjudication and proposal acceptors. Preserve one capture/codec/identity and
+   keep the existing acceptors and effect owner authoritative.
+3. **Required capabilities and effects.** Demonstrate the descriptor's supported
+   read-only roles, source/Skill delivery, observations and optional native
+   features against the selected implementation. Missing required support rejects
+   before the Step; unavailable optional features remain disabled and explicit.
+   Read-only proposal and direct editing need
    distinct demonstrated effect contracts; selecting a native agent grants no
    additional tool, write, recipient or network authority.
 4. **Native configuration.** Let the selected agent own its model settings,
@@ -118,9 +174,10 @@ The next contract change should answer these questions in the existing owners:
    deadline at the original Step owner. Distinguish native conversation/session
    state from Run retry/recovery and campaign continuation. No new agent store,
    scheduler or independent retry route follows from native session support.
-7. **Bounded observable evidence.** Decide which available native events and
-   producer identities need typed observations or bounded artifact promotion
-   through existing evidence/content owners. Keep raw prompt/credential privacy
+7. **Bounded observable evidence.** Map available native events and producer
+   identities to selected observations and bounded artifact promotion through
+   existing evidence/content owners. Claim metadata alone is not actual observation
+   or retention. Keep raw prompt/credential privacy
    and scratch cleanup explicit. Do not advertise durable transcript or producer
    packet replay before an owner actually retains it.
 8. **Migration and removal proof.** Demonstrate one supported native adapter,
@@ -128,8 +185,8 @@ The next contract change should answer these questions in the existing owners:
    Compare permissions, source, cancellation, failure, verification and Game Tape
    accounting; their solutions may differ. Retire only demonstrated overlaps.
 
-This inventory does not freeze a universal agent protocol, select a native agent
-version or authorize replacing current execution. The [retained workload ADR](../architecture/ADR_AGENT_WORKLOAD_CANONICAL_EXECUTION.md)
+This contract does not establish a universal native-agent feature set, select a
+native agent version or authorize replacing current execution. The [retained workload ADR](../architecture/ADR_AGENT_WORKLOAD_CANONICAL_EXECUTION.md)
 records the shared-execution decision and its original assumptions. Current
 normal-local behavior does not gain a strict signer/custody qualification gate.
 
@@ -142,7 +199,7 @@ normal-local behavior does not gain a strict signer/custody qualification gate.
 | Complete provider closure and typed output acceptance | [Provider execution](../../backend/tests/unit/integrations/test_agent_review_execution.py), [review/adjudication resolution](../../backend/tests/unit/services/test_agent_review_resolution.py), [provider wire boundaries](../../backend/tests/dependency_complete/test_agent_provider_http.py) |
 | Frozen provider selection and credentials | [Provider configuration](../../backend/tests/unit/runtime/test_agent_providers.py), [provider connection](../../backend/tests/integration/services/test_agent_provider_connection.py) |
 | Producer qualifications and evidence bounds | [Hashmarks Agent tools](../../backend/tests/unit/integrations/test_hashmarks_agent_tools.py) |
-| Pure generic prework contract | [Harness interface](../../backend/tests/unit/services/test_skill03a_harness_interface.py), [effect requests](../../backend/tests/unit/services/test_skill03b_effect_requests.py) |
+| Passive harness data contract | [Harness contract](../../backend/tests/unit/core/test_agent_harness_contract.py), [effect requests](../../backend/tests/unit/services/test_skill03b_effect_requests.py) |
 | Linked review/repair Runs and source recapture | [Review/repair integration](../../backend/tests/integration/services/test_agent_review_repair_loop.py), [bounded repair](../../backend/tests/integration/test_agent_bounded_repair.py), [capture boundaries](../../backend/tests/unit/services/test_agent_repair_source_capture.py) |
 | Installed local model behavior | Opt-in [native model review](../../backend/tests/integration/test_agent01b3c_native_model_review.py) and [native Skill cycle](../../backend/tests/integration/test_agent01b3h_native_skill_cycle.py) |
 

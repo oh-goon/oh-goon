@@ -8,12 +8,20 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from oh_goon.core.agent_harness_contract import (
+    AgentHarnessInput,
+    AgentHarnessIntent,
+    AgentHarnessSelection,
+    decode_agent_harness_submission,
+    prepare_agent_harness_input,
+)
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.fleet_plan import AgentPlanStep, AgentStepRequestedEffects
+from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
 from oh_goon.runtime.goon_templates import GoonTemplateStore
-from oh_goon.services.agent_harness_contract import prepare_agent_harness_input
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 
@@ -52,6 +60,25 @@ steps:
     )
 
 
+def _prepare(handoff: FrozenAgentStepHandoff) -> AgentHarnessInput:
+    return prepare_agent_harness_input(
+        handoff.encode_prework_delivery(),
+        expected_handoff_identity=handoff.handoff_identity,
+        selection=AgentHarnessSelection(
+            harness=handoff.harness,
+            implementation_identity="sha256:" + "1" * 64,
+            capabilities=("frozen_source", "hashmarks_evidence", "report"),
+        ),
+        execution=AgentHarnessIntent(
+            execution_identity=ExecutionIdentity(digest="sha256:" + "2" * 64),
+            backend_id="standard-local",
+            policy=VerificationExecutionPolicy(),
+            disclosure_recipients=handoff.requested_effects.recipients,
+        ),
+        occurrence="review.first",
+    )
+
+
 EFFECTS = """  requested_effects:
     repository_access: write
     recipients: [internal_model]
@@ -76,7 +103,7 @@ def test_explicit_authored_effects_are_bound_to_frozen_original_handoff(tmp_path
     assert handoff.effect_permission == "NONE"
     assert handoff.authority == "PREWORK_NOT_ADMITTED"
     packet = handoff.encode_prework_delivery()
-    frozen = prepare_agent_harness_input(packet, expected_handoff_identity=handoff.handoff_identity)
+    frozen = _prepare(handoff)
     assert frozen.requested_effects == effects
     assert frozen.handoff.effect_permission == "NONE"
     assert json.loads(packet)["step"]["requested_effects"]["repository_access"] == "write"
@@ -161,21 +188,23 @@ def test_transport_tampering_cannot_expand_or_remove_requested_effects(tmp_path,
 
 
 def test_clean_result_is_still_only_untrusted_claim_with_write_request(tmp_path):
-    from oh_goon.services.agent_harness_contract import decode_agent_harness_submission
-
     handoff = _make_step(tmp_path, effect_block=EFFECTS)
+    prepared = _prepare(handoff)
     payload = canonical_bytes(
         {
-            "schema": "oh-goon.agent-harness-submission/v1",
+            "schema": "oh-goon.agent-harness-submission/v2",
+            "input_identity": prepared.input_identity,
             "handoff_identity": handoff.handoff_identity,
+            "status": "COMPLETED",
             "verdict": "CLEAN",
             "findings": [],
             "summary": "looks good",
+            "record": None,
+            "observations": [],
+            "artifacts": [],
         }
     )
-    result = decode_agent_harness_submission(
-        payload, expected_handoff_identity=handoff.handoff_identity
-    )
+    result = decode_agent_harness_submission(payload, expected_input=prepared)
     assert result.authority == "UNTRUSTED_HARNESS_CLAIM"
     assert not hasattr(result, "effect_permission")
 

@@ -52,6 +52,12 @@ the bridge into the original Fleet journal reservation. Execution integrations
 consume the same core contract and frozen bytes without importing the authoring
 service or reacquiring source paths.
 
+`core/agent_harness_contract.py` owns passive harness input, capability compatibility
+and bounded untrusted submission data. It reuses the original frozen source
+contract and remains separate from execution admission and typed role-result
+acceptance. The [Agent runtime inventory](../../../docs/development/AGENT_RUNTIME_OWNERS.md)
+describes its current scope and the remaining native adapter integration.
+
 ### [engine/](engine/)
 
 Native local command/Git/project execution primitives and the focused operation implementations under `engine/operations/`. Start at `engine/runner.py` when tracing native action dispatch.
