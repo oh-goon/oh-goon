@@ -26,7 +26,7 @@ from oh_goon.core.models.agent_providers import (
 )
 from oh_goon.core.models.fleet_plan import MAX_AGENT_TASK_CHARS
 from oh_goon.core.models.run import FleetRunDetail
-from oh_goon.core.vocabulary import FleetRunOutcome
+from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
@@ -247,7 +247,7 @@ def _run_and_close(
     try:
         result, detail = _run_selected(runtime, selected, workspace, skill, task, verification)
         if result not in (0, 130):
-            _print_failure_stderr(runtime, detail.run.fleet_run_id)
+            _print_failure_stderr(runtime, detail)
     except BaseException:
         _shutdown_after_primary_failure(runtime)
         raise
@@ -258,12 +258,13 @@ def _run_and_close(
     return result, detail
 
 
-def _print_failure_stderr(runtime: ApplicationRuntime, fleet_run_id: str) -> None:
+def _print_failure_stderr(runtime: ApplicationRuntime, detail: FleetRunDetail) -> None:
     """Present a bounded stderr tail before its original transient owner closes."""
     try:
-        batch = runtime.runs.game_tape_live_output(fleet_run_id)
+        batch = runtime.runs.game_tape_live_output(detail.run.fleet_run_id)
     except (FleetDomainError, OSError, ValueError):
         print("Run failure stderr is unavailable from Game Tape live output.", file=sys.stderr)
+        _print_recorded_failure(detail)
         return
     remaining = _MAX_FAILURE_STDERR_BYTES
     parts: list[str] = []
@@ -285,8 +286,36 @@ def _print_failure_stderr(runtime: ApplicationRuntime, fleet_run_id: str) -> Non
         if omitted:
             print("... earlier output omitted ...", file=sys.stderr)
         print(text, file=sys.stderr, end="" if text.endswith("\n") else "\n")
-    else:
+    elif not _print_recorded_failure(detail):
         print("Run failure has no retained stderr; inspect the Fleet Run ID.", file=sys.stderr)
+
+
+def _print_recorded_failure(detail: FleetRunDetail) -> bool:
+    """Show recorded Step outcomes and bounded claims without source/model output."""
+    printed = 0
+    for repository in detail.game_tape.repositories:
+        for step in repository.steps:
+            if step.status is not GameTapeStatus.FAILED:
+                continue
+            print(f"Recorded Step failure: {step.step_id} (exit {step.exit_code})", file=sys.stderr)
+            printed += 1
+            if printed == 8:
+                return True
+            for observation in step.native_agent_observations:
+                if not observation.failed:
+                    continue
+                for event in reversed(observation.events):
+                    if event.kind != "agent":
+                        continue
+                    summary = event.summary.encode("utf-8")[:512].decode("utf-8", errors="ignore")
+                    print(
+                        f"Native protocol claim (Step exit {step.exit_code}): {summary}",
+                        file=sys.stderr,
+                    )
+                    printed += 1
+                    if printed == 8:
+                        return True
+    return printed > 0
 
 
 def _run_selected(

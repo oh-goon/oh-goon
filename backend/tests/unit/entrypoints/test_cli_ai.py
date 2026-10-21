@@ -15,7 +15,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli import main
 from oh_goon.cli_parser import build_parser
 from oh_goon.core.models.agent_providers import AgentProviderError
-from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
+from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
 from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
@@ -58,6 +58,7 @@ def native_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespa
     detail = SimpleNamespace(
         run=SimpleNamespace(fleet_run_id="native-run", status=FleetRunStatus.COMPLETED),
         outcome=FleetRunOutcome.SUCCESS,
+        game_tape=SimpleNamespace(repositories=()),
         model_dump_json=Mock(return_value='{"fleet_run_id":"native-run"}'),
     )
     runtime = SimpleNamespace(
@@ -205,6 +206,95 @@ def test_native_failure_stderr_tail_has_utf8_byte_bound_and_omission_notice(
     assert "earlier output omitted" in output.err and "OLD" not in output.err
     assert output.err.count("é") * 2 <= 16384
     assert json.loads(output.out)["fleet_run_id"] == "native-run"
+
+
+@pytest.mark.parametrize("live_available", [True, False])
+def test_native_failure_reports_recorded_stop_reason_without_transient_stderr(
+    native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str], live_available: bool
+) -> None:
+    native_cli.detail.outcome = FleetRunOutcome.FAILED
+    native_cli.detail.game_tape.repositories = (
+        SimpleNamespace(
+            steps=(
+                SimpleNamespace(
+                    status=GameTapeStatus.FAILED,
+                    step_id="native-agent",
+                    exit_code=125,
+                    native_agent_observations=(
+                        SimpleNamespace(
+                            agent="pi",
+                            failed=True,
+                            events=(
+                                SimpleNamespace(kind="agent", summary="pi: stop_reason=length"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    native_cli.runtime.runs.game_tape_live_output.return_value = SimpleNamespace(
+        dropped_chunk_count=0,
+        chunks=(SimpleNamespace(stream="stdout", text="PRIVATE PRODUCER AND MODEL OUTPUT"),),
+    )
+    if not live_available:
+        native_cli.runtime.runs.game_tape_live_output.side_effect = OSError("live owner closed")
+    assert main([*native_cli.argv, "--json"]) == 1
+    output = capsys.readouterr()
+    assert json.loads(output.out)["fleet_run_id"] == "native-run"
+    assert "Native protocol claim" in output.err
+    assert "pi: stop_reason=length" in output.err and "125" in output.err
+    assert "PRIVATE PRODUCER" not in output.out + output.err
+
+
+def test_native_verification_failure_has_recorded_exit_when_logs_are_stdout_only(
+    native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    native_cli.detail.outcome = FleetRunOutcome.FAILED
+    native_cli.detail.game_tape.repositories = (
+        SimpleNamespace(
+            steps=(
+                SimpleNamespace(
+                    status=GameTapeStatus.FAILED,
+                    step_id="verify-1",
+                    exit_code=7,
+                    native_agent_observations=(),
+                ),
+            ),
+        ),
+    )
+    assert main(native_cli.argv) == 1
+    assert "verify-1 (exit 7)" in capsys.readouterr().err
+
+
+def test_recorded_native_failure_claims_are_bounded_utf8_without_stdout(
+    native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    native_cli.detail.outcome = FleetRunOutcome.FAILED
+    native_cli.detail.game_tape.repositories = (
+        SimpleNamespace(
+            steps=(
+                SimpleNamespace(
+                    status=GameTapeStatus.FAILED,
+                    step_id="native-agent",
+                    exit_code=125,
+                    native_agent_observations=(
+                        SimpleNamespace(
+                            failed=True,
+                            events=tuple(
+                                SimpleNamespace(kind="agent", summary="é" * 1000) for _ in range(10)
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    assert main(native_cli.argv) == 1
+    lines = capsys.readouterr().err.splitlines()
+    claims = [line for line in lines if line.startswith("Native protocol claim")]
+    assert len(claims) == 7
+    assert all(len(line.split(": ", 1)[1].encode("utf-8")) <= 512 for line in claims)
 
 
 def test_ai_ctrl_c_uses_original_cancel_and_wait(native_cli: SimpleNamespace) -> None:
