@@ -13,7 +13,7 @@ from oh_goon.core.execution_lock_identity import build_execution_lock, verify_ex
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
-from oh_goon.integrations.agent_skill_sources import skill_source_cache
+from oh_goon.integrations.agent_skill_sources import prepare_skill_source, skill_source_cache
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.execution_lock_persistence import load_execution_lock, write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -137,6 +137,73 @@ def test_one_collection_prepares_once_and_transports_every_selected_resource(tmp
     assert not (repository / "worktrees").exists()
     assert not (path.parent / ".gitmodules").exists()
     assert not (path.parent / "libs").exists()
+
+
+@pytest.mark.parametrize("form", ["path", "file_uri", "escaped_uri", "symlink"])
+def test_native_local_skill_acquisition_rejects_agent_editable_source_before_git_or_cache(
+    tmp_path, monkeypatch, form
+):
+    from unittest.mock import Mock
+
+    workspace = tmp_path / "workspace"
+    source = workspace / "collection"
+    source.mkdir(parents=True)
+    selected = str(source)
+    if form == "file_uri":
+        selected = source.as_uri()
+    elif form == "escaped_uri":
+        selected = source.as_uri().replace("collection", "%63ollection")
+    elif form == "symlink":
+        alias = tmp_path / "outside-alias"
+        alias.symlink_to(source, target_is_directory=True)
+        selected = str(alias)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    run = Mock(side_effect=AssertionError("Agent-editable Skill source reached host Git"))
+    monkeypatch.setattr(GitService, "run", run)
+    with pytest.raises(FleetPlanInvalid, match="agent-editable workspace"):
+        with prepare_skill_source(selected, "main", commit="a" * 40, native_workspace=workspace):
+            pytest.fail("Unsupported source was prepared")
+    run.assert_not_called()
+    assert not skill_source_cache().exists()
+
+
+def test_native_external_locked_skill_source_keeps_native_git_semantics(tmp_path, monkeypatch):
+    _, _, remote, commit, options = case(tmp_path, monkeypatch)
+    workspace = options["repository_root"] / "product"
+    with prepare_skill_source(
+        remote.as_uri(), "main", commit=commit, native_workspace=workspace
+    ) as (root, selected):
+        assert selected == commit
+        assert (
+            root / "skills/review/references/guide.md"
+        ).read_text() == "Keep the complete resource directory.\n"
+
+
+def test_native_registry_transports_workspace_fence_before_pinned_acquisition(
+    tmp_path, monkeypatch
+):
+    from unittest.mock import Mock
+
+    from oh_goon.core.models.agent_providers import (
+        NativeAgentDefinition,
+        NativeAgentProfile,
+        ResolvedNativeAgent,
+    )
+
+    resolver, path, remote, _, options = case(tmp_path, monkeypatch)
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+    )
+    run = Mock(side_effect=AssertionError("Native capture prepared an agent-editable Git source"))
+    monkeypatch.setattr(GitService, "run", run)
+    with pytest.raises(FleetPlanInvalid, match="agent-editable workspace"):
+        resolver.resolve_frozen_agents(path, native_agent=selected, repository=remote, **options)
+    run.assert_not_called()
+    assert not skill_source_cache().exists()
 
 
 def test_branch_advances_only_on_explicit_update_and_cache_miss_keeps_pin(tmp_path, monkeypatch):

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_composition import bind_inputs, validate_condition_dependencies
+from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan import (
     AgentPlanStep,
@@ -38,6 +39,7 @@ from oh_goon.core.path_authority import RepositoryPathSpace, navigation_path
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
+from oh_goon.engine.git import GitService
 from oh_goon.integrations.fleet_plan_compilation import (
     GoonTemplateProvider,
     load_extension_catalog,
@@ -81,10 +83,13 @@ class FleetPlanResolver:
         extensions: FleetExtensionStore | None = None,
         tools: FleetToolStore | None = None,
         goon_templates: GoonTemplateProvider | None = None,
+        *,
+        git_service: GitService | None = None,
     ) -> None:
         self._extensions = extensions
         self._tools = tools
         self.goon_templates = goon_templates
+        self._git_service = git_service or GitService()
 
     def analyze_source(
         self,
@@ -137,6 +142,9 @@ class FleetPlanResolver:
         connection: AgentConnectionSelection | None = None,
         locked_skills: tuple[LockedSkillSource, ...] | None = None,
         update_skills: bool = False,
+        native_agent: ResolvedNativeAgent | None = None,
+        repository: Path | None = None,
+        git_service: GitService | None = None,
     ) -> tuple[ResolvedFleetPlan, dict[str, FrozenAgentStepHandoff], str]:
         """Freeze each occurrence while the canonical compiler binds its inputs.
 
@@ -151,6 +159,10 @@ class FleetPlanResolver:
         )
         from oh_goon.services.fleet_plan_step_resolution import require_agent_step_handoff
 
+        if native_agent is not None and repository is None:
+            raise FleetPlanInvalid(
+                "Native Agent capture requires its explicit repository workspace"
+            )
         graph = self.analyze_source(plan_path)
         source_sha = graph.root.source_sha256
         if source_sha is None:
@@ -162,6 +174,7 @@ class FleetPlanResolver:
             locked_sources=locked_skills,
             update_sources=update_skills,
             cancel_requested=cancel_requested,
+            native_workspace=repository if native_agent is not None else None,
         )
         with aliases_context as aliases:
             if callable(connection):
@@ -202,6 +215,7 @@ class FleetPlanResolver:
                     plan_graph_identity=graph_identity,
                     skill_aliases=aliases,
                     previous_source=old.source if old else None,
+                    expected_repository=repository if native_agent is not None else None,
                     cancel_requested=cancel_requested,
                     tree_cache=trees,
                 )
@@ -231,6 +245,9 @@ class FleetPlanResolver:
                 trace=None,
                 agent_capture=capture,
                 agent_connection=connection,
+                native_agent=native_agent,
+                repository=repository,
+                input_git_service=git_service,
                 skill_sources=aliases.pins if isinstance(aliases, FrozenSkillRegistry) else (),
             )
             if not deliveries or (previous is not None and deliveries.keys() != previous.keys()):
@@ -880,6 +897,8 @@ class FleetPlanResolver:
         agent_capture: AgentCapture | None = None,
         agent_connection: AgentConnectionSelection | None = None,
         skill_sources: tuple[LockedSkillSource, ...] = (),
+        native_agent: ResolvedNativeAgent | None = None,
+        input_git_service: GitService | None = None,
     ) -> tuple[ResolvedFleetPlan, Path, str | None]:
         plan_path = source_graph.root.path
         plan_root = source_graph.containment_root
@@ -912,9 +931,11 @@ class FleetPlanResolver:
             agent_owner_path=agent_owner_path,
             agent_capture=agent_capture,
             agent_connection=agent_connection,
+            native_agent=native_agent,
             input_resolution=InputResolutionContext(
                 repository=repository,
                 environment=(os.environ if environment is None else environment),
+                git=input_git_service or self._git_service,
             ),
         )
         # AG-01 is only a prework source inspection contract. Enabling typed
@@ -965,6 +986,7 @@ class FleetPlanResolver:
                 step_sources=scope.step_sources,
                 skill_sources=skill_sources,
                 configuration=context.diagnostics.evidence(),
+                native_agent=native_agent,
             )
         except ValidationError as exc:
             raise FleetPlanInvalid(f"Invalid resolved Fleet Plan: {exc}") from exc

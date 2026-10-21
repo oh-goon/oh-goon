@@ -26,7 +26,15 @@ def test_public_application_entrypoint_passes_exact_deployment_provisioner(monke
     built = object()
     observed = []
 
-    def foundation_builder(*, fleet_provisioner=None, standard_local=False):
+    def foundation_builder(
+        *,
+        fleet_provisioner=None,
+        standard_local=False,
+        terminal=None,
+        standard_process_isolation=None,
+        git_service=None,
+    ):
+        assert (terminal, standard_process_isolation, git_service) == (None, None, None)
         observed.append((fleet_provisioner, standard_local))
         return built
 

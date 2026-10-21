@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from oh_goon.repository_tooling.architecture.structural_authority_contract import (
     check_structural_authority_contract,
 )
@@ -480,6 +482,46 @@ def test_guard_rejects_system_wide_local_executor_control_state(tmp_path: Path) 
         'cgroup_state_dir = control_root / "cgroups"\n',
         encoding="utf-8",
     )
+    assert any("system-wide /run" in message for message in _messages(root))
+
+
+def test_guard_allows_namespace_broker_destinations_without_host_control_state(
+    tmp_path: Path,
+) -> None:
+    root = _minimal_repo(tmp_path)
+    isolation = (
+        root / "backend/src/oh_goon/integrations/fleet_plan_bubblewrap_isolation.py"
+    )
+    isolation.parent.mkdir(parents=True, exist_ok=True)
+    isolation.write_text(
+        "from pathlib import Path, PurePosixPath\n"
+        'broker_target = PurePosixPath("/run/oh-goon-broker")\n'
+        "protected_targets = (broker_target,)\n"
+        'arguments = ["--ro-bind", str(private_broker), str(broker_target)]\n'
+        'control_root = Path.home() / ".local/share/oh-goon/executor-control"\n'
+        'egress_lock = control_root / "egress.lock"\n'
+    )
+    assert not any("system-wide /run" in message for message in _messages(root))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'selected = "/run/oh-goon/control"\nrenamed = selected\nprivate_root = Path(renamed)\n',
+        'open("/run/lock/oh-goon/egress.lock", "w")\n',
+        'backend(egress_state_dir="/run/oh-goon/egress")\n',
+        'class Backend:\n    def __init__(self, *, cgroup_lock=PurePosixPath("/run/oh-goon/cgroups.lock")):\n        self.cgroup_lock = cgroup_lock\n',
+    ],
+)
+def test_guard_rejects_host_control_state_aliases_and_effect_inputs(
+    tmp_path: Path, source: str
+) -> None:
+    root = _minimal_repo(tmp_path)
+    isolation = (
+        root / "backend/src/oh_goon/integrations/fleet_plan_bubblewrap_isolation.py"
+    )
+    isolation.parent.mkdir(parents=True, exist_ok=True)
+    isolation.write_text(source)
     assert any("system-wide /run" in message for message in _messages(root))
 
 

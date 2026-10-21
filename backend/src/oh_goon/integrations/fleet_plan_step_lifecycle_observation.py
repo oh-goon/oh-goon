@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from oh_goon.engine.command import (
     CommandOutputObserver,
@@ -29,6 +30,7 @@ def lifecycle_command_runner(
         stream_output: CommandOutputObserver | None = None,
         process_observer: CommandProcessObserver | None = None,
         runtime_supervision: CommandRuntimeSupervision | None = None,
+        **native_options: Any,
     ) -> CommandResult:
         def observe_process(event: CommandProcessLifecycleEvent) -> None:
             observer(
@@ -54,6 +56,7 @@ def lifecycle_command_runner(
             stream_output=stream_output,
             process_observer=observe_process,
             runtime_supervision=runtime_supervision,
+            **native_options,
         )
 
     return command_runner

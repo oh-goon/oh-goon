@@ -169,6 +169,7 @@ def original_skill_aliases(
     locked_sources: tuple[LockedSkillSource, ...] | None = None,
     update_sources: bool = False,
     cancel_requested: Callable[[], bool] | None = None,
+    native_workspace: Path | None = None,
 ) -> Iterator[Mapping[str, str] | None]:
     """Prepare each collection once, preserving its lock pin across cache misses."""
     if isinstance(explicit_aliases, FrozenSkillRegistry):
@@ -216,6 +217,7 @@ def original_skill_aliases(
                         if name in locked and not update_sources
                         else None,
                         cancel_requested=cancel_requested,
+                        native_workspace=native_workspace,
                     )
                 )
             except FleetPlanInvalid as exc:

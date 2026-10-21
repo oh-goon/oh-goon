@@ -74,6 +74,18 @@ class ApplicationStatePathLayout:
 
         return self.root / "diagnostics" / "diagnostics.jsonl"
 
+    @property
+    def private_control_paths(self) -> tuple[Path, ...]:
+        """Private cross-Run state, excluding explicitly disclosed execution scratch."""
+        return (
+            self.content_store,
+            self.executor_control,
+            self.local_launches,
+            self.local_launch_bindings,
+            self.local_launch_access,
+            self.diagnostics_log,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ManagedPreparationPathLayout:

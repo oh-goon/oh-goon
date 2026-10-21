@@ -20,7 +20,8 @@ from oh_goon.core.models.agent_review import MAX_REVIEW_BYTES, review_scope
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff, FrozenSourceMember
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_identity import ExecutionIdentity
-from oh_goon.core.models.fleet_plan import AgentStepRequestedEffects
+from oh_goon.core.models.fleet_observation import AgentHarnessObservation as AgentHarnessObservation
+from oh_goon.core.models.fleet_plan import AgentResultRole, AgentStepRequestedEffects
 from oh_goon.core.models.fleet_plan_evidence import PlanContentObjectEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits, PlanExecutionPolicy
 from oh_goon.core.product_identity import stable_id
@@ -29,7 +30,7 @@ _MAX_RESULT_BYTES = 1024 * 1024
 _MAX_FINDINGS = 128
 _MAX_FINDING_CHARS = 4000
 
-HarnessRole = Literal["report", "review", "adjudication", "proposal"]
+HarnessRole = AgentResultRole
 HarnessCapability = Literal[
     "frozen_source",
     "hashmarks_evidence",
@@ -39,6 +40,7 @@ HarnessCapability = Literal[
     "proposal",
     "observations",
     "artifacts",
+    "terminal",
 ]
 _CAPABILITIES = frozenset(get_args(HarnessCapability))
 
@@ -65,7 +67,7 @@ class AgentHarnessSelection(ImmutableModel):
     native_configuration_identity: str | None = Field(
         default=None, pattern=r"^sha256:[0-9a-f]{64}$"
     )
-    capabilities: tuple[HarnessCapability, ...] = Field(max_length=8)
+    capabilities: tuple[HarnessCapability, ...] = Field(max_length=9)
 
     @field_validator("capabilities")
     @classmethod
@@ -255,8 +257,8 @@ def prepare_agent_harness_input(
     """Verify the existing delivery, then bind selected support before execution.
 
     Source paths are never reopened. The returned value is still prework, not
-    execution/disclosure authority. A3 must connect this preparation to original
-    resolution/preflight and retain the existing mandatory Hashmarks delivery.
+    execution/disclosure authority. The native Step receiver checks this input
+    against original resolution/preflight and retains mandatory Hashmarks delivery.
     """
     handoff = FrozenAgentStepHandoff.decode_prework_delivery(
         packet, expected_handoff_identity=expected_handoff_identity
@@ -286,21 +288,6 @@ class AgentHarnessFinding(ImmutableModel):
         if not self.location.strip() or not self.explanation.strip():
             raise ValueError("Agent harness finding fields must be nonblank")
         return self
-
-
-class AgentHarnessObservation(ImmutableModel):
-    """Bounded harness-reported event; never a supervisor or producer fact."""
-
-    kind: Literal["agent", "tool", "context"]
-    summary: str = Field(min_length=1, max_length=_MAX_FINDING_CHARS)
-    native_event_id: str | None = Field(default=None, min_length=1, max_length=160)
-
-    @field_validator("summary", "native_event_id")
-    @classmethod
-    def nonblank_text(cls, value: str | None) -> str | None:
-        if value is not None and not value.strip():
-            raise ValueError("Agent harness observation text must be nonblank")
-        return value
 
 
 class AgentHarnessArtifactReference(ImmutableModel):

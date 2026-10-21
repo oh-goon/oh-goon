@@ -35,6 +35,40 @@ _CGROUP_EXEC = """raise RuntimeError('original LACE independent kernel custody N
 """
 
 
+def standard_resource_scope_command(
+    policy: CicdResourcePolicy,
+    executable: str | None,
+) -> tuple[str, ...]:
+    """Delegate ordinary whole-workload caps and cleanup to the native user manager.
+
+    This is separate from strict signed kernel custody. No cgroup path, lease,
+    retry or recovery algorithm is reconstructed: systemd owns its transient
+    scope and applies each requested cap to the workload and all descendants.
+    """
+    if all(value is None for value in policy.model_dump().values()):
+        return ()
+    if (
+        executable is None
+        or not Path(executable).is_absolute()
+        or not os.access(executable, os.X_OK)
+    ):
+        raise FleetPlanInvalid(
+            "Standard workload resource caps require an explicitly selected native systemd-run"
+        )
+    command = [executable, "--user", "--scope", "--quiet", "--collect"]
+    if policy.memory_bytes is not None:
+        command.extend(
+            (f"--property=MemoryMax={policy.memory_bytes}", "--property=MemorySwapMax=0")
+        )
+    if policy.max_processes is not None:
+        command.append(f"--property=TasksMax={policy.max_processes}")
+    if policy.cpu_millis is not None:
+        whole, decimal = divmod(policy.cpu_millis, 10)
+        quota = str(whole) if decimal == 0 else f"{whole}.{decimal}"
+        command.append(f"--property=CPUQuota={quota}%")
+    return (*command, "--")
+
+
 def require_independent_native_parent_custody(
     *,
     operation: str,

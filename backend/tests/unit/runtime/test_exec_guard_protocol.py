@@ -24,7 +24,7 @@ def _literal_owners(value: str) -> set[Path]:
 
 @pytest.mark.parametrize(
     "identity",
-    [exec_guard_protocol.PARENT_PID_ENV, exec_guard_protocol.EXEC_FD_ENV],
+    exec_guard_protocol.ENVIRONMENT,
 )
 def test_exec_guard_environment_identity_has_one_source_owner(identity: str) -> None:
     assert _literal_owners(identity) == {Path(exec_guard_protocol.__file__).resolve()}
@@ -128,3 +128,38 @@ def test_exec_guard_execution_descriptor_fails_closed(
 
     with pytest.raises(SystemExit, match="exec guard execution descriptor is (missing|invalid)"):
         exec_guard.main(["tool"])
+
+
+@pytest.mark.parametrize("terminal_request", ["0", "invalid", "1"])
+def test_exec_guard_rejects_unowned_controlling_terminal(
+    monkeypatch: pytest.MonkeyPatch, terminal_request: str
+) -> None:
+    monkeypatch.setenv(exec_guard_protocol.CONTROLLING_TERMINAL_ENV, terminal_request)
+    monkeypatch.setattr(os, "isatty", lambda descriptor: False)
+
+    with pytest.raises(SystemExit, match="exec guard controlling terminal is invalid"):
+        exec_guard._attach_controlling_terminal()
+
+
+@pytest.mark.parametrize(
+    ("path", "descriptor"), [("", None), ("relative", None), ("/native/program", "3")]
+)
+def test_exec_guard_observational_mode_requires_one_absolute_path_without_a_descriptor(
+    monkeypatch: pytest.MonkeyPatch, path: str, descriptor: str | None
+) -> None:
+    monkeypatch.setattr(exec_guard, "_ensure_owned_session", lambda: None)
+    monkeypatch.setattr(exec_guard, "_set_parent_death_signal", lambda **kwargs: None)
+    monkeypatch.setattr(exec_guard, "_attach_controlling_terminal", lambda: None)
+    monkeypatch.setenv(exec_guard_protocol.PARENT_PID_ENV, str(os.getppid()))
+    monkeypatch.setenv(exec_guard_protocol.OBSERVED_EXECUTABLE_ENV, path)
+    if descriptor is None:
+        monkeypatch.delenv(exec_guard_protocol.EXEC_FD_ENV, raising=False)
+    else:
+        monkeypatch.setenv(exec_guard_protocol.EXEC_FD_ENV, descriptor)
+    monkeypatch.setattr(os, "execvpe", lambda *args: pytest.fail("invalid mode executed a path"))
+    monkeypatch.setattr(
+        os, "execve", lambda *args: pytest.fail("invalid mode executed a descriptor")
+    )
+
+    with pytest.raises(SystemExit, match="exec guard observational execution path is invalid"):
+        exec_guard.main(["native-program"])

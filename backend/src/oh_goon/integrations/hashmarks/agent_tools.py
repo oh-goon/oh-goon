@@ -48,11 +48,12 @@ def repository_observation(
     tool: str,
     query: str | None,
     capture_identity: str,
+    state_directory: Path | None = None,
 ) -> dict[str, Any]:
     from hashmarks import CodeMap
     from hashmarks.evidence_presentation import present_repository_evidence
 
-    state = root / "evidence-state"
+    state = state_directory if state_directory is not None else root / "evidence-state"
     with CodeMap(root / "repo", state_dir=state, artifact_db=state / "artifacts.sqlite3") as native:
         with native.reads.session():
             envelope = {
@@ -230,15 +231,29 @@ def main() -> int:
     parser.add_argument(
         "--tool", choices=("task_evidence", "search_text", "list_paths"), required=True
     )
-    parser.add_argument("--query")
+    query = parser.add_mutually_exclusive_group()
+    query.add_argument("--query")
+    query.add_argument("--query-file", type=Path)
     parser.add_argument("--capture-identity", required=True)
+    parser.add_argument("--root", type=Path, default=None)
+    parser.add_argument("--state-directory", type=Path, default=None)
     args = parser.parse_args()
     try:
+        query_text = args.query
+        if args.query_file is not None:
+            with args.query_file.open("rb") as stream:
+                data = stream.read(65537)
+            if len(data) > 65536:
+                raise ValueError("Repository query exceeds 65536 UTF-8 bytes")
+            query_text = data.decode("utf-8")
+            if not query_text.strip() or "\x00" in query_text:
+                raise ValueError("Repository query must be nonblank text without NUL")
         result = repository_observation(
-            Path.cwd(),
+            args.root if args.root is not None else Path.cwd(),
             tool=args.tool,
-            query=args.query,
+            query=query_text,
             capture_identity=args.capture_identity,
+            state_directory=args.state_directory,
         )
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"Hashmarks repository evidence unavailable: {exc}")

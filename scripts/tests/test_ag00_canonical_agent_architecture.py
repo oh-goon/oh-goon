@@ -208,19 +208,26 @@ def test_hosted_command_step_both_modes_delegate_one_canonical_sequence(
     from types import SimpleNamespace
     from typing import cast
 
-    from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
-    from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
+    from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+    from oh_goon.core.models.fleet_plan_execution_policy import (
+        CicdExecutionPolicy,
+        MaintenanceExecutionPolicy,
+    )
+    from oh_goon.engine.git import GitService
+    from oh_goon.integrations.fleet_plan_step_execution import StepRuntime
     from oh_goon.integrations import fleet_plan_run_execution as module
     from oh_goon.integrations.fleet_plan_run import PreparedPlanRun
 
     visits: list[tuple[str, object]] = []
-    marker = object()
+    marker = GitService()
 
     class Sequence:
-        def __init__(self, repository: Path, runtime: object, observer: object) -> None:
+        def __init__(
+            self, repository: Path, runtime: StepRuntime, observer: object
+        ) -> None:
             assert repository == tmp_path
-            assert runtime is marker
-            visits.append(("original_sequence", runtime))
+            assert runtime.git is marker
+            visits.append(("original_sequence", runtime.git))
 
         def run_direct(self, step: object) -> None:
             visits.append(("original_direct", step))
@@ -229,9 +236,6 @@ def test_hosted_command_step_both_modes_delegate_one_canonical_sequence(
             visits.append(("original_strict", step))
 
     monkeypatch.setattr(module, "FleetPlanStepSequence", Sequence)
-    monkeypatch.setattr(
-        module.FleetPlanRunExecutor, "_step_runtime", lambda *a, **k: marker
-    )
     monkeypatch.setattr(
         module.FleetPlanRunExecutor,
         "_outcome",
@@ -242,22 +246,23 @@ def test_hosted_command_step_both_modes_delegate_one_canonical_sequence(
             )
         ),
     )
-    executor = object.__new__(module.FleetPlanRunExecutor)
-    step = object()
-    direct = SimpleNamespace(
-        execution=SimpleNamespace(purpose=ExecutionPurpose.MAINTENANCE), steps=(step,)
-    )
-    strict = SimpleNamespace(
-        execution=SimpleNamespace(purpose=ExecutionPurpose.CICD),
+    executor = module.FleetPlanRunExecutor(marker, process_isolation_backends=())
+    step = ResolvedCommandStep(step_id="observed", argv=("true",))
+    direct = ResolvedFleetPlan.create(
+        name="direct",
+        description="",
         steps=(step,),
-        plan_id="original-plan",
+        execution=MaintenanceExecutionPolicy(),
+    )
+    strict = ResolvedFleetPlan.create(
+        name="strict", description="", steps=(step,), execution=CicdExecutionPolicy()
     )
     evidence = object()
     # Preserve the existing strict execution object's explicit optional TL-1
     # fields in this hosted spy. A missing attribute is not a realistic
     # PreparedPlanRun and must not mask canonical sequence ownership.
     prepared = SimpleNamespace(
-        plan_id="original-plan",
+        plan_id=strict.plan_id,
         trusted_local_consent=None,
         trusted_local_scope=None,
         bind_execution_cancel_requested=lambda f: None,
@@ -265,7 +270,7 @@ def test_hosted_command_step_both_modes_delegate_one_canonical_sequence(
     )
 
     direct_outcome: object = executor.execute_direct_run(
-        tmp_path, cast(ResolvedFleetPlan, direct), cancel_requested=None
+        tmp_path, direct, cancel_requested=None
     )
     assert direct_outcome == (
         "canonical_outcome",
@@ -273,7 +278,7 @@ def test_hosted_command_step_both_modes_delegate_one_canonical_sequence(
     )
     strict_outcome: object = executor.execute_strict_run(
         tmp_path,
-        cast(ResolvedFleetPlan, strict),
+        strict,
         cast(PreparedPlanRun, prepared),
         cancel_requested=None,
     )

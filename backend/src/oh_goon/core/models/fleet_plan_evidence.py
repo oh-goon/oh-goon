@@ -248,6 +248,24 @@ class PlanResourceEvidence(ImmutableModel):
         return stable_id("plan-resource-policy", resource_policy_payload(self))
 
 
+class PlanStandardIsolationEvidence(ImmutableModel):
+    """Observed ordinary sandbox execution, without strict source/runtime custody."""
+
+    backend: PlanIsolationBackendEvidence
+    host_and_external_ip_networking: Literal["denied"] = "denied"
+    workspace_read_only: bool
+    broker_socket_mounted: bool
+    private_configuration_overlay: bool = False
+    resources: PlanResourceEvidence | None = None
+    resource_owner: Literal["none", "systemd_user_scope"]
+
+    @model_validator(mode="after")
+    def validate_resource_owner(self) -> PlanStandardIsolationEvidence:
+        if (self.resources is None) != (self.resource_owner == "none"):
+            raise ValueError("Ordinary resource evidence requires its native scope owner")
+        return self
+
+
 class CompletedPlanStepTeardownEvidence(ImmutableModel):
     """Verified removal of one step's attempt-private filesystem roots."""
 
@@ -338,6 +356,9 @@ class PlanStepAttemptEvidence(ImmutableModel):
     retained_cache: PlanRetainedContentEvidence | None = None
     egress: PlanEgressEvidence
     resources: PlanResourceEvidence | None = None
+    standard_isolation: PlanStandardIsolationEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     retry: PlanRetryDecisionEvidence | None = None
     release_effect: PlanReleaseEffectEvidence | None = None
     release_verification: KubernetesRolloutVerificationEvidence | None = None

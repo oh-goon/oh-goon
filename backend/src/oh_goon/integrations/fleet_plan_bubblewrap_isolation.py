@@ -1,25 +1,38 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import stat
+import subprocess
+import tempfile
 from collections.abc import Callable
 from dataclasses import replace
-from pathlib import Path
+from itertools import islice
+from pathlib import Path, PurePosixPath
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_evidence import (
+    PlanIsolationBackendEvidence,
+    PlanResourceEvidence,
+    PlanStandardIsolationEvidence,
+)
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_isolation import (
     IsolationBackendCapabilities,
     IsolationKernelBoundary,
 )
-from oh_goon.core.path_layouts import SANDBOX_PATHS
+from oh_goon.core.path_authority import HostSandboxPathMapping, map_host_text_to_sandbox
+from oh_goon.core.path_layouts import SANDBOX_PATHS, AttemptPathLayout
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentProof
 from oh_goon.core.product_identity import stable_id
 from oh_goon.engine.command import (
+    CommandCancelledError,
     CommandOutputObserver,
     CommandProcessObserver,
     CommandResult,
+    CommandTimeoutExpired,
     run_command,
 )
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
@@ -30,6 +43,7 @@ from oh_goon.integrations._fleet_plan_cgroup_resources import (
     CgroupV2AttemptLease,
     cgroup_configuration_identity,
     require_cgroup_v2_host,
+    standard_resource_scope_command,
 )
 from oh_goon.integrations._fleet_plan_host_resources import HostToolBinding
 from oh_goon.integrations._fleet_plan_restricted_egress import (
@@ -57,13 +71,17 @@ from oh_goon.integrations.fleet_plan_local_lace_recovery import lace_resource_bi
 from oh_goon.integrations.fleet_plan_process_isolation import (
     MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
     IsolatedProcessRequest,
+    StandardIsolatedProcessRequest,
+    StandardReadOnlyMount,
     verify_selected_backend,
 )
 from oh_goon.integrations.source_snapshot import verify_clean_source_snapshot
 
+_STANDARD_RUNTIME_DIRECTORIES = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc/alternatives")
+
 
 class BubblewrapProcessIsolation:
-    """Reference local backend: one strict process boundary on the shared host kernel."""
+    """One Bubblewrap owner for ordinary namespaces and selected strict custody."""
 
     capabilities = IsolationBackendCapabilities(
         backend_id="bubblewrap",
@@ -96,9 +114,16 @@ class BubblewrapProcessIsolation:
         cgroup_lock: Path | None = None,
         cgroup_state_dir: Path | None = None,
         require_local_resource_intent: bool = False,
+        standard_resource_executable: str | None = None,
     ) -> None:
         self.executable = executable
         self.require_local_resource_intent = require_local_resource_intent
+        self.standard_resource_executable = standard_resource_executable
+        self._standard_resource_environment = {
+            name: os.environ[name]
+            for name in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+            if name in os.environ
+        }
         self.ip_executable = ip_executable
         self.nft_executable = nft_executable
         self.egress_pool = egress_pool
@@ -110,6 +135,427 @@ class BubblewrapProcessIsolation:
         self.cgroup_root = cgroup_root
         self.cgroup_lock = cgroup_lock or control_root / "cgroups.lock"
         self.cgroup_state_dir = cgroup_state_dir or control_root / "cgroups"
+        self._standard_available_configuration: str | None = None
+        self._standard_system_checked = False
+        self._application_state_paths: tuple[tuple[Path, ...], tuple[Path, ...]] | None = None
+
+    def bind_application_state(
+        self, *, private_paths: tuple[Path, ...], read_only_paths: tuple[Path, ...]
+    ) -> None:
+        """Receive the original application's resolved state before recovery or execution.
+
+        The database parent can also contain independent repositories. Bind exact
+        private artifacts and host tool stores, rather than excluding that parent.
+        """
+        if any(not path.is_absolute() for path in (*private_paths, *read_only_paths)):
+            raise FleetPlanInvalid("Native application state requires resolved absolute paths")
+        binding = (
+            tuple(dict.fromkeys(path.resolve() for path in private_paths)),
+            tuple(dict.fromkeys(path.resolve() for path in read_only_paths)),
+        )
+        if self._application_state_paths not in (None, binding):
+            raise FleetPlanInvalid(
+                "Native isolation is already bound to different application state"
+            )
+        self._application_state_paths = binding
+
+    def _private_application_file_identities(self) -> frozenset[tuple[int, int]]:
+        """Stat only the exact owner-bound artifacts, including newly created SQLite sidecars."""
+        identities: set[tuple[int, int]] = set()
+        if self._application_state_paths is not None:
+            for path in self._application_state_paths[0]:
+                try:
+                    metadata = path.stat()
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    raise FleetPlanInvalid(
+                        "Native isolation cannot establish private application file identity"
+                    ) from exc
+                if stat.S_ISREG(metadata.st_mode):
+                    identities.add((metadata.st_dev, metadata.st_ino))
+        return frozenset(identities)
+
+    def _require_application_state_separation(
+        self, request: StandardIsolatedProcessRequest
+    ) -> None:
+        if self._application_state_paths is None:
+            return
+        private_paths, read_only_paths = self._application_state_paths
+        sources = (
+            request.workspace,
+            *(mount.source for mount in request.read_only_mounts),
+            *(Path(root).resolve() for root in _STANDARD_RUNTIME_DIRECTORIES),
+            *(
+                (request.private_configuration_directory,)
+                if request.private_configuration_directory is not None
+                else ()
+            ),
+        )
+        if any(
+            source.is_relative_to(private) or private.is_relative_to(source)
+            for source in sources
+            for private in private_paths
+        ):
+            raise FleetPlanInvalid("Native mounts cannot expose private application state")
+        if not request.read_only_workspace and any(
+            request.workspace.is_relative_to(path) or path.is_relative_to(request.workspace)
+            for path in read_only_paths
+        ):
+            raise FleetPlanInvalid("Native writable workspace overlaps host-managed tool authority")
+
+    def require_standard_available(self, request: StandardIsolatedProcessRequest) -> None:
+        """Prove the requested ordinary namespace capability before workload effects."""
+        private_file_identities = self._validate_standard_request(request)
+        if not self._standard_system_checked:
+            roots: list[Path] = []
+            for value in _STANDARD_RUNTIME_DIRECTORIES:
+                path = Path(value).resolve()
+                if path.is_dir() and not any(path.is_relative_to(root) for root in roots):
+                    _require_standard_bind_structure(
+                        path,
+                        allow_synthetic_devices=True,
+                        private_file_identities=private_file_identities,
+                    )
+                    roots.append(path)
+            self._standard_system_checked = True
+        configuration = stable_id(
+            "standard-bubblewrap-capability",
+            {
+                "backend": self.configuration_identity(),
+                "resources": request.resources.model_dump(),
+                "private_configuration_directory": str(request.private_configuration_directory)
+                if request.private_configuration_directory is not None
+                else None,
+            },
+        )
+        if self._standard_available_configuration == configuration:
+            return
+        try:
+            result = run_command(
+                *standard_resource_scope_command(
+                    request.resources, self.standard_resource_executable
+                ),
+                self.executable,
+                "--unshare-user",
+                "--unshare-net",
+                "--unshare-pid",
+                "--die-with-parent",
+                *_standard_system_binds(),
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                *(
+                    (
+                        "--overlay-src",
+                        str(request.private_configuration_directory),
+                        "--tmp-overlay",
+                        "/config/native",
+                    )
+                    if request.private_configuration_directory is not None
+                    else ()
+                ),
+                "--",
+                "/bin/true",
+                timeout=10.0,
+                env={"PATH": os.defpath, **self._standard_resource_environment},
+                max_capture_bytes_per_stream=4096,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise FleetPlanInvalid(
+                "Selected Bubblewrap namespace capability could not be established"
+            ) from exc
+        if result.returncode != 0:
+            raise FleetPlanInvalid(
+                "Selected Bubblewrap user/PID/network namespaces are unavailable: "
+                + result.stderr.strip()[:1000]
+            )
+        self._standard_available_configuration = configuration
+
+    def _validate_standard_request(
+        self, request: StandardIsolatedProcessRequest
+    ) -> frozenset[tuple[int, int]]:
+        if os.name != "posix" or not Path(self.executable).is_file():
+            raise FleetPlanInvalid("Standard isolated execution requires native Bubblewrap")
+        if request.backend_configuration_id != self.configuration_identity():
+            raise FleetPlanInvalid("Standard Bubblewrap configuration changed after resolution")
+        if self.require_local_resource_intent:
+            raise FleetPlanInvalid("Strict custody configuration cannot consume ordinary authority")
+        self._require_application_state_separation(request)
+        private_file_identities = self._private_application_file_identities()
+        unsafe_environment = sorted(
+            name
+            for name in request.env
+            if name.upper().startswith(("LD_", "DYLD_"))
+            or name.upper()
+            in {
+                "PYTHONPATH",
+                "PYTHONHOME",
+                "PYTHONSTARTUP",
+                "PYTHONINSPECT",
+                "BASH_ENV",
+                "ENV",
+                "NODE_OPTIONS",
+                "PERL5OPT",
+                "RUBYOPT",
+                "GLIBC_TUNABLES",
+            }
+        )
+        if unsafe_environment:
+            raise FleetPlanInvalid(
+                "Standard namespace launcher cannot accept host loader/interpreter injection: "
+                + ", ".join(unsafe_environment)
+            )
+        standard_resource_scope_command(request.resources, self.standard_resource_executable)
+        request.require_workspace_current()
+        if not request.cwd.is_dir() or not request.cwd.is_relative_to(request.workspace):
+            raise FleetPlanInvalid("Standard sandbox workspace or cwd is no longer current")
+        private_roots = (
+            PurePosixPath("/workspace"),
+            PurePosixPath(request.workspace),
+            PurePosixPath("/proc"),
+            PurePosixPath("/dev"),
+            PurePosixPath("/home/fleet"),
+            PurePosixPath("/cache"),
+            PurePosixPath("/run/oh-goon-broker"),
+        )
+        home = Path.home().resolve()
+        if home.is_relative_to(request.workspace):
+            raise FleetPlanInvalid(
+                "Standard workspace cannot expose the host home or its ancestors"
+            )
+        _require_standard_bind_structure(
+            request.workspace, private_file_identities=private_file_identities
+        )
+        targets: list[PurePosixPath] = []
+        sources: set[Path] = {request.workspace}
+        selected_mounts = request.read_only_mounts + (
+            (
+                StandardReadOnlyMount(
+                    request.private_configuration_directory, PurePosixPath("/config/native")
+                ),
+            )
+            if request.private_configuration_directory is not None
+            else ()
+        )
+        canonical_sources = {
+            mount.source for mount in selected_mounts if mount.target == PurePosixPath(mount.source)
+        }
+        for mount in selected_mounts:
+            source, target = mount.source, mount.target
+            if (
+                not source.exists()
+                or source == request.workspace
+                or (source in sources and source not in canonical_sources)
+                or source.is_socket()
+                or source == home
+                or source in (Path("/tmp"), Path("/var/tmp"))
+                or home.is_relative_to(source)
+                or any(
+                    source.is_relative_to(home / private)
+                    for private in (".ssh", ".aws", ".gnupg", ".kube")
+                )
+                or any(
+                    target == root or root.is_relative_to(target) or target.is_relative_to(root)
+                    for root in private_roots
+                )
+                or target
+                in (
+                    PurePosixPath("/home"),
+                    PurePosixPath("/config"),
+                    PurePosixPath("/etc"),
+                    PurePosixPath("/tmp"),
+                )
+                or any(
+                    target == other or target.is_relative_to(other) or other.is_relative_to(target)
+                    for other in targets
+                )
+            ):
+                raise FleetPlanInvalid(
+                    "Standard sandbox read-only mount exceeds its explicit scope"
+                )
+            targets.append(target)
+            if source not in sources:
+                _require_standard_bind_structure(
+                    source, private_file_identities=private_file_identities
+                )
+            sources.add(source)
+        if request.broker_directory is not None:
+            directory = request.broker_directory
+            metadata = directory.lstat()
+            with os.scandir(directory) as children:
+                entries = tuple(Path(entry.path) for entry in islice(children, 2))
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+                or metadata.st_uid != os.getuid()
+                or len(entries) != 1
+                or not stat.S_ISSOCK(entries[0].lstat().st_mode)
+            ):
+                raise FleetPlanInvalid(
+                    "Standard model broker requires one socket in a private directory"
+                )
+        return private_file_identities
+
+    def _execute_standard(
+        self,
+        request: StandardIsolatedProcessRequest,
+        *,
+        timeout: float | None,
+        cancel_requested: Callable[[], bool] | None,
+        stream_output: CommandOutputObserver | None,
+        process_observer: CommandProcessObserver | None,
+        runtime_supervision: CommandRuntimeSupervision | None,
+    ) -> CommandResult:
+        if cancel_requested is not None and cancel_requested():
+            from oh_goon.engine.errors import OperationCancelledError
+
+            raise OperationCancelledError("Standard sandbox cancelled before preparation")
+        self.require_standard_available(request)
+        from oh_goon.integrations.fleet_plan_run import _write_minimal_etc
+
+        with (
+            tempfile.TemporaryDirectory(prefix="oh-goon-isolated-") as directory,
+            tempfile.TemporaryFile() as status,
+        ):
+            paths = AttemptPathLayout.from_root(Path(directory))
+            for path in (paths.home, paths.tmp, paths.cache, paths.config, paths.etc):
+                path.mkdir()
+            _write_minimal_etc(paths.etc)
+            args = _bubblewrap_prefix(self.executable, egress_mode="none")
+            args.insert(1, "--unshare-user")
+            args.extend(("--json-status-fd", str(status.fileno())))
+            if request.terminal is not None:
+                args.remove("--new-session")
+            for name in self._standard_resource_environment:
+                args.extend(("--unsetenv", name))
+            args.extend(_standard_system_binds())
+            args.extend(("--proc", "/proc", "--dev", "/dev"))
+            for name in ("passwd", "group", "nsswitch.conf", "hosts"):
+                args.extend(("--ro-bind", str(paths.etc / name), "/etc/" + name))
+            workspace_mode = "--ro-bind" if request.read_only_workspace else "--bind"
+            args.extend((workspace_mode, str(request.workspace), "/workspace"))
+            for source, target in (
+                (paths.home, "/home/fleet"),
+                (paths.tmp, "/tmp"),
+                (paths.cache, "/cache"),
+                (paths.config, "/config"),
+            ):
+                args.extend(("--bind", str(source), target))
+            if str(request.workspace) != "/workspace":
+                args.extend((workspace_mode, str(request.workspace), str(request.workspace)))
+            for mount in request.read_only_mounts:
+                args.extend(("--ro-bind", str(mount.source), str(mount.target)))
+            if request.private_configuration_directory is not None:
+                args.extend(
+                    (
+                        "--overlay-src",
+                        str(request.private_configuration_directory),
+                        "--tmp-overlay",
+                        "/config/native",
+                    )
+                )
+            if request.broker_directory is not None:
+                args.extend(("--ro-bind", str(request.broker_directory), "/run/oh-goon-broker"))
+            mapping = tuple(
+                sorted(
+                    [
+                        HostSandboxPathMapping.create(request.workspace, SANDBOX_PATHS.workspace),
+                        *(
+                            HostSandboxPathMapping.create(mount.source, mount.target)
+                            for mount in request.read_only_mounts
+                            if mount.target == PurePosixPath(mount.source)
+                            or not any(
+                                other.source == mount.source
+                                and other.target == PurePosixPath(other.source)
+                                for other in request.read_only_mounts
+                            )
+                        ),
+                        *(
+                            (
+                                HostSandboxPathMapping.create(
+                                    request.private_configuration_directory,
+                                    PurePosixPath("/config/native"),
+                                ),
+                            )
+                            if request.private_configuration_directory is not None
+                            else ()
+                        ),
+                    ],
+                    key=lambda item: len(str(item.host_root)),
+                    reverse=True,
+                )
+            )
+            argv = tuple(map_host_text_to_sandbox(value, mapping) for value in request.argv)
+            environment = {
+                name: (
+                    os.pathsep.join(
+                        map_host_text_to_sandbox(part, mapping) for part in value.split(os.pathsep)
+                    )
+                    if name == "PATH"
+                    else map_host_text_to_sandbox(value, mapping)
+                )
+                for name, value in request.env.items()
+                if name not in {"SSH_AUTH_SOCK", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"}
+            }
+            environment.update(
+                {
+                    "HOME": "/home/fleet",
+                    "USERPROFILE": "/home/fleet",
+                    "TMPDIR": "/tmp",
+                    "TMP": "/tmp",
+                    "TEMP": "/tmp",
+                    "XDG_CACHE_HOME": "/cache",
+                    "XDG_CONFIG_HOME": "/config",
+                    "XDG_DATA_HOME": "/home/fleet/.local/share",
+                    "XDG_STATE_HOME": "/home/fleet/.local/state",
+                }
+            )
+            args.extend(
+                (
+                    "--chdir",
+                    str(request.cwd),
+                    "--",
+                    *argv,
+                )
+            )
+            self._validate_standard_request(request)
+            try:
+                result = run_command(
+                    *standard_resource_scope_command(
+                        request.resources, self.standard_resource_executable
+                    ),
+                    *args,
+                    timeout=timeout,
+                    env={**environment, **self._standard_resource_environment},
+                    cancel_requested=cancel_requested,
+                    termination_requested=request.termination_requested,
+                    stream_output=stream_output,
+                    process_observer=process_observer,
+                    runtime_supervision=runtime_supervision,
+                    terminal=request.terminal,
+                    input_data=request.input_data,
+                    pass_fds=(status.fileno(),),
+                    max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
+                    retain_output_tail=request.retain_output_tail,
+                )
+            except (CommandTimeoutExpired, CommandCancelledError) as exc:
+                status.seek(0)
+                if _standard_workload_exec_completed(status.read(4097), None):
+                    exc.standard_isolation = _standard_isolation_evidence(request)
+                raise
+            status.seek(0)
+            if not _standard_workload_exec_completed(status.read(4097), result.returncode):
+                if result.returncode == 0:
+                    raise FleetPlanInvalid(
+                        "Standard sandbox completed without native workload-exec evidence"
+                    )
+                return result
+            return replace(
+                result,
+                standard_isolation=_standard_isolation_evidence(request),
+            )
 
     def configuration_identity(self) -> str:
         return stable_id(
@@ -122,6 +568,15 @@ class BubblewrapProcessIsolation:
                 "nft_sha256": _executable_sha256(self.nft_executable),
                 "egress_pool": self.egress_pool,
                 "resources": cgroup_configuration_identity(self),
+                **(
+                    {
+                        "standard_resource_executable": _executable_sha256(
+                            self.standard_resource_executable
+                        )
+                    }
+                    if self.standard_resource_executable is not None
+                    else {}
+                ),
             },
         )
 
@@ -145,7 +600,7 @@ class BubblewrapProcessIsolation:
 
     def execute(
         self,
-        request: IsolatedProcessRequest,
+        request: IsolatedProcessRequest | StandardIsolatedProcessRequest,
         *,
         timeout: float | None,
         cancel_requested: Callable[[], bool] | None,
@@ -153,6 +608,15 @@ class BubblewrapProcessIsolation:
         process_observer: CommandProcessObserver | None = None,
         runtime_supervision: CommandRuntimeSupervision | None = None,
     ) -> CommandResult:
+        if isinstance(request, StandardIsolatedProcessRequest):
+            return self._execute_standard(
+                request,
+                timeout=timeout,
+                cancel_requested=cancel_requested,
+                stream_output=stream_output,
+                process_observer=process_observer,
+                runtime_supervision=runtime_supervision,
+            )
         require_original_agent_source_mount_authority(request)
         verify_selected_backend(self, request)
         proof: LocalLaceIntentProof | None = None
@@ -666,3 +1130,131 @@ def _executable_sha256(path: str | None) -> str | None:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _standard_isolation_evidence(
+    request: StandardIsolatedProcessRequest,
+) -> PlanStandardIsolationEvidence:
+    policy = request.resources
+    limited = any(value is not None for value in policy.model_dump().values())
+    return PlanStandardIsolationEvidence(
+        backend=PlanIsolationBackendEvidence(
+            backend_id="bubblewrap",
+            configuration_id=request.backend_configuration_id,
+            kernel_boundary="shared_host_kernel",
+            remote_execution=False,
+            experimental=False,
+        ),
+        workspace_read_only=request.read_only_workspace,
+        broker_socket_mounted=request.broker_directory is not None,
+        private_configuration_overlay=request.private_configuration_directory is not None,
+        resources=PlanResourceEvidence(
+            cpu_millis=policy.cpu_millis,
+            memory_bytes=policy.memory_bytes,
+            max_processes=policy.max_processes,
+        )
+        if limited
+        else None,
+        resource_owner="systemd_user_scope" if limited else "none",
+    )
+
+
+def _standard_workload_exec_completed(payload: bytes, returncode: int | None) -> bool:
+    """Use Bubblewrap's native successful-exec acknowledgement, not exit status alone.
+
+    The native monitor closes this descriptor in the sandbox child. It emits
+    exit-code only after setup and exec succeeded, including nonzero workloads.
+    Namespace/setup/exec failures have no final exit-code acknowledgement.
+    """
+    if len(payload) > 4096:
+        return False
+    try:
+        records = [json.loads(line) for line in payload.splitlines() if line]
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return (
+        len(records) == 2
+        and isinstance(records[0], dict)
+        and type(records[0].get("child-pid")) is int
+        and records[0]["child-pid"] > 0
+        and isinstance(records[1], dict)
+        and set(records[1]) == {"exit-code"}
+        and type(records[1]["exit-code"]) is int
+        and (returncode is None or records[1]["exit-code"] == returncode)
+    )
+
+
+def _standard_system_binds() -> tuple[str, ...]:
+    """Read-only operating-system runtime paths, excluding host homes and services."""
+    arguments: list[str] = []
+    for value in _STANDARD_RUNTIME_DIRECTORIES:
+        path = Path(value)
+        if path.is_dir():
+            arguments.extend(("--ro-bind", str(path.resolve()), value))
+    return tuple(arguments)
+
+
+def _require_standard_bind_structure(
+    root: Path,
+    *,
+    allow_synthetic_devices: bool = False,
+    private_file_identities: frozenset[tuple[int, int]] = frozenset(),
+) -> None:
+    """Reject host IPC/special objects without reading file contents or following directory links.
+
+    This is a bounded physical mount check, not repository retrieval or another
+    source identity. Native runtime symlinks to the explicitly synthetic /dev
+    devices resolve to sandbox-owned devices rather than the host's objects.
+    """
+    pending = [root]
+    inspected = 0
+    synthetic = {Path("/dev") / name for name in ("null", "zero", "random", "urandom", "tty")}
+    while pending:
+        path = pending.pop()
+        metadata = path.lstat()
+        inspected += 1
+        if inspected > 1_000_000:
+            raise FleetPlanInvalid("Standard sandbox bind exceeds its physical entry budget")
+        if (metadata.st_dev, metadata.st_ino) in private_file_identities:
+            raise FleetPlanInvalid("Native bind exposes a private application file alias")
+        if stat.S_ISLNK(metadata.st_mode):
+            try:
+                target = path.resolve(strict=True)
+                target_metadata = target.stat()
+                target_mode = target_metadata.st_mode
+            except FileNotFoundError:
+                continue  # A dangling link conveys no host endpoint.
+            if allow_synthetic_devices and target in synthetic:
+                continue
+            if not (stat.S_ISREG(target_mode) or stat.S_ISDIR(target_mode)):
+                raise FleetPlanInvalid(
+                    "Standard sandbox bind symlink exposes a host IPC/special object"
+                )
+            if (target_metadata.st_dev, target_metadata.st_ino) in private_file_identities:
+                raise FleetPlanInvalid("Native bind exposes a private application file alias")
+        elif stat.S_ISDIR(metadata.st_mode):
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    inspected += 1
+                    if inspected > 1_000_000:
+                        raise FleetPlanInvalid(
+                            "Standard sandbox bind exceeds its physical entry budget"
+                        )
+                    entry_metadata = entry.stat(follow_symlinks=False)
+                    mode = entry_metadata.st_mode
+                    if (entry_metadata.st_dev, entry_metadata.st_ino) in private_file_identities:
+                        raise FleetPlanInvalid(
+                            "Native bind exposes a private application file alias"
+                        )
+                    if stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
+                        if len(pending) >= 4096:
+                            raise FleetPlanInvalid(
+                                "Standard sandbox bind exceeds its pending-directory budget"
+                            )
+                        pending.append(Path(entry.path))
+                    elif not stat.S_ISREG(mode):
+                        raise FleetPlanInvalid(
+                            "Standard sandbox bind exposes a host IPC/special object"
+                        )
+        elif not stat.S_ISREG(metadata.st_mode):
+            raise FleetPlanInvalid("Standard sandbox bind exposes a host IPC/special object")

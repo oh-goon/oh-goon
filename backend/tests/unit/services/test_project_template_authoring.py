@@ -375,8 +375,39 @@ def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
         values.write_text(example.group(1))
         snapshot = read_caller_input_file(values, root=tmp_path)
         if key in AGENT_PLAN_TEMPLATES:
-            agent_resolver, path, _, options = agent_review_case(tmp_path / key, plan_template=key)
+            agent_resolver, path, repository, options = agent_review_case(
+                tmp_path / key, plan_template=key
+            )
             options["inputs"] = snapshot.values()
+            from oh_goon.core.models.agent_providers import (
+                NativeAgentDefinition,
+                NativeAgentProfile,
+                ResolvedNativeAgent,
+            )
+            from oh_goon.core.models.fleet_plan import AgentPlanStep
+
+            graph = agent_resolver.analyze_source(path)
+            if any(
+                isinstance(step, AgentPlanStep) and step.harness == "native"
+                for owner, identifier in graph.agent_step_sources()
+                for step in graph.node(owner).compiled.steps
+                if step.step_id == identifier
+            ):
+                connection = options.pop("connection")
+                options.update(
+                    native_agent=ResolvedNativeAgent(
+                        agent="pi",
+                        profile_name="isolated-managed",
+                        definition=NativeAgentDefinition(executable="/native/pi"),
+                        profile=NativeAgentProfile(
+                            backend="bubblewrap", inference_profile=connection.profile
+                        ),
+                        executable_sha256="a" * 64,
+                        connection=connection,
+                    ),
+                    repository=repository,
+                )
+                options["allowed_acceptance"] = ("agentic-review", "native-coding")
             resolved, _, _ = agent_resolver.resolve_frozen_agents(path, **options)
         else:
             resolved = resolver.resolve(source.path, inputs=snapshot.values())

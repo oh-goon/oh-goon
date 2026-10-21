@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import re
 import shlex
 import tomllib
@@ -198,10 +199,14 @@ def _check_backend_dependency_complete_partition(root: Path) -> list[Violation]:
             "test-python": ("backend/tests/unit", "120"),
             "test-python-complete": ("backend/tests/unit", "180"),
         }
-        for target, (surface, timeout) in bounded.items():
+        for target, (test_surface, timeout) in bounded.items():
             matched = False
             for argv in target_payloads(target):
-                if not argv or Path(argv[0]).name != "oh-goon-test-batches" or surface not in argv:
+                if (
+                    not argv
+                    or Path(argv[0]).name != "oh-goon-test-batches"
+                    or test_surface not in argv
+                ):
                     continue
                 try:
                     timeout_index = argv.index("--batch-timeout")
@@ -745,16 +750,79 @@ def _check_local_executor_control_state(root: Path) -> list[Violation]:
     )
     violations: list[Violation] = []
     if isolation.is_file():
-        text = isolation.read_text(encoding="utf-8")
-        for token in ("/run/oh-goon", "/run/lock/oh-goon"):
-            if token in text:
-                violations.append(
-                    Violation(
-                        isolation,
-                        "local Bubblewrap locks/recovery metadata must use application-owned private state rather than system-wide /run",
+        tree = ast.parse(isolation.read_text(encoding="utf-8"))
+        system_paths: set[str] = set()
+
+        def system_path(value: ast.AST) -> bool:
+            return any(
+                isinstance(item, ast.Constant)
+                and isinstance(item.value, str)
+                and item.value.startswith(("/run/oh-goon", "/run/lock/oh-goon"))
+                or isinstance(item, ast.Name)
+                and item.id in system_paths
+                for item in ast.walk(value)
+            )
+
+        # Follow literal aliases without coupling the invariant to private
+        # variable names. Guest-only PurePosixPath values are harmless until
+        # transported into a host Path, filesystem operation or control field.
+        assignments = [
+            item for item in ast.walk(tree) if isinstance(item, (ast.Assign, ast.AnnAssign))
+        ]
+        for _ in range(len(assignments)):
+            previous = len(system_paths)
+            for item in assignments:
+                if item.value is not None and system_path(item.value):
+                    targets = item.targets if isinstance(item, ast.Assign) else [item.target]
+                    system_paths.update(
+                        target.id for target in targets if isinstance(target, ast.Name)
                     )
-                )
+            if len(system_paths) == previous:
                 break
+        fields = {
+            "control_state_root",
+            "control_root",
+            "egress_lock",
+            "egress_state_dir",
+            "cgroup_lock",
+            "cgroup_state_dir",
+        }
+        host_values: list[ast.AST] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                name = ast.unparse(node.func)
+                if name in {"Path", "pathlib.Path", "open", "os.open"}:
+                    host_values.extend(node.args)
+                host_values.extend(
+                    keyword.value for keyword in node.keywords if keyword.arg in fields
+                )
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if any(
+                    isinstance(target, ast.Attribute) and target.attr in fields
+                    for target in targets
+                ):
+                    host_values.append(node.value)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                arguments = [*node.args.posonlyargs, *node.args.args]
+                defaults: list[tuple[ast.arg, ast.expr | None]] = []
+                if node.args.defaults:
+                    defaults.extend(
+                        zip(arguments[-len(node.args.defaults) :], node.args.defaults, strict=False)
+                    )
+                defaults.extend(zip(node.args.kwonlyargs, node.args.kw_defaults, strict=False))
+                host_values.extend(
+                    value
+                    for argument, value in defaults
+                    if argument.arg in fields and value is not None
+                )
+        if any(system_path(value) for value in host_values):
+            violations.append(
+                Violation(
+                    isolation,
+                    "local Bubblewrap locks/recovery metadata must use application-owned private state rather than system-wide /run",
+                )
+            )
     return violations
 
 

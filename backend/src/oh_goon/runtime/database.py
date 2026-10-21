@@ -35,7 +35,7 @@ from oh_goon.runtime._database_policy import (
 from oh_goon.runtime._database_policy import inspect_local_database as inspect_local_database
 from oh_goon.runtime._database_schema import _SCHEMA_SQL
 from oh_goon.runtime._sqlite_access_diagnostics import SQLiteAccessDiagnostics
-from oh_goon.runtime._sqlite_authority_gate import sqlite_authority_gate
+from oh_goon.runtime._sqlite_authority_gate import sqlite_authority_gate, sqlite_authority_gate_path
 from oh_goon.runtime._sqlite_connection_configuration import configure_common_connection
 from oh_goon.runtime._sqlite_identity_error import sqlite_identity_error as _sqlite_identity_error
 from oh_goon.runtime._sqlite_observer_authority import admitted_observer_authorizer
@@ -193,6 +193,18 @@ class LocalDatabase:
             self.journal_mode = sqlite_journal_mode_for_path(self.path, requested=journal_mode)
             self._initialize()
             self._path_identity = _capture_database_path_identity(self.path)
+
+    @property
+    def private_paths(self) -> tuple[Path, ...]:
+        """Exact active SQLite state, including native transient sidecars and its gate."""
+        return (
+            self.path,
+            *(
+                self.path.with_name(self.path.name + suffix)
+                for suffix in ("-wal", "-shm", "-journal")
+            ),
+            sqlite_authority_gate_path(self.path),
+        )
 
     def export_verified_backup(self, destination: Path) -> LocalStateBackupReceipt:
         """Explicit offline SQLite snapshot through the ORIGINAL database owner.

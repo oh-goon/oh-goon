@@ -9,10 +9,10 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping
-from contextlib import contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from oh_goon.core.agent_model_selection import (
     LocalModelToolAction,
@@ -28,7 +28,9 @@ from oh_goon.core.agent_model_selection import (
     prepend_repository_evidence,
 )
 from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
+from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
     ResolvedCommandStep,
@@ -43,7 +45,7 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedPlanStep,
     ResolvedPreCommitStep,
 )
-from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits
+from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits, PlanExecutionPolicy
 from oh_goon.core.models.fleet_plan_observation_steps import ResolvedDependencyInventoryStep
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
 from oh_goon.core.models.termination import TerminationSignal
@@ -62,6 +64,7 @@ from oh_goon.engine.command import (
     CommandOutputObserver,
     CommandProcessObserver,
     CommandResult,
+    CommandTerminal,
     run_command,
 )
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
@@ -104,7 +107,9 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
     IsolatedProcessRequest,
     ProcessIsolationBackend,
+    StandardReadOnlyMount,
     TrustedLocalRunScope,
+    native_profile_command_runner,
 )
 from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
 from oh_goon.integrations.fleet_plan_step_lifecycle_observation import lifecycle_command_runner
@@ -128,6 +133,14 @@ class CommandRunner(Protocol):
         stream_output: CommandOutputObserver | None = None,
         process_observer: CommandProcessObserver | None = None,
         runtime_supervision: CommandRuntimeSupervision | None = None,
+        terminal: CommandTerminal | None = None,
+        input_data: bytes | None = None,
+        retain_output_tail: bool = False,
+        read_only_mounts: tuple[StandardReadOnlyMount, ...] = (),
+        broker_directory: Path | None = None,
+        read_only_workspace: bool = False,
+        private_configuration_directory: Path | None = None,
+        preserve_native_executable_path: bool = False,
     ) -> CommandResult: ...
 
 
@@ -170,6 +183,12 @@ class StepRuntime:
     # only transports bytes; it is not an authorization or a second runner.
     agent_delivery_for: Callable[[str, str], bytes] | None = None
     execution_limits: FleetPlanRunLimits | None = None
+    terminal: CommandTerminal | None = None
+    standard_process_isolation: ProcessIsolationBackend | None = None
+    execution_policy: PlanExecutionPolicy | None = None
+    execution_identity: ExecutionIdentity | None = None
+    workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None = None
+    native_profile: ResolvedNativeAgent | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,7 +212,18 @@ def execute_direct_step(
 ) -> StepOutcome:
     if runtime.cancel_requested is not None and runtime.cancel_requested():
         raise OperationCancelledError("Fleet Step cancelled before preparation")
-    runner = _direct_step_command_runner
+    physical_runner = (
+        native_profile_command_runner(
+            repository,
+            runtime.native_profile,
+            runtime.standard_process_isolation,
+            runtime.workspace_pin,
+            termination_requested=runtime.termination_requested,
+        )
+        if runtime.native_profile is not None
+        else _direct_step_command_runner
+    )
+    runner = physical_runner
     if runtime.execution_limits is not None:
         limits = runtime.execution_limits
         remaining = (limits.deadline_at - utc_now()).total_seconds()
@@ -211,7 +241,7 @@ def execute_direct_step(
             if kwargs.get("runtime_supervision") is not None:
                 raise FleetPlanInvalid("repair deadline cannot replace an admitted native watchdog")
             selected_timeout = remaining if timeout is None else min(timeout, remaining)
-            return _direct_step_command_runner(*args, timeout=selected_timeout, **kwargs)
+            return physical_runner(*args, timeout=selected_timeout, **kwargs)
 
         runner = bounded_runner
     with tempfile.TemporaryDirectory(prefix="oh-goon-step-") as private_root:
@@ -342,6 +372,12 @@ def _execute_typed_step(
 ) -> StepOutcome:
     try:
         if isinstance(step, ResolvedLocalSearchAgentStep):
+            native_deadline = None
+            if step.harness == "native":
+                assert step.native_agent is not None
+                native_deadline = time.monotonic() + min(
+                    step.timeout_seconds, step.native_agent.profile.timeout_seconds
+                )
             if step.step_id != step.source_step_id and not step.step_id.endswith(
                 "." + step.source_step_id
             ):
@@ -357,10 +393,17 @@ def _execute_typed_step(
                 or hashlib.sha256(packet).hexdigest() != step.delivery_sha256
             ):
                 raise FleetPlanInvalid("Agent Step delivery does not match resolved source digest")
-            handoff = FrozenAgentStepHandoff.decode_prework_delivery(
-                packet,
-                expected_handoff_identity=step.handoff_identity,
-            )
+            native_input = None
+            if step.harness == "native":
+                from oh_goon.integrations.fleet_plan_native_steps import prepare_native_step_input
+
+                native_input = prepare_native_step_input(packet, step, runtime)
+                handoff = native_input.handoff
+            else:
+                handoff = FrozenAgentStepHandoff.decode_prework_delivery(
+                    packet,
+                    expected_handoff_identity=step.handoff_identity,
+                )
             if handoff.step_id != step.source_step_id or handoff.harness != step.harness:
                 raise FleetPlanInvalid("Agent Step meaning differs from admitted frozen delivery")
             if handoff.requested_effects.model != step.model:
@@ -377,6 +420,21 @@ def _execute_typed_step(
                 with prepare_frozen_readonly_skill_search(handoff) as (root, tool_step):
                     return _execute_command_step(root, tool_step, process, runtime)
             with prepare_agent_evidence(handoff) as prepared:
+                if native_input is not None:
+                    from oh_goon.integrations.fleet_plan_native_steps import (
+                        execute_native_agent_step,
+                    )
+
+                    assert native_deadline is not None
+                    return execute_native_agent_step(
+                        repository,
+                        step,
+                        native_input,
+                        prepared,
+                        process,
+                        runtime,
+                        deadline=native_deadline,
+                    )
                 observation_step = ResolvedCommandStep(
                     step_id=handoff.step_id,
                     argv=(
@@ -1004,7 +1062,20 @@ def _direct_step_command_runner(
     stream_output: CommandOutputObserver | None = None,
     process_observer: CommandProcessObserver | None = None,
     runtime_supervision: CommandRuntimeSupervision | None = None,
+    terminal: CommandTerminal | None = None,
+    input_data: bytes | None = None,
+    read_only_mounts: tuple[StandardReadOnlyMount, ...] = (),
+    broker_directory: Path | None = None,
+    read_only_workspace: bool = False,
+    retain_output_tail: bool = False,
 ) -> CommandResult:
+    if (
+        read_only_mounts
+        or broker_directory is not None
+        or read_only_workspace
+        or retain_output_tail
+    ):
+        raise FleetPlanInvalid("Native process options require a resolved native profile")
     if cancel_requested is not None and cancel_requested():
         raise OperationCancelledError("Fleet Step cancelled before process launch")
     return run_command(
@@ -1016,6 +1087,8 @@ def _direct_step_command_runner(
         stream_output=stream_output,
         process_observer=process_observer,
         runtime_supervision=runtime_supervision,
+        terminal=terminal,
+        input_data=input_data,
         max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
     )
 
@@ -1234,7 +1307,10 @@ def _isolated_command_runner(
         stream_output: CommandOutputObserver | None = None,
         process_observer: CommandProcessObserver | None = None,
         runtime_supervision: CommandRuntimeSupervision | None = None,
+        **native_options: Any,
     ) -> CommandResult:
+        if native_options:
+            raise FleetPlanInvalid("Ordinary native launch options cannot replace strict custody")
         if cwd is None or env is None:
             raise FleetPlanInvalid(
                 f"Fleet sandbox command for step {step.step_id} requires explicit cwd and env"

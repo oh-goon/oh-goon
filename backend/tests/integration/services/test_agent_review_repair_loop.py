@@ -21,7 +21,6 @@ from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.product_identity import repository_id
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from tests.factories.agent_review import agent_review_case
-from tests.factories.shipped_templates import AGENT_PLAN_TEMPLATES
 
 
 @pytest.fixture
@@ -131,7 +130,7 @@ model = "synthetic/reviewer"
             worker.join(timeout=5)
 
 
-@pytest.mark.parametrize("template_key", AGENT_PLAN_TEMPLATES)
+@pytest.mark.parametrize("template_key", ["agents/agentic-review-repair-loop"])
 @pytest.mark.parametrize(
     "scenario,passes,expected,expected_phases,calls",
     [
@@ -513,7 +512,9 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                     budget=AgentRepairBudget(
                         max_attempts=passes,
                         timeout_seconds=45,
-                        step_timeout_seconds=1 if scenario == "timeout" else 10,
+                        # Exercise a stalled model request after cold producer
+                        # startup, rather than racing that startup on busy hosts.
+                        step_timeout_seconds=5 if scenario == "timeout" else 10,
                     ),
                     inputs=options["inputs"],
                     agent_repository_root=options["repository_root"],

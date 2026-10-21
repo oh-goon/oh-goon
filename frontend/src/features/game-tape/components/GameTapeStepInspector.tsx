@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import type { GameTapeFailureHistory, GameTapeStepExecution } from "@generated/models";
 import type { GameTapeArtifact } from "@/features/game-tape/gameTapeArtifacts";
 import { GameTapeStepArtifacts } from "@/features/game-tape/components/GameTapeStepArtifacts";
+import { GameTapeNativeAgentObservations } from "@/features/game-tape/components/GameTapeNativeAgentObservations";
 import {
   command,
   duration,
@@ -79,6 +80,7 @@ export function GameTapeStepInspector({ step, artifacts = [], failureHistory = n
       </> : null}
     </section> : null}
     <GameTapeStepArtifacts artifacts={artifacts} ownerIdentity={step.step_execution_id} />
+    <GameTapeNativeAgentObservations observations={step.native_agent_observations ?? []} />
     <details className="advanced-disclosure game-tape-inspector__technical" open={technicalOpen} onToggle={(event) => { const next = event.currentTarget.open; if (next === technicalOpen) return; onTechnicalOpenChange?.(next); }}>
       <summary>{t("gameTape.inspector.technicalDetails")}</summary>
       <p className="muted">{t("gameTape.inspector.technicalDetailsHelp")}</p>

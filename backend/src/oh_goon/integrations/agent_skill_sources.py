@@ -9,6 +9,8 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.execution_lock_models import LockedSkillSource
@@ -42,6 +44,7 @@ def prepare_skill_source(
     *,
     commit: str | None,
     cancel_requested: Callable[[], bool] | None = None,
+    native_workspace: Path | None = None,
 ) -> Iterator[tuple[Path, str]]:
     """Fetch a selector only when authoring; locked use fetches the exact commit.
 
@@ -51,6 +54,8 @@ def prepare_skill_source(
     """
     import fcntl
 
+    if native_workspace is not None:
+        _reject_native_workspace_source(source, native_workspace)
     cache = skill_source_cache()
     cache.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha256(source.encode("utf-8")).hexdigest()
@@ -137,3 +142,28 @@ def prepare_skill_source(
                         )
         finally:
             fcntl.flock(lease, fcntl.LOCK_UN)
+
+
+def _reject_native_workspace_source(source: str, workspace: Path) -> None:
+    """Deny agent-editable local Git acquisition without interpreting remote Git URLs.
+
+    Path and file-URI normalization is used only for this denial fence. The
+    original source is still passed unchanged to native Git when permitted.
+    """
+    local = Path(source) if Path(source).is_absolute() else None
+    if source.partition(":")[0].lower() == "file":
+        try:
+            parsed = urlsplit(source)
+        except ValueError:
+            raise FleetPlanInvalid("Native Skill file-URI source is unsupported") from None
+        if parsed.netloc not in ("", "localhost") or parsed.query or parsed.fragment:
+            raise FleetPlanInvalid(
+                "Native Skill acquisition cannot prove this file-URI source scope"
+            )
+        local = Path(url2pathname(parsed.path))
+        if not local.is_absolute():
+            raise FleetPlanInvalid("Native Skill file-URI source must be an absolute local path")
+    if local is not None and local.resolve().is_relative_to(workspace.resolve(strict=True)):
+        raise FleetPlanInvalid(
+            "Native Skill Git source is inside the agent-editable workspace; scoped acquisition is required"
+        )

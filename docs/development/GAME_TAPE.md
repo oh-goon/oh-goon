@@ -22,6 +22,27 @@ Game Tape never schedules work. A Flow node is not schedulable, a Flow edge is n
 
 The browser owns no parallel execution model. `FleetRunDetail.game_tape` is the API projection consumed by every Game Tape view.
 
+Native Agent Steps expose bounded `native_agent_observations` on their canonical
+Step. The inspector shows implementation, profile, occurrence, captured source
+and harness-input identities, event kinds and omitted-observation counts. Native
+settled/failure flags remain `UNTRUSTED_HARNESS_CLAIM`; they cannot overrule the
+recorded process exit or verification Step. Event summaries contain protocol
+names rather than prompt, tool argument or response bodies. Raw output remains
+subject to the existing transient retention contract.
+
+PTY and native headless execution stream output while retaining a bounded tail.
+The command owner hashes and counts the complete stdout stream; the omission
+notice describes retained display text rather than changing those evidence facts.
+Accepted headless role output is a separate bounded result, with its own text
+evidence. Ordinary command output limits retain their existing failure behavior.
+
+Ordinary isolated attempts also retain `standard_isolation` only after the native
+Bubblewrap owner confirms workload execution. It records the actual backend
+configuration, shared-kernel boundary, denied host/external IP networking,
+workspace mode, private config/broker bindings and selected systemd resource
+policy. Missing usage measurements stay unavailable. This is separate from
+strict custody and does not create an APP qualification receipt.
+
 ## Stable live refresh
 
 Live output is a bounded process-local projection, so the browser advances through it with the backend-owned `next_sequence` cursor instead of refetching the whole retained buffer on every poll. The client merges chunks monotonically by canonical sequence, retains already-rendered rows while they remain inside `retained_from_sequence`, and accepts eviction only when the backend says the retained window moved. Failure anchors still come from the newest immutable live-output cut; React never parses log text to rediscover them.

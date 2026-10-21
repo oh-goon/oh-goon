@@ -39,7 +39,7 @@ def _join_readers(readers: tuple[Thread, Thread], *, timeout: float) -> bool:
 
 
 def _close_process_pipes(process: subprocess.Popen[str]) -> None:
-    for pipe in (process.stdout, process.stderr):
+    for pipe in (process.stdin, process.stdout, process.stderr):
         if pipe is not None and not pipe.closed:
             pipe.close()
 

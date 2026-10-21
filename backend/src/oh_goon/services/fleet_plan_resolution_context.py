@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
-from oh_goon.core.models.agent_providers import AgentConnection
+from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan import AgentPlanStep, ExtensionCatalog
@@ -13,6 +13,7 @@ from oh_goon.core.models.fleet_plan_composition import PlanInputDefinition, Plan
 from oh_goon.core.models.fleet_plan_execution_policy import PlanExecutionPolicy
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
+from oh_goon.engine.git import GitService
 from oh_goon.services.fleet_plan_input_resolution import InputResolutionContext
 from oh_goon.services.fleet_plan_resolution_diagnostics import FleetPlanResolutionDiagnostics
 from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
@@ -33,6 +34,9 @@ class AgentCaptureOptions(TypedDict):
     cancel_requested: Callable[[], bool] | None
     connection: AgentConnectionSelection | None
     locked_skills: tuple[LockedSkillSource, ...]
+    native_agent: NotRequired[ResolvedNativeAgent | None]
+    repository: NotRequired[Path | None]
+    git_service: NotRequired[GitService | None]
 
 
 @dataclass(frozen=True)
@@ -50,3 +54,4 @@ class FleetPlanResolutionContext:
     agent_owner_path: Path | None = None
     agent_capture: AgentCapture | None = None
     agent_connection: AgentConnectionSelection | None = None
+    native_agent: ResolvedNativeAgent | None = None

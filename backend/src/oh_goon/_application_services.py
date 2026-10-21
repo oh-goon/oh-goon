@@ -146,6 +146,7 @@ def build_product_services(foundation: RuntimeFoundation):
         foundation.extension_store,
         foundation.tool_store,
         goon_templates,
+        git_service=foundation.git_service,
     )
     plans = FleetPlanService(
         plan_resolver,
@@ -155,6 +156,9 @@ def build_product_services(foundation: RuntimeFoundation):
         foundation.tool_store,
         content_store=foundation.content_store,
         standard_local_fleet=foundation.standard_local_fleet,
+        terminal=foundation.terminal,
+        standard_process_isolation=foundation.standard_process_isolation,
+        git_service=foundation.git_service,
     )
     shared_plan_store = SharedPlanFileStore()
     shared_plan = SharedPlanService(shared_plan_store, league, plans, runs, plan_templates)

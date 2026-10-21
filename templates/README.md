@@ -13,6 +13,15 @@ Its imports declare `phase:` beside each Goon. The existing repair owner runs
 linked native phase Runs with explicit review, write-scope and deadline budgets.
 See the [setup and customization example](../examples/agentic-review-repair-loop/README.md).
 
+For a selected native coding agent, [agents/native-coding](plans/agents/native-coding/README.md)
+runs the Agent followed by the project's explicit verification script;
+[agents/native-review](plans/agents/native-review/README.md) performs one typed
+read-only review. Both reuse the existing Plan/lock native selection flags and
+require a Bubblewrap profile with managed inference. The native default
+`isolated-managed` profile consumes the catalog's explicit `default_model`;
+ordinary Plan/Goon local execution defaults remain unchanged. See the
+[native configuration guide](../docs/AGENT_PROVIDERS.md#run-a-native-coding-agent).
+
 ## First local Python run
 
 Use an initialized Oh-Goon installation. Source-checkout users should use the prepared CLI described in the [backend guide](../backend/README.md). Run the following commands from your workload repository root.

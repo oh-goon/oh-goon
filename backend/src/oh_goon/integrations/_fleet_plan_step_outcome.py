@@ -19,6 +19,10 @@ from oh_goon.core.models.fleet_plan import (
     StepFailurePolicy,
     StepLifecycle,
 )
+from oh_goon.core.models.fleet_plan_evidence import (
+    PlanOutputEvidence,
+    PlanStandardIsolationEvidence,
+)
 from oh_goon.core.models.fleet_plan_release_evidence import (
     KubernetesRolloutVerificationEvidence,
     PlanReleaseEffectEvidence,
@@ -44,6 +48,9 @@ class StepOutcome:
     runtime_authority: RuntimeAuthorityReceipt | None = None
     execution_authority_economics: tuple[ExecutionAuthorityEconomicsReceipt, ...] = ()
     physical_execution_id: str | None = None
+    standard_isolation: PlanStandardIsolationEvidence | None = None
+    # Tail capture retains diagnostic text; evidence covers the whole original raw stream.
+    stdout_evidence: PlanOutputEvidence | None = None
 
 
 def output_contract_failure(
@@ -120,18 +127,31 @@ def executable_not_found_outcome(step: ResolvedPlanStep, executable: str) -> Ste
 
 def timeout_outcome(step: ResolvedPlanStep, error: subprocess.TimeoutExpired) -> StepOutcome:
     command = error.cmd
+    argv: tuple[str, ...]
     if isinstance(command, str):
         argv = (command,)
     else:
         argv = tuple(str(item) for item in command)
     if not argv:
         argv = (step.kind, step.step_id)
+    stdout = error.output or ""
+    stderr = error.stderr or ""
+    if isinstance(stdout, bytes):
+        stdout = stdout.decode("utf-8", errors="replace")
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    diagnostic = f"Fleet plan step timed out after {error.timeout} seconds"
     return StepOutcome(
         argv=argv,
         returncode=PLAN_TIMEOUT_RETURN_CODE,
-        stderr=f"Fleet plan step timed out after {error.timeout} seconds",
+        stdout=stdout,
+        stderr=(stderr.rstrip() + "\n" + diagnostic).lstrip("\n"),
+        duration_ms=getattr(error, "duration_ms", 0),
         supervisor=getattr(error, "supervisor", None),
         runtime_authority=getattr(error, "runtime_authority", None),
+        physical_execution_id=getattr(error, "physical_execution_id", None),
+        standard_isolation=getattr(error, "standard_isolation", None),
+        stdout_evidence=getattr(error, "stdout_evidence", None),
     )
 
 
@@ -146,4 +166,6 @@ def from_command(result: CommandResult) -> StepOutcome:
         runtime_authority=result.runtime_authority,
         execution_authority_economics=result.execution_authority_economics,
         physical_execution_id=result.physical_execution_id,
+        standard_isolation=result.standard_isolation,
+        stdout_evidence=result.stdout_evidence,
     )

@@ -5,6 +5,7 @@ from datetime import datetime
 from oh_goon.core.game_tape_attempt_comparison import compare_adjacent_attempts
 from oh_goon.core.game_tape_identity import step_execution_id
 from oh_goon.core.game_tape_lifecycle import step_status
+from oh_goon.core.models.fleet_observation import NativeAgentObservation
 from oh_goon.core.models.fleet_plan import ResolvedPlanStep, ResolvedStepSource
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepTeardownEvidence,
@@ -114,6 +115,15 @@ def _step_execution(
         output_names=_output_names(step, execution),
         artifacts=_artifacts(execution),
         outputs=_published_outputs(execution),
+        native_agent_observations=(
+            tuple(
+                observation
+                for observation in execution.observations
+                if isinstance(observation, NativeAgentObservation)
+            )
+            if execution is not None
+            else ()
+        ),
         reason=(
             execution.reason
             if isinstance(execution, SkippedPlanStepExecution)

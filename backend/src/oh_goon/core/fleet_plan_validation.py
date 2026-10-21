@@ -3,8 +3,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from pydantic import TypeAdapter
+
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_output_refs import step_output_references
+from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
 from oh_goon.core.models.fleet_plan_step_contract import (
     RetainedPlanCacheSource,
@@ -18,6 +21,17 @@ from oh_goon.core.product_identity import stable_id
 
 def validate_resolved_plan(plan: Any) -> None:
     """Validate cross-step invariants that require the fully resolved plan graph."""
+    from oh_goon.core.agent_review_plan import agent_phase_role, agent_review_phases
+
+    native = getattr(plan, "native_agent", None)
+    for step in plan.steps:
+        if step.kind != "agent":
+            continue
+        if step.harness == "native":
+            if native is None or step.native_agent != native:
+                raise ValueError("Native Agent Step differs from the original Plan profile")
+        elif native is not None:
+            raise ValueError("A native execution profile cannot silently host built-in Agent steps")
     if plan.contract_version < 44:
         if any(
             isinstance(output, PlanStreamOutput)
@@ -47,9 +61,8 @@ def validate_resolved_plan(plan: Any) -> None:
         published[step.step_id] = {item.name for item in getattr(step, "outputs", ())}
         # A validated Agent proposal is a scalar Step output, not a hidden
         # model-controlled command or grant. Only this explicit harness exports it.
-        if step.kind == "agent" and getattr(step, "harness", None) in (
-            "local-model-proposal",
-            "provider-proposal",
+        if step.kind == "agent" and (
+            step.harness == "local-model-proposal" or agent_phase_role(step) == "proposal"
         ):
             published[step.step_id].add("proposal")
         if step.workspace.publish:
@@ -59,8 +72,6 @@ def validate_resolved_plan(plan: Any) -> None:
     _validate_kubernetes_rollout_links(plan)
     _validate_plan_requirements(plan)
     _validate_imports(plan)
-    from oh_goon.core.agent_review_plan import agent_review_phases
-
     agent_review_phases(plan)
     _validate_plan_identity(plan)
 
@@ -392,6 +403,15 @@ def _validate_plan_identity(plan: Any) -> None:
         "steps": [
             step.model_dump(mode="json", exclude_computed_fields=True) for step in plan.steps
         ],
+        **(
+            {
+                "native_agent": TypeAdapter(ResolvedNativeAgent).dump_python(
+                    plan.native_agent, mode="json"
+                )
+            }
+            if getattr(plan, "native_agent", None) is not None
+            else {}
+        ),
         **(
             {"skill_sources": [item.model_dump(mode="json") for item in sources]} if sources else {}
         ),

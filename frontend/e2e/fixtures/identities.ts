@@ -4,6 +4,7 @@ export const LONG_REPOSITORY_NAME = "payments-api-with-a-deliberately-long-opera
 export const LONG_PLAN_NAME = "Python production quality and security verification with a deliberately long Plan name for realistic browser visibility testing";
 export const LONG_GOON_NAME = "python-production-quality-security-composite-goon-with-a-deliberately-long-capability-name";
 export const LONG_STEP_NAME = "validate-generated-contract-and-production-security-evidence-with-realistic-long-step-name";
+export const LONG_NATIVE_INPUT_IDENTITY = `agent-harness-input-v2-${"f".repeat(120)}`;
 
 export const FIXTURE_REPOSITORIES = {
   payments: repository("repo-payments", LONG_REPOSITORY_NAME, `/workspace/${LONG_REPOSITORY_NAME}`),

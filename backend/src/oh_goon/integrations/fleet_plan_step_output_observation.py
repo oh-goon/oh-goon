@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.fleet_plan import ResolvedPlanStep
@@ -33,14 +33,26 @@ def observed_command_runner(
         stream_output: CommandOutputObserver | None = None,
         process_observer: CommandProcessObserver | None = None,
         runtime_supervision: CommandRuntimeSupervision | None = None,
+        **native_options: Any,
     ) -> CommandResult:
-        del stream_output
         redactors = {
             "stdout": streaming_host_secret_redactor(step, host_environment),
             "stderr": streaming_host_secret_redactor(step, host_environment),
         }
 
         def observe(stream: Literal["stdout", "stderr"], text: str) -> None:
+            if stream_output is not None:
+                try:
+                    stream_output(stream, text)
+                except Exception as exc:
+                    emit_output_observer_failure(
+                        diagnostics,
+                        exc,
+                        step_id=step.step_id,
+                        operation=f"provided_stream_{stream}",
+                        fleet_run_id=fleet_run_id,
+                        repository_id=repository_id,
+                    )
             try:
                 redacted = redactors[stream].feed(text)
                 if redacted:
@@ -65,6 +77,7 @@ def observed_command_runner(
                 stream_output=observe,
                 process_observer=process_observer,
                 runtime_supervision=runtime_supervision,
+                **native_options,
             )
         finally:
             for stream, redactor in redactors.items():

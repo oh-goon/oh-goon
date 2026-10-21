@@ -119,6 +119,29 @@ describe("GameTapeStepInspector failure actions", () => {
     expect(artifactPath.closest(".game-tape-artifacts")).toBeTruthy();
   });
 
+  it("discloses recorded native claims and omissions without replacing the failed Step", () => {
+    const step = failedStep();
+    step.native_agent_observations = [{
+      kind: "native_agent", agent: "pi", profile: "isolated-managed", role: "report",
+      implementation_identity: "pi:sha256:" + "1".repeat(64),
+      input_identity: "sha256:" + "2".repeat(64), source_identity: "sha256:" + "3".repeat(64),
+      occurrence: "agent", native_event_count: 140, omitted_observations: 12,
+      settled: true, failed: false, authority: "UNTRUSTED_HARNESS_CLAIM",
+      events: [{ kind: "context", summary: "pi: auto_compaction_end" }],
+    }];
+    const { rerender } = render(<GameTapeStepInspector step={step} />);
+    expect(screen.getByText("Native agent observations")).toBeVisible();
+    expect(screen.getByText(/Native events are agent claims/)).toBeVisible();
+    expect(screen.getByText("pi: auto_compaction_end")).not.toBeVisible();
+    fireEvent.click(screen.getByText("pi · isolated-managed · report"));
+    expect(screen.getByText("pi: auto_compaction_end")).toBeVisible();
+    expect(screen.getByText("12")).toBeVisible();
+    expect(screen.getByText("pytest command failed", { exact: false })).toBeVisible();
+    rerender(<GameTapeStepInspector step={failedStep()} />);
+    expect(screen.queryByText("Native agent observations")).toBeNull();
+    expect(screen.queryByText("pi: auto_compaction_end")).toBeNull();
+  });
+
   it("shows derived materialization, runtime, atomic handoff and economics evidence", async () => {
     const step = failedStep() as unknown as Record<string, unknown>;
     step.execution_authority = {

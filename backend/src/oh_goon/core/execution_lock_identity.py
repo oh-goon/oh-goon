@@ -6,7 +6,10 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from pydantic import TypeAdapter
+
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.execution_lock_models import (
     ExecutionLock,
     LockedExternalArtifact,
@@ -108,6 +111,15 @@ def _plan_digest(
         "root_steps": root_steps,
         "root_requirements": _root_requirements(plan),
         "ordered_goons": [item.goon for item in goons],
+        **(
+            {
+                "native_agent": TypeAdapter(ResolvedNativeAgent).dump_python(
+                    plan.native_agent, mode="json"
+                )
+            }
+            if plan.native_agent is not None
+            else {}
+        ),
     }
     return sha256_digest(payload)
 

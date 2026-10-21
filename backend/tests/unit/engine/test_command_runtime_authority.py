@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.engine.command import RuntimeAuthorityBinding, run_command
+from oh_goon.engine.command import CommandTerminal, RuntimeAuthorityBinding, run_command
 
 
 def test_sealed_python_entrypoint_retains_native_virtual_environment(tmp_path: Path) -> None:
@@ -57,6 +57,102 @@ def test_env_shebang_is_observed_without_false_atomic_materialization(tmp_path: 
     assert result.runtime_authority.interpreter_path == str(Path("/usr/bin/env").resolve())
     assert result.runtime_authority.interpreter_identity is not None
     assert result.runtime_authority.execution_materialization_identity is None
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux guarded process authority")
+@pytest.mark.parametrize("shebang", ["#!/usr/bin/env sh", "#!/usr/bin/env -S sh"])
+@pytest.mark.parametrize("terminal", [False, True])
+def test_guarded_native_env_shebang_keeps_native_resolution_and_observational_receipt(
+    tmp_path: Path, shebang: str, terminal: bool
+) -> None:
+    executable = tmp_path / "native-env-program"
+    executable.write_text(shebang + "\nprintf 'native-env-program\\n'\n", encoding="utf-8")
+    executable.chmod(0o755)
+    output: list[bytes] = []
+
+    result = run_command(
+        str(executable),
+        parent_death_signal=True,
+        terminal=CommandTerminal(lambda maximum: None, output.append) if terminal else None,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    expected = "native-env-program\r\n" if terminal else "native-env-program"
+    assert result.stdout == expected
+    assert result.runtime_authority is not None
+    assert result.runtime_authority.execution_materialization_identity is None
+    assert result.runtime_authority.interpreter_path == str(Path("/usr/bin/env").resolve())
+    assert result.supervisor.final_process_group_quiescent
+    if terminal:
+        raw = b"".join(output)
+        assert raw == expected.encode()
+        assert result.stdout_evidence is not None
+        assert result.stdout_evidence.sha256 == hashlib.sha256(raw).hexdigest()
+        assert result.stdout_evidence.byte_count == len(raw)
+    else:
+        assert result.stdout_evidence is None
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Linux native self-executable semantics"
+)
+@pytest.mark.parametrize("terminal", [False, True])
+def test_native_executable_path_allows_binary_self_respawn_without_atomic_claim(
+    tmp_path: Path, terminal: bool
+) -> None:
+    compiler = shutil.which("cc")
+    if compiler is None:
+        pytest.skip("native C compiler is unavailable")
+    source = tmp_path / "self-spawn.c"
+    source.write_text("""#include <spawn.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char **environ;
+int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "child") == 0) { puts("native child"); return 0; }
+    char path[4096];
+    ssize_t n = readlink("/proc/self/exe", path, sizeof(path)-1);
+    if (n < 0) return 70;
+    path[n] = 0;
+    char *args[] = {path, "child", NULL};
+    pid_t child;
+    if (posix_spawn(&child, path, NULL, NULL, args, environ) != 0) return 71;
+    int status;
+    if (waitpid(child, &status, 0) < 0 || !WIFEXITED(status)) return 72;
+    return WEXITSTATUS(status);
+}
+""")
+    executable = tmp_path / "self-spawn"
+    subprocess.run([compiler, str(source), "-o", str(executable)], check=True, capture_output=True)
+    output: list[bytes] = []
+
+    result = run_command(
+        str(executable),
+        parent_death_signal=True,
+        preserve_native_executable_path=True,
+        terminal=CommandTerminal(lambda maximum: None, output.append) if terminal else None,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    expected = "native child\r\n" if terminal else "native child"
+    assert result.stdout == expected
+    assert result.runtime_authority is not None
+    assert result.runtime_authority.execution_materialization_identity is None
+    assert result.runtime_authority.executable_path == str(executable)
+    assert (
+        result.runtime_authority.executable_identity
+        == "sha256:" + hashlib.sha256(executable.read_bytes()).hexdigest()
+    )
+    if terminal:
+        raw = b"".join(output)
+        assert raw == expected.encode()
+        assert result.stdout_evidence is not None
+        assert result.stdout_evidence.sha256 == hashlib.sha256(raw).hexdigest()
+        assert result.stdout_evidence.byte_count == len(raw)
+    else:
+        assert result.stdout_evidence is None
 
 
 def test_run_command_runtime_authority_binding_is_execution_owner_input(tmp_path: Path) -> None:

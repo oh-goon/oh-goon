@@ -11,9 +11,9 @@ services-layer facade. Use the
 for that contract and its integration limits.
 
 The original services location and runtime-refusal assumptions below are
-historical. Built-in standard-local Agent execution now exists; the extended
-contract is not yet wired into it, and external native adapters remain separate
-work. Neither prework preparation nor a harness submission grants execution,
+historical. Built-in standard-local Agent execution remains supported. Native
+Agent Steps now consume the extended contract through the original Fleet/Step
+lifecycle and retain its typed result acceptors. Neither prework preparation nor a harness submission grants execution,
 disclosure or verification authority. Ordinary local execution does not acquire
 the historical strict/native prerequisites below.
 

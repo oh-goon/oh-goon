@@ -1,12 +1,14 @@
 """Local synthetic Skills and source for native review/repair contract tests."""
 
 from pathlib import Path
+from shutil import copytree
 
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentModel,
     AgentProvider,
     AgentProvidersConfig,
+    ResolvedNativeAgent,
 )
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -18,6 +20,7 @@ def agent_review_case(
     *,
     endpoint="http://127.0.0.1:12345",
     plan_template="agents/agentic-review-repair-loop",
+    native_agent: ResolvedNativeAgent | None = None,
 ):
     names = (
         "single-source-of-truth-review",
@@ -53,7 +56,24 @@ def agent_review_case(
             },
         )
     )
-    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
+    templates = GoonTemplateStore()
+    if native_agent is not None:
+        native_templates = tmp_path / "native-goons"
+        copytree(templates.root / "agents", native_templates / "agents")
+        for name, harness, role in (
+            ("review", "provider-review", "review"),
+            ("adjudicate", "provider-adjudicate", "adjudication"),
+            ("repair", "provider-proposal", "proposal"),
+        ):
+            source = native_templates / "agents" / name / "goon.yml"
+            recipients = "[configured_model]" if native_agent.connection is not None else "[]"
+            source.write_text(
+                source.read_text()
+                .replace(f"harness: {harness}", f"harness: native\n  role: {role}")
+                .replace("recipients: [configured_model]", f"recipients: {recipients}")
+            )
+        templates = GoonTemplateStore(native_templates)
+    resolver = FleetPlanResolver(goon_templates=templates)
     options = dict(
         inputs={
             "repo": "local:repo",
@@ -65,4 +85,8 @@ def agent_review_case(
         allowed_acceptance=("agentic-review",),
         connection=connection,
     )
+    if native_agent is not None:
+        options.pop("connection")
+        options["native_agent"] = native_agent
+        options["repository"] = repo
     return resolver, plan_path, repo, options
