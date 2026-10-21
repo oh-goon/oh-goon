@@ -2065,7 +2065,7 @@ questions:
   - backend/src/oh_goon/runtime/local_launch_owner.py:1-276
   - backend/src/oh_goon/api/app.py:40-58
   - backend/src/oh_goon/cli_start.py:1-93
-  - backend/tests/unit/repository_tooling/test_local_dev_launch.py:1-41
+  - scripts/tests/test_local_dev_launch.py:1-41
   - backend/tests/unit/api/test_launch_lifespan.py:1-55
   - backend/src/oh_goon/repository_tooling/architecture/_launch_contract_foundation.py:1-73
 - id: Q136

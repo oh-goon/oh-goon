@@ -28,7 +28,7 @@ backend/src/oh_goon/repository_tooling/release/       release identity and assem
 scripts/tests/                                         repository-tooling regression tests
 ```
 
-`oh_goon.repository_tooling.architecture.repository_layout` is the single physical-
+[repository_layout.py](../backend/src/oh_goon/repository_tooling/architecture/repository_layout.py) is the single physical-
 layout authority for repository checks. Do not reconstruct top-level ownership paths
 independently in individual contracts.
 
@@ -38,7 +38,7 @@ For an architecture/repository-tooling change:
 
 ```text
 edit the existing pyproject-owned module
--> uv run --offline --frozen --no-sync --project backend pytest scripts/tests/<focused_test>.py
+-> uv run --offline --frozen --no-sync --project backend pytest -c backend/pyproject.toml scripts/tests/<focused_test>.py
 -> make architecture
 -> make tooling-check
 -> stop

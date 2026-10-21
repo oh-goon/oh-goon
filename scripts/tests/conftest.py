@@ -6,6 +6,8 @@ import shutil
 
 import pytest
 
+from tests.fakes.process_identity import stable_test_process_identity_without_procfs  # noqa: F401
+
 
 @pytest.fixture
 def non_wsl_grep(tmp_path: Path) -> Path:

@@ -34,10 +34,11 @@ def replace_python_syntax(source: str, old: str, new: str, *, last: bool = False
         ]
         if nodes:
             node = sorted(nodes, key=lambda item: (item.lineno, item.col_offset))[-1 if last else 0]
+            assert node.end_lineno is not None and node.end_col_offset is not None
             return replace_span(node.lineno, node.col_offset, node.end_lineno, node.end_col_offset)
 
     def tokens(text: str) -> list[tuple[object, tokenize.TokenInfo]]:
-        result = []
+        result: list[tuple[object, tokenize.TokenInfo]] = []
         try:
             for token in tokenize.generate_tokens(StringIO(text).readline):
                 if token.type in {

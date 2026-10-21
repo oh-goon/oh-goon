@@ -1,10 +1,58 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_source_navigation_links_resolve_to_current_owners() -> None:
+    documents = (
+        ROOT / "backend/README.md",
+        ROOT / "backend/src/oh_goon/README.md",
+        ROOT / "backend/tests/README.md",
+        ROOT / "scripts/README.md",
+        ROOT / "docs/development/CODE_TOUR.md",
+        ROOT / "docs/development/STRUCTURAL_AUTHORITY_GUARD.md",
+        ROOT / "docs/ARCHITECTURE.md",
+        ROOT / "docs/development/SSOT.md",
+    )
+    broken = []
+    for document in documents:
+        for href in re.findall(
+            r"\[[^\]\n]+\]\(([^)\s]+)\)", document.read_text(encoding="utf-8")
+        ):
+            if href.startswith(("https://", "http://", "mailto:", "#")):
+                continue
+            target = href.split("#", 1)[0]
+            if target and not (document.parent / target).exists():
+                broken.append(f"{document.relative_to(ROOT)} -> {target}")
+    assert not broken, "Broken owner navigation:\n" + "\n".join(broken)
+
+
+def test_source_navigation_covers_current_python_package_owners() -> None:
+    package = ROOT / "backend/src/oh_goon"
+    navigation = package / "README.md"
+    package_owners = {
+        child.resolve()
+        for child in package.iterdir()
+        if child.is_dir() and (child / "__init__.py").is_file()
+    }
+    linked_owners = {
+        (navigation.parent / href).resolve()
+        for href in re.findall(
+            r"\[[^\]\n]+\]\(([^)\s]+)\)", navigation.read_text(encoding="utf-8")
+        )
+        if ":" not in href and "#" not in href
+    }
+    missing = sorted(
+        str(path.relative_to(package)) for path in package_owners - linked_owners
+    )
+    assert not missing, (
+        f"Python package owners missing from source navigation: {missing}"
+    )
 
 
 def test_historical_roadmap_numbers_cannot_masquerade_as_future_checkpoints() -> None:

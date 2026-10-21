@@ -26,41 +26,37 @@ _SELECTOR = "backend/src/oh_goon/integrations/fleet_plan_process_isolation.py"
 _API = "backend/src/oh_goon/api/routes/fleet_runs.py"
 _R3_TEST = "backend/tests/unit/runtime/test_co_r3_native_provider_conformance.py"
 _R3B_TEST = "backend/tests/unit/runtime/test_co_r3b_original_failure_cuts.py"
-_R3B_GUARD = "backend/tests/unit/repository_tooling/test_co_r3b_original_failure_architecture.py"
+_R3B_GUARD = "scripts/tests/test_co_r3b_original_failure_architecture.py"
 _R3C_TEST = "backend/tests/unit/runtime/test_co_r3c_trust_writer_quiescence.py"
-_R3C_GUARD = "backend/tests/unit/repository_tooling/test_co_r3c_original_quiescence_architecture.py"
+_R3C_GUARD = "scripts/tests/test_co_r3c_original_quiescence_architecture.py"
 _R3D_TEST = "backend/tests/unit/integrations/test_co_r3d_original_cgroup_quiescence.py"
-_R3D_GUARD = "backend/tests/unit/repository_tooling/test_co_r3d_original_cgroup_architecture.py"
+_R3D_GUARD = "scripts/tests/test_co_r3d_original_cgroup_architecture.py"
 _R3E_TEST = "backend/tests/unit/integrations/test_co_r3e_durable_cgroup_recovery.py"
-_R3E_GUARD = "backend/tests/unit/repository_tooling/test_co_r3e_original_recovery_architecture.py"
+_R3E_GUARD = "scripts/tests/test_co_r3e_original_recovery_architecture.py"
 _R3F_TEST = "backend/tests/unit/integrations/test_co_r3f_cgroup_native_handle.py"
-_R3F_GUARD = "backend/tests/unit/repository_tooling/test_co_r3f_handle_architecture.py"
+_R3F_GUARD = "scripts/tests/test_co_r3f_handle_architecture.py"
 _R3G_TEST = "backend/tests/unit/integrations/test_co_r3g_bound_observation_removal.py"
-_R3G_GUARD = "backend/tests/unit/repository_tooling/test_co_r3g_bound_observation_architecture.py"
+_R3G_GUARD = "scripts/tests/test_co_r3g_bound_observation_architecture.py"
 _R3H_TEST = "backend/tests/unit/integrations/test_co_r3h_original_inode_retirement.py"
-_R3H_GUARD = "backend/tests/unit/repository_tooling/test_co_r3h_inode_retirement_architecture.py"
+_R3H_GUARD = "scripts/tests/test_co_r3h_inode_retirement_architecture.py"
 _R3I_REAPER = "backend/src/oh_goon/integrations/fleet_plan_local_lace_native_reaper.py"
 _R3I_TEST = "backend/tests/unit/integrations/test_co_r3i_original_lace_cgroup_custody.py"
-_R3I_GUARD = (
-    "backend/tests/unit/repository_tooling/test_co_r3i_original_lace_custody_architecture.py"
-)
+_R3I_GUARD = "scripts/tests/test_co_r3i_original_lace_custody_architecture.py"
 _R3J_TEST = "backend/tests/unit/integrations/test_co_r3j_original_parent_lineage.py"
-_R3J_GUARD = "backend/tests/unit/repository_tooling/test_co_r3j_parent_lineage_architecture.py"
+_R3J_GUARD = "scripts/tests/test_co_r3j_parent_lineage_architecture.py"
 _R3K_TEST = "backend/tests/unit/integrations/test_co_r3k_prework_identity_rollback.py"
-_R3K_GUARD = "backend/tests/unit/repository_tooling/test_co_r3k_prework_architecture.py"
+_R3K_GUARD = "scripts/tests/test_co_r3k_prework_architecture.py"
 _R3L_TEST = "backend/tests/unit/integrations/test_co_r3l_bound_nested_attachment.py"
-_R3L_GUARD = "backend/tests/unit/repository_tooling/test_co_r3l_bound_attachment_architecture.py"
+_R3L_GUARD = "scripts/tests/test_co_r3l_bound_attachment_architecture.py"
 _R3M_TEST = "backend/tests/unit/integrations/test_co_r3m_pending_cgroup_allocation.py"
-_R3M_GUARD = "backend/tests/unit/repository_tooling/test_co_r3m_pending_allocation_architecture.py"
+_R3M_GUARD = "scripts/tests/test_co_r3m_pending_allocation_architecture.py"
 _R3N_TEST = "backend/tests/native/test_co_r3n_native_cgroup_v2_witness.py"
-_R3N_GUARD = "backend/tests/unit/repository_tooling/test_co_r3n_native_cgroup_qualification.py"
-_R3O_GUARD = "backend/tests/unit/repository_tooling/test_co_r3o_native_witness_contract.py"
+_R3N_GUARD = "scripts/tests/test_co_r3n_native_cgroup_qualification.py"
+_R3O_GUARD = "scripts/tests/test_co_r3o_native_witness_contract.py"
 _R3P_TEST = "backend/tests/unit/services/test_co_r3p_original_fleet_effect_revocation.py"
-_R3P_GUARD = (
-    "backend/tests/unit/repository_tooling/test_co_r3p_original_effect_epoch_architecture.py"
-)
+_R3P_GUARD = "scripts/tests/test_co_r3p_original_effect_epoch_architecture.py"
 _R3Q_TEST = "backend/tests/unit/services/test_co_r3q_effect_revalidation.py"
-_R3Q_GUARD = "backend/tests/unit/repository_tooling/test_co_r3q_effect_architecture.py"
+_R3Q_GUARD = "scripts/tests/test_co_r3q_effect_architecture.py"
 _R3L_LAUNCHER = "backend/src/oh_goon/integrations/_fleet_plan_nested_cgroup_launcher.py"
 _CGROUP_OWNER = "backend/src/oh_goon/integrations/_fleet_plan_cgroup_resources.py"
 _PROCESS_GROUP_OWNER = "backend/src/oh_goon/runtime/process_group.py"
@@ -644,7 +640,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/runtime/test_co_r3b_original_failure_cuts.py",
-                    "tests/unit/repository_tooling/test_co_r3b_original_failure_architecture.py",
+                    "../scripts/tests/test_co_r3b_original_failure_architecture.py",
                 )
             ),
             "CO-R3B must run on the one original QENV1 CORE",
@@ -719,7 +715,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/runtime/test_co_r3c_trust_writer_quiescence.py",
-                    "tests/unit/repository_tooling/test_co_r3c_original_quiescence_architecture.py",
+                    "../scripts/tests/test_co_r3c_original_quiescence_architecture.py",
                 )
             ),
             "CO-R3C original CORE must include physical writer and negative-control tests",
@@ -779,7 +775,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3d_original_cgroup_quiescence.py",
-                    "tests/unit/repository_tooling/test_co_r3d_original_cgroup_architecture.py",
+                    "../scripts/tests/test_co_r3d_original_cgroup_architecture.py",
                 )
             ),
             "CO-R3D must remain in original QENV1 CORE",
@@ -874,7 +870,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3e_durable_cgroup_recovery.py",
-                    "tests/unit/repository_tooling/test_co_r3e_original_recovery_architecture.py",
+                    "../scripts/tests/test_co_r3e_original_recovery_architecture.py",
                 )
             ),
             "CO-R3E must run inside original QENV1 CORE",
@@ -949,7 +945,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3f_cgroup_native_handle.py",
-                    "tests/unit/repository_tooling/test_co_r3f_handle_architecture.py",
+                    "../scripts/tests/test_co_r3f_handle_architecture.py",
                 )
             ),
             "CO-R3F must run through original CORE qualification owner",
@@ -1017,7 +1013,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3g_bound_observation_removal.py",
-                    "tests/unit/repository_tooling/test_co_r3g_bound_observation_architecture.py",
+                    "../scripts/tests/test_co_r3g_bound_observation_architecture.py",
                 )
             ),
             "CO-R3G must remain enrolled in original QENV1 CORE",
@@ -1095,7 +1091,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3h_original_inode_retirement.py",
-                    "tests/unit/repository_tooling/test_co_r3h_inode_retirement_architecture.py",
+                    "../scripts/tests/test_co_r3h_inode_retirement_architecture.py",
                 )
             ),
             "CO-R3H inode retirement witnesses must run in original CORE",
@@ -1162,7 +1158,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3i_original_lace_cgroup_custody.py",
-                    "tests/unit/repository_tooling/test_co_r3i_original_lace_custody_architecture.py",
+                    "../scripts/tests/test_co_r3i_original_lace_custody_architecture.py",
                 )
             ),
             "CO-R3I native LACE original-owner witnesses must run in CORE",
@@ -1222,7 +1218,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3j_original_parent_lineage.py",
-                    "tests/unit/repository_tooling/test_co_r3j_parent_lineage_architecture.py",
+                    "../scripts/tests/test_co_r3j_parent_lineage_architecture.py",
                 )
             ),
             "CO-R3J must run inside original QENV1 CORE",
@@ -1277,7 +1273,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3k_prework_identity_rollback.py",
-                    "tests/unit/repository_tooling/test_co_r3k_prework_architecture.py",
+                    "../scripts/tests/test_co_r3k_prework_architecture.py",
                 )
             ),
             "CO-R3K original CORE prework witnesses must be enrolled once",
@@ -1354,7 +1350,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3l_bound_nested_attachment.py",
-                    "tests/unit/repository_tooling/test_co_r3l_bound_attachment_architecture.py",
+                    "../scripts/tests/test_co_r3l_bound_attachment_architecture.py",
                 )
             ),
             "CO-R3L native owner and X0 witnesses must be in original CORE exactly once",
@@ -1431,7 +1427,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                 core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3m_pending_cgroup_allocation.py",
-                    "tests/unit/repository_tooling/test_co_r3m_pending_allocation_architecture.py",
+                    "../scripts/tests/test_co_r3m_pending_allocation_architecture.py",
                 )
             ),
             "CO-R3M original CORE pending allocation witnesses must be enrolled once",
@@ -1502,8 +1498,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
         require(
             _R3_QUALIFIER,
-            core.count("tests/unit/repository_tooling/test_co_r3n_native_cgroup_qualification.py")
-            == 1
+            core.count("../scripts/tests/test_co_r3n_native_cgroup_qualification.py") == 1
             and core.count('"${r3n_native_tests[@]}"') == 1
             and shell.count(
                 "r3n_native_tests+=(tests/native/test_co_r3n_native_cgroup_v2_witness.py)"
@@ -1564,8 +1559,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         require(
             _R3_QUALIFIER,
             (
-                core.count("tests/unit/repository_tooling/test_co_r3o_native_witness_contract.py")
-                == 1
+                core.count("../scripts/tests/test_co_r3o_native_witness_contract.py") == 1
                 and core.count('"${r3n_native_tests[@]}"') == 1
                 and shell.count("--require-module test_co_r3n_native_cgroup_v2_witness") == 1
                 and shell.count("R3O_NATIVE_STATUS.txt") == 4
@@ -1660,9 +1654,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         require(
             _R3_QUALIFIER,
             core.count("tests/unit/services/test_co_r3p_original_fleet_effect_revocation.py") == 1
-            and core.count(
-                "tests/unit/repository_tooling/test_co_r3p_original_effect_epoch_architecture.py"
-            )
+            and core.count("../scripts/tests/test_co_r3p_original_effect_epoch_architecture.py")
             == 1
             and shell.count(
                 "if [[ -f .checkpoint/CO_R3P_SOURCE.sha256 ]]; then embedded='.checkpoint/CO_R3P_SOURCE.sha256'; fi"
@@ -1746,7 +1738,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         require(
             root / _R3_QUALIFIER,
             core.count("tests/unit/services/test_co_r3q_effect_revalidation.py") == 1
-            and core.count("tests/unit/repository_tooling/test_co_r3q_effect_architecture.py") == 1
+            and core.count("../scripts/tests/test_co_r3q_effect_architecture.py") == 1
             and shell.count(
                 "if [[ -f .checkpoint/CO_R3Q_SOURCE.sha256 ]]; then embedded='.checkpoint/CO_R3Q_SOURCE.sha256'; fi"
             )
@@ -1764,9 +1756,9 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
 
 def check_co_r3r_visibility(root: Path = ROOT) -> list[Violation]:
     owner = root / "backend/src/oh_goon/integrations/linux_physical_observer.py"
-    test = root / "backend/tests/unit/repository_tooling/test_co_r3r_visible_holder_race.py"
+    test = root / "scripts/tests/test_co_r3r_visible_holder_race.py"
     native = root / "backend/tests/native/test_co_r3r_real_visible_holder.py"
-    guard = root / "backend/tests/unit/repository_tooling/test_co_r3r_observer_architecture.py"
+    guard = root / "scripts/tests/test_co_r3r_observer_architecture.py"
     shell = root / _R3_QUALIFIER
     issues: list[Violation] = []
     try:
@@ -1828,8 +1820,8 @@ def check_co_r3r_visibility(root: Path = ROOT) -> list[Violation]:
     core = selection.split("run_ring CORE " + chr(92) + chr(10), 1)
     core = core[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core) == 2 else ""
     for path in (
-        "tests/unit/repository_tooling/test_co_r3r_visible_holder_race.py",
-        "tests/unit/repository_tooling/test_co_r3r_observer_architecture.py",
+        "../scripts/tests/test_co_r3r_visible_holder_race.py",
+        "../scripts/tests/test_co_r3r_observer_architecture.py",
         "tests/native/test_co_r3r_real_visible_holder.py",
     ):
         if core.count(path) != 1:
@@ -1848,8 +1840,8 @@ def check_co_r3s_observation(root: Path = ROOT) -> list[Violation]:
     """Keep CO-R3S handle-bound diagnostic observation and CORE evidence."""
     owner = root / "backend/src/oh_goon/integrations/linux_physical_observer.py"
     shell = root / _R3_QUALIFIER
-    tests = root / "backend/tests/unit/repository_tooling/test_co_r3s_pinned_cgroup_observation.py"
-    guard = root / "backend/tests/unit/repository_tooling/test_co_r3s_architecture.py"
+    tests = root / "scripts/tests/test_co_r3s_pinned_cgroup_observation.py"
+    guard = root / "scripts/tests/test_co_r3s_architecture.py"
     issues: list[Violation] = []
     try:
         tree = ast.parse(owner.read_text(encoding="utf-8"))
@@ -1904,8 +1896,8 @@ def check_co_r3s_observation(root: Path = ROOT) -> list[Violation]:
     core = selection.split("run_ring CORE " + chr(92) + chr(10), 1)
     core = core[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core) == 2 else ""
     for path in (
-        "tests/unit/repository_tooling/test_co_r3s_pinned_cgroup_observation.py",
-        "tests/unit/repository_tooling/test_co_r3s_architecture.py",
+        "../scripts/tests/test_co_r3s_pinned_cgroup_observation.py",
+        "../scripts/tests/test_co_r3s_architecture.py",
     ):
         if core.count(path) != 1:
             issues.append(
@@ -1963,7 +1955,7 @@ def check_co_r3t_no_legacy_pid_scavenging(root: Path = ROOT) -> list[Violation]:
     core = core[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core) == 2 else ""
     for name in (
         "tests/unit/integrations/test_co_r3t_legacy_orphan_fail_before_effect.py",
-        "tests/unit/repository_tooling/test_co_r3t_legacy_custody_architecture.py",
+        "../scripts/tests/test_co_r3t_legacy_custody_architecture.py",
     ):
         if core.count(name) != 1:
             issues.append(

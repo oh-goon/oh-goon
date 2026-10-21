@@ -49,10 +49,13 @@ src/oh_goon/
 ├── engine/          native command/git/project execution primitives
 ├── integrations/    filesystem/process/container/VCS/external effect boundaries
 ├── runtime/         durable state, lifecycle, scheduling, coordination stores
-└── services/        product use-cases that compose lower-level owners
+├── services/        product use-cases that compose lower-level owners
+├── scout/           optional read-only cross-run workload/resource observability
+├── native_issuer/   installed native Fleet authority issuers
+└── repository_tooling/  repository architecture, generation, release and check commands
 ```
 
-The directory name is an ownership clue, not an invitation to add another layer. Put a change in the lowest existing owner that already has the responsibility. For the decision ladder between `core/`, `engine/`, `integrations/`, `runtime/`, `services/` and `api/`, read `src/oh_goon/README.md`.
+The six general layers are `api/`, `core/`, `engine/`, `integrations/`, `runtime/` and `services/`. The scoped [Scout](src/oh_goon/scout/), [native issuer](src/oh_goon/native_issuer/) and [repository tooling](src/oh_goon/repository_tooling/) packages retain their own boundaries; they are not interchangeable general layers. Put a change in the existing owner that already has the responsibility. Read the [source owner map](src/oh_goon/README.md) for the decision ladder and the [tooling map](../scripts/README.md) for repository commands.
 
 ## Entry points
 
@@ -73,6 +76,7 @@ tests/fakes/                 narrow backend test doubles
 ```
 
 Read `tests/README.md` after choosing a source owner. Root `../tests/integration/` is only for behavior that genuinely crosses top-level owners.
+Repository-tooling regressions belong in `../scripts/tests/`, even though their implementation is installed from the backend Python project.
 
 ## API contract boundary
 
