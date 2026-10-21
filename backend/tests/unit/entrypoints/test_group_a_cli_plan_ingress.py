@@ -123,6 +123,7 @@ def test_hardened_cli_accepts_only_exact_enrolled_identity_then_delegates_one_pl
                 "root_expected_name": None,
                 "lock_path": None,
                 "caller_input_file": None,
+                "caller_input_origins": {"ENV": "cli"},
             },
         )
     ]

@@ -1285,6 +1285,51 @@
       "retryable": "Kan försökas igen",
       "nextAction": "Säker nästa åtgärd:",
       "rule": "Förklaringen härleds från det beständiga körfelet; den är inte en separat exekveringsauktoritet."
+    },
+    "configuration": {
+      "title": "Konfigurationsförklaring",
+      "privacy": "Värden visas inte. Besluten fångades vid upplösningen; denna vy ger ingen exekveringsbehörighet.",
+      "unavailable": "Konfigurationens ursprung sparades inte för denna Run.",
+      "root": "<rot>",
+      "parent": "Överordnad indata:",
+      "producer": "Producent:",
+      "source": "Definitionens SHA-256:",
+      "bindingSource": "Bindningens SHA-256:",
+      "candidates": "Källor i deklarerad ordning",
+      "empty": "Inga beslut om indata eller miljö fångades.",
+      "pagination": "Sidor med konfigurationsbeslut",
+      "page": "Sida {{page}} av {{total}}",
+      "omitted": "Ytterligare beslut utelämnade från begränsad evidens: {{count}}",
+      "origins": {
+        "default": "Standardvärde från ägande Goon",
+        "caller": "Anroparens indata",
+        "cli": "Explicit CLI-indata",
+        "caller_file": "Anroparens indatafil",
+        "literal": "Explicit bindning",
+        "host": "Explicit bindning till värdmiljön",
+        "parent_input": "Vidarebefordrad indata",
+        "expression": "Kompilerat uttryck",
+        "external_source": "Första definierade externa källa",
+        "producer_workspace": "Referens till producentens arbetsyta",
+        "deferred_goon_output": "Senare bundet Goon-resultat",
+        "deferred_step_output": "Senare bundet Step-resultat",
+        "optional_omission": "Valfri indata utelämnad"
+      },
+      "states": {
+        "null": "Null",
+        "empty": "Tomt",
+        "defined": "Definierat",
+        "deferred": "Senare bindning"
+      },
+      "candidateStates": {
+        "missing": "Saknas",
+        "null": "Null; nästa källa prövad",
+        "empty": "Tomt; nästa källa prövad",
+        "selected": "Vald",
+        "not_evaluated": "Inte utvärderad"
+      },
+      "inputType": "Indatatyp: {{type}}",
+      "callerFileSource": "Indatafilens SHA-256:"
     }
   },
   "attention": {

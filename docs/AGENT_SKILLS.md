@@ -366,14 +366,22 @@ lifecycle behavior; they are not evidence of real model quality.
 With Ollama running locally and a model already installed, pass its exact name:
 
 ```bash
-bash scripts/qualify_agent_local_model.sh YOUR_INSTALLED_MODEL
+OH_GOON_AGENT_QUALIFICATION_OUT="${XDG_STATE_HOME:-$HOME/.local/state}/oh-goon/native-agent" \
+  bash scripts/qualify_agent_local_model.sh YOUR_INSTALLED_MODEL
 ```
 
 The script checks the selected local model, materializes the committed backend
 dependencies through native uv, and exercises real Hashmarks, real Ollama,
 the original Fleet Step supervisor, frozen Skill resources, and reopened
-SQLite/Game Tape. Output goes under `.qualification/` by default. It does not
-install a model and does not certify a complete repair loop or a release.
+SQLite/Game Tape. Output defaults to
+`${XDG_STATE_HOME:-$HOME/.local/state}/oh-goon/qualification/agent-local-model`,
+outside the source checkout. `OH_GOON_AGENT_QUALIFICATION_OUT` selects a different
+output directory, as shown above. The selected `dev`, `quality`, and `build`
+groups match `make init`, so qualification retains the prepared development tools.
+Native uv reuses satisfied
+packages and its download cache; Ollama retains the already installed model in
+its own model store. The script does not install or pull a model. Each invocation
+runs the native tests again and does not certify a complete repair loop or a release.
 
 The script currently covers native read-only review and Skill-resource cycles.
 Failed-test feedback and proposal/apply/test have separate deterministic

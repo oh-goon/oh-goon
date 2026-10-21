@@ -216,6 +216,7 @@ def fleet_run_outcome(run: FleetRunState) -> FleetRunOutcome:
 class FleetRunDetail(ImmutableModel):
     """Trusted immutable read projection produced by the canonical FleetRun reducer."""
 
+    journal_revision: int | None = Field(default=None, ge=0)
     run: FleetRunState
     execution: FleetExecutionAdmission
     repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...]

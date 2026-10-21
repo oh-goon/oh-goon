@@ -7,8 +7,11 @@ import json
 import pytest
 
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
+from tests.factories.fleet_plan_executor import agent_staging_scratch as agent_staging_scratch
 from tests.unit.runtime.test_b12_local_resource_intent import _resources
 from tests.unit.runtime.test_skill03c2d1_original_tool_effect_cut import _staged
+
+pytestmark = pytest.mark.usefixtures("agent_staging_scratch")
 
 
 def _grant(conn, journal, args, **changes):

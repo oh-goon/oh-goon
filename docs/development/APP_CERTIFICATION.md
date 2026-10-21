@@ -41,6 +41,14 @@ The normal frontdoor proves only the prerequisite it directly owns: the initiali
 
 The number five is not itself product authority. The invariant is that dependency acquisition/materialization is not an APP workload after canonical initialization already succeeded. Template startability may materialize only the bounded canonical certification fixtures needed to prove their declared repository contracts; it must not recreate or reacquire the initialized Oh-Goon backend/frontend environment.
 
+Each selected fixture environment is materialized once by native `uv sync --locked`
+using the execution subject's selected cache and native network configuration. A
+subsequent `uv sync --check --locked --offline` verifies that same environment
+without repair or dependency acquisition, and the harness preserves the fixture
+lock bytes. An empty attempt-private cache is valid setup input, not evidence that
+the fixture dependencies are unavailable. Explicit native offline configuration
+still applies to setup; a cache miss then remains a native failure without fallback.
+
 The strict CI/CD Fleet executor remains the authority for CI/CD workload isolation and frozen executable capability. APP self-certification is verification of this already-initialized local product; it must not manufacture, inherit, validate, export, or require strict executor/cgroup/systemd-delegation authority that the verification Plan does not consume. The outer certification frontdoor classifies APP verification and strips that authority before static admission or any APP bootstrap/orchestration work; the workflow bootstrap repeats the stripping as defense-in-depth; and the APP local-runtime Goon uses a verification-only runtime journey that never reacquires it. Production-shaped repository Goon execution, physical Step cancellation, crash/restart recovery, and strict parallel Shared Plan execution remain under `make strict-local-runtime-acceptance`, `make test-real-world`, and `make test-real-world-parallel`. `make strict-executor-setup` belongs only to explicit strict release/CI or strict-acceptance paths.
 
 ## Certification semantic boundary

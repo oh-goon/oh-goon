@@ -6,12 +6,15 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock, verify_execution_lock
+from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.product_identity import operation_intent_key
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.execution_lock_persistence import (
     parse_execution_lock,
     render_execution_lock,
 )
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from oh_goon.services.fleet_plans import prepare_reviewed_execution_target
 
 
 def _package(root: Path, key: str, body: str) -> Path:
@@ -76,6 +79,30 @@ def test_generation_is_deterministic_and_byte_identical(tmp_path: Path) -> None:
     assert first == second
     assert render_execution_lock(first) == render_execution_lock(second)
     assert parse_execution_lock(render_execution_lock(first)) == first
+
+
+def test_configuration_is_provenance_not_executable_identity_and_is_source_bound(tmp_path):
+    goons = tmp_path / "goons"
+    _package(goons, "general/a", _input_atomic())
+    path = tmp_path / "plan.yml"
+    _plan(path, ("general/a",))
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(goons))
+    plan = resolver.resolve(path)
+    target = prepare_reviewed_execution_target(
+        resolver, path, expected_execution_digest=build_execution_lock(plan).digest
+    )
+    without = target.model_copy(
+        update={"plan": target.plan.model_copy(update={"configuration": None})}
+    )
+    assert target.plan.plan_id == without.plan.plan_id
+    assert build_execution_lock(target.plan) == build_execution_lock(without.plan)
+    assert operation_intent_key("execute-plan", target) == operation_intent_key(
+        "execute-plan", without
+    )
+    payload = target.model_dump()
+    payload["plan"]["configuration"]["root_source_sha256"] = "f" * 64
+    with pytest.raises(ValueError, match="different source"):
+        FleetPlanTarget.model_validate(payload)
 
 
 def test_step_command_and_requirement_changes_invalidate_goon(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
@@ -21,6 +22,7 @@ from oh_goon.core.models.fleet_plan_composition import (
     TomlInputSource,
     YamlInputSource,
 )
+from oh_goon.core.models.fleet_plan_diagnostics import PlanInputSourceObservation
 from oh_goon.core.path_authority import RepositoryPathSpace, navigation_path
 from oh_goon.engine.git import GitService
 from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
@@ -40,12 +42,29 @@ def resolve_input_sources(
     *,
     context: InputResolutionContext,
     input_name: str,
+    observations: list[PlanInputSourceObservation] | None = None,
 ) -> tuple[bool, PlanInputValue, str]:
     """Return the first defined source value; no expressions or computation are supported."""
 
-    for source in sources:
-        found, value, origin = _resolve_source(source, context=context, input_name=input_name)
+    for index, source in enumerate(sources):
+        found, value, origin, state = _resolve_source(
+            source, context=context, input_name=input_name
+        )
+        if observations is not None:
+            observations.append(
+                PlanInputSourceObservation(
+                    kind=source.kind,
+                    state=state,
+                    name=source.name if isinstance(source, EnvInputSource) else None,
+                    git_field=source.field if isinstance(source, GitInputSource) else None,
+                )
+            )
         if found:
+            if observations is not None:
+                observations.extend(
+                    PlanInputSourceObservation(kind=later.kind, state="not_evaluated")
+                    for later in sources[index + 1 :]
+                )
             return True, value, origin
     return False, None, "default"
 
@@ -55,15 +74,15 @@ def _resolve_source(
     *,
     context: InputResolutionContext,
     input_name: str,
-) -> tuple[bool, PlanInputValue, str]:
+) -> tuple[bool, PlanInputValue, str, Literal["missing", "null", "empty", "selected"]]:
     if isinstance(source, EnvInputSource):
         environment = context.environment
         if environment is None:
-            return False, None, f"env:{source.name}"
+            return False, None, f"env:{source.name}", "missing"
         value = environment.get(source.name)
         if value is None or value == "":
-            return False, None, f"env:{source.name}"
-        return True, value, f"env:{source.name}"
+            return False, None, f"env:{source.name}", "missing" if value is None else "empty"
+        return True, value, f"env:{source.name}", "selected"
 
     if isinstance(source, YamlInputSource):
         repository = _require_repository(context, input_name=input_name, source="yaml")
@@ -74,7 +93,7 @@ def _resolve_source(
             require_exists=False,
         )
         if not path.exists():
-            return False, None, f"yaml:{source.path}#{source.key}"
+            return False, None, f"yaml:{source.path}#{source.key}", "missing"
         try:
             payload = yaml.safe_load(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, yaml.YAMLError) as exc:
@@ -83,13 +102,13 @@ def _resolve_source(
             ) from exc
         value = _mapping_key(payload, source.key)
         if value is _MISSING or value is None or value == "":
-            return False, None, f"yaml:{source.path}#{source.key}"
+            return False, None, f"yaml:{source.path}#{source.key}", _undefined_state(value)
         if type(value) not in (str, bool, int):
             raise FleetPlanInvalid(
                 f"Fleet input {input_name!r} YAML source {source.path}#{source.key} "
                 "must resolve to a scalar"
             )
-        return True, value, f"yaml:{source.path}#{source.key}"
+        return True, value, f"yaml:{source.path}#{source.key}", "selected"
 
     if isinstance(source, TomlInputSource):
         repository = _require_repository(context, input_name=input_name, source="toml")
@@ -100,7 +119,7 @@ def _resolve_source(
             require_exists=False,
         )
         if not path.exists():
-            return False, None, f"toml:{source.path}#{source.key}"
+            return False, None, f"toml:{source.path}#{source.key}", "missing"
         try:
             payload = tomllib.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
@@ -109,13 +128,13 @@ def _resolve_source(
             ) from exc
         value = _mapping_key(payload, source.key)
         if value is _MISSING or value is None or value == "":
-            return False, None, f"toml:{source.path}#{source.key}"
+            return False, None, f"toml:{source.path}#{source.key}", _undefined_state(value)
         if type(value) not in (str, bool, int):
             raise FleetPlanInvalid(
                 f"Fleet input {input_name!r} TOML source {source.path}#{source.key} "
                 "must resolve to a scalar"
             )
-        return True, value, f"toml:{source.path}#{source.key}"
+        return True, value, f"toml:{source.path}#{source.key}", "selected"
 
     if isinstance(source, TextInputSource):
         repository = _require_repository(context, input_name=input_name, source="text")
@@ -126,7 +145,7 @@ def _resolve_source(
             require_exists=False,
         )
         if not path.exists():
-            return False, None, f"text:{source.path}"
+            return False, None, f"text:{source.path}", "missing"
         try:
             value = path.read_text(encoding="utf-8").strip()
         except (OSError, UnicodeError) as exc:
@@ -134,13 +153,13 @@ def _resolve_source(
                 f"Fleet input {input_name!r} cannot read text source {source.path}: {exc}"
             ) from exc
         if not value:
-            return False, None, f"text:{source.path}"
+            return False, None, f"text:{source.path}", "empty"
         if "\n" in value or "\r" in value:
             raise FleetPlanInvalid(
                 f"Fleet input {input_name!r} text source {source.path} "
                 "must contain exactly one non-empty line"
             )
-        return True, value, f"text:{source.path}"
+        return True, value, f"text:{source.path}", "selected"
 
     if isinstance(source, GitInputSource):
         repository = _require_repository(context, input_name=input_name, source="git")
@@ -152,13 +171,13 @@ def _resolve_source(
         if source.field in {"commit_sha", "commit_short_sha"}:
             head = observation.head_sha
             if not head:
-                return False, None, f"git:{source.field}"
+                return False, None, f"git:{source.field}", "missing"
             value = head if source.field == "commit_sha" else head[:8]
-            return True, value, f"git:{source.field}"
+            return True, value, f"git:{source.field}", "selected"
         if source.field == "branch":
             if observation.branch is None:
-                return False, None, "git:branch"
-            return True, observation.branch, "git:branch"
+                return False, None, "git:branch", "missing"
+            return True, observation.branch, "git:branch", "selected"
         raise AssertionError(f"Unhandled Git input source field: {source.field}")
 
     raise AssertionError(f"Unhandled Fleet input source: {type(source).__name__}")
@@ -178,6 +197,12 @@ def _require_repository(
 
 
 _MISSING = object()
+
+
+def _undefined_state(value: object) -> Literal["missing", "null", "empty"]:
+    if value is _MISSING:
+        return "missing"
+    return "null" if value is None else "empty"
 
 
 def _mapping_key(payload: object, key: str) -> object:

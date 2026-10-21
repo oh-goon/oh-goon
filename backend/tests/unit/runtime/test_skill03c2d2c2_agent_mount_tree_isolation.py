@@ -17,7 +17,10 @@ from oh_goon.core.ports.original_mount_intent import (
 )
 from oh_goon.integrations.fleet_plan_bind_source_custody import OriginalBindSourceLease
 from oh_goon.integrations.fleet_plan_local_lace_intent import prepared_original_native_mounts
+from tests.factories.fleet_plan_executor import agent_staging_scratch as agent_staging_scratch
 from tests.unit.runtime.test_skill03c2d2c1_agent_native_mount_projection import _source
+
+pytestmark = pytest.mark.usefixtures("agent_staging_scratch")
 
 
 @pytest.mark.parametrize(

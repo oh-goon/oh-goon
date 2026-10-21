@@ -10,6 +10,12 @@ The browser must not become a second source of truth for repository/business sta
 
 ## Durable backend state
 
+Retained Plan configuration lineage stores only bounded structured decision
+metadata: names, occurrence/parent references, source digests/marks, types,
+value states and source-selection outcomes. It does not copy input/default/env
+values or source snippets. It follows the canonical target/Journal lifecycle,
+without a second report database, automatic report files or browser storage.
+
 The folders a user chooses for the local League are a small configuration preference stored in `league.yml` outside disposable run history. It contains only versioned local folder paths; Teams and `goon.yml` state are rediscovered from disk and are never persisted as a shadow catalog.
 
 oh-goon persists canonical operational/runtime state in one SQLite database:

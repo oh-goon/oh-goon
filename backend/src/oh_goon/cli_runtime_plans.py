@@ -139,6 +139,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             fleet_run_id=args.fleet_run_id,
             requested_priority=args.priority,
             inputs=selected_inputs,
+            caller_input_origins=getattr(args, "_caller_input_origins", {}),
             **source_identity,
             lock_path=args.lock_file,
             agent_repository_root=args.agent_repository_root,
@@ -810,6 +811,7 @@ def _schedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             name=args.name,
             interval_minutes=args.interval_minutes,
             inputs=selected_inputs,
+            caller_input_origins=getattr(args, "_caller_input_origins", {}),
             **source_identity,
         )
     except (FleetDomainError, ValueError) as exc:
@@ -837,6 +839,7 @@ def _reschedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             name=args.name,
             interval_minutes=args.interval_minutes,
             inputs=selected_inputs,
+            caller_input_origins=getattr(args, "_caller_input_origins", {}),
             **source_identity,
         )
     except (FleetDomainError, ValueError) as exc:

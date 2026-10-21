@@ -71,6 +71,18 @@ Fleet plan step evidence records `started_at` and `finished_at` at the step-sequ
 
 ## Provenance and secrets
 
+The Configuration explanation disclosure renders the resolver's retained,
+value-free decision trace. It preserves root versus imported occurrence scope,
+input type/state, default/caller/binding/source selection, structural parent and
+producer edges, source digests/marks and observed candidate outcomes. It never
+reopens source or reads current environment values. The trace is bounded to 4096
+entries with an explicit omitted count; presentation pages through the retained
+entries without filtering admitted work. Older evidence without a trace is
+explicitly unavailable. No raw input/default/environment values are added to this
+view. `plan tape RUN_ID --json` and `dev explain-run RUN_ID --json` expose the
+same backend projection with schema `oh-goon.game-tape/v1`, the verified read
+cut's Journal revision and whether the canonical Run is terminal.
+
 The shared inspector exposes command, working directory, exit code, attempt count, declared output names, and safe environment provenance. Host values are represented as `host:NAME`; step outputs as `step:STEP.OUTPUT`; literal sources are represented only as `literal`. Literal and host secret values are never copied into the Game Tape payload.
 
 ## Developer execution explorer

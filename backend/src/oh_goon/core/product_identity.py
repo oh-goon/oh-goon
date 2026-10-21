@@ -255,7 +255,9 @@ def _require_stable_json_value(value: Any, ancestors: set[int]) -> None:
 def operation_intent_key(capability_id: str, target: OperationTarget | None) -> tuple[str, str]:
     """Stable in-memory key for one exact capability/target intent."""
     target_payload = (
-        target.model_dump(mode="json", exclude_none=True) if target is not None else None
+        target.model_dump(mode="json", exclude_none=True, exclude={"plan": {"configuration"}})
+        if target is not None
+        else None
     )
     encoded_target = json.dumps(
         target_payload,

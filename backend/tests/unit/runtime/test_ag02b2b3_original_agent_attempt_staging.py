@@ -12,9 +12,12 @@ from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
 from oh_goon.services.agent_authoring_sources import reserve_verified_agent_source_in
+from tests.factories.fleet_plan_executor import agent_staging_scratch as agent_staging_scratch
 from tests.fixtures.db1b2_legacy_sqlite import CausalJournalError, _event_identity
 from tests.unit.runtime.test_ag02b2b1_original_agent_source_reservation import fixture
 from tests.unit.services.test_ag02b_typed_agent_prework_handoff import _case
+
+pytestmark = pytest.mark.usefixtures("agent_staging_scratch")
 
 
 def original_handoff(tmp_path):

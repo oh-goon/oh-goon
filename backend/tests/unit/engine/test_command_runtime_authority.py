@@ -120,8 +120,8 @@ def test_runtime_authority_executes_admitted_binary_bytes_after_source_mutation(
     tmp_path: Path,
     mutation: str,
 ) -> None:
-    executable = tmp_path / "admitted-echo"
-    shutil.copy2("/bin/echo", executable)
+    executable = tmp_path / "admitted-sh"
+    shutil.copy2("/bin/sh", executable)
     admitted_bytes = executable.read_bytes()
     admitted_identity = "sha256:" + hashlib.sha256(admitted_bytes).hexdigest()
     replacement = tmp_path / "replacement"
@@ -139,7 +139,8 @@ def test_runtime_authority_executes_admitted_binary_bytes_after_source_mutation(
     monkeypatch.setattr(subprocess, "Popen", mutate_before_spawn)
     result = run_command(
         str(executable),
-        "admitted-binary",
+        "-c",
+        "printf admitted-binary",
         runtime_authority=RuntimeAuthorityBinding(
             runtime_identity="sha256:" + "1" * 64,
         ),

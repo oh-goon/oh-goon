@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
@@ -36,6 +36,7 @@ class FleetPlanSourceSnapshot:
     sha256: str
     compiled: CompiledExecutionTemplate
     step_positions: Mapping[str, FleetPlanStepPosition]
+    value_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
 
 
 def read_fleet_plan_source(
@@ -67,7 +68,63 @@ def read_fleet_plan_source(
         sha256=hashlib.sha256(raw).hexdigest(),
         compiled=compiled,
         step_positions=MappingProxyType(_step_positions(document.root, compiled)),
+        value_positions=MappingProxyType(_value_positions(document.root, compiled)),
     )
+
+
+def _value_positions(
+    root: MappingNode, compiled: CompiledExecutionTemplate
+) -> dict[str, FleetPlanStepPosition]:
+    positions: dict[str, FleetPlanStepPosition] = {}
+    for namespace in ("inputs", "env"):
+        node = _mapping_value(root, namespace)
+        if isinstance(node, MappingNode):
+            for key, definition in node.value:
+                if isinstance(key, ScalarNode):
+                    positions[f"{namespace}/{key.value}"] = FleetPlanStepPosition(
+                        line=key.start_mark.line + 1, column=key.start_mark.column + 1
+                    )
+                    if namespace == "inputs":
+                        default = None
+                        if isinstance(definition, MappingNode):
+                            default = _mapping_value(definition, "default")
+                        elif (
+                            isinstance(definition, ScalarNode)
+                            and definition.tag != "tag:yaml.org,2002:null"
+                        ):
+                            default = definition
+                        if default is not None:
+                            positions[f"inputs/{key.value}/default"] = FleetPlanStepPosition(
+                                line=default.start_mark.line + 1,
+                                column=default.start_mark.column + 1,
+                            )
+    imports = _mapping_value(root, "goons")
+    if isinstance(imports, SequenceNode):
+        for node, step in zip(imports.value, compiled.steps, strict=False):
+            positions[f"import/{step.step_id}"] = FleetPlanStepPosition(
+                line=node.start_mark.line + 1, column=node.start_mark.column + 1
+            )
+            if isinstance(node, MappingNode):
+                bindings = _mapping_value(node, "with")
+                if isinstance(bindings, MappingNode):
+                    for key, value in bindings.value:
+                        if isinstance(key, ScalarNode):
+                            positions[f"binding/{step.step_id}/{key.value}"] = (
+                                FleetPlanStepPosition(
+                                    line=value.start_mark.line + 1,
+                                    column=value.start_mark.column + 1,
+                                )
+                            )
+                forwarding = _mapping_value(node, "pass")
+                if isinstance(forwarding, SequenceNode):
+                    for name in forwarding.value:
+                        if isinstance(name, ScalarNode):
+                            positions[f"binding/{step.step_id}/{name.value}"] = (
+                                FleetPlanStepPosition(
+                                    line=name.start_mark.line + 1, column=name.start_mark.column + 1
+                                )
+                            )
+    return positions
 
 
 def _step_positions(

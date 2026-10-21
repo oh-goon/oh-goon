@@ -85,6 +85,36 @@ class FleetPlanTarget(ImmutableModel):
             raise ValueError(
                 "Fleet Plan execution identity does not match the resolved Plan semantics"
             )
+        configuration = self.plan.configuration
+        if configuration is not None:
+            caller_file = self.caller_input_file or self.scheduled_caller_file
+            if configuration.caller_file_sha256 is not None and (
+                caller_file is None or configuration.caller_file_sha256 != caller_file.sha256
+            ):
+                raise ValueError("Plan configuration caller source does not match target")
+            if (
+                configuration.root_source_sha256 is not None
+                and configuration.root_source_sha256 != self.source.sha256
+            ):
+                raise ValueError("Plan configuration evidence belongs to a different source")
+            sources = {item.import_id: item.source_sha256 for item in self.plan.imports}
+            for entry in configuration.entries:
+                expected_source = (
+                    self.source.sha256 if entry.scope is None else sources.get(entry.scope)
+                )
+                if expected_source is None or (
+                    entry.source_sha256 is not None and entry.source_sha256 != expected_source
+                ):
+                    raise ValueError("Plan configuration occurrence source does not match target")
+                binding = entry.binding
+                if binding.source_sha256 is not None:
+                    parent_source = (
+                        self.source.sha256
+                        if binding.parent_scope is None
+                        else sources.get(binding.parent_scope)
+                    )
+                    if binding.source_sha256 != parent_source:
+                        raise ValueError("Plan configuration binding source does not match target")
         expected_agent = {
             step.step_id: (step.handoff_identity, step.delivery_sha256)
             for step in self.plan.steps

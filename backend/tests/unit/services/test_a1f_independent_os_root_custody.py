@@ -18,8 +18,6 @@ from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import facts
 from tests.unit.services.test_group_a_explicit_issuer_keyring import secure_roots
 from tests.unit.services.test_group_a_fleet_provisioning_authority import provisioned
 
-pytestmark = pytest.mark.certification
-
 
 def _foreign_uid() -> int:
     return 65534 if os.geteuid() != 65534 else 65533
@@ -37,6 +35,7 @@ def _make_foreign_roots(directory: Path) -> int:
     return uid
 
 
+@pytest.mark.certification
 def test_explicit_foreign_uid_root_verifies_without_signing(tmp_path):
     directory, refs, _keys = secure_roots(tmp_path)
     uid = _make_foreign_roots(directory)
@@ -49,12 +48,23 @@ def test_explicit_foreign_uid_root_verifies_without_signing(tmp_path):
 
 
 @pytest.mark.parametrize(
+    "owner",
+    [os.geteuid(), True, -1],
+    ids=["same-process-owner", "bool-owner", "negative-owner"],
+)
+def test_invalid_independent_root_owner_rejects_before_filesystem_access(tmp_path, owner):
+    _directory, refs, _keys = secure_roots(tmp_path)
+    unopened = tmp_path / "unopened-issuers"
+    assert not unopened.exists()
+    with pytest.raises(TrustProtocolError, match="explicitly different OS principal"):
+        load_explicit_issuer_verifier(unopened, refs, public_root_owner_uid=owner)
+
+
+@pytest.mark.certification
+@pytest.mark.parametrize(
     "attack",
     [
         "unpinned",
-        "same-process-owner",
-        "bool-owner",
-        "negative-owner",
         "wrong-owner",
         "writable-directory",
         "writable-leaf",
@@ -68,12 +78,6 @@ def test_foreign_owned_root_rejects_untrusted_authority(tmp_path, monkeypatch, a
     uid = _make_foreign_roots(directory)
     if attack == "unpinned":
         uid = None
-    elif attack == "same-process-owner":
-        uid = os.geteuid()
-    elif attack == "bool-owner":
-        uid = True
-    elif attack == "negative-owner":
-        uid = -1
     elif attack == "wrong-owner":
         uid += 1
     elif attack == "writable-directory":
@@ -113,6 +117,7 @@ def test_foreign_owned_root_rejects_untrusted_authority(tmp_path, monkeypatch, a
         load_explicit_issuer_verifier(directory, refs, public_root_owner_uid=uid)
 
 
+@pytest.mark.certification
 def test_original_provisioner_rejects_privileged_signer_even_with_distinct_uids(
     tmp_path, monkeypatch
 ):

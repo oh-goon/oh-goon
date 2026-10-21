@@ -18,6 +18,7 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedStepSource,
 )
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
+from oh_goon.core.models.fleet_plan_diagnostics import PlanConfigurationBinding
 from oh_goon.core.models.fleet_plan_requirements import RepositoryRequirement, UvProjectRequirement
 from oh_goon.integrations.fleet_plan_compilation import qualified_step_id
 from oh_goon.services.fleet_plan_resolution_diagnostics import FleetPlanResolutionDiagnostics
@@ -74,6 +75,7 @@ def prepare_composition_scope(
     input_values: dict[str, PlanInputValue],
     input_origins: dict[str, str],
     external_step_ids: frozenset[str],
+    input_bindings: dict[str, PlanConfigurationBinding] | None = None,
 ) -> PipelineValueCompiler:
     reject_ambiguous_external_step_ids(compiled, external_step_ids)
     compiler = validated_value_compiler(compiled=compiled, input_values=input_values, prefix=prefix)
@@ -84,6 +86,7 @@ def prepare_composition_scope(
         input_values=input_values,
         input_origins=input_origins,
         compiler=compiler,
+        input_bindings=input_bindings,
     )
     return compiler
 

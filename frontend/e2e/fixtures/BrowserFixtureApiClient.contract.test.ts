@@ -41,6 +41,8 @@ describe("BrowserFixtureApiClient canonical fixture contracts", () => {
       throw new Error("default fixture Run must carry the canonical Fleet Plan target");
     }
     expect(source.repository_admissions.every((item) => item.plan_id === target.plan.plan_id)).toBe(true);
+    expect(source.game_tape.configuration).toEqual(target.plan.configuration);
+    expect(source.game_tape.configuration?.root_source_sha256).toBe(target.source.sha256);
     expect(source.rerun_supported).toBe(true);
   });
 

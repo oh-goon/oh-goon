@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import errno
+import fcntl
 import os
 import struct
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations import fleet_plan_agent_fsverity as verity
 from oh_goon.integrations.fleet_plan_bind_source_custody import OriginalBindSourceLease
+from tests.factories.fleet_plan_executor import agent_staging_scratch as agent_staging_scratch
 from tests.unit.runtime.test_ag02b2b3_original_agent_attempt_staging import (
     attempt,
     original_handoff,
@@ -19,29 +24,51 @@ from tests.unit.runtime.test_skill03c2d2c2b_staged_descendant_seal import (
     _request_with_native_sources,
 )
 
+pytestmark = pytest.mark.usefixtures("agent_staging_scratch")
 
-def test_original_linux_fsverity_ioctl_abi_and_kernel_digest(monkeypatch, tmp_path):
+
+@pytest.mark.parametrize(
+    ("page_size", "filesystem_block_size", "expected_block_size"),
+    [(4096, 4096, 4096), (65536, 4096, 4096), (4096, 1024, 1024), (4096, 65536, 4096)],
+)
+def test_original_linux_fsverity_ioctl_abi_and_kernel_digest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    page_size: int,
+    filesystem_block_size: int,
+    expected_block_size: int,
+) -> None:
     member = tmp_path / "member"
     member.write_bytes(b"signed bytes")
     commands = []
 
+    def native_page_size(name: str) -> int:
+        assert name == "SC_PAGESIZE"
+        return page_size
+
+    def native_filesystem(fd: int) -> SimpleNamespace:
+        assert os.fstat(fd).st_ino == member.stat().st_ino
+        return SimpleNamespace(f_bsize=filesystem_block_size)
+
     def fake_ioctl(fd, cmd, arg, mutate=False):
         commands.append(cmd)
-        if cmd == verity._FS_IOC_ENABLE_VERITY:
+        if cmd == 0x40806685:
             assert len(arg) == 128
-            assert struct.unpack_from("=II", arg) == (1, 1)
-            assert not any(arg[8:])
-        elif cmd == verity._FS_IOC_MEASURE_VERITY:
+            assert struct.unpack_from("=III", arg) == (1, 1, expected_block_size)
+            assert not any(arg[12:])
+        elif cmd == 0xC0046686:
             assert mutate is True
             assert struct.unpack_from("=HH", arg) == (1, 32)
             arg[4:36] = b"A" * 32
         else:
             raise AssertionError("Unexpected kernel ioctl")
 
+    monkeypatch.setattr(os, "sysconf", native_page_size)
+    monkeypatch.setattr(os, "fstatvfs", native_filesystem)
     monkeypatch.setattr(verity.fcntl, "ioctl", fake_ioctl)
     with member.open("rb") as stream:
         assert verity.enable_original_agent_file_verity(stream.fileno()) == b"A" * 32
-    assert commands == [verity._FS_IOC_ENABLE_VERITY, verity._FS_IOC_MEASURE_VERITY]
+    assert commands == [0x40806685, 0xC0046686]
 
 
 @pytest.mark.parametrize("error", [errno.ENOTTY, errno.EOPNOTSUPP, errno.EPERM, errno.EINVAL])
@@ -54,10 +81,14 @@ def test_unsupported_or_unauthorized_kernel_custody_never_downgrades(monkeypatch
 
     monkeypatch.setattr(verity.fcntl, "ioctl", deny)
     with member.open("rb") as stream:
-        with pytest.raises(FleetPlanInvalid, match="unavailable"):
+        with pytest.raises(FleetPlanInvalid, match="unavailable") as enable_error:
             verity.enable_original_agent_file_verity(stream.fileno())
-        with pytest.raises(FleetPlanInvalid, match="lacks kernel"):
+        assert isinstance(enable_error.value.__cause__, OSError)
+        assert enable_error.value.__cause__.errno == error
+        with pytest.raises(FleetPlanInvalid, match="lacks kernel") as measure_error:
             verity.measure_original_agent_file_verity(stream.fileno())
+        assert isinstance(measure_error.value.__cause__, OSError)
+        assert measure_error.value.__cause__.errno == error
 
 
 def test_wrong_kernel_digest_algorithm_is_rejected(monkeypatch, tmp_path):
@@ -152,7 +183,7 @@ def test_verity_lease_refuses_any_unverified_descendant_at_pin(monkeypatch, tmp_
 
 @pytest.mark.certification
 @pytest.mark.skipif(__import__("sys").platform != "linux", reason="Linux UAPI only")
-def test_native_filesystem_verity_is_kernel_enforced_when_supported(tmp_path):
+def test_native_filesystem_verity_is_kernel_enforced_when_supported(tmp_path, monkeypatch):
     """Physical POSITIVE witness only on a filesystem that truly supports it.
 
     EOPNOTSUPP/ENOTTY is a SKIP, never a simulated kernel PASS.
@@ -160,12 +191,40 @@ def test_native_filesystem_verity_is_kernel_enforced_when_supported(tmp_path):
     """
     member = tmp_path / "kernel-source"
     member.write_bytes(b"read-only kernel protected source")
+    native_ioctl = fcntl.ioctl
+    enabled_by_kernel = False
+
+    def observe_ioctl(
+        fd: int, request: int, arg: bytes | bytearray, *mutate_flags: Literal[True]
+    ) -> int | bytes:
+        nonlocal enabled_by_kernel
+        result: int | bytes
+        if isinstance(arg, bytes):
+            result = native_ioctl(fd, request, arg, *mutate_flags)
+        else:
+            result = native_ioctl(fd, request, arg, *mutate_flags)
+        if request == 0x40806685:
+            enabled_by_kernel = True
+        return result
+
+    # Delegate the real ioctl unchanged and record when the kernel accepts
+    # enable. Measurement failures after that point must fail, never skip.
+    monkeypatch.setattr(fcntl, "ioctl", observe_ioctl)
     try:
         with member.open("rb") as src:
             enabled = verity.enable_original_agent_file_verity(src.fileno())
-            assert enabled == verity.measure_original_agent_file_verity(src.fileno())
     except FleetPlanInvalid as exc:
+        cause = exc.__cause__
+        if (
+            enabled_by_kernel
+            or not isinstance(cause, OSError)
+            or cause.errno not in {errno.EOPNOTSUPP, errno.ENOTTY}
+        ):
+            raise
         pytest.skip(f"native fs-verity not available on this mounted filesystem: {exc}")
+    assert enabled_by_kernel
+    with member.open("rb") as src:
+        assert enabled == verity.measure_original_agent_file_verity(src.fileno())
     with pytest.raises(OSError):
         member.write_bytes(b"hostile content")
     with member.open("rb") as src:

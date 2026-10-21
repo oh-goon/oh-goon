@@ -110,7 +110,10 @@ def test_native_cli_success_journal_and_game_tape_survive_restart(tmp_path, monk
     repo = _repo(tmp_path, monkeypatch)
     # Ordinary authoring needs neither an execution policy nor local/wait flags.
     source = repo / "goon.yml"
-    source.write_text("version: 1\nsteps:\n- id: hello\n  run: sh scripts/hello.sh\n")
+    source.write_text(
+        "version: 1\ninputs:\n  label: {type: string, default: private-history-canary}\n"
+        "steps:\n- id: hello\n  run: sh scripts/hello.sh\n"
+    )
     assert main(["lock", str(source)]) == 0
     capsys.readouterr()
     _register(repo)
@@ -129,9 +132,22 @@ def test_native_cli_success_journal_and_game_tape_survive_restart(tmp_path, monk
     assert data["status"] == "COMPLETED"
     assert data["outcome"] == "SUCCESS"
     run_id = data["fleet_run_id"]
+    # Historical explanation must not reopen source or choose configuration again.
+    source.write_text("not: [valid-yaml")
     assert _reopened_tape(run_id) == ("PASSED", "COMPLETED")
     tape = _cli(["plan", "tape", run_id, "--json"], capsys)
     assert tape["exit"] == 0
+    assert tape["schema_name"] == "oh-goon.game-tape/v1"
+    assert tape["journal_revision"] > 0
+    assert tape["terminal"] is True
+    entry = tape["configuration"]["entries"][0]
+    assert entry["name"] == "label" and entry["binding"]["kind"] == "default"
+    assert entry["line"] == 3
+    assert (
+        tape["configuration"]["root_source_sha256"]
+        == tape["execution_reference"]["source"]["sha256"]
+    )
+    assert "private-history-canary" not in json.dumps(tape)
     events = _cli(["plan", "events", run_id, "--json"], capsys)
     assert events["exit"] == 0
 

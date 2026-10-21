@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { GameTapeObservabilityReceipt } from "@/features/game-tape/components/GameTapeObservabilityReceipt";
+import { GameTapeConfiguration } from "@/features/game-tape/components/GameTapeConfiguration";
 import { GameTapeTeamOverview } from "@/features/game-tape/components/GameTapeTeamOverview";
 import { GameTapeStatus } from "@generated/enums";
 import type { GameTape } from "@generated/models";
@@ -47,6 +48,7 @@ export function GameTapeSummary({ tape, compact = false }: { tape: GameTape; com
       </dl>
       <GameTapeTeamOverview tape={tape} />
     </details>
+    <GameTapeConfiguration configuration={tape.configuration} />
     {!compact ? <details className="advanced-disclosure game-tape-technical-evidence"><summary>{t("gameTape.summary.technicalEvidence")}</summary>
       <p className="muted">{t("gameTape.summary.technicalEvidenceHelp")}</p>
       <TechnicalIdentity tape={tape} />

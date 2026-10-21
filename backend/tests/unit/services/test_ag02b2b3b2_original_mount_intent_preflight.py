@@ -15,8 +15,11 @@ from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.path_authority import storage_component
 from oh_goon.core.ports.original_mount_intent import OriginalMountIntentDescriptor
 from oh_goon.core.vocabulary import FleetRunEventType
+from tests.factories.fleet_plan_executor import agent_staging_scratch as agent_staging_scratch
 from tests.unit.runtime.test_ag02b2b3_original_agent_attempt_staging import attempt
 from tests.unit.services.test_ag02b2b2_original_owned_attempt_source import make_case
+
+pytestmark = pytest.mark.usefixtures("agent_staging_scratch")
 
 
 def attempt_owner_for_renamed_root(owner, root):

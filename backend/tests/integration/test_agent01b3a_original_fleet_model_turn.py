@@ -121,6 +121,8 @@ def test_untrusted_model_action_cannot_escape_one_literal_search(reply):
     "reply,show_status",
     [
         ('{"shell":"false"}', 0),
+        ('<think>untrusted thought</think>\n{"query":"needle"}', 0),
+        ('{"query":"wrapped\u001b[5D\u001b[K\nquery"}', 0),
         ('{"query":"needle"}', 1),
     ],
 )

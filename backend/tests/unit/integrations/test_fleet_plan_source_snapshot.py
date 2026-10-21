@@ -17,6 +17,8 @@ execution:
 steps:
   - id: check
     run: "true"
+inputs:
+  label: private-default
 """,
         encoding="utf-8",
     )
@@ -36,3 +38,20 @@ steps:
     assert snapshot.compiled.name == "goon"
     assert snapshot.step_positions["check"].line == 5
     assert snapshot.step_positions["check"].column == 5
+    assert snapshot.value_positions["inputs/label/default"].line == 8
+    assert snapshot.value_positions["inputs/label/default"].column == 10
+
+
+def test_value_locations_are_derived_from_the_original_source_tree(tmp_path: Path):
+    path = tmp_path / "goon.yml"
+    path.write_text("""version: 1
+inputs:
+  project: {type: string, default: .}
+env:
+  TOKEN: {from: host}
+steps:
+- run: echo ok
+""")
+    snapshot = read_fleet_plan_source(path, kind="goon")
+    assert snapshot.value_positions["inputs/project"].line == 3
+    assert snapshot.value_positions["env/TOKEN"].line == 5

@@ -8,9 +8,11 @@ from pathlib import Path
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
 from oh_goon.cli_plan_inputs import plan_inputs
+from oh_goon.cli_plan_summary import configuration_summary
 from oh_goon.cli_plan_summary import resolved_plan_summary as _resolved_plan_summary
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_diagnostics import PlanConfigurationEvidence
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.fleet_plan_input_inspection import InputInspection, InputInterfaceInspection
 from oh_goon.services.fleet_plan_input_routing import CallerFileRoutingOrigin
@@ -18,6 +20,37 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plans import FleetPlanService
 
 _INSPECTION_SCHEMA = "oh-goon.plan-input-inspection/v1"
+
+
+def _accepted_diagnostic(
+    args: argparse.Namespace, plan_id: str, configuration: PlanConfigurationEvidence | None
+) -> None:
+    if configuration is not None:
+        snapshot = getattr(args, "_caller_input_file_snapshot", None)
+        configuration = configuration.with_caller_origins(
+            getattr(args, "_caller_input_origins", {}),
+            caller_file_sha256=snapshot.sha256 if snapshot is not None else None,
+        )
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "schema": "oh-goon.plan-validation-diagnostic/v1",
+                    "status": "accepted",
+                    "stage": "plan_resolution",
+                    "plan_id": plan_id,
+                    "execution": "resolved_not_executed",
+                    "configuration": configuration.model_dump(mode="json")
+                    if configuration
+                    else None,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print("Plan resolved; no execution was initiated by this diagnostic presentation.")
+        for line in configuration_summary(configuration):
+            print(line)
 
 
 def _inspection_input(item: InputInspection) -> dict[str, object]:
@@ -183,6 +216,9 @@ def _validate_with_resolver(
             print("Fix this bootstrap/admission problem, then rerun: make certify")
             print("Do not skip admission, change the Plan, or bypass locked execution.")
         return 2
+    if getattr(args, "diagnostics", False):
+        _accepted_diagnostic(args, plan.plan_id, plan.configuration)
+        return 0
     if args.as_json:
         print(plan.model_dump_json(indent=2))
         return 0
@@ -260,6 +296,9 @@ def _explain_with_owner(
         else:
             print(str(exc))
         return 2
+    if getattr(args, "diagnostics", False):
+        _accepted_diagnostic(args, report.plan_id, report.configuration)
+        return 0
     if args.as_json:
         print(report.model_dump_json(indent=2))
         return 0

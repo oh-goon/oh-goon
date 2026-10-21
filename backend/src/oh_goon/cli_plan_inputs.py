@@ -17,6 +17,7 @@ def plan_inputs(args: argparse.Namespace) -> dict[str, PlanInputValue]:
         if not name or name in values:
             raise ValueError(f"Fleet plan input must have one unique non-empty name: {item}")
         values[name] = value
+    origins = dict.fromkeys(values, "cli")
     path = getattr(args, "inputs_file", None)
     if path is not None:
         snapshot = getattr(args, "_caller_input_file_snapshot", None)
@@ -26,4 +27,6 @@ def plan_inputs(args: argparse.Namespace) -> dict[str, PlanInputValue]:
             # diagnostic dispatches reuse the same frozen caller observation.
             args._caller_input_file_snapshot = snapshot
         values = {**snapshot.values(), **values}
+        origins = {**dict.fromkeys(snapshot.values(), "caller_file"), **origins}
+    args._caller_input_origins = origins
     return values

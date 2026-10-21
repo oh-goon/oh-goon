@@ -29,6 +29,7 @@ class FleetPlanSourceNode:
     package_name: str | None = None
     local_source: str | None = None
     step_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
+    value_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +244,7 @@ def _read_node(
         compiled=source.compiled,
         source_sha256=source.sha256,
         step_positions=source.step_positions,
+        value_positions=source.value_positions,
     )
 
 
@@ -306,6 +308,7 @@ def _load_goon_child(
         package_name=key,
         local_source=local_source,
         step_positions=source.step_positions,
+        value_positions=source.value_positions,
     )
     build.loaded[cache_key] = node
     return node

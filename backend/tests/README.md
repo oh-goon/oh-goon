@@ -34,6 +34,8 @@ root privileges or an installed model server. Tests that require privileged
 cross-UID custody, chroot, fs-verity, or real installed model inference carry the
 existing `certification` marker and run explicitly for those execution profiles.
 Their portable negative and lifecycle tests remain in the ordinary checks.
+Apply the marker to the tests requiring those facilities, so portable negatives
+in the same module still run during ordinary validation.
 
 Run privileged/native probes with `pytest -m certification tests/unit` on a host
 providing the selected facilities. Use `scripts/qualify_agent_local_model.sh`
@@ -48,6 +50,12 @@ tests/fakes/      narrow backend test doubles
 ```
 
 Do not add a generic helper bucket. Reuse the closest named factory/fake or keep test-specific setup inside the owning test module.
+
+Hosted Agent staging tests select `agent_staging_scratch` from
+`factories/fleet_plan_executor.py`. After their local leases end, it restores
+directory delete permission within that test's pytest-owned scratch; pytest
+retains deletion authority. Sealed modes remain in force during assertions,
+symlinks are not followed, and cleanup errors are not suppressed.
 
 ## Finding a test
 

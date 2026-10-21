@@ -15,11 +15,14 @@ import pytest
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations.fleet_plan_bind_source_custody import OriginalBindSourceLease
 from oh_goon.integrations.fleet_plan_local_lace_intent import prepared_original_native_mounts
+from tests.factories.fleet_plan_executor import agent_staging_scratch as agent_staging_scratch
 from tests.unit.runtime.test_ag02b2b3_original_agent_attempt_staging import (
     attempt,
     original_handoff,
 )
 from tests.unit.runtime.test_skill03c2d2c1_agent_native_mount_projection import _source
+
+pytestmark = pytest.mark.usefixtures("agent_staging_scratch")
 
 
 def _request_with_native_sources(tmp_path):

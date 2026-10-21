@@ -114,7 +114,6 @@ def _native_uv_environment(environment: Path, cache: Path, python: Path) -> dict
             "UV_NO_MANAGED_PYTHON": "1",
             "UV_PYTHON_DOWNLOADS": "never",
             "UV_PYTHON": str(python),
-            "UV_OFFLINE": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
         }
     )
@@ -141,6 +140,37 @@ def _run_uv(
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "native uv failed").strip()
         raise FleetPlanInvalid(f"{failure_prefix}: {detail}")
+
+
+def _materialize_fixture_environment(
+    uv: Path,
+    argv: tuple[str, ...],
+    *,
+    project: Path,
+    env: dict[str, str],
+    failure_prefix: str,
+) -> None:
+    """Materialize this fixture once, then verify that same environment offline.
+
+    A certification fixture is a new execution subject, not the initialized
+    Oh-Goon checkout. Native uv may acquire its locked dependencies into the
+    selected cache; an inherited native offline setting still applies. The
+    following check must neither download nor repair that environment.
+    """
+    lock = project / "uv.lock"
+    before = lock.read_bytes()
+    _run_uv(uv, argv, cwd=project, env=env, failure_prefix=failure_prefix)
+    if lock.read_bytes() != before:
+        raise FleetPlanInvalid(f"native uv rewrote certification lock {lock}")
+    _run_uv(
+        uv,
+        (*argv, "--check", "--offline"),
+        cwd=project,
+        env={**env, "UV_OFFLINE": "1"},
+        failure_prefix=f"offline fixture verification failed after {failure_prefix}",
+    )
+    if lock.read_bytes() != before:
+        raise FleetPlanInvalid(f"native uv rewrote certification lock {lock}")
 
 
 def _prove_fixture_locks(
@@ -257,10 +287,9 @@ def _prove_managed_uv_projects(
                 "UV_NO_MANAGED_PYTHON": "1",
                 "UV_PYTHON_DOWNLOADS": "never",
                 "UV_PYTHON": str(python),
-                "UV_OFFLINE": "1",
             },
         )
-        _run_uv(
+        _materialize_fixture_environment(
             uv,
             (
                 "sync",
@@ -270,9 +299,8 @@ def _prove_managed_uv_projects(
                 "--no-default-groups",
                 "--group",
                 group,
-                "--offline",
             ),
-            cwd=project,
+            project=project,
             env=env,
             failure_prefix=f"native uv rejected project {project_name!r} group {group!r}",
         )
@@ -302,7 +330,7 @@ def _prove_direct_uv_projects(
             cache,
             python,
         )
-        _run_uv(
+        _materialize_fixture_environment(
             uv,
             (
                 "sync",
@@ -310,9 +338,8 @@ def _prove_direct_uv_projects(
                 str(project),
                 "--locked",
                 "--no-default-groups",
-                "--offline",
             ),
-            cwd=project,
+            project=project,
             env=env,
             failure_prefix=f"native uv rejected direct project {project_name!r}",
         )
@@ -353,10 +380,10 @@ def _materialize_direct_package_executables(
             cache,
             python,
         )
-        _run_uv(
+        _materialize_fixture_environment(
             uv,
-            ("sync", "--project", str(project), "--locked", "--no-default-groups", "--offline"),
-            cwd=project,
+            ("sync", "--project", str(project), "--locked", "--no-default-groups"),
+            project=project,
             env=env,
             failure_prefix=(
                 f"native uv could not materialize direct project executable for {project}"
@@ -401,10 +428,9 @@ def _prove_fixture_contract(
     if python is None:
         raise FleetPlanInvalid("template certification could not select native uv system Python")
 
-    # Native uv owns artifact caching. A new empty cache for every offline
-    # fixture cannot prove a locked environment whose third-party wheels need
-    # prior materialization. Resolve its selected cache once and share it while
-    # keeping each environment and workload scratch private.
+    # Native uv owns artifact caching. Resolve the selected cache once; fixture
+    # setup may acquire locked dependencies there before its offline proof.
+    # Each fixture environment and its workload scratch remain private.
     selected_cache = subprocess.run(
         (str(uv), "cache", "dir"), check=True, capture_output=True, text=True
     )

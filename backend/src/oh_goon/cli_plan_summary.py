@@ -10,11 +10,47 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedOciTagAssertStep,
     ResolvedPreCommitStep,
 )
+from oh_goon.core.models.fleet_plan_diagnostics import PlanConfigurationEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import (
     CicdExecutionPolicy,
     ParallelRepositoryExecution,
 )
 from oh_goon.integrations.fleet_plan_containerfile_policy import oci_build_repository_policy_id
+
+
+def configuration_summary(configuration: PlanConfigurationEvidence | None) -> tuple[str, ...]:
+    """Render captured facts only; no source access, value echo or admission decision."""
+    if configuration is None:
+        return ("Configuration lineage: unavailable in retained evidence",)
+    lines = ["Configuration lineage (values withheld):"]
+    if configuration.caller_file_sha256:
+        lines.append(f"  Caller input file SHA-256: {configuration.caller_file_sha256}")
+    for entry in configuration.entries:
+        location = f" source={entry.source_sha256}" if entry.source_sha256 else ""
+        if entry.line is not None:
+            location += f":{entry.line}:{entry.column}"
+        binding = entry.binding
+        scope = "<root>" if entry.scope is None else entry.scope
+        parent_scope = "<root>" if binding.parent_scope is None else binding.parent_scope
+        parent = (
+            f" <- {parent_scope}.input.{binding.parent_input}"
+            if binding.parent_input
+            else f" <- {binding.producer}"
+            if binding.producer
+            else ""
+        )
+        lines.append(
+            f"  {scope}.{entry.namespace.value}.{entry.name}: "
+            f"{binding.kind} ({entry.value_state}){parent}{location}"
+        )
+        for index, source in enumerate(binding.candidates, 1):
+            label = source.name or source.git_field
+            lines.append(
+                f"    source {index}: {source.kind}{':' + label if label else ''} {source.state}"
+            )
+    if configuration.omitted_entries:
+        lines.append(f"  Additional decisions omitted: {configuration.omitted_entries}")
+    return tuple(lines)
 
 
 def resolved_plan_summary(plan: ResolvedFleetPlan) -> tuple[str, ...]:

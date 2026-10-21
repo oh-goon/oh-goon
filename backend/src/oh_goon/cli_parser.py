@@ -346,6 +346,7 @@ def _add_developer_observation_commands(
 ) -> None:
     explain_run = commands.add_parser("explain-run", help="Trace one durable fleet run")
     explain_run.add_argument("fleet_run_id")
+    explain_run.add_argument("--json", action="store_true", dest="as_json")
     shards = commands.add_parser(
         "shards", help="Show the canonical deterministic shard plan for a validation surface"
     )

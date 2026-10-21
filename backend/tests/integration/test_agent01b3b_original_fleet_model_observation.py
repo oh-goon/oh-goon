@@ -50,6 +50,7 @@ n=$(cat '{tmp_path / "calls"}' 2>/dev/null || echo 0)
 n=$((n + 1))
 printf '%s\\n' "$n" > '{tmp_path / "calls"}'
 printf '%s' "$3" > "{tmp_path}/prompt-$n.txt"
+printf '%s\\0' "$@" > "{tmp_path}/argv-$n.bin"
 case "$n" in
 {"".join(commands)}
 *) exit 5 ;;
@@ -108,6 +109,14 @@ def test_original_fleet_search_observation_review_finish_persists(tmp_path, monk
     assert "needle from real original Fleet" in review
     assert "UNTRUSTED DATA" in review
     assert '"stdout_truncated": false' in review
+    for ordinal, prompt in enumerate((initial, review), 1):
+        arguments = (tmp_path / f"argv-{ordinal}.bin").read_bytes().split(b"\0")
+        assert arguments[-1] == b""
+        argv = [argument.decode("utf-8") for argument in arguments[:-1]]
+        assert argv[:3] == ["run", frozen.steps[0].model, prompt]
+        assert argv[argv.index("--format") + 1] == "json"
+        assert "--hidethinking" in argv[3:]
+        assert "--nowordwrap" in argv[3:]
     step = detail.operations[0].evidence.plan.steps[0]
     assert step.returncode == 0
     assert step.stdout_evidence.byte_count > 0
@@ -161,6 +170,8 @@ def test_model_may_request_exactly_one_followup_read_only_search(tmp_path, monke
         '{"decision":"search","query":"bad\\nvalue"}',
         '{"decision":"finish","summary":true}',
         '{"decision":"finish","summary":"ok"} trailing',
+        '<think>untrusted thought</think>\n{"decision":"finish","summary":"ok"}',
+        '{"decision":"finish","summary":"wrapped\u001b[5D\u001b[K\nsummary"}',
     ],
 )
 def test_untrusted_model_observation_cannot_grant_actions_or_pass(tmp_path, monkeypatch, bad_reply):

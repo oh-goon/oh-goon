@@ -10,11 +10,14 @@ import pytest
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations import fleet_plan_agent_dir_immutable as immutable
 from oh_goon.integrations import fleet_plan_agent_fsverity as verity
+from tests.factories.fleet_plan_executor import agent_staging_scratch as agent_staging_scratch
 from tests.unit.runtime.test_ag02b2b3_original_agent_attempt_staging import (
     attempt,
     original_handoff,
 )
 from tests.unit.runtime.test_skill03c2d2c2c3_kernel_directory_custody import _kernel_flags
+
+pytestmark = pytest.mark.usefixtures("agent_staging_scratch")
 
 
 def _stage(tmp_path):

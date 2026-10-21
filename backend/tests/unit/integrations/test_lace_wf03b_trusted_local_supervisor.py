@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -231,13 +232,11 @@ def test_backend_refuses_untrusted_plan_and_denied_egress():
 
 def test_admitted_host_command_runs_through_real_supervisor(tmp_path):
     """Hosted adapter smoke test, NOT authenticated Fleet admission or native certification."""
-    import shutil
-
-    executable = shutil.which("printf")
-    if executable is None:
-        pytest.skip("printf executable not available")
     backend, request, owner = _setup(tmp_path)
-    request = replace(request, argv=(executable, "tl-1-smoke"))
+    request = replace(
+        request,
+        argv=(sys.executable, "-S", "-c", "print('tl-1-smoke', end='')"),
+    )
     result = backend.execute(request, timeout=5.0, cancel_requested=lambda: False)
     assert result.returncode == 0 and result.stdout == "tl-1-smoke"
     owner.require_effect_authority.assert_called_once_with(request)

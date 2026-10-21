@@ -50,12 +50,14 @@ def enable_original_agent_file_verity(fd: int) -> bytes:
     """
     if sys.platform != "linux" or not stat.S_ISREG(os.fstat(fd).st_mode):
         raise FleetPlanInvalid("Kernel fs-verity requires a Linux regular file")
-    # version=1, hash_algorithm=SHA256, default block size, no salt/signature,
-    # and every reserved field zero. Kernel validates this ABI structure.
-    args = struct.pack("=IIIIQIIQ11Q", 1, _SHA256, 0, 0, 0, 0, 0, 0, *([0] * 11))
-    if len(args) != 128:
-        raise FleetPlanInvalid("Invalid Linux fs-verity enable ABI")
+    # Linux requires an explicit Merkle-tree block size, not a zero/default
+    # sentinel. Bind it to this open file's native filesystem and page sizes;
+    # the kernel remains authority for support and validates the full request.
     try:
+        block_size = min(os.sysconf("SC_PAGESIZE"), os.fstatvfs(fd).f_bsize)
+        args = struct.pack("=IIIIQIIQ11Q", 1, _SHA256, block_size, 0, 0, 0, 0, 0, *([0] * 11))
+        if len(args) != 128:
+            raise FleetPlanInvalid("Invalid Linux fs-verity enable ABI")
         fcntl.ioctl(fd, _FS_IOC_ENABLE_VERITY, args)
     except OSError as exc:
         raise FleetPlanInvalid("Kernel fs-verity unavailable for Agent staged file") from exc

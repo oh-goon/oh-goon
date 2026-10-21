@@ -24,6 +24,10 @@ class _Fact:
 
 
 class _Tape:
+    journal_revision = 7
+    configuration = None
+    why_not = None
+
     def __init__(self, run_id):
         self.fleet_run_id = run_id
         self.status = SimpleNamespace(value="ATTENTION_REQUIRED")
@@ -36,6 +40,7 @@ class _Tape:
             ),
         )
         step = SimpleNamespace(
+            reason="Recorded native failure",
             step_execution_id="step-run-a",
             step_id="verify",
             order=2,
@@ -55,6 +60,7 @@ class _Tape:
             },
         )
         untouched = SimpleNamespace(
+            reason=None,
             step_execution_id="step-run-b",
             step_id="package",
             order=3,
