@@ -27,6 +27,7 @@ Use topic guides for current behavior. Specialized deployment and high-security 
 - [Native engine](development/ENGINE.md), [execution supervisor](development/EXECUTION_SUPERVISOR.md), and [launch ownership](development/LAUNCH_OWNERSHIP.md) — command execution, cancellation and local process lifetime.
 - [Tool authority](development/FROZEN_TOOL_AUTHORITY.md) and [Enforcer receipts](development/ENFORCER_RECEIPTS.md) — selected tool permissions and comparison of recorded execution facts.
 - [Hashmarks execution handoff](development/HASHMARKS_EXECUTION_LAYER.md) — admitted repository evidence, exact verification membership and Oh-Goon execution results.
+- [Agent runtime ownership](development/AGENT_RUNTIME_OWNERS.md) — live model/Agent call paths, outer workflow ownership, current evidence limits and the contract questions for replaceable coding agents.
 
 Retained ADRs explain architectural choices and their original evidence limits. Checkpoint status and historical test results in an ADR describe that source; they do not establish current qualification or select the next development task.
 

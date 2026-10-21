@@ -10,6 +10,10 @@ The Resolver captures the selected repository and Skill resources, Fleet owns
 admission and sequencing, the existing Step supervisor owns native processes,
 and Game Tape records their outcomes.
 
+The workflow below uses built-in bounded model adapters. The
+[runtime ownership inventory](development/AGENT_RUNTIME_OWNERS.md) maps their
+current call paths and the separate design for replaceable native coding agents.
+
 Reusable review and development Skills are maintained in
 [agentsCookbook](https://github.com/Hugloss/agentsCookbook). OH-Goon accepts
 caller-selected Skill resources through its existing source contract. A cookbook
@@ -114,7 +118,12 @@ Application startup verifies the loaded Hashmarks runtime before opening state.
 Every model-backed Agent Step obtains Hashmarks task evidence from its frozen
 repository before the first model request, including provider review,
 adjudication and proposal. The producer's presentation and qualifications lead
-the model context, and the original packet is retained with Step evidence.
+the model context. The original packet is included in transient supervised Step
+output; durable evidence retains hashes, byte counts and line counts for the
+Step streams.
+Typed review/adjudication observations persist separately. Historical Game Tape
+does not retain or reconstruct the raw packet or model/tool transcript; see the
+[current evidence limits](development/AGENT_RUNTIME_OWNERS.md#results-limits-and-observations).
 Unavailable evidence stops the Step before model disclosure. There is no
 evidence opt-out. Complete review and verification obligations still apply;
 retrieval bounds cannot narrow the caller's admitted scope.

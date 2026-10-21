@@ -130,8 +130,13 @@ Every model-backed Agent request starts with Hashmarks task evidence over that
 captured repository, including provider review, adjudication and proposal. The
 producer owns relevance, ambiguity, verification nominations, source observations
 and their presentation. Oh-Goon binds the capture and loaded implementation,
-places that evidence before repository text in model context, and retains the
-original packet with Step evidence. Follow-up tool evidence uses the same
+places that evidence before repository text in model context, and includes the
+original packet in transient supervised Step output. Durable stream evidence
+retains hashes, byte counts and line counts; typed review/adjudication claims
+persist separately. Historical Game Tape does not retain raw producer packets
+or reconstruct model/tool transcripts. See the
+[Agent runtime evidence inventory](AGENT_RUNTIME_OWNERS.md#results-limits-and-observations).
+Follow-up tool evidence uses the same
 producer boundary and native presentation, retaining retrieval locators, source
 observations and their producer qualifications. Local model context has an
 explicit combined bound; oversized native disclosure fails before a model call
