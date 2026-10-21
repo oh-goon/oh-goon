@@ -52,7 +52,10 @@ it cannot promote that result into admission for new work.
 
 ## No execution-policy smuggling
 
-The v1 envelope is repository evidence only. Oh-Goon admits the exact contract shape and rejects extra policy fields. The envelope does not control:
+The `hashmarks.verification-selection-envelope.v2` envelope and
+`hashmarks.downstream-verification-contract.v2` contract carry repository evidence
+only. Oh-Goon admits the exact contract shape and rejects extra policy fields.
+The envelope does not control:
 
 - argv/command construction;
 - timeout/deadline;
