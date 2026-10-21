@@ -9,8 +9,8 @@ from oh_goon.repository_tooling.architecture.common import Violation
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 
 _SOURCE = "backend/src/oh_goon/repository_tooling/offline_custody_review.py"
-_TEST = "backend/tests/unit/repository_tooling/test_t0b2_offline_custody_review.py"
-_DOSSIER_TEST = "backend/tests/unit/repository_tooling/test_t0b2b1_custody_dossier.py"
+_TEST = "scripts/tests/test_t0b2_offline_custody_review.py"
+_DOSSIER_TEST = "scripts/tests/test_t0b2b1_custody_dossier.py"
 
 
 def check_offline_custody_review_contract(root: Path = ROOT) -> list[Violation]:
@@ -97,7 +97,7 @@ def check_offline_custody_review_contract(root: Path = ROOT) -> list[Violation]:
         shell = (root / "scripts/qualify_b12_development_wsl.sh").read_text(encoding="utf-8")
         for expected in (
             "if [[ -f .checkpoint/T0B2A_SOURCE.sha256 ]]; then embedded='.checkpoint/T0B2A_SOURCE.sha256'; fi",
-            "tests/unit/repository_tooling/test_t0b2_offline_custody_review.py",
+            "../scripts/tests/test_t0b2_offline_custody_review.py",
             "--require-module test_t0b2_offline_custody_review",
         ):
             if expected not in shell:

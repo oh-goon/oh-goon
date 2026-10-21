@@ -260,7 +260,7 @@ This boundary applies to uv/npm/pytest/Ruff/mypy, Docker/BuildKit, Kubernetes, G
 
 Runtime safety is proved by behavioral backend and integration tests that exercise real admission, filesystem isolation, Journal settlement, recovery, and Scout behavior. Repository source checks are intentionally limited to cross-owner dependency direction, local-only frontend networking, exact shipped-template grammar, production-template safety, Scout's observer boundary, release identity, and native package-manager validation of the authoritative dependency locks.
 
-Repository checks live only under `scripts/`; the installed product has no architecture-rule registry or architecture-inspection CLI. Private names, call chains, documentation sentences, and historical file splits are not compatibility contracts.
+Repository check implementations live under [backend/src/oh_goon/repository_tooling/](../backend/src/oh_goon/repository_tooling/), invoked through named backend project entrypoints. [scripts/](../scripts/README.md) owns launch support and repository-tooling tests; product runtime owners do not import repository checks. Private names, call chains, documentation sentences, and historical file splits are not compatibility contracts.
 
 Architecture checks therefore certify public protocol/schema identities and cross-owner package/import structure, not private local/helper names or source-expression spelling. Behavioral outcomes remain executable-test authority. Scout is owned by package membership; League Team identity is owned by descendant Git roots; canonical source exclusions are exact current artifact classes rather than historical name prefixes.
 

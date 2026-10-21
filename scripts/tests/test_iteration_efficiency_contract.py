@@ -485,9 +485,9 @@ def test_runtime_liveness_and_tool_lookup_are_owned_not_textual() -> None:
     process_birth = (ROOT / "backend/src/oh_goon/core/process_birth.py").read_text(
         encoding="utf-8"
     )
-    process_tests = (
-        ROOT / "backend/tests/unit/repository_tooling/test_test_batches_process.py"
-    ).read_text(encoding="utf-8")
+    process_tests = (ROOT / "scripts/tests/test_test_batches_process.py").read_text(
+        encoding="utf-8"
+    )
 
     assert '"PATH": os.environ.get("PATH", os.defpath)' in workspaces
     assert "observe_process_liveness(pid)" in lease

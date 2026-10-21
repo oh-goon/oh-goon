@@ -12,16 +12,19 @@ Native command/Git/project operation                       engine/
 Filesystem/process/container/VCS/external side effect      integrations/
 Durable state, lease, lifecycle, scheduler, runtime store  runtime/
 Product use-case coordinating existing owners              services/
+Read-only cross-run workload/resource observability        scout/
+Installed native Fleet authority issuance                  native_issuer/
+Repository architecture, generation, release and checks    repository_tooling/
 CLI parsing/dispatch only                                  cli*.py
 Process/service composition/lifecycle                      application.py
 Private construction wiring                                _application_foundation.py / _application_services.py
 ```
 
-The six directories are the complete top-level implementation owners. Do not add another top-level package directory just to avoid choosing between them.
+The six general layers coexist with the scoped Scout, native issuer and repository-tooling packages described below. Choose an existing owner before adding a package; a scoped package is not another general layer.
 
 ## Decision ladder
 
-When ownership is unclear, ask these questions in order:
+For Scout, native issuance or repository tooling, use the scoped owner below. For general product behavior, ask these questions in order:
 
 1. **Can the behavior be expressed as a pure fact or decision without I/O?** Put it in `core/` or reuse the existing core owner.
 2. **Is it a narrow native repository command/Git/project primitive?** Use `engine/`.
@@ -34,11 +37,11 @@ Do not create `common.py`, `utils.py`, another manager/context/service layer, or
 
 ## Owner map
 
-### `api/`
+### [api/](api/)
 
 FastAPI construction, routes, schemas and HTTP-only translation. Start with `api/app.py::create_app` for application wiring or `api/routes/<capability>.py` for one API surface. API code must not become the owner of product semantics.
 
-### `core/`
+### [core/](core/)
 
 Framework-independent facts, immutable models, validation/policy and pure projections. `core/models/` holds durable/public shapes; `core/projections/` derives read models; `core/ports/` contains narrow dependency boundaries. Game Tape semantic facts/projections begin in the `core/game_tape_*` owners, not React or API routes.
 
@@ -49,15 +52,15 @@ the bridge into the original Fleet journal reservation. Execution integrations
 consume the same core contract and frozen bytes without importing the authoring
 service or reacquiring source paths.
 
-### `engine/`
+### [engine/](engine/)
 
 Native local command/Git/project execution primitives and the focused operation implementations under `engine/operations/`. Start at `engine/runner.py` when tracing native action dispatch.
 
-### `integrations/`
+### [integrations/](integrations/)
 
 Concrete effect boundaries: filesystem/process/container/isolation/VCS/OCI/Kubernetes/OpenSandbox and other host/external operations. These modules implement effects already admitted/resolved elsewhere; they should not become a second policy or plan-resolution authority.
 
-### `runtime/`
+### [runtime/](runtime/)
 
 Durable/local process state and coordination: database/journal stores, executor capacity/placement, leases, lifecycle, schedulers, safety cuts and template stores. `runtime/workspaces.py::RepositoryWorkspaceAuthority` owns durable candidate/source workspace identity, lifecycle state, and the one persistent managed-workspace path resolver; `RunPathLayout`/`AttemptPathLayout` continue to own disposable execution scratch. For `READ_SNAPSHOT`, the same owner materializes the canonical clean source snapshot, persists its source-content proof, and re-proves it before the process-isolation layer may expose it; Bubblewrap uses a physical read-only bind and backends without an explicit read-only-workspace guarantee fail closed. Runtime may persist/coordinate canonical decisions but should not reinterpret them independently.
 
@@ -68,9 +71,21 @@ historical checkpoint files do not activate or disable current structural
 contracts. Explicit archive and host-qualification commands retain their own
 historical-input requirements.
 
-### `services/`
+### [services/](services/)
 
 Product use-cases that compose lower-level owners: Fleet, plan resolution/preparation, repository effects, recovery, Schedules, migration, security and related operations. Start from the service named after the user operation, then follow its explicit collaborators downward.
+
+### [scout/](scout/)
+
+Optional read-only cross-run workload/resource observability over canonical Journal/Fleet evidence. Start at [service.py](scout/service.py); [THE_SCOUT.md](../../../docs/development/THE_SCOUT.md) defines its observer boundary. Execution admission, scheduling, retry, cancellation, placement and recovery must not depend on Scout. Game Tape owns the handoff into one execution's debugging evidence.
+
+### [native_issuer/](native_issuer/)
+
+Installed native Fleet authority issuers and signer custody, used only with explicit deployment authority. Start at [the native issuer suite](native_issuer/enforcer_lace_native_issuer_suite.py). Repository-tooling import compatibility names bind to these same module objects; they do not own separate issuance state or grant another authorization path.
+
+### [repository_tooling/](repository_tooling/)
+
+Repository architecture checks, contract generation, release assembly, development commands and qualification tooling. [backend/pyproject.toml](../../pyproject.toml) registers named command entrypoints; [scripts/README.md](../../../scripts/README.md) owns their contributor navigation. The `scripts/` surface contains launch support and repository-tooling tests. Product runtime owners must not acquire repository-tooling dependencies.
 
 ## Plan/Goon compile boundary
 
@@ -125,6 +140,9 @@ cli*.py / application.py / _application_*.py → tests/unit/entrypoints/
 ```
 
 Read `../../tests/README.md` for backend integration placement. Search inside the matching owner before searching all backend tests.
+
+Scoped packages use the existing behavior-based test owners: Scout projections use `tests/unit/core/`, its persistence uses `tests/unit/runtime/`, its public use-cases use `tests/unit/services/`, and HTTP integration uses `tests/integration/api/`. Native issuer behavior uses `tests/unit/services/`; installed-wheel/source qualification and architecture regressions use root `scripts/tests/`. All repository-tooling regressions belong in [scripts/tests/](../../../scripts/tests/).
+
 ## Change impact
 
 After choosing the source owner and matching test owner, use this escalation map. Directory ownership tells you the **default** validation; public-contract changes add the root checks below.
@@ -139,7 +157,7 @@ services/     → unit/services + integration/services when orchestration bounda
 cli*.py       → unit/entrypoints
 ```
 
-Then ask one question: **did the public FastAPI/OpenAPI contract change?** If yes, run `make -C ../../.. generate`, `check-generated`, `test-integration`, and `frontend-check`. If no, keep the change inside backend validation. A core/service change does not trigger generation merely because API code eventually calls it.
+For product behavior, ask: **did the public FastAPI/OpenAPI contract change?** If yes, run `make -C ../../.. generate`, `check-generated`, `test-integration`, and `frontend-check`. If no, keep product behavior inside backend validation. A core/service change does not trigger generation merely because API code eventually calls it. Repository-tooling changes follow [the tooling loop](../../../scripts/README.md) and the root change-impact table; generation/release boundaries add their existing escalation checks.
 
 CLI syntax/help changes should update the owning user/contributor documentation when command examples change. Repository-layout or owner-map changes are repository-tooling work and must also run root architecture/tooling checks.
 

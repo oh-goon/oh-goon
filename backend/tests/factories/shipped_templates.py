@@ -22,11 +22,13 @@ class CachedShippedPlanTemplateStore(PlanTemplateStore):
 
     def __init__(self, root: Path | None = None) -> None:
         super().__init__(root)
-        self.catalog = cache(super().catalog)
-        self.keys = cache(super().keys)
-        self.read = cache(super().read)
-        self.runnable_keys = cache(super().runnable_keys)
-        self.source = cache(super().source)
+        self.__dict__.update(
+            catalog=cache(super().catalog),
+            keys=cache(super().keys),
+            read=cache(super().read),
+            runnable_keys=cache(super().runnable_keys),
+            source=cache(super().source),
+        )
 
 
 class CachedShippedGoonTemplateStore(GoonTemplateStore):
@@ -36,10 +38,12 @@ class CachedShippedGoonTemplateStore(GoonTemplateStore):
         self, root: Path | None = None, *, tool_authority_path: Path | None = None
     ) -> None:
         super().__init__(root, tool_authority_path=tool_authority_path)
-        self.catalog = cache(super().catalog)
-        self.keys = cache(super().keys)
-        self.read = cache(super().read)
-        self.source = cache(super().source)
+        self.__dict__.update(
+            catalog=cache(super().catalog),
+            keys=cache(super().keys),
+            read=cache(super().read),
+            source=cache(super().source),
+        )
 
 
 PLAN_TEMPLATES = CachedShippedPlanTemplateStore(TEMPLATES / "plans")

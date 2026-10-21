@@ -19,7 +19,7 @@ The repository must keep one canonical owner for each critical responsibility:
 - Frontend HTTP/write transport remains centralized through `ApiClient` / mutation transport instead of feature-local transport paths.
 - Destructive API operations require an explicit target; Fleet Run cancellation remains identity-bound from the displayed Run through the command boundary.
 
-The static contract is `scripts/architecture/structural_authority_contract.py` and is part of `make architecture`.
+The static contract is [structural_authority_contract.py](../../backend/src/oh_goon/repository_tooling/architecture/structural_authority_contract.py) and is part of `make architecture`. [scripts/README.md](../../scripts/README.md) describes the launch/test surface; repository Python implementation stays under the backend project.
 The APP tooling-test Goon also executes its regression tests, so the current repository shape is checked during APP certification without adding another APP orchestration step.
 
 ## Race safety is behavioral, not inferred from static structure

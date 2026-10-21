@@ -11,12 +11,13 @@ policy:
     authority across ordering/retry/failure cases, and demonstrates a meaningful
     measured benefit. Micro-optimisations alone are not sufficient.
 fixtures:
-  - path: backend/tests/conftest.py
+  - path: backend/tests/fakes/process_identity.py
     expected_scope: function
     autouse: true
     owner: portable process-identity isolation
     reason: >-
-      Keeps process-identity shims scoped to each test when procfs is unavailable so
+      Shared by backend and tooling conftests; keeps process-identity shims scoped to
+      each test when procfs is unavailable so
       cached/runtime state from one test cannot silently become another test's authority.
   - path: scripts/tests/test_certification_frontdoor.py
     expected_scope: function

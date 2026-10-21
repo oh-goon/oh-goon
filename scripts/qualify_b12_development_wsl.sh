@@ -568,7 +568,7 @@ run_ring CORE \
   tests/unit/services/test_group_a_atomic_fleet_prework_ingress.py \
   tests/unit/services/test_group_a_signer_trust_epoch.py \
   tests/unit/runtime/test_db0db1a_canonical_database_owner.py \
-  tests/unit/repository_tooling/test_db0db1a_database_owner_architecture.py \
+  ../scripts/tests/test_db0db1a_database_owner_architecture.py \
   tests/unit/services/test_db0db1a_atomic_fleet_owner_cut.py \
   tests/unit/runtime/test_db1b1_atomic_domain_operations.py \
   tests/unit/runtime/test_db1b2_transaction_owner_and_replay.py \
@@ -577,60 +577,60 @@ run_ring CORE \
   tests/unit/runtime/test_db4_offline_recovery_certification.py \
   tests/unit/runtime/test_db5_backup_publication_failures.py \
   tests/unit/runtime/test_db6_native_fault_preflight.py \
-  tests/unit/repository_tooling/test_db6_native_fault_architecture.py \
-  tests/unit/repository_tooling/test_co_r01_lifecycle_architecture.py \
-  tests/unit/repository_tooling/test_co_r01_roadmap_architecture.py \
+  ../scripts/tests/test_db6_native_fault_architecture.py \
+  ../scripts/tests/test_co_r01_lifecycle_architecture.py \
+  ../scripts/tests/test_co_r01_roadmap_architecture.py \
   tests/unit/runtime/test_co_r2b_workspace_recovery.py \
   tests/unit/runtime/test_co_r2w2_native_git_recovery.py \
-  tests/unit/repository_tooling/test_co_r2w2_owner_architecture.py \
+  ../scripts/tests/test_co_r2w2_owner_architecture.py \
   tests/unit/runtime/test_co_r2w3_git_retirement.py \
-  tests/unit/repository_tooling/test_co_r2c_q1_isolated_core_collection.py \
-  tests/unit/repository_tooling/test_co_r2w3_owner_architecture.py \
+  ../scripts/tests/test_co_r2c_q1_isolated_core_collection.py \
+  ../scripts/tests/test_co_r2w3_owner_architecture.py \
   tests/unit/runtime/test_co_r2c_evidence_acceptance_cut.py \
   tests/unit/runtime/test_co_r3_native_provider_conformance.py \
   tests/unit/runtime/test_co_r3b_original_failure_cuts.py \
   tests/unit/runtime/test_co_r3c_trust_writer_quiescence.py \
   tests/unit/integrations/test_co_r3d_original_cgroup_quiescence.py \
-  tests/unit/repository_tooling/test_co_r3d_original_cgroup_architecture.py \
+  ../scripts/tests/test_co_r3d_original_cgroup_architecture.py \
   tests/unit/integrations/test_co_r3e_durable_cgroup_recovery.py \
   tests/unit/integrations/test_co_r3f_cgroup_native_handle.py \
-  tests/unit/repository_tooling/test_co_r3f_handle_architecture.py \
+  ../scripts/tests/test_co_r3f_handle_architecture.py \
   tests/unit/integrations/test_co_r3g_bound_observation_removal.py \
-  tests/unit/repository_tooling/test_co_r3g_bound_observation_architecture.py \
+  ../scripts/tests/test_co_r3g_bound_observation_architecture.py \
   tests/unit/integrations/test_co_r3h_original_inode_retirement.py \
-  tests/unit/repository_tooling/test_co_r3h_inode_retirement_architecture.py \
+  ../scripts/tests/test_co_r3h_inode_retirement_architecture.py \
   tests/unit/integrations/test_co_r3i_original_lace_cgroup_custody.py \
-  tests/unit/repository_tooling/test_co_r3i_original_lace_custody_architecture.py \
+  ../scripts/tests/test_co_r3i_original_lace_custody_architecture.py \
   tests/unit/integrations/test_co_r3j_original_parent_lineage.py \
-  tests/unit/repository_tooling/test_co_r3j_parent_lineage_architecture.py \
+  ../scripts/tests/test_co_r3j_parent_lineage_architecture.py \
   tests/unit/integrations/test_co_r3k_prework_identity_rollback.py \
-  tests/unit/repository_tooling/test_co_r3k_prework_architecture.py \
+  ../scripts/tests/test_co_r3k_prework_architecture.py \
   tests/unit/integrations/test_co_r3l_bound_nested_attachment.py \
   tests/unit/integrations/test_co_r3m_pending_cgroup_allocation.py \
-  tests/unit/repository_tooling/test_co_r3m_pending_allocation_architecture.py \
-  tests/unit/repository_tooling/test_co_r3n_native_cgroup_qualification.py \
-  tests/unit/repository_tooling/test_co_r3o_native_witness_contract.py \
+  ../scripts/tests/test_co_r3m_pending_allocation_architecture.py \
+  ../scripts/tests/test_co_r3n_native_cgroup_qualification.py \
+  ../scripts/tests/test_co_r3o_native_witness_contract.py \
   tests/unit/services/test_co_r3p_original_fleet_effect_revocation.py \
   tests/unit/services/test_co_r3q_effect_revalidation.py \
-  tests/unit/repository_tooling/test_co_r3q_effect_architecture.py \
-  tests/unit/repository_tooling/test_co_r3r_visible_holder_race.py \
-  tests/unit/repository_tooling/test_co_r3r_observer_architecture.py \
+  ../scripts/tests/test_co_r3q_effect_architecture.py \
+  ../scripts/tests/test_co_r3r_visible_holder_race.py \
+  ../scripts/tests/test_co_r3r_observer_architecture.py \
   tests/native/test_co_r3r_real_visible_holder.py \
-  tests/unit/repository_tooling/test_co_r3s_pinned_cgroup_observation.py \
-  tests/unit/repository_tooling/test_co_r3s_architecture.py \
+  ../scripts/tests/test_co_r3s_pinned_cgroup_observation.py \
+  ../scripts/tests/test_co_r3s_architecture.py \
   tests/unit/integrations/test_co_r3t_legacy_orphan_fail_before_effect.py \
-  tests/unit/repository_tooling/test_co_r3t_legacy_custody_architecture.py \
-  tests/unit/repository_tooling/test_co_r3p_original_effect_epoch_architecture.py \
-  tests/unit/repository_tooling/test_co_r3l_bound_attachment_architecture.py \
-  tests/unit/repository_tooling/test_co_r3e_original_recovery_architecture.py \
-  tests/unit/repository_tooling/test_co_r3c_original_quiescence_architecture.py \
-  tests/unit/repository_tooling/test_co_r3b_original_failure_architecture.py \
-  tests/unit/repository_tooling/test_co_r3_native_provider_architecture.py \
-  tests/unit/repository_tooling/test_co_r2c_acceptance_architecture.py \
+  ../scripts/tests/test_co_r3t_legacy_custody_architecture.py \
+  ../scripts/tests/test_co_r3p_original_effect_epoch_architecture.py \
+  ../scripts/tests/test_co_r3l_bound_attachment_architecture.py \
+  ../scripts/tests/test_co_r3e_original_recovery_architecture.py \
+  ../scripts/tests/test_co_r3c_original_quiescence_architecture.py \
+  ../scripts/tests/test_co_r3b_original_failure_architecture.py \
+  ../scripts/tests/test_co_r3_native_provider_architecture.py \
+  ../scripts/tests/test_co_r2c_acceptance_architecture.py \
   tests/unit/engine/test_commands.py \
-  tests/unit/repository_tooling/test_db3_backup_owner_architecture.py \
-  tests/unit/repository_tooling/test_db4_offline_recovery_architecture.py \
-  tests/unit/repository_tooling/test_db1b2_database_owner_architecture.py \
+  ../scripts/tests/test_db3_backup_owner_architecture.py \
+  ../scripts/tests/test_db4_offline_recovery_architecture.py \
+  ../scripts/tests/test_db1b2_database_owner_architecture.py \
   "${r3u2b2b2a_refusal_tests[@]}" \
   "${r3n_native_tests[@]}" \
   "${db6_native_tests[@]}"
@@ -662,13 +662,13 @@ if [[ -f .checkpoint/AG02B1_SOURCE.sha256 ]]; then
     tests/unit/runtime/test_b3b3b2_native_manifest_precedence.py \
     tests/unit/runtime/test_b3b3b4_workspace_signed_mount.py \
     tests/unit/runtime/test_p1b27a_signed_host_tool_custody.py \
-    tests/unit/repository_tooling/test_t0a_trust_authority_registry.py \
-    tests/unit/repository_tooling/test_t0b_trust_custody_review.py \
-    tests/unit/repository_tooling/test_t0b2_offline_custody_review.py tests/unit/repository_tooling/test_t0b2b1_custody_dossier.py \
-    tests/unit/repository_tooling/test_t0b2b2a_native_host_observation.py \
+    ../scripts/tests/test_t0a_trust_authority_registry.py \
+    ../scripts/tests/test_t0b_trust_custody_review.py \
+    ../scripts/tests/test_t0b2_offline_custody_review.py ../scripts/tests/test_t0b2b1_custody_dossier.py \
+    ../scripts/tests/test_t0b2b2a_native_host_observation.py \
     tests/unit/runtime/test_ag02b2b3b3b1_execution_order_architecture.py \
     tests/unit/runtime/test_p1b27b2b1_kernel_fd_custody.py \
-    tests/unit/repository_tooling/test_ag00_canonical_agent_architecture.py
+    ../scripts/tests/test_ag00_canonical_agent_architecture.py
 fi
 # Explicit stress is observation, never a hidden retry. Any failed attempt
 # makes the full witness fail even when a later repetition passes.
@@ -688,7 +688,7 @@ for (( iteration=1; iteration<=repeats; iteration++ )); do
     # All six modules MUST contribute a non-skipped JUnit testcase.
     observer_tests=()
     if [[ -f .checkpoint/B21_SOURCE.sha256 ]]; then
-      observer_tests+=(tests/unit/repository_tooling/test_b21_shared_observer_collapse.py)
+      observer_tests+=(../scripts/tests/test_b21_shared_observer_collapse.py)
     fi
     if [[ -f .checkpoint/B22_SOURCE.sha256 ]]; then
       observer_tests+=(tests/unit/runtime/test_b22_original_physical_sampling.py)
@@ -779,13 +779,13 @@ for (( iteration=1; iteration<=repeats; iteration++ )); do
     fi
     run_ring "PHYSICAL_OBSERVER${suffix}" \
       "${observer_tests[@]}" \
-      tests/unit/repository_tooling/test_b13_local_physical_preflight.py \
-      tests/unit/repository_tooling/test_b15_cgroup_subtree_evidence.py \
-      tests/unit/repository_tooling/test_b16_tracked_namespace_evidence.py \
-      tests/unit/repository_tooling/test_b17_namespace_fd_holders.py \
-      tests/unit/repository_tooling/test_b18_foreign_mount_targets.py \
-      tests/unit/repository_tooling/test_b19_visible_mount_fd_holders.py \
-      tests/unit/repository_tooling/test_b20_linux_proc_observer_witness.py
+      ../scripts/tests/test_b13_local_physical_preflight.py \
+      ../scripts/tests/test_b15_cgroup_subtree_evidence.py \
+      ../scripts/tests/test_b16_tracked_namespace_evidence.py \
+      ../scripts/tests/test_b17_namespace_fd_holders.py \
+      ../scripts/tests/test_b18_foreign_mount_targets.py \
+      ../scripts/tests/test_b19_visible_mount_fd_holders.py \
+      ../scripts/tests/test_b20_linux_proc_observer_witness.py
   fi
 done
 exit "$last_result"

@@ -14,6 +14,7 @@
     "backend/src/oh_goon/repository_tooling/acceptance/product.py": "product-qualification-harness",
     "backend/src/oh_goon/engine/command_process_tree.py": "admitted-step-command-process-tree-lifecycle",
     "backend/src/oh_goon/engine/command.py": "admitted-step-command-launch-lifecycle",
+    "backend/src/oh_goon/integrations/_fleet_plan_nested_cgroup_launcher.py": "admitted-step-nested-bubblewrap-launch-lifecycle",
     "backend/src/oh_goon/repository_tooling/b11_ring_supervisor.py": "development-only-test-process-group-supervisor-no-runtime-lease-or-release-authority"
   },
   "non_owners": {

@@ -206,11 +206,11 @@ def check_qualification_environment_contract(root: Path = ROOT) -> list[Violatio
     if (root / ".checkpoint/DB0DB1A_SOURCE.sha256").is_file():
         core_owner_ring = shell.split("run_ring CORE \\", 1)
         if len(core_owner_ring) != 2 or any(
-            core_owner_ring[1].split("\n# AG-02B1", 1)[0].count(f"tests/unit/{owner}") != 1
-            for owner in (
-                "runtime/test_db0db1a_canonical_database_owner.py",
-                "repository_tooling/test_db0db1a_database_owner_architecture.py",
-                "services/test_db0db1a_atomic_fleet_owner_cut.py",
+            core_owner_ring[1].split("\n# AG-02B1", 1)[0].count(module) != 1
+            for module in (
+                "tests/unit/runtime/test_db0db1a_canonical_database_owner.py",
+                "../scripts/tests/test_db0db1a_database_owner_architecture.py",
+                "tests/unit/services/test_db0db1a_atomic_fleet_owner_cut.py",
             )
         ):
             issues.append(
@@ -234,7 +234,7 @@ def check_qualification_environment_contract(root: Path = ROOT) -> list[Violatio
             core[1].split("\n# AG-02B1", 1)[0].count(module) != 1
             for module in (
                 "tests/unit/runtime/test_db1b2_transaction_owner_and_replay.py",
-                "tests/unit/repository_tooling/test_db1b2_database_owner_architecture.py",
+                "../scripts/tests/test_db1b2_database_owner_architecture.py",
             )
         ):
             issues.append(
@@ -259,7 +259,7 @@ def check_qualification_environment_contract(root: Path = ROOT) -> list[Violatio
         required = (
             "tests/unit/runtime/test_db3_scout_backup_owner.py",
             "tests/unit/engine/test_commands.py",
-            "tests/unit/repository_tooling/test_db3_backup_owner_architecture.py",
+            "../scripts/tests/test_db3_backup_owner_architecture.py",
         )
         if len(core) != 2 or any(
             core[1].split("\n# AG-02B1", 1)[0].count(module) != 1 for module in required
@@ -441,8 +441,8 @@ def check_qualification_environment_contract(root: Path = ROOT) -> list[Violatio
         if len(core) != 2 or any(
             core[1].split("\n# AG-02B1", 1)[0].count(module) != 1
             for module in (
-                "tests/unit/repository_tooling/test_co_r01_lifecycle_architecture.py",
-                "tests/unit/repository_tooling/test_co_r01_roadmap_architecture.py",
+                "../scripts/tests/test_co_r01_lifecycle_architecture.py",
+                "../scripts/tests/test_co_r01_roadmap_architecture.py",
             )
         ):
             issues.append(
@@ -470,7 +470,7 @@ def check_qualification_environment_contract(root: Path = ROOT) -> list[Violatio
             core[1].split("\n# AG-02B1", 1)[0].count(name) != 1
             for name in (
                 "tests/unit/runtime/test_co_r2w2_native_git_recovery.py",
-                "tests/unit/repository_tooling/test_co_r2w2_owner_architecture.py",
+                "../scripts/tests/test_co_r2w2_owner_architecture.py",
             )
         ):
             issues.append(
@@ -485,7 +485,7 @@ def check_qualification_environment_contract(root: Path = ROOT) -> list[Violatio
             core[1].split("\n# AG-02B1", 1)[0].count(name) != 1
             for name in (
                 "tests/unit/runtime/test_co_r2w3_git_retirement.py",
-                "tests/unit/repository_tooling/test_co_r2w3_owner_architecture.py",
+                "../scripts/tests/test_co_r2w3_owner_architecture.py",
             )
         ):
             issues.append(
@@ -500,7 +500,7 @@ def check_qualification_environment_contract(root: Path = ROOT) -> list[Violatio
             core[1].split("\n# AG-02B1", 1)[0].count(name) != 1
             for name in (
                 "tests/unit/runtime/test_co_r2c_evidence_acceptance_cut.py",
-                "tests/unit/repository_tooling/test_co_r2c_acceptance_architecture.py",
+                "../scripts/tests/test_co_r2c_acceptance_architecture.py",
             )
         ):
             issues.append(
@@ -514,7 +514,7 @@ def check_qualification_environment_contract(root: Path = ROOT) -> list[Violatio
             len(core) != 2
             or core[1]
             .split("\n# AG-02B1", 1)[0]
-            .count("tests/unit/repository_tooling/test_co_r2c_q1_isolated_core_collection.py")
+            .count("../scripts/tests/test_co_r2c_q1_isolated_core_collection.py")
             != 1
         ):
             issues.append(
