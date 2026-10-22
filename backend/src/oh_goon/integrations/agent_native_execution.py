@@ -201,8 +201,8 @@ def codex_login_command(
 ) -> NativeAgentCommand:
     """Native sign-in and sandbox authority, without exporting authentication.
 
-    The native model-instructions file is loaded as session base instructions,
-    including follow-up and compaction requests. Auth remains in the original
+    Configure native session instructions; Codex owns follow-up and compaction
+    behavior, whose installed request delivery remains unverified. Auth stays in the original
     CODEX_HOME; the native tool filesystem never receives that directory.
     Git and verification in this explicit local profile remain trusted local.
     """

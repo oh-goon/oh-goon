@@ -69,10 +69,13 @@ copying or exporting credentials. This requires a Codex version supporting
 oh-goon ai --agent codex --profile signed-in --config providers.json --workspace /path/to/projects/app --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
 ```
 
-This is an original managed Run with headless report Steps. Native Codex receives
-the exact frozen task, Hashmarks presentation and Skill through its session base
-instructions file, including follow-up and compaction; incremental tool context
-is disabled. Model and reasoning effort are explicit native settings. User config
+This is an original managed Run with headless report Steps. Oh-Goon configures
+Codex's native session instructions file with the exact frozen task, Hashmarks
+presentation and Skill; incremental tool context is disabled. Codex owns session,
+follow-up and compaction behavior. Portable tests verify the emitted configuration
+and a synthetic receiver; the installed Codex probe verifies sandbox permissions.
+Actual installed-Codex instruction delivery across follow-up and compaction remains
+unverified. Model and reasoning effort are explicit native settings. User config
 and exec rules are ignored for this invocation, the project is untrusted, and
 hooks, plugins, Apps, web search and native delegation are disabled. Native tools
 use Codex's restricted filesystem policy: platform binaries and selected runtime
