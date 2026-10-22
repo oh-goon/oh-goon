@@ -79,15 +79,24 @@ uv run --offline --frozen --no-sync --project backend pytest -q -m certification
 The installed Codex context probe drives the real executable through the original
 Run and an independent verification Step. A bounded local Responses fixture
 requests real tools, reports enough usage to trigger native automatic compaction,
-and checks exact frozen task, Skill and qualified Hashmarks instructions in every
-privileged request, including the continuation carrying the returned compaction
-item. The duplicate user prompt cannot satisfy that instruction check.
+and checks frozen task, Skill and qualified Hashmarks instructions through the
+observed response chain and the continuation carrying the returned compaction item.
+The duplicate user prompt cannot satisfy that privileged instruction check.
 
-This probe uses synthetic API-key authentication and tests native Responses HTTP
-request delivery. It does not prove ChatGPT workspace routing, model reasoning
-quality or live account access. On Linux, an
-isolated network namespace keeps the entire fixture local (requires native
-`unshare` and `ip`, with the committed uv environment already materialized):
+The four cases select API-key or ChatGPT authentication with HTTP or WebSocket
+transport. The ChatGPT cases use synthetic tokens, account discovery and a local
+HTTPS backend with an ephemeral test CA and server certificate (`openssl` required
+for the fixture). ChatGPT HTTP requests retain native Zstandard compression; that
+case requires Python 3.14's `compression.zstd` and skips explicitly on older Python.
+Discovery and inference use distinct local HTTPS origins; inference must reach
+the discovered backend.
+The WebSocket cases require successful upgrades and actual model frames, check
+privileged warm-up instructions and native incremental `previous_response_id`
+links, and reject HTTP inference
+fallback as WebSocket proof. These tests do not prove model reasoning quality or
+live account access. On Linux, an isolated network namespace keeps the entire
+fixture local (requires native `unshare` and `ip`, with the committed uv
+environment already materialized):
 
 ```sh
 OH_GOON_NATIVE_CODEX=/path/to/codex \
