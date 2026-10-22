@@ -189,8 +189,10 @@ other settings or interpret native preferences to repair inference. See
 
 The minimal Codex configuration disables its provider-hosted web search because
 the managed profile admits model inference only. Explicit native configuration
-remains unchanged; remote provider tools or attachments conflict with the broker
-and are rejected. See the native [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+remains unchanged; provider-executed tools and attachment retrieval through
+remote URLs or uploaded `file_id` references conflict with the broker and are
+rejected. This includes top-level `web_search_options`. Inline file bytes,
+data-image URLs, and native function schemas and arguments remain supported. See the native [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 Explicit native configuration must target `http://127.0.0.1:18743` inside the
 namespace, use the selected API path/model and either no client key or the dummy
