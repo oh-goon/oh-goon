@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import stat
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -39,6 +40,10 @@ from oh_goon.integrations._fleet_plan_sandbox_launch import _sandbox_environment
 from oh_goon.integrations.content_snapshot import snapshot_directory
 from oh_goon.integrations.content_snapshot_dereferenced import snapshot_directory_dereferenced
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+from oh_goon.integrations.fleet_plan_preview import (
+    repository_plan_admission_evidence,
+    require_repository_plan_admission_current,
+)
 from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
 from oh_goon.integrations.fleet_plan_run import PreparedPlanRun, _teardown_step_attempts
 from tests.factories.bubblewrap_command import prepared_bubblewrap_command as _prepared
@@ -358,6 +363,64 @@ def test_strict_preparation_rejects_source_drift_after_admission(tmp_path: Path)
             admitted_source_authority=admitted_source,
             admitted_isolation_backend=executor.admitted_isolation_backend(),
         )
+
+
+@pytest.mark.parametrize("git_metadata", [False, True])
+@pytest.mark.parametrize("replacement_phase", ["before_freeze", "during_freeze"])
+def test_strict_freeze_rejects_identical_source_from_replaced_repository_subject(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    git_metadata: bool,
+    replacement_phase: str,
+) -> None:
+    import oh_goon.integrations._fleet_plan_run_resources as run_resources
+
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    if git_metadata:
+        (repository / ".git").mkdir()
+    (repository / "owned.txt").write_text("same source\n", encoding="utf-8")
+    identity = RepositoryIdentity(path=repository)
+    plan = _cicd(ResolvedCommandStep(timeout_seconds=60, step_id="check", argv=("true",)))
+    admitted = repository_plan_admission_evidence(identity, plan)
+    require_repository_plan_admission_current(identity, plan, admitted)
+
+    def replace_subject() -> None:
+        previous = tmp_path / "previous-repo"
+        repository.rename(previous)
+        shutil.copytree(previous, repository)
+        replacement = source_authority_for_test(identity)
+        assert replacement.source_snapshot == admitted.source_authority.source_snapshot
+        assert replacement.subject_instance_id != admitted.source_authority.subject_instance_id
+
+    if replacement_phase == "before_freeze":
+        replace_subject()
+    else:
+        snapshot = run_resources.snapshot_source_directory
+
+        def replace_while_freezing(*args, **kwargs):
+            frozen = snapshot(*args, **kwargs)
+            replace_subject()
+            return frozen
+
+        monkeypatch.setattr(run_resources, "snapshot_source_directory", replace_while_freezing)
+
+    captured_tools = False
+
+    def capture_tools(*args, **kwargs):
+        nonlocal captured_tools
+        captured_tools = True
+        pytest.fail("replaced repository subject must fail before host tool capture")
+
+    monkeypatch.setattr(run_resources.host_resources, "capture_host_tools", capture_tools)
+    with pytest.raises(FleetPlanInvalid, match="admitted repository subject"):
+        with prepare_physical_test_run(
+            identity,
+            plan,
+            source_authority=admitted.source_authority,
+        ):
+            pytest.fail("replaced repository subject must not prepare a strict Run")
+    assert captured_tools is False
 
 
 def test_snapshot_cancellation_removes_partial_destination(tmp_path: Path) -> None:

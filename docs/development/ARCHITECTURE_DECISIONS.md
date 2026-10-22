@@ -103,13 +103,34 @@ Certification executor inventory, certification cgroup overrides, and certificat
 ## Fleet and admission structure
 
 ### Git is optional repository-native metadata, not source authority
-Oh-Goon repository/source identity is canonical-path plus captured source authority, not the
-presence of `.git`. An explicitly selected configured source root may therefore participate in
-Plan verification or strict execution without Git metadata. Fleet instance fencing uses the
-repository-subject identity, which includes Git metadata when it genuinely exists but remains
-defined when it does not. Git-derived inputs and Git Steps still require native Git at their own
-owner; no certification, release, source-ZIP acceptance, or strict-admission layer may manufacture
-or require Git merely to make otherwise-valid source executable.
+
+An explicitly selected configured source root may participate in Plan verification or strict
+execution without Git metadata. Catalog, filesystem subject, source content, workspace,
+admission, and physical custody identities answer different questions:
+
+| Fact | Canonical owner |
+| --- | --- |
+| Stable catalog identity for a canonical path | [`core/product_identity.py::repository_id()`](../../backend/src/oh_goon/core/product_identity.py) |
+| Git-specific stale-observation token | `core/product_identity.py::repository_instance_id()` |
+| Git-optional execution subject token | `core/product_identity.py::repository_subject_instance_id()` |
+| Repository-evidence/content identity and freshness | Hashmarks through [`integrations/hashmarks/`](../../backend/src/oh_goon/integrations/hashmarks/) |
+| Admitted subject plus captured source | [`RepositorySourceAuthority`](../../backend/src/oh_goon/core/models/source_authority.py) and the existing [repository/Plan admission owner](../../backend/src/oh_goon/integrations/fleet_plan_preview.py) |
+| Durable workspace allocation, state, checkpoints, and leases | [`runtime/workspaces.py::RepositoryWorkspaceAuthority`](../../backend/src/oh_goon/runtime/workspaces.py) and its existing runtime collaborators |
+| Validation of supplied execution authority | Existing [Fleet admission](../../backend/src/oh_goon/services/fleet_admission.py) and [Enforcer](../../backend/src/oh_goon/core/enforcer_lace_semantics.py) owners |
+| Active physical execution custody | Existing LACE and [process-isolation owners](../../backend/src/oh_goon/integrations/fleet_plan_process_isolation.py) |
+
+Fleet instance fencing uses the repository-subject token, which includes Git metadata when
+it exists and remains defined when it does not. Git-derived inputs and Git Steps still require
+native Git at their own owner; certification, release, source-ZIP acceptance, and strict admission
+must not manufacture or require Git merely to make otherwise-valid source executable.
+
+Overwriting an existing file in place can change content identity while leaving the subject
+token unchanged. Adding or removing root directory entries can also change the token through
+root ctime. Metadata tokens fence observations; they do not retain file descriptors or establish
+continuous physical custody. Restart recovery must re-prove its durable bindings through the
+existing lifecycle/recovery owners; a persisted token does not preserve process or descriptor
+custody. A workspace ID identifies its durable allocation: stale references, lifecycle versions,
+checkpoints, assignments, leases, or physical bindings can be rejected without replacing that ID.
 
 ### FleetRun lifecycle state is structural
 FleetRun state is represented with explicit structural states rather than loosely related booleans or implicit event-position assumptions.
@@ -132,7 +153,10 @@ shape; execution mode may add isolation/runtime evidence but must not redefine w
 was admitted.
 Strict execution evidence may add physical `base_workspace`, runtime, isolation, and tool
 evidence, but it must carry the admitted `source_authority_id`, and its frozen base workspace
-must match the admitted source snapshot. Success/certification/package consumers compare the
+must match the admitted source snapshot. The strict input owner checks the admitted subject
+token before and after freezing and rejects a changed observed subject even when source bytes
+match. These metadata observations do not establish continuous descriptor custody.
+Success/certification/package consumers compare the
 one durable repository admission authority for every execution mode; they must never branch
 between direct admission proof and strict execution-input proof to answer which source passed.
 

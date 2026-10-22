@@ -13,6 +13,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.path_layouts import RunPathLayout
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.integrations._fleet_plan_run_resources import _FleetPlanRunInputs
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.fleet_plan_repository_scope import RepositoryScopeBinding
@@ -35,7 +36,7 @@ def test_uv_preparation_consumes_run_root_from_canonical_run_layout_owner(
     run_root.mkdir()
     identity = SnapshotIdentity(sha256="a" * 64, byte_count=7, entry_count=1)
     source_authority = RepositorySourceAuthority.create(
-        subject_instance_id="repo-subject-instance-" + "b" * 64,
+        subject_instance_id=repository_subject_instance_id(repository_path),
         source_snapshot=PlanSnapshotEvidence(
             sha256=identity.sha256,
             byte_count=identity.byte_count,

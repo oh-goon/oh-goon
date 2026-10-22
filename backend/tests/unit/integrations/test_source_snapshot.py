@@ -88,3 +88,27 @@ def test_source_snapshot_rejects_symlink_to_generated_state(tmp_path: Path) -> N
     (source / "python-link").symlink_to("backend/.venv/python")
     with pytest.raises(FleetPlanInvalid, match="generated/operational state"):
         source_snapshot_identity(source)
+
+
+@pytest.mark.parametrize(
+    "name", ["coverage", "playwright-report", "playwright-runtime-report", "test-results"]
+)
+def test_source_snapshot_binds_authored_report_names_and_excludes_frontend_outputs(
+    tmp_path: Path, name: str
+) -> None:
+    source = tmp_path / "source"
+    authored = source / "docs" / name / "analysis.md"
+    authored.parent.mkdir(parents=True)
+    authored.write_text("authored\n", encoding="utf-8")
+    generated = source / "frontend" / name / "result.txt"
+    generated.parent.mkdir(parents=True)
+    generated.write_text("generated\n", encoding="utf-8")
+    destination = tmp_path / "snapshot"
+
+    before = snapshot_source_directory(source, destination, label="report source")
+    assert (destination / "docs" / name / "analysis.md").read_text() == "authored\n"
+    assert not (destination / "frontend" / name).exists()
+    generated.write_text("changed output\n", encoding="utf-8")
+    assert source_snapshot_identity(source) == before
+    authored.write_text("changed source\n", encoding="utf-8")
+    assert source_snapshot_identity(source) != before

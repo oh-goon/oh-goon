@@ -114,6 +114,49 @@ def test_resume_context_manifest_is_atomic_and_auditable(
     assert not list(path.parent.glob("*.tmp"))
 
 
+def test_authored_report_name_mutation_invalidates_current_receipt_reuse(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.test_batch_receipts import (
+        MemberReceiptStore,
+        build_resume_context,
+    )
+
+    root = tmp_path / "source"
+    authored = root / "docs/test-results/analysis.md"
+    authored.parent.mkdir(parents=True)
+    authored.write_text("original\n", encoding="utf-8")
+    test_file = root / "backend/tests/test_value.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_value(): assert True\n", encoding="utf-8")
+    member = test_file.relative_to(root).as_posix()
+    arguments: _ResumeArguments = dict(
+        root=root,
+        members=(member,),
+        resume_key="source-reuse",
+        state_root=tmp_path / "state",
+        granularity="files",
+        marker="",
+    )
+    original = build_resume_context(**arguments)
+    history = MemberReceiptStore(
+        original.receipt_directory, suite_identity=original.suite_identity
+    )
+    receipt = history.record(member, outcome="PYTEST_MEMBER_PASSED")
+    assert history.reusable(member)
+
+    authored.write_text("changed source\n", encoding="utf-8")
+    current = build_resume_context(**arguments)
+    current_receipts = MemberReceiptStore(
+        current.receipt_directory, suite_identity=current.suite_identity
+    )
+
+    assert original.source_identity != current.source_identity
+    assert original.test_plan_identity == current.test_plan_identity
+    assert not current_receipts.reusable(member)
+    assert receipt.is_file() and history.reusable(member)
+
+
 def test_receipt_identity_module_keeps_heavy_product_imports_lazy() -> None:
     root = Path(__file__).resolve().parents[2]
     path = root / "backend/src/oh_goon/repository_tooling/test_batch_receipts.py"

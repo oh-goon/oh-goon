@@ -91,12 +91,13 @@ not a ban on a particular method spelling.
 Durable workspace identity and host-path resolution belong to
 `runtime/workspaces.py::RepositoryWorkspaceAuthority`. `RunPathLayout` and
 `AttemptPathLayout` own disposable execution scratch. A path alone is not
-workspace authority.
+workspace authority. See the [identity owner map](docs/development/ARCHITECTURE_DECISIONS.md#git-is-optional-repository-native-metadata-not-source-authority)
+for catalog, subject, content, workspace, admission, and physical custody identities.
 
 ## Hashmarks, coding agents, and Skills
 
-- **Hashmarks = repository-evidence plane.** It owns repository identity and
-  freshness, retrieval/CodeMap, impact, context and verification selection,
+- **Hashmarks = repository-evidence plane.** It owns repository-evidence/content
+  identity and freshness, retrieval/CodeMap, impact, context and verification selection,
   exact flat verification membership, repository-negative evidence, and
   repository-evidence provenance.
 - **Coding agent = solution plane.** It owns solution reasoning and editing.

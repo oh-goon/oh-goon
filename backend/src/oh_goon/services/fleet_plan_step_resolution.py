@@ -54,9 +54,7 @@ def bind_native_agent_effects(
     """Bind the existing provider marker once before freezing native Step meaning."""
     if step.harness != "native" or native_agent is None:
         return step
-    expected = (
-        (native_agent.connection.provider_name,) if native_agent.connection is not None else ()
-    )
+    expected = native_agent.disclosure_recipients
     recipients = step.requested_effects.recipients
     if recipients == ("configured_model",):
         if not expected:
@@ -325,9 +323,7 @@ def resolve_delivered_local_search_agent_step(
             raise FleetPlanInvalid("native phase results require headless structured output")
         if requested.repository_access == "read_only" and native_agent.profile.backend == "local":
             raise FleetPlanInvalid("native read-only effects require physical workspace isolation")
-        expected_recipients = (
-            (native_agent.connection.provider_name,) if native_agent.connection is not None else ()
-        )
+        expected_recipients = native_agent.disclosure_recipients
         if requested.recipients != expected_recipients:
             raise FleetPlanInvalid(
                 "native inference disclosure differs from the selected recipient"

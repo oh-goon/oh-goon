@@ -262,6 +262,7 @@ def test_native_process_failure_and_unsettled_or_invalid_claims_cannot_report_su
     assert outcome.returncode == expected, outcome.stderr
     assert outcome.supervisor is not None and outcome.supervisor.final_process_group_quiescent
     assert outcome.runtime_authority is not None
+    assert outcome.argv[0] == outcome.runtime_authority.executable_path
 
 
 @pytest.mark.process

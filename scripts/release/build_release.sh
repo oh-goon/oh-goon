@@ -27,7 +27,7 @@ require_built_ui() {
 make release-locks-check
 clear_release_outputs
 
-cd backend && uv sync --locked --no-dev --group dev --group quality --group build --no-python-downloads
+cd backend && uv sync --locked --group dev --group quality --group build --no-python-downloads
 cd "$ROOT"
 backend/.venv/bin/oh-goon-release-version check
 make frontend-install

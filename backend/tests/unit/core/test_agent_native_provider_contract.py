@@ -62,3 +62,26 @@ def test_native_defaults_do_not_request_inference_or_installation() -> None:
     assert NativeAgentDefinition().executable is None
     assert NativeAgentProfile().inference_profile is None
     assert NativeAgentProfile().timeout_seconds == 7200
+
+
+@pytest.mark.parametrize("conflict", ["bubblewrap", "broker", "effort"])
+def test_codex_login_never_implicitly_downgrades_broker_policy(conflict: str) -> None:
+    profile: dict[str, object] = {
+        "codex_login": {
+            "home": "/native/auth",
+            "model": "gpt-6-luna",
+            "reasoning_effort": "low",
+        }
+    }
+    if conflict == "bubblewrap":
+        profile["backend"] = "bubblewrap"
+    elif conflict == "broker":
+        profile["inference_profile"] = "api"
+    else:
+        profile["codex_login"] = {
+            "home": "/native/auth",
+            "model": "gpt-6-luna",
+            "reasoning_effort": "unknown",
+        }
+    with pytest.raises(ValidationError):
+        NativeAgentProfile.model_validate(profile)

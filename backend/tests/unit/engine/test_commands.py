@@ -278,18 +278,22 @@ def test_run_command_drains_large_stdout_and_stderr_without_deadlock() -> None:
 
 def test_run_command_explicit_capture_limit_fails_closed_without_unbounded_retention() -> None:
     limit = 128 * 1024
+    argv = (
+        sys.executable,
+        "-S",
+        "-c",
+        "import os; os.write(1,b'x'*(4*int(os.environ['LIMIT'])))",
+    )
     with pytest.raises(CommandOutputLimitExceeded) as caught:
         run_command(
-            sys.executable,
-            "-S",
-            "-c",
-            "import os; os.write(1,b'x'*(4*int(os.environ['LIMIT'])))",
+            *argv,
             env={"LIMIT": str(limit)},
             timeout=10,
             max_capture_bytes_per_stream=limit,
         )
 
     error = caught.value
+    assert error.argv == argv
     assert error.stream == "stdout"
     assert error.limit_bytes == limit
     assert len(error.stdout.encode("utf-8")) <= limit

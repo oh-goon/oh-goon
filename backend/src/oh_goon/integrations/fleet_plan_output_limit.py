@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import subprocess
 
-from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedPlanStep
+from oh_goon.core.models.fleet_plan import (
+    PLAN_CONTRACT_RETURN_CODE,
+    ResolvedLocalSearchAgentStep,
+    ResolvedPlanStep,
+)
 from oh_goon.engine.command import CommandOutputLimitExceeded
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, timeout_outcome
 
@@ -22,8 +26,12 @@ def _output_limit_outcome(step: ResolvedPlanStep, error: CommandOutputLimitExcee
         f"{error.limit_bytes}-byte capture limit; output is bounded to protect executor memory"
     )
     stderr = (error.stderr + "\n" + message).strip()
+    native = isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None
+    argv = error.argv
+    if not argv and not native:
+        argv = tuple(getattr(step, "argv", ())) or (step.kind, step.step_id)
     return StepOutcome(
-        argv=tuple(getattr(step, "argv", ())) or (step.kind, step.step_id),
+        argv=argv,
         returncode=PLAN_CONTRACT_RETURN_CODE,
         stdout=error.stdout,
         stderr=stderr,

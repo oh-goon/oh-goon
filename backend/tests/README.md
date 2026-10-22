@@ -65,6 +65,17 @@ uv run --offline --frozen --no-sync --project backend pytest -q -m certification
 The paths are public execution inputs, never credential or unrelated repository
 stores. Without an explicit selection, this optional probe skips.
 
+The installed Codex permission probe uses a synthetic authentication home and no
+model connection. It checks the exact native tool policy used by explicit
+`codex_login` profiles: workspace writes, read-only evidence, private-path and
+symlink denial, and host-loopback denial. Saved-login coding demonstrations are
+separate, explicitly selected live model evidence:
+
+```sh
+OH_GOON_NATIVE_CODEX=/path/to/codex \
+uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_agent_run.py -k installed_codex
+```
+
 ## Shared test support
 
 ```text

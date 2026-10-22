@@ -724,6 +724,19 @@ def test_release_source_cleanup_removes_only_declared_transients(
     zone_data.write_text("[ZoneTransfer]\n", encoding="utf-8")
     ordinary_colon = tmp_path / "backend/src/pkg/source.py:review"
     ordinary_colon.write_text("authored\n", encoding="utf-8")
+    report_names = (
+        "coverage",
+        "playwright-report",
+        "playwright-runtime-report",
+        "test-results",
+    )
+    for name in report_names:
+        output = tmp_path / "frontend" / name / "result.txt"
+        output.parent.mkdir(parents=True)
+        output.write_text("generated\n", encoding="utf-8")
+        authored_report = tmp_path / "docs" / name / "analysis.md"
+        authored_report.parent.mkdir(parents=True)
+        authored_report.write_text("authored\n", encoding="utf-8")
     monkeypatch.setattr(source_normalization, "ROOT", tmp_path)
 
     removed = source_normalization.clean()
@@ -748,6 +761,10 @@ def test_release_source_cleanup_removes_only_declared_transients(
     assert "frontend/node_modules" in removed
     assert "frontend/.oh-goon-playwright-browsers" in removed
     assert not (tmp_path / "generated/release/static").exists()
+    for name in report_names:
+        assert f"frontend/{name}" in removed
+        assert not (tmp_path / "frontend" / name).exists()
+        assert (tmp_path / "docs" / name / "analysis.md").read_text() == "authored\n"
 
 
 def test_release_source_cleanup_removes_generated_static_without_recreating_bootstrap_input(

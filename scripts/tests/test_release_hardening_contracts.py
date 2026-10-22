@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tomllib
 from pathlib import Path
@@ -70,14 +71,53 @@ def test_source_sync_uses_declared_build_requirements_and_release_stays_locked()
     assert "make release-locks-check" in release
     assert "uv lock --project backend --check" not in release
     assert "npm ci --package-lock-only" not in release
-    assert (
-        "uv sync --locked --no-dev --group dev --group quality --group build --no-python-downloads"
-        in release
-    )
     assert "uv build --wheel --no-build-isolation --no-sources" in release
     assert "oh-goon-python-install" not in release
     assert "uv sync --group dev" not in release
     assert "--no-install-project" not in release
+
+
+def test_release_build_keeps_test_groups_in_its_native_materialization(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    script = tmp_path / "scripts/release/build_release.sh"
+    script.parent.mkdir(parents=True)
+    script.write_bytes((root / "scripts/release/build_release.sh").read_bytes())
+    (tmp_path / "backend").mkdir()
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    arguments_path = tmp_path / "uv-arguments"
+    for name, body in {
+        "make": "#!/bin/sh\nexit 0\n",
+        "uv": '#!/bin/sh\nprintf "%s\\n" "$@" > "$RELEASE_UV_ARGUMENTS"\nexit 73\n',
+    }.items():
+        executable = tools / name
+        executable.write_text(body, encoding="utf-8")
+        executable.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(script)],
+        env={
+            **os.environ,
+            "PATH": str(tools) + os.pathsep + os.defpath,
+            "RELEASE_UV_ARGUMENTS": str(arguments_path),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 73
+    arguments = arguments_path.read_text(encoding="utf-8").splitlines()
+    assert arguments[0] == "sync" and "--locked" in arguments
+    groups = {
+        arguments[index + 1]
+        for index, argument in enumerate(arguments[:-1])
+        if argument == "--group"
+    }
+    assert {"dev", "quality", "build"} <= groups
+    assert "--no-dev" not in arguments
 
 
 def test_release_acceptance_has_one_lock_admissibility_owner_before_materialization() -> (

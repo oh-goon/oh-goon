@@ -208,6 +208,7 @@ class CommandOutputLimitExceeded(RuntimeError):
         stderr: str,
         supervisor: CommandSupervisorReceipt,
         runtime_authority: RuntimeAuthorityReceipt | None = None,
+        argv: tuple[str, ...] = (),
     ) -> None:
         super().__init__(f"command {stream} exceeded {limit_bytes} captured bytes")
         self.stream = stream
@@ -216,6 +217,7 @@ class CommandOutputLimitExceeded(RuntimeError):
         self.stderr = stderr
         self.supervisor = supervisor
         self.runtime_authority = runtime_authority
+        self.argv = argv
 
 
 CommandOutputObserver = Callable[[Literal["stdout", "stderr"], str], None]
@@ -602,7 +604,7 @@ def run_command(
                     process_identity=process_identity,
                     process_observer=process_observer,
                 )
-            _raise_if_output_limited(process, readers, capture, authority_receipt)
+            _raise_if_output_limited(process, readers, capture, authority_receipt, argv=argv)
             leader_running = process.poll() is None
             if leader_running and input_data is not None and process.stdin is not None:
                 if not process.stdin.closed:
@@ -759,7 +761,7 @@ def run_command(
         if started_command.output_errors:
             raise started_command.output_errors[0]
         _raise_if_output_limited(
-            process, readers, capture, authority_receipt, already_finished=True
+            process, readers, capture, authority_receipt, argv=argv, already_finished=True
         )
         final_quiescent = os.name == "nt" or not _process_group_exists(process.pid)
         return CommandResult(
@@ -1028,6 +1030,7 @@ def _raise_if_output_limited(
     capture: CommandCapture,
     runtime_authority: RuntimeAuthorityReceipt,
     *,
+    argv: tuple[str, ...],
     already_finished: bool = False,
 ) -> None:
     if not capture.overflow.is_set():
@@ -1038,6 +1041,7 @@ def _raise_if_output_limited(
         capture.stdout,
         capture.stderr,
         runtime_authority,
+        argv=argv,
         already_finished=already_finished,
     )
 
@@ -1049,6 +1053,7 @@ def _output_limit_error(
     stderr_capture: TextCapture,
     runtime_authority: RuntimeAuthorityReceipt,
     *,
+    argv: tuple[str, ...],
     already_finished: bool = False,
 ) -> CommandOutputLimitExceeded:
     forced_termination = False
@@ -1059,6 +1064,7 @@ def _output_limit_error(
     capture = stdout_capture if stream == "stdout" else stderr_capture
     assert capture.limit_bytes is not None
     return CommandOutputLimitExceeded(
+        argv=argv,
         stream=stream,
         limit_bytes=capture.limit_bytes,
         stdout=stdout_capture.text,

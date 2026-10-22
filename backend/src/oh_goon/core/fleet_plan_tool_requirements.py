@@ -8,6 +8,7 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedGitStep,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
+    ResolvedLocalSearchAgentStep,
     ResolvedOciBuildStep,
     ResolvedOciPublishStep,
     ResolvedOciTagAssertStep,
@@ -45,13 +46,17 @@ def shell_runtime_support_tool_names(tool_names: tuple[str, ...]) -> tuple[str, 
 
 
 def step_execution_tool(step: ResolvedPlanStep) -> str | None:
-    """Return the one environment-provided executable required by a resolved step.
+    """Return the primary executable selected by a resolved step.
 
     Managed pre-commit runtimes, built-in in-process observations, and repository-relative
     executables do not consume the executor image/host toolchain. Typed integrations name
     their implementation tool here so authoring never duplicates that fact in YAML.
+    Native Agents return their frozen selected path; host-tool names are projected
+    separately by ``step_execution_tool_names`` and never resolve that path again.
     """
 
+    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
+        return step.native_agent.definition.executable
     if isinstance(step, ResolvedCommandStep):
         executable = step.argv[0]
         return executable if "/" not in executable and "\\" not in executable else None
@@ -75,9 +80,14 @@ def step_execution_tool(step: ResolvedPlanStep) -> str | None:
 def step_execution_tool_names(step: ResolvedPlanStep) -> tuple[str, ...]:
     """Return the complete frozen host-tool authority for one resolved Step."""
 
-    primary = step_execution_tool(step)
     names = set(step.capabilities.tools)
-    if primary is not None:
+    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
+        # Native selection already owns the exact path and bytes. Python supports
+        # producer evidence and the isolated relay; it does not select the agent.
+        names.add("python")
+        return tuple(sorted(names))
+    primary = step_execution_tool(step)
+    if primary is not None and "/" not in primary and "\\" not in primary:
         names.add(primary)
     return tuple(sorted(names))
 

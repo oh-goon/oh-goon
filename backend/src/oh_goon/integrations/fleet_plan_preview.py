@@ -7,6 +7,7 @@ from oh_goon.core.fleet_plan_output_refs import step_output_reference
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
     ResolvedFleetPlan,
+    ResolvedLocalSearchAgentStep,
     ResolvedPreCommitStep,
     StepStatusCondition,
     step_runtime_strings,
@@ -71,6 +72,13 @@ def repository_plan_admission_evidence(
 ) -> PlanRepositoryAdmissionEvidence:
     """Observe one repository/Plan semantic admission fact without effects."""
 
+    if isinstance(plan.execution, CicdExecutionPolicy) and any(
+        isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None
+        for step in plan.steps
+    ):
+        raise FleetPlanInvalid(
+            "Native Agent requires ordinary execution; strict CI/CD is unsupported"
+        )
     scope = bind_repository_scope(repository.path, plan)
     preview = _preview_plan_from_scope(repository.path, plan, scope)
     if isinstance(plan.execution, CicdExecutionPolicy):

@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetSnapshot, LeagueMap } from "@generated/models";
 import { i18n } from "@/i18n/setup";
@@ -102,10 +102,20 @@ describe("service-free app state and refresh authority", () => {
   });
 
   it("keeps the newest fleet refresh when an older read finishes later", async () => {
+    let releaseDiscovery!: () => void;
+    const discovery = new Promise<void>((resolve) => { releaseDiscovery = resolve; });
+    const overview = InMemoryApiClient.prototype.fleetRunOverview;
+    vi.spyOn(InMemoryApiClient.prototype, "fleetRunOverview").mockImplementation(async function (this: InMemoryApiClient) {
+      await discovery;
+      return overview.call(this);
+    });
     const fixture = renderServiceFreeApp({ fleet: fleetSnapshot("initial", 2) });
     fireEvent.click(await screen.findByRole("button", { name: "Repositories" }));
     await screen.findByRole("heading", { name: "Repositories" });
     await waitFor(() => expect(readyValue()).toBe("2"));
+    // Initial runtime discovery invalidates the seeded Fleet once. Settle that
+    // read graph before the two explicitly controlled operator refreshes.
+    await act(async () => { releaseDiscovery(); });
     const baselineReads = fixture.client.state.fleetReads;
     fixture.client.setCommittedFleetSnapshot(fleetSnapshot("new", 9));
     const olderRead = fixture.client.deferFleetRead(fleetSnapshot("old", 3));
