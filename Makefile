@@ -565,6 +565,7 @@ frontend-build:
 
 test-integration:
 	@$(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- sh -c 'cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "not certification" tests/integration'
+	@$(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- backend/.venv/bin/oh-goon-qualification-exec pytest -c backend/pyproject.toml -m "not certification" tests/integration
 
 # Compact production-shaped SQLite lifetime gate. This deliberately crosses the
 # worker/wait/restart boundary and complements component/fault-matrix coverage.

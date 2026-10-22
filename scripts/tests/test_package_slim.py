@@ -44,28 +44,40 @@ def test_canonical_source_identity_reuses_unchanged_byte_digest_and_invalidates_
     )
 
 
-def test_shipped_example_bytes_are_packaged_and_bind_source_identity(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("relative", "original", "updated"),
+    [
+        (
+            "examples/standard-atomic/goon.yml",
+            b"steps:\n  - run: echo original\n",
+            b"steps:\n  - run: echo changed-example\n",
+        ),
+        (
+            ".github/workflows/ci.yml",
+            b"jobs:\n  backend:\n    steps:\n      - run: make backend-check\n",
+            b"jobs:\n  tooling:\n    steps:\n      - run: make tooling-check\n",
+        ),
+    ],
+)
+def test_authored_source_bytes_are_packaged_and_bind_source_identity(
+    tmp_path: Path, relative: str, original: bytes, updated: bytes
 ) -> None:
     root = tmp_path / "root"
-    example = root / "examples/standard-atomic/goon.yml"
-    example.parent.mkdir(parents=True)
+    source = root / relative
+    source.parent.mkdir(parents=True)
     (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
-    original = b"steps:\n  - run: echo original\n"
-    example.write_bytes(original)
+    source.write_bytes(original)
 
     before = package_slim.canonical_source_identity(root)
-    assert example in package_slim.canonical_source_files(root)
+    assert source in package_slim.canonical_source_files(root)
     output = tmp_path / "source.zip"
     package_slim.package_slim(output, root=root)
 
     with zipfile.ZipFile(output) as archive:
-        assert (
-            archive.read("oh-goon-1.2.3/examples/standard-atomic/goon.yml") == original
-        )
+        assert archive.read(f"oh-goon-1.2.3/{relative}") == original
     assert package_slim.archive_source_identity(output) == before
 
-    example.write_bytes(b"steps:\n  - run: echo changed-example\n")
+    source.write_bytes(updated)
     assert package_slim.canonical_source_identity(root) != before
 
 

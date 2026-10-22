@@ -29,6 +29,7 @@ RELEASE_LOCAL_ROOTS = frozenset({"repositories"})
 OWNED_TOP_LEVEL = {
     ".dockerignore",
     ".editorconfig",
+    ".github",
     ".gitignore",
     ".pre-commit-config.yaml",
     "AGENTS.md",

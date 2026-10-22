@@ -4,6 +4,30 @@
 
 This document is the short product-level contract for local CI/CD execution. The detailed mechanics live in [`development/FLEET_PLANS.md`](development/FLEET_PLANS.md), while [Architecture](ARCHITECTURE.md) explains the current ownership boundaries.
 
+## Repository checks on GitHub
+
+The repository's [required-checks workflow](../.github/workflows/ci.yml) runs on
+every pull request, push to `main`, and merge-queue group. Each job materializes
+the committed uv/npm locks through `make init`, then invokes one existing owner
+check: `backend-check`, `frontend-check`, `tooling-check`, `architecture`,
+`check-generated`, or `test-integration`. These are also the stable GitHub check
+names. The integration target executes both backend and cross-owner integration
+tests. Make and the native tools retain command, dependency, and result authority;
+GitHub owns hosted scheduling and merge enforcement.
+
+Require all six checks from the GitHub Actions app for `main`, require the branch
+to be up to date, and apply those requirements to administrators without bypass.
+Require changes through a pull request and disallow force pushes and deletion.
+These are GitHub repository settings; the workflow file alone does not enforce
+them. Keep existing stronger review requirements when updating the settings.
+
+Required jobs have no path filters or allowed failures. Full Git history supplies
+the PR-base quality-floor comparison. Hosted runners use read-only tokens and
+do not retain checkout credentials or receive repository secrets. Installed-agent,
+live-account, browser, and privileged certification remain explicit qualification;
+portable checks exclude the existing `certification` marker. Workflow files are
+authored source and participate in canonical source/archive identity.
+
 ## Why this exists
 
 CI/CD failures are expensive when the real dependency is implicit: a graph keyword changes inheritance, a YAML indentation error changes structure, a secret appears only on one runner, or a step silently relies on files/cache/environment left behind by another step.
