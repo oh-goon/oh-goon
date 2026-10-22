@@ -55,8 +55,19 @@ def test_default_backend_scheduling_is_suite_rooted_not_filename_driven() -> Non
         ("backend/tests/unit",),
         ("backend/tests/unit",),
         ("backend/tests/dependency_complete",),
+        ("backend/tests/dependency_complete",),
     )
     assert all("--exclude" not in options for _, options in (*fast, *complete))
+    assert all(
+        options[options.index("--marker") + 1]
+        == "not slow and not process and not scale and not certification"
+        for _, options in fast
+    )
+    assert tuple(
+        invocation
+        for invocation in complete
+        if invocation[0] == ("backend/tests/dependency_complete",)
+    ) == _batch_invocations("test-python-dependency-complete")
 
 
 def test_default_tooling_scheduling_is_suite_rooted_not_filename_driven() -> None:
@@ -70,12 +81,15 @@ def test_default_tooling_scheduling_is_suite_rooted_not_filename_driven() -> Non
 
 def test_distinct_backend_execution_class_is_declared_by_semantic_marker() -> None:
     complete = _batch_invocations("test-python-complete")
-    unit_profiles = [
-        options for paths, options in complete if paths == ("backend/tests/unit",)
-    ]
-
-    assert len(unit_profiles) == 2
-    marker_values = {
-        options[options.index("--marker") + 1] for options in unit_profiles
-    }
-    assert marker_values == {"not process", "process"}
+    for suite in ("backend/tests/unit", "backend/tests/dependency_complete"):
+        profiles = [options for paths, options in complete if paths == (suite,)]
+        assert len(profiles) == 2
+        by_marker = {
+            options[options.index("--marker") + 1]: options for options in profiles
+        }
+        assert set(by_marker) == {"not process", "process"}
+        process = by_marker["process"]
+        assert process[process.index("--batch-size") + 1] == "1"
+        assert process[process.index("--workers") + 1] == "1"
+        assert process[process.index("--batch-timeout") + 1] == "180"
+        assert process[process.index("--suite-timeout") + 1] == "600"
