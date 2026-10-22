@@ -531,9 +531,14 @@ def test_native_run_keeps_every_model_turn_bound_and_retains_step_local_claims(
                     if verification_value == 42
                     else FleetRunOutcome.ATTENTION_REQUIRED
                 )
-                assert detail.outcome is expected, runtime.runs.game_tape_live_output(
-                    admitted.fleet_run_id
-                ).model_dump_json()
+                assert detail.outcome is expected, (
+                    "Run failure: "
+                    + detail.run.model_dump_json(include={"status", "failure"})[:8192]
+                    + "\nLive output: "
+                    + runtime.runs.game_tape_live_output(admitted.fleet_run_id).model_dump_json()[
+                        -8192:
+                    ]
+                )
                 steps = detail.game_tape.repositories[0].steps
                 assert len(steps) == 2
                 assert steps[0].status is GameTapeStatus.PASSED

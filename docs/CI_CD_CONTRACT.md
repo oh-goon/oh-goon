@@ -24,7 +24,8 @@ them. Keep existing stronger review requirements when updating the settings.
 
 Required jobs have no path filters or allowed failures. Full Git history supplies
 the PR-base quality-floor comparison. CI backend pytest stops at its first failure;
-a successful run covers the entire ordinary suite. Each disposable Ubuntu runner enables
+a successful run covers the entire ordinary suite. Ubuntu 26.04 supplies the
+native Bubblewrap overlay features used by the selected agent tests. Each disposable runner enables
 unprivileged user namespaces for the ordinary Bubblewrap tests.
 Hosted runners use read-only tokens and do not retain checkout credentials or
 receive repository secrets. Installed-agent,
