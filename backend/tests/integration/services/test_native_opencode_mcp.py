@@ -13,7 +13,7 @@ import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
-from typing import Any
+from time import monotonic, sleep
 
 import pytest
 
@@ -23,8 +23,9 @@ from oh_goon.core.vocabulary import FleetRunOutcome
 
 
 @pytest.mark.certification
+@pytest.mark.parametrize("mcp_startup_delay_seconds", [0, 5], ids=["immediate", "delayed"])
 def test_installed_opencode_calls_mcp_inside_original_run_boundary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mcp_startup_delay_seconds: int
 ) -> None:
     executable = os.environ.get("OH_GOON_NATIVE_OPENCODE")
     runtime_root = os.environ.get("OH_GOON_NATIVE_OPENCODE_RUNTIME_ROOT")
@@ -40,9 +41,11 @@ def test_installed_opencode_calls_mcp_inside_original_run_boundary(
     inputs = tmp_path / "public-tools"
     inputs.mkdir()
     server_script = inputs / "boundary.py"
+    catalog_ready = workspace / "mcp-catalog-ready"
     server_script.write_text(
-        """import json, pathlib, socket, sys
-private, port, receipt = sys.argv[1:]
+        """import json, pathlib, socket, sys, time
+private, port, receipt, startup_delay = sys.argv[1:]
+time.sleep(float(startup_delay))
 methods = []
 for line in sys.stdin:
     request = json.loads(line)
@@ -67,30 +70,53 @@ for line in sys.stdin:
     else:
         result = {'resources': [], 'resourceTemplates': [], 'prompts': []}
     print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)
+    if method == 'tools/list':
+        pathlib.Path(receipt).with_name('mcp-catalog-ready').touch()
 """
     )
-    requests: list[dict[str, Any]] = []
-    headers: list[tuple[str, str | None]] = []
-    tool_requests: list[dict[str, Any]] = []
-    discovery_reads = 0
+    request_count = 0
+    tool_request_count = 0
+    approved_transport = True
+    hashmarks_every_request = True
+    native_result_replayed = False
+    discovery_deadline: float | None = None
+    discovery_timed_out = False
 
     class ModelEndpoint(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
-            nonlocal discovery_reads
+            nonlocal request_count, tool_request_count, approved_transport
+            nonlocal hashmarks_every_request, native_result_replayed
+            nonlocal discovery_deadline, discovery_timed_out
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            requests.append(body)
-            headers.append((self.path, self.headers["Authorization"]))
+            request_count += 1
+            approved_transport &= (
+                self.path == "/v1/chat/completions"
+                and self.headers["Authorization"] == "Bearer HOST_INFERENCE_CANARY"
+            )
+            hashmarks_every_request &= "Hashmarks" in body["messages"][0]["content"]
             names = [item["function"]["name"] for item in body.get("tools", [])]
             if "boundary_prove_boundary" in names:
-                tool_requests.append(body)
+                tool_request_count += 1
+                if tool_request_count == 2:
+                    native_result_replayed = any(
+                        message.get("role") == "tool"
+                        and "Boundary inspected" in json.dumps(message.get("content"))
+                        for message in body["messages"]
+                    )
             call = None
-            # Native MCP startup is asynchronous. Let its own loop read source
-            # while discovery completes; never synthesize an MCP result.
+            # Synchronize with the real MCP catalog response, then let the native
+            # loop refresh its tools. Keep discovery within the 90-second Run;
+            # retain only counters/facts rather than growing conversation bodies.
             if "read" in names and "boundary_prove_boundary" not in names:
-                discovery_reads += 1
-                if discovery_reads <= 3:
+                if discovery_deadline is None:
+                    discovery_deadline = monotonic() + 30
+                while not catalog_ready.exists() and monotonic() < discovery_deadline:
+                    sleep(0.01)
+                if monotonic() < discovery_deadline:
                     call = {"name": "read", "arguments": json.dumps({"path": "source.py"})}
-            elif len(tool_requests) == 1 and "boundary_prove_boundary" in names:
+                else:
+                    discovery_timed_out = True
+            elif tool_request_count == 1 and "boundary_prove_boundary" in names:
                 call = {"name": "boundary_prove_boundary", "arguments": "{}"}
             if call is not None:
                 delta = {
@@ -98,7 +124,7 @@ for line in sys.stdin:
                     "tool_calls": [
                         {
                             "index": 0,
-                            "id": f"call_{len(requests)}",
+                            "id": f"call_{request_count}",
                             "type": "function",
                             "function": call,
                         }
@@ -154,12 +180,14 @@ for line in sys.stdin:
                         "boundary": {
                             "type": "local",
                             "codemode": False,
+                            "timeout": {"startup": 30_000, "catalog": 30_000},
                             "command": [
                                 "/usr/bin/python3",
                                 str(server_script),
                                 str(private),
                                 str(endpoint.server_port),
                                 str(workspace / "mcp-proof.json"),
+                                str(mcp_startup_delay_seconds),
                             ],
                         }
                     }
@@ -218,23 +246,16 @@ for line in sys.stdin:
                 )
                 detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
                 assert detail.outcome is FleetRunOutcome.SUCCESS
+                assert not discovery_timed_out, "Native MCP discovery exceeded 30 seconds"
                 proof = json.loads((workspace / "mcp-proof.json").read_text())
-                assert all(
-                    path == "/v1/chat/completions" and auth == "Bearer HOST_INFERENCE_CANARY"
-                    for path, auth in headers
-                )
+                assert approved_transport
                 assert {"initialize", "tools/list", "tools/call"}.issubset(proof["methods"])
                 assert not proof["private_visible"]
                 assert not proof["host_reachable"]
                 assert not proof["credential_in_environment"]
-                assert len(tool_requests) == 2
-                assert any(
-                    message.get("role") == "tool"
-                    and "Boundary inspected" in json.dumps(message.get("content"))
-                    for message in tool_requests[1]["messages"]
-                )
-                for request in requests:
-                    assert "Hashmarks" in request["messages"][0]["content"]
+                assert tool_request_count == 2
+                assert native_result_replayed
+                assert hashmarks_every_request
                 step = detail.game_tape.repositories[0].steps[0]
                 assert any(
                     event.kind == "tool"
