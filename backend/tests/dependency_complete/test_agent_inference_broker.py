@@ -613,6 +613,64 @@ def test_selected_model_catalog_and_raw_loopback_relay(
     assert len(provider.requests) == 1
 
 
+def test_relay_preserves_response_after_peer_refuses_remaining_request_body(
+    directory: Path,
+) -> None:
+    path = directory / "early-response.sock"
+    headers = b"POST /unrestricted HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n"
+    expected = b"HTTP/1.1 404 Not Found\r\nContent-Length: 8\r\nConnection: close\r\n\r\nrejected"
+    peer_ready = threading.Event()
+    body_sent = threading.Event()
+    failures: list[Exception] = []
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(str(path))
+        listener.listen(1)
+        listener.settimeout(5)
+
+        def respond() -> None:
+            try:
+                connection, _ = listener.accept()
+                with connection:
+                    connection.settimeout(5)
+                    received = bytearray()
+                    while not received.endswith(b"\r\n\r\n"):
+                        chunk = connection.recv(len(headers) - len(received))
+                        assert chunk
+                        received.extend(chunk)
+                    assert received == headers
+                    connection.shutdown(socket.SHUT_RD)
+                    peer_ready.set()
+                    assert body_sent.wait(5)
+                    connection.sendall(expected)
+            except Exception as exc:
+                failures.append(exc)
+
+        worker = threading.Thread(target=respond)
+        worker.start()
+        try:
+            with model_inference_relay(path, port=0) as relay:
+                with socket.create_connection(("127.0.0.1", relay.port), timeout=5) as client:
+                    client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    client.sendall(headers)
+                    assert peer_ready.wait(5)
+                    try:
+                        client.sendall(b"{}")
+                    finally:
+                        body_sent.set()
+                    received = bytearray()
+                    while len(received) <= len(expected):
+                        chunk = client.recv(len(expected) + 1 - len(received))
+                        if not chunk:
+                            break
+                        received.extend(chunk)
+                    assert received == expected
+        finally:
+            body_sent.set()
+            worker.join(timeout=6)
+    assert not worker.is_alive()
+    assert not failures
+
+
 def test_cancellation_closes_inflight_http_and_private_socket(
     directory: Path, provider: _Provider
 ) -> None:

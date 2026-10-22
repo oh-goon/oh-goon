@@ -94,7 +94,16 @@ class _RelayHandler(socketserver.BaseRequestHandler):
                             if source is upstream:
                                 return
                         else:
-                            target.sendall(data)
+                            try:
+                                target.sendall(data)
+                            except (BrokenPipeError, ConnectionResetError):
+                                if source is upstream:
+                                    raise
+                                # The broker can refuse headers before reading a body.
+                                # Keep its response half open after request refusal.
+                                readers.remove(source)
+                                with contextlib.suppress(OSError):
+                                    upstream.shutdown(socket.SHUT_WR)
             except (OSError, ValueError):
                 return
             finally:

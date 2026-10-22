@@ -23,8 +23,8 @@ These are GitHub repository settings; the workflow file alone does not enforce
 them. Keep existing stronger review requirements when updating the settings.
 
 Required jobs have no path filters or allowed failures. Full Git history supplies
-the PR-base quality-floor comparison. CI backend pytest stops at its first failure;
-a successful run covers the entire ordinary suite. Ubuntu 26.04 supplies the
+the PR-base quality-floor comparison. CI backend pytest stops at its first failure and reports the 40 slowest
+setup/call/teardown durations above 50 ms; a successful run covers the entire ordinary suite. Ubuntu 26.04 supplies the
 native Bubblewrap overlay features used by the selected agent tests. Each disposable runner enables
 unprivileged user namespaces for the ordinary Bubblewrap tests.
 Hosted runners use read-only tokens and do not retain checkout credentials or
