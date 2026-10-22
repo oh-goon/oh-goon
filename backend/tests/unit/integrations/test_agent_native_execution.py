@@ -300,6 +300,41 @@ def test_codex_final_text_is_claim_and_nonzero_physical_exit_still_fails() -> No
     assert result.final_text == "untrusted role payload"
 
 
+def test_codex_recovered_diagnostic_preserves_successful_terminal_result() -> None:
+    result = parse_native_agent_events(
+        "codex",
+        events(
+            {"type": "turn.started"},
+            {"type": "error", "message": "Native transport diagnostic"},
+            {"type": "item.completed", "item": {"type": "error"}},
+            {"type": "item.completed", "item": {"type": "command_execution", "id": "tool"}},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "Done"}},
+            {"type": "turn.completed"},
+        ),
+        returncode=0,
+    )
+    assert result.settled and not result.failed
+    assert result.final_text == "Done"
+    assert any(item.summary == "codex: error" for item in result.observations)
+    assert any(item.kind == "tool" for item in result.observations)
+
+
+@pytest.mark.parametrize(
+    ("records", "returncode"),
+    [
+        ([{"type": "error"}], 0),
+        ([{"type": "turn.completed"}, {"type": "error"}], 0),
+        ([{"type": "turn.failed"}, {"type": "turn.completed"}], 0),
+        ([{"type": "error"}, {"type": "turn.completed"}], 7),
+    ],
+)
+def test_codex_diagnostics_cannot_replace_completion_or_erase_failure(
+    records: list[dict[str, object]], returncode: int
+) -> None:
+    result = parse_native_agent_events("codex", events(*records), returncode=returncode)
+    assert not result.settled or result.failed
+
+
 @pytest.mark.parametrize(
     "output",
     [

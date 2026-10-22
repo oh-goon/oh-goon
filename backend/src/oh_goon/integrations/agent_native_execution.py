@@ -201,8 +201,8 @@ def codex_login_command(
 ) -> NativeAgentCommand:
     """Native sign-in and sandbox authority, without exporting authentication.
 
-    Configure native session instructions; Codex owns follow-up and compaction
-    behavior, whose installed request delivery remains unverified. Auth stays in the original
+    Configure frozen native session instructions. Selected installed conformance
+    observes follow-up and compaction delivery, not model reasoning quality. Auth stays in the original
     CODEX_HOME; the native tool filesystem never receives that directory.
     Git and verification in this explicit local profile remain trusted local.
     """
@@ -508,8 +508,13 @@ class NativeAgentEventParser:
             elif event_type == "turn.completed":
                 self._settled = True
                 self._observe("agent", "turn.completed")
-            elif event_type in ("turn.failed", "error"):
+            elif event_type == "turn.failed":
                 self._failed = True
+                self._observe("agent", "error")
+            elif event_type == "error":
+                # Codex can recover transport diagnostics within the same turn.
+                # Require its later terminal completion; never parse message prose.
+                self._settled = False
                 self._observe("agent", "error")
             elif event_type == "item.completed":
                 item = record.get("item")
