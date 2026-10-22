@@ -115,7 +115,9 @@ inference. Create a dedicated private Codex home outside the repository and nati
 tool roots, and complete native `codex login` there; never copy the desktop auth
 cache or put credentials into the synthetic fixture. The installed executable
 and its runtime directory must remain in a separate filesystem tree from that
-home. Choose an available model explicitly when the default is unavailable:
+home. For an app-bundled executable beneath that home, select a public
+installation in a separate tree while keeping credentials in place. Choose an
+available model explicitly when the default is unavailable:
 
 ```sh
 CODEX_HOME=/private/dedicated-codex-login /path/to/codex login
@@ -125,8 +127,11 @@ OH_GOON_LIVE_CODEX_MODEL=gpt-6-luna \
 uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_codex_live.py
 ```
 
-This requires a file-backed native-managed ChatGPT sign-in home without user
-configuration. The probe requests native `getAuthStatus` with `includeToken=false`,
+An existing CLI sign-in home may instead be selected in place; do not copy its
+credentials or alter its authored configuration. This requires file-backed
+native-managed ChatGPT authentication. The account probe explicitly selects the
+built-in OpenAI provider and requests native `getAuthStatus` with
+`includeToken=false`,
 rejects API-key or externally managed token modes, then requests native
 `account/read` refresh. A cached account response alone cannot prove refresh:
 the bounded host-only checker privately verifies that native `last_refresh`
@@ -142,7 +147,8 @@ simulated model response is involved. Missing explicit selections skip; a
 selected account, refresh or coding failure fails qualification. This consumes
 live account quota and requires external networking. After qualification, use
 native `codex logout` for the dedicated home and remove its owned temporary
-state; never archive the credential home as evidence.
+state; never archive the credential home as evidence. This cleanup applies only
+to a temporary dedicated home.
 
 ## Shared test support
 

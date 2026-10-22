@@ -24,7 +24,14 @@ class _NativeAccountRPC:
         self.selector = selectors.DefaultSelector()
         try:
             self.process = subprocess.Popen(
-                [str(program), "--no-daemon", "app-server", "--stdio"],
+                [
+                    str(program),
+                    "--no-daemon",
+                    "app-server",
+                    "--stdio",
+                    "-c",
+                    'model_provider="openai"',
+                ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -137,13 +144,9 @@ def _refresh_timestamp(home: Path) -> datetime | None:
 
 def refresh_native_chatgpt_account(program: Path, home: Path) -> dict[str, bool]:
     """Force native refresh, proving persistence without accepting a cached account."""
-    if (home / "config.toml").exists():
-        raise RuntimeError(
-            "Live qualification requires a dedicated sign-in home without user config"
-        )
     with _NativeAccountRPC(program, home) as native:
         status = native.request("getAuthStatus", {"includeToken": False, "refreshToken": False})
-        managed = status.get("authMethod") == "chatgpt"
+        managed = status.get("authMethod") == "chatgpt" and status.get("requiresOpenaiAuth") is True
         token_omitted = status.get("authToken") is None
         if not managed or not token_omitted:
             raise RuntimeError("Live qualification requires native-managed ChatGPT authentication")
