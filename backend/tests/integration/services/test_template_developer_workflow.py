@@ -21,31 +21,33 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(scope="module")
+def native_fixture_uv_cache(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Prove the fixture can bootstrap without an ambient developer package cache."""
+    return tmp_path_factory.mktemp("native-fixture-uv-cache")
+
+
+def _prepare_fixture_project(project: Path) -> None:
+    result = subprocess.run(
+        ["uv", "sync", "--locked", "--project", str(project), "--group", "dev"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (result.stderr or result.stdout)[-8192:]
+
+
 @pytest.mark.parametrize("project", [".", "my backend"])
 def test_native_project_configuration_reports_and_extensions(
-    tmp_path, monkeypatch, capsys, project
+    tmp_path, monkeypatch, capsys, project, native_fixture_uv_cache
 ):
+    monkeypatch.setenv("UV_CACHE_DIR", str(native_fixture_uv_cache))
     repository = tmp_path / "repositories/team/app"
     target = repository if project == "." else repository / project
     shutil.copytree(
         FIXTURE, target, ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache")
     )
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
-    subprocess.run(
-        [
-            "uv",
-            "sync",
-            "--offline",
-            "--frozen",
-            "--project",
-            str(target),
-            "--group",
-            "dev",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    _prepare_fixture_project(target)
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
@@ -139,15 +141,18 @@ steps:
         runtime.shutdown(wait_for_runs=True)
 
 
-def test_local_custom_goon_cancels_a_real_native_process_before_next_step(tmp_path, monkeypatch):
+def test_local_custom_goon_cancels_a_real_native_process_before_next_step(
+    tmp_path, monkeypatch, native_fixture_uv_cache
+):
+    monkeypatch.setenv("UV_CACHE_DIR", str(native_fixture_uv_cache))
     repository = tmp_path / "repositories/team/app"
-    shutil.copytree(FIXTURE, repository)
-    subprocess.run(["git", "init", "-q", str(repository)], check=True)
-    subprocess.run(
-        ["uv", "sync", "--offline", "--frozen", "--project", str(repository), "--group", "dev"],
-        check=True,
-        capture_output=True,
+    shutil.copytree(
+        FIXTURE,
+        repository,
+        ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache"),
     )
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    _prepare_fixture_project(repository)
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))

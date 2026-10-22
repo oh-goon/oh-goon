@@ -78,7 +78,13 @@ def _original_record(
 
 
 def _native_list(executable: str, args: tuple[str, ...], *, kind: str) -> list[dict[str, object]]:
-    result = run_command(executable, *args, timeout=5.0, env=_control_environment())
+    result = run_command(
+        executable,
+        *args,
+        timeout=5.0,
+        env=_control_environment(),
+        preserve_native_executable_path=False,
+    )
     if result.returncode != 0:
         raise FleetPlanInvalid(f"local LACE {kind} native observation failed")
     try:

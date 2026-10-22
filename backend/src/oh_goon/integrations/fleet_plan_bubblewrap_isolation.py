@@ -262,6 +262,7 @@ class BubblewrapProcessIsolation:
                 "/bin/true",
                 timeout=10.0,
                 env={"PATH": os.defpath, **self._standard_resource_environment},
+                preserve_native_executable_path=False,
                 max_capture_bytes_per_stream=4096,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -531,6 +532,7 @@ class BubblewrapProcessIsolation:
                     *args,
                     timeout=timeout,
                     env={**environment, **self._standard_resource_environment},
+                    preserve_native_executable_path=False,
                     cancel_requested=cancel_requested,
                     termination_requested=request.termination_requested,
                     stream_output=stream_output,
@@ -749,6 +751,7 @@ class BubblewrapProcessIsolation:
                         timeout=timeout,
                         cwd=None,
                         env=env,
+                        preserve_native_executable_path=False,
                         cancel_requested=effective_cancel_requested,
                         termination_requested=termination_requested,
                         stream_output=stream_output,

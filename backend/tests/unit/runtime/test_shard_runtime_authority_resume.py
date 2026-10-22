@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,33 @@ from oh_goon.engine.command import CommandResult, RuntimeAuthorityReceipt
 from oh_goon.runtime.execution import shards as subject
 
 from ._shard_execution_support import context, plan, work
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux sealed execution")
+def test_real_shard_pass_retains_exact_runtime_materialization_for_resume(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    selected = plan(work())
+    first = subject.execute_shard_plan(
+        selected,
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=10,
+        state_root=state,
+        execution_context=context(),
+    )
+    second = subject.execute_shard_plan(
+        selected,
+        cwd=tmp_path,
+        workers=1,
+        shard_timeout_seconds=10,
+        state_root=state,
+        execution_context=context(),
+    )
+
+    assert first.results[0].status == "PASS"
+    assert second.results[0].status == "RESUMED_PASS"
+    assert first.results[0].attempts[0].runtime_authority_receipt_identity is not None
+    assert second.results[0].resumed
 
 
 def _sha(char: str) -> str:

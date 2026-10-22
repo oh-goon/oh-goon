@@ -200,7 +200,7 @@ def native_profile_command_runner(
         broker_directory: Path | None = None,
         private_configuration_directory: Path | None = None,
         read_only_workspace: bool = False,
-        preserve_native_executable_path: bool = False,
+        preserve_native_executable_path: bool = True,
         retain_output_tail: bool = False,
     ) -> CommandResult:
         if type(retain_output_tail) is not bool:

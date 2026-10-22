@@ -130,6 +130,23 @@ unless execution is represented by the corresponding native package-manager mode
 
 The semantic owner resolves native meaning once. Oh-Goon transports the resulting authority, invokes the native owner once, and reports the observed result once. Re-entry or delegation must not create a second resolver or execution owner.
 
+Ordinary trusted-local commands retain the resolved native executable path and
+their original invocation arguments. Native tools may use the kernel executable
+name for dispatch or respawn themselves; replacing that path with an anonymous
+descriptor changes their semantics. The command owner records the observed
+executable digest and environment authority without claiming immutable execution
+materialization. Parent-death handling, cancellation, deadlines, output bounds,
+and process-tree cleanup still use the same supervisor.
+
+Callers requiring exact immutable local execution explicitly select
+`preserve_native_executable_path=False`; the command owner then seals and executes
+the captured bytes. Durable shard execution retains this selection because its
+resumable evidence requires exact materialization. Selected strict sandbox
+execution retains its separate sealed-descriptor and physical isolation owners;
+ordinary native-path observation grants none of those guarantees. A native tool
+that requires a stable kernel executable path is incompatible with anonymous
+descriptor execution and cannot be qualified by a successful ordinary run.
+
 ## Design test
 
 Before adding code around a tool, ask:

@@ -389,6 +389,7 @@ def _run_osb(
         *args,
         timeout=timeout,
         env=_osb_environment(settings),
+        preserve_native_executable_path=False,
         cancel_requested=cancel_requested,
         parent_death_signal=True,
         require_process_group_quiescence=True,

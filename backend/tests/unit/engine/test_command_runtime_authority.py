@@ -10,6 +10,24 @@ from pathlib import Path
 import pytest
 
 from oh_goon.engine.command import CommandTerminal, RuntimeAuthorityBinding, run_command
+from tests.factories.runtime_authority import native_invocation_executable
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux executable identity")
+@pytest.mark.parametrize("guarded", [False, True])
+def test_default_native_command_preserves_kernel_invocation_name(
+    tmp_path: Path, guarded: bool
+) -> None:
+    executable = native_invocation_executable(tmp_path)
+
+    result = run_command(str(executable), parent_death_signal=guarded)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "native invocation retained"
+    assert result.runtime_authority is not None
+    assert result.runtime_authority.executable_path == str(executable)
+    assert result.runtime_authority.execution_materialization_identity is None
+    assert result.supervisor.final_process_group_quiescent
 
 
 def test_sealed_python_entrypoint_retains_native_virtual_environment(tmp_path: Path) -> None:
@@ -17,7 +35,7 @@ def test_sealed_python_entrypoint_retains_native_virtual_environment(tmp_path: P
     entrypoint.write_text(f"#!{sys.executable}\nimport sys\nprint(sys.prefix)\n", encoding="utf-8")
     entrypoint.chmod(0o755)
     native = subprocess.run([str(entrypoint)], check=True, capture_output=True, text=True)
-    sealed = run_command(str(entrypoint))
+    sealed = run_command(str(entrypoint), preserve_native_executable_path=False)
     assert sealed.returncode == 0, sealed.stderr
     assert sealed.stdout == native.stdout.rstrip("\n")
 
@@ -28,7 +46,7 @@ def test_run_command_captures_actual_executable_and_path_authority(tmp_path: Pat
     executable.chmod(0o755)
     env = {"PATH": str(tmp_path)}
 
-    result = run_command("authority-tool", env=env)
+    result = run_command("authority-tool", env=env, preserve_native_executable_path=False)
 
     receipt = result.runtime_authority
     assert receipt is not None
@@ -49,7 +67,7 @@ def test_env_shebang_is_observed_without_false_atomic_materialization(tmp_path: 
     executable.write_text("#!/usr/bin/env sh\nprintf 'env-script\\n'\n", encoding="utf-8")
     executable.chmod(0o755)
 
-    result = run_command(str(executable))
+    result = run_command(str(executable), preserve_native_executable_path=False)
 
     assert result.returncode == 0
     assert result.stdout == "env-script"
@@ -74,6 +92,7 @@ def test_guarded_native_env_shebang_keeps_native_resolution_and_observational_re
         str(executable),
         parent_death_signal=True,
         terminal=CommandTerminal(lambda maximum: None, output.append) if terminal else None,
+        preserve_native_executable_path=False,
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
@@ -270,6 +289,7 @@ def test_runtime_authority_executes_admitted_binary_bytes_after_source_mutation(
         str(executable),
         "-c",
         "printf admitted-binary",
+        preserve_native_executable_path=False,
         runtime_authority=RuntimeAuthorityBinding(
             runtime_identity="sha256:" + "1" * 64,
         ),
@@ -308,6 +328,7 @@ def test_runtime_authority_executes_admitted_shebang_interpreter_after_replaceme
     monkeypatch.setattr(subprocess, "Popen", replace_interpreter_before_spawn)
     result = run_command(
         str(executable),
+        preserve_native_executable_path=False,
         runtime_authority=RuntimeAuthorityBinding(
             runtime_identity="sha256:" + "2" * 64,
         ),

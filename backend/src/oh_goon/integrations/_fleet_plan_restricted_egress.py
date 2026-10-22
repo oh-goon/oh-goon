@@ -185,6 +185,7 @@ class RestrictedEgressLease:
             *command,
             timeout=10.0,
             env=_control_environment(),
+            preserve_native_executable_path=False,
             cancel_requested=cancel_requested,
         )
         if result.returncode != 0:
@@ -364,7 +365,12 @@ def _cleanup_egress_resources(
         (ip, "link", "delete", host_veth),
     ):
         try:
-            result = run_command(*command, timeout=5.0, env=_control_environment())
+            result = run_command(
+                *command,
+                timeout=5.0,
+                env=_control_environment(),
+                preserve_native_executable_path=False,
+            )
             if result.returncode != 0:
                 failures.append(f"{command[1:]}: exit={result.returncode}")
         except Exception as exc:
@@ -379,7 +385,12 @@ def _cleanup_egress_resources(
         )
         for command, kind, name in probes:
             try:
-                result = run_command(*command, timeout=5.0, env=_control_environment())
+                result = run_command(
+                    *command,
+                    timeout=5.0,
+                    env=_control_environment(),
+                    preserve_native_executable_path=False,
+                )
                 if result.returncode != 0:
                     failures.append(f"{kind} absence probe: exit={result.returncode}")
                     continue
@@ -484,6 +495,7 @@ def _select_free_link_subnet(
         "show",
         timeout=10.0,
         env=_control_environment(),
+        preserve_native_executable_path=False,
         cancel_requested=cancel_requested,
     )
     if result.returncode != 0:
