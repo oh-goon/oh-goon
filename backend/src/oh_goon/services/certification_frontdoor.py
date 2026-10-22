@@ -581,6 +581,7 @@ def _systemd_reentry_command(
         f"--working-directory={Path.cwd().resolve()}",
         "--",
         sys.executable,
+        "-I",
         "-m",
         "oh_goon.services.certification_frontdoor",
         _REENTRY_FLAG,

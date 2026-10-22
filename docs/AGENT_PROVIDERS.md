@@ -69,16 +69,21 @@ copying or exporting credentials. This requires a Codex version supporting
 oh-goon ai --agent codex --profile signed-in --config providers.json --workspace /path/to/projects/app --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
 ```
 
-This is an original managed Run with headless report Steps. Native Codex receives
-the exact frozen task, Hashmarks presentation and Skill through its session base
-instructions file, including follow-up and compaction; incremental tool context
-is disabled. Model and reasoning effort are explicit native settings. User config
+This is an original managed Run with headless report Steps. Oh-Goon configures
+Codex's native session instructions file with the exact frozen task, Hashmarks
+presentation and Skill; incremental tool context is disabled. Codex owns session,
+follow-up and compaction behavior. Portable tests verify the emitted configuration
+and a synthetic receiver; the installed Codex probe verifies sandbox permissions.
+Actual installed-Codex instruction delivery across follow-up and compaction remains
+unverified. Model and reasoning effort are explicit native settings. User config
 and exec rules are ignored for this invocation, the project is untrusted, and
 hooks, plugins, Apps, web search and native delegation are disabled. Native tools
 use Codex's restricted filesystem policy: platform binaries and selected runtime
 inputs are readable, the working repository and execution scratch are writable,
-and tool networking is disabled. The authentication home cannot be a tool root
-or part of the captured workspace. Native argument/config overrides are rejected.
+and tool networking is disabled. The authentication home and every native tool
+root must be separate filesystem trees: neither may contain the other, including
+through symlink aliases. The home cannot be part of the captured workspace.
+Native argument/config overrides are rejected.
 
 Git hooks and separate verification Steps retain trusted local execution. This
 profile does not provide whole-process Bubblewrap isolation, broker endpoint

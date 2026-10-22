@@ -62,6 +62,11 @@ working = prompt['working_workspace']
 assert pathlib.Path(working['root']) == pathlib.Path.cwd()
 assert working['root'] != prompt['captured_repository']
 assert working['repository_access'] == ('read_only' if mode in {'review', 'wrong-review'} else 'write')
+if mode == 'helper-shadowing':
+    import shlex, subprocess
+    evidence = subprocess.run(shlex.split(prompt['repository_tools']['list']), capture_output=True, text=True, check=True)
+    assert json.loads(evidence.stdout)['producer'] == 'Hashmarks'
+    assert 'repo/main.py' in json.loads(evidence.stdout)['paths']
 configuration = json.loads(pathlib.Path(os.environ['OPENCODE_CONFIG_DIR'], 'opencode.json').read_text())
 provider = configuration['providers']['oh-goon']
 base = provider['settings']['baseURL']
@@ -107,6 +112,14 @@ def _case(
     repository = tmp_path / "repos/team/project"
     repository.mkdir(parents=True)
     (repository / "main.py").write_text("def answer():\n    return 42\n")
+    if mode == "helper-shadowing":
+        shadow = repository / "oh_goon"
+        shadow.mkdir()
+        (shadow / "__init__.py").write_text(
+            "from pathlib import Path\n"
+            "Path('untrusted-helper-ran.txt').write_text('repository import executed')\n"
+            "raise SystemExit(77)\n"
+        )
     skill = tmp_path / "skills/team/inspect"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("# Native fixture\nInspect complete captured source.\n")
@@ -233,6 +246,7 @@ def test_native_step_real_child_receives_frozen_context_and_uses_the_managed_bro
     assert outcome.physical_execution_id is not None and outcome.runtime_authority is not None
     assert outcome.standard_isolation is not None
     assert outcome.standard_isolation.broker_socket_mounted
+
     observation = next(
         item for item in outcome.observations if isinstance(item, NativeAgentObservation)
     )
@@ -243,6 +257,19 @@ def test_native_step_real_child_receives_frozen_context_and_uses_the_managed_bro
     assert len(model_transport) == 1
     assert "Hashmarks" in model_transport[0]["messages"][0]["content"]
     assert "private-host-value" not in outcome.stdout + outcome.stderr
+
+
+@pytest.mark.process
+def test_native_helpers_ignore_repository_controlled_python_package(
+    tmp_path: Path, model_transport: list[dict[str, Any]]
+) -> None:
+    repository, _handoff, step, runtime = _case(tmp_path, mode="helper-shadowing")
+    outcome = execute_direct_step(repository, step, runtime, step_order=1)
+    assert not (repository / "untrusted-helper-ran.txt").exists()
+    assert outcome.returncode == 0, outcome.stderr
+    assert outcome.stdout == "Native work reported"
+    assert (repository / "native-write.txt").read_text() == "owned edit"
+    assert len(model_transport) == 1
 
 
 @pytest.mark.process

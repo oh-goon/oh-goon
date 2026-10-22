@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -36,8 +38,10 @@ from oh_goon.integrations.fleet_plan_step_execution import (
     StepRuntime,
     _execute_typed_step,
     _StepProcess,
+    prepare_frozen_readonly_skill_search,
 )
 from oh_goon.integrations.hashmarks.agent_tools import prompt_observation, repository_observation
+from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 
 _LOCAL_HARNESSES = (
     "local-model-search",
@@ -164,7 +168,12 @@ def test_hashmarks_failure_stops_every_model_harness_before_dispatch(
 
     def runner(*args: str, **kwargs: Any) -> CommandResult:
         calls.append(args)
-        assert args[:3] == (sys.executable, "-m", "oh_goon.integrations.hashmarks.agent_tools")
+        assert args[:4] == (
+            sys.executable,
+            "-I",
+            "-m",
+            "oh_goon.integrations.hashmarks.agent_tools",
+        )
         assert args[args.index("--tool") + 1] == "task_evidence"
         roots.append(kwargs["cwd"])
         if failure == "unavailable":
@@ -207,7 +216,12 @@ def test_initial_evidence_precedes_every_reasoning_turn_without_reducing_scope(
         assert kwargs["cancel_requested"] is cancellation
         assert kwargs["runtime_supervision"] is token
         assert kwargs["timeout"] is None
-        if args[:3] == (sys.executable, "-m", "oh_goon.integrations.hashmarks.agent_tools"):
+        if args[:4] == (
+            sys.executable,
+            "-I",
+            "-m",
+            "oh_goon.integrations.hashmarks.agent_tools",
+        ):
             observations.append((args[args.index("--tool") + 1], kwargs["cwd"]))
             result = _native_reply(args, kwargs)
             if observations[-1][0] != "task_evidence":
@@ -235,8 +249,13 @@ def test_initial_evidence_precedes_every_reasoning_turn_without_reducing_scope(
                 assert disclosed["stdout_truncated"] is False
                 reply = {"decision": "finish", "summary": "Reviewed bounded observations"}
             return CommandResult(argv=args, stderr="", returncode=0, stdout=json.dumps(reply))
-        assert args[:3] == (sys.executable, "-m", "oh_goon.integrations.agent_review_execution")
-        payload = json.loads(Path(args[3]).read_bytes())
+        assert args[:4] == (
+            sys.executable,
+            "-I",
+            "-m",
+            "oh_goon.integrations.agent_review_execution",
+        )
+        payload = json.loads(Path(args[4]).read_bytes())
         source = json.loads(payload["messages"][1]["content"])
         assert next(iter(source)) == "repository_evidence"
         assert {row["path"] for row in source["repository"]} == {"repo/code.py", "repo/other.txt"}
@@ -285,7 +304,12 @@ def test_cancellation_after_initial_observation_prevents_model_disclosure(
     def runner(*args: str, **kwargs: Any) -> CommandResult:
         nonlocal cancelled
         calls.append(args)
-        assert args[:3] == (sys.executable, "-m", "oh_goon.integrations.hashmarks.agent_tools")
+        assert args[:4] == (
+            sys.executable,
+            "-I",
+            "-m",
+            "oh_goon.integrations.hashmarks.agent_tools",
+        )
         cancelled = True
         return CommandResult(
             argv=args, stderr="", returncode=0, stdout="not-disclosed-after-cancellation"
@@ -308,3 +332,73 @@ def test_frozen_timeout_mismatch_prevents_initial_observation_and_model_dispatch
     step = step.model_copy(update={"timeout_seconds": 31})
     with pytest.raises(FleetPlanInvalid, match="timeout differs from frozen delivery"):
         _execute_typed_step(tmp_path / "unavailable-checkout", step, process, runtime)
+
+
+@pytest.mark.parametrize("phase", ("initial", "followup"))
+@pytest.mark.parametrize(
+    ("origin", "module"),
+    (
+        ("cwd", "oh_goon"),
+        ("cwd", "json"),
+        ("pythonpath", "hashmarks"),
+        ("pythonpath", "sitecustomize"),
+    ),
+)
+def test_repository_python_imports_cannot_replace_internal_evidence(
+    tmp_path: Path, phase: str, origin: str, module: str
+) -> None:
+    marker = tmp_path / "hostile-import-executed"
+    pythonpath = tmp_path / "repository-pythonpath"
+    pythonpath.mkdir()
+    packets: list[dict[str, Any]] = []
+
+    def runner(*args: str, **kwargs: Any) -> CommandResult:
+        if "--tool" not in args:
+            return CommandResult(argv=args, returncode=23, stdout="provider stopped", stderr="")
+        root = kwargs["cwd"] if origin == "cwd" else pythonpath
+        target = root / (module + ".py")
+        if module in ("oh_goon", "hashmarks"):
+            package = root / module
+            package.mkdir()
+            target = package / "__init__.py"
+        target.write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker)!r}).write_text('repository code ran')\n"
+            "raise RuntimeError('hostile repository import')\n"
+        )
+        completed = subprocess.run(
+            args,
+            cwd=kwargs["cwd"],
+            env={**os.environ, "PYTHONPATH": str(pythonpath)},
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr + completed.stdout
+        assert not marker.exists()
+        packets.append(json.loads(completed.stdout))
+        return CommandResult(
+            argv=args,
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+
+    handoff, step, process, runtime = _case(
+        tmp_path, "provider-review" if phase == "initial" else "local-model-tools", runner
+    )
+    if phase == "initial":
+        outcome = _execute_typed_step(tmp_path / "unavailable-checkout", step, process, runtime)
+        assert outcome.returncode == 23
+        assert packets[0]["evidence"]["evidence_packet_identity"]
+    else:
+        with prepare_frozen_readonly_skill_search(handoff, tool_kind="list_paths") as (
+            root,
+            tool_step,
+        ):
+            runner(*tool_step.argv, cwd=root)
+        assert set(packets[0]["paths"]) == {"repo/code.py", "repo/other.txt"}
+    assert len(packets) == 1
+    assert packets[0]["capture_identity"] == handoff.source.repository.content_identity
+    assert packets[0]["producer_implementation_identity"] == require_loaded_hashmarks_runtime()

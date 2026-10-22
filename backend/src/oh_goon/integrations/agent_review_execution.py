@@ -172,6 +172,7 @@ def execute_provider_agent(
     try:
         result = process.command_runner(
             sys.executable,
+            "-I",
             "-m",
             "oh_goon.integrations.agent_review_execution",
             str(request_file),
