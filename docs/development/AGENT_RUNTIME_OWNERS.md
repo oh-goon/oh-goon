@@ -200,6 +200,13 @@ The existing owners enforce these contracts:
 Ordinary Bubblewrap evidence describes a shared host kernel, explicit mounts,
 network denial and selected native systemd resource caps. It does not establish
 immutable runtime bytes, deep custody, installed-model quality or APP PASS.
+Workspace, configuration and explicit input binds reject host sockets, FIFOs
+and special objects before launch. System runtime links to host IPC outside all
+bound system roots remain usable as links; their host endpoints are absent from
+the sandbox namespace. Links into another bound runtime root still fail, and
+private application file aliases remain forbidden in every bind.
+Writable private configuration overlays use native Bubblewrap 0.11 or newer
+capabilities; the selected workload rejects when they are unavailable.
 The [retained workload ADR](../architecture/ADR_AGENT_WORKLOAD_CANONICAL_EXECUTION.md)
 continues to govern shared execution. Strict Agent execution remains unsupported;
 normal startup does not acquire a strict signer/custody qualification gate.

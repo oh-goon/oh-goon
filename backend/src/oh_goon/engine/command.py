@@ -507,13 +507,15 @@ def run_command(
     runtime_supervision: CommandRuntimeSupervision | None = None,
     terminal: CommandTerminal | None = None,
     input_data: bytes | None = None,
-    preserve_native_executable_path: bool = False,
+    preserve_native_executable_path: bool = True,
     retain_output_tail: bool = False,
 ) -> CommandResult:
     """Run one owned command with optional live output and terminal transport.
 
-    Native agents that respawn their executable may explicitly retain the original
-    executable path. That mode reports observation, never atomic materialization.
+    Ordinary commands retain their native executable path, including native
+    invocation-name dispatch and self-respawn. This reports an observation,
+    never atomic materialization. Explicit exact-byte execution selects
+    preserve_native_executable_path=False and retains the sealed launch owner.
     Terminal output and explicit tail capture retain a bounded diagnostic tail;
     stdout_evidence hashes and counts the original complete raw stream.
     """

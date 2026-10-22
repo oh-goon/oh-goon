@@ -212,12 +212,14 @@ class BubblewrapProcessIsolation:
             for value in _STANDARD_RUNTIME_DIRECTORIES:
                 path = Path(value).resolve()
                 if path.is_dir() and not any(path.is_relative_to(root) for root in roots):
-                    _require_standard_bind_structure(
-                        path,
-                        allow_synthetic_devices=True,
-                        private_file_identities=private_file_identities,
-                    )
                     roots.append(path)
+            system_runtime_roots = tuple(roots)
+            for path in system_runtime_roots:
+                _require_standard_bind_structure(
+                    path,
+                    system_runtime_roots=system_runtime_roots,
+                    private_file_identities=private_file_identities,
+                )
             self._standard_system_checked = True
         configuration = stable_id(
             "standard-bubblewrap-capability",
@@ -260,6 +262,7 @@ class BubblewrapProcessIsolation:
                 "/bin/true",
                 timeout=10.0,
                 env={"PATH": os.defpath, **self._standard_resource_environment},
+                preserve_native_executable_path=False,
                 max_capture_bytes_per_stream=4096,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -529,6 +532,7 @@ class BubblewrapProcessIsolation:
                     *args,
                     timeout=timeout,
                     env={**environment, **self._standard_resource_environment},
+                    preserve_native_executable_path=False,
                     cancel_requested=cancel_requested,
                     termination_requested=request.termination_requested,
                     stream_output=stream_output,
@@ -747,6 +751,7 @@ class BubblewrapProcessIsolation:
                         timeout=timeout,
                         cwd=None,
                         env=env,
+                        preserve_native_executable_path=False,
                         cancel_requested=effective_cancel_requested,
                         termination_requested=termination_requested,
                         stream_output=stream_output,
@@ -1197,14 +1202,15 @@ def _standard_system_binds() -> tuple[str, ...]:
 def _require_standard_bind_structure(
     root: Path,
     *,
-    allow_synthetic_devices: bool = False,
+    system_runtime_roots: tuple[Path, ...] = (),
     private_file_identities: frozenset[tuple[int, int]] = frozenset(),
 ) -> None:
     """Reject host IPC/special objects without reading file contents or following directory links.
 
     This is a bounded physical mount check, not repository retrieval or another
-    source identity. Native runtime symlinks to the explicitly synthetic /dev
-    devices resolve to sandbox-owned devices rather than the host's objects.
+    source identity. System runtime links to synthetic /dev devices resolve
+    inside the sandbox. Host IPC outside the bound system roots is absent from
+    that view; the workspace and selected inputs independently reject host IPC.
     """
     pending = [root]
     inspected = 0
@@ -1224,14 +1230,21 @@ def _require_standard_bind_structure(
                 target_mode = target_metadata.st_mode
             except FileNotFoundError:
                 continue  # A dangling link conveys no host endpoint.
-            if allow_synthetic_devices and target in synthetic:
+            if (target_metadata.st_dev, target_metadata.st_ino) in private_file_identities:
+                raise FleetPlanInvalid("Native bind exposes a private application file alias")
+            if system_runtime_roots and (
+                target in synthetic
+                or (
+                    (stat.S_ISSOCK(target_mode) or stat.S_ISFIFO(target_mode))
+                    and not any(target.is_relative_to(bound) for bound in system_runtime_roots)
+                )
+            ):
                 continue
             if not (stat.S_ISREG(target_mode) or stat.S_ISDIR(target_mode)):
                 raise FleetPlanInvalid(
-                    "Standard sandbox bind symlink exposes a host IPC/special object"
+                    "Standard sandbox bind symlink exposes a host IPC/special object: "
+                    f"{path} -> {target}"
                 )
-            if (target_metadata.st_dev, target_metadata.st_ino) in private_file_identities:
-                raise FleetPlanInvalid("Native bind exposes a private application file alias")
         elif stat.S_ISDIR(metadata.st_mode):
             with os.scandir(path) as entries:
                 for entry in entries:

@@ -140,7 +140,7 @@ class CommandRunner(Protocol):
         broker_directory: Path | None = None,
         read_only_workspace: bool = False,
         private_configuration_directory: Path | None = None,
-        preserve_native_executable_path: bool = False,
+        preserve_native_executable_path: bool = True,
     ) -> CommandResult: ...
 
 

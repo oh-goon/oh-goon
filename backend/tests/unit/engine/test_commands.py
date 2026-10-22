@@ -202,8 +202,8 @@ def test_run_command_streams_output_without_changing_final_result() -> None:
     assert result.returncode == 0
     assert result.stdout == "out"
     assert result.stderr == "err"
-    assert ("stdout", "out\n") in observed
-    assert ("stderr", "err\n") in observed
+    assert "".join(text for stream, text in observed if stream == "stdout") == "out\n"
+    assert "".join(text for stream, text in observed if stream == "stderr") == "err\n"
 
 
 @pytest.mark.slow

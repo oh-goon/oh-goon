@@ -86,6 +86,7 @@ def test_owned_exec_guard_receives_parent_and_exact_admitted_execution_fd(
         "-c",
         "pass",
         parent_death_signal=True,
+        preserve_native_executable_path=False,
     )
 
     assert result.returncode == 0

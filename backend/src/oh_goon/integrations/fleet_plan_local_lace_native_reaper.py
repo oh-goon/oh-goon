@@ -144,7 +144,13 @@ def cleanup_local_orphan(
 
                 namespace = subject.observation["network_namespace"]
                 result = run_command(
-                    ip, "netns", "pids", namespace, timeout=5.0, env=_control_environment()
+                    ip,
+                    "netns",
+                    "pids",
+                    namespace,
+                    timeout=5.0,
+                    env=_control_environment(),
+                    preserve_native_executable_path=False,
                 )
                 if result.returncode != 0 or result.stdout.strip():
                     raise FleetPlanInvalid(

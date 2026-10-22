@@ -91,6 +91,7 @@ def _attempt(
             timeout=timeout,
             cwd=cwd,
             cancel_requested=cancel_requested,
+            preserve_native_executable_path=False,
             runtime_authority=RuntimeAuthorityBinding(
                 runtime_identity=context.runner_toolchain_identity,
                 environment_generation_identity=context.environment_identity,

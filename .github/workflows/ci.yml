@@ -1,0 +1,57 @@
+name: Required checks
+
+"on":
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - backend-check
+          - frontend-check
+          - tooling-check
+          - architecture
+          - check-generated
+          - test-integration
+          - build-release
+    env:
+      UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: ${{ matrix.target == 'backend-check' && '--maxfail=1' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.19.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.5"
+          enable-cache: false
+      - name: Install native test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
+          # Native Bubblewrap tests need user namespaces on this disposable VM.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Materialize committed locks
+        run: make init
+      - name: Run required check
+        run: make "${{ matrix.target }}"

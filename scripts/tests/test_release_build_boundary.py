@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import shutil
+import subprocess
 from pathlib import Path
 import sys
 import tomllib
@@ -107,3 +110,72 @@ def test_source_bootstrap_layers_do_not_compensate_for_release_static_contract()
     assert "generated/release/static" in hook
     assert 'version != "standard"' in hook
     assert "generated/release/static" in release
+
+
+@pytest.mark.parametrize("previous_ui", (None, "stale UI\n"))
+@pytest.mark.parametrize("frontend_exit", (0, 7))
+def test_release_build_owns_fresh_ui_and_cleans_failed_outputs(
+    tmp_path: Path, previous_ui: str | None, frontend_exit: int
+) -> None:
+    script = tmp_path / "scripts/release/build_release.sh"
+    script.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / "scripts/release/build_release.sh", script)
+    if previous_ui is not None:
+        frontend = tmp_path / "frontend/dist"
+        frontend.mkdir(parents=True)
+        (frontend / "index.html").write_text(previous_ui, encoding="utf-8")
+    for directory in ("static", "dist"):
+        output = tmp_path / "generated/release" / directory
+        output.mkdir(parents=True)
+        (output / "old-output").write_text("old release", encoding="utf-8")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    backend_bin = tmp_path / "backend/.venv/bin"
+    backend_bin.mkdir(parents=True)
+    commands = tmp_path / "commands"
+    for path, body in {
+        tools / "make": (
+            '#!/bin/sh\nprintf "make:%s\\n" "$1" >> "$RELEASE_COMMANDS"\n'
+            'if [ "$1" = frontend-build ]; then\n'
+            '  [ "$RELEASE_FRONTEND_EXIT" = 0 ] || exit "$RELEASE_FRONTEND_EXIT"\n'
+            "  mkdir -p frontend/dist\n"
+            '  printf "fresh UI\\n" > frontend/dist/index.html\n'
+            "fi\n"
+        ),
+        tools / "uv": (
+            '#!/bin/sh\nprintf "uv:%s\\n" "$1" >> "$RELEASE_COMMANDS"\n'
+            'if [ "$1" = build ]; then\n'
+            "  cp ../generated/release/static/index.html "
+            "../generated/release/dist/wheel-ui-proof\n"
+            "fi\n"
+        ),
+        backend_bin / "oh-goon-release-version": "#!/bin/sh\nexit 0\n",
+        backend_bin / "oh-goon-release-artifact-check": "#!/bin/sh\nexit 0\n",
+    }.items():
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o755)
+    result = subprocess.run(
+        ("bash", str(script)),
+        env={
+            **os.environ,
+            "PATH": str(tools) + os.pathsep + os.defpath,
+            "RELEASE_COMMANDS": str(commands),
+            "RELEASE_FRONTEND_EXIT": str(frontend_exit),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    observed = commands.read_text(encoding="utf-8").splitlines()
+    assert observed.count("make:frontend-build") == 1
+    assert result.returncode == frontend_exit, result.stdout + result.stderr
+    release = tmp_path / "generated/release"
+    if frontend_exit:
+        assert "uv:build" not in observed
+        assert not (release / "static").exists()
+        assert not (release / "dist").exists()
+    else:
+        assert (release / "static/index.html").read_text() == "fresh UI\n"
+        assert (release / "dist/wheel-ui-proof").read_text() == "fresh UI\n"
+        assert observed.index("make:check") < observed.index("make:frontend-build")
+        assert observed.index("make:frontend-build") < observed.index("uv:build")

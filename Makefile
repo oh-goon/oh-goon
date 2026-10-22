@@ -496,9 +496,10 @@ test-python-core-diagnostic:
 
 # The leaf transport compatibility surface intentionally waits until backend dependencies
 # are complete. Missing httpx2 must block this late job, never the unrelated core suite.
-# A repository-owned process-group timeout prevents one leaf adapter from hanging forever.
+# Process lifecycle proofs use their own serialized lane and native timeout budget.
 test-python-dependency-complete:
-	@$(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | 60s hard timeout' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 2 --workers 1 --batch-timeout 60 --suite-timeout 120 --marker ''
+	@$(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | complete non-process qualification' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 2 --workers 1 --batch-timeout 60 --suite-timeout 120 --marker 'not process'
+	@$(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE PROCESS TESTS' 'Owner: Oh-Goon pytest batches | semantic process supervision is serialized' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 1 --workers 1 --batch-timeout 180 --suite-timeout 600 --marker 'process'
 
 # Profiling is diagnostic, never part of the normal gate. It exposes accidental
 # suite growth without making wall-clock timing a correctness assertion.
@@ -511,7 +512,7 @@ test-python-profile:
 # OH_GOON_OPAQUE_TOOLS: git ldd node npm true uv
 test-python: python-static-sanity
 	@$(RUN_STEP) 'BACKEND FAST UNIT TESTS' 'Owner: Oh-Goon pytest batches | semantic selection + adaptive timeout refinement' -- backend/.venv/bin/oh-goon-test-batches backend/tests/unit --granularity files --batch-size 4 --workers 4 --batch-timeout 120 --suite-timeout 1200 $(PYTEST_RESUME) --resume-key backend-fast-unit-files --marker 'not slow and not process and not scale and not certification'
-	@$(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | 60s hard timeout' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 2 --workers 1 --batch-timeout 60 --suite-timeout 120 --marker ''
+	@$(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | 60s hard timeout' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 2 --workers 1 --batch-timeout 60 --suite-timeout 120 --marker 'not slow and not process and not scale and not certification'
 
 # Complete backend qualification uses one generic non-process lane. Process-supervision
 # tests own the explicit ``process`` semantic marker and are serialized as a distinct
@@ -520,7 +521,7 @@ test-python: python-static-sanity
 test-python-complete: python-static-sanity
 	@$(RUN_STEP) 'BACKEND COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | complete non-process qualification' -- backend/.venv/bin/oh-goon-test-batches backend/tests/unit --granularity files --batch-size 4 --workers 2 --batch-timeout 180 --suite-timeout 1200 --environment-retries 1 --marker 'not process'
 	@$(RUN_STEP) 'BACKEND COMPLETE PROCESS TESTS' 'Owner: Oh-Goon pytest batches | semantic process supervision is serialized' -- backend/.venv/bin/oh-goon-test-batches backend/tests/unit --granularity files --batch-size 1 --workers 1 --batch-timeout 180 --suite-timeout 600 --environment-retries 1 --marker 'process'
-	@$(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | 60s hard timeout' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 2 --workers 1 --batch-timeout 60 --suite-timeout 120 --marker ''
+	@$(MAKE) test-python-dependency-complete
 
 repository-understanding-test-batch:
 	@test -n "$(BATCH)" || { echo "BATCH=1..7 is required" >&2; exit 2; }
@@ -565,6 +566,7 @@ frontend-build:
 
 test-integration:
 	@$(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- sh -c 'cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "not certification" tests/integration'
+	@$(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- backend/.venv/bin/oh-goon-qualification-exec pytest -c backend/pyproject.toml -m "not certification" tests/integration
 
 # Compact production-shaped SQLite lifetime gate. This deliberately crosses the
 # worker/wait/restart boundary and complements component/fault-matrix coverage.

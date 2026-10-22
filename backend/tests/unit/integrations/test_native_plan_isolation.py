@@ -40,6 +40,44 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
 from oh_goon.integrations.fleet_plan_run_execution import FleetPlanRunExecutor
 from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, execute_direct_step
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
+from tests.factories.runtime_authority import native_invocation_executable
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux executable identity")
+@pytest.mark.parametrize("profile", [False, True])
+def test_ordinary_step_preserves_native_kernel_invocation_name(
+    tmp_path: Path, profile: bool
+) -> None:
+    executable = native_invocation_executable(tmp_path)
+    selection = (
+        ResolvedNativeAgent(
+            agent="pi",
+            profile_name="local",
+            definition=NativeAgentDefinition(executable=str(executable)),
+            profile=NativeAgentProfile(backend="local"),
+            executable_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
+        )
+        if profile
+        else None
+    )
+    result = execute_direct_step(
+        tmp_path,
+        ResolvedCommandStep(step_id="native-utility", argv=(str(executable),)),
+        StepRuntime(
+            git=GitService(),
+            extensions=None,
+            tools=None,
+            cancel_requested=None,
+            native_profile=selection,
+        ),
+        step_order=1,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "native invocation retained"
+    assert result.runtime_authority is not None
+    assert result.runtime_authority.execution_materialization_identity is None
+    assert result.supervisor is not None and result.supervisor.final_process_group_quiescent
 
 
 def _selection(backend: BubblewrapProcessIsolation) -> ResolvedNativeAgent:

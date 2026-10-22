@@ -12,6 +12,7 @@ before changing code; keep instructions here specific to Oh-Goon.
 | React/TypeScript behavior | `frontend/`; read its `AGENTS.md`, `README.md`, then `src/README.md` |
 | Executable Goon and Plan packages | `templates/`; package rules below |
 | Architecture, generation, release, repository checks | `scripts/` launchers; implementation in `backend/src/oh_goon/repository_tooling/`, tests in `scripts/tests/` |
+| Hosted repository CI | `.github/workflows/`; invoke the existing Make checks; GitHub owns check scheduling and merge enforcement |
 | Generated OpenAPI/frontend contracts | `generated/`; change the authoritative backend source or generator |
 | Container/deployment examples | `docker/`; backend/release owners retain runtime semantics |
 | Cross-owner integration | `tests/integration/`; backend-only integration stays under `backend/tests/integration/` |

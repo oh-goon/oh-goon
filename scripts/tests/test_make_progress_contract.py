@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -133,3 +138,64 @@ def test_init_has_no_storage_admission_before_native_uv_and_doctor_is_separate()
     assert "$(INIT_DOCTOR)" in doctor
     assert "DEPENDENCY_POLICY =" in makefile
     assert "$(DEPENDENCY_POLICY)" in (ROOT / "Makefile").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("failure", ("", "backend", "cross-owner"))
+def test_integration_gate_runs_both_owners_and_preserves_failures(
+    tmp_path: Path, failure: str
+) -> None:
+    shutil.copyfile(ROOT / "Makefile", tmp_path / "Makefile")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("run_step.sh", "command_banner.sh"):
+        shutil.copyfile(ROOT / "scripts" / name, scripts / name)
+    executable = tmp_path / "backend/.venv/bin/oh-goon-qualification-exec"
+    executable.parent.mkdir(parents=True)
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "owner = 'backend' if Path.cwd().name == 'backend' else 'cross-owner'\n"
+        "with Path(os.environ['OH_GOON_INTEGRATION_CALLS']).open('a') as stream:\n"
+        "    stream.write(json.dumps({'owner': owner, 'argv': sys.argv[1:]}) + '\\n')\n"
+        "sys.exit(7 if owner == os.environ['OH_GOON_INTEGRATION_FAILURE'] else 0)\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    calls = tmp_path / "calls.jsonl"
+    environment = dict(os.environ)
+    environment["OH_GOON_INTEGRATION_CALLS"] = str(calls)
+    environment["OH_GOON_INTEGRATION_FAILURE"] = failure
+    result = subprocess.run(
+        ("make", "test-integration"),
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    observed = [json.loads(line) for line in calls.read_text().splitlines()]
+    expected = [
+        {
+            "owner": "backend",
+            "argv": ["pytest", "-m", "not certification", "tests/integration"],
+        }
+    ]
+    if failure != "backend":
+        expected.append(
+            {
+                "owner": "cross-owner",
+                "argv": [
+                    "pytest",
+                    "-c",
+                    "backend/pyproject.toml",
+                    "-m",
+                    "not certification",
+                    "tests/integration",
+                ],
+            }
+        )
+    assert observed == expected
+    assert result.returncode == (2 if failure else 0), result.stdout + result.stderr
+    if failure:
+        assert "exit 7" in result.stderr
