@@ -77,8 +77,10 @@ and exec rules are ignored for this invocation, the project is untrusted, and
 hooks, plugins, Apps, web search and native delegation are disabled. Native tools
 use Codex's restricted filesystem policy: platform binaries and selected runtime
 inputs are readable, the working repository and execution scratch are writable,
-and tool networking is disabled. The authentication home cannot be a tool root
-or part of the captured workspace. Native argument/config overrides are rejected.
+and tool networking is disabled. The authentication home and every native tool
+root must be separate filesystem trees: neither may contain the other, including
+through symlink aliases. The home cannot be part of the captured workspace.
+Native argument/config overrides are rejected.
 
 Git hooks and separate verification Steps retain trusted local execution. This
 profile does not provide whole-process Bubblewrap isolation, broker endpoint

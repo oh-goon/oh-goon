@@ -93,6 +93,39 @@ def test_guarded_native_env_shebang_keeps_native_resolution_and_observational_re
         assert result.stdout_evidence is None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX guarded process authority")
+@pytest.mark.parametrize("variable", ["PYTHONPATH", "PYTHONHOME"])
+def test_exec_guard_ignores_python_environment_without_replacing_workload_environment(
+    tmp_path: Path, variable: str
+) -> None:
+    injected = tmp_path / "repository"
+    injected.mkdir()
+    marker = tmp_path / "untrusted-import"
+    (injected / "ctypes.py").write_text(
+        f"open({str(marker)!r}, 'w').write('injected')\nraise RuntimeError('untrusted ctypes')\n",
+        encoding="utf-8",
+    )
+    selected = str(injected)
+
+    result = run_command(
+        sys.executable,
+        "-I",
+        "-S",
+        "-c",
+        "import os,sys; print(os.environ[sys.argv[1]])",
+        variable,
+        cwd=injected,
+        env={variable: selected},
+        parent_death_signal=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == selected
+    assert not marker.exists()
+    assert result.supervisor.final_process_group_quiescent
+
+
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="Linux native self-executable semantics"
 )

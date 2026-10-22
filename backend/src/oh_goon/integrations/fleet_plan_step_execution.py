@@ -439,6 +439,7 @@ def _execute_typed_step(
                     step_id=handoff.step_id,
                     argv=(
                         sys.executable,
+                        "-I",
                         "-m",
                         "oh_goon.integrations.hashmarks.agent_tools",
                         "--tool",
@@ -1490,6 +1491,7 @@ def prepare_frozen_readonly_skill_search(
             if tool_kind == "list_skill_paths"
             else (
                 sys.executable,
+                "-I",
                 "-m",
                 "oh_goon.integrations.hashmarks.agent_tools",
                 "--tool",

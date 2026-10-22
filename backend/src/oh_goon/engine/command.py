@@ -318,7 +318,9 @@ def _spawn_command_process(
     )
     guarded_parent_death = os.name != "nt" and (parent_death_signal or terminal_slave is not None)
     if guarded_parent_death:
-        popen_argv = (sys.executable, "-S", str(_EXEC_GUARD_PATH), *lease.launch_argv)
+        # The guard imports only its trusted script directory and stdlib. Ignore
+        # Python startup variables here while preserving them for the workload.
+        popen_argv = (sys.executable, "-E", "-S", str(_EXEC_GUARD_PATH), *lease.launch_argv)
         popen_executable = None
         child_env[exec_guard_protocol.PARENT_PID_ENV] = str(os.getpid())
         if lease.execution_descriptor is not None:

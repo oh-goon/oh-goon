@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import subprocess
+from pathlib import Path
+
 import oh_goon.services.certification_frontdoor as frontdoor
 
 
@@ -94,3 +98,40 @@ def test_delegated_reentry_does_not_repeat_static_admission(monkeypatch) -> None
 
     assert frontdoor.main([frontdoor._REENTRY_FLAG, "env", "ready", "release"]) == 0
     assert observed == [["env", "ready", "release"]]
+
+
+def test_delegated_reentry_ignores_repository_python_imports(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    marker = tmp_path / "untrusted-import"
+    poison = (
+        f"open({str(marker)!r}, 'w').write('injected')\n"
+        "raise RuntimeError('untrusted repository import')\n"
+    )
+    package = tmp_path / "oh_goon"
+    package.mkdir()
+    (package / "__init__.py").write_text(poison, encoding="utf-8")
+    (tmp_path / "sitecustomize.py").write_text(poison, encoding="utf-8")
+    command = frontdoor._systemd_reentry_command(
+        systemd_run=Path("/usr/bin/systemd-run"),
+        env_file=tmp_path / "missing-environment.json",
+        ready_file=tmp_path / "ready",
+        workflow_args=["release"],
+    )
+
+    # Exercise the exact Python re-entry while stopping before environment
+    # restoration, systemd delegation, or any certification workload.
+    result = subprocess.run(
+        command[command.index("--") + 1 :],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 2, result.stderr
+    assert "cannot restore certification environment" in result.stdout
+    assert "No certification Goon ran." in result.stdout
+    assert not marker.exists()
+    assert not (tmp_path / "ready").exists()

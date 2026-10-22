@@ -1,5 +1,8 @@
 import base64
 import json
+import os
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -245,6 +248,67 @@ def test_provider_adapter_still_rejects_untyped_clean_after_zero_exit(tmp_path):
             repository_evidence="Producer-qualified evidence",
         )
     assert not list(scratch.iterdir())
+
+
+@pytest.mark.parametrize("module", ("oh_goon", "json", "sitecustomize"))
+def test_provider_worker_ignores_repository_python_imports_and_reports_native_failure(
+    tmp_path, module
+):
+    resolver, path, _, options = agent_review_case(tmp_path)
+    plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    step = plan.steps[0]
+    scratch = tmp_path / "provider-scratch"
+    scratch.mkdir()
+    marker = tmp_path / "hostile-import-executed"
+    target = scratch / (module + ".py")
+    if module == "oh_goon":
+        package = scratch / module
+        package.mkdir()
+        target = package / "__init__.py"
+    target.write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('repository code ran')\n"
+        "raise RuntimeError('hostile repository import')\n"
+    )
+
+    def runner(*args, **kwargs):
+        # A malformed native request must remain a real worker failure, with no
+        # provider connection and no import selected from the request directory.
+        Path(args[-1]).write_text("{}")
+        completed = subprocess.run(
+            args,
+            cwd=kwargs["cwd"],
+            env={**os.environ, **kwargs["env"], "PYTHONPATH": str(scratch)},
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return CommandResult(
+            argv=args,
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+
+    process = SimpleNamespace(
+        host_environment={},
+        environment={},
+        paths=SimpleNamespace(tmp=scratch),
+        command_runner=runner,
+    )
+    outcome = execute_provider_agent(
+        step,
+        handoffs[step.step_id],
+        process,
+        SimpleNamespace(cancel_requested=None, runtime_supervision=None),
+        timeout=1,
+        repository_evidence="Producer-qualified evidence",
+    )
+    assert outcome.returncode != 0
+    assert "KeyError: 'connection'" in outcome.stderr
+    assert not marker.exists()
+    assert not (scratch / "agent-provider-request.json").exists()
 
 
 @pytest.mark.parametrize("attack", [None, "bad_queue", "omitted_finding"])

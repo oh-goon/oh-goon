@@ -258,6 +258,7 @@ class CgroupV2AttemptLease:
                 )
             return (
                 sys.executable,
+                "-I",
                 "-m",
                 "oh_goon.integrations._fleet_plan_nested_cgroup_launcher",
                 str(self.nested_delegation),
@@ -269,6 +270,7 @@ class CgroupV2AttemptLease:
             raise FleetPlanInvalid("Fleet direct process launch lacks original cgroup identity")
         return (
             sys.executable,
+            "-I",
             "-S",
             "-c",
             _CGROUP_EXEC,

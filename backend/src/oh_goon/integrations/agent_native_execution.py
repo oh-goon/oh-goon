@@ -174,6 +174,22 @@ def validate_native_agent_arguments(agent: str, arguments: tuple[str, ...]) -> N
         )
 
 
+def require_codex_authentication_home_separation(home: Path, tool_roots: tuple[Path, ...]) -> None:
+    """Reject overlapping authentication/tool trees, including filesystem aliases."""
+    try:
+        resolved_home = home.resolve()
+        resolved_roots = tuple(root.resolve() for root in tool_roots)
+    except (OSError, RuntimeError):
+        raise AgentProviderError(
+            "Codex authentication home separation cannot be established"
+        ) from None
+    if any(
+        root.is_relative_to(resolved_home) or resolved_home.is_relative_to(root)
+        for root in resolved_roots
+    ):
+        raise AgentProviderError("Native tool roots must not expose the Codex authentication home")
+
+
 def codex_login_command(
     selected: ResolvedNativeAgent,
     *,
@@ -202,10 +218,7 @@ def codex_login_command(
         raise AgentProviderError("Codex login requires its explicit headless native selection")
     home = Path(login.home)
     writable = (workspace, scratch, *((evidence_state,) if evidence_state is not None else ()))
-    if workspace.is_relative_to(home) or any(
-        home.is_relative_to(root) for root in (*read_roots, *writable)
-    ):
-        raise AgentProviderError("Native tool roots must not expose the Codex authentication home")
+    require_codex_authentication_home_separation(home, (*read_roots, *writable))
     filesystem = {":minimal": "read", **{str(root): "read" for root in read_roots}}
     filesystem.update({str(root): "write" for root in writable})
     rules = ", ".join(

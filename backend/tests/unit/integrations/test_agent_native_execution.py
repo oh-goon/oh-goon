@@ -32,12 +32,27 @@ def selection(agent: NativeAgentName, *, arguments: tuple[str, ...] = ()) -> Res
     )
 
 
-def test_codex_login_binds_native_model_instructions_and_tool_permissions(tmp_path: Path) -> None:
+@pytest.mark.parametrize("alias", ["none", "home", "root"])
+def test_codex_login_binds_native_model_instructions_and_tool_permissions(
+    tmp_path: Path, alias: str
+) -> None:
+    home = tmp_path / "native-auth"
+    capture = tmp_path / "capture"
+    home.mkdir()
+    capture.mkdir()
+    if alias == "home":
+        link = tmp_path / "home-link"
+        link.symlink_to(home, target_is_directory=True)
+        home = link
+    elif alias == "root":
+        link = tmp_path / "capture-link"
+        link.symlink_to(capture, target_is_directory=True)
+        capture = link
     selected = replace(
         selection("codex"),
         profile=NativeAgentProfile(
             codex_login=CodexLoginConnection(
-                home="/private/codex",
+                home=str(home),
                 model="gpt-6-luna",
                 reasoning_effort="low",
             )
@@ -51,7 +66,7 @@ def test_codex_login_binds_native_model_instructions_and_tool_permissions(tmp_pa
         workspace=tmp_path / "repo",
         scratch=tmp_path / "scratch",
         evidence_state=tmp_path / "producer-state",
-        read_roots=(tmp_path / "capture",),
+        read_roots=(capture,),
     )
     settings: dict[str, object] = {}
     for index, argument in enumerate(command.argv):
@@ -66,24 +81,44 @@ def test_codex_login_binds_native_model_instructions_and_tool_permissions(tmp_pa
     assert permissions["oh_goon"]["network"]["enabled"] is False
     filesystem = permissions["oh_goon"]["filesystem"]
     assert filesystem[str(tmp_path / "repo")] == "write"
-    assert filesystem[str(tmp_path / "capture")] == "read"
+    assert filesystem[str(capture)] == "read"
     assert filesystem[str(tmp_path / "producer-state")] == "write"
-    assert "/private/codex" not in filesystem and ":root" not in filesystem
-    assert dict(command.environment)["CODEX_HOME"] == "/private/codex"
+    assert str(home) not in filesystem and ":root" not in filesystem
+    assert dict(command.environment)["CODEX_HOME"] == str(home)
     assert "PRIVATE evidence" not in " ".join(command.argv)
     assert "--ignore-user-config" in command.argv and "--ignore-rules" in command.argv
 
 
-@pytest.mark.parametrize("root_kind", ["read", "producer-state"])
+@pytest.mark.parametrize("root_kind", ["read", "workspace", "scratch", "producer-state"])
+@pytest.mark.parametrize("relation", ["equal", "home-in-root", "root-in-home"])
+@pytest.mark.parametrize("alias", ["none", "home", "root"])
 def test_codex_login_refuses_tool_root_that_exposes_native_authentication(
     tmp_path: Path,
     root_kind: str,
+    relation: str,
+    alias: str,
 ) -> None:
+    home = tmp_path / "native-auth"
+    root = {
+        "equal": home,
+        "home-in-root": tmp_path,
+        "root-in-home": home / "public-runtime",
+    }[relation]
+    home.mkdir()
+    root.mkdir(exist_ok=True)
+    if alias == "home":
+        link = tmp_path / "home-link"
+        link.symlink_to(home, target_is_directory=True)
+        home = link
+    elif alias == "root":
+        link = tmp_path / "root-link"
+        link.symlink_to(root, target_is_directory=True)
+        root = link
     selected = replace(
         selection("codex"),
         profile=NativeAgentProfile(
             codex_login=CodexLoginConnection(
-                home=str(tmp_path / "native"),
+                home=str(home),
                 model="gpt-6-luna",
                 reasoning_effort="low",
             )
@@ -93,10 +128,10 @@ def test_codex_login_refuses_tool_root_that_exposes_native_authentication(
         codex_login_command(
             selected,
             instructions=tmp_path / "prompt",
-            workspace=tmp_path / "repo",
-            scratch=tmp_path / "scratch",
-            read_roots=(tmp_path,) if root_kind == "read" else (),
-            evidence_state=tmp_path if root_kind == "producer-state" else None,
+            workspace=root if root_kind == "workspace" else tmp_path / "repo",
+            scratch=root if root_kind == "scratch" else tmp_path / "scratch",
+            read_roots=(root,) if root_kind == "read" else (),
+            evidence_state=root if root_kind == "producer-state" else None,
         )
 
 

@@ -143,6 +143,16 @@ When the distinction is unclear, the burden is on the new Oh-Goon layer to demon
 
 ## Hashmarks dependency and package-local execution
 
+Runtime evidence, provider, inference relay, and delegation module helpers use
+native Python isolated mode (`-I`), so the repository working directory and
+ambient `PYTHON*` settings cannot select their
+modules or dependencies. The command guard uses its trusted absolute script with
+`-E -S`, preserving its sibling protocol import while ignoring ambient Python
+configuration. These controls apply to the helper interpreter; the admitted
+workload still receives its configured working directory and environment.
+Installed distributions in the selected Python environment retain import
+authority, without repository-path injection or a bootstrap fallback.
+
 Hashmarks release production and standalone installation are Hashmarks-owned. The Oh-Goon backend selects a released Hashmarks wheel through `backend/pyproject.toml`; native `uv.lock` owns the exact dependency selection and `make init` materializes it once. Oh-Goon must not vendor, reacquire, unpack into diagnostics, or maintain a parallel release/provenance ledger.
 
 Package-local frontend executables are resolved by native npm scripts such as `npm run dev` and `npm run browser:runtime`. Acceptance must not infer readiness from `node_modules/.bin` existence before invoking npm. Exact package-local executable inspection remains valid only at the strict Fleet executable-materialization security boundary.

@@ -42,7 +42,19 @@ from oh_goon.integrations.fleet_plan_process_isolation import native_profile_com
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
 
-@pytest.mark.parametrize("invalid", ["runtime-root", "workspace", "review", "agent"])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "runtime-root",
+        "runtime-root-descendant",
+        "runtime-root-equal",
+        "runtime-root-symlink",
+        "authentication-home-symlink",
+        "workspace",
+        "review",
+        "agent",
+    ],
+)
 def test_codex_login_conflicts_reject_before_run_admission(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -53,9 +65,14 @@ def test_codex_login_conflicts_reject_before_run_admission(
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     home = tmp_path / "native-auth"
     home.mkdir()
+    if invalid == "authentication-home-symlink":
+        alias = tmp_path / "home-link"
+        alias.symlink_to(home, target_is_directory=True)
+        home = alias
     program = tmp_path / "bin" / "codex"
     program.parent.mkdir()
-    program.write_text("#!/bin/sh\nexit 99\n")
+    native_effect = tmp_path / "native-started"
+    program.write_text(f"#!/bin/sh\ntouch '{native_effect}'\nexit 99\n")
     program.chmod(0o700)
     selected = ResolvedNativeAgent(
         agent="codex",
@@ -75,6 +92,22 @@ def test_codex_login_conflicts_reject_before_run_admission(
             selected,
             definition=selected.definition.model_copy(update={"runtime_roots": (str(tmp_path),)}),
         )
+    elif invalid in {
+        "runtime-root-descendant",
+        "runtime-root-equal",
+        "runtime-root-symlink",
+        "authentication-home-symlink",
+    }:
+        root = home if invalid == "runtime-root-equal" else home.resolve() / "public-runtime"
+        root.mkdir(exist_ok=True)
+        if invalid == "runtime-root-symlink":
+            alias = tmp_path / "runtime-link"
+            alias.symlink_to(root, target_is_directory=True)
+            root = alias
+        selected = replace(
+            selected,
+            definition=selected.definition.model_copy(update={"runtime_roots": (str(root),)}),
+        )
     elif invalid == "agent":
         selected = replace(selected, agent="pi")
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
@@ -89,6 +122,7 @@ def test_codex_login_conflicts_reject_before_run_admission(
                 role="review" if invalid == "review" else "report",
             )
         assert runtime.runs.history().items == ()
+        assert not native_effect.exists()
     finally:
         runtime.shutdown(wait_for_runs=True)
 

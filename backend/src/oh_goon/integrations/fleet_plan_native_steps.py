@@ -43,6 +43,7 @@ from oh_goon.integrations.agent_native_execution import (
     NativeAgentEventParser,
     codex_login_command,
     native_agent_command,
+    require_codex_authentication_home_separation,
     validate_native_agent_arguments,
     verify_native_agent_executable,
 )
@@ -77,7 +78,7 @@ def _codex_runtime_roots(selected: ResolvedNativeAgent) -> tuple[Path, ...]:
 def require_native_agent_compatibility(
     selected: ResolvedNativeAgent, *, role: str = "report", terminal_available: bool = False
 ) -> None:
-    """Pure compatibility checks shared by Run preflight and its Step receiver."""
+    """Compatibility and path-separation checks shared by preflight and Step receiver."""
     if role not in {"report", "review", "adjudication", "proposal"}:
         raise FleetPlanInvalid("Native Agent result role is unsupported")
     if selected.profile.codex_login is not None:
@@ -93,12 +94,12 @@ def require_native_agent_compatibility(
         ):
             raise FleetPlanInvalid("Codex login requires an explicit local headless report profile")
         home = Path(selected.profile.codex_login.home)
-        if (
-            not home.is_absolute()
-            or ".." in home.parts
-            or any(home.is_relative_to(root) for root in _codex_runtime_roots(selected))
-        ):
+        if not home.is_absolute() or ".." in home.parts:
             raise FleetPlanInvalid("Codex authentication home must be outside native tool roots")
+        try:
+            require_codex_authentication_home_separation(home, _codex_runtime_roots(selected))
+        except AgentProviderError as error:
+            raise FleetPlanInvalid(str(error)) from error
         return
     if selected.profile.backend != "bubblewrap":
         raise FleetPlanInvalid(
@@ -290,6 +291,7 @@ def _prompt(
 ) -> bytes:
     producer = (
         sys.executable,
+        "-I",
         "-m",
         "oh_goon.integrations.hashmarks.agent_tools",
         "--root",
@@ -370,6 +372,7 @@ def execute_native_agent_step(
     _write_private(query_file, prepared.task.encode("utf-8"))
     evidence = process.command_runner(
         sys.executable,
+        "-I",
         "-m",
         "oh_goon.integrations.hashmarks.agent_tools",
         "--root",
@@ -524,6 +527,7 @@ def execute_native_agent_step(
                 mounts.append(StandardReadOnlyMount(control, PurePosixPath(control)))
                 argv = (
                     sys.executable,
+                    "-I",
                     "-m",
                     "oh_goon.integrations.agent_inference_relay",
                     "--socket",
