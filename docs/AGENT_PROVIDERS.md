@@ -1,6 +1,6 @@
 # Agent provider configuration
 
-Oh-Goon can connect to configured model endpoints without installing their servers or provider SDKs. Ollama, LiteLLM, OpenRouter and OpenAI are connection choices, not repository dependencies. Direct OpenAI connections use API keys. Native Codex can also use its existing sign-in through the explicit local profile below.
+Oh-Goon can connect to configured model endpoints without installing their servers or provider SDKs. Ollama, LiteLLM, OpenRouter and OpenAI are connection choices, not repository dependencies. Direct OpenAI connections use API keys. Prefer an explicitly configured API-key connection for unattended automation. Native Codex can also use its existing sign-in through the optional trusted local profile below; Codex retains authentication and refresh authority.
 
 ## Run a native coding agent
 
@@ -73,11 +73,17 @@ This is an original managed Run with headless report Steps. Oh-Goon configures
 Codex's native session instructions file with the exact frozen task, Hashmarks
 presentation and Skill; incremental tool context is disabled. Codex owns session,
 follow-up and compaction behavior. Portable tests verify the emitted configuration.
-The explicitly selected installed-Codex context probe checks exact privileged
-instruction delivery through tool follow-up, native automatic compaction and
-continuation in the original Run. Its bounded local Responses HTTP fixture uses
-synthetic API-key authentication; this proves native request transport, not
-ChatGPT workspace routing, live account access or model reasoning quality.
+The explicitly selected installed-Codex context probe checks privileged instruction
+delivery through tool follow-up, native automatic compaction and continuation in
+the original Run. Its bounded local fixture selects API-key and ChatGPT
+authentication across Responses HTTP and WebSocket transports. Synthetic ChatGPT
+workspace discovery selects a different local HTTPS backend origin using a test CA;
+request hosts must match that discovered origin. Real credentials are never needed. WebSocket warm-up must carry the exact privileged instructions;
+follow-ups must reference that observed response chain, and continuation must
+restore the exact privileged instructions after
+compaction. A duplicate user prompt cannot satisfy this proof, and HTTP fallback
+cannot qualify WebSocket delivery. This proves installed client transport and
+synthetic workspace routing, not live account access or model reasoning quality.
 The native sandbox permission probe remains
 separate; selection commands are in [backend test guidance](../backend/tests/README.md#optional-native-qualification).
 Model and reasoning effort are explicit native settings. User config
