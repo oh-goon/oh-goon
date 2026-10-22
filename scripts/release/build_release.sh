@@ -34,6 +34,7 @@ make frontend-install
 
 make generate
 make check
+make frontend-build
 
 clear_release_outputs
 mkdir -p "$ROOT/generated/release/static" "$ROOT/generated/release/dist"
