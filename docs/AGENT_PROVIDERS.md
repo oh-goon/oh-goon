@@ -19,7 +19,9 @@ Hashmarks context reaches every model request, including follow-up and compactio
 OpenCode and Pi support the selected Chat Completions, Responses or Anthropic wire
 protocol; Codex requires Responses. An Ollama server may provide its compatible
 OpenAI endpoint (`/v1`); its native `/api/chat` protocol is retained for existing
-direct-model Steps and cannot be selected for these native adapters.
+direct-model Steps and cannot be selected for these native adapters. The endpoint
+must also support the selected agent's native tool calling and replay behavior;
+a compatible API path alone does not establish coding-task compatibility.
 
 The native default is `isolated-managed`, using the catalog's explicit
 `default_model` and the existing Bubblewrap backend. A missing model selection
@@ -32,7 +34,10 @@ and prints the terminal Run detail. `--interactive` requires a terminal and
 conflicts with `--headless` and `--json`. Ctrl-C requests Run cancellation and
 waits for its result. The command prints the Run ID and waits. Failed Runs return
 a nonzero exit status and a bounded tail of transient stderr; JSON stdout remains
-valid Run detail. Producer stdout is not dumped by the failure diagnostic.
+valid Run detail. When transient stderr is absent, the diagnostic reports recorded
+failed Step exits and bounded native failure claims, including Pi stop reasons.
+These claims do not replace verification results. Producer stdout is not dumped
+by the failure diagnostic.
 
 Tasks accept `--prompt`, `--prompt-file PATH`, or `--prompt-file -` for stdin.
 The authored task limit is 4000 characters; file input is bounded before decoding.
@@ -102,6 +107,14 @@ this public directory through a private native copy-on-write overlay so trust,
 credential-store initialization and settings writes cannot mutate the host input.
 Its private state is discarded with the execution scratch.
 
+Model context limits, output budgets and thinking controls belong to the native
+agent/provider configuration. Include reasoning tokens in the output budget.
+A provider may reject or ignore an unsupported thinking setting; for local
+Ollama models, inspect the installed artifact's `/api/show` thinking capabilities
+before choosing that setting. Oh-Goon does not change the model, retry with
+other settings or interpret native preferences to repair inference. See
+[Ollama thinking capabilities](https://docs.ollama.com/capabilities/thinking).
+
 The minimal Codex configuration disables its provider-hosted web search because
 the managed profile admits model inference only. Explicit native configuration
 remains unchanged; remote provider tools or attachments conflict with the broker
@@ -122,8 +135,17 @@ MCP servers and native tools. Host/external IP networking, DNS and host-local
 services are unavailable; the namespace's own loopback remains available to the
 native TUI and inference relay. Selected filesystem inputs are explicit. Requested
 read-only roles use a read-only workspace. These are shared-kernel controls,
-not deep custody or immutable runtime certification. Missing capabilities reject
-before work. A configured workspace root must contain the selected real Git root;
+not deep custody or immutable runtime certification. Configure MCP with the
+installed agent's native schema. For OpenCode 2.1.2, that is `mcp.servers`; a local
+server uses `type: "local"` and an argv `command`. The managed session initializes
+those configured servers asynchronously; their tools may join a later native
+turn. Its `mcp list` diagnostic does not initialize the same
+configuration plugins, so an empty list alone cannot establish that the session
+has no MCP servers. Verify tool discovery and an actual call through the managed
+session; see the [native MCP schema](https://dev.opencode.ai/v2/docs/mcp-servers/)
+and the [installed-native probe](../backend/tests/README.md#optional-native-qualification).
+Missing capabilities reject before work. A configured workspace root must contain
+the selected real Git root;
 the launcher adds only that repository location and refuses excluded repositories.
 
 A writable target must be separate from the running Oh-Goon source and Python

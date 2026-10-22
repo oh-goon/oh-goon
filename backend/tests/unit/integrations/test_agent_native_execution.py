@@ -154,6 +154,10 @@ def test_pi_failed_assistant_or_aborted_native_loop_remains_failure(stop_reason:
         returncode=0,
     )
     assert result.failed
+    assert any(
+        observation.summary == f"pi: stop_reason={stop_reason}"
+        for observation in result.observations
+    )
 
 
 def test_opencode_requires_the_runner_exit_and_does_not_reuse_previous_step_text() -> None:

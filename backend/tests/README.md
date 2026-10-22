@@ -50,6 +50,21 @@ providing the selected facilities. Use `scripts/qualify_agent_local_model.sh`
 for actual Ollama inference. Unavailable native facilities remain unverified for
 that optional profile; a portable pass grants no strict-execution qualification.
 
+The installed OpenCode MCP probe uses the original managed Run and a deterministic
+HTTP model fixture. It checks native MCP discovery/calling and descendant
+isolation; it does not prove model coding quality. Select a compatible installed
+OpenCode executable and its public runtime directory explicitly, on a host with
+the ordinary Bubblewrap facilities:
+
+```sh
+OH_GOON_NATIVE_OPENCODE=/opt/native-tools/bin/opencode \
+OH_GOON_NATIVE_OPENCODE_RUNTIME_ROOT=/opt/native-tools \
+uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_opencode_mcp.py
+```
+
+The paths are public execution inputs, never credential or unrelated repository
+stores. Without an explicit selection, this optional probe skips.
+
 ## Shared test support
 
 ```text

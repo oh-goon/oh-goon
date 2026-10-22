@@ -399,6 +399,8 @@ class NativeAgentEventParser:
                         "aborted",
                         "length",
                     )
+                    if self._assistant_failed:
+                        self._observe("agent", f"stop_reason={message['stopReason']}")
             elif event_type == "agent_settled":
                 self._settled = True
                 self._failed |= self._assistant_failed or record.get("aborted") is True
