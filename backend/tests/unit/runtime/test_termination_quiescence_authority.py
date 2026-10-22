@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -86,14 +87,27 @@ def test_stubborn_process_tree_escalates_and_returns_quiescence_receipt():
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-tree grace proof")
-def test_cooperative_process_tree_stops_during_grace_without_kill():
+@pytest.mark.parametrize("proc_census_available", [True, False])
+def test_cooperative_process_tree_stops_during_grace_without_kill(
+    monkeypatch, proc_census_available: bool
+):
+    if not proc_census_available:
+        real_iterdir = Path.iterdir
+
+        def unavailable_proc_census(path: Path):
+            if path == Path("/proc"):
+                raise PermissionError("process census unavailable")
+            return real_iterdir(path)
+
+        monkeypatch.setattr(Path, "iterdir", unavailable_proc_census)
     process = subprocess.Popen(
-        [sys.executable, "-S", "-c", "import time; time.sleep(30)"],
+        [sys.executable, "-S", "-c", "import time; print('READY', flush=True); time.sleep(30)"],
         start_new_session=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+    assert process.stdout is not None and process.stdout.readline().strip() == "READY"
     request = TerminationRequest(
         execution_id="exec-cooperative",
         generation=1,

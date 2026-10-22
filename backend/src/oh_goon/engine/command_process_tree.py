@@ -106,7 +106,11 @@ def _terminate_posix(process: subprocess.Popen[str], grace_seconds: float) -> bo
         return False
     deadline = time.monotonic() + grace_seconds
     while _process_group_exists(group) and time.monotonic() < deadline:
+        # Reap our leader during grace: the portable group probe also sees zombies.
+        # Its exit alone does not settle descendants, so keep probing the whole group.
+        process.poll()
         time.sleep(POLL_INTERVAL_SECONDS)
+    process.poll()
     if not _process_group_exists(group):
         return False
     try:
