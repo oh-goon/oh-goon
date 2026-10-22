@@ -78,12 +78,18 @@ delivery through tool follow-up, native automatic compaction and continuation in
 the original Run. Its bounded local fixture selects API-key and ChatGPT
 authentication across Responses HTTP and WebSocket transports. Synthetic ChatGPT
 workspace discovery selects a different local HTTPS backend origin using a test CA;
-request hosts must match that discovered origin. Real credentials are never needed. WebSocket warm-up must carry the exact privileged instructions;
+request hosts must match that discovered origin. Real credentials are never
+needed. WebSocket warm-up must carry the exact privileged instructions;
 follow-ups must reference that observed response chain, and continuation must
-restore the exact privileged instructions after
-compaction. A duplicate user prompt cannot satisfy this proof, and HTTP fallback
+restore the exact privileged instructions after compaction. A duplicate user prompt cannot satisfy this proof, and HTTP fallback
 cannot qualify WebSocket delivery. This proves installed client transport and
 synthetic workspace routing, not live account access or model reasoning quality.
+A separate explicitly selected live-account probe checks native-managed ChatGPT
+refresh persistence and a real coding repair in the original Run, followed by
+immutable independent verification. It uses a dedicated private sign-in home,
+keeps the real native endpoints, and emits only boolean account facts. A cached
+account response cannot substitute for persisted refresh evidence. Fresh browser
+sign-in remains a native interactive prerequisite.
 The native sandbox permission probe remains
 separate; selection commands are in [backend test guidance](../backend/tests/README.md#optional-native-qualification).
 Model and reasoning effort are explicit native settings. User config
