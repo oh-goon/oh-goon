@@ -51,7 +51,7 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_step_resolution import resolve_delivered_local_search_agent_step
 
 _STUB = r"""#!/usr/bin/python3
-import json, os, pathlib, sys, urllib.request, time
+import json, os, pathlib, signal, sys, urllib.request, time
 mode = sys.argv[sys.argv.index('--fixture-mode') + 1]
 prompt = json.loads(sys.stdin.read())
 assert prompt['task'] == 'Inspect the captured source'
@@ -76,7 +76,7 @@ request = urllib.request.Request(base + '/chat/completions', data=json.dumps({
     'model': model, 'messages': [{'role': 'user', 'content': 'Native turn'}], 'stream': True,
 }).encode(), headers={'Content-Type': 'application/json', 'Authorization': 'Bearer oh-goon-local'})
 with opener.open(request) as response: assert response.read()
-if mode == 'timeout': time.sleep(30)
+if mode == 'timeout': signal.pause()
 if mode == 'failure':
     print('native error, not JSON', flush=True)
     sys.exit(7)
@@ -563,7 +563,9 @@ def test_native_timeout_retains_physical_failure_evidence_without_accepting_comp
     assert step.native_agent is not None
     selected = replace(
         step.native_agent,
-        profile=step.native_agent.profile.model_copy(update={"timeout_seconds": 5.0}),
+        # The whole-Step budget includes producer work and namespace preparation.
+        # The native fixture stays blocked after inference until this deadline.
+        profile=step.native_agent.profile.model_copy(update={"timeout_seconds": 30.0}),
     )
     step = step.model_copy(update={"native_agent": selected})
     runtime = replace(runtime, native_profile=selected)
