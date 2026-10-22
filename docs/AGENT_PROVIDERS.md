@@ -72,10 +72,15 @@ oh-goon ai --agent codex --profile signed-in --config providers.json --workspace
 This is an original managed Run with headless report Steps. Oh-Goon configures
 Codex's native session instructions file with the exact frozen task, Hashmarks
 presentation and Skill; incremental tool context is disabled. Codex owns session,
-follow-up and compaction behavior. Portable tests verify the emitted configuration
-and a synthetic receiver; the installed Codex probe verifies sandbox permissions.
-Actual installed-Codex instruction delivery across follow-up and compaction remains
-unverified. Model and reasoning effort are explicit native settings. User config
+follow-up and compaction behavior. Portable tests verify the emitted configuration.
+The explicitly selected installed-Codex context probe checks exact privileged
+instruction delivery through tool follow-up, native automatic compaction and
+continuation in the original Run. Its bounded local Responses HTTP fixture uses
+synthetic API-key authentication; this proves native request transport, not
+ChatGPT workspace routing, live account access or model reasoning quality.
+The native sandbox permission probe remains
+separate; selection commands are in [backend test guidance](../backend/tests/README.md#optional-native-qualification).
+Model and reasoning effort are explicit native settings. User config
 and exec rules are ignored for this invocation, the project is untrusted, and
 hooks, plugins, Apps, web search and native delegation are disabled. Native tools
 use Codex's restricted filesystem policy: platform binaries and selected runtime

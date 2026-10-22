@@ -76,6 +76,31 @@ OH_GOON_NATIVE_CODEX=/path/to/codex \
 uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_agent_run.py -k installed_codex
 ```
 
+The installed Codex context probe drives the real executable through the original
+Run and an independent verification Step. A bounded local Responses fixture
+requests real tools, reports enough usage to trigger native automatic compaction,
+and checks exact frozen task, Skill and qualified Hashmarks instructions in every
+privileged request, including the continuation carrying the returned compaction
+item. The duplicate user prompt cannot satisfy that instruction check.
+
+This probe uses synthetic API-key authentication and tests native Responses HTTP
+request delivery. It does not prove ChatGPT workspace routing, model reasoning
+quality or live account access. On Linux, an
+isolated network namespace keeps the entire fixture local (requires native
+`unshare` and `ip`, with the committed uv environment already materialized):
+
+```sh
+OH_GOON_NATIVE_CODEX=/path/to/codex \
+unshare --user --map-root-user --net sh -c \
+  'ip link set lo up && exec uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_codex_context.py'
+```
+
+Select the installed version to qualify explicitly; this conformance check is
+not an additional ordinary startup prerequisite. The native client owns transport
+retries and compaction. Reconnect diagnostics may recover only through a later
+native completion; explicit failed turns, missing completion and physical command
+failure still cannot pass.
+
 ## Shared test support
 
 ```text
