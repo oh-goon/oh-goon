@@ -118,10 +118,15 @@ def load_agent_providers(path: Path) -> AgentProvidersConfig:
     native_profiles = {
         name: profile.model_copy(
             update={
+                "codex_login": profile.codex_login.model_copy(
+                    update={"home": _configuration_path(path, profile.codex_login.home)}
+                )
+                if profile.codex_login is not None
+                else None,
                 "workspace_roots": tuple(
                     str((path.parent / Path(root).expanduser()).resolve())
                     for root in profile.workspace_roots
-                )
+                ),
             }
         )
         for name, profile in config.native_profiles.items()
@@ -189,6 +194,29 @@ def resolve_native_agent(
             "Selected native workspace is outside the profile's workspace roots"
         )
     definition = config.native_agents.get(name, NativeAgentDefinition())
+    login = profile.codex_login
+    if login is not None:
+        if (
+            name != "codex"
+            or definition.arguments
+            or definition.configuration_directory is not None
+        ):
+            raise AgentProviderError(
+                "Codex login requires Codex with its typed connection and no native argument/config overrides"
+            )
+        try:
+            native_home = _existing_native_path(login.home, directory=True)
+        except OSError:
+            raise AgentProviderError("Selected Codex authentication home is unavailable") from None
+        if selected_workspace.is_relative_to(native_home) or native_home.is_relative_to(
+            selected_workspace
+        ):
+            raise AgentProviderError(
+                "Codex authentication home must be outside the captured workspace"
+            )
+        profile = profile.model_copy(
+            update={"codex_login": login.model_copy(update={"home": str(native_home)})}
+        )
     validate_native_agent_arguments(name, definition.arguments)
     executable = definition.executable
     if executable is None:

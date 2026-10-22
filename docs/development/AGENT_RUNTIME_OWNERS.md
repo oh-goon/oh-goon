@@ -35,7 +35,7 @@ role output, successful verification or host certification.
 | Repository evidence before reasoning | The original Step obtains Hashmarks task evidence through [hashmarks/agent_tools.py](../../backend/src/oh_goon/integrations/hashmarks/agent_tools.py). The producer owns repository relevance, presentation and qualifications. Evidence failure stops model disclosure; retrieval bounds cannot narrow the admitted review scope. |
 | Physical processes and native tools | The Step's admitted command runner uses [engine/command.py](../../backend/src/oh_goon/engine/command.py) and its existing process-tree/runtime owners. Model and tool subprocesses receive the original cancellation, supervision and timeout parameters. Native tools retain their own semantics. |
 | Native invocation and terminal | [fleet_plan_native_steps.py](../../backend/src/oh_goon/integrations/fleet_plan_native_steps.py) consumes the shared input and adapts native events; [agent_native_execution.py](../../backend/src/oh_goon/integrations/agent_native_execution.py) translates the frozen selection into native argv. The original command owner provides bounded stdin and PTY transport. There is no separate native process manager. |
-| Ordinary isolation and inference | [fleet_plan_process_isolation.py](../../backend/src/oh_goon/integrations/fleet_plan_process_isolation.py) transports the frozen profile into the existing Bubblewrap backend. The [broker](../../backend/src/oh_goon/integrations/agent_inference_broker.py) admits only the selected API/model/destination; its [relay](../../backend/src/oh_goon/integrations/agent_inference_relay.py) exposes namespace-local HTTP over a fixed private Unix socket. Host credentials remain outside the workload. |
+| Ordinary isolation and inference | [fleet_plan_process_isolation.py](../../backend/src/oh_goon/integrations/fleet_plan_process_isolation.py) transports the frozen profile into the existing Bubblewrap backend. The [broker](../../backend/src/oh_goon/integrations/agent_inference_broker.py) admits only the selected API/model/destination; its [relay](../../backend/src/oh_goon/integrations/agent_inference_relay.py) exposes namespace-local HTTP over a fixed private Unix socket. Host credentials remain outside that workload. Explicit `codex_login` profiles use the native command adapter's Codex permission policy and saved sign-in, with trusted local Git/verification; they do not claim whole-process isolation or broker endpoint enforcement. |
 | Typed claims and proposal publication | [agent_review.py](../../backend/src/oh_goon/core/models/agent_review.py), [agent_review_execution.py](../../backend/src/oh_goon/integrations/agent_review_execution.py), [agent_patch_apply.py](../../backend/src/oh_goon/integrations/agent_patch_apply.py), and [fleet_plan_step_publication.py](../../backend/src/oh_goon/integrations/fleet_plan_step_publication.py) accept and publish bounded results. Agent assertions cannot grant writes or establish verification truth. |
 | Outer review/repair control | [agent_review_plan.py](../../backend/src/oh_goon/core/agent_review_plan.py) validates phase membership. [fleet_plan_repair.py](../../backend/src/oh_goon/services/fleet_plan_repair.py) selects phase Plans; [FleetPlanService.repair](../../backend/src/oh_goon/services/fleet_plans.py) admits, waits for and cancels the original Fleet Runs. |
 | Durable results and presentation | Original repository-effect settlement and Journal owners persist the [OperationReport](../../backend/src/oh_goon/core/models/operation.py). [Step evidence](../../backend/src/oh_goon/integrations/_fleet_plan_step_evidence.py) and [Game Tape projection](../../backend/src/oh_goon/core/game_tape_step_projection.py) retain their existing result authority and read-only presentation roles. |
@@ -143,6 +143,16 @@ unavailable rather than being reconstructed from an agent claim.
 
 ## Native integration boundaries
 
+The frozen native selection owns its executable path and SHA-256. Tool projections
+and planned Game Tape commands use that selection without resolving its name again.
+Python remains a separate support dependency for producer evidence and the isolated
+inference relay. Attempt and result evidence retain the actual invocation; when
+Python launches the relay, its tool name and digest describe Python, while the
+native selection remains in the resolved Plan. Historical invocation evidence is
+shown as retained and is never rebuilt from current configuration. Strict CI/CD
+rejects native Agent Steps before Run admission or physical tool capture, and the strict
+host-tool issuer refuses native selections before observation or signing.
+
 The existing owners enforce these contracts:
 
 - **One source and result handoff.** The native receiver consumes the original
@@ -166,6 +176,12 @@ The existing owners enforce these contracts:
   compaction or relevance selection. Follow-up retrieval uses the existing
   Hashmarks CLI inside the boundary, with a read-only capture and disposable
   native index state. Bounded evidence never narrows a complete review scope.
+  Explicit headless local Codex sign-in profiles deliver the same captured
+  presentation and Skill as native session base instructions, with incremental
+  context disabled. Codex owns request construction, tools and compaction;
+  Oh-Goon adds no authentication or agent loop. Its typed home/model/effort
+  selection is frozen with the existing profile. The home is never copied,
+  parsed, captured as repository source or exposed as a native tool root.
 - **Approved inference only.** The isolated workload has no host/external IP
   networking. Namespace-local HTTP reaches a fixed private Unix socket; the host
   broker permits only the selected API routes and exact model at the frozen

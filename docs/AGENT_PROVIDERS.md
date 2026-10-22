@@ -1,6 +1,6 @@
 # Agent provider configuration
 
-Oh-Goon can connect to configured model endpoints without installing their servers or provider SDKs. Ollama, LiteLLM, OpenRouter and OpenAI are connection choices, not repository dependencies. OpenAI connections use API keys; ChatGPT/Codex subscription sign-in is outside this interface.
+Oh-Goon can connect to configured model endpoints without installing their servers or provider SDKs. Ollama, LiteLLM, OpenRouter and OpenAI are connection choices, not repository dependencies. Direct OpenAI connections use API keys. Native Codex can also use its existing sign-in through the explicit local profile below.
 
 ## Run a native coding agent
 
@@ -14,7 +14,7 @@ oh-goon-ai --agent opencode --config providers.json --profile company --workspac
 oh-goon ai --agent codex --config providers.json --profile company-responses --prompt-file task.txt --headless --verify "uv run pytest tests/test_example.py" --json
 ```
 
-All native reasoning requires an explicit managed inference connection so qualified
+Broker-backed native reasoning requires an explicit managed inference connection so qualified
 Hashmarks context reaches every model request, including follow-up and compaction.
 OpenCode and Pi support the selected Chat Completions, Responses or Anthropic wire
 protocol; Codex requires Responses. An Ollama server may provide its compatible
@@ -25,7 +25,7 @@ a compatible API path alone does not establish coding-task compatibility.
 
 The native default is `isolated-managed`, using the catalog's explicit
 `default_model` and the existing Bubblewrap backend. A missing model selection
-fails before work. Native reasoning cannot use the general `local` profile:
+fails before work. Broker-backed reasoning cannot use the general `local` profile:
 host networking would let native project settings bypass required context
 delivery. Ordinary trusted-local Plan verification keeps its existing default.
 On a POSIX terminal the default is the native TUI.
@@ -38,6 +38,55 @@ valid Run detail. When transient stderr is absent, the diagnostic reports record
 failed Step exits and bounded native failure claims, including Pi stop reasons.
 These claims do not replace verification results. Producer stdout is not dumped
 by the failure diagnostic.
+
+### Use an existing Codex sign-in
+
+Select this profile explicitly for trusted local coding tasks. Codex owns its
+saved authentication and refresh; Oh-Goon resolves the home path without reading,
+copying or exporting credentials. This requires a Codex version supporting
+`exec --ignore-user-config`, native permission profiles and `model_instructions_file`
+(validated with 0.163.0). No API provider entry or local model server is needed:
+
+```json
+{
+  "native_agents": {"codex": {"executable": "/path/to/codex"}},
+  "native_profiles": {
+    "signed-in": {
+      "backend": "local",
+      "allowed_agents": ["codex"],
+      "workspace_roots": ["/path/to/projects"],
+      "codex_login": {
+        "home": "/path/to/existing/.codex",
+        "model": "gpt-6-luna",
+        "reasoning_effort": "low"
+      }
+    }
+  }
+}
+```
+
+```sh
+oh-goon ai --agent codex --profile signed-in --config providers.json --workspace /path/to/projects/app --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
+```
+
+This is an original managed Run with headless report Steps. Native Codex receives
+the exact frozen task, Hashmarks presentation and Skill through its session base
+instructions file, including follow-up and compaction; incremental tool context
+is disabled. Model and reasoning effort are explicit native settings. User config
+and exec rules are ignored for this invocation, the project is untrusted, and
+hooks, plugins, Apps, web search and native delegation are disabled. Native tools
+use Codex's restricted filesystem policy: platform binaries and selected runtime
+inputs are readable, the working repository and execution scratch are writable,
+and tool networking is disabled. The authentication home cannot be a tool root
+or part of the captured workspace. Native argument/config overrides are rejected.
+
+Git hooks and separate verification Steps retain trusted local execution. This
+profile does not provide whole-process Bubblewrap isolation, broker endpoint
+enforcement, read-only review roles, interactive execution or resource caps.
+Those guarantees remain with the explicitly selected broker/Bubblewrap profile;
+there is no automatic fallback between the profiles. Authentication failures and
+unsupported native settings fail through the original Step result. The native
+connection's disclosure recipient is `codex`; reports remain untrusted claims.
 
 Tasks accept `--prompt`, `--prompt-file PATH`, or `--prompt-file -` for stdin.
 The authored task limit is 4000 characters; file input is bounded before decoding.

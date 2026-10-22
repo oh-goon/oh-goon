@@ -52,6 +52,29 @@ Source YAML and extension TOML are authoring inputs, not runtime state. Browser 
 
 A saved Lineup contains exact local Team roots chosen by the user. It is not authoritative for whether those Teams still exist. On preview/run, roots are resolved again against the current filesystem-derived League; unavailable roots fail visibly. Lineups never contain repository `goon.yml` state or plan bytes and never grant execution authority by themselves.
 
+## Source membership
+
+`core/source_tree_policy.py` owns generated and operational source exclusions for
+execution snapshots, repair write boundaries, isolation traversal, and explicit
+source normalization. Frontend coverage and Playwright outputs are excluded at
+their configured `frontend/` roots; authored paths such as
+`docs/test-results/analysis.md` remain source. Adding a transient root also makes
+it eligible for the existing explicit normalization command, so exclusions must
+select actual operational locations.
+
+`repository_tooling/release/package_slim.py` consumes that policy and owns the
+release-specific root `repositories/` exclusion and top-level ownership check.
+Its filesystem packager and canonical ZIP reader admit the same release member
+set as regular file rows only; explicit directory members are noncanonical.
+Release source identity binds member paths and bytes, and is reused by
+source issuers, checkpoint/recovery publication, self-certification staging,
+test/tool-session receipts, and Repository Understanding material. Newly admitted
+authored bytes invalidate current-source receipt reuse; historical receipts keep
+their original identities. Repository Understanding still withholds SECRET
+answers from its evidence index. Execution snapshots may retain safe contained
+symlinks, while release packages require regular files; their identity codecs
+and scope need not produce the same digest.
+
 ## Development continuation SSOT
 
 Ordinary Git-backed contributions use the selected branch/commit and reviewed working-tree changes, preserved through normal commits and authorized synchronization. The recovery graph applies only when explicitly continuing an archive-managed campaign or requesting a portable checkpoint. For that selected workflow, `RECOVERY_HEAD.json` is the atomic pointer to a publication receipt that digest-binds the immutable source archive, optional structured proof, and immutable machine-readable continuation state. Recovery—not the caller—fills observed source/archive/generation/proof authority into that continuation state. The record owns current authority, completed phases, open phases, proof receipts, qualification state, and next executable phase. A Markdown handoff is generated from verified committed recovery state, is a human projection only, and is stale if it disagrees. See [`DURABLE_CONTINUATION.md`](DURABLE_CONTINUATION.md).

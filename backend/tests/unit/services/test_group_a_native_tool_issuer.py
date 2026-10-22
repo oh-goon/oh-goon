@@ -19,7 +19,7 @@ from tests.unit.services.test_group_a_verified_ingress_authorities import (
 )
 
 
-def fixture(tmp_path: Path, monkeypatch):
+def fixture(tmp_path: Path, monkeypatch, *, native_policy: str | None = None):
     import hashlib
 
     from oh_goon.core.models.fleet_executor import (
@@ -30,9 +30,13 @@ def fixture(tmp_path: Path, monkeypatch):
         PlanIsolationBackendEvidence,
         PlanSnapshotEvidence,
     )
-    from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
+    from oh_goon.core.models.fleet_plan_execution_policy import (
+        CicdExecutionPolicy,
+        VerificationExecutionPolicy,
+    )
     from oh_goon.core.models.repository import RepositoryIdentity
     from oh_goon.core.models.run_admission import (
+        DirectFleetExecutionAdmission,
         FleetRunAdmissionIntent,
         PlanRepositoryAdmissionEvidence,
         StrictFleetExecutionAdmission,
@@ -53,18 +57,70 @@ def fixture(tmp_path: Path, monkeypatch):
         "version: 1\nexecution:\n  purpose: verification\nsteps:\n  - id: check\n    run: 'true'\n"
     )
     raw = FleetPlanResolver().resolve(plan_file)
-    from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+    from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedLocalSearchAgentStep
+
+    native = None
+    steps = raw.steps
+    if native_policy is not None:
+        from oh_goon.core.models.agent_providers import (
+            NativeAgentDefinition,
+            NativeAgentProfile,
+            ResolvedNativeAgent,
+        )
+
+        native = ResolvedNativeAgent(
+            agent="pi",
+            profile_name="selected",
+            definition=NativeAgentDefinition(executable="/selected/pi-custom"),
+            profile=NativeAgentProfile(),
+            executable_sha256="a" * 64,
+        )
+        steps = (
+            ResolvedLocalSearchAgentStep(
+                step_id="check",
+                argv=("python",),
+                timeout_seconds=30,
+                delivery_sha256="b" * 64,
+                handoff_identity="handoff",
+                source_step_id="check",
+                harness="native",
+                native_agent=native,
+            ),
+        )
 
     plan = ResolvedFleetPlan.create(
         name=raw.name,
         description=raw.description,
-        steps=raw.steps,
-        execution=CicdExecutionPolicy(),
+        steps=steps,
+        execution=(
+            VerificationExecutionPolicy() if native_policy == "ordinary" else CicdExecutionPolicy()
+        ),
         requirements=raw.requirements,
         imports=raw.imports,
         step_sources=raw.step_sources,
+        native_agent=native,
     )
-    target = structural_fleet_plan_target(plan)
+    if native is None:
+        target = structural_fleet_plan_target(plan)
+    else:
+        from oh_goon.core.models.goon_plan_source import PlanFileSource
+        from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
+        from tests.factories.fleet_plan_targets import structural_execution_identity
+
+        target = FleetPlanTarget(
+            kind="fleet_plan",
+            plan=plan,
+            source=PlanFileSource(sha256="0" * 64),
+            identity=structural_execution_identity(plan),
+            agent_deliveries=(
+                AgentStepDeliveryReference(
+                    step_id="check",
+                    handoff_identity="handoff",
+                    delivery_sha256="b" * 64,
+                    reference_id="retained-native-delivery",
+                ),
+            ),
+        )
     identities = []
     admissions = []
     for ch in "ab":
@@ -118,7 +174,9 @@ def fixture(tmp_path: Path, monkeypatch):
     intent = FleetRunAdmissionIntent(
         target=target,
         capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
-        execution=StrictFleetExecutionAdmission(
+        execution=DirectFleetExecutionAdmission()
+        if native_policy == "ordinary"
+        else StrictFleetExecutionAdmission(
             placement=FleetExecutorPlacement(
                 isolation_backend=backend,
                 executor_capacity=capacity,
@@ -160,11 +218,12 @@ def fixture(tmp_path: Path, monkeypatch):
     _, _, _, base_contract, _, _ = setup()
     fields = base_contract.fields
     fields["run_id"] = "durable-run"
-    fields["native_tool_identity"] = issuer.observed_admitted_run_native_tool_identity(
-        journal=journal,
-        run_id="durable-run",
-        path_authority=authority,
-    )
+    if native_policy is None:
+        fields["native_tool_identity"] = issuer.observed_admitted_run_native_tool_identity(
+            journal=journal,
+            run_id="durable-run",
+            path_authority=authority,
+        )
     return journal, AdmittedRunContract.freeze(fields), authority, executable
 
 
@@ -193,6 +252,28 @@ def test_exact_run_selected_native_tool_signed_and_independently_verified(tmp_pa
         lease_is_current=lambda *_: True,
     )
     assert signed == sign(journal, contract, authority)
+
+
+@pytest.mark.parametrize("native_policy", ("ordinary", "strict"))
+def test_native_agent_selection_rejects_before_host_tool_observation_or_signing(
+    tmp_path, monkeypatch, native_policy
+):
+    journal, contract, authority, _ = fixture(tmp_path, monkeypatch, native_policy=native_policy)
+
+    def forbidden_observation(*_args):
+        raise AssertionError("unsupported native authority cannot capture host-tool bytes")
+
+    monkeypatch.setattr(issuer, "_observe", forbidden_observation)
+    with pytest.raises(
+        TrustProtocolError, match="Native Agent executable authority is unsupported"
+    ):
+        issuer.observed_admitted_run_native_tool_identity(
+            journal=journal, run_id="durable-run", path_authority=authority
+        )
+    with pytest.raises(
+        TrustProtocolError, match="Native Agent executable authority is unsupported"
+    ):
+        sign(journal, contract, authority)
 
 
 def test_modified_tool_bytes_rejected(tmp_path, monkeypatch):

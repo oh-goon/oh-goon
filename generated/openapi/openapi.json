@@ -2199,6 +2199,42 @@
         "title": "CidrPlanEgressRule",
         "type": "object"
       },
+      "CodexLoginConnection": {
+        "additionalProperties": false,
+        "description": "Explicit native authentication location; only Codex reads its contents.",
+        "properties": {
+          "home": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Home",
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "title": "Reasoning Effort",
+            "type": "string"
+          }
+        },
+        "required": [
+          "home",
+          "model",
+          "reasoning_effort"
+        ],
+        "title": "CodexLoginConnection",
+        "type": "object"
+      },
       "CommandSafety": {
         "enum": [
           "READ_ONLY",
@@ -11626,7 +11662,6 @@
             "items": {
               "type": "string"
             },
-            "maxItems": 64,
             "title": "Command",
             "type": "array"
           },
@@ -15178,6 +15213,16 @@
             ],
             "title": "Backend",
             "type": "string"
+          },
+          "codex_login": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodexLoginConnection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "inference_profile": {
             "anyOf": [

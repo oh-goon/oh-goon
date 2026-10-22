@@ -211,6 +211,21 @@ class NativeAgentDefinition(ImmutableModel):
         return value
 
 
+class CodexLoginConnection(ImmutableModel):
+    """Explicit native authentication location; only Codex reads its contents."""
+
+    home: str = Field(min_length=1, max_length=4096)
+    model: str = Field(min_length=1, max_length=256)
+    reasoning_effort: Literal["low", "medium", "high", "xhigh", "max"]
+
+    @field_validator("home", "model")
+    @classmethod
+    def bounded_native_value(cls, value: str) -> str:
+        if not value.strip() or "\x00" in value:
+            raise ValueError("native connection values must be nonblank without NUL")
+        return value
+
+
 class NativeAgentProfile(ImmutableModel):
     """Existing backend and resource policy selected for one native workload."""
 
@@ -220,6 +235,17 @@ class NativeAgentProfile(ImmutableModel):
     timeout_seconds: float = Field(default=7200.0, gt=0, le=21600, allow_inf_nan=False, strict=True)
     resources: CicdResourcePolicy = Field(default_factory=CicdResourcePolicy)
     inference_profile: str | None = None
+    codex_login: CodexLoginConnection | None = None
+
+    @model_validator(mode="after")
+    def native_login_boundary(self) -> NativeAgentProfile:
+        if self.codex_login is not None and (
+            self.backend != "local" or self.inference_profile is not None
+        ):
+            raise ValueError(
+                "Codex login requires explicit local execution without broker inference"
+            )
+        return self
 
     @field_validator("allowed_agents")
     @classmethod
@@ -368,6 +394,12 @@ class ResolvedNativeAgent:
     connection: AgentConnection | None = None
     interactive: bool = False
     backend_configuration_id: str | None = None
+
+    @property
+    def disclosure_recipients(self) -> tuple[str, ...]:
+        if self.profile.codex_login is not None:
+            return ("codex",)
+        return (self.connection.provider_name,) if self.connection is not None else ()
 
 
 @dataclass(frozen=True, slots=True)

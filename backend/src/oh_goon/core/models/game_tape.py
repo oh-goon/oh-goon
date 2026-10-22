@@ -122,7 +122,7 @@ class GameTapeStepExecution(ImmutableModel):
     started_at: AwareDatetime | None = None
     finished_at: AwareDatetime | None = None
     duration_ms: int | None = Field(default=None, ge=0)
-    command: tuple[str, ...] = Field(default_factory=tuple, max_length=64)
+    command: tuple[str, ...] = Field(default_factory=tuple)
     working_directory: str = Field(default=".", min_length=1, max_length=240)
     environment: tuple[GameTapeEnvironmentSource, ...] = Field(default_factory=tuple, max_length=64)
     exit_code: int | None = None

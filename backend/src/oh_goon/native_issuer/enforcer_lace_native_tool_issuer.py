@@ -45,6 +45,10 @@ def _admitted_tools(journal: Journal, run_id: str, *, prework: PreworkRunCapture
         or len(admitted.targets) != len(selected)
     ):
         raise TrustProtocolError("durable Run tool scope differs from selected repositories")
+    if admitted.target.plan.native_agent is not None:
+        raise TrustProtocolError(
+            "Native Agent executable authority is unsupported by the host-tool issuer"
+        )
     try:
         plans = tuple(
             admitted_active_plan(admitted.target.plan, item)

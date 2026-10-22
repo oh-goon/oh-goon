@@ -22,6 +22,14 @@ Private construction wiring                                _application_foundati
 
 The six general layers coexist with the scoped Scout, native issuer and repository-tooling packages described below. Choose an existing owner before adding a package; a scoped package is not another general layer.
 
+For repository identity work, use the [identity owner map](../../../docs/development/ARCHITECTURE_DECISIONS.md#git-is-optional-repository-native-metadata-not-source-authority):
+`core/product_identity.py` owns catalog and filesystem-subject tokens,
+`integrations/hashmarks/` owns the repository-evidence/content identity boundary,
+`RepositorySourceAuthority` binds the admitted subject and captured source, and
+`runtime/workspaces.py::RepositoryWorkspaceAuthority` owns durable workspace allocation.
+Fleet/Enforcer admission and LACE/process isolation retain their respective validation
+and physical custody authority.
+
 ## Decision ladder
 
 For Scout, native issuance or repository tooling, use the scoped owner below. For general product behavior, ask these questions in order:

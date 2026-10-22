@@ -14,6 +14,7 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedGitStep,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
+    ResolvedLocalSearchAgentStep,
     ResolvedPlanStep,
     ResolvedPreCommitStep,
 )
@@ -87,6 +88,8 @@ def step_evidence(
 def canonical_argv(step: ResolvedPlanStep, outcome: StepOutcome) -> tuple[str, ...]:
     if outcome.skipped:
         return ()
+    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
+        return outcome.argv
     if isinstance(step, ResolvedGitStep):
         return ("git", *step.argv)
     if hasattr(step, "argv"):

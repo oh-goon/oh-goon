@@ -1,11 +1,14 @@
 import codecs
 import json
+import tomllib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
+    CodexLoginConnection,
     NativeAgentDefinition,
     NativeAgentName,
     NativeAgentProfile,
@@ -13,6 +16,7 @@ from oh_goon.core.models.agent_providers import (
 )
 from oh_goon.integrations.agent_native_execution import (
     NativeAgentEventParser,
+    codex_login_command,
     native_agent_command,
     parse_native_agent_events,
 )
@@ -26,6 +30,74 @@ def selection(agent: NativeAgentName, *, arguments: tuple[str, ...] = ()) -> Res
         profile=NativeAgentProfile(),
         executable_sha256="a" * 64,
     )
+
+
+def test_codex_login_binds_native_model_instructions_and_tool_permissions(tmp_path: Path) -> None:
+    selected = replace(
+        selection("codex"),
+        profile=NativeAgentProfile(
+            codex_login=CodexLoginConnection(
+                home="/private/codex",
+                model="gpt-6-luna",
+                reasoning_effort="low",
+            )
+        ),
+    )
+    prompt = tmp_path / "PRIVATE-prompt-🧪.txt"
+    prompt.write_text("PRIVATE evidence and Skill")
+    command = codex_login_command(
+        selected,
+        instructions=prompt,
+        workspace=tmp_path / "repo",
+        scratch=tmp_path / "scratch",
+        evidence_state=tmp_path / "producer-state",
+        read_roots=(tmp_path / "capture",),
+    )
+    settings: dict[str, object] = {}
+    for index, argument in enumerate(command.argv):
+        if argument == "-c":
+            settings.update(tomllib.loads(command.argv[index + 1]))
+    assert settings["model"] == "gpt-6-luna"
+    assert settings["model_reasoning_effort"] == "low"
+    assert settings["model_instructions_file"] == str(prompt)
+    assert settings["approval_policy"] == "never"
+    permissions = settings["permissions"]
+    assert isinstance(permissions, dict)
+    assert permissions["oh_goon"]["network"]["enabled"] is False
+    filesystem = permissions["oh_goon"]["filesystem"]
+    assert filesystem[str(tmp_path / "repo")] == "write"
+    assert filesystem[str(tmp_path / "capture")] == "read"
+    assert filesystem[str(tmp_path / "producer-state")] == "write"
+    assert "/private/codex" not in filesystem and ":root" not in filesystem
+    assert dict(command.environment)["CODEX_HOME"] == "/private/codex"
+    assert "PRIVATE evidence" not in " ".join(command.argv)
+    assert "--ignore-user-config" in command.argv and "--ignore-rules" in command.argv
+
+
+@pytest.mark.parametrize("root_kind", ["read", "producer-state"])
+def test_codex_login_refuses_tool_root_that_exposes_native_authentication(
+    tmp_path: Path,
+    root_kind: str,
+) -> None:
+    selected = replace(
+        selection("codex"),
+        profile=NativeAgentProfile(
+            codex_login=CodexLoginConnection(
+                home=str(tmp_path / "native"),
+                model="gpt-6-luna",
+                reasoning_effort="low",
+            )
+        ),
+    )
+    with pytest.raises(AgentProviderError, match="authentication home"):
+        codex_login_command(
+            selected,
+            instructions=tmp_path / "prompt",
+            workspace=tmp_path / "repo",
+            scratch=tmp_path / "scratch",
+            read_roots=(tmp_path,) if root_kind == "read" else (),
+            evidence_state=tmp_path if root_kind == "producer-state" else None,
+        )
 
 
 def events(*records: dict[str, object]) -> str:

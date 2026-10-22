@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from oh_goon.core.fleet_plan_tool_requirements import step_execution_tool
+from oh_goon.core.fleet_plan_tool_requirements import (
+    step_execution_tool,
+    step_execution_tool_names,
+)
 from oh_goon.core.models.fleet_plan import (
     ResolvedFleetPlan,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
+    ResolvedLocalSearchAgentStep,
     ResolvedOciBuildStep,
     ResolvedOciPublishStep,
     ResolvedOciTagAssertStep,
@@ -219,6 +223,14 @@ def _step_summary(step) -> tuple[str, ...]:
         lines.append(
             "    extension: "
             f"name={step.extension} command={step.command} extension_id={step.extension_id}"
+        )
+    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
+        selected = step.native_agent
+        lines.append(
+            "    native_agent: "
+            f"agent={selected.agent} executable={selected.definition.executable} "
+            f"sha256={selected.executable_sha256} "
+            f"host_support={_csv(step_execution_tool_names(step))}"
         )
     return tuple(lines)
 

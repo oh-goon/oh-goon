@@ -34,6 +34,7 @@ from oh_goon.core.path_layouts import (
     SANDBOX_PATHS,
     RunPathLayout,
 )
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.integrations import _fleet_plan_host_resources as host_resources
 from oh_goon.integrations._fleet_plan_egress_binding import (
     capture_hostname_egress,
@@ -100,6 +101,7 @@ class _FleetPlanRunInputs:
         self.base_workspace = self._layout.base_workspace
         self.repository_id = repository.repository_id
         self.source_authority_id = source_authority.authority_id
+        _require_admitted_repository_subject(repository, source_authority)
         RepositoryPathSpace.from_root(repository.path).require_isolated_source()
         self.base_identity = snapshot_source_directory(
             repository.path,
@@ -107,6 +109,9 @@ class _FleetPlanRunInputs:
             label="Fleet admitted repository workspace",
             cancel_requested=cancel_requested,
         )
+        # Equal source bytes cannot authorize a replacement filesystem subject.
+        # Fence the transfer into the private snapshot without another source walk.
+        _require_admitted_repository_subject(repository, source_authority)
         admitted_snapshot = source_authority.source_snapshot
         if (
             self.base_identity.sha256,
@@ -247,6 +252,17 @@ class _FleetPlanRunInputs:
             content_inputs=content_inputs,
             hostname_resolutions=self._hostname_evidence,
         )
+
+
+def _require_admitted_repository_subject(
+    repository: RepositoryIdentity, source_authority: RepositorySourceAuthority
+) -> None:
+    try:
+        subject = repository_subject_instance_id(repository.path)
+    except ValueError as exc:
+        raise FleetPlanInvalid("Strict execution lost its admitted repository subject") from exc
+    if subject != source_authority.subject_instance_id:
+        raise FleetPlanInvalid("Strict execution source does not match admitted repository subject")
 
 
 def _validate_managed_runtime_binding(

@@ -194,7 +194,7 @@ class FleetPlanService:
                     if selected_skill.name != "SKILL.md":
                         raise FleetPlanInvalid("Select the canonical SKILL.md or its directory")
                     selected_skill = selected_skill.parent
-            recipients = [selected.connection.provider_name] if selected.connection else []
+            recipients = list(selected.disclosure_recipients)
             steps = [
                 {
                     "id": "native-agent",
@@ -270,6 +270,10 @@ class FleetPlanService:
         require_native_workspace_runtime_separation(
             workspace, read_only_workspace=read_only_workspace
         )
+        if selected.profile.codex_login is not None:
+            home = Path(selected.profile.codex_login.home)
+            if workspace.is_relative_to(home) or home.is_relative_to(workspace):
+                raise FleetPlanInvalid("Codex authentication home must be outside the workspace")
         if read_only_workspace and selected.profile.backend != "bubblewrap":
             raise FleetPlanInvalid("Native read-only phases require the selected isolated backend")
         if selected.profile.backend == "bubblewrap":

@@ -174,6 +174,84 @@ def validate_native_agent_arguments(agent: str, arguments: tuple[str, ...]) -> N
         )
 
 
+def codex_login_command(
+    selected: ResolvedNativeAgent,
+    *,
+    instructions: Path,
+    workspace: Path,
+    scratch: Path,
+    evidence_state: Path | None = None,
+    read_roots: tuple[Path, ...],
+) -> NativeAgentCommand:
+    """Native sign-in and sandbox authority, without exporting authentication.
+
+    The native model-instructions file is loaded as session base instructions,
+    including follow-up and compaction requests. Auth remains in the original
+    CODEX_HOME; the native tool filesystem never receives that directory.
+    Git and verification in this explicit local profile remain trusted local.
+    """
+    login = selected.profile.codex_login
+    if (
+        selected.agent != "codex"
+        or login is None
+        or selected.interactive
+        or selected.definition.arguments
+        or selected.definition.configuration_directory is not None
+        or selected.definition.executable is None
+    ):
+        raise AgentProviderError("Codex login requires its explicit headless native selection")
+    home = Path(login.home)
+    writable = (workspace, scratch, *((evidence_state,) if evidence_state is not None else ()))
+    if workspace.is_relative_to(home) or any(
+        home.is_relative_to(root) for root in (*read_roots, *writable)
+    ):
+        raise AgentProviderError("Native tool roots must not expose the Codex authentication home")
+    filesystem = {":minimal": "read", **{str(root): "read" for root in read_roots}}
+    filesystem.update({str(root): "write" for root in writable})
+    rules = ", ".join(
+        f"{json.dumps(path, ensure_ascii=False)} = {json.dumps(access, ensure_ascii=False)}"
+        for path, access in filesystem.items()
+    )
+    settings = (
+        f"model={json.dumps(login.model, ensure_ascii=False)}",
+        'model_provider="openai"',
+        f"model_reasoning_effort={json.dumps(login.reasoning_effort, ensure_ascii=False)}",
+        f"model_instructions_file={json.dumps(str(instructions), ensure_ascii=False)}",
+        'approval_policy="never"',
+        'default_permissions="oh_goon"',
+        f"permissions.oh_goon={{filesystem={{{rules}}},network={{enabled=false}}}}",
+        f'projects.{json.dumps(str(workspace), ensure_ascii=False)}.trust_level="untrusted"',
+        'web_search="disabled"',
+        'shell_environment_policy.inherit="none"',
+        f'shell_environment_policy.set={{PATH="/usr/local/bin:/usr/bin:/bin",TMPDIR={json.dumps(str(scratch), ensure_ascii=False)}}}',
+        "features.hooks=false",
+        "features.plugin_hooks=false",
+        "features.plugins=false",
+        "features.apps=false",
+        "features.multi_agent_v2=false",
+        "features.skill_mcp_dependency_install=false",
+        "features.incremental_tools=false",
+    )
+    return NativeAgentCommand(
+        argv=(
+            selected.definition.executable,
+            "--no-daemon",
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--strict-config",
+            *(value for setting in settings for value in ("-c", setting)),
+            "--cd",
+            str(workspace),
+            "-",
+        ),
+        input_file=instructions,
+        environment=(("CODEX_HOME", login.home), ("TMPDIR", str(scratch))),
+    )
+
+
 def parse_native_agent_events(
     agent: str,
     output: str,

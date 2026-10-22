@@ -255,18 +255,14 @@ def test_release_source_package_refuses_published_archive_byte_drift(
 def test_release_source_package_binds_seal_gate_to_exact_source_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _root, output_dir = _configure_root(tmp_path, monkeypatch)
-    before = "sha256:" + "6" * 64
-    after = "sha256:" + "7" * 64
-    state = {"identity": before}
+    root, output_dir = _configure_root(tmp_path, monkeypatch)
+    authored = root / "docs/test-results/analysis.md"
+    authored.parent.mkdir(parents=True)
+    authored.write_text("admitted source\n", encoding="utf-8")
     package_calls: list[Path] = []
 
-    monkeypatch.setattr(
-        subject, "canonical_source_identity", lambda _root: state["identity"]
-    )
-
     def mutate_during_gate(_root: Path) -> None:
-        state["identity"] = after
+        authored.write_text("changed during seal\n", encoding="utf-8")
 
     def fake_package(output: Path) -> str:
         package_calls.append(output)
@@ -275,7 +271,6 @@ def test_release_source_package_binds_seal_gate_to_exact_source_identity(
 
     monkeypatch.setattr(subject, "require_source_seal_gate", mutate_during_gate)
     monkeypatch.setattr(subject, "package_slim", fake_package)
-    monkeypatch.setattr(subject, "archive_source_identity", lambda _archive: after)
     monkeypatch.setattr(
         subject, "_require_packaged_architecture_fresh", lambda _archive: None
     )

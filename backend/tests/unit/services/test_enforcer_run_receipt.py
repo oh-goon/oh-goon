@@ -11,10 +11,20 @@ from pydantic import ValidationError
 from oh_goon.api import dependencies
 from oh_goon.api.routes import fleet_runs
 from oh_goon.cli import main
+from oh_goon.core.models.agent_providers import (
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
 from oh_goon.core.models.enforcer_receipt import EnforcerRunReceipt
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet_executor import FleetExecutorPlacement, PlanExecutorCapacityEvidence
-from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan, ResolvedImport
+from oh_goon.core.models.fleet_plan import (
+    ResolvedCommandStep,
+    ResolvedFleetPlan,
+    ResolvedImport,
+    ResolvedLocalSearchAgentStep,
+)
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     CompletedPlanStepTeardownEvidence,
@@ -44,7 +54,7 @@ from oh_goon.core.models.fleet_plan_isolation import (
 )
 from oh_goon.core.models.fleet_plan_retry import ExitCodeNotDeclaredPlanRetryDecisionEvidence
 from oh_goon.core.models.fleet_plan_tool_authority import PlanHostToolAuthorityEvidence
-from oh_goon.core.models.goon_plan_source import SharedPlanSource, TeamGoonSource
+from oh_goon.core.models.goon_plan_source import PlanFileSource, SharedPlanSource, TeamGoonSource
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import (
     CompletedFleetRun,
@@ -56,11 +66,15 @@ from oh_goon.core.models.run_admission import (
     StrictFleetExecutionAdmission,
     fleet_repository_scope,
 )
+from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import OperationAction, Verdict
 from oh_goon.services.enforcer_run_receipt import enforcer_run_receipt, render_enforcer_yaml
 from tests.factories.capabilities import capability_snapshot
-from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+from tests.factories.fleet_plan_targets import (
+    structural_execution_identity,
+    structural_fleet_plan_target,
+)
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.run_admission import repository_admissions_for
 
@@ -73,9 +87,33 @@ def _output() -> PlanOutputEvidence:
     return PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
 
 
-def _detail(tmp_path: Path) -> FleetRunDetail:
+def _detail(tmp_path: Path, *, native: bool = False) -> FleetRunDetail:
     repository = tmp_path / "repo"
     repository.mkdir()
+    native_agent = None
+    planned: ResolvedCommandStep = ResolvedCommandStep(
+        step_id="tests",
+        argv=("uv", "run", "pytest"),
+        timeout_seconds=60,
+    )
+    if native:
+        native_agent = ResolvedNativeAgent(
+            agent="pi",
+            profile_name="selected",
+            definition=NativeAgentDefinition(executable="/private/native/bin/custom-pi"),
+            profile=NativeAgentProfile(),
+            executable_sha256="c" * 64,
+        )
+        planned = ResolvedLocalSearchAgentStep(
+            step_id="tests",
+            argv=("python",),
+            timeout_seconds=60,
+            delivery_sha256="b" * 64,
+            handoff_identity="handoff",
+            source_step_id="tests",
+            harness="native",
+            native_agent=native_agent,
+        )
     plan = ResolvedFleetPlan.create(
         name="quality",
         description="",
@@ -94,16 +132,28 @@ def _detail(tmp_path: Path) -> FleetRunDetail:
                 requirements=(),
             ),
         ),
-        steps=(
-            ResolvedCommandStep(
-                step_id="tests",
-                argv=("uv", "run", "pytest"),
-                timeout_seconds=60,
-            ),
-        ),
+        steps=(planned,),
+        native_agent=native_agent,
     )
-    target = structural_fleet_plan_target(plan)
-    tool = PlanHostToolAuthorityEvidence(name="uv", sha256="a" * 64, byte_count=123)
+    if isinstance(planned, ResolvedLocalSearchAgentStep):
+        target = FleetPlanTarget(
+            kind="fleet_plan",
+            plan=plan,
+            source=PlanFileSource(sha256="0" * 64),
+            identity=structural_execution_identity(plan),
+            agent_deliveries=(
+                AgentStepDeliveryReference(
+                    step_id=planned.step_id,
+                    handoff_identity=planned.handoff_identity,
+                    delivery_sha256=planned.delivery_sha256,
+                    reference_id="retained-native-delivery",
+                ),
+            ),
+        )
+    else:
+        target = structural_fleet_plan_target(plan)
+    tool_name = "python" if native else "uv"
+    tool = PlanHostToolAuthorityEvidence(name=tool_name, sha256="a" * 64, byte_count=123)
     attempt = PlanStepAttemptEvidence(
         attempt=1,
         returncode=0,
@@ -112,12 +162,12 @@ def _detail(tmp_path: Path) -> FleetRunDetail:
         duration_ms=40,
         repository_state_before="repo-before",
         repository_state_after="repo-after",
-        tool=PlanToolEvidence(name="uv", origin="host", sha256="a" * 64, byte_count=123),
+        tool=PlanToolEvidence(name=tool_name, origin="host", sha256="a" * 64, byte_count=123),
         egress=PlanEgressEvidence(mode="none"),
     )
     step = CompletedPlanStepExecution(
         step_id="tests",
-        kind="command",
+        kind=planned.kind,
         returncode=0,
         stdout_evidence=_output(),
         stderr_evidence=_output(),
@@ -236,6 +286,22 @@ def _detail(tmp_path: Path) -> FleetRunDetail:
         ),
         operations=(report,),
     )
+
+
+def test_historical_native_receipt_keeps_selected_label_and_launcher_evidence_path_free(
+    tmp_path: Path,
+) -> None:
+    detail = FleetRunDetail.model_validate_json(
+        _detail(tmp_path, native=True).model_dump_json(exclude_computed_fields=True)
+    )
+    receipt = enforcer_run_receipt(detail)
+    rendered = render_enforcer_yaml(receipt)
+
+    assert receipt.plan.steps[0].required_tool == "custom-pi"
+    tool = receipt.repositories[0].steps[0].attempts[0].tool
+    assert tool is not None and tool.name == "python" and tool.sha256 == "a" * 64
+    assert "/private/native" not in rendered
+    assert "required_tool: custom-pi" in rendered
 
 
 def test_enforcer_yaml_is_deterministic_and_excludes_sensitive_runtime_values(

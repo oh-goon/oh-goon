@@ -9,35 +9,23 @@ import stat
 import tempfile
 import zipfile
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from oh_goon.core.file_digest import sha256_file, update_digest_from_file
 from oh_goon.core.source_transport_metadata import is_disposable_source_transport_artifact_name
+from oh_goon.core.source_tree_policy import is_transient_source_path
 from oh_goon.repository_tooling.public_dependency_privacy import assert_public_source_privacy
 from oh_goon.repository_tooling.release.source_version_coherence import (
     require_source_version_coherence,
 )
 from oh_goon.repository_tooling.source_layout import (
-    is_transient_source_path,
     source_transport_artifact_issues,
 )
 
 ROOT = Path(__file__).resolve().parents[5]
-EXCLUDED_DIRS = {
-    ".git",
-    ".venv",
-    "node_modules",
-    ".oh-goon-playwright-browsers",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    "coverage",
-    "playwright-report",
-    "playwright-runtime-report",
-    "test-results",
-}
-EXCLUDED_FILES = {"coverage-python.json"}
+# This checkout's local repository catalog is outside release source scope. It is
+# still authored source in arbitrary execution targets, so it is not core policy.
+RELEASE_LOCAL_ROOTS = frozenset({"repositories"})
 OWNED_TOP_LEVEL = {
     ".dockerignore",
     ".editorconfig",
@@ -67,34 +55,40 @@ OWNED_TOP_LEVEL = {
 }
 
 
+def _include_relative_source_path(relative: PurePosixPath) -> bool:
+    return not is_transient_source_path(relative) and not (
+        relative.parts and relative.parts[0] in RELEASE_LOCAL_ROOTS
+    )
+
+
+def _canonical_source_member_path(value: str) -> PurePosixPath:
+    if "\\" in value:
+        raise ValueError("source archive member names must use canonical POSIX separators")
+    if any(part in {"", ".", ".."} for part in value.split("/")):
+        raise ValueError("source archive member path is not canonical")
+    return PurePosixPath(value)
+
+
+def _require_no_file_ancestor_collisions(paths: set[str]) -> None:
+    folded = {PurePosixPath(path.casefold()) for path in paths}
+    if any(parent in folded for path in folded for parent in path.parents):
+        raise ValueError("source archive contains a file/ancestor path collision")
+
+
 def _include(path: Path, root: Path = ROOT) -> bool:
-    rel = path.relative_to(root)
-    if is_transient_source_path(rel):
+    relative = PurePosixPath(path.relative_to(root).as_posix())
+    if not _include_relative_source_path(relative):
         return False
-    if any(part in EXCLUDED_DIRS for part in rel.parts):
-        return False
-    if is_disposable_source_transport_artifact_name(rel.name):
-        return False
-    if rel.name in EXCLUDED_FILES or rel.suffix in {".pyc", ".pyo", ".tsbuildinfo"}:
-        return False
-    if rel.parts[:3] in (
-        ("generated", "release", "dist"),
-        ("generated", "release", "static"),
-    ):
-        return False
-    if rel.parts[:2] == ("frontend", "dist"):
-        return False
-    if rel.parts and rel.parts[0] in {".oh-goon-data", "repositories"}:
-        return False
+    _canonical_source_member_path(relative.as_posix())
     return True
 
 
 def _validate_top_level_ownership(root: Path = ROOT) -> None:
-    allowed = OWNED_TOP_LEVEL | EXCLUDED_DIRS | EXCLUDED_FILES | {".oh-goon-data", "repositories"}
     unknown = sorted(
         path.name
         for path in root.iterdir()
-        if path.name not in allowed and not is_transient_source_path(path.name)
+        if path.name not in OWNED_TOP_LEVEL
+        and _include_relative_source_path(PurePosixPath(path.name))
     )
     if unknown:
         raise ValueError(
@@ -170,6 +164,7 @@ def _collect_source_files(root: Path = ROOT) -> list[Path]:
         raise ValueError(
             f"slim source archive refuses case-insensitive path collisions: {rendered}"
         )
+    _require_no_file_ancestor_collisions({path.relative_to(root).as_posix() for path in files})
     _validate_top_level_ownership(root)
     return files
 
@@ -283,7 +278,9 @@ def _write_checksum(output: Path, digest: str) -> Path:
 def _canonical_archive_rows(
     archive: zipfile.ZipFile,
 ) -> tuple[str, list[tuple[str, zipfile.ZipInfo]]]:
-    files = [info for info in archive.infolist() if not info.is_dir()]
+    files = archive.infolist()
+    if any(info.is_dir() for info in files):
+        raise ValueError("source archive explicit directory members are not canonical")
     prefixes = {Path(info.filename).parts[0] for info in files if Path(info.filename).parts}
     if len(prefixes) != 1:
         raise ValueError("source archive must contain exactly one top-level directory")
@@ -296,6 +293,7 @@ def _canonical_archive_rows(
     rows.sort(key=lambda item: item[0])
     if len({relative.casefold() for relative, _info in rows}) != len(rows):
         raise ValueError("source archive contains a case-insensitive path collision")
+    _require_no_file_ancestor_collisions({relative for relative, _info in rows})
     return prefix, rows
 
 
@@ -303,12 +301,7 @@ def _canonical_archive_row(info: zipfile.ZipInfo, prefix: str) -> tuple[str, zip
     member_type = stat.S_IFMT(info.external_attr >> 16)
     if member_type not in {0, stat.S_IFREG}:
         raise ValueError("source archive contains a non-regular file member")
-    if "\\" in info.filename:
-        raise ValueError("source archive member names must use canonical POSIX separators")
-    raw_parts = info.filename.split("/")
-    if any(part in {"", ".", ".."} for part in raw_parts):
-        raise ValueError("source archive member path is not canonical")
-    parts = Path(info.filename).parts
+    parts = _canonical_source_member_path(info.filename).parts
     if len(parts) < 2 or parts[0] != prefix:
         raise ValueError(f"invalid source archive member: {info.filename}")
     relative = Path(*parts[1:]).as_posix()
@@ -316,10 +309,12 @@ def _canonical_archive_row(info: zipfile.ZipInfo, prefix: str) -> tuple[str, zip
         raise ValueError(
             "source archive contains forbidden source transport artifact; exact member paths are debug-only"
         )
-    if is_transient_source_path(relative):
+    if not _include_relative_source_path(PurePosixPath(relative)):
         raise ValueError(
             "source archive contains forbidden transient or local-only payload; exact member paths are debug-only"
         )
+    if parts[1] not in OWNED_TOP_LEVEL:
+        raise ValueError("source archive contains an unowned top-level entry")
     return relative, info
 
 

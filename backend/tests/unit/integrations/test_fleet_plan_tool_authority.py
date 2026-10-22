@@ -11,9 +11,20 @@ from oh_goon.core.fleet_plan_tool_requirements import (
     SHELL_RUNTIME_SUPPORT_TOOLS,
     required_execution_tool_names,
     required_runtime_tool_names,
+    step_execution_tool,
     step_runtime_tool_names,
 )
-from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedDependencyInventoryStep
+from oh_goon.core.models.agent_providers import (
+    NativeAgentDefinition,
+    NativeAgentName,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
+from oh_goon.core.models.fleet_plan import (
+    ResolvedCommandStep,
+    ResolvedDependencyInventoryStep,
+    ResolvedLocalSearchAgentStep,
+)
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     CompletedPlanStepTeardownEvidence,
@@ -162,6 +173,149 @@ def test_in_process_dependency_inventory_requires_no_environment_tool() -> None:
 
     assert required_execution_tool_names(plan) == ()  # type: ignore[arg-type]
     assert required_runtime_tool_names(plan) == ()  # type: ignore[arg-type]
+
+
+def _native_step(agent: NativeAgentName) -> ResolvedLocalSearchAgentStep:
+    return ResolvedLocalSearchAgentStep(
+        step_id="native-agent",
+        argv=("python",),
+        timeout_seconds=30,
+        delivery_sha256="b" * 64,
+        handoff_identity="handoff",
+        source_step_id="native-agent",
+        harness="native",
+        native_agent=ResolvedNativeAgent(
+            agent=agent,
+            profile_name="selected",
+            definition=NativeAgentDefinition(executable=f"/selected/{agent}-custom"),
+            profile=NativeAgentProfile(),
+            executable_sha256="a" * 64,
+        ),
+    )
+
+
+@pytest.mark.parametrize("agent", ("codex", "opencode", "pi"))
+def test_native_executable_selection_is_separate_from_host_support(agent: NativeAgentName) -> None:
+    step = _native_step(agent)
+    plan = SimpleNamespace(steps=(step,))
+    seen: list[str] = []
+
+    class Authority:
+        def tool(self, name: str) -> object:
+            seen.append(name)
+            assert name == "python"
+            return object()
+
+    assert step_execution_tool(step) == f"/selected/{agent}-custom"
+    assert required_execution_tool_names(plan) == ("python",)  # type: ignore[arg-type]
+    assert required_runtime_tool_names(plan) == ("python",)  # type: ignore[arg-type]
+    preflight_run_capabilities(plan, Authority())  # type: ignore[arg-type]
+    assert seen == ["python"]
+
+
+@pytest.mark.parametrize("agent", ("codex", "opencode", "pi"))
+@pytest.mark.parametrize("stage", ("native", "relay", "producer"))
+def test_native_evidence_retains_actual_invocation_and_launcher_bytes(
+    agent: NativeAgentName,
+    stage: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from oh_goon.engine.command_runtime_authority import RuntimeAuthorityReceipt
+    from oh_goon.engine.git import GitService
+    from oh_goon.integrations import fleet_plan_attempt_evidence as attempt_evidence_module
+    from oh_goon.integrations._fleet_plan_step_evidence import step_evidence
+    from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+    from oh_goon.integrations.fleet_plan_attempt_evidence import build_direct_attempt_evidence
+
+    step = _native_step(agent)
+    selected = f"/selected/{agent}-custom"
+    launcher = selected if stage == "native" else "/launch/python3.13"
+    argv = (
+        (selected, "run", "--configured")
+        if stage == "native"
+        else (
+            launcher,
+            "-m",
+            "oh_goon.integrations.agent_inference_relay",
+            "--",
+            selected,
+            "run",
+        )
+        if stage == "relay"
+        else (launcher, "-m", "oh_goon.integrations.hashmarks.agent_tools", "task_evidence")
+    )
+    runtime = RuntimeAuthorityReceipt(
+        executable_path=launcher,
+        executable_identity="sha256:" + "c" * 64,
+        executable_byte_count=123,
+        path_authority_identity="sha256:" + "1" * 64,
+        environment_identity="sha256:" + "2" * 64,
+    )
+    outcome = StepOutcome(argv=argv, returncode=17, runtime_authority=runtime)
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "later-shadow"))
+
+    def forbidden_path_lookup(*_args: object, **_kwargs: object) -> Path:
+        raise AssertionError("native evidence must use the launch receipt, not read selected paths")
+
+    monkeypatch.setattr(attempt_evidence_module, "_resolve_executable_path", forbidden_path_lookup)
+    observation = GitService().observe(repository)
+    attempt = build_direct_attempt_evidence(
+        step, step, 1, outcome, repository, observation, observation, retry=None
+    )
+    execution = step_evidence(
+        step=step,
+        outcome=outcome,
+        repository_state_before="before",
+        repository_state_after="after",
+        worktree_files_after=(),
+        attempts=(attempt,),
+        artifacts=(),
+    )
+    retained = FleetPlanResult.model_validate_json(
+        FleetPlanResult(plan_id="native-plan", steps=(execution,)).model_dump_json(
+            exclude_computed_fields=True
+        )
+    )
+
+    assert retained.steps[0].argv == argv
+    assert retained.steps[0].attempts[0].argv == argv
+    tool = retained.steps[0].attempts[0].tool
+    assert tool is not None
+    assert tool.name == Path(launcher).name
+    assert tool.sha256 == "c" * 64 and tool.byte_count == 123
+    assert step.native_agent is not None
+    assert tool.sha256 != step.native_agent.executable_sha256
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        (),
+        ("/launch/python3.13", "-m", "oh_goon.integrations.hashmarks.agent_tools"),
+        ("/launch/bwrap", "--bind", "/runtime", "/runtime", "/launch/python3.13", "-m", "relay"),
+    ),
+)
+def test_native_output_limit_retains_only_the_invocation_captured_by_the_process_owner(
+    argv: tuple[str, ...],
+) -> None:
+    from oh_goon.engine.command import CommandOutputLimitExceeded, CommandSupervisorReceipt
+    from oh_goon.integrations.fleet_plan_output_limit import bounded_execution_failure_outcome
+
+    error = CommandOutputLimitExceeded(
+        argv=argv,
+        stream="stdout",
+        limit_bytes=4096,
+        stdout="bounded",
+        stderr="",
+        supervisor=CommandSupervisorReceipt(),
+    )
+    outcome = bounded_execution_failure_outcome(_native_step("pi"), error)
+
+    assert outcome.argv == argv
+    assert outcome.returncode != 0
 
 
 def test_enforcer_checks_required_tool_availability_from_execution_environment() -> None:

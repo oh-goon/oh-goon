@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import hashlib
+import os
 import zipfile
 
 import pytest
@@ -355,6 +356,48 @@ def test_package_slim_rejects_case_insensitive_collision(
         package_slim.package_slim(tmp_path / "out.zip")
 
 
+@pytest.mark.skipif(
+    os.sep == "\\", reason="literal backslash names require POSIX paths"
+)
+@pytest.mark.parametrize(
+    "relative", [r"docs/authored\note.md", r"docs/authored\notes/readme.md"]
+)
+def test_package_slim_rejects_paths_its_canonical_archive_reader_cannot_represent(
+    tmp_path: Path, relative: str
+) -> None:
+    root = tmp_path / "source"
+    source = root / relative
+    source.parent.mkdir(parents=True)
+    source.write_text("authored\n", encoding="utf-8")
+    (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+    output = tmp_path / "source.zip"
+    output.write_bytes(b"previous publication")
+
+    with pytest.raises(ValueError, match="canonical POSIX separators"):
+        package_slim.package_slim(output, root=root)
+
+    assert output.read_bytes() == b"previous publication"
+    assert not output.with_name(output.name + ".sha256").exists()
+    assert not list(tmp_path.glob(".source.zip.*.tmp"))
+
+
+def test_package_slim_rejects_case_folded_file_ancestor_collision(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "source"
+    descendant = root / "docs/guide/a.md"
+    descendant.parent.mkdir(parents=True)
+    descendant.write_text("descendant\n", encoding="utf-8")
+    (root / "docs/Guide").write_text("regular file\n", encoding="utf-8")
+    (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+    output = tmp_path / "source.zip"
+
+    with pytest.raises(ValueError, match="file/ancestor path collision"):
+        package_slim.package_slim(output, root=root)
+
+    assert not output.exists()
+
+
 def test_package_slim_rejects_symlink_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -418,6 +461,36 @@ def test_slim_archive_excludes_all_playwright_reports(
         names = archive.namelist()
     assert "oh-goon-1.0.0/frontend/e2e/journey.spec.ts" in names
     assert not any("report.txt" in name for name in names)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["coverage", "playwright-report", "playwright-runtime-report", "test-results"],
+)
+def test_package_source_binds_authored_report_names_and_excludes_frontend_outputs(
+    tmp_path: Path, name: str
+) -> None:
+    root = tmp_path / "source"
+    authored = root / "docs" / name / "analysis.md"
+    authored.parent.mkdir(parents=True)
+    authored.write_text("authored\n", encoding="utf-8")
+    generated = root / "frontend" / name / "result.txt"
+    generated.parent.mkdir(parents=True)
+    generated.write_text("generated\n", encoding="utf-8")
+    (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+    before = package_slim.canonical_source_identity(root)
+    output = tmp_path / "source.zip"
+
+    package_slim.package_slim(output, root=root)
+
+    with zipfile.ZipFile(output) as archive:
+        assert archive.read(f"oh-goon-1.2.3/docs/{name}/analysis.md") == b"authored\n"
+        assert f"oh-goon-1.2.3/frontend/{name}/result.txt" not in archive.namelist()
+    assert package_slim.archive_source_identity(output) == before
+    generated.write_text("changed output\n", encoding="utf-8")
+    assert package_slim.canonical_source_identity(root) == before
+    authored.write_text("changed source\n", encoding="utf-8")
+    assert package_slim.canonical_source_identity(root) != before
 
 
 def test_package_slim_owns_template_certification_fixture_source(

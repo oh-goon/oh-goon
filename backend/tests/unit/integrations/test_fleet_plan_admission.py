@@ -7,11 +7,17 @@ from types import SimpleNamespace
 import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid, StateConflict, TargetSelectionError
+from oh_goon.core.models.agent_providers import (
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
     ResolvedCommandStep,
     ResolvedFleetPlan,
     ResolvedImport,
+    ResolvedLocalSearchAgentStep,
     ResolvedPreCommitStep,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import (
@@ -37,11 +43,13 @@ from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepCapabilities,
     RetainedPlanCacheSource,
 )
+from oh_goon.core.models.goon_plan_source import PlanFileSource
 from oh_goon.core.models.repository import (
     IncludedRepositoryCatalogEntry,
     RepositoryCatalogEntry,
     RepositoryIdentity,
 )
+from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
 from oh_goon.core.vocabulary import FleetScope
 from oh_goon.integrations import fleet_plan_preview, fleet_plan_repository_scope
 from oh_goon.integrations.fleet_plan_admission import (
@@ -56,7 +64,10 @@ from oh_goon.services.fleet_admission import FleetAdmissionPlanner
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import TEST_ISOLATION_BACKEND, prepare_physical_test_run
-from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+from tests.factories.fleet_plan_targets import (
+    structural_execution_identity,
+    structural_fleet_plan_target,
+)
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
 from tests.factories.run_admission import repository_admission_for
 
@@ -117,6 +128,67 @@ def test_verification_plan_repository_preflight_rejects_before_run_admitted(tmp_
         )
 
     assert "missing" in str(exc.value)
+
+
+def test_strict_native_rejects_before_source_capture_and_run_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="selected",
+        definition=NativeAgentDefinition(executable="/selected/pi-custom"),
+        profile=NativeAgentProfile(),
+        executable_sha256="a" * 64,
+    )
+    native = ResolvedLocalSearchAgentStep(
+        step_id="native-agent",
+        argv=("python",),
+        timeout_seconds=30,
+        delivery_sha256="b" * 64,
+        handoff_identity="handoff",
+        source_step_id="native-agent",
+        harness="native",
+        native_agent=selected,
+    )
+    plan = ResolvedFleetPlan.create(
+        name="unsupported-strict-native",
+        description="",
+        execution=CicdExecutionPolicy(),
+        steps=(native,),
+        native_agent=selected,
+    )
+    target = FleetPlanTarget(
+        kind="fleet_plan",
+        plan=plan,
+        source=PlanFileSource(sha256="0" * 64),
+        identity=structural_execution_identity(plan),
+        agent_deliveries=(
+            AgentStepDeliveryReference(
+                step_id=native.step_id,
+                handoff_identity=native.handoff_identity,
+                delivery_sha256=native.delivery_sha256,
+                reference_id="retained-native-delivery",
+            ),
+        ),
+    )
+
+    def forbidden_source_capture(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("unsupported native execution must fail before source capture")
+
+    monkeypatch.setattr(fleet_plan_preview, "source_snapshot_identity", forbidden_source_capture)
+    planner = object.__new__(FleetAdmissionPlanner)
+    with pytest.raises(
+        TargetSelectionError, match="before RUN_ADMITTED.*strict CI/CD is unsupported"
+    ):
+        planner._validate_plan_repository_admission(target, [_entry(repository)])
+
+    # Historical immutable Plans remain decodable, but cannot gain a new admission.
+    restored = ResolvedFleetPlan.model_validate_json(
+        plan.model_dump_json(exclude_computed_fields=True)
+    )
+    assert restored == plan
 
 
 @pytest.mark.parametrize(
@@ -653,6 +725,10 @@ def test_verification_admission_binds_filtered_source_identity(tmp_path: Path, m
     current = repository_plan_admission_evidence(repository, plan)
 
     assert current.semantic_preview_id == admitted.semantic_preview_id
+    assert (
+        current.source_authority.subject_instance_id
+        == admitted.source_authority.subject_instance_id
+    )
     assert current.source_authority != admitted.source_authority
     assert current.admission_id != admitted.admission_id
     with pytest.raises(StateConflict, match="became stale after RUN_ADMITTED"):

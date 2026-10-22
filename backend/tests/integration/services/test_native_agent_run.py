@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,16 +25,247 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentProvidersConfig,
+    CodexLoginConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
+from oh_goon.engine.command import run_command
 from oh_goon.engine.git import GitService
-from oh_goon.integrations.agent_native_execution import native_executable_sha256
+from oh_goon.integrations.agent_native_execution import (
+    codex_login_command,
+    native_executable_sha256,
+)
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
+
+
+@pytest.mark.parametrize("invalid", ["runtime-root", "workspace", "review", "agent"])
+def test_codex_login_conflicts_reject_before_run_admission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid: str,
+) -> None:
+    repo = tmp_path / "teams" / "app"
+    repo.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    home = tmp_path / "native-auth"
+    home.mkdir()
+    program = tmp_path / "bin" / "codex"
+    program.parent.mkdir()
+    program.write_text("#!/bin/sh\nexit 99\n")
+    program.chmod(0o700)
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="signed-in",
+        definition=NativeAgentDefinition(executable=str(program)),
+        profile=NativeAgentProfile(
+            codex_login=CodexLoginConnection(
+                home=str(repo if invalid == "workspace" else home),
+                model="gpt-6-luna",
+                reasoning_effort="low",
+            )
+        ),
+        executable_sha256=native_executable_sha256(program),
+    )
+    if invalid == "runtime-root":
+        selected = replace(
+            selected,
+            definition=selected.definition.model_copy(update={"runtime_roots": (str(tmp_path),)}),
+        )
+    elif invalid == "agent":
+        selected = replace(selected, agent="pi")
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
+    runtime = ApplicationRuntime.build(standard_local=True)
+    try:
+        with pytest.raises(FleetPlanInvalid, match="Codex"):
+            runtime.plans.run_native_agent(
+                selected=selected,
+                workspace=repo,
+                skill=None,
+                task="Must not start",
+                role="review" if invalid == "review" else "report",
+            )
+        assert runtime.runs.history().items == ()
+    finally:
+        runtime.shutdown(wait_for_runs=True)
+
+
+@pytest.mark.certification
+def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Path) -> None:
+    executable = os.environ.get("OH_GOON_NATIVE_CODEX")
+    if not executable:
+        pytest.skip("Select an installed Codex executable explicitly")
+    program = Path(executable).resolve(strict=True)
+    repo, home, scratch, capture, state = (
+        tmp_path / name for name in ("repo", "native-auth", "scratch", "capture", "producer-state")
+    )
+    for directory in (repo, home, scratch, capture, state):
+        directory.mkdir()
+    private = home / "canary"
+    private.write_text("synthetic private data; never a real credential")
+    (capture / "evidence").write_text("frozen producer evidence")
+    (repo / "escape").symlink_to(private)
+    script = repo / "probe.py"
+    script.write_text(
+        "import pathlib,socket,sys\n"
+        f"home=pathlib.Path({str(home)!r})\n"
+        "for path in (home/'canary',pathlib.Path('escape')):\n"
+        "    try: path.read_bytes()\n"
+        "    except OSError: pass\n"
+        "    else: raise AssertionError('private path was readable')\n"
+        f"evidence=pathlib.Path({str(capture / 'evidence')!r})\n"
+        "assert evidence.read_text()=='frozen producer evidence'\n"
+        "try: evidence.write_text('changed')\n"
+        "except OSError: pass\n"
+        "else: raise AssertionError('capture was writable')\n"
+        "try: socket.create_connection(('127.0.0.1',int(sys.argv[1])),timeout=1)\n"
+        "except OSError: pass\n"
+        "else: raise AssertionError('host loopback was reachable')\n"
+        "pathlib.Path('native-boundary-proof').write_text('PASS')\n"
+        f"pathlib.Path({str(state / 'index-proof')!r}).write_text('PASS')\n"
+    )
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="signed-in",
+        definition=NativeAgentDefinition(executable=str(program)),
+        profile=NativeAgentProfile(
+            codex_login=CodexLoginConnection(
+                home=str(home),
+                model="gpt-6-luna",
+                reasoning_effort="low",
+            )
+        ),
+        executable_sha256=native_executable_sha256(program),
+    )
+    command = codex_login_command(
+        selected,
+        instructions=capture / "evidence",
+        workspace=repo,
+        scratch=scratch,
+        evidence_state=state,
+        read_roots=(capture, program.parent),
+    )
+    settings = tuple(
+        value
+        for index, value in enumerate(command.argv)
+        if index > 0 and (command.argv[index - 1] == "-c" or value == "-c")
+    )
+    with ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler) as server:
+        result = run_command(
+            str(program),
+            "--no-daemon",
+            *settings,
+            "sandbox",
+            "--permission-profile",
+            "oh_goon",
+            "--cd",
+            str(repo),
+            "--",
+            "/usr/bin/python3",
+            str(script),
+            str(server.server_port),
+            cwd=repo,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(home), **dict(command.environment)},
+            timeout=30.0,
+            preserve_native_executable_path=True,
+        )
+    assert result.returncode == 0, result.stderr
+    assert (repo / "native-boundary-proof").read_text() == "PASS"
+    assert (state / "index-proof").read_text() == "PASS"
+
+
+@pytest.mark.parametrize("verification_value", [42, 43])
+def test_codex_login_uses_original_run_and_independent_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    verification_value: int,
+) -> None:
+    repo = tmp_path / "teams" / "app"
+    repo.mkdir(parents=True)
+    (repo / "code.py").write_text("VALUE = 41\n")
+    (repo / "verify.py").write_text(
+        f"from code import VALUE\nassert VALUE == {verification_value}\n"
+    )
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    home = tmp_path / "native-auth"
+    home.mkdir()
+    os.mkfifo(home / "auth.json")
+    (tmp_path / "bin").mkdir()
+    executable = tmp_path / "bin" / "native-codex"
+    executable.write_text(
+        "#!/usr/bin/python3\n"
+        "import json,os,pathlib,sys,tomllib\n"
+        "config={}\n"
+        "for i,arg in enumerate(sys.argv):\n"
+        "    if arg == '-c': config.update(tomllib.loads(sys.argv[i+1]))\n"
+        "assert config['model']=='gpt-6-luna'\n"
+        "assert config['model_reasoning_effort']=='low'\n"
+        "assert config['model_provider']=='openai'\n"
+        "assert config['approval_policy']=='never'\n"
+        "assert not config['permissions']['oh_goon']['network']['enabled']\n"
+        "assert '--ignore-user-config' in sys.argv and '--ignore-rules' in sys.argv\n"
+        "prompt=json.loads(sys.stdin.read())\n"
+        "assert json.loads(pathlib.Path(config['model_instructions_file']).read_text())==prompt\n"
+        "assert 'Hashmarks' in prompt['repository_evidence']\n"
+        "assert 'Skill' in prompt['skill_instructions'] or 'supplied task' in prompt['skill_instructions']\n"
+        "assert pathlib.Path(os.environ['CODEX_HOME'],'auth.json').is_fifo()\n"
+        "pathlib.Path('code.py').write_text('VALUE = 42\\n')\n"
+        "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'Done'}}))\n"
+        "print(json.dumps({'type':'turn.completed'}))\n"
+    )
+    executable.chmod(0o700)
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="signed-in",
+        definition=NativeAgentDefinition(executable=str(executable)),
+        profile=NativeAgentProfile(
+            timeout_seconds=30.0,
+            codex_login=CodexLoginConnection(
+                home=str(home),
+                model="gpt-6-luna",
+                reasoning_effort="low",
+            ),
+        ),
+        executable_sha256=native_executable_sha256(executable),
+    )
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    runner = native_profile_command_runner(
+        repo, selected, None, RepositoryWorkspaceAuthority.pin_repository_subject
+    )
+    runtime = ApplicationRuntime.build(
+        standard_local=True, git_service=GitService(command_runner=runner)
+    )
+    try:
+        runtime.locations.add(repo)
+        admitted = runtime.plans.run_native_agent(
+            selected=selected,
+            workspace=repo,
+            skill=None,
+            task="Change VALUE to 42",
+            verification=((sys.executable, "verify.py"),),
+        )
+        detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
+        assert detail.outcome is (
+            FleetRunOutcome.SUCCESS
+            if verification_value == 42
+            else FleetRunOutcome.ATTENTION_REQUIRED
+        ), runtime.runs.game_tape_live_output(admitted.fleet_run_id).model_dump_json()
+        steps = detail.game_tape.repositories[0].steps
+        assert steps[0].status is GameTapeStatus.PASSED
+        assert steps[0].native_agent_observations[0].settled
+        assert steps[0].attempts[0].standard_isolation is None
+        assert steps[1].status is (
+            GameTapeStatus.PASSED if verification_value == 42 else GameTapeStatus.FAILED
+        )
+        assert (repo / "code.py").read_text() == "VALUE = 42\n"
+        assert (home / "auth.json").is_fifo()
+    finally:
+        runtime.shutdown(wait_for_runs=True)
 
 
 @pytest.mark.skipif(

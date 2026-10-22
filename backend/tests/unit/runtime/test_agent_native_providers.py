@@ -23,6 +23,79 @@ def executable(path: Path) -> Path:
     return path
 
 
+def test_codex_login_freezes_only_explicit_public_connection_facts(tmp_path: Path) -> None:
+    home = tmp_path / "native-home"
+    home.mkdir()
+    # A special file would hang an attempted credential read. Resolution must
+    # only resolve the home; native Codex retains all authentication semantics.
+    import os
+
+    os.mkfifo(home / "auth.json")
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    executable(tmp_path / "codex")
+    catalog = tmp_path / "providers.json"
+    catalog.write_text(
+        json.dumps(
+            {
+                "native_agents": {"codex": {"executable": "codex"}},
+                "native_profiles": {
+                    "signed-in": {
+                        "backend": "local",
+                        "codex_login": {
+                            "home": "native-home",
+                            "model": "gpt-6-luna",
+                            "reasoning_effort": "low",
+                        },
+                    }
+                },
+            }
+        )
+    )
+    config = load_agent_providers(catalog)
+    catalog.unlink()
+    selected = resolve_native_agent(
+        config, "codex", "signed-in", workspace=workspace, environment={}
+    )
+    assert selected.connection is None
+    assert selected.disclosure_recipients == ("codex",)
+    assert selected.profile.codex_login is not None
+    assert selected.profile.codex_login.home == str(home)
+    assert selected.profile.codex_login.model == "gpt-6-luna"
+    assert selected.profile.codex_login.reasoning_effort == "low"
+
+
+@pytest.mark.parametrize("invalid", ["agent", "arguments", "configuration", "workspace"])
+def test_codex_login_rejects_conflicting_native_authority(tmp_path: Path, invalid: str) -> None:
+    home = tmp_path / "native-home"
+    home.mkdir()
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    agent = "pi" if invalid == "agent" else "codex"
+    program = executable(tmp_path / agent)
+    definition: dict[str, object] = {"executable": str(program)}
+    if invalid == "arguments":
+        definition["arguments"] = ["--model", "different-model"]
+    if invalid == "configuration":
+        definition["configuration_directory"] = str(home)
+    config = AgentProvidersConfig.model_validate(
+        {
+            "native_agents": {agent: definition},
+            "native_profiles": {
+                "signed-in": {
+                    "codex_login": {
+                        "home": str(workspace if invalid == "workspace" else home),
+                        "model": "gpt-6-luna",
+                        "reasoning_effort": "low",
+                    }
+                }
+            },
+        }
+    )
+    with pytest.raises(AgentProviderError, match="Codex"):
+        resolve_native_agent(config, agent, "signed-in", workspace=workspace, environment={})
+
+
 def test_os_lookup_is_explicit_and_frozen_executable_is_verified(tmp_path: Path) -> None:
     program = executable(tmp_path / "pi")
     selected = resolve_native_agent(

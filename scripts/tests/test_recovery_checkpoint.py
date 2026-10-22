@@ -419,20 +419,19 @@ def test_crash_after_successful_cas_leaves_new_head_fully_recoverable(
 def test_resume_reconstructs_committed_source_into_empty_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from oh_goon.repository_tooling.release import package_slim
+
     root = _source(tmp_path)
-    identity = "sha256:" + "2" * 64
+    authored = root / "docs/test-results/analysis.md"
+    authored.parent.mkdir(parents=True)
+    authored.write_text("retained source\n", encoding="utf-8")
+    output = root / "frontend/test-results/result.txt"
+    output.parent.mkdir(parents=True)
+    output.write_text("local report\n", encoding="utf-8")
     publisher = FilesystemRecoveryPublisher(tmp_path / "durable")
-    monkeypatch.setattr(subject, "canonical_source_identity", lambda _root: identity)
-
-    def package(output: Path, *, root: Path) -> str:
-        import zipfile
-
-        with zipfile.ZipFile(output, "w") as archive:
-            archive.writestr("source/VERSION", (root / "VERSION").read_bytes())
-        return hashlib.sha256(output.read_bytes()).hexdigest()
-
-    monkeypatch.setattr(subject, "package_slim", package)
-    monkeypatch.setattr(subject, "archive_source_identity", lambda _archive: identity)
+    monkeypatch.setattr(
+        package_slim, "assert_public_source_privacy", lambda _root: None
+    )
     head = subject.checkpoint(
         root=root,
         publisher=publisher,
@@ -442,9 +441,18 @@ def test_resume_reconstructs_committed_source_into_empty_destination(
         proof_level="NONE",
         qualification_state="INCOMPLETE",
     )
+    assert head.source_identity == package_slim.canonical_source_identity(root)
+    authored.write_text("changed after checkpoint\n", encoding="utf-8")
+    assert package_slim.canonical_source_identity(root) != head.source_identity
     destination = tmp_path / "restored"
     assert subject.resume(publisher=publisher, destination=destination) == head
-    assert (destination / "source" / "VERSION").read_text() == "1.2.3\n"
+    restored = destination / "oh-goon-1.2.3"
+    assert (restored / "VERSION").read_text() == "1.2.3\n"
+    assert (
+        restored / "docs/test-results/analysis.md"
+    ).read_text() == "retained source\n"
+    assert not (restored / "frontend/test-results").exists()
+    assert package_slim.canonical_source_identity(restored) == head.source_identity
 
 
 def test_retry_after_receipt_publish_resumes_at_cas_without_rebuild(
