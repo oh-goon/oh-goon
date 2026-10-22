@@ -22,7 +22,9 @@ These are GitHub repository settings; the workflow file alone does not enforce
 them. Keep existing stronger review requirements when updating the settings.
 
 Required jobs have no path filters or allowed failures. Full Git history supplies
-the PR-base quality-floor comparison. Hosted runners use read-only tokens and
+the PR-base quality-floor comparison. Each disposable Ubuntu runner enables
+unprivileged user namespaces for the ordinary Bubblewrap tests.
+Hosted runners use read-only tokens and
 do not retain checkout credentials or receive repository secrets. Installed-agent,
 live-account, browser, and privileged certification remain explicit qualification;
 portable checks exclude the existing `certification` marker. Workflow files are
