@@ -10,22 +10,24 @@ The repository's [required-checks workflow](../.github/workflows/ci.yml) runs on
 every pull request, push to `main`, and merge-queue group. Each job materializes
 the committed uv/npm locks through `make init`, then invokes one existing owner
 check: `backend-check`, `frontend-check`, `tooling-check`, `architecture`,
-`check-generated`, or `test-integration`. These are also the stable GitHub check
-names. The integration target executes both backend and cross-owner integration
-tests. Make and the native tools retain command, dependency, and result authority;
+`check-generated`, `test-integration`, or `build-release`. These are also the
+stable GitHub check names. The integration target executes both backend and cross-owner integration
+tests. The release check rebuilds the frontend and verifies the assembled wheel.
+Make and the native tools retain command, dependency, and result authority;
 GitHub owns hosted scheduling and merge enforcement.
 
-Require all six checks from the GitHub Actions app for `main`, require the branch
+Require all seven checks from the GitHub Actions app for `main`, require the branch
 to be up to date, and apply those requirements to administrators without bypass.
 Require changes through a pull request and disallow force pushes and deletion.
 These are GitHub repository settings; the workflow file alone does not enforce
 them. Keep existing stronger review requirements when updating the settings.
 
 Required jobs have no path filters or allowed failures. Full Git history supplies
-the PR-base quality-floor comparison. Each disposable Ubuntu runner enables
+the PR-base quality-floor comparison. CI backend pytest stops at its first failure;
+a successful run covers the entire ordinary suite. Each disposable Ubuntu runner enables
 unprivileged user namespaces for the ordinary Bubblewrap tests.
-Hosted runners use read-only tokens and
-do not retain checkout credentials or receive repository secrets. Installed-agent,
+Hosted runners use read-only tokens and do not retain checkout credentials or
+receive repository secrets. Installed-agent,
 live-account, browser, and privileged certification remain explicit qualification;
 portable checks exclude the existing `certification` marker. Workflow files are
 authored source and participate in canonical source/archive identity.

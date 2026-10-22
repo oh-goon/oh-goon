@@ -35,6 +35,7 @@ def test_required_checks_run_for_every_pull_request_and_main_commit() -> None:
         "architecture",
         "check-generated",
         "test-integration",
+        "build-release",
     }
     assert "if" not in checks
     assert "continue-on-error" not in checks

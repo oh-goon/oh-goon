@@ -28,8 +28,10 @@ jobs:
           - architecture
           - check-generated
           - test-integration
+          - build-release
     env:
       UV_PYTHON: "3.12"
+      PYTEST_ADDOPTS: ${{ matrix.target == 'backend-check' && '--maxfail=1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

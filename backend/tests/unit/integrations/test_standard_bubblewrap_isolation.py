@@ -428,6 +428,135 @@ def test_workload_environment_cannot_inject_code_before_namespace_entry(
 
 
 @pytest.mark.process
+def test_system_runtime_links_cannot_reach_unmounted_host_ipc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = shutil.which("bwrap")
+    if executable is None:
+        pytest.skip("native bwrap is not installed")
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    available = BubblewrapProcessIsolation(executable)
+    _require_native(available, _request(available, workspace))
+    alternatives = tmp_path / "alternatives"
+    alternatives.mkdir()
+    socket_path = tmp_path / "host-service.sock"
+    fifo_path = tmp_path / "host-service.fifo"
+    os.mkfifo(fifo_path)
+    (alternatives / "service.sock").symlink_to(socket_path)
+    (alternatives / "service.fifo").symlink_to(fifo_path)
+    (alternatives / "null").symlink_to("/dev/null")
+    original_binds = module._standard_system_binds()
+    monkeypatch.setattr(
+        module,
+        "_STANDARD_RUNTIME_DIRECTORIES",
+        (*module._STANDARD_RUNTIME_DIRECTORIES, str(alternatives)),
+    )
+    monkeypatch.setattr(
+        module,
+        "_standard_system_binds",
+        lambda: (*original_binds, "--ro-bind", str(alternatives), "/etc/alternatives"),
+    )
+    script = """
+import errno, json, pathlib, socket
+root = pathlib.Path('/etc/alternatives')
+assert (root / 'service.sock').is_symlink()
+assert (root / 'service.fifo').is_symlink()
+assert not (root / 'service.sock').exists()
+assert not (root / 'service.fifo').exists()
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+    try:
+        connection.connect(str(root / 'service.sock'))
+    except OSError as error:
+        assert error.errno == errno.ENOENT
+    else:
+        raise AssertionError('host service became reachable')
+with (root / 'null').open('wb') as null:
+    assert null.write(b'sandbox-owned device') == 20
+print(json.dumps({'host_ipc': 'absent', 'synthetic_device': 'usable'}))
+"""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+        server.bind(str(socket_path))
+        server.listen()
+        server.setblocking(False)
+        backend = BubblewrapProcessIsolation(executable)
+        with RepositoryWorkspaceAuthority.pin_repository_subject(workspace) as require_current:
+            result = backend.execute(
+                _request(
+                    backend,
+                    workspace,
+                    require_workspace_current=require_current,
+                    argv=("/usr/bin/python3", "-c", script),
+                ),
+                timeout=5,
+                cancel_requested=None,
+            )
+        try:
+            connection, _ = server.accept()
+        except BlockingIOError:
+            pass
+        else:
+            with connection:
+                pytest.fail("host service accepted a sandbox connection")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "host_ipc": "absent",
+        "synthetic_device": "usable",
+    }
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("kind", ["socket", "fifo", "socket-link", "fifo-link"])
+def test_system_runtime_rejects_host_ipc_visible_in_any_bound_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    alternatives = tmp_path / "alternatives"
+    alternatives.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    # Inspect the alternatives first, so cross-root links require the full mount set.
+    monkeypatch.setattr(module, "_STANDARD_RUNTIME_DIRECTORIES", (str(alternatives), str(runtime)))
+    backend = _backend(tmp_path)
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("host IPC reached native launch")
+    )
+    endpoint = runtime / "endpoint" if kind.endswith("-link") else alternatives / "endpoint"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+        if kind.startswith("fifo"):
+            os.mkfifo(endpoint)
+        else:
+            server.bind(str(endpoint))
+        if kind.endswith("-link"):
+            (alternatives / "service").symlink_to(endpoint)
+        with pytest.raises(FleetPlanInvalid, match="IPC/special"):
+            backend.require_standard_available(_request(backend, workspace))
+
+
+def test_system_runtime_external_link_still_rejects_private_file_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    private = tmp_path / "private.sqlite"
+    private.write_bytes(b"private application state")
+    (runtime / "ordinary-looking-input").symlink_to(private)
+    backend = _backend(tmp_path)
+    backend.bind_application_state(private_paths=(private,), read_only_paths=())
+    monkeypatch.setattr(module, "_STANDARD_RUNTIME_DIRECTORIES", (str(runtime),))
+    monkeypatch.setattr(
+        module,
+        "run_command",
+        lambda *a, **kw: pytest.fail("private file alias reached native launch"),
+    )
+    with pytest.raises(FleetPlanInvalid, match="private application file alias"):
+        backend.require_standard_available(_request(backend, workspace))
+
+
+@pytest.mark.process
 @pytest.mark.parametrize("location", ["workspace", "input", "input-alias", "private-config"])
 @pytest.mark.parametrize("kind", ["socket", "fifo", "socket-symlink"])
 def test_ordinary_binds_reject_existing_host_ipc_before_process_creation(
