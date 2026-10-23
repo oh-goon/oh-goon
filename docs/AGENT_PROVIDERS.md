@@ -58,6 +58,11 @@ The supporting private diagnostic log may retain earlier visible output after
 shutdown; rotation or storage failure can make it unavailable. No transcript,
 reasoning history or completed cleanup is reconstructed from that log.
 
+Keep exported handoffs, session inputs and stack traces in private storage outside
+the source checkout. The root Git ignores cover accidental Run evidence bundles,
+handoff JSON and diagnostic logs; they do not redact contents or protect a file
+that is already tracked. Review an export before sharing it, even after redaction.
+
 After a session ends, use the same Oh-Goon state root and exact Run ID:
 
 ```sh

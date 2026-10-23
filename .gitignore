@@ -45,6 +45,20 @@ __pycache__/
 /generated/release/
 /reports/
 /logs/
+/diagnostics/
+/run-logs/
+/run-evidence/
+# Private Run readbacks and traces belong outside source. Keep test fixtures visible.
+/handoff-*.json
+/session-input-*.json
+/steps-*.json
+/retained-controller-log-*.jsonl
+/*.log
+/*.jsonl
+/*.jsonl.*
+/*.stacktrace
+/stacktrace*.txt
+/stacktrace*.json
 /htmlcov/
 /coverage-python.json
 /coverage.xml
