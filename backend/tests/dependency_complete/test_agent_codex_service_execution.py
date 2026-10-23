@@ -1,0 +1,394 @@
+"""Owned native service turns retain actual command-owner shutdown evidence."""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+import time
+import tomllib
+from collections.abc import Callable
+from pathlib import Path
+from threading import Event
+from typing import Any
+
+import pytest
+
+from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
+    CodexServiceConnection,
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
+from oh_goon.core.path_layouts import AttemptPathLayout
+from oh_goon.engine.command import CommandCancelledError, CommandResult, run_command
+from oh_goon.engine.errors import OperationCancelledError
+from oh_goon.engine.git import GitService
+from oh_goon.integrations import agent_codex_service_execution as execution
+from oh_goon.integrations.agent_codex_service import NativeCodexCleanupIncomplete
+from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, _StepProcess
+
+
+def execute_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fault: str | None = None,
+) -> tuple[
+    Callable[[], execution.CodexServiceExecution],
+    list[object],
+    list[CommandResult | CommandCancelledError],
+]:
+    repository, control = tmp_path / "repository", tmp_path / "control"
+    repository.mkdir()
+    control.mkdir()
+    cancelled = Event()
+    release = tmp_path / "native-exit"
+    events: list[object] = []
+    physical: list[CommandResult | CommandCancelledError] = []
+    native_environment = {
+        "OPENAI_API_KEY": "SYNTHETIC_NATIVE_PROVIDER_SECRET",
+        "HOME": str(tmp_path / "native-home"),
+        "CODEX_HOME": str(tmp_path / "native-home" / "native-state"),
+        "XDG_CONFIG_HOME": str(tmp_path / "native-configuration"),
+    }
+    inherited_control = {
+        name: "SYNTHETIC_PARENT_CONTROL_SECRET"
+        for name in (
+            "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
+            "CODEX_VERSION",
+            "CODEX_THREAD_ID",
+            "CODEX_SESSION_ID",
+            "CODEX_PERMISSION_PROFILE",
+            "CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN",
+            "NODE_REPL_AUTH_TOKEN",
+        )
+    }
+    public_program = tmp_path / "public-runtime" / "codex"
+    public_program.parent.mkdir()
+    public_program.write_text("#!/bin/sh\nexit 99\n")
+    public_program.chmod(0o700)
+    for name in ("HOME", "CODEX_HOME", "XDG_CONFIG_HOME"):
+        Path(native_environment[name]).mkdir(parents=True, exist_ok=True)
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="owned-service",
+        definition=NativeAgentDefinition(executable=str(public_program)),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(tmp_path / "native-home" / "native-state"),
+                model="native-model",
+                reasoning_effort="high",
+            )
+        ),
+        executable_sha256="0" * 64,
+    )
+
+    def command_owner(*argv: str, **kwargs: Any) -> CommandResult:
+        environment = kwargs["env"]
+        assert all(environment.get(name) == value for name, value in native_environment.items())
+        assert not inherited_control.keys() & environment.keys()
+        if argv[-1] == "--version":
+            events.append("version_probe")
+            version = "codex-cli 0.999.0" if fault == "version" else "codex-cli 0.163.0"
+            result = run_command(
+                sys.executable,
+                "-I",
+                "-c",
+                "import sys; print(sys.argv[1])",
+                version,
+                cwd=repository,
+                env={"PATH": "/usr/bin:/bin"},
+                timeout=kwargs["timeout"],
+                cancel_requested=kwargs["cancel_requested"],
+                require_process_group_quiescence=True,
+                input_data=kwargs.get("input_data"),
+            )
+            events.append(("version_receipt", result))
+            return result
+        events.append("process_birth")
+        if fault == "dead_before_socket":
+            script = "raise SystemExit(7)"
+        else:
+            script = (
+                "import pathlib,sys,time\n"
+                "pathlib.Path(sys.argv[1]).touch()\n"
+                "while not pathlib.Path(sys.argv[2]).exists(): time.sleep(.01)\n"
+            )
+        try:
+            result = run_command(
+                sys.executable,
+                "-I",
+                "-c",
+                script,
+                argv[-1].removeprefix("unix://"),
+                str(release),
+                cwd=repository,
+                env={"PATH": "/usr/bin:/bin"},
+                timeout=kwargs["timeout"],
+                cancel_requested=kwargs["cancel_requested"],
+                require_process_group_quiescence=True,
+                input_data=kwargs["input_data"],
+            )
+        except CommandCancelledError as error:
+            physical.append(error)
+            events.append("process_closed")
+            raise
+        physical.append(result)
+        events.append("process_closed")
+        return result
+
+    class NativeProtocol:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self.metadata = {"service_version": None}
+            self._message = 0
+
+        async def __aenter__(self) -> NativeProtocol:
+            events.append("connect")
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            events.append("disconnect")
+            if fault == "normal_daemon_exit":
+                release.touch()
+                deadline = time.monotonic() + 2
+                while not physical and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                assert physical, "real command owner did not observe the normal daemon exit"
+            if fault == "transport_cleanup":
+                raise NativeCodexCleanupIncomplete("Native transport cleanup is incomplete")
+
+        def require_native_home_separation(
+            self, _roots: tuple[Path, ...], *, expected_home: Path | None = None
+        ) -> None:
+            assert expected_home == Path(native_environment["CODEX_HOME"])
+            events.append("store_separation")
+            if fault == "store_overlap":
+                raise AgentProviderError("Native Codex state overlaps an agent-readable root")
+
+        async def start_thread(self, **_kwargs: Any) -> dict[str, Any]:
+            events.append("thread_start")
+            return {"thread": {"id": "owned-thread"}}
+
+        async def require_no_mcp_servers(self, thread: str) -> None:
+            assert thread == "owned-thread"
+            events.append("mcp_gate")
+            if fault == "mcp":
+                raise AgentProviderError(
+                    "Native Codex protected execution requires an empty MCP catalog"
+                )
+
+        async def feature_flags(self, thread: str) -> dict[str, bool]:
+            assert thread == "owned-thread"
+            events.append("feature_gate")
+            return {name: fault == "features" for name in execution._DISABLED_FEATURES}
+
+        async def command_exec(self, *_args: object, **_kwargs: Any) -> dict[str, Any]:
+            events.append("sandbox_qualification")
+            return {"exitCode": 1 if fault == "qualification" else 0}
+
+        async def start_turn(self, thread: str, task: str, **_kwargs: Any) -> dict[str, Any]:
+            assert thread == "owned-thread" and task == "Captured task"
+            events.append("model_turn")
+            return {"turn": {"id": "owned-turn"}}
+
+        async def next_notification(self, thread: str) -> dict[str, Any]:
+            assert thread == "owned-thread"
+            if fault == "cancel":
+                cancelled.set()
+                await asyncio.sleep(0.01)
+                return {"method": "item/agentMessage/delta", "params": {"threadId": thread}}
+            self._message += 1
+            if self._message == 1:
+                return {
+                    "method": "item/completed",
+                    "params": {
+                        "threadId": thread,
+                        "turnId": "owned-turn",
+                        "item": {"type": "agentMessage", "text": "Native final report"},
+                    },
+                }
+            return {
+                "method": "turn/completed",
+                "params": {
+                    "threadId": thread,
+                    "turn": {
+                        "id": "foreign-turn" if fault == "foreign_terminal" else "owned-turn",
+                        "status": "completed",
+                        "error": None,
+                    },
+                },
+            }
+
+    monkeypatch.setattr(execution, "CodexServiceClient", NativeProtocol)
+    process = _StepProcess(
+        paths=AttemptPathLayout.from_root(tmp_path / "attempt"),
+        environment={},
+        host_environment={**native_environment, **inherited_control},
+        command_runner=command_owner,
+        git_command_runner=command_owner,
+        managed_runtime=None,
+    )
+    runtime = StepRuntime(
+        git=GitService(), extensions=None, tools=None, cancel_requested=cancelled.is_set
+    )
+
+    def invoke() -> execution.CodexServiceExecution:
+        return execution.execute_codex_service_run(
+            selected,
+            repository=repository,
+            instructions=b"Frozen Skill and Hashmarks instructions",
+            task="Captured task",
+            read_roots=(tmp_path / "public-runtime",),
+            control=control,
+            process=process,
+            runtime=runtime,
+            deadline=time.monotonic() + 5,
+            read_only=True,
+        )
+
+    return invoke, events, physical
+
+
+def test_service_turn_success_retains_actual_owned_daemon_cancellation_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch)
+    result = invoke()
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    shutdown = physical[0]
+    assert result.outcome.supervisor is shutdown.supervisor
+    assert result.outcome.runtime_authority is shutdown.runtime_authority
+    assert result.outcome.physical_execution_id == shutdown.physical_execution_id
+    assert shutdown.supervisor.process_group_cleanup_requested is True
+    assert shutdown.supervisor.cleanup_reason == "cancel"
+    assert shutdown.supervisor.final_process_group_quiescent is True
+    assert shutdown.supervisor.termination_receipt is not None
+    assert result.outcome.stdout == "Native final report"
+    assert result.outcome.returncode == 0 and result.protocol.settled is True
+    assert events.index("mcp_gate") < events.index("model_turn")
+    assert events.index("sandbox_qualification") < events.index("model_turn")
+    assert events.index("disconnect") < events.index("process_closed")
+
+
+def test_unqualified_native_cli_version_blocks_before_daemon_and_model_submission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault="version")
+    with pytest.raises(AgentProviderError, match="version"):
+        invoke()
+    assert "version_probe" in events
+    assert "process_birth" not in events and "connect" not in events and "model_turn" not in events
+    assert not physical
+    receipts = [
+        item[1] for item in events if isinstance(item, tuple) and item[0] == "version_receipt"
+    ]
+    assert len(receipts) == 1 and isinstance(receipts[0], CommandResult)
+    assert receipts[0].stdout.strip() == "codex-cli 0.999.0"
+    assert receipts[0].supervisor.final_process_group_quiescent is True
+
+
+@pytest.mark.parametrize("fault", ["store_overlap", "mcp", "features", "qualification"])
+def test_unproven_service_capability_blocks_model_and_closes_owned_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault=fault)
+    with pytest.raises(execution.CodexServiceExecutionFailure) as failure:
+        invoke()
+    assert "model_turn" not in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    assert failure.value.outcome.supervisor is physical[0].supervisor
+    assert failure.value.outcome.physical_execution_id == physical[0].physical_execution_id
+    assert failure.value.outcome.returncode != 0
+    assert physical[0].supervisor.final_process_group_quiescent is True
+    assert events[-1] == "process_closed"
+
+
+@pytest.mark.parametrize("fault", ["foreign_terminal", "transport_cleanup", "normal_daemon_exit"])
+def test_missing_terminal_or_cleanup_proof_cannot_be_reported_as_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault=fault)
+    with pytest.raises(AgentProviderError):
+        invoke()
+    assert "model_turn" in events
+    assert len(physical) == 1
+    assert physical[0].supervisor.final_process_group_quiescent is True
+    assert isinstance(
+        physical[0], CommandResult if fault == "normal_daemon_exit" else CommandCancelledError
+    )
+
+
+def test_dead_service_before_readiness_never_submits_model_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault="dead_before_socket")
+    with pytest.raises(AgentProviderError, match="before readiness"):
+        invoke()
+    assert "connect" not in events and "model_turn" not in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandResult)
+    assert physical[0].returncode == 7
+    assert physical[0].supervisor.final_process_group_quiescent is True
+
+
+def test_run_cancellation_keeps_actual_daemon_cleanup_and_never_returns_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault="cancel")
+    with pytest.raises(OperationCancelledError) as cancelled:
+        invoke()
+    assert cancelled.value.__cause__ is physical[0]
+    assert "model_turn" in events and "disconnect" in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    assert physical[0].supervisor.cleanup_reason == "cancel"
+    assert physical[0].supervisor.final_process_group_quiescent is True
+
+
+def test_service_policy_keeps_review_git_and_control_roots_protected(tmp_path: Path) -> None:
+    repository, control = tmp_path / "repository", tmp_path / "control"
+    socket = control / "private" / "agent.sock"
+    scratch, public_runtime = control / "scratch", tmp_path / "public-runtime"
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="owned-service",
+        definition=NativeAgentDefinition(executable="/public/native/codex"),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(tmp_path / "native-home" / "native-state"),
+                model="native-model",
+                reasoning_effort="high",
+            )
+        ),
+        executable_sha256="0" * 64,
+    )
+    argv = execution.service_arguments(
+        selected,
+        repository=repository,
+        read_roots=(public_runtime,),
+        control=control,
+        scratch=scratch,
+        socket=socket,
+        profile="frozen_profile",
+        read_only=True,
+    )
+    settings = [argv[index + 1] for index, value in enumerate(argv[:-1]) if value == "-c"]
+    native = tomllib.loads("\n".join(settings))
+    policy = native["permissions"]["frozen_profile"]
+    assert policy["filesystem"] == {
+        ":root": "deny",
+        ":minimal": "read",
+        str(public_runtime): "read",
+        str(repository): "read",
+        str(repository / ".git"): "read",
+        str(repository / ".codex"): "read",
+        str(repository / ".codex" / "**"): "deny",
+        str(control): "read",
+        str(socket.parent): "deny",
+        str(scratch): "write",
+    }
+    assert policy["network"] == {"enabled": False}
+    assert native["approval_policy"] == "never"
+    assert native["allow_login_shell"] is False
+    assert native["shell_environment_policy"]["inherit"] == "none"
+    assert native["shell_environment_policy"]["include_only"] == ["PATH", "TMPDIR"]
+    assert argv[-3:] == ("app-server", "--listen", "unix://" + str(socket))

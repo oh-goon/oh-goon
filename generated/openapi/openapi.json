@@ -2230,6 +2230,37 @@
         "title": "CodexLoginConnection",
         "type": "object"
       },
+      "CodexServiceConnection": {
+        "additionalProperties": false,
+        "description": "Explicit native-owned directory scope and public service model settings.\n\nOh-Goon verifies directory separation without reading its files. Native Codex\nalone owns authentication and personal configuration within that directory;\nthe original Step owns service startup and its explicit socket.",
+        "properties": {
+          "home": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Home",
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Reasoning Effort",
+            "type": "string"
+          }
+        },
+        "required": [
+          "home",
+          "model",
+          "reasoning_effort"
+        ],
+        "title": "CodexServiceConnection",
+        "type": "object"
+      },
       "CommandSafety": {
         "enum": [
           "READ_ONLY",
@@ -15082,7 +15113,7 @@
       },
       "NativeAgentObservation": {
         "additionalProperties": false,
-        "description": "Native protocol claims bound to the original source and Step occurrence.\n\nActual process results, resources, cancellation and verification remain in\nthe original Step evidence. A settled native conversation is not APP PASS.",
+        "description": "Native protocol claims bound to the original source and Step occurrence.\n\nConversation events and settled/failed flags remain untrusted harness claims.\nThe optional execution child carries original Step facts under its own\nauthority. Actual process receipts, cancellation and verification remain in\nthe original Step evidence. A settled native conversation is not APP PASS.",
         "properties": {
           "agent": {
             "enum": [
@@ -15107,6 +15138,16 @@
             "maxItems": 128,
             "title": "Events",
             "type": "array"
+          },
+          "execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NativeServiceExecutionEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "failed": {
             "title": "Failed",
@@ -15229,6 +15270,16 @@
               }
             ]
           },
+          "codex_service": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodexServiceConnection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "inference_profile": {
             "anyOf": [
               {
@@ -15270,6 +15321,92 @@
           }
         },
         "title": "NativeAgentProfile",
+        "type": "object"
+      },
+      "NativeServiceExecutionEvidence": {
+        "additionalProperties": false,
+        "description": "Established native service facts reported by the original Step owner.\n\nThese facts describe observed preflight and owned process closure. They are\nseparate from model/native conversation claims and do not certify a solution.",
+        "properties": {
+          "authority": {
+            "const": "ORIGINAL_STEP_EXECUTION",
+            "default": "ORIGINAL_STEP_EXECUTION",
+            "title": "Authority",
+            "type": "string"
+          },
+          "backend_id": {
+            "const": "codex-native-tools",
+            "default": "codex-native-tools",
+            "title": "Backend Id",
+            "type": "string"
+          },
+          "configuration_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Configuration Id",
+            "type": "string"
+          },
+          "disabled_features": {
+            "items": {
+              "pattern": "^[a-z][a-z0-9_]{0,127}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Disabled Features",
+            "type": "array"
+          },
+          "mcp_catalog": {
+            "const": "empty",
+            "default": "empty",
+            "title": "Mcp Catalog",
+            "type": "string"
+          },
+          "native_state_separation": {
+            "const": "verified",
+            "default": "verified",
+            "title": "Native State Separation",
+            "type": "string"
+          },
+          "native_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Native Version",
+            "type": "string"
+          },
+          "permission_profile_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Permission Profile Id",
+            "type": "string"
+          },
+          "preflight": {
+            "const": "verified",
+            "default": "verified",
+            "title": "Preflight",
+            "type": "string"
+          },
+          "process_cleanup": {
+            "const": "verified",
+            "default": "verified",
+            "title": "Process Cleanup",
+            "type": "string"
+          },
+          "repository_access": {
+            "enum": [
+              "read_only",
+              "write"
+            ],
+            "title": "Repository Access",
+            "type": "string"
+          }
+        },
+        "required": [
+          "configuration_id",
+          "native_version",
+          "permission_profile_id",
+          "repository_access",
+          "disabled_features"
+        ],
+        "title": "NativeServiceExecutionEvidence",
         "type": "object"
       },
       "NoDependencyUpdates": {

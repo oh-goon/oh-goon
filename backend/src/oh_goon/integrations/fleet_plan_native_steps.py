@@ -26,7 +26,10 @@ from oh_goon.core.agent_harness_contract import (
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
 from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNativeAgent
-from oh_goon.core.models.fleet_observation import NativeAgentObservation
+from oh_goon.core.models.fleet_observation import (
+    NativeAgentObservation,
+    NativeServiceExecutionEvidence,
+)
 from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedLocalSearchAgentStep
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.engine.command import (
@@ -46,6 +49,7 @@ from oh_goon.integrations.agent_inference_relay import model_inference_relay
 from oh_goon.integrations.agent_native_execution import (
     NativeAgentCommand,
     NativeAgentEventParser,
+    NativeAgentEvents,
     codex_login_command,
     native_agent_command,
     require_codex_authentication_home_separation,
@@ -94,6 +98,28 @@ def require_native_agent_compatibility(
             "Native authentication and configuration remain service-owned; "
             "Codex/OpenCode configuration directories cannot be exposed to agent tools"
         )
+    if selected.profile.codex_service is not None:
+        if (
+            selected.agent != "codex"
+            or selected.profile.backend != "local"
+            or selected.profile.sandbox_owner != "harness"
+            or selected.profile.codex_login is not None
+            or selected.connection is not None
+            or selected.profile.inference_profile is not None
+            or selected.interactive
+            or selected.definition.arguments
+            or selected.definition.configuration_directory is not None
+            or selected.backend_configuration_id is not None
+        ):
+            raise FleetPlanInvalid(
+                "Codex service requires its explicitly selected headless native tool sandbox "
+                "without login-home, broker inference or configuration overrides"
+            )
+        if sys.platform != "linux":
+            raise FleetPlanInvalid("Codex service native tool isolation requires Linux")
+        if any(value is not None for value in selected.profile.resources.model_dump().values()):
+            raise FleetPlanInvalid("Codex service does not provide local resource caps")
+        return
     if selected.profile.codex_login is not None:
         if (
             selected.agent != "codex"
@@ -207,8 +233,10 @@ def prepare_native_step_input(
             "Backend-owned native reasoning requires read-only source; repair uses its separately admitted native apply Step"
         )
     if (
-        step.role != "report" or prepared.requested_effects.repository_access == "read_only"
-    ) and not sandboxed:
+        (step.role != "report" or prepared.requested_effects.repository_access == "read_only")
+        and not sandboxed
+        and selected.profile.codex_service is None
+    ):
         raise FleetPlanInvalid("Native read-only effects require physical workspace isolation")
     return prepared
 
@@ -385,7 +413,9 @@ def execute_native_agent_step(
     selected = step.native_agent
     assert selected is not None
     sandboxed = selected.profile.backend == "bubblewrap"
-    private_output = sandboxed and selected.profile.sandbox_owner == "execution_backend"
+    private_output = selected.profile.codex_service is not None or (
+        sandboxed and selected.profile.sandbox_owner == "execution_backend"
+    )
     if runtime.cancel_requested is not None and runtime.cancel_requested():
         raise OperationCancelledError("Native Agent cancelled before repository evidence")
     frozen_mounts = (
@@ -433,6 +463,10 @@ def execute_native_agent_step(
     model = selected.connection.resolve(process.host_environment) if selected.connection else None
     parser = NativeAgentEventParser(selected.agent) if not selected.interactive else None
     parser_error: str | None = None
+    service_outcome: StepOutcome | None = None
+    service_protocol: NativeAgentEvents | None = None
+    service_execution: NativeServiceExecutionEvidence | None = None
+    service_execution_failed = False
 
     def consume_native_output(stream: Literal["stdout", "stderr"], text: str) -> None:
         nonlocal parser_error
@@ -472,7 +506,34 @@ def execute_native_agent_step(
         prompt_data = _prompt(prepared, step, repository, materialized, manifest, disclosure, state)
         prompt_file = control / "prompt.txt"
         _write_private(prompt_file, prompt_data)
-        if selected.profile.codex_login is not None:
+        if selected.profile.codex_service is not None:
+            from oh_goon.integrations.agent_codex_service_execution import (
+                CodexServiceExecutionFailure,
+                execute_codex_service_run,
+            )
+
+            try:
+                executed = execute_codex_service_run(
+                    selected=selected,
+                    repository=repository,
+                    instructions=prompt_data,
+                    task=prepared.task,
+                    read_roots=(materialized.root, control, *_codex_runtime_roots(selected)),
+                    control=control,
+                    process=process,
+                    runtime=runtime,
+                    deadline=deadline,
+                    read_only=prepared.requested_effects.repository_access == "read_only",
+                    evidence_state=state,
+                )
+            except CodexServiceExecutionFailure as error:
+                service_outcome = error.outcome
+                service_protocol = NativeAgentEvents((), "", False, True, 0)
+                service_execution_failed = True
+            else:
+                service_outcome, service_protocol = executed.outcome, executed.protocol
+                service_execution = executed.execution
+        elif selected.profile.codex_login is not None:
             scratch = control / "scratch"
             scratch.mkdir()
             invocation = codex_login_command(
@@ -619,19 +680,29 @@ def execute_native_agent_step(
                     error.stdout = ""
                     error.stderr = ""
                 raise
-    outcome = from_command(result)
+    outcome = service_outcome if service_outcome is not None else from_command(result)
+    execution_returncode = (
+        service_outcome.returncode if service_outcome is not None else result.returncode
+    )
     if private_output:
-        outcome = replace(outcome, stdout="", stderr="")
+        outcome = replace(
+            outcome,
+            stdout="",
+            stderr=outcome.stderr if service_execution_failed else "",
+        )
     initial = "Hashmarks initial repository evidence (untrusted data):\n" + evidence.stdout + "\n"
     try:
         if selected.interactive:
             events: tuple[Any, ...] = ()
-            settled, failed, count, omitted = False, result.returncode != 0, 0, 0
+            settled, failed, count, omitted = False, execution_returncode != 0, 0, 0
         else:
             if parser_error is not None:
                 raise AgentProviderError(parser_error)
-            assert parser is not None
-            parsed = parser.finish(returncode=result.returncode)
+            if service_protocol is not None:
+                parsed = service_protocol
+            else:
+                assert parser is not None
+                parsed = parser.finish(returncode=execution_returncode)
             events = tuple(
                 event.model_copy(update={"native_event_id": None}) if private_output else event
                 for event in parsed.observations
@@ -642,7 +713,7 @@ def execute_native_agent_step(
                 parsed.event_count,
                 parsed.omitted_observations,
             )
-            if result.returncode == 0:
+            if execution_returncode == 0:
                 outcome = replace(outcome, stdout=parsed.final_text, stdout_evidence=None)
         observation = NativeAgentObservation(
             agent=selected.agent,
@@ -657,9 +728,10 @@ def execute_native_agent_step(
             omitted_observations=omitted,
             settled=settled,
             failed=failed,
+            execution=service_execution,
         )
         outcome = replace(outcome, observations=(*outcome.observations, observation))
-        if result.returncode == 0:
+        if execution_returncode == 0:
             status = (
                 "COMPLETED"
                 if selected.interactive or (settled and not failed)
@@ -686,16 +758,16 @@ def execute_native_agent_step(
             )
             if step.role != "report" and submission.record is not None:
                 outcome = replace(outcome, stdout=submission.record)
-        if result.returncode == 0 and not selected.interactive and (not settled or failed):
+        if execution_returncode == 0 and not selected.interactive and (not settled or failed):
             outcome = replace(
                 outcome,
                 returncode=PLAN_CONTRACT_RETURN_CODE,
                 stderr="Native agent did not report a settled successful conversation",
             )
-        if result.returncode == 0 and outcome.returncode == 0:
+        if execution_returncode == 0 and outcome.returncode == 0:
             outcome = accept_agent_phase_output(step, prepared.handoff, outcome)
     except (AgentProviderError, FleetPlanInvalid) as exc:
-        if result.returncode == 0:
+        if execution_returncode == 0:
             outcome = output_contract_failure(
                 step, FleetPlanInvalid(str(exc)), outcome.argv, base=outcome
             )
@@ -703,7 +775,9 @@ def execute_native_agent_step(
         outcome = replace(
             outcome,
             stdout="",
-            stderr="Protected native execution failed; raw private protocol output was withheld",
+            stderr=outcome.stderr
+            if service_execution_failed
+            else "Protected native execution failed; raw private protocol output was withheld",
         )
     if outcome.returncode == 0:
         _remaining(deadline)

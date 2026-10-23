@@ -140,7 +140,23 @@ def test_explicit_native_profiles_and_continuation_remain_on_the_selected_thread
                     result = {"turn": {"id": "turn-1"}}
                 elif method == "thread/compact/start":
                     await websocket.send_json(
-                        {"method": "thread/compacted", "params": {"threadId": thread}}
+                        {
+                            "method": "item/completed",
+                            "params": {
+                                "threadId": thread,
+                                "turnId": "compaction-turn",
+                                "item": {"id": "compact-item", "type": "contextCompaction"},
+                            },
+                        }
+                    )
+                    await websocket.send_json(
+                        {
+                            "method": "turn/completed",
+                            "params": {
+                                "threadId": thread,
+                                "turn": {"id": "compaction-turn", "status": "completed"},
+                            },
+                        }
                     )
                 await websocket.send_json({"id": message["id"], "result": result})
         except WebSocketDisconnect:
@@ -166,8 +182,14 @@ def test_explicit_native_profiles_and_continuation_remain_on_the_selected_thread
             )
             event = await client.next_notification(thread)
             assert event["params"]["delta"] == "owned progress"
+            await client.resume_thread(thread, permissions=profile)
             await client.compact_thread(thread)
-            assert (await client.next_notification(thread))["method"] == "thread/compacted"
+            compacted = await client.next_notification(thread)
+            assert compacted["method"] == "item/completed"
+            assert compacted["params"]["item"]["type"] == "contextCompaction"
+            assert (await client.next_notification(thread))["params"]["turn"][
+                "status"
+            ] == "completed"
             await client.start_turn(thread, "follow-up task", permissions=profile)
             await client.next_notification(thread)
             await client.interrupt_turn(thread, "turn-1")
@@ -184,6 +206,10 @@ def test_explicit_native_profiles_and_continuation_remain_on_the_selected_thread
                 await client.resume_thread(thread, permissions=":danger-full-access")
             with pytest.raises(AgentProviderError, match="cannot replace"):
                 await client.resume_thread(thread, permissions=profile, configuration={})
+            with pytest.raises(AgentProviderError, match="cannot replace"):
+                await client.resume_thread(
+                    thread, permissions=profile, developer_instructions="different context"
+                )
             assert len(messages) == before
             with pytest.raises(AgentProviderError, match="fresh native"):
                 await client.start_thread(
@@ -193,9 +219,17 @@ def test_explicit_native_profiles_and_continuation_remain_on_the_selected_thread
                     developer_instructions="fresh phase",
                 )
         async with CodexServiceClient(tmp_path / "explicit.sock", experimental_api=True) as client:
-            assert (await client.resume_thread(thread, permissions=profile))["thread"][
-                "id"
-            ] == thread
+            before = len(messages)
+            with pytest.raises(AgentProviderError, match="original frozen instructions"):
+                await client.resume_thread(thread, permissions=profile)
+            assert len(messages) == before
+            assert (
+                await client.resume_thread(
+                    thread,
+                    permissions=profile,
+                    developer_instructions="frozen Hashmarks and Skill context",
+                )
+            )["thread"]["id"] == thread
 
     asyncio.run(check())
     turns = [message for message in messages if message["method"] == "turn/start"]
@@ -207,6 +241,16 @@ def test_explicit_native_profiles_and_continuation_remain_on_the_selected_thread
     start = next(message for message in messages if message["method"] == "thread/start")
     assert start["params"]["developerInstructions"] == "frozen Hashmarks and Skill context"
     assert start["params"]["permissions"] == profile and "sandbox" not in start["params"]
+    assert start["params"]["environments"] == [
+        {"environmentId": "local", "cwd": str(tmp_path), "runtimeWorkspaceRoots": [str(tmp_path)]}
+    ]
+    assert start["params"]["selectedCapabilityRoots"] == []
+    resumes = [message for message in messages if message["method"] == "thread/resume"]
+    assert len(resumes) == 2
+    assert all(
+        message["params"]["developerInstructions"] == start["params"]["developerInstructions"]
+        for message in resumes
+    )
 
 
 @pytest.mark.parametrize(
@@ -320,7 +364,9 @@ def test_native_profile_fallback_or_wrong_resume_identity_is_refused(
     async def check() -> None:
         async with CodexServiceClient(tmp_path / "explicit.sock", experimental_api=True) as client:
             with pytest.raises(AgentProviderError):
-                await client.resume_thread("owned", permissions="admitted")
+                await client.resume_thread(
+                    "owned", permissions="admitted", developer_instructions="frozen"
+                )
 
     asyncio.run(check())
     assert methods == ["initialize", "initialized", "thread/resume"]

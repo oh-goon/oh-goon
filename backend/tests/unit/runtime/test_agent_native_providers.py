@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import tomllib
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,9 @@ from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     AgentProvidersConfig,
     CodexLoginConnection,
+    CodexServiceConnection,
     NativeAgentDefinition,
+    NativeAgentName,
     NativeAgentProfile,
 )
 from oh_goon.integrations.agent_native_execution import (
@@ -336,7 +339,7 @@ def test_forged_protected_login_rejects_before_native_home_access(
 
 @pytest.mark.parametrize("agent", ["codex", "opencode"])
 def test_native_configuration_directory_rejects_before_file_access(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: NativeAgentName
 ) -> None:
     import oh_goon.runtime.agent_providers as provider_owner
 
@@ -417,3 +420,180 @@ def test_backend_delegation_rejects_competing_native_policy_arguments(
     )
     with pytest.raises(AgentProviderError, match="owns the native sandbox selection"):
         resolve_native_agent(config, "codex", "protected", workspace=tmp_path, environment={})
+
+
+def test_codex_service_resolution_freezes_public_facts_without_native_state_or_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import oh_goon.runtime.agent_providers as provider_owner
+
+    program = executable(tmp_path / "codex")
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    native_home = tmp_path / "native-owned"
+    native_home.mkdir()
+    os.mkfifo(native_home / "auth.json")
+    os.mkfifo(native_home / "config.toml")
+    catalog = tmp_path / "providers.json"
+    catalog.write_text(
+        json.dumps(
+            {
+                "native_agents": {"codex": {"executable": "codex", "runtime_roots": ["codex"]}},
+                "native_profiles": {
+                    "service": {
+                        "codex_service": {
+                            "home": "native-owned",
+                            "model": "native-model",
+                            "reasoning_effort": " native-effort ",
+                        }
+                    }
+                },
+            }
+        )
+    )
+    config = load_agent_providers(catalog)
+    catalog.unlink()
+    monkeypatch.setattr(Path, "home", lambda: pytest.fail("native home was discovered"))
+    monkeypatch.setattr(
+        provider_owner.shutil,
+        "which",
+        lambda *args, **kwargs: pytest.fail("explicit executable was rediscovered"),
+    )
+
+    class UnreadEnvironment(Mapping[str, str]):
+        def __getitem__(self, key: str) -> str:
+            pytest.fail("native service selection read ambient environment")
+
+        def __iter__(self) -> Iterator[str]:
+            pytest.fail("native service selection enumerated ambient environment")
+
+        def __len__(self) -> int:
+            pytest.fail("native service selection inspected ambient environment")
+
+    selected = resolve_native_agent(
+        config, "codex", "service", workspace=workspace, environment=UnreadEnvironment()
+    )
+    assert selected.definition.executable == str(program)
+    assert selected.definition.runtime_roots == (str(program),)
+    assert selected.executable_sha256 == hashlib.sha256(program.read_bytes()).hexdigest()
+    assert selected.profile.codex_service is not None
+    assert selected.profile.codex_service.home == str(native_home)
+    assert selected.profile.codex_service.model == "native-model"
+    assert selected.profile.codex_service.reasoning_effort == " native-effort "
+    assert selected.connection is None and selected.profile.codex_login is None
+    assert selected.disclosure_recipients == ("codex",)
+    config.native_profiles["service"] = NativeAgentProfile()
+    assert selected.profile.codex_service is not None
+
+
+@pytest.mark.parametrize("invalid", ["agent", "arguments", "backend", "broker", "login"])
+def test_codex_service_conflicts_reject_before_native_path_or_executable_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
+) -> None:
+    import oh_goon.runtime.agent_providers as provider_owner
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    service = CodexServiceConnection(
+        home="/never-inspect-native-state", model="native", reasoning_effort="ultra"
+    )
+    profile = NativeAgentProfile(codex_service=service)
+    if invalid == "backend":
+        profile = profile.model_copy(update={"backend": "bubblewrap"})
+    elif invalid == "broker":
+        profile = profile.model_copy(update={"inference_profile": "managed"})
+    elif invalid == "login":
+        profile = profile.model_copy(
+            update={
+                "codex_login": CodexLoginConnection(
+                    home="/never-inspect-native-state", model="native", reasoning_effort="ultra"
+                )
+            }
+        )
+    agent = "pi" if invalid == "agent" else "codex"
+    definition = NativeAgentDefinition(
+        arguments=("--model", "other") if invalid == "arguments" else ()
+    )
+    config = AgentProvidersConfig().model_copy(
+        update={"native_agents": {agent: definition}, "native_profiles": {"service": profile}}
+    )
+    monkeypatch.setattr(
+        provider_owner,
+        "_existing_native_path",
+        lambda *args, **kwargs: pytest.fail("native path inspected before rejection"),
+    )
+    monkeypatch.setattr(
+        provider_owner.shutil,
+        "which",
+        lambda *args, **kwargs: pytest.fail("native executable discovered before rejection"),
+    )
+    with pytest.raises(AgentProviderError, match="Codex service"):
+        resolve_native_agent(config, agent, "service", workspace=workspace, environment={})
+
+
+@pytest.mark.parametrize(
+    "overlap",
+    [
+        "workspace-equal",
+        "workspace-parent",
+        "workspace-child",
+        "executable",
+        "runtime-equal",
+        "runtime-parent",
+        "runtime-child",
+        "runtime-alias",
+    ],
+)
+def test_codex_service_native_directory_overlap_rejects_before_any_executable_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overlap: str
+) -> None:
+    import oh_goon.runtime.agent_providers as provider_owner
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    native_home = tmp_path / "native-owned"
+    native_home.mkdir()
+    os.mkfifo(native_home / "auth.json")
+    os.mkfifo(native_home / "config.toml")
+    program = executable(tmp_path / "codex")
+    roots: tuple[str, ...] = ()
+    if overlap == "workspace-equal":
+        native_home = workspace
+    elif overlap == "workspace-parent":
+        native_home = tmp_path
+    elif overlap == "workspace-child":
+        native_home = workspace / "native-owned"
+        native_home.mkdir()
+    elif overlap == "executable":
+        program = executable(native_home / "codex")
+    elif overlap == "runtime-equal":
+        roots = (str(native_home),)
+    elif overlap == "runtime-parent":
+        roots = (str(tmp_path),)
+    elif overlap == "runtime-child":
+        child = native_home / "runtime"
+        child.mkdir()
+        roots = (str(child),)
+    else:
+        alias = tmp_path / "runtime-alias"
+        alias.symlink_to(native_home, target_is_directory=True)
+        roots = (str(alias),)
+    config = AgentProvidersConfig(
+        native_agents={
+            "codex": NativeAgentDefinition(executable=str(program), runtime_roots=roots)
+        },
+        native_profiles={
+            "service": NativeAgentProfile(
+                codex_service=CodexServiceConnection(
+                    home=str(native_home), model="native", reasoning_effort="ultra"
+                )
+            )
+        },
+    )
+    monkeypatch.setattr(
+        provider_owner,
+        "native_executable_sha256",
+        lambda *args: pytest.fail("file bytes were read before native state separation"),
+    )
+    with pytest.raises(AgentProviderError, match="authentication home"):
+        resolve_native_agent(config, "codex", "service", workspace=workspace, environment={})

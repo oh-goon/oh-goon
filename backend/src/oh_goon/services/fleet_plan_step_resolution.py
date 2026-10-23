@@ -321,7 +321,17 @@ def resolve_delivered_local_search_agent_step(
             raise FleetPlanInvalid("native phase results require read-only proposal/review effects")
         if role != "report" and native_agent.interactive:
             raise FleetPlanInvalid("native phase results require headless structured output")
-        if requested.repository_access == "read_only" and native_agent.profile.backend == "local":
+        if native_agent.profile.codex_service is not None:
+            from oh_goon.integrations.fleet_plan_native_steps import (
+                require_native_agent_compatibility,
+            )
+
+            require_native_agent_compatibility(native_agent, role=role)
+        if (
+            requested.repository_access == "read_only"
+            and native_agent.profile.backend == "local"
+            and native_agent.profile.codex_service is None
+        ):
             raise FleetPlanInvalid("native read-only effects require physical workspace isolation")
         expected_recipients = native_agent.disclosure_recipients
         if requested.recipients != expected_recipients:

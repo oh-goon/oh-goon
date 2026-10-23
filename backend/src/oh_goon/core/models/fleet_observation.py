@@ -115,10 +115,34 @@ class AgentHarnessObservation(ImmutableModel):
         return value
 
 
+class NativeServiceExecutionEvidence(ImmutableModel):
+    """Established native service facts reported by the original Step owner.
+
+    These facts describe observed preflight and owned process closure. They are
+    separate from model/native conversation claims and do not certify a solution.
+    """
+
+    authority: Literal["ORIGINAL_STEP_EXECUTION"] = "ORIGINAL_STEP_EXECUTION"
+    backend_id: Literal["codex-native-tools"] = "codex-native-tools"
+    configuration_id: str = Field(min_length=1, max_length=160)
+    native_version: str = Field(min_length=1, max_length=128)
+    permission_profile_id: str = Field(min_length=1, max_length=256)
+    repository_access: Literal["read_only", "write"]
+    disabled_features: tuple[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,127}$")], ...] = (
+        Field(max_length=64)
+    )
+    mcp_catalog: Literal["empty"] = "empty"
+    native_state_separation: Literal["verified"] = "verified"
+    preflight: Literal["verified"] = "verified"
+    process_cleanup: Literal["verified"] = "verified"
+
+
 class NativeAgentObservation(ImmutableModel):
     """Native protocol claims bound to the original source and Step occurrence.
 
-    Actual process results, resources, cancellation and verification remain in
+    Conversation events and settled/failed flags remain untrusted harness claims.
+    The optional execution child carries original Step facts under its own
+    authority. Actual process receipts, cancellation and verification remain in
     the original Step evidence. A settled native conversation is not APP PASS.
     """
 
@@ -136,6 +160,15 @@ class NativeAgentObservation(ImmutableModel):
     settled: bool
     failed: bool
     authority: Literal["UNTRUSTED_HARNESS_CLAIM"] = "UNTRUSTED_HARNESS_CLAIM"
+    execution: NativeServiceExecutionEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def native_service_execution_owner(self) -> NativeAgentObservation:
+        if self.execution is not None and self.agent != "codex":
+            raise ValueError("Codex service execution evidence requires the Codex harness")
+        return self
 
 
 FleetObservationEvidence = Annotated[

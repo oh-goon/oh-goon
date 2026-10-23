@@ -218,10 +218,10 @@ process owner cancelled the server and verified process-group quiescence. These
 are model-free native policy observations, not admission of a service-backed Run:
 the reported profile identifier lacks full effective grants/configuration
 identity. An empty zero-turn thread starts, but native resume from a fresh
-connection refuses it before any persisted turn history. Persisted continuation,
-model follow-up, compaction and real-account sign-in/refresh remain unverified
-for this adapter. No real authentication/configuration files or model turns were
-used.
+connection refuses it before any persisted turn history. This model-free case
+uses no real authentication/configuration files or model turns. Separate
+installed local-provider cases below qualify actual native follow-up and compaction;
+real-account sign-in/refresh remains unverified.
 
 The [installed OpenCode readiness
 probe](../backend/tests/integration/services/test_native_opencode_service.py)
@@ -234,18 +234,94 @@ private-store/tool isolation or a real account.
 
 ### Native service adapter design
 
-Service connections now support explicit protocol readiness. There is no
-implemented `native_service` profile or service-backed Run consumer; protected
-model work remains unavailable. Preparation prints a recipe and connection reads
-readiness, without admitting execution. Existing native command adapters retain
-their current execution path. A running desktop/CLI instance alone does not
-establish a supported endpoint or protected tool access.
+The explicit `codex_service` profile runs one task through the original native
+Run/Step path. Each Step owns a fresh app-server process and private Unix endpoint;
+an unrelated existing socket cannot authorize protected work. The original
+resolver captures source once, Hashmarks supplies mandatory qualified evidence,
+and the exact frozen task/Skill/evidence becomes native developer instructions.
+Only task text becomes user input. Codex owns tool follow-up and automatic
+compaction; Oh-Goon does not implement another reasoning loop.
 
-A future admitted Run must submit exact frozen task, qualified Hashmarks evidence
-and Skill instructions through the native session protocol. The native service
-retains sign-in, refresh, personal configuration, conversation, tools and compaction.
-Oh-Goon retains Plan resolution, consent, phase admission, deadlines, cancellation,
-verification and result acceptance; it does not rebuild the native reasoning loop.
+```json
+{
+  "native_agents": {
+    "codex": {
+      "executable": "/opt/native-codex/bin/codex",
+      "runtime_roots": ["/opt/native-codex"]
+    }
+  },
+  "native_profiles": {
+    "native-service": {
+      "backend": "local",
+      "allowed_agents": ["codex"],
+      "workspace_roots": ["/path/to/projects"],
+      "codex_service": {
+        "home": "/path/to/existing/native-codex-state",
+        "model": "gpt-6.1-sol",
+        "reasoning_effort": "low"
+      }
+    }
+  }
+}
+```
+
+```sh
+oh-goon ai --agent codex --profile native-service --config providers.json --workspace /path/to/projects/app --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
+```
+
+Use a complete public native installation outside native state, retaining its
+companion programs. Existing sign-in and personal configuration stay native-owned;
+Oh-Goon neither opens their contents nor transfers credentials. The explicit
+`home` is a directory boundary, not credential material. It must already exist
+outside source, selected Skill and public runtime trees; metadata separation is
+checked before source capture, then the native-reported home must match. Source
+capture rejects native project-state contents before opening files rather than
+silently omitting them from the admitted scope. Empty reserved directories have
+no source members and may remain as native-owned setup artifacts; the capture
+walk permits only that empty-directory metadata. It rejects any entry inside
+before opening content. Oh-Goon never deletes or reclassifies native stores to
+make a later capture pass. Use native-owned state outside the
+captured repository. The child receives the selected home and original owner's
+provider environment while parent conversation,
+tool IPC and version overrides are removed. Native tools receive only the explicit
+PATH/TMPDIR environment. Login/config failures remain native failures.
+
+Before the first model turn, the original command owner verifies the selected
+binary's `--version` (currently qualified: `codex-cli 0.163.0`). A user-agent version
+from readiness is insufficient. Native RPC confirms disabled extension/browser/
+computer/delegation features, empty MCP inventory, and the selected native profile.
+Native-home directory identity, including symlink aliases, must be separate from
+every readable tool root. No native file contents are inspected. A disposable
+canary verifies native private/read-only denial and allowed scratch output; this
+preflight never attempts mutations against real repository files. Unsupported or
+inconclusive capability checks fail before model submission, without fallback.
+
+The selected native profile denies the filesystem by default, grants only public
+runtime/frozen context and the admitted workspace, denies the private endpoint and
+native project configuration contents, and disables tool networking. The reserved
+`.codex` directory uses native read-only metadata protection with a subtree
+content-deny rule; this supports absent directories without creating them in
+source. Review is read-only;
+ordinary report coding can write its admitted workspace while Git metadata stays
+read-only. Verification Steps retain their existing trusted-local execution.
+This profile does not implement the full separately scoped repair/re-review
+campaign or strict/untrusted execution. It cannot be combined with `codex_login`,
+broker inference, native argument/config-directory overrides or resource caps.
+
+Terminal native turn evidence and process closure are separate requirements. The
+original command owner stops the owned daemon and verifies group quiescence;
+the actual daemon shutdown/cancellation receipt remains in Step evidence. Client
+closure, compaction ACK or turn completion alone cannot report Run success.
+Raw service protocol stays private, and independent verification remains separate
+from native claims. Game Tape keeps bounded original-Step execution facts under
+`ORIGINAL_STEP_EXECUTION` separately from the parent
+`UNTRUSTED_HARNESS_CLAIM`: configuration/profile identity, observed native version,
+disabled features, empty MCP catalog, state separation, preflight and process
+cleanup. Native Codex can create an empty reserved `.codex` directory in the
+workspace during setup; the agent cannot create, rename, remove or populate that
+directory. This is a native setup effect, so the profile claims agent-tool
+read-only protection rather than whole-process workspace immutability. Existing
+CLI profiles keep their current execution path.
 
 | Native service | Protocol to qualify |
 | --- | --- |
@@ -289,14 +365,21 @@ service credential is not a narrow agent capability. Filter session events to th
 owned session before retention and keep unrelated sessions and raw diagnostics out
 of evidence.
 
-The Codex transport includes native thread/turn continuation methods, but those
-methods are not a service-backed Run admission path. A symbolic thread/policy
-identifier is not proof of effective permissions. OpenCode currently exposes
-readiness and an explicit protected-execution refusal, with no submission or
-continuation methods. Native follow-up/compaction through admitted service Runs
-remains unverified. Each future new phase must re-admit tool scope; do not inherit
-repair rights into re-review. Cancellation targets the owned native
-turn/session, not a user's whole service. An abort response or disconnected stream
+A symbolic thread/policy identifier alone is not permission proof. The owned
+Codex path binds the original executable, startup policy, private endpoint and
+native capability checks to one Step. Its installed local-provider Run probe
+checks actual tool follow-up and automatic compaction, retained frozen
+Hashmarks/Skill instructions, repository edits, independent verification and
+durable Game Tape. A separate native protocol case checks persisted detach/resume,
+explicit compaction and another turn. Cold resume must supply the same original
+frozen developer instructions; omitting them lost context after native compaction.
+The Run profile itself owns one ephemeral task turn and does not expose cross-Run
+session adoption or user follow-up. New permission phases require distinct
+admission and owned process closure; a live resume cannot downgrade repair rights.
+
+OpenCode still exposes readiness and an explicit protected-execution refusal,
+with no submission or continuation methods. Owned Codex cancellation targets its
+own Step process tree, never a user's shared service. An abort response or disconnected stream
 alone does not establish tool quiescence. Reattachment must verify the same service,
 session, workspace and original authority; missing terminal or cleanup evidence
 remains unresolved. Never resubmit automatically after ambiguous acceptance, and

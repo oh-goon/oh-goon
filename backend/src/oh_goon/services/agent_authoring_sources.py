@@ -47,6 +47,7 @@ def capture_agent_sources(
     cancel_requested: Callable[[], bool] | None = None,
     tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
     expected_repository: Path | None = None,
+    private_native_roots: tuple[Path, ...] = (),
 ) -> agent_source.FrozenAgentSourceCapture:
     """Capture bytes ONCE via the existing AG-01 reader, without effects.
 
@@ -56,6 +57,10 @@ def capture_agent_sources(
     if cancel_requested is not None and cancel_requested():
         raise OperationCancelledError("Agent source capture cancelled")
     if previous_source is not None:
+        if private_native_roots:
+            for tree in (previous_source.repository, previous_source.skill):
+                for member in tree.members:
+                    _require_native_project_source_privacy(PurePosixPath(member.path))
         previous_source.verify()
         if agent_source_references(definitions, values) != (
             previous_source.repository_reference,
@@ -76,6 +81,7 @@ def capture_agent_sources(
         cancel_requested=cancel_requested,
         tree_cache=tree_cache,
         expected_repository=expected_repository,
+        private_native_roots=private_native_roots,
     )
     frozen = agent_source.FrozenAgentSourceCapture(
         plan_source_sha256=plan_source_sha256,
@@ -148,6 +154,7 @@ def explain_agent_sources(
     cancel_requested: Callable[[], bool] | None = None,
     tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
     expected_repository: Path | None = None,
+    private_native_roots: tuple[Path, ...] = (),
 ) -> dict[str, object]:
     """Project immutable read-only identities without admitting or executing work."""
     repo_ref, authored_skill_ref, accepted = agent_source_references(definitions, values)
@@ -186,6 +193,17 @@ def explain_agent_sources(
     if not skill_ref.startswith("local:"):
         raise FleetPlanInvalid("AG-01 skill must use a bounded, immutable source reference")
 
+    if private_native_roots:
+        # Reject both source selections before the first fd-anchored byte read.
+        # Native homes are explicit directory scopes; no store files are opened.
+        _require_private_native_source_separation(
+            private_native_roots,
+            (
+                repository_root / repo_ref.removeprefix("local:"),
+                (prepared.root if prepared else skill_root) / skill_ref.removeprefix("local:"),
+            ),
+        )
+
     repository = _snapshot_authorized_tree(
         repository_root,
         repo_ref,
@@ -195,6 +213,7 @@ def explain_agent_sources(
         cancel_requested=cancel_requested,
         tree_cache=tree_cache,
         expected_directory=expected_repository,
+        private_native_roots=private_native_roots,
     )
     skill = _snapshot_authorized_tree(
         prepared.root if prepared else skill_root,
@@ -204,6 +223,7 @@ def explain_agent_sources(
         captured=_captured,
         cancel_requested=cancel_requested,
         tree_cache=tree_cache,
+        private_native_roots=private_native_roots,
     )
     if prepared is not None:
         skill["reference"] = prepared.reference
@@ -227,6 +247,30 @@ def explain_agent_sources(
     }
 
 
+def _require_private_native_source_separation(
+    private_native_roots: tuple[Path, ...], source_directories: tuple[Path, ...]
+) -> None:
+    from oh_goon.core.models.agent_providers import AgentProviderError
+    from oh_goon.integrations.agent_native_execution import (
+        require_codex_authentication_home_separation,
+    )
+
+    try:
+        for native_root in private_native_roots:
+            require_codex_authentication_home_separation(native_root, source_directories)
+    except AgentProviderError:
+        raise FleetPlanInvalid(
+            "Agent source scope overlaps native authentication/configuration state"
+        ) from None
+
+
+def _require_native_project_source_privacy(relative: PurePosixPath) -> None:
+    if any(part.casefold() in {".codex", ".opencode"} for part in relative.parts) or (
+        relative.name.casefold() in {"opencode.json", "opencode.jsonc"}
+    ):
+        raise FleetPlanInvalid("Agent source includes native authentication/configuration state")
+
+
 def _snapshot_authorized_tree(
     root: Path,
     reference: str,
@@ -237,6 +281,7 @@ def _snapshot_authorized_tree(
     cancel_requested: Callable[[], bool] | None = None,
     tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
     expected_directory: Path | None = None,
+    private_native_roots: tuple[Path, ...] = (),
 ) -> dict[str, Any]:
     """Read exactly once from an fd-anchored authorized tree.
 
@@ -253,9 +298,16 @@ def _snapshot_authorized_tree(
         raise FleetPlanInvalid(
             "Captured Agent repository differs from the explicit native workspace"
         )
+    if private_native_roots:
+        _require_private_native_source_separation(
+            private_native_roots, (root / reference.removeprefix("local:"),)
+        )
     cache_key = (label, str(root) + "\0" + reference)
     if tree_cache is not None and cache_key in tree_cache:
         frozen = tree_cache[cache_key]
+        if private_native_roots:
+            for member in frozen.members:
+                _require_native_project_source_privacy(PurePosixPath(member.path))
         if captured is not None:
             captured[label] = frozen
         return {
@@ -306,7 +358,19 @@ def _snapshot_authorized_tree(
         if before_dir.st_dev != root_device:
             raise FleetPlanInvalid(f"AG-01 {label} crosses a foreign filesystem")
         with os.scandir(dir_fd) as iterator:
-            entries = sorted(iterator, key=lambda entry: entry.name)
+            if private_native_roots and any(
+                part.casefold() in {".codex", ".opencode"} for part in subpath.parts
+            ):
+                # Native sandbox setup may retain an empty reserved directory.
+                # Empty directories have no source members. Any entry is private
+                # state and rejects this capture before its stat or content open.
+                if next(iterator, None) is not None:
+                    raise FleetPlanInvalid(
+                        "Agent source includes native authentication/configuration state"
+                    )
+                entries = []
+            else:
+                entries = sorted(iterator, key=lambda entry: entry.name)
         for entry in entries:
             if cancel_requested is not None and cancel_requested():
                 raise OperationCancelledError("Agent source capture cancelled")
@@ -314,6 +378,10 @@ def _snapshot_authorized_tree(
             if ".git" in rel.parts or (label == "repository" and is_transient_source_path(rel)):
                 continue
             before = os.stat(entry.name, dir_fd=dir_fd, follow_symlinks=False)
+            if private_native_roots and not (
+                entry.name.casefold() in {".codex", ".opencode"} and stat.S_ISDIR(before.st_mode)
+            ):
+                _require_native_project_source_privacy(PurePosixPath(rel))
             if stat.S_ISDIR(before.st_mode):
                 next_fd = os.open(entry.name, dir_flags, dir_fd=dir_fd)
                 try:

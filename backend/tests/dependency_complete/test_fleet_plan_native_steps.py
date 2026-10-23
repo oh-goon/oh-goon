@@ -18,6 +18,7 @@ from oh_goon.core.models.agent_providers import (
     AgentModel,
     AgentProvider,
     AgentProvidersConfig,
+    CodexServiceConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
     ResolvedNativeAgent,
@@ -30,14 +31,14 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedCommandStep,
     ResolvedLocalSearchAgentStep,
 )
-from oh_goon.core.models.fleet_plan_evidence import PlanOutputEvidence
+from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution, PlanOutputEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
 from oh_goon.core.models.runtime_supervision import RuntimeSupervisionPolicy
 from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt, CommandTimeoutExpired
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_step_evidence import attempt_evidence, step_evidence
-from oh_goon.integrations._fleet_plan_step_outcome import from_command, timeout_outcome
+from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, from_command, timeout_outcome
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_native_steps import (
     prepare_native_step_input,
@@ -594,3 +595,180 @@ def test_unsupported_backend_sandbox_harness_rejects_before_producer(tmp_path: P
     )
     with pytest.raises(FleetPlanInvalid, match="not qualified for this native agent"):
         require_native_agent_compatibility(selected, role="review")
+
+
+def test_codex_service_read_only_receiver_preserves_the_original_frozen_handoff(
+    tmp_path: Path,
+) -> None:
+    _, handoff, step, runtime = _case(tmp_path, sandboxed=False)
+    assert step.native_agent is not None
+    selected = replace(
+        step.native_agent,
+        agent="codex",
+        definition=step.native_agent.definition.model_copy(update={"arguments": ()}),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(tmp_path / "native-owned"), model="native", reasoning_effort="ultra"
+            ),
+            timeout_seconds=10.0,
+        ),
+        connection=None,
+        backend_configuration_id=None,
+    )
+    handoff = replace(
+        handoff,
+        requested_effects=handoff.requested_effects.model_copy(
+            update={"repository_access": "read_only", "recipients": ("codex",)}
+        ),
+    )
+    step = resolve_delivered_local_search_agent_step(handoff, native_agent=selected, role="review")
+    runtime = replace(runtime, native_profile=selected)
+    packet = handoff.encode_prework_delivery()
+    prepared = prepare_native_step_input(packet, step, runtime)
+    assert prepared.handoff == handoff
+    assert prepared.source_identity == handoff.source.capture_identity
+    assert prepared.requested_effects.repository_access == "read_only"
+    assert prepared.execution.disclosure_recipients == ("codex",)
+    assert prepared.execution.backend_id == "standard-local"
+    assert prepared.role == "review"
+
+
+@pytest.mark.parametrize(
+    "conflict",
+    ["agent", "backend", "broker", "arguments", "interactive", "caps", "identity", "platform"],
+)
+def test_codex_service_receiver_rejects_conflicting_transport_authority(
+    monkeypatch: pytest.MonkeyPatch, conflict: str
+) -> None:
+    import oh_goon.integrations.fleet_plan_native_steps as native_owner
+
+    profile = NativeAgentProfile(
+        codex_service=CodexServiceConnection(
+            home="/private/native", model="native", reasoning_effort="ultra"
+        )
+    )
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="service",
+        definition=NativeAgentDefinition(executable="/public/native/codex"),
+        profile=profile,
+        executable_sha256="a" * 64,
+    )
+    if conflict == "agent":
+        selected = replace(selected, agent="pi")
+    elif conflict == "backend":
+        selected = replace(selected, profile=profile.model_copy(update={"backend": "bubblewrap"}))
+    elif conflict == "broker":
+        selected = replace(
+            selected, profile=profile.model_copy(update={"inference_profile": "api"})
+        )
+    elif conflict == "arguments":
+        selected = replace(
+            selected, definition=selected.definition.model_copy(update={"arguments": ("--remote",)})
+        )
+    elif conflict == "interactive":
+        selected = replace(selected, interactive=True)
+    elif conflict == "caps":
+        selected = replace(
+            selected,
+            profile=profile.model_copy(
+                update={"resources": profile.resources.model_copy(update={"memory_mib": 512})}
+            ),
+        )
+    elif conflict == "identity":
+        selected = replace(selected, backend_configuration_id="unrelated-backend")
+    else:
+        monkeypatch.setattr(native_owner.sys, "platform", "win32")
+    with pytest.raises(FleetPlanInvalid, match="Codex service"):
+        require_native_agent_compatibility(selected, role="review")
+
+
+def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.integrations import agent_codex_service_execution as service_owner
+
+    repository, handoff, step, runtime = _case(tmp_path, sandboxed=False)
+    assert step.native_agent is not None
+    selected = replace(
+        step.native_agent,
+        agent="codex",
+        definition=step.native_agent.definition.model_copy(update={"arguments": ()}),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(tmp_path / "native-owned"), model="native", reasoning_effort="ultra"
+            ),
+            timeout_seconds=10.0,
+        ),
+        connection=None,
+        backend_configuration_id=None,
+    )
+    handoff = replace(
+        handoff,
+        requested_effects=handoff.requested_effects.model_copy(
+            update={"repository_access": "read_only", "recipients": ("codex",)}
+        ),
+    )
+    step = resolve_delivered_local_search_agent_step(handoff, native_agent=selected, role="review")
+    packet = handoff.encode_prework_delivery()
+    runtime = replace(
+        runtime,
+        native_profile=selected,
+        agent_delivery_for=lambda _step, _identity: packet,
+    )
+    supervisor = CommandSupervisorReceipt(
+        process_group_cleanup_requested=True,
+        cleanup_reason="cancel",
+        final_process_group_quiescent=True,
+    )
+    failure = StepOutcome(
+        argv=(selected.definition.executable or "", "app-server"),
+        returncode=PLAN_CONTRACT_RETURN_CODE,
+        stdout="synthetic-private-service-protocol",
+        stderr="Native version preflight rejected",
+        supervisor=supervisor,
+        duration_ms=12,
+        physical_execution_id="owned-service-preflight",
+    )
+
+    def reject_service(**_kwargs: Any) -> Any:
+        raise service_owner.CodexServiceExecutionFailure(failure)
+
+    monkeypatch.setattr(service_owner, "execute_codex_service_run", reject_service)
+    outcome = execute_direct_step(repository, step, runtime, step_order=1)
+    assert outcome.returncode == PLAN_CONTRACT_RETURN_CODE
+    assert outcome.supervisor == supervisor
+    assert outcome.physical_execution_id == "owned-service-preflight"
+    assert "Native version preflight rejected" in outcome.stderr
+    assert "synthetic-private-service-protocol" not in outcome.stdout + outcome.stderr
+    observation = next(
+        item for item in outcome.observations if isinstance(item, NativeAgentObservation)
+    )
+    assert observation.failed and not observation.settled
+    assert observation.execution is None
+    attempt = attempt_evidence(
+        step=step,
+        attempt=1,
+        outcome=outcome,
+        repository_state_before="before",
+        repository_state_after="after",
+        worktree_files_after=(),
+    )
+    evidence = step_evidence(
+        step=step,
+        outcome=outcome,
+        repository_state_before="before",
+        repository_state_after="after",
+        worktree_files_after=(),
+        attempts=(attempt,),
+        artifacts=(),
+    )
+    assert isinstance(evidence, FailedPlanStepExecution)
+    retained = FailedPlanStepExecution.model_validate_json(
+        evidence.model_dump_json(exclude_computed_fields=True)
+    )
+    assert retained.returncode == PLAN_CONTRACT_RETURN_CODE
+    assert retained.attempts[0].supervisor is not None
+    assert retained.attempts[0].supervisor.cleanup_reason == "cancel"
+    assert retained.attempts[0].supervisor.final_process_group_quiescent is True
+    assert retained.observations == (observation,)

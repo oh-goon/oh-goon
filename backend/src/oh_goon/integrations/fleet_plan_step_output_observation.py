@@ -41,7 +41,10 @@ def observed_command_runner(
         selected = step.native_agent if isinstance(step, ResolvedLocalSearchAgentStep) else None
         private_native_protocol = (
             selected is not None
-            and selected.profile.sandbox_owner == "execution_backend"
+            and (
+                selected.profile.sandbox_owner == "execution_backend"
+                or selected.profile.codex_service is not None
+            )
             and bool(argv)
             and (
                 argv[0] == selected.definition.executable

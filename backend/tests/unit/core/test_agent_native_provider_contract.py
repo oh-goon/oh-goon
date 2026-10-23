@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from oh_goon.core.models.agent_providers import (
     AgentProvidersConfig,
     CodexLoginConnection,
+    CodexServiceConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
 )
@@ -133,3 +134,73 @@ def test_protected_sign_in_requires_service_owned_authentication(owner: str) -> 
                 },
             }
         )
+
+
+def test_codex_service_selects_public_native_settings_without_changing_existing_wire() -> None:
+    assert "codex_service" not in NativeAgentProfile().model_dump(mode="json")
+    service = CodexServiceConnection(
+        home="/private/native", model="native-model", reasoning_effort=" native-effort "
+    )
+    profile = NativeAgentProfile(codex_service=service)
+    assert profile.backend == "local" and profile.sandbox_owner == "harness"
+    assert profile.model_dump(mode="json")["codex_service"] == {
+        "home": "/private/native",
+        "model": "native-model",
+        "reasoning_effort": " native-effort ",
+    }
+
+
+@pytest.mark.parametrize("field", ["model", "reasoning_effort"])
+@pytest.mark.parametrize("value", ["", " \t\r\n", "bad\x00value", "x" * 257, float("inf")])
+def test_codex_service_rejects_unbounded_or_empty_native_settings(
+    field: str, value: object
+) -> None:
+    payload = {
+        "home": "/private/native",
+        "model": "native",
+        "reasoning_effort": "ultra",
+        field: value,
+    }
+    with pytest.raises(ValidationError):
+        CodexServiceConnection.model_validate(payload)
+
+
+@pytest.mark.parametrize("private_input", ["configuration_directory", "socket", "token"])
+def test_codex_service_cannot_select_native_stores_or_an_unowned_endpoint(
+    private_input: str,
+) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        CodexServiceConnection.model_validate(
+            {
+                "home": "/private/native",
+                "model": "native",
+                "reasoning_effort": "ultra",
+                private_input: "/private/native",
+            }
+        )
+
+
+@pytest.mark.parametrize("conflict", ["login", "broker", "bubblewrap", "backend-owner"])
+def test_codex_service_requires_one_explicit_native_connection_and_sandbox(conflict: str) -> None:
+    payload: dict[str, object] = {
+        "codex_service": {"home": "/private/native", "model": "native", "reasoning_effort": "ultra"}
+    }
+    if conflict == "login":
+        payload["codex_login"] = {
+            "home": "/private/native",
+            "model": "native",
+            "reasoning_effort": "ultra",
+        }
+    elif conflict == "broker":
+        payload["inference_profile"] = "managed"
+    elif conflict == "bubblewrap":
+        payload["backend"] = "bubblewrap"
+    else:
+        payload.update(backend="bubblewrap", sandbox_owner="execution_backend")
+    with pytest.raises(ValidationError, match="Codex service"):
+        NativeAgentProfile.model_validate(payload)
+
+
+def test_codex_service_requires_the_native_owned_directory_scope() -> None:
+    with pytest.raises(ValidationError, match="home"):
+        CodexServiceConnection.model_validate({"model": "native", "reasoning_effort": "ultra"})
