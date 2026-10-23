@@ -39,20 +39,20 @@ def observed_command_runner(
         **native_options: Any,
     ) -> CommandResult:
         selected = step.native_agent if isinstance(step, ResolvedLocalSearchAgentStep) else None
-        credential_bearing_native_process = (
+        private_native_protocol = (
             selected is not None
-            and selected.agent == "codex"
             and selected.profile.sandbox_owner == "execution_backend"
-            and selected.profile.codex_login is not None
             and bool(argv)
-            and argv[0] == selected.definition.executable
-            and native_options.get("credential_file") is not None
+            and (
+                argv[0] == selected.definition.executable
+                or native_options.get("broker_directory") is not None
+            )
         )
-        # Native authentication is opaque. Exact environment redaction cannot
-        # protect a file-backed credential printed by a descendant tool.
+        # Protected native protocol may contain private source and task data.
+        # Parse it internally without copying the raw stream into live output.
         redactors: dict[Literal["stdout", "stderr"], StreamingSecretRedactor] = (
             {}
-            if credential_bearing_native_process
+            if private_native_protocol
             else {
                 "stdout": streaming_host_secret_redactor(step, host_environment),
                 "stderr": streaming_host_secret_redactor(step, host_environment),
@@ -67,14 +67,14 @@ def observed_command_runner(
                     emit_output_observer_failure(
                         diagnostics,
                         RuntimeError("Protected native protocol observer failed")
-                        if credential_bearing_native_process
+                        if private_native_protocol
                         else exc,
                         step_id=step.step_id,
                         operation=f"provided_stream_{stream}",
                         fleet_run_id=fleet_run_id,
                         repository_id=repository_id,
                     )
-            if credential_bearing_native_process:
+            if private_native_protocol:
                 return
             try:
                 redacted = redactors[stream].feed(text)

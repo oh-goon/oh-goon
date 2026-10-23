@@ -322,10 +322,6 @@ class FleetPlanService:
                         resources=selected.profile.resources,
                         read_only_workspace=read_only_workspace,
                         protected_execution=protected,
-                        credential_file=Path(selected.profile.codex_login.home) / "auth.json"
-                        if protected and selected.profile.codex_login is not None
-                        else None,
-                        host_network=protected and selected.profile.codex_login is not None,
                         private_configuration_directory=(
                             Path(selected.definition.configuration_directory)
                             if selected.definition.configuration_directory is not None

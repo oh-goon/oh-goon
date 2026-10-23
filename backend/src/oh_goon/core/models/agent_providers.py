@@ -217,9 +217,6 @@ class CodexLoginConnection(ImmutableModel):
     home: str = Field(min_length=1, max_length=4096)
     model: str = Field(min_length=1, max_length=256)
     reasoning_effort: str = Field(min_length=1, max_length=256)
-    credential_store: Literal["native", "file"] = Field(
-        default="native", exclude_if=lambda value: value == "native"
-    )
 
     @field_validator("home", "model", "reasoning_effort")
     @classmethod
@@ -250,13 +247,10 @@ class NativeAgentProfile(ImmutableModel):
         if self.codex_login is not None:
             if self.inference_profile is not None:
                 raise ValueError("Codex login cannot use broker inference")
-            if self.backend == "bubblewrap" and (
-                self.sandbox_owner != "execution_backend"
-                or self.codex_login.credential_store != "file"
-            ):
+            if self.backend != "local" or self.sandbox_owner != "harness":
                 raise ValueError(
-                    "Protected Codex login requires execution_backend sandbox ownership "
-                    "and explicit file credentials"
+                    "Protected native sign-in requires a qualified service connection; "
+                    "authentication and configuration files cannot be mounted into agent tools"
                 )
         return self
 

@@ -86,16 +86,23 @@ def require_native_agent_compatibility(
     """Compatibility and path-separation checks shared by preflight and Step receiver."""
     if role not in {"report", "review", "adjudication", "proposal"}:
         raise FleetPlanInvalid("Native Agent result role is unsupported")
+    if (
+        selected.agent in {"codex", "opencode"}
+        and selected.definition.configuration_directory is not None
+    ):
+        raise FleetPlanInvalid(
+            "Native authentication and configuration remain service-owned; "
+            "Codex/OpenCode configuration directories cannot be exposed to agent tools"
+        )
     if selected.profile.codex_login is not None:
-        protected = selected.profile.sandbox_owner == "execution_backend"
         if (
             selected.agent != "codex"
-            or selected.profile.backend != ("bubblewrap" if protected else "local")
-            or (protected and selected.profile.codex_login.credential_store != "file")
+            or selected.profile.backend != "local"
+            or selected.profile.sandbox_owner != "harness"
             or selected.connection is not None
             or selected.profile.inference_profile is not None
             or selected.interactive
-            or (not protected and role != "report")
+            or role != "report"
             or selected.definition.arguments
             or selected.definition.configuration_directory is not None
         ):
@@ -378,7 +385,7 @@ def execute_native_agent_step(
     selected = step.native_agent
     assert selected is not None
     sandboxed = selected.profile.backend == "bubblewrap"
-    private_output = sandboxed and selected.profile.codex_login is not None
+    private_output = sandboxed and selected.profile.sandbox_owner == "execution_backend"
     if runtime.cancel_requested is not None and runtime.cancel_requested():
         raise OperationCancelledError("Native Agent cancelled before repository evidence")
     frozen_mounts = (
@@ -499,10 +506,6 @@ def execute_native_agent_step(
                     )
                     if sandboxed
                     else (),
-                    credential_file=Path(selected.profile.codex_login.home) / "auth.json"
-                    if sandboxed
-                    else None,
-                    host_network=sandboxed,
                 )
             except (
                 CommandTimeoutExpired,
@@ -585,27 +588,37 @@ def execute_native_agent_step(
                     *argv,
                 )
                 input_data = None if terminal is not None else b""
-            result = process.command_runner(
-                *argv,
-                cwd=repository,
-                env=environment,
-                timeout=_remaining(deadline),
-                cancel_requested=runtime.cancel_requested,
-                runtime_supervision=runtime.runtime_supervision,
-                terminal=terminal,
-                input_data=input_data,
-                retain_output_tail=not selected.interactive,
-                stream_output=consume_native_output if parser is not None else None,
-                read_only_mounts=tuple(mounts),
-                broker_directory=broker.socket_path.parent if sandboxed else None,
-                private_configuration_directory=private_configuration if sandboxed else None,
-                preserve_native_executable_path=not sandboxed,
-                read_only_workspace=sandboxed
-                and (
-                    step.role != "report"
-                    or prepared.requested_effects.repository_access == "read_only"
-                ),
-            )
+            try:
+                result = process.command_runner(
+                    *argv,
+                    cwd=repository,
+                    env=environment,
+                    timeout=_remaining(deadline),
+                    cancel_requested=runtime.cancel_requested,
+                    runtime_supervision=runtime.runtime_supervision,
+                    terminal=terminal,
+                    input_data=input_data,
+                    retain_output_tail=not selected.interactive,
+                    stream_output=consume_native_output if parser is not None else None,
+                    read_only_mounts=tuple(mounts),
+                    broker_directory=broker.socket_path.parent if sandboxed else None,
+                    private_configuration_directory=private_configuration if sandboxed else None,
+                    preserve_native_executable_path=not sandboxed,
+                    read_only_workspace=sandboxed
+                    and (
+                        step.role != "report"
+                        or prepared.requested_effects.repository_access == "read_only"
+                    ),
+                )
+            except (
+                CommandTimeoutExpired,
+                CommandCancelledError,
+                CommandOutputLimitExceeded,
+            ) as error:
+                if private_output:
+                    error.stdout = ""
+                    error.stderr = ""
+                raise
     outcome = from_command(result)
     if private_output:
         outcome = replace(outcome, stdout="", stderr="")
@@ -690,7 +703,7 @@ def execute_native_agent_step(
         outcome = replace(
             outcome,
             stdout="",
-            stderr="Protected native execution failed; raw credential-visible output was withheld",
+            stderr="Protected native execution failed; raw private protocol output was withheld",
         )
     if outcome.returncode == 0:
         _remaining(deadline)

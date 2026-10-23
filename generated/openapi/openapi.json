@@ -2203,15 +2203,6 @@
         "additionalProperties": false,
         "description": "Explicit native authentication location; only Codex reads its contents.",
         "properties": {
-          "credential_store": {
-            "default": "native",
-            "enum": [
-              "native",
-              "file"
-            ],
-            "title": "Credential Store",
-            "type": "string"
-          },
           "home": {
             "maxLength": 4096,
             "minLength": 1,

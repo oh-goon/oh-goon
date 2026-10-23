@@ -19,8 +19,6 @@ from typing import Any, Literal
 from oh_goon.core.agent_harness_contract import AgentHarnessObservation
 from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNativeAgent
 
-CODEX_BACKEND_HOME = "/oh-goon-codex-home"
-
 _MAX_EVENT_STREAM_BYTES = 1024 * 1024
 _MAX_EVENT_RECORD_BYTES = 256 * 1024
 _MAX_OBSERVATIONS = 128
@@ -105,6 +103,14 @@ def native_agent_command(
     """
     if selected.agent not in ("opencode", "pi", "codex"):
         raise AgentProviderError("Unsupported native command protocol")
+    if (
+        selected.agent in {"codex", "opencode"}
+        and selected.definition.configuration_directory is not None
+    ):
+        raise AgentProviderError(
+            "Native authentication and configuration remain service-owned; "
+            "Codex/OpenCode configuration directories cannot be exposed to agent tools"
+        )
     executable = selected.definition.executable
     if executable is None or not Path(executable).is_absolute():
         raise AgentProviderError("Native command requires an already resolved executable")
@@ -243,9 +249,8 @@ def codex_login_command(
     The harness-owned local profile keeps the original authentication home
     outside native tool permissions.
     Git and verification in the existing local profile remain trusted local.
-    Explicit execution-backend enforcement uses a private native home containing
-    only the separately bound file credential; child visibility and networking
-    remain the selected external boundary's declared guarantees.
+    Protected native sign-in requires a separately qualified service adapter;
+    authentication and configuration files are never delegated to agent tools.
     """
     login = selected.profile.codex_login
     if (
@@ -257,28 +262,25 @@ def codex_login_command(
         or selected.definition.executable is None
     ):
         raise AgentProviderError("Codex login requires its explicit headless native selection")
+    if selected.profile.backend != "local" or selected.profile.sandbox_owner != "harness":
+        raise AgentProviderError(
+            "Protected native sign-in requires a qualified service connection; "
+            "authentication and configuration files cannot be mounted into agent tools"
+        )
     home = Path(login.home)
     writable = (workspace, scratch, *((evidence_state,) if evidence_state is not None else ()))
     require_codex_authentication_home_separation(home, (*read_roots, *writable))
-    delegated = selected.profile.sandbox_owner == "execution_backend"
-    temporary_directory = "/tmp" if delegated else str(scratch)
-    if delegated:
-        if selected.profile.backend != "bubblewrap" or login.credential_store != "file":
-            raise AgentProviderError(
-                "Protected Codex login requires Bubblewrap and explicit file credentials"
-            )
-        permission_settings: tuple[str, ...] = ()
-    else:
-        filesystem = {":minimal": "read", **{str(root): "read" for root in read_roots}}
-        filesystem.update({str(root): "write" for root in writable})
-        rules = ", ".join(
-            f"{json.dumps(path, ensure_ascii=False)} = {json.dumps(access, ensure_ascii=False)}"
-            for path, access in filesystem.items()
-        )
-        permission_settings = (
-            'default_permissions="oh_goon"',
-            f"permissions.oh_goon={{filesystem={{{rules}}},network={{enabled=false}}}}",
-        )
+    temporary_directory = str(scratch)
+    filesystem = {":minimal": "read", **{str(root): "read" for root in read_roots}}
+    filesystem.update({str(root): "write" for root in writable})
+    rules = ", ".join(
+        f"{json.dumps(path, ensure_ascii=False)} = {json.dumps(access, ensure_ascii=False)}"
+        for path, access in filesystem.items()
+    )
+    permission_settings = (
+        'default_permissions="oh_goon"',
+        f"permissions.oh_goon={{filesystem={{{rules}}},network={{enabled=false}}}}",
+    )
     settings = (
         f"model={json.dumps(login.model, ensure_ascii=False)}",
         'model_provider="openai"',
@@ -286,7 +288,6 @@ def codex_login_command(
         f"model_instructions_file={json.dumps(str(instructions), ensure_ascii=False)}",
         'approval_policy="never"',
         *permission_settings,
-        *(('cli_auth_credentials_store="file"',) if login.credential_store == "file" else ()),
         f'projects.{json.dumps(str(workspace), ensure_ascii=False)}.trust_level="untrusted"',
         'web_search="disabled"',
         'shell_environment_policy.inherit="none"',
@@ -303,7 +304,6 @@ def codex_login_command(
         argv=(
             selected.definition.executable,
             "--no-daemon",
-            *(("--sandbox", "danger-full-access") if delegated else ()),
             "exec",
             "--json",
             "--ephemeral",
@@ -317,7 +317,7 @@ def codex_login_command(
         ),
         input_file=instructions,
         environment=(
-            ("CODEX_HOME", CODEX_BACKEND_HOME if delegated else login.home),
+            ("CODEX_HOME", login.home),
             ("TMPDIR", temporary_directory),
         ),
     )

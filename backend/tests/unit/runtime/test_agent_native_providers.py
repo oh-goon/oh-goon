@@ -3,13 +3,13 @@ import json
 import os
 import tomllib
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     AgentProvidersConfig,
+    CodexLoginConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
 )
@@ -47,7 +47,6 @@ def test_codex_login_freezes_only_explicit_public_connection_facts(
     home.mkdir()
     # A special file would hang an attempted credential read. Resolution must
     # only resolve the home; native Codex retains all authentication semantics.
-    import os
 
     os.mkfifo(home / "auth.json")
     workspace = tmp_path / "repo"
@@ -312,93 +311,66 @@ def test_pi_literal_credentials_reject_before_executable_discovery(
     assert "PRIVATE-KEY" not in str(captured.value)
 
 
-def test_protected_login_resolves_file_metadata_without_opening_credentials(
+def test_forged_protected_login_rejects_before_native_home_access(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    home = tmp_path / "native-auth"
-    home.mkdir()
-    credential = home / "auth.json"
-    credential.write_text("synthetic native-owned credential; not Oh-Goon JSON")
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    program = executable(tmp_path / "codex")
-    config = AgentProvidersConfig.model_validate(
-        {
-            "native_agents": {"codex": {"executable": str(program)}},
-            "native_profiles": {
-                "protected": {
-                    "backend": "bubblewrap",
-                    "sandbox_owner": "execution_backend",
-                    "codex_login": {
-                        "home": str(home),
-                        "model": "gpt-6.1-sol",
-                        "reasoning_effort": "ultra",
-                        "credential_store": "file",
-                    },
-                }
-            },
-        }
+    import oh_goon.runtime.agent_providers as provider_owner
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    login = CodexLoginConnection(
+        home="/never-inspect-native-state", model="native", reasoning_effort="ultra"
     )
-    original_path_open = Path.open
-    original_os_open = os.open
-
-    def path_open(path: Path, *args: Any, **kwargs: Any) -> Any:
-        assert path != credential, "Oh-Goon must not open native credential contents"
-        return original_path_open(path, *args, **kwargs)
-
-    def os_open(path: Any, *args: Any, **kwargs: Any) -> int:
-        assert path != str(credential) and path != credential, (
-            "Credential contents are native-owned"
-        )
-        return original_os_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "open", path_open)
-    monkeypatch.setattr(os, "open", os_open)
-    selected = resolve_native_agent(config, "codex", "protected", workspace=repo, environment={})
-    assert selected.profile.sandbox_owner == "execution_backend"
-    assert selected.profile.codex_login is not None
-    assert selected.profile.codex_login.home == str(home)
-    assert selected.profile.codex_login.credential_store == "file"
-    assert selected.connection is None
+    profile = NativeAgentProfile.model_construct(
+        backend="bubblewrap", sandbox_owner="execution_backend", codex_login=login
+    )
+    config = AgentProvidersConfig().model_copy(update={"native_profiles": {"protected": profile}})
+    monkeypatch.setattr(
+        provider_owner,
+        "_existing_native_path",
+        lambda *args, **kwargs: pytest.fail("native state inspected before rejection"),
+    )
+    with pytest.raises(AgentProviderError, match="qualified service connection"):
+        resolve_native_agent(config, "codex", "protected", workspace=workspace, environment={})
 
 
-@pytest.mark.parametrize("kind", ["missing", "directory", "fifo", "symlink"])
-def test_file_login_refuses_unavailable_or_nonregular_authentication(
-    tmp_path: Path, kind: str
+@pytest.mark.parametrize("agent", ["codex", "opencode"])
+def test_native_configuration_directory_rejects_before_file_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
 ) -> None:
-    home = tmp_path / "native-auth"
-    home.mkdir()
-    credential = home / "auth.json"
-    if kind == "directory":
-        credential.mkdir()
-    elif kind == "fifo":
-        os.mkfifo(credential)
-    elif kind == "symlink":
-        original = tmp_path / "other-auth"
-        original.write_text("synthetic")
-        credential.symlink_to(original)
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    program = executable(tmp_path / "codex")
-    config = AgentProvidersConfig.model_validate(
-        {
-            "native_agents": {"codex": {"executable": str(program)}},
-            "native_profiles": {
-                "protected": {
-                    "backend": "bubblewrap",
-                    "sandbox_owner": "execution_backend",
-                    "codex_login": {
-                        "home": str(home),
-                        "model": "native",
-                        "reasoning_effort": "ultra",
-                        "credential_store": "file",
-                    },
-                }
-            },
-        }
+    import oh_goon.runtime.agent_providers as provider_owner
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    config = AgentProvidersConfig(
+        native_agents={agent: NativeAgentDefinition(configuration_directory="/private/native")}
     )
-    with pytest.raises(AgentProviderError, match="existing regular auth.json"):
-        resolve_native_agent(config, "codex", "protected", workspace=repo, environment={})
+    monkeypatch.setattr(
+        provider_owner,
+        "_existing_native_path",
+        lambda *args, **kwargs: pytest.fail("native configuration inspected before rejection"),
+    )
+    with pytest.raises(AgentProviderError, match="configuration remain service-owned"):
+        resolve_native_agent(config, agent, "local", workspace=workspace, environment={})
+
+
+@pytest.mark.parametrize("agent", ["codex", "opencode"])
+def test_catalog_rejects_native_configuration_before_resolving_any_native_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
+) -> None:
+    import oh_goon.runtime.agent_providers as provider_owner
+
+    catalog = tmp_path / "providers.json"
+    catalog.write_text(
+        json.dumps({"native_agents": {agent: {"configuration_directory": "private-native-state"}}})
+    )
+    monkeypatch.setattr(
+        provider_owner,
+        "_configuration_path",
+        lambda *args, **kwargs: pytest.fail("native state path resolved before rejection"),
+    )
+    with pytest.raises(AgentProviderError, match="configuration remain service-owned"):
+        load_agent_providers(catalog)
 
 
 @pytest.mark.parametrize("agent", ["opencode", "pi"])

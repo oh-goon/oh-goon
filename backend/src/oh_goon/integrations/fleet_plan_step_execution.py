@@ -141,7 +141,6 @@ class CommandRunner(Protocol):
         broker_directory: Path | None = None,
         read_only_workspace: bool = False,
         allowed_write_roots: tuple[Path, ...] = (),
-        credential_file: Path | None = None,
         host_network: bool = False,
         private_configuration_directory: Path | None = None,
         preserve_native_executable_path: bool = True,
@@ -1075,7 +1074,6 @@ def _direct_step_command_runner(
     broker_directory: Path | None = None,
     read_only_workspace: bool = False,
     allowed_write_roots: tuple[Path, ...] = (),
-    credential_file: Path | None = None,
     host_network: bool = False,
     private_configuration_directory: Path | None = None,
     preserve_native_executable_path: bool = True,
@@ -1086,7 +1084,6 @@ def _direct_step_command_runner(
         or broker_directory is not None
         or read_only_workspace
         or allowed_write_roots
-        or credential_file is not None
         or host_network
         or private_configuration_directory is not None
         or not preserve_native_executable_path

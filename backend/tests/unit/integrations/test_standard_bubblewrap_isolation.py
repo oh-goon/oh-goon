@@ -1537,69 +1537,32 @@ print(json.dumps(facts))
     assert result.standard_isolation.filesystem_cleanup == "verified"
 
 
-@pytest.mark.process
-def test_protected_native_auth_file_refresh_is_in_place_and_exposure_is_explicit(
-    tmp_path: Path,
+@pytest.mark.parametrize("attempt", ["removed_credential", "host_network"])
+def test_native_file_auth_and_host_network_are_rejected_before_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attempt: str
 ) -> None:
-    executable = shutil.which("bwrap")
-    if executable is None:
-        pytest.skip("native Bubblewrap not installed")
-    backend = BubblewrapProcessIsolation(executable)
-    workspace, private = tmp_path / "repo", tmp_path / "native-auth"
-    workspace.mkdir()
-    private.mkdir()
-    auth = private / "auth.json"
-    auth.write_text("synthetic old authentication")
-    auth.chmod(0o600)
-    sibling = private / "private-sibling"
-    sibling.write_text("unselected private state")
-    before = auth.stat()
-    (workspace / "original-private").write_text(str(sibling))
-    (workspace / "source").write_text("original")
-    script = r"""
-import json,pathlib,socket,sys
-root=pathlib.Path('/workspace');facts=[]
-try: (root/'source').write_text('bad')
-except OSError: facts.append(True)
-else: facts.append(False)
-try: pathlib.Path((root/'original-private').read_text()).read_text()
-except OSError: facts.append(True)
-else: facts.append(False)
-auth=pathlib.Path('/oh-goon-codex-home/auth.json')
-facts.append(auth.read_text()=='synthetic old authentication')
-with auth.open('w') as stream: stream.write('synthetic native refresh');stream.flush()
-pathlib.Path('/oh-goon-codex-home/private-state').write_text('disposable')
-with socket.create_connection(('127.0.0.1',int(sys.argv[1])),timeout=1): facts.append(True)
-facts.append(sys.stdin.buffer.read()==b'full unchanged stdin')
-print(json.dumps(facts))
-"""
-    with ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler) as server:
-        with RepositoryWorkspaceAuthority.pin_repository_subject(workspace) as require_current:
-            request = _request(
+    backend = _backend(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("unsupported authority reached launch")
+    )
+    if attempt == "removed_credential":
+        with pytest.raises(TypeError, match="credential_file"):
+            _request(
                 backend,
-                workspace,
-                require_workspace_current=require_current,
+                tmp_path,
                 read_only_workspace=True,
                 protected_execution=True,
-                credential_file=auth,
-                host_network=True,
-                input_data=b"full unchanged stdin",
-                argv=("/usr/bin/python3", "-c", script, str(server.server_port)),
+                credential_file=tmp_path / "synthetic-auth" / "auth.json",
             )
-            _require_native(backend, request)
-            result = backend.execute(request, timeout=10, cancel_requested=None)
-    assert result.returncode == 0, result.stderr
-    assert all(json.loads(result.stdout))
-    assert auth.read_text() == "synthetic native refresh"
-    after = auth.stat()
-    assert (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
-    assert sorted(path.name for path in private.iterdir()) == ["auth.json", "private-sibling"]
-    assert (workspace / "source").read_text() == "original"
-    evidence = result.standard_isolation
-    assert evidence is not None
-    assert evidence.host_and_external_ip_networking == "host_unrestricted"
-    assert evidence.credential_visibility == "codex_auth_file_read_write"
-    assert evidence.preflight == "verified" and evidence.filesystem_cleanup == "verified"
+    else:
+        with pytest.raises(FleetPlanInvalid, match="supported admitted service transport"):
+            _request(
+                backend,
+                tmp_path,
+                read_only_workspace=True,
+                protected_execution=True,
+                host_network=True,
+            )
 
 
 @pytest.mark.parametrize("timed_out", [False, True])
@@ -1701,3 +1664,16 @@ def test_protected_missing_exec_ack_is_a_setup_failure_with_bounded_facts(
         backend.execute(request, timeout=1, cancel_requested=None)
     assert len(calls) == 2
     assert "PRIVATE" not in str(caught.value)
+
+
+def test_stale_native_host_network_authority_cannot_bypass_receiving_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    request = _request(backend, tmp_path, read_only_workspace=True, protected_execution=True)
+    object.__setattr__(request, "host_network", True)
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("stale networking launched")
+    )
+    with pytest.raises(FleetPlanInvalid, match="supported admitted service transport"):
+        backend.execute(request, timeout=1, cancel_requested=None)

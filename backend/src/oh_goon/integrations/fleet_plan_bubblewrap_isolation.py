@@ -73,7 +73,6 @@ from oh_goon.integrations.fleet_plan_local_lace_intent import (
 from oh_goon.integrations.fleet_plan_local_lace_recovery import lace_resource_binding
 from oh_goon.integrations.fleet_plan_process_isolation import (
     MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
-    STANDARD_CODEX_HOME,
     IsolatedProcessRequest,
     StandardIsolatedProcessRequest,
     StandardReadOnlyMount,
@@ -238,9 +237,6 @@ class BubblewrapProcessIsolation:
                 "private_configuration_directory": str(request.private_configuration_directory)
                 if request.private_configuration_directory is not None
                 else None,
-                "credential_file": str(request.credential_file)
-                if request.credential_file
-                else None,
                 "host_network": request.host_network,
                 "protected_execution": request.protected_execution,
                 "broker_directory": str(request.broker_directory)
@@ -292,6 +288,10 @@ class BubblewrapProcessIsolation:
     ) -> frozenset[tuple[int, int]]:
         if os.name != "posix" or not Path(self.executable).is_file():
             raise FleetPlanInvalid("Standard isolated execution requires native Bubblewrap")
+        if request.host_network:
+            raise FleetPlanInvalid(
+                "Native host networking requires a supported admitted service transport"
+            )
         if request.backend_configuration_id != self.configuration_identity():
             raise FleetPlanInvalid("Standard Bubblewrap configuration changed after resolution")
         if self.require_local_resource_intent:
@@ -300,28 +300,6 @@ class BubblewrapProcessIsolation:
         if request.protected_execution:
             _require_standard_git_layout(request.workspace)
         private_file_identities = self._private_application_file_identities()
-        credential = request.credential_file
-        if credential is not None:
-            try:
-                metadata = credential.lstat()
-            except OSError as exc:
-                raise FleetPlanInvalid("Native credential file is unavailable") from exc
-            if (
-                not stat.S_ISREG(metadata.st_mode)
-                or metadata.st_nlink != 1
-                or metadata.st_uid != os.getuid()
-                or metadata.st_mode & 0o077
-                or credential.name != "auth.json"
-                or credential.is_relative_to(request.workspace)
-                or request.workspace.is_relative_to(credential.parent)
-                or request.broker_directory is not None
-                or request.private_configuration_directory is not None
-                or request.allowed_write_roots
-            ):
-                raise FleetPlanInvalid("Native credential file exceeds its explicit private scope")
-            if (metadata.st_dev, metadata.st_ino) in private_file_identities:
-                raise FleetPlanInvalid("Native credential cannot expose private application state")
-            private_file_identities = private_file_identities | {(metadata.st_dev, metadata.st_ino)}
         unsafe_environment = sorted(
             name
             for name in request.env
@@ -357,7 +335,6 @@ class BubblewrapProcessIsolation:
             PurePosixPath("/home/fleet"),
             PurePosixPath("/cache"),
             PurePosixPath("/run/oh-goon-broker"),
-            STANDARD_CODEX_HOME,
         )
         home = Path.home().resolve()
         if home.is_relative_to(request.workspace):
@@ -413,13 +390,6 @@ class BubblewrapProcessIsolation:
             if (
                 not source.exists()
                 or any(source.is_relative_to(root) or root.is_relative_to(source) for root in roots)
-                or (
-                    credential is not None
-                    and (
-                        source.is_relative_to(credential.parent)
-                        or credential.is_relative_to(source)
-                    )
-                )
                 or source == request.workspace
                 or (source in sources and source not in canonical_sources)
                 or source.is_socket()
@@ -523,12 +493,6 @@ class BubblewrapProcessIsolation:
                     if any(
                         scratch.is_relative_to(root) or root.is_relative_to(scratch)
                         for root in immutable_inputs
-                    ) or (
-                        request.credential_file is not None
-                        and (
-                            scratch.is_relative_to(request.credential_file.parent)
-                            or request.credential_file.is_relative_to(scratch)
-                        )
                     ):
                         raise CapabilityUnavailable(
                             "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_setup; "
@@ -584,17 +548,6 @@ class BubblewrapProcessIsolation:
                                 )
                 for mount in request.read_only_mounts:
                     args.extend(("--ro-bind", str(mount.source), str(mount.target)))
-                if request.credential_file is not None:
-                    native_home = paths.home / "codex"
-                    native_home.mkdir(mode=0o700)
-                    args.extend(("--bind", str(native_home), str(STANDARD_CODEX_HOME)))
-                    args.extend(
-                        (
-                            "--bind",
-                            str(request.credential_file),
-                            str(STANDARD_CODEX_HOME / "auth.json"),
-                        )
-                    )
                 if request.private_configuration_directory is not None:
                     args.extend(
                         (
@@ -1363,9 +1316,6 @@ def _standard_isolation_evidence(
         protected_paths=tuple(path.as_posix() for path in sorted(LIVE_CHECKOUT_PROTECTED_PATHS))
         if request.read_only_workspace
         else (),
-        credential_visibility="codex_auth_file_read_write"
-        if request.credential_file is not None
-        else "none",
         preflight="verified",
         filesystem_cleanup=filesystem_cleanup,
         broker_socket_mounted=request.broker_directory is not None,

@@ -8,7 +8,6 @@ from typing import cast
 import pytest
 
 from oh_goon.core.models.agent_providers import (
-    CodexLoginConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
     ResolvedNativeAgent,
@@ -273,22 +272,16 @@ def test_live_output_observer_failure_emits_diagnostic_without_changing_command_
     assert event.diagnostic_capability_affected == "live_output_capture"
 
 
-@pytest.mark.parametrize("launch", ["protected_auth", "producer", "no_credential", "local_auth"])
-def test_protected_auth_stream_is_private_while_native_protocol_still_receives_it(launch):
+@pytest.mark.parametrize("launch", ["protected", "managed", "producer", "local"])
+def test_protected_stream_is_private_while_native_protocol_still_receives_it(launch):
     selected = ResolvedNativeAgent(
         agent="codex",
         profile_name="explicit",
         executable_sha256="a" * 64,
         definition=NativeAgentDefinition(executable="/native/codex"),
         profile=NativeAgentProfile(
-            backend="local" if launch == "local_auth" else "bubblewrap",
-            sandbox_owner="harness" if launch == "local_auth" else "execution_backend",
-            codex_login=CodexLoginConnection(
-                home="/private/native-auth",
-                model="selected-model",
-                reasoning_effort="low",
-                credential_store="file",
-            ),
+            backend="local" if launch == "local" else "bubblewrap",
+            sandbox_owner="harness" if launch == "local" else "execution_backend",
         ),
     )
     step = ResolvedLocalSearchAgentStep(
@@ -303,7 +296,7 @@ def test_protected_auth_stream_is_private_while_native_protocol_still_receives_i
     store = GameTapeLiveOutputStore()
     store.open_run("run")
     protocol = []
-    canary = "synthetic-file-credential-canary"
+    canary = "synthetic-private-protocol-canary"
 
     def command(*argv, stream_output, **kwargs):
         stream_output("stdout", canary[:16])
@@ -321,21 +314,23 @@ def test_protected_auth_stream_is_private_while_native_protocol_still_receives_i
         fleet_run_id="run",
         repository_id="repo",
     )
-    argv = ("/native/python", "evidence") if launch == "producer" else ("/native/codex", "exec")
+    argv = (
+        ("/native/python", "evidence")
+        if launch == "producer"
+        else ("/native/python", "-I", "-m", "oh_goon.integrations.agent_inference_relay")
+        if launch == "managed"
+        else ("/native/codex", "exec")
+    )
     result = runner(
         *argv,
         stream_output=lambda stream, text: protocol.append((stream, text)),
-        **(
-            {"credential_file": Path("/private/native-auth/auth.json")}
-            if launch in ("protected_auth", "local_auth")
-            else {}
-        ),
+        **({"broker_directory": Path("/private/run/broker")} if launch == "managed" else {}),
     )
     assert result.returncode == 7
     assert "".join(text for stream, text in protocol if stream == "stdout") == canary
     assert "".join(text for stream, text in protocol if stream == "stderr") == canary
     retained = store.snapshot("run")
-    if launch == "protected_auth":
+    if launch in {"protected", "managed"}:
         assert retained.chunks == ()
         assert canary not in retained.model_dump_json()
     else:
@@ -351,12 +346,6 @@ def test_protected_protocol_observer_exception_cannot_export_private_output():
         profile=NativeAgentProfile(
             backend="bubblewrap",
             sandbox_owner="execution_backend",
-            codex_login=CodexLoginConnection(
-                home="/private/native-auth",
-                model="selected-model",
-                reasoning_effort="low",
-                credential_store="file",
-            ),
         ),
     )
     step = ResolvedLocalSearchAgentStep(
@@ -375,7 +364,7 @@ def test_protected_protocol_observer_exception_cannot_export_private_output():
             diagnostics.append(event)
 
     def command(*argv, stream_output, **kwargs):
-        stream_output("stdout", "synthetic-file-credential-canary")
+        stream_output("stdout", "synthetic-private-protocol-canary")
         return CommandResult(argv=argv, returncode=0, stdout="", stderr="")
 
     def broken_protocol(stream, text):
@@ -394,10 +383,9 @@ def test_protected_protocol_observer_exception_cannot_export_private_output():
     result = runner(
         "/native/codex",
         "exec",
-        credential_file=Path("/private/native-auth/auth.json"),
         stream_output=broken_protocol,
     )
     assert result.returncode == 0
     assert len(diagnostics) == 1
     assert diagnostics[0].message == "Protected native protocol observer failed"
-    assert "synthetic-file-credential-canary" not in diagnostics[0].model_dump_json()
+    assert "synthetic-private-protocol-canary" not in diagnostics[0].model_dump_json()

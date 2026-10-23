@@ -42,7 +42,6 @@ from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
 from oh_goon.integrations.source_snapshot import SourceSnapshotBinding, verify_clean_source_snapshot
 
 MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM = 1024 * 1024
-STANDARD_CODEX_HOME = PurePosixPath("/oh-goon-codex-home")
 
 if TYPE_CHECKING:
     from oh_goon.engine.command import CommandTerminal
@@ -86,7 +85,6 @@ class StandardIsolatedProcessRequest:
     resources: CicdResourcePolicy = field(default_factory=CicdResourcePolicy)
     read_only_workspace: bool = False
     allowed_write_roots: tuple[Path, ...] = ()
-    credential_file: Path | None = field(default=None, repr=False)
     host_network: bool = False
     protected_execution: bool = False
     retain_output_tail: bool = False
@@ -124,11 +122,13 @@ class StandardIsolatedProcessRequest:
             raise FleetPlanInvalid("Standard sandbox input must be bounded bytes")
         if any(type(name) is not str or type(value) is not str for name, value in self.env.items()):
             raise FleetPlanInvalid("Standard sandbox environment requires resolved strings")
+        if self.host_network:
+            raise FleetPlanInvalid(
+                "Native host networking requires a supported admitted service transport"
+            )
         if self.protected_execution and not self.read_only_workspace:
             raise FleetPlanInvalid("Protected execution requires a read-only base workspace")
-        if not self.protected_execution and (
-            self.allowed_write_roots or self.credential_file is not None or self.host_network
-        ):
+        if not self.protected_execution and (self.allowed_write_roots or self.host_network):
             raise FleetPlanInvalid(
                 "Native scoped writes, authentication and host network require explicit protected execution"
             )
@@ -147,10 +147,6 @@ class StandardIsolatedProcessRequest:
                 raise FleetPlanInvalid(
                     "Scoped native write roots must be explicit workspace descendants"
                 )
-        if self.credential_file is not None and (
-            not self.credential_file.is_absolute() or ".." in self.credential_file.parts
-        ):
-            raise FleetPlanInvalid("Native credential selection requires an exact absolute file")
         object.__setattr__(self, "workspace", workspace)
         object.__setattr__(self, "cwd", cwd)
         object.__setattr__(self, "env", MappingProxyType(dict(self.env)))
@@ -245,7 +241,6 @@ def native_profile_command_runner(
         private_configuration_directory: Path | None = None,
         read_only_workspace: bool = False,
         allowed_write_roots: tuple[Path, ...] = (),
-        credential_file: Path | None = None,
         host_network: bool = False,
         preserve_native_executable_path: bool = True,
         retain_output_tail: bool = False,
@@ -259,23 +254,9 @@ def native_profile_command_runner(
         if protected:
             allowed_write_roots = () if read_only_workspace else admitted_roots
             read_only_workspace = True
-            login = native_agent.profile.codex_login
-            if credential_file is not None or host_network:
-                if (
-                    native_agent.agent != "codex"
-                    or not argv
-                    or argv[0] != native_agent.definition.executable
-                    or login is None
-                    or credential_file != Path(login.home) / "auth.json"
-                    or not host_network
-                    or allowed_write_roots
-                ):
-                    raise FleetPlanInvalid(
-                        "Native authentication differs from its frozen protected selection"
-                    )
-        elif credential_file is not None or host_network:
+        if host_network:
             raise FleetPlanInvalid(
-                "Native authentication and host network require explicit protected execution"
+                "Native host networking requires a supported admitted service transport"
             )
         if sandboxed:
             require_native_workspace_runtime_separation(
@@ -285,7 +266,6 @@ def native_profile_command_runner(
             if (
                 read_only_workspace
                 or allowed_write_roots
-                or credential_file is not None
                 or host_network
                 or broker_directory is not None
                 or private_configuration_directory is not None
@@ -328,7 +308,6 @@ def native_profile_command_runner(
                 resources=native_agent.profile.resources,
                 read_only_workspace=read_only_workspace,
                 allowed_write_roots=allowed_write_roots,
-                credential_file=credential_file,
                 host_network=host_network,
                 protected_execution=protected,
                 retain_output_tail=retain_output_tail,
@@ -388,6 +367,13 @@ def require_native_workspace_runtime_separation(
 def native_runtime_read_only_mounts(
     workspace: Path, native_agent: ResolvedNativeAgent
 ) -> tuple[StandardReadOnlyMount, ...]:
+    if (
+        native_agent.agent in {"codex", "opencode"}
+        and native_agent.definition.configuration_directory is not None
+    ):
+        raise FleetPlanInvalid(
+            "Native service authentication/configuration must remain outside agent execution"
+        )
     # These are the loaded runtime's existing paths, not a second installation
     # resolver or a broad bind of its source checkout/host home.
     roots = list(_loaded_native_host_runtime_roots())

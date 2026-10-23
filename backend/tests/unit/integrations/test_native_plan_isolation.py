@@ -37,6 +37,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     StandardIsolatedProcessRequest,
     StandardReadOnlyMount,
     native_profile_command_runner,
+    native_runtime_read_only_mounts,
 )
 from oh_goon.integrations.fleet_plan_run_execution import FleetPlanRunExecutor
 from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, execute_direct_step
@@ -568,7 +569,7 @@ def test_protected_runner_rechecks_exact_phase_roots_and_readonly_requests(
     assert calls[0].allowed_write_roots == (allowed,)
     assert calls[1].allowed_write_roots == ()
     assert all(request.read_only_workspace and request.protected_execution for request in calls)
-    assert all(request.credential_file is None and not request.host_network for request in calls)
+    assert all(not request.host_network for request in calls)
 
 
 @pytest.mark.process
@@ -630,3 +631,45 @@ print(json.dumps(facts))
     assert isolation.credential_visibility == "none"
     assert isolation.host_and_external_ip_networking == "denied"
     assert (repository / "outside").read_text() == "protected source"
+
+
+@pytest.mark.parametrize("agent", ["codex", "opencode"])
+def test_forged_native_user_configuration_is_refused_before_mount_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
+) -> None:
+    selected = replace(
+        _selection(_fake_backend(tmp_path)),
+        agent=agent,
+        definition=NativeAgentDefinition(
+            executable="/usr/bin/true", configuration_directory="/synthetic/do-not-inspect"
+        ),
+    )
+    monkeypatch.setattr(
+        "oh_goon.integrations.fleet_plan_process_isolation._loaded_native_host_runtime_roots",
+        lambda: pytest.fail("forged native configuration reached path discovery"),
+    )
+    with pytest.raises(FleetPlanInvalid, match="outside agent execution"):
+        native_runtime_read_only_mounts(tmp_path, selected)
+
+
+@pytest.mark.parametrize("attempt", ["removed_credential", "host_network"])
+def test_native_runner_cannot_receive_file_credentials_or_host_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attempt: str
+) -> None:
+    backend = _fake_backend(tmp_path)
+    selected = replace(
+        _selection(backend),
+        profile=NativeAgentProfile(backend="bubblewrap", sandbox_owner="execution_backend"),
+    )
+    monkeypatch.setattr(
+        backend, "execute", lambda *a, **kw: pytest.fail("unsupported native authority launched")
+    )
+    runner = native_profile_command_runner(
+        tmp_path, selected, backend, RepositoryWorkspaceAuthority.pin_repository_subject
+    )
+    if attempt == "removed_credential":
+        with pytest.raises(TypeError, match="credential_file"):
+            runner("/usr/bin/true", credential_file=tmp_path / "synthetic-auth.json")
+    else:
+        with pytest.raises(FleetPlanInvalid, match="supported admitted service transport"):
+            runner("/usr/bin/true", host_network=True)

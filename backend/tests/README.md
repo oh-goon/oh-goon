@@ -68,8 +68,8 @@ stores. Without an explicit selection, this optional probe skips.
 The installed Codex permission probe uses a synthetic authentication home and no
 model connection. It checks the exact native tool policy used by explicit
 `codex_login` profiles: workspace writes, read-only evidence, private-path and
-symlink denial, and host-loopback denial. Saved-login coding demonstrations are
-separate, explicitly selected live model evidence:
+symlink denial, and host-loopback denial. It does not establish a live account
+or the planned native-service/private-store boundary:
 
 ```sh
 OH_GOON_NATIVE_CODEX=/path/to/codex \
@@ -132,18 +132,19 @@ fallback metadata, so this proves installed managed transport, physical isolatio
 and typed review admission, not model-specific code-mode behavior, live model
 quality or a successful dogfood campaign.
 
-The backend-owned protected Codex profile has a separate installed probe. It uses
-synthetic ChatGPT credentials, the selected installation's bundled
-`gpt-6.1-sol` metadata and real Code Mode helper, through the original typed
-read-only review Run. Both HTTP and WebSocket cases verify denied source/Git
-mutations, private auth-file-only binding, allowed scratch, full instructions,
-native follow-up and compaction. It requires Linux Bubblewrap, OpenSSL and
-Python 3.14 for native compressed requests:
+The backend-owned protected Codex profile has a separate installed probe. Its
+managed HTTP fixture uses the selected installation's bundled `gpt-6.1-sol`
+metadata and real Code Mode helper through the original typed read-only review
+Run. It verifies denied source/Git mutations, absent authentication files, allowed
+scratch, full instructions, native follow-up and compaction. Its host-only broker
+credential is synthetic. This is separate from the legacy synthetic ChatGPT
+HTTP/WebSocket matrix above; protected WebSocket is not qualified. It requires
+Linux Bubblewrap and the selected complete public native installation:
 
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-codex/bin/codex \
 OH_GOON_NATIVE_CODEX_RUNTIME_ROOT=/opt/native-codex \
-uv run --offline --frozen --no-sync --project backend pytest -m certification backend/tests/integration/services/test_native_codex_context.py -k installed_protected_codex
+uv run --offline --frozen --no-sync --project backend pytest -m certification backend/tests/integration/services/test_native_codex_context.py -k installed_protected_managed_codex
 ```
 
 The existing OpenCode file also has an independent typed read-only review case
@@ -157,49 +158,38 @@ uv run --offline --frozen --no-sync --project backend pytest -m certification ba
 
 These synthetic probes do not access real credentials or establish live account
 refresh, arbitrary final-record secrecy, complete repair convergence, WSL2 or
-container compatibility. [The selected profile contract](../../docs/AGENT_PROVIDERS.md#select-backend-owned-protected-codex-execution)
+container compatibility. [The selected profile contract](../../docs/AGENT_PROVIDERS.md#native-owned-authentication-and-configuration)
 records those boundaries. Keep the complete public installation outside the real
 authentication home; never copy credentials into these tests.
 
-The separate live-account probe uses real ChatGPT authentication and live model
-inference. Create a dedicated private Codex home outside the repository and native
-tool roots, and complete native `codex login` there; never copy the desktop auth
-cache or put credentials into the synthetic fixture. The installed executable
-and its runtime directory must remain in a separate filesystem tree from that
-home. For an app-bundled executable beneath that home, select a public
-installation in a separate tree while keeping credentials in place. Choose an
-available model explicitly when the default is unavailable:
+The former live-account refresh helper has been removed. It opened the selected
+real `auth.json` to inspect `last_refresh`, started a new account server against
+that home and forced account refresh. A bounded read and boolean result still
+expose native credentials to the test process; that route does not meet
+native-store exclusion. The home-based refresh/sign-in recipe is withdrawn.
+Existing synthetic authentication fixtures remain separate.
 
-```sh
-CODEX_HOME=/private/dedicated-codex-login /path/to/codex login
-OH_GOON_NATIVE_CODEX=/path/to/codex \
-OH_GOON_LIVE_CODEX_HOME=/private/dedicated-codex-login \
-OH_GOON_LIVE_CODEX_MODEL=gpt-6-luna \
-uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_codex_live.py
-```
+The [legacy live coding baseline](integration/services/test_native_codex_live.py)
+retains its original Run and immutable independent verifier without that helper.
+It is opt-in real inference against native Codex's existing sign-in, with no test
+credential-content reads, token export, forced refresh or new account-server
+process. It proves only local coding and independent verification. It is not
+qualification for the new native-service/private-store contract, and has not been
+rerun for that contract. Missing explicit selections still skip this optional
+baseline; a selected coding failure still fails the test.
 
-An existing CLI sign-in home may instead be selected in place; do not copy its
-credentials or alter its authored configuration. This requires file-backed
-native-managed ChatGPT authentication. The account probe explicitly selects the
-built-in OpenAI provider and requests native `getAuthStatus` with
-`includeToken=false`,
-rejects API-key or externally managed token modes, then requests native
-`account/read` refresh. A cached account response alone cannot prove refresh:
-the bounded host-only checker privately verifies that native `last_refresh`
-advanced during the request and that account identity remained unchanged. It
-returns only boolean facts and never exports credentials, token hashes or raw
-account/RPC output. Product authentication remains opaque to Oh-Goon.
-
-The refreshed credentials must then work in a fresh installed-Codex process
-through the original managed Run. The live coding task repairs a real defect;
-an immutable verifier outside the native writable workspace fails before the
-repair and must pass as an independent Step afterward. No endpoint override or
-simulated model response is involved. Missing explicit selections skip; a
-selected account, refresh or coding failure fails qualification. This consumes
-live account quota and requires external networking. After qualification, use
-native `codex logout` for the dedicated home and remove its owned temporary
-state; never archive the credential home as evidence. This cleanup applies only
-to a temporary dedicated home.
+Native-service acceptance remains TODO in the
+[owning adapter design](../../docs/AGENT_PROVIDERS.md#native-service-adapter-design).
+Use an explicitly selected, qualified endpoint and dedicated owned session;
+native services retain authentication, configuration and token refresh. Readiness
+must come from supported non-secret native protocol facts, without file reads,
+token export, forced-refresh/account-server helpers or broad configuration APIs.
+A cached authenticated response alone does not establish refresh or persistence;
+if native lifecycle events cannot establish those facts, record them as
+unverified. Service identity, private-store/tool denial, continuation and lifecycle
+qualification must precede a new service-based coding Run with independent
+verification. No native-service adapter or live-account refresh qualification is
+implemented by this withdrawal.
 
 ## Shared test support
 

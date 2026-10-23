@@ -15,7 +15,6 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
 )
 from oh_goon.integrations.agent_native_execution import (
-    CODEX_BACKEND_HOME,
     NativeAgentEventParser,
     codex_login_command,
     native_agent_command,
@@ -559,60 +558,44 @@ def test_opencode_unfinalized_or_blank_text_and_zero_exit_are_incomplete(
     ).settled
 
 
-@pytest.mark.parametrize("backend_owned", [False, True])
-def test_codex_file_login_preserves_native_authentication_and_instruction_transport(
-    tmp_path: Path, backend_owned: bool
-) -> None:
-    home = tmp_path / "native-auth"
-    home.mkdir()
-    prompt = tmp_path / "prompt.txt"
-    prompt.write_text("full frozen task and producer evidence")
+def test_forged_protected_login_rejects_before_inspecting_native_state(tmp_path: Path) -> None:
     selected = replace(
         selection("codex"),
-        profile=NativeAgentProfile(
-            backend="bubblewrap" if backend_owned else "local",
-            sandbox_owner="execution_backend" if backend_owned else "harness",
+        profile=NativeAgentProfile.model_construct(
+            backend="bubblewrap",
+            sandbox_owner="execution_backend",
             codex_login=CodexLoginConnection(
-                home=str(home),
-                model="gpt-6.1-sol",
-                reasoning_effort="ultra",
-                credential_store="file",
+                home="/never-inspect-native-state", model="native", reasoning_effort="ultra"
             ),
         ),
     )
-    command = codex_login_command(
-        selected,
-        instructions=prompt,
-        workspace=tmp_path / "repo",
-        scratch=tmp_path / "scratch",
-        read_roots=(),
+    with pytest.raises(AgentProviderError, match="qualified service connection"):
+        codex_login_command(
+            selected,
+            instructions=tmp_path / "unopened-prompt",
+            workspace=tmp_path / "unopened-repo",
+            scratch=tmp_path / "unopened-scratch",
+            read_roots=(),
+        )
+
+
+@pytest.mark.parametrize("agent", ["codex", "opencode"])
+def test_native_command_rejects_configuration_files_before_prepared_source_access(
+    tmp_path: Path, agent: NativeAgentName
+) -> None:
+    selected = replace(
+        selection(agent),
+        definition=NativeAgentDefinition(
+            executable=f"/native/{agent}", configuration_directory="/private/native"
+        ),
     )
-    settings: dict[str, object] = {}
-    for index, value in enumerate(command.argv):
-        if value == "-c":
-            settings.update(tomllib.loads(command.argv[index + 1]))
-    assert settings["model"] == "gpt-6.1-sol"
-    assert settings["model_reasoning_effort"] == "ultra"
-    assert settings["model_instructions_file"] == str(prompt)
-    assert settings["cli_auth_credentials_store"] == "file"
-    assert settings["approval_policy"] == "never"
-    expected_tmpdir = "/tmp" if backend_owned else str(tmp_path / "scratch")
-    assert 'shell_environment_policy.inherit="none"' in command.argv
-    assert settings["shell_environment_policy"] == {
-        "set": {"PATH": "/usr/local/bin:/usr/bin:/bin", "TMPDIR": expected_tmpdir},
-    }
-    assert dict(command.environment)["TMPDIR"] == expected_tmpdir
-    assert command.input_file == prompt and command.argv[-1] == "-"
-    assert dict(command.environment)["CODEX_HOME"] == (
-        CODEX_BACKEND_HOME if backend_owned else str(home)
-    )
-    if backend_owned:
-        assert "default_permissions" not in settings and "permissions" not in settings
-        assert command.argv[command.argv.index("--sandbox") + 1] == "danger-full-access"
-        assert str(home) not in command.argv
-    else:
-        assert settings["default_permissions"] == "oh_goon"
-        assert "--sandbox" not in command.argv
+    with pytest.raises(AgentProviderError, match="configuration remain service-owned"):
+        native_agent_command(
+            selected,
+            prompt_file=tmp_path / "unopened-prompt",
+            workspace=tmp_path,
+            interactive=False,
+        )
 
 
 def test_managed_codex_delegates_only_when_explicitly_selected(tmp_path: Path) -> None:

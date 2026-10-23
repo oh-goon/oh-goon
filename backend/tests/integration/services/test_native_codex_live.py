@@ -1,7 +1,8 @@
-"""Explicit live ChatGPT account refresh and coding through the original Run.
+"""Legacy opt-in live coding baseline through the original local Run.
 
-The installed Codex account owner signs in and refreshes credentials. This opt-in
-proof uses real inference; the deterministic transport matrix remains separate.
+Native Codex owns its existing sign-in. This proof uses real inference and an
+immutable independent verifier; it never inspects native credential contents or
+requests forced refresh. It does not qualify native-service/private-store exclusion.
 """
 
 from __future__ import annotations
@@ -31,7 +32,6 @@ from oh_goon.integrations.agent_native_execution import (
     parse_native_agent_events,
 )
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
-from tests.factories.native_codex_account import refresh_native_chatgpt_account
 
 _BROKEN_SOURCE = """def merge_ranges(ranges):
     result = []
@@ -72,7 +72,7 @@ unittest.main(argv=["live-codex-verification"])
 
 
 @pytest.mark.certification
-def test_live_chatgpt_refresh_and_coding_use_original_run(
+def test_legacy_live_chatgpt_coding_uses_original_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     executable = os.environ.get("OH_GOON_NATIVE_CODEX")
@@ -105,15 +105,6 @@ def test_live_chatgpt_refresh_and_coding_use_original_run(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("CODEX_API_KEY", "must-not-replace-selected-chatgpt-login")
-    account_facts = refresh_native_chatgpt_account(program, home)
-    assert account_facts == {
-        "managed_chatgpt": True,
-        "refresh_advanced": True,
-        "refresh_recorded_during_request": True,
-        "account_identity_preserved": True,
-        "auth_token_omitted": True,
-    }
-
     task = (
         "Fix merge_ranges in ranges.py for inclusive integer ranges. Return sorted merged "
         "(start, end) tuples, combining overlapping or immediately adjacent ranges. "
