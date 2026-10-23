@@ -47,8 +47,13 @@ else:
 facts['git_write_denied'] = denied(lambda: (repo / '.git' / 'config').write_text('unauthorized'))
 facts['outside_repair_write_denied'] = denied(lambda: (repo / 'outside.py').write_text('unauthorized'))
 for name in ('codex-auth.json', 'codex-config.toml', 'opencode-auth.json', 'opencode-config.json'):
-    facts[name + '_read_denied'] = denied(lambda: (stores / name).read_bytes())
+    private_file = stores / name
+    facts[name + '_read_denied'] = denied(private_file.read_bytes)
+    facts[name + '_write_denied'] = denied(lambda: private_file.write_text('unauthorized'))
+    facts[name + '_rename_denied'] = denied(lambda: private_file.rename(private_file.with_suffix('.moved')))
+    facts[name + '_delete_denied'] = denied(private_file.unlink)
 facts['private_alias_read_denied'] = denied(lambda: (repo / 'private-alias').read_bytes())
+facts['private_alias_write_denied'] = denied(lambda: (repo / 'private-alias').write_text('unauthorized'))
 child = subprocess.run([sys.executable, '-I', '-c', 'import pathlib, sys\ntry: pathlib.Path(sys.argv[1]).read_bytes()\nexcept OSError: sys.exit(0)\nelse: sys.exit(1)', str(stores / 'codex-auth.json')], capture_output=True, timeout=3)
 facts['subprocess_private_read_denied'] = child.returncode == 0
 print(json.dumps(facts, sort_keys=True))
@@ -251,6 +256,14 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
         assert source.read_text() == "VALUE = 42\n"
         assert git.read_text() == "SYNTHETIC_GIT_METADATA"
         assert outside.read_text() == "OUTSIDE_REPAIR_SCOPE"
+        for private_file in stores.iterdir():
+            assert private_file.read_text() == "SYNTHETIC_PRIVATE_CANARY"
+        assert {private_file.name for private_file in stores.iterdir()} == {
+            "codex-auth.json",
+            "codex-config.toml",
+            "opencode-auth.json",
+            "opencode-config.json",
+        }
     finally:
         cancelled.set()
         server.join(timeout=12)
