@@ -391,7 +391,8 @@ def execute_codex_service_run(
                 permissions=profile,
                 timeout_seconds=min(5, max(0.001, deadline - time.monotonic())),
             )
-            if qualification.get("exitCode") != 0:
+            qualification_exit_code = qualification.get("exitCode")
+            if type(qualification_exit_code) is not int or qualification_exit_code != 0:
                 raise AgentProviderError("Codex service native sandbox qualification failed")
             turn = await client.start_turn(
                 thread,
@@ -399,8 +400,14 @@ def execute_codex_service_run(
                 permissions=profile,
                 effort=connection.reasoning_effort,
             )
-            turn_id = turn.get("turn", {}).get("id")
-            if not isinstance(turn_id, str) or not turn_id:
+            started_turn = turn.get("turn")
+            turn_id = started_turn.get("id") if isinstance(started_turn, dict) else None
+            if (
+                type(turn_id) is not str
+                or not turn_id.strip()
+                or len(turn_id) > 256
+                or not turn_id.isprintable()
+            ):
                 raise AgentProviderError("Codex service did not identify its owned turn")
             return await _turn(client, thread, turn_id, runtime, deadline, worker)
 

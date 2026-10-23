@@ -185,12 +185,35 @@ def execute_fixture(
 
         async def command_exec(self, *_args: object, **_kwargs: Any) -> dict[str, Any]:
             events.append("sandbox_qualification")
-            return {"exitCode": 1 if fault == "qualification" else 0}
+            if fault == "qualification_missing":
+                return {}
+            return {
+                "exitCode": {
+                    "qualification": 1,
+                    "qualification_boolean": False,
+                    "qualification_float": 0.0,
+                    "qualification_null": None,
+                    "qualification_array": [],
+                }.get(fault or "", 0)
+            }
 
         async def start_turn(self, thread: str, task: str, **_kwargs: Any) -> dict[str, Any]:
             assert thread == "owned-thread" and task == "Captured task"
             events.append("model_turn")
-            return {"turn": {"id": "owned-turn"}}
+            if fault == "turn_missing":
+                return {}
+            return {
+                "turn": {
+                    "turn_null": None,
+                    "turn_array": [],
+                    "turn_identifier_missing": {},
+                    "turn_identifier_null": {"id": None},
+                    "turn_identifier_boolean": {"id": False},
+                    "turn_identifier_blank": {"id": " "},
+                    "turn_identifier_oversized": {"id": "t" * 257},
+                    "turn_identifier_control": {"id": "PRIVATE\nTURN"},
+                }.get(fault or "", {"id": "owned-turn"})
+            }
 
         async def next_notification(self, thread: str) -> dict[str, Any]:
             assert thread == "owned-thread"
@@ -317,6 +340,59 @@ def test_missing_terminal_or_cleanup_proof_cannot_be_reported_as_success(
     assert isinstance(
         physical[0], CommandResult if fault == "normal_daemon_exit" else CommandCancelledError
     )
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "qualification_missing",
+        "qualification_boolean",
+        "qualification_float",
+        "qualification_null",
+        "qualification_array",
+    ],
+)
+def test_malformed_sandbox_qualification_never_starts_model_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault=fault)
+    with pytest.raises(execution.CodexServiceExecutionFailure, match="qualification") as failure:
+        invoke()
+    assert "sandbox_qualification" in events and "model_turn" not in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    assert failure.value.outcome.returncode != 0
+    assert failure.value.outcome.supervisor is physical[0].supervisor
+    assert failure.value.outcome.physical_execution_id == physical[0].physical_execution_id
+    assert physical[0].supervisor.final_process_group_quiescent is True
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "turn_missing",
+        "turn_null",
+        "turn_array",
+        "turn_identifier_missing",
+        "turn_identifier_null",
+        "turn_identifier_boolean",
+        "turn_identifier_blank",
+        "turn_identifier_oversized",
+        "turn_identifier_control",
+    ],
+)
+def test_malformed_turn_acceptance_is_a_safe_failure_with_actual_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault=fault)
+    with pytest.raises(execution.CodexServiceExecutionFailure, match="owned turn") as failure:
+        invoke()
+    assert "model_turn" in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    assert failure.value.outcome.returncode != 0
+    assert "PRIVATE" not in failure.value.outcome.stderr
+    assert failure.value.outcome.supervisor is physical[0].supervisor
+    assert failure.value.outcome.physical_execution_id == physical[0].physical_execution_id
+    assert physical[0].supervisor.final_process_group_quiescent is True
 
 
 def test_dead_service_before_readiness_never_submits_model_work(
