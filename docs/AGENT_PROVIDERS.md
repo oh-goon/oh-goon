@@ -281,8 +281,13 @@ no source members and may remain as native-owned setup artifacts; the capture
 walk permits only that empty-directory metadata. It rejects any entry inside
 before opening content. Oh-Goon never deletes or reclassifies native stores to
 make a later capture pass. Use native-owned state outside the
-captured repository. The child receives the selected home and original owner's
-provider environment while parent conversation,
+captured repository. If a repository commits native configuration, prepare a
+separately declared public-source export without reading or materializing those
+files. Record the exact exclusions and bind evidence to that exported scope. Do
+not expose the original Git object database: read-only Git can still reveal an
+excluded file from history. Transfer only reviewed changes back onto the original
+tree, preserving its native files. The child receives the selected home and
+original owner's provider environment while parent conversation,
 tool IPC and version overrides are removed. Native tools receive only the explicit
 PATH/TMPDIR environment. Login/config failures remain native failures.
 

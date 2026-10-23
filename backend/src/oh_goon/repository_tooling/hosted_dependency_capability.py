@@ -50,6 +50,10 @@ _IMPORT_NAME_OVERRIDES = {
     "pytest-cov": "pytest_cov",
 }
 _NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
+_EXTRAS_RE = re.compile(
+    r"\[\s*[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?"
+    r"(?:\s*,\s*[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)*\s*\]"
+)
 _RELEASE_RE = re.compile(r"^(\d+(?:\.\d+){1,3})$")
 VersionReader = Callable[[str], str]
 ImportProbe = Callable[[str, str], None]
@@ -71,10 +75,14 @@ def _requirement_name(requirement: str) -> str:
 
 
 def _minimum(requirement: str) -> tuple[int, ...]:
-    name_match = _NAME_RE.match(requirement.strip())
+    normalized = requirement.strip()
+    name_match = _NAME_RE.match(normalized)
     if name_match is None:
         raise HostedCapabilityError(f"cannot parse dependency requirement: {requirement!r}")
-    spec = requirement[name_match.end() :].strip()
+    spec = normalized[name_match.end() :].strip()
+    extras = _EXTRAS_RE.match(spec)
+    if extras is not None:
+        spec = spec[extras.end() :].strip()
     match = re.fullmatch(r">=\s*(\d+(?:\.\d+){1,3})", spec)
     if match is None:
         raise HostedCapabilityError(

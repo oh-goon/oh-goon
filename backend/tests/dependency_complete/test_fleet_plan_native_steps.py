@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import sys
 import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -108,11 +109,20 @@ if mode == 'bad-utf8':
 
 
 def _case(
-    tmp_path: Path, *, mode: str = "report", sandboxed: bool = True
+    tmp_path: Path,
+    *,
+    mode: str = "report",
+    sandboxed: bool = True,
+    repository_files: dict[str, str] | None = None,
+    skill_instructions: str = "# Native fixture\nInspect complete captured source.\n",
 ) -> tuple[Path, FrozenAgentStepHandoff, ResolvedLocalSearchAgentStep, StepRuntime]:
     repository = tmp_path / "repos/team/project"
     repository.mkdir(parents=True)
     (repository / "main.py").write_text("def answer():\n    return 42\n")
+    for relative, content in (repository_files or {}).items():
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
     if mode == "helper-shadowing":
         shadow = repository / "oh_goon"
         shadow.mkdir()
@@ -123,7 +133,7 @@ def _case(
         )
     skill = tmp_path / "skills/team/inspect"
     skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text("# Native fixture\nInspect complete captured source.\n")
+    (skill / "SKILL.md").write_text(skill_instructions)
     package = tmp_path / "goons/agents/native"
     package.mkdir(parents=True)
     (package / "README.md").write_text("# agents/native\n")
@@ -480,6 +490,87 @@ def test_initial_evidence_uses_private_query_file_and_spends_the_same_step_deadl
     assert query_files and all(not path.exists() for path in query_files)
 
 
+@pytest.mark.process
+def test_native_initial_evidence_keeps_long_qualified_presentation_intact(
+    tmp_path: Path, model_transport: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.integrations import fleet_plan_step_execution as module
+
+    path = (
+        "/".join(f"captured_source_component_{index}_" + "qualification_" * 9 for index in range(6))
+        + "/tests/test_captured_source.py"
+    )
+    source = "\n".join(
+        f"def test_captured_source_{index}_" + "qualification_" * 9 + "():\n    assert True\n"
+        for index in range(3)
+    )
+    repository, _, step, runtime = _case(tmp_path, repository_files={path: source})
+    original_factory = native_profile_command_runner
+    packets: list[dict[str, Any]] = []
+    prompts: list[dict[str, Any]] = []
+
+    def factory(*args: Any, **kwargs: Any) -> Any:
+        bound = original_factory(*args, **kwargs)
+
+        def run(*argv: str, **options: Any) -> Any:
+            result = bound(*argv, **options)
+            if "--query-file" in argv:
+                packets.append(json.loads(result.stdout))
+            else:
+                prompt_file = Path(argv[argv.index("--input-file") + 1])
+                prompts.append(json.loads(prompt_file.read_text()))
+            return result
+
+        return run
+
+    monkeypatch.setattr(module, "native_profile_command_runner", factory)
+    outcome = execute_direct_step(repository, step, runtime, step_order=1)
+    assert outcome.returncode == 0, outcome.stderr
+    assert len(packets) == len(prompts) == 1
+    disclosure = prompts[0]["repository_evidence"]
+    assert len(disclosure) > 6000
+    projected = json.loads(disclosure)
+    assert projected["presentation"] == packets[0]["presentation"]
+    assert (
+        projected["evidence_packet_identity"] == packets[0]["evidence"]["evidence_packet_identity"]
+    )
+    assert (
+        projected["source_evidence_identity"] == packets[0]["evidence"]["source_evidence_identity"]
+    )
+    assert "omissions do not establish absence" in projected["presentation"]["text"]
+    assert "tests were not executed" in projected["presentation"]["text"]
+
+
+@pytest.mark.process
+def test_native_complete_input_budget_still_rejects_before_agent_launch(
+    tmp_path: Path, model_transport: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES
+    from oh_goon.integrations import fleet_plan_step_execution as module
+
+    repository, _, step, runtime = _case(
+        tmp_path, skill_instructions="# Native fixture\n" + "x" * MAX_COMMAND_INPUT_BYTES
+    )
+    original_factory = native_profile_command_runner
+    producers: list[tuple[str, ...]] = []
+
+    def factory(*args: Any, **kwargs: Any) -> Any:
+        bound = original_factory(*args, **kwargs)
+
+        def run(*argv: str, **options: Any) -> Any:
+            assert "--query-file" in argv, "oversize native input launched the agent"
+            producers.append(argv)
+            return bound(*argv, **options)
+
+        return run
+
+    monkeypatch.setattr(module, "native_profile_command_runner", factory)
+    with pytest.raises(FleetPlanInvalid, match="Native prompt exceeds.*input budget"):
+        execute_direct_step(repository, step, runtime, step_order=1)
+    assert len(producers) == 1
+    assert model_transport == []
+
+
 def test_native_receiver_rejects_fresh_per_process_watchdog_before_producer_work(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -640,8 +731,6 @@ def test_codex_service_read_only_receiver_preserves_the_original_frozen_handoff(
 def test_codex_service_receiver_rejects_conflicting_transport_authority(
     monkeypatch: pytest.MonkeyPatch, conflict: str
 ) -> None:
-    import oh_goon.integrations.fleet_plan_native_steps as native_owner
-
     profile = NativeAgentProfile(
         codex_service=CodexServiceConnection(
             home="/private/native", model="native", reasoning_effort="ultra"
@@ -678,7 +767,7 @@ def test_codex_service_receiver_rejects_conflicting_transport_authority(
     elif conflict == "identity":
         selected = replace(selected, backend_configuration_id="unrelated-backend")
     else:
-        monkeypatch.setattr(native_owner.sys, "platform", "win32")
+        monkeypatch.setattr(sys, "platform", "win32")
     with pytest.raises(FleetPlanInvalid, match="Codex service"):
         require_native_agent_compatibility(selected, role="review")
 

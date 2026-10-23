@@ -454,8 +454,12 @@ def execute_native_agent_step(
     )
     if evidence.returncode != 0:
         return from_command(evidence)
+    # The native workload's complete serialized input has its own receiving
+    # bound below. Local-model disclosure budgets do not constrain this path.
     disclosure = task_evidence_prompt(
-        evidence.stdout, expected_capture_identity=prepared.candidate_identity
+        evidence.stdout,
+        expected_capture_identity=prepared.candidate_identity,
+        max_chars=MAX_COMMAND_INPUT_BYTES,
     )
     _remaining(deadline)
     if runtime.cancel_requested is not None and runtime.cancel_requested():
