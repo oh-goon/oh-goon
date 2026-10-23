@@ -343,6 +343,203 @@ def test_background_execution_rejects_before_provider_work(
     assert provider.requests == []
 
 
+@pytest.mark.parametrize(
+    ("api", "route", "attachment", "root_type"),
+    [
+        pytest.param(
+            "openai-responses",
+            "/v1/responses",
+            {"type": "input_file", "file_id": "file-provider-owned"},
+            None,
+            id="responses-file",
+        ),
+        pytest.param(
+            "openai-responses",
+            "/v1/responses",
+            {"type": "input_image", "file_id": "file-provider-owned"},
+            None,
+            id="responses-image",
+        ),
+        pytest.param(
+            "openai-responses",
+            "/v1/responses",
+            {"type": "input_file", "file_id": "file-provider-owned"},
+            "tool_use",
+            id="responses-root-tool-use-spoof",
+        ),
+        pytest.param(
+            "openai-chat-completions",
+            "/v1/chat/completions",
+            {"type": "file", "file": {"file_id": "file-provider-owned"}},
+            None,
+            id="chat-nested-file",
+        ),
+        pytest.param(
+            "openai-chat-completions",
+            "/v1/chat/completions",
+            {"type": "file", "file_id": "file-provider-owned"},
+            None,
+            id="chat-typed-file",
+        ),
+        pytest.param(
+            "anthropic-messages",
+            "/v1/messages",
+            {"type": "document", "source": {"type": "file", "file_id": "file-provider-owned"}},
+            None,
+            id="anthropic-document",
+        ),
+    ],
+)
+def test_provider_attachment_ids_reject_before_provider_work(
+    directory: Path,
+    provider: _Provider,
+    api: str,
+    route: str,
+    attachment: dict[str, Any],
+    root_type: str | None,
+) -> None:
+    body = _body(api)
+    if root_type is not None:
+        body["type"] = root_type
+    content_key = "input" if api == "openai-responses" else "messages"
+    body[content_key][0]["content"] = [
+        {"type": "input_text" if api == "openai-responses" else "text", "text": "Inspect"},
+        attachment,
+    ]
+    with approved_model_broker(
+        directory, _selected(provider, api), repository_evidence=EVIDENCE, skill_instructions=SKILL
+    ) as broker:
+        with _client(broker.socket_path) as client:
+            response = client.post(route, json=body)
+            assert response.status_code == 400
+    assert provider.requests == []
+
+
+@pytest.mark.parametrize("native_tools", [False, True])
+@pytest.mark.parametrize("options", [{}, None, False, {"search_context_size": "low"}])
+def test_top_level_web_search_options_reject_before_provider_work(
+    directory: Path, provider: _Provider, native_tools: bool, options: object
+) -> None:
+    body = _body()
+    body["web_search_options"] = options
+    if not native_tools:
+        body.pop("tools")
+    with approved_model_broker(
+        directory, _selected(provider), repository_evidence=EVIDENCE, skill_instructions=SKILL
+    ) as broker:
+        with _client(broker.socket_path) as client:
+            response = client.post("/v1/chat/completions", json=body)
+            assert response.status_code == 400
+    assert provider.requests == []
+
+
+@pytest.mark.parametrize(
+    ("api", "route"),
+    [
+        ("openai-chat-completions", "/v1/chat/completions"),
+        ("openai-responses", "/v1/responses"),
+        ("anthropic-messages", "/v1/messages"),
+    ],
+)
+def test_inline_attachments_and_native_function_data_keep_stream_and_frozen_context(
+    directory: Path, provider: _Provider, api: str, route: str
+) -> None:
+    body = _body(api)
+    schema = {
+        "type": "object",
+        "properties": {"file_id": {"type": "string"}, "web_search_options": {"type": "object"}},
+        "examples": [{"type": "input_file", "file_id": "ordinary-schema-data"}],
+    }
+    function = {"name": "edit", "parameters": schema}
+    argument_data = {
+        "type": "input_file",
+        "file_id": "ordinary-argument-data",
+        "image_url": "https://example.test/ordinary-argument-data",
+        "web_search_options": {},
+        "nested": [
+            {"type": "document", "source": {"type": "file", "file_id": "ordinary-nested-data"}}
+        ],
+    }
+    arguments = json.dumps(argument_data)
+    if api == "openai-responses":
+        content_key = "input"
+        body["tools"] = [{"type": "function", **function}]
+        content = [
+            {
+                "type": "input_file",
+                "filename": "source.txt",
+                "file_data": "data:text/plain;base64,YQ==",
+            },
+            {"type": "input_image", "image_url": "data:image/png;base64,YQ=="},
+        ]
+        invocation = {
+            "type": "function_call",
+            "call_id": "edit-1",
+            "name": "edit",
+            "arguments": arguments,
+        }
+    elif api == "anthropic-messages":
+        content_key = "messages"
+        body["tools"] = [{"name": "edit", "input_schema": schema}]
+        content = [
+            {
+                "type": "document",
+                "source": {"type": "base64", "media_type": "text/plain", "data": "YQ=="},
+            },
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": "YQ=="},
+            },
+        ]
+        invocation = {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "edit-1", "name": "edit", "input": argument_data}
+            ],
+        }
+    else:
+        content_key = "messages"
+        body["tools"] = [{"type": "function", "function": function}]
+        content = [
+            {
+                "type": "file",
+                "file": {"filename": "source.txt", "file_data": "data:text/plain;base64,YQ=="},
+            },
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,YQ=="}},
+        ]
+        invocation = {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "edit-1",
+                    "type": "function",
+                    "function": {"name": "edit", "arguments": arguments},
+                }
+            ],
+        }
+    body[content_key][0]["content"] = content
+    body[content_key].append(invocation)
+    with approved_model_broker(
+        directory, _selected(provider, api), repository_evidence=EVIDENCE, skill_instructions=SKILL
+    ) as broker:
+        with _client(broker.socket_path) as client:
+            response = client.post(route, json=body)
+            assert response.status_code == 200
+            assert response.content == STREAM
+    assert len(provider.requests) == 1
+    forwarded = json.loads(provider.requests[0][2])
+    assert forwarded["tools"] == body["tools"]
+    if api == "anthropic-messages":
+        assert forwarded[content_key] == body[content_key]
+        assert forwarded["system"][1:] == body["system"]
+        context = forwarded["system"][0]["text"]
+    else:
+        assert forwarded[content_key][1:] == body[content_key]
+        context = forwarded[content_key][0]["content"]
+    assert EVIDENCE in context
+    assert SKILL in context
+
+
 def test_namespace_custom_tools_and_inline_images_remain_native_data(
     directory: Path, provider: _Provider
 ) -> None:
@@ -414,6 +611,64 @@ def test_selected_model_catalog_and_raw_loopback_relay(
         with pytest.raises(OSError):
             socket.create_connection(("127.0.0.1", port), timeout=0.1)
     assert len(provider.requests) == 1
+
+
+def test_relay_preserves_response_after_peer_refuses_remaining_request_body(
+    directory: Path,
+) -> None:
+    path = directory / "early-response.sock"
+    headers = b"POST /unrestricted HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n"
+    expected = b"HTTP/1.1 404 Not Found\r\nContent-Length: 8\r\nConnection: close\r\n\r\nrejected"
+    peer_ready = threading.Event()
+    body_sent = threading.Event()
+    failures: list[Exception] = []
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(str(path))
+        listener.listen(1)
+        listener.settimeout(5)
+
+        def respond() -> None:
+            try:
+                connection, _ = listener.accept()
+                with connection:
+                    connection.settimeout(5)
+                    received = bytearray()
+                    while not received.endswith(b"\r\n\r\n"):
+                        chunk = connection.recv(len(headers) - len(received))
+                        assert chunk
+                        received.extend(chunk)
+                    assert received == headers
+                    connection.shutdown(socket.SHUT_RD)
+                    peer_ready.set()
+                    assert body_sent.wait(5)
+                    connection.sendall(expected)
+            except Exception as exc:
+                failures.append(exc)
+
+        worker = threading.Thread(target=respond)
+        worker.start()
+        try:
+            with model_inference_relay(path, port=0) as relay:
+                with socket.create_connection(("127.0.0.1", relay.port), timeout=5) as client:
+                    client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    client.sendall(headers)
+                    assert peer_ready.wait(5)
+                    try:
+                        client.sendall(b"{}")
+                    finally:
+                        body_sent.set()
+                    received = bytearray()
+                    while len(received) <= len(expected):
+                        chunk = client.recv(len(expected) + 1 - len(received))
+                        if not chunk:
+                            break
+                        received.extend(chunk)
+                    assert received == expected
+        finally:
+            body_sent.set()
+            worker.join(timeout=6)
+    assert not worker.is_alive()
+    assert not failures
 
 
 def test_cancellation_closes_inflight_http_and_private_socket(

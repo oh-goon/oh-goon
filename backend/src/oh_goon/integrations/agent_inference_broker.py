@@ -65,13 +65,16 @@ def _check_tools(tools: object, *, anthropic: bool = False) -> None:
             _check_tools(tool.get("tools"), anthropic=anthropic)
 
 
-def _check_attachments(value: object) -> None:
+def _check_attachments(value: object, *, anthropic: bool = False) -> None:
     """Inspect structured attachment locations, never URLs in ordinary prompt text."""
     if isinstance(value, list):
         for item in value:
-            _check_attachments(item)
+            _check_attachments(item, anthropic=anthropic)
     elif isinstance(value, dict):
         if value.get("type") in {"image", "document", "input_image", "input_file", "file"}:
+            file_content = value.get("file")
+            if "file_id" in value or (isinstance(file_content, dict) and "file_id" in file_content):
+                raise ValueError("provider-hosted attachment retrieval is not permitted")
             source = value.get("source")
             if isinstance(source, dict) and source.get("type") == "url":
                 raise ValueError("remote attachment retrieval is not permitted")
@@ -83,8 +86,14 @@ def _check_attachments(value: object) -> None:
             # Tool JSON schemas and function arguments are native data, not
             # provider attachment envelopes. A schema property named image_url
             # must not change the meaning of the coding tool declaration.
-            if key not in {"tools", "functions", "arguments", "input_schema", "parameters"}:
-                _check_attachments(item)
+            if key not in {
+                "tools",
+                "functions",
+                "arguments",
+                "input_schema",
+                "parameters",
+            } and not (anthropic and value.get("type") == "tool_use" and key == "input"):
+                _check_attachments(item, anthropic=anthropic)
 
 
 def _request_body(raw: bytes, selected: ResolvedAgentModel, context: str) -> bytes:
@@ -96,10 +105,11 @@ def _request_body(raw: bytes, selected: ResolvedAgentModel, context: str) -> byt
             # Closing this owned request must end provider work. Background
             # jobs have independent remote lifetimes and cancellation routes.
             raise ValueError("background inference execution is not supported")
-        if any(key in body for key in ("mcp_servers", "remote_mcp_servers")):
+        if any(key in body for key in ("mcp_servers", "remote_mcp_servers", "web_search_options")):
             raise ValueError("provider-executed services are not permitted")
+        api = selected.provider.api
         if "tools" in body:
-            _check_tools(body["tools"], anthropic=selected.provider.api == "anthropic-messages")
+            _check_tools(body["tools"], anthropic=api == "anthropic-messages")
         choice = body.get("tool_choice")
         if isinstance(choice, dict):
             if choice.get("type") not in {
@@ -120,8 +130,7 @@ def _request_body(raw: bytes, selected: ResolvedAgentModel, context: str) -> byt
             or any(not isinstance(item, dict) for item in body["functions"])
         ):
             raise ValueError("functions must be native function definitions")
-        _check_attachments(body)
-        api = selected.provider.api
+        _check_attachments(body, anthropic=api == "anthropic-messages")
         if api in {"openai-chat-completions", "ollama"}:
             if not isinstance(body.get("messages"), list):
                 raise ValueError("native messages are required")

@@ -185,8 +185,11 @@ The existing owners enforce these contracts:
 - **Approved inference only.** The isolated workload has no host/external IP
   networking. Namespace-local HTTP reaches a fixed private Unix socket; the host
   broker permits only the selected API routes and exact model at the frozen
-  endpoint. It refuses generic proxying, remote attachment retrieval and
-  provider-executed web/MCP tools. Host secrets never enter native argv or state.
+  endpoint. It refuses generic proxying, attachment retrieval through remote URLs
+  or provider-hosted `file_id` references, and provider-executed web/MCP tools,
+  including top-level `web_search_options`. Inline attachment bytes and native
+  function payloads retain their wire meaning. Host secrets never enter native
+  argv or state.
 - **Original lifetime and result authority.** A single native Step deadline
   includes initial producer work and native reasoning. Original Run cancellation,
   process-tree supervision and result accounting remain authoritative. Native

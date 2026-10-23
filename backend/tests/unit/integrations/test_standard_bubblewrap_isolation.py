@@ -37,9 +37,14 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
 
-def _backend(tmp_path: Path) -> BubblewrapProcessIsolation:
+def _backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> BubblewrapProcessIsolation:
+    """Give launcher fakes a physical test runtime; native tests retain host roots."""
     executable = tmp_path / "bwrap"
     executable.write_bytes(b"test selected executable")
+    runtime = tmp_path / "system-runtime"
+    runtime.mkdir()
+    (runtime / "public-runtime").write_bytes(b"test runtime bytes")
+    monkeypatch.setattr(module, "_STANDARD_RUNTIME_DIRECTORIES", (str(runtime),))
     return BubblewrapProcessIsolation(str(executable))
 
 
@@ -71,7 +76,7 @@ def _native_exec_ack(argv: tuple[str, ...], returncode: int = 0) -> None:
 def test_private_application_state_is_refused_before_any_native_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, surface: str
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "project"
     workspace.mkdir()
     private = workspace / "state" if "workspace" in surface else tmp_path / "private-state"
@@ -101,7 +106,7 @@ def test_late_sqlite_sidecar_mount_cannot_bypass_resolved_database_privacy(
     from oh_goon.runtime.database import LocalDatabase
 
     database = LocalDatabase(tmp_path / "custom.sqlite", journal_mode="DELETE")
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     backend.bind_application_state(private_paths=database.private_paths, read_only_paths=())
     sidecar = database.path.with_name(database.path.name + "-wal")
     sidecar.write_text("private journal pages")
@@ -133,7 +138,7 @@ def test_active_database_hardlink_alias_is_refused_before_native_process_birth(
     from oh_goon.runtime.database import LocalDatabase
 
     database = LocalDatabase(tmp_path / "private-state" / "active.sqlite", journal_mode="DELETE")
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     backend.bind_application_state(private_paths=database.private_paths, read_only_paths=())
     workspace = tmp_path / "project"
     workspace.mkdir()
@@ -214,7 +219,7 @@ def test_native_public_hardlinks_remain_usable_in_all_approved_input_surfaces(
 def test_sibling_database_and_private_state_do_not_exclude_approved_repository(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read_only_tool_workspace: bool
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     workspace = (
         tmp_path / "extensions" / "project" if read_only_tool_workspace else tmp_path / "project"
     )
@@ -251,8 +256,10 @@ def test_sibling_database_and_private_state_do_not_exclude_approved_repository(
     assert str(journal) not in calls[-1]
 
 
-def test_application_state_binding_cannot_be_replaced_by_another_runtime(tmp_path: Path) -> None:
-    backend = _backend(tmp_path)
+def test_application_state_binding_cannot_be_replaced_by_another_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
     backend.bind_application_state(private_paths=(tmp_path / "active.sqlite",), read_only_paths=())
     backend.bind_application_state(private_paths=(tmp_path / "active.sqlite",), read_only_paths=())
     with pytest.raises(FleetPlanInvalid, match="different application state"):
@@ -264,7 +271,7 @@ def test_application_state_binding_cannot_be_replaced_by_another_runtime(tmp_pat
 def test_standard_launch_retains_namespace_cancellation_and_private_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "repo"
     workspace.mkdir()
     selected_config = tmp_path / "native.json"
@@ -313,7 +320,7 @@ def test_standard_launch_retains_namespace_cancellation_and_private_paths(
 def test_explicit_native_runtime_and_prompt_paths_map_at_the_process_boundary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "repo"
     workspace.mkdir()
     runtime = workspace / "selected-runtime"
@@ -350,7 +357,7 @@ def test_explicit_native_runtime_and_prompt_paths_map_at_the_process_boundary(
 def test_terminal_transport_does_not_start_another_terminal_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "repo"
     workspace.mkdir()
     calls: list[tuple[tuple[str, ...], dict[str, Any]]] = []
@@ -374,7 +381,7 @@ def test_terminal_transport_does_not_start_another_terminal_session(
 def test_invalid_or_cancelled_standard_request_never_starts_a_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attack: str
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "repo"
     workspace.mkdir()
     request = _request(backend, workspace)
@@ -401,7 +408,7 @@ def test_invalid_or_cancelled_standard_request_never_starts_a_process(
 def test_native_namespace_failure_is_not_a_host_network_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     calls: list[tuple[str, ...]] = []
 
     def unavailable(*argv: str, **kwargs: Any) -> CommandResult:
@@ -418,7 +425,7 @@ def test_native_namespace_failure_is_not_a_host_network_fallback(
 def test_workload_environment_cannot_inject_code_before_namespace_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     request = _request(backend, tmp_path, env={"PATH": os.defpath, name: "/host/injection"})
     monkeypatch.setattr(
         module, "run_command", lambda *a, **kw: pytest.fail("injection reached launcher")
@@ -517,8 +524,8 @@ def test_system_runtime_rejects_host_ipc_visible_in_any_bound_root(
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     # Inspect the alternatives first, so cross-root links require the full mount set.
+    backend = _backend(tmp_path, monkeypatch)
     monkeypatch.setattr(module, "_STANDARD_RUNTIME_DIRECTORIES", (str(alternatives), str(runtime)))
-    backend = _backend(tmp_path)
     monkeypatch.setattr(
         module, "run_command", lambda *a, **kw: pytest.fail("host IPC reached native launch")
     )
@@ -544,7 +551,7 @@ def test_system_runtime_external_link_still_rejects_private_file_alias(
     private = tmp_path / "private.sqlite"
     private.write_bytes(b"private application state")
     (runtime / "ordinary-looking-input").symlink_to(private)
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     backend.bind_application_state(private_paths=(private,), read_only_paths=())
     monkeypatch.setattr(module, "_STANDARD_RUNTIME_DIRECTORIES", (str(runtime),))
     monkeypatch.setattr(
@@ -562,7 +569,7 @@ def test_system_runtime_external_link_still_rejects_private_file_alias(
 def test_ordinary_binds_reject_existing_host_ipc_before_process_creation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, location: str, kind: str
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "repo"
     workspace.mkdir()
     selected_input = tmp_path / "selected"
@@ -606,7 +613,7 @@ def test_requested_caps_use_native_whole_workload_scope_for_preflight_and_launch
     resource_executable = tmp_path / "systemd-run"
     resource_executable.write_text("native-resource-owner")
     resource_executable.chmod(0o755)
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     backend.standard_resource_executable = str(resource_executable)
     calls: list[tuple[str, ...]] = []
 
@@ -690,7 +697,7 @@ def test_real_native_scope_applies_limits_to_the_bubblewrap_workload(tmp_path: P
 def test_explicit_mount_cannot_replace_workspace_or_private_namespace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     config = tmp_path / "selected.json"
     config.write_text("{}")
     request = _request(
@@ -707,7 +714,7 @@ def test_explicit_mount_cannot_replace_workspace_or_private_namespace(
 def test_explicit_mount_cannot_shadow_original_workspace_alias(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_scope: str
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "repository"
     workspace.mkdir()
     runtime = tmp_path / "runtime"
@@ -791,7 +798,7 @@ def _require_native(
 def test_unavailable_native_overlay_rejects_before_workload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "repo"
     workspace.mkdir()
     configuration = tmp_path / "config"
@@ -817,7 +824,7 @@ def test_unavailable_native_overlay_rejects_before_workload(
 def test_aborted_native_workload_retains_only_acknowledged_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cause: str, acknowledged: bool
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     request = _request(backend, tmp_path)
     error = (
         CommandTimeoutExpired(request.argv, 0.2, supervisor=CommandSupervisorReceipt())
@@ -907,8 +914,10 @@ def test_native_headless_protocol_output_tail_is_explicit_and_metadata_covers_fu
 
 
 @pytest.mark.parametrize("retain_tail", [1, "true", None])
-def test_output_tail_request_requires_explicit_boolean(tmp_path: Path, retain_tail: Any) -> None:
-    backend = _backend(tmp_path)
+def test_output_tail_request_requires_explicit_boolean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retain_tail: Any
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
     with pytest.raises(FleetPlanInvalid, match="resolved workspace and launch intent"):
         _request(backend, tmp_path, retain_output_tail=retain_tail)
 
@@ -917,7 +926,7 @@ def test_output_tail_request_requires_explicit_boolean(tmp_path: Path, retain_ta
 def test_standard_receipt_requires_native_successful_exec_acknowledgement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, acknowledged: bool, returncode: int
 ) -> None:
-    backend = _backend(tmp_path)
+    backend = _backend(tmp_path, monkeypatch)
     request = _request(backend, tmp_path)
 
     def command(*argv: str, **kwargs: Any) -> CommandResult:
