@@ -44,9 +44,12 @@ remain the local iteration loop; draft feedback is not test or merge completion.
 
 The full job's draft condition is evaluated before matrix expansion, as specified
 by [GitHub's job-condition contract](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif).
-Its skipped draft stub is explicitly named `full-checks-pending-review`, outside
-the seven required check names. Never conditionally skip a required check under
-its ordinary name: [GitHub treats a skipped job as success](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions).
+Its name expression includes a `full-checks-pending-review` fallback outside the
+seven required check names. For the skipped, unexpanded matrix, the observed
+GitHub jobs API displays that expression literally; it does not publish the
+seven target names. Verify this namespace separation when changing scheduling.
+Never conditionally skip a required check under its ordinary name:
+[GitHub treats a skipped job as success](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions).
 A new draft commit does not report the seven full checks; repository settings must require those
 exact names. Workflow scheduling does not install or prove those settings.
 
