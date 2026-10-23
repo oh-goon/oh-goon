@@ -186,10 +186,12 @@ The existing owners enforce these contracts:
   networking. Namespace-local HTTP reaches a fixed private Unix socket; the host
   broker permits only the selected API routes and exact model at the frozen
   endpoint. It refuses generic proxying, attachment retrieval through remote URLs
-  or provider-hosted `file_id` references, and provider-executed web/MCP tools,
-  including top-level `web_search_options`. Inline attachment bytes and native
-  function payloads retain their wire meaning. Host secrets never enter native
-  argv or state.
+  or provider-hosted `file_id` references, and provider-executed web/MCP tools
+  (including top-level `web_search_options`). The broker also refuses the top-level
+  Responses `prompt` field for hosted templates. Inline attachment bytes, native
+  function payloads, and ordinary Responses
+  instructions, cache keys and continuation fields retain their wire meaning.
+  Host secrets never enter native argv or state.
 - **Original lifetime and result authority.** A single native Step deadline
   includes initial producer work and native reasoning. Original Run cancellation,
   process-tree supervision and result accounting remain authoritative. Native

@@ -29,6 +29,8 @@ from oh_goon.integrations.agent_inference_relay import model_inference_relay
 EVIDENCE = "Exact Hashmarks packet: qualified=true; coverage=bounded; freshness=captured; π"
 SKILL = "# Native Skill\nPreserve complete scope and report evidence."
 STREAM = b'data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"edit","arguments":"{}"}}]}}]}\n\ndata: [DONE]\n\n'
+HOSTED_PROMPT_ID = "pmpt-fixture-private-identifier"
+HOSTED_PROMPT_SECRET = "fixture-private-prompt-variable"
 
 
 @dataclass
@@ -341,6 +343,143 @@ def test_background_execution_rejects_before_provider_work(
             response = client.post("/v1/responses", json=body)
             assert response.status_code == 400
     assert provider.requests == []
+
+
+@pytest.mark.parametrize("native_tools", [False, True], ids=["without-tools", "with-tools"])
+@pytest.mark.parametrize(
+    "fields",
+    [
+        pytest.param({"prompt": {"id": HOSTED_PROMPT_ID}}, id="id"),
+        pytest.param(
+            {
+                "prompt": {
+                    "id": HOSTED_PROMPT_ID,
+                    "version": "7",
+                    "variables": {"key": HOSTED_PROMPT_SECRET},
+                }
+            },
+            id="version-and-variables",
+        ),
+        pytest.param({"prompt": None}, id="null"),
+        pytest.param({"prompt": {}}, id="empty-object"),
+        pytest.param({"prompt": {"version": "7"}}, id="missing-id"),
+        pytest.param({"prompt": HOSTED_PROMPT_ID}, id="scalar"),
+        pytest.param(
+            {"prompt": {"id": HOSTED_PROMPT_ID}, "api": "openai-chat-completions"},
+            id="request-api-spoof",
+        ),
+    ],
+)
+def test_responses_hosted_prompt_rejects_before_provider_work(
+    directory: Path, provider: _Provider, native_tools: bool, fields: dict[str, Any]
+) -> None:
+    body = _body("openai-responses")
+    body.update(fields)
+    if not native_tools:
+        body.pop("tools")
+    with approved_model_broker(
+        directory,
+        _selected(provider, "openai-responses"),
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
+    ) as broker:
+        with _client(broker.socket_path) as client:
+            response = client.post("/v1/responses", json=body)
+            assert response.status_code == 400
+            assert HOSTED_PROMPT_ID not in response.text
+            assert HOSTED_PROMPT_SECRET not in response.text
+    assert provider.requests == []
+
+
+@pytest.mark.parametrize(
+    "causal_fields",
+    [
+        pytest.param({}, id="omitted"),
+        pytest.param({"previous_response_id": None, "conversation": None}, id="null"),
+        pytest.param({"previous_response_id": "resp-fixture-parent"}, id="previous-response"),
+        pytest.param({"conversation": "conv-fixture-parent"}, id="conversation-string"),
+        pytest.param({"conversation": {"id": "conv-fixture-parent"}}, id="conversation-object"),
+    ],
+)
+def test_responses_prompt_data_and_causal_fields_remain_native_transport(
+    directory: Path, provider: _Provider, causal_fields: dict[str, Any]
+) -> None:
+    """Transport preservation only; this provider fixture does not resolve causal state."""
+    body = _body("openai-responses")
+    body.update(causal_fields)
+    body["instructions"] = 'Native instructions retain literal {"prompt": "ordinary data"}.'
+    body["prompt_cache_key"] = "fixture:prompt:cache-key"
+    body["input"][0]["content"] = [
+        {"type": "input_text", "text": 'Inspect literal {"prompt": {"id": "ordinary-input-data"}}.'}
+    ]
+    body["tools"] = [
+        {
+            "type": "function",
+            "name": "edit",
+            "parameters": {
+                "type": "object",
+                "properties": {"prompt": {"type": "object"}},
+                "examples": [{"prompt": {"id": "ordinary-schema-data"}}],
+            },
+        }
+    ]
+    body["input"].append(
+        {
+            "type": "function_call",
+            "call_id": "edit-1",
+            "name": "edit",
+            "arguments": json.dumps(
+                {"prompt": {"id": "ordinary-argument-data", "variables": {"prompt": "native data"}}}
+            ),
+        }
+    )
+    with approved_model_broker(
+        directory,
+        _selected(provider, "openai-responses"),
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
+    ) as broker:
+        with _client(broker.socket_path) as client:
+            response = client.post("/v1/responses", json=body)
+            assert response.status_code == 200
+            assert response.content == STREAM
+    assert len(provider.requests) == 1
+    forwarded = json.loads(provider.requests[0][2])
+    assert forwarded["input"][0]["role"] == "developer"
+    assert EVIDENCE in forwarded["input"][0]["content"]
+    assert SKILL in forwarded["input"][0]["content"]
+    assert forwarded["input"][1:] == body["input"]
+    assert {key: value for key, value in forwarded.items() if key != "input"} == {
+        key: value for key, value in body.items() if key != "input"
+    }
+
+
+@pytest.mark.parametrize(
+    ("api", "route"),
+    [
+        ("openai-chat-completions", "/v1/chat/completions"),
+        ("anthropic-messages", "/v1/messages"),
+        ("ollama", "/api/chat"),
+    ],
+)
+def test_other_protocol_prompt_data_does_not_override_the_selected_api(
+    directory: Path, provider: _Provider, api: str, route: str
+) -> None:
+    """The mock proves API-scoped transport, not provider support for an extension field."""
+    body = _body(api)
+    body["prompt"] = {"id": "ordinary-protocol-data"}
+    body["api"] = "openai-responses"
+    with approved_model_broker(
+        directory, _selected(provider, api), repository_evidence=EVIDENCE, skill_instructions=SKILL
+    ) as broker:
+        with _client(broker.socket_path) as client:
+            response = client.post(route, json=body)
+            assert response.status_code == 200
+            assert response.content == STREAM
+    assert len(provider.requests) == 1
+    forwarded = json.loads(provider.requests[0][2])
+    assert forwarded["prompt"] == body["prompt"]
+    assert forwarded["api"] == body["api"]
 
 
 @pytest.mark.parametrize(
