@@ -1,5 +1,6 @@
 import hashlib
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,10 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentDefinition,
     NativeAgentProfile,
 )
-from oh_goon.integrations.agent_native_execution import verify_native_agent_executable
+from oh_goon.integrations.agent_native_execution import (
+    codex_login_command,
+    verify_native_agent_executable,
+)
 from oh_goon.runtime.agent_providers import (
     load_agent_providers,
     resolve_native_agent,
@@ -23,7 +27,20 @@ def executable(path: Path) -> Path:
     return path
 
 
-def test_codex_login_freezes_only_explicit_public_connection_facts(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("model", "effort"),
+    [
+        ("gpt-6-luna", "low"),
+        ("gpt-6.1-sol", "ultra"),
+        ("native-model", "unknown"),
+        ("native-model", " native-effort "),
+        ("native-model", "x" * 256),
+    ],
+    ids=["existing", "ultra", "client-owned", "unmodified", "bounded"],
+)
+def test_codex_login_freezes_only_explicit_public_connection_facts(
+    tmp_path: Path, model: str, effort: str
+) -> None:
     home = tmp_path / "native-home"
     home.mkdir()
     # A special file would hang an attempted credential read. Resolution must
@@ -44,8 +61,8 @@ def test_codex_login_freezes_only_explicit_public_connection_facts(tmp_path: Pat
                         "backend": "local",
                         "codex_login": {
                             "home": "native-home",
-                            "model": "gpt-6-luna",
-                            "reasoning_effort": "low",
+                            "model": model,
+                            "reasoning_effort": effort,
                         },
                     }
                 },
@@ -61,8 +78,22 @@ def test_codex_login_freezes_only_explicit_public_connection_facts(tmp_path: Pat
     assert selected.disclosure_recipients == ("codex",)
     assert selected.profile.codex_login is not None
     assert selected.profile.codex_login.home == str(home)
-    assert selected.profile.codex_login.model == "gpt-6-luna"
-    assert selected.profile.codex_login.reasoning_effort == "low"
+    assert selected.profile.codex_login.model == model
+    assert selected.profile.codex_login.reasoning_effort == effort
+
+    command = codex_login_command(
+        selected,
+        instructions=tmp_path / "prompt.txt",
+        workspace=workspace,
+        scratch=tmp_path / "scratch",
+        read_roots=(),
+    )
+    settings: dict[str, object] = {}
+    for index, argument in enumerate(command.argv):
+        if argument == "-c":
+            settings.update(tomllib.loads(command.argv[index + 1]))
+    assert settings["model"] == model
+    assert settings["model_reasoning_effort"] == effort
 
 
 @pytest.mark.parametrize("invalid", ["agent", "arguments", "configuration", "workspace"])

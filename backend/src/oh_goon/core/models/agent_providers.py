@@ -216,9 +216,9 @@ class CodexLoginConnection(ImmutableModel):
 
     home: str = Field(min_length=1, max_length=4096)
     model: str = Field(min_length=1, max_length=256)
-    reasoning_effort: Literal["low", "medium", "high", "xhigh", "max"]
+    reasoning_effort: str = Field(min_length=1, max_length=256)
 
-    @field_validator("home", "model")
+    @field_validator("home", "model", "reasoning_effort")
     @classmethod
     def bounded_native_value(cls, value: str) -> str:
         if not value.strip() or "\x00" in value:
