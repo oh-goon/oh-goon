@@ -114,8 +114,9 @@ def test_source_bootstrap_layers_do_not_compensate_for_release_static_contract()
 
 @pytest.mark.parametrize("previous_ui", (None, "stale UI\n"))
 @pytest.mark.parametrize("frontend_exit", (0, 7))
+@pytest.mark.parametrize("action", (None, "assemble"))
 def test_release_build_owns_fresh_ui_and_cleans_failed_outputs(
-    tmp_path: Path, previous_ui: str | None, frontend_exit: int
+    tmp_path: Path, previous_ui: str | None, frontend_exit: int, action: str | None
 ) -> None:
     script = tmp_path / "scripts/release/build_release.sh"
     script.parent.mkdir(parents=True)
@@ -155,7 +156,7 @@ def test_release_build_owns_fresh_ui_and_cleans_failed_outputs(
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)
     result = subprocess.run(
-        ("bash", str(script)),
+        ("bash", str(script), *((action,) if action is not None else ())),
         env={
             **os.environ,
             "PATH": str(tools) + os.pathsep + os.defpath,
@@ -168,6 +169,14 @@ def test_release_build_owns_fresh_ui_and_cleans_failed_outputs(
     )
     observed = commands.read_text(encoding="utf-8").splitlines()
     assert observed.count("make:frontend-build") == 1
+    assert observed.count("make:release-locks-check") == 1
+    assert observed.index("make:release-locks-check") < observed.index("uv:sync")
+    if action == "assemble":
+        assert "make:generate" not in observed
+        assert "make:check" not in observed
+    else:
+        assert observed.count("make:generate") == observed.count("make:check") == 1
+        assert observed.index("make:generate") < observed.index("make:check")
     assert result.returncode == frontend_exit, result.stdout + result.stderr
     release = tmp_path / "generated/release"
     if frontend_exit:
@@ -177,5 +186,29 @@ def test_release_build_owns_fresh_ui_and_cleans_failed_outputs(
     else:
         assert (release / "static/index.html").read_text() == "fresh UI\n"
         assert (release / "dist/wheel-ui-proof").read_text() == "fresh UI\n"
-        assert observed.index("make:check") < observed.index("make:frontend-build")
+        if action != "assemble":
+            assert observed.index("make:check") < observed.index("make:frontend-build")
         assert observed.index("make:frontend-build") < observed.index("uv:build")
+
+
+@pytest.mark.parametrize("arguments", (("unknown",), ("assemble", "unexpected")))
+def test_unknown_release_action_rejects_before_cleanup_or_native_work(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    script = tmp_path / "scripts/release/build_release.sh"
+    script.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / "scripts/release/build_release.sh", script)
+    stale = tmp_path / "generated/release/dist/previous-wheel.whl"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"retained previous artifact")
+    result = subprocess.run(
+        ("bash", str(script), *arguments),
+        check=False,
+        capture_output=True,
+        text=True,
+        env={"PATH": os.defpath},
+    )
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+    assert stale.read_bytes() == b"retained previous artifact"
+    assert not (tmp_path / "backend/.venv").exists()

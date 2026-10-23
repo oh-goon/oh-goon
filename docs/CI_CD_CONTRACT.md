@@ -9,14 +9,25 @@ This document is the short product-level contract for local CI/CD execution. The
 The repository's [required-checks workflow](../.github/workflows/ci.yml) runs on
 pull-request updates and draft/readiness transitions, pushes to `main`, and
 merge-queue groups. Ready pull requests, `main` and merge-queue groups run all
-seven full checks. Each full job materializes the committed uv/npm locks through
-`make init`, then invokes one existing owner
-check: `backend-check`, `frontend-check`, `tooling-check`, `architecture`,
-`check-generated`, `test-integration`, or `build-release`. These are also the
-stable GitHub check names. The integration target executes both backend and cross-owner integration
-tests. The release check rebuilds the frontend and verifies the assembled wheel.
-Make and the native tools retain command, dependency, and result authority;
-GitHub owns hosted scheduling and merge enforcement.
+seven full checks. Six parallel matrix jobs materialize the committed uv/npm
+locks through `make init`, then invoke `backend-check`, `frontend-check`,
+`tooling-check`, `architecture`, `check-generated` or `test-integration`.
+The integration target executes both backend and cross-owner integration tests.
+The seventh stable check name remains `build-release`; its job uses GitHub's
+`needs: checks` to wait for all six successful matrix jobs in the same workflow.
+Every checkout explicitly selects the same `github.sha`.
+
+The release job then runs `make assemble-release`, using the existing
+[release owner](../scripts/release/build_release.sh) to check native locks before
+materialization, check version coherence, build fresh frontend assets, build the
+wheel and verify its contents. Assembly consumes the committed generated
+contracts already checked by `check-generated`; it does not regenerate source
+or rerun the completed test suites. Local `make build-release` retains its full
+`generate` → `check` → assembly journey. `assemble-release` is an explicit
+artifact assembly action; its caller owns validation scheduling, and it grants
+no APP certificate or release promotion. Unknown release actions reject before
+cleanup or native work. Make and native tools retain dependency/build/result
+authority; GitHub owns hosted scheduling and merge enforcement.
 
 Require all seven checks from the GitHub Actions app for `main`, require the branch
 to be up to date, and apply those requirements to administrators without bypass.
@@ -45,7 +56,8 @@ remain the local iteration loop; draft feedback is not test or merge completion.
 The full job's draft condition is evaluated before matrix expansion, as specified
 by [GitHub's job-condition contract](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif).
 Its name expression includes a `full-checks-pending-review` fallback outside the
-seven required check names. For the skipped, unexpanded matrix, the observed
+seven required check names. The dependent release job likewise uses the separate
+`release-pending-review` draft name. For the skipped, unexpanded matrix, the observed
 GitHub jobs API displays that expression literally; it does not publish the
 seven target names. Verify this namespace separation when changing scheduling.
 Never conditionally skip a required check under its ordinary name:
@@ -66,8 +78,9 @@ their first failure and report the 40 slowest setup/call/teardown durations abov
 covers every ordinary test; no successful test receipts are reused across changed
 source. Publish coherent changes after focused checks so superseded full runs can
 be cancelled by the workflow's existing concurrency policy. Ubuntu 26.04 supplies the
-native Bubblewrap overlay features used by the selected agent tests. Each full-check runner enables
-unprivileged user namespaces for the ordinary Bubblewrap tests.
+native Bubblewrap overlay features used by the selected agent tests. Each matrix
+runner enables unprivileged user namespaces for the ordinary Bubblewrap tests;
+the dependent artifact assembly job does not execute those tests again.
 Hosted runners use read-only tokens and do not retain checkout credentials or
 receive repository secrets. Installed-agent,
 live-account, browser, and privileged certification remain explicit qualification;
