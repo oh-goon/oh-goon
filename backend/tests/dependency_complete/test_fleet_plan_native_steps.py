@@ -95,6 +95,7 @@ elif mode == 'wrong-review':
 else:
     pathlib.Path(working['root'], 'native-write.txt').write_text('owned edit')
     final = 'Native work reported'
+    if mode == 'secret-summary': final += ' private-host-value ' + 'x' * 7000
 print(json.dumps({'type': 'step_start'}))
 if mode == 'long':
     for index in range(6000):
@@ -344,7 +345,7 @@ def test_long_native_protocol_stream_keeps_bounded_claims_and_original_final_acc
     )
     assert observation.native_event_count == 6003
     assert len(observation.events) == 128
-    assert observation.omitted_observations == 5874
+    assert observation.omitted_observations == 5875
     assert observation.settled and not observation.failed
     assert "raw_tool_payload" not in observation.model_dump_json()
     assert len(model_transport) == 1
@@ -772,8 +773,9 @@ def test_codex_service_receiver_rejects_conflicting_transport_authority(
         require_native_agent_compatibility(selected, role="review")
 
 
+@pytest.mark.parametrize("cancelled", [False, True])
 def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancelled: bool
 ) -> None:
     from oh_goon.integrations import agent_codex_service_execution as service_owner
 
@@ -821,9 +823,22 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
     )
 
     def reject_service(**_kwargs: Any) -> Any:
-        raise service_owner.CodexServiceExecutionFailure(failure)
+        rejected = service_owner.CodexServiceExecutionFailure(failure)
+        if cancelled:
+            raise service_owner.CodexServiceExecutionCancelled(rejected)
+        raise rejected
 
     monkeypatch.setattr(service_owner, "execute_codex_service_run", reject_service)
+    if cancelled:
+        with pytest.raises(service_owner.CodexServiceExecutionCancelled) as caught:
+            execute_direct_step(repository, step, runtime, step_order=1)
+        assert caught.value.outcome is failure
+        observation = caught.value.native_observations[0]
+        assert observation.source_identity == handoff.source.capture_identity
+        assert observation.input_identity and observation.failed and not observation.settled
+        assert observation.events[-1].kind == "context"
+        assert "cancellation" in observation.events[-1].summary
+        return
     outcome = execute_direct_step(repository, step, runtime, step_order=1)
     assert outcome.returncode == PLAN_CONTRACT_RETURN_CODE
     assert outcome.supervisor == supervisor
@@ -861,3 +876,21 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
     assert retained.attempts[0].supervisor.cleanup_reason == "cancel"
     assert retained.attempts[0].supervisor.final_process_group_quiescent is True
     assert retained.observations == (observation,)
+
+
+@pytest.mark.process
+def test_native_final_summary_is_redacted_bounded_and_retained_as_untrusted_data(
+    tmp_path: Path, model_transport: list[dict[str, Any]]
+) -> None:
+    repository, _, step, runtime = _case(tmp_path, mode="secret-summary")
+    outcome = execute_direct_step(repository, step, runtime, step_order=1)
+    assert outcome.returncode == 0
+    observation = next(
+        item for item in outcome.observations if isinstance(item, NativeAgentObservation)
+    )
+    summary = observation.events[-1]
+    assert summary.kind == "agent" and "Untrusted native final summary" in summary.summary
+    assert len(summary.summary) <= 4000 and "omitted" in summary.summary
+    assert "private-host-value" not in observation.model_dump_json()
+    assert observation.source_identity and observation.input_identity
+    assert observation.authority == "UNTRUSTED_HARNESS_CLAIM"

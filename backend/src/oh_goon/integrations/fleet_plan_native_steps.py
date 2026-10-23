@@ -11,6 +11,7 @@ import shlex
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -23,10 +24,12 @@ from oh_goon.core.agent_harness_contract import (
     decode_agent_harness_submission,
     prepare_agent_harness_input,
 )
+from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
 from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNativeAgent
 from oh_goon.core.models.fleet_observation import (
+    AgentHarnessObservation,
     NativeAgentObservation,
     NativeServiceExecutionEvidence,
 )
@@ -61,6 +64,7 @@ from oh_goon.integrations.agent_review_execution import (
     agent_phase_output_contract,
 )
 from oh_goon.integrations.fleet_plan_process_isolation import StandardReadOnlyMount
+from oh_goon.integrations.fleet_plan_secret_redaction import redact_host_secret_text
 from oh_goon.integrations.hashmarks.agent_tools import PreparedAgentEvidence, task_evidence_prompt
 
 if TYPE_CHECKING:
@@ -399,6 +403,60 @@ def _prompt(
     return prompt
 
 
+def _retained_native_summary(
+    step: ResolvedLocalSearchAgentStep,
+    text: str,
+    *,
+    diagnostic: str,
+    host_environment: Mapping[str, str],
+) -> AgentHarnessObservation:
+    """Retain visible final claims only; missing native work stays explicit."""
+    if text.strip():
+        kind: Literal["agent", "context"] = "agent"
+        prefix = "Untrusted native final summary (not verification authority): "
+        content = text
+    elif diagnostic:
+        kind = "context"
+        prefix = "Controller diagnostic (not a native claim or permission proof); native final summary unavailable: "
+        content = diagnostic
+    else:
+        kind = "context"
+        prefix = "Native final summary unavailable: "
+        content = "No final native claim was accepted; do not infer completion."
+    content = redact_diagnostic_text(redact_host_secret_text(step, content, host_environment))
+    summary = prefix + content
+    if len(summary) > 4000:
+        suffix = f" [omitted {len(summary) - 3900} summary characters; bounded journal claim]"
+        summary = summary[:3900] + suffix
+    return AgentHarnessObservation(kind=kind, summary=summary)
+
+
+def _native_observation_from_protocol(
+    step: ResolvedLocalSearchAgentStep,
+    prepared: AgentHarnessInput,
+    protocol: NativeAgentEvents,
+    execution: NativeServiceExecutionEvidence | None = None,
+) -> NativeAgentObservation:
+    """Bind retained claims to the exact receiving Step without result authority."""
+    selected = step.native_agent
+    assert selected is not None
+    return NativeAgentObservation(
+        agent=selected.agent,
+        implementation_identity=prepared.selection.implementation_identity,
+        profile=selected.profile_name,
+        input_identity=prepared.input_identity,
+        occurrence=prepared.occurrence,
+        source_identity=prepared.source_identity,
+        role=step.role,
+        events=protocol.observations,
+        native_event_count=protocol.event_count,
+        omitted_observations=protocol.omitted_observations,
+        settled=protocol.settled,
+        failed=protocol.failed,
+        execution=execution,
+    )
+
+
 def execute_native_agent_step(
     repository: Path,
     step: ResolvedLocalSearchAgentStep,
@@ -512,6 +570,7 @@ def execute_native_agent_step(
         _write_private(prompt_file, prompt_data)
         if selected.profile.codex_service is not None:
             from oh_goon.integrations.agent_codex_service_execution import (
+                CodexServiceExecutionCancelled,
                 CodexServiceExecutionFailure,
                 execute_codex_service_run,
             )
@@ -530,9 +589,36 @@ def execute_native_agent_step(
                     read_only=prepared.requested_effects.repository_access == "read_only",
                     evidence_state=state,
                 )
+            except CodexServiceExecutionCancelled as error:
+                summary = _retained_native_summary(
+                    step,
+                    "",
+                    diagnostic="Original cancellation requested; native final summary unavailable.",
+                    host_environment=process.host_environment,
+                )
+                protocol = NativeAgentEvents(
+                    (*error.safe_diagnostics[-127:], summary),
+                    "",
+                    False,
+                    True,
+                    error.native_event_count,
+                    error.omitted_observations + max(0, len(error.safe_diagnostics) - 127),
+                )
+                error.native_observations = (
+                    *error.native_observations,
+                    _native_observation_from_protocol(step, prepared, protocol),
+                )
+                raise
             except CodexServiceExecutionFailure as error:
                 service_outcome = error.outcome
-                service_protocol = NativeAgentEvents((), "", False, True, 0)
+                service_protocol = NativeAgentEvents(
+                    error.safe_diagnostics,
+                    "",
+                    False,
+                    True,
+                    error.native_event_count,
+                    error.omitted_observations,
+                )
                 service_execution_failed = True
             else:
                 service_outcome, service_protocol = executed.outcome, executed.protocol
@@ -717,22 +803,21 @@ def execute_native_agent_step(
                 parsed.event_count,
                 parsed.omitted_observations,
             )
+            summary = _retained_native_summary(
+                step,
+                parsed.final_text,
+                diagnostic=outcome.stderr if service_execution_failed else "",
+                host_environment=process.host_environment,
+            )
+            omitted += max(0, len(events) + 1 - 128)
+            events = (*events[-127:], summary)
             if execution_returncode == 0:
                 outcome = replace(outcome, stdout=parsed.final_text, stdout_evidence=None)
-        observation = NativeAgentObservation(
-            agent=selected.agent,
-            implementation_identity=prepared.selection.implementation_identity,
-            profile=selected.profile_name,
-            input_identity=prepared.input_identity,
-            occurrence=prepared.occurrence,
-            source_identity=prepared.source_identity,
-            role=step.role,
-            events=events,
-            native_event_count=count,
-            omitted_observations=omitted,
-            settled=settled,
-            failed=failed,
-            execution=service_execution,
+        observation = _native_observation_from_protocol(
+            step,
+            prepared,
+            NativeAgentEvents(events, "", settled, failed, count, omitted),
+            service_execution,
         )
         outcome = replace(outcome, observations=(*outcome.observations, observation))
         if execution_returncode == 0:
@@ -771,6 +856,26 @@ def execute_native_agent_step(
         if execution_returncode == 0 and outcome.returncode == 0:
             outcome = accept_agent_phase_output(step, prepared.handoff, outcome)
     except (AgentProviderError, FleetPlanInvalid) as exc:
+        if not any(isinstance(item, NativeAgentObservation) for item in outcome.observations):
+            observation = _native_observation_from_protocol(
+                step,
+                prepared,
+                NativeAgentEvents(
+                    (
+                        _retained_native_summary(
+                            step,
+                            "",
+                            diagnostic="Native protocol was rejected; no valid final summary was retained. Rejected native event counts are unavailable.",
+                            host_environment=process.host_environment,
+                        ),
+                    ),
+                    "",
+                    False,
+                    True,
+                    0,
+                ),
+            )
+            outcome = replace(outcome, observations=(*outcome.observations, observation))
         if execution_returncode == 0:
             outcome = output_contract_failure(
                 step, FleetPlanInvalid(str(exc)), outcome.argv, base=outcome

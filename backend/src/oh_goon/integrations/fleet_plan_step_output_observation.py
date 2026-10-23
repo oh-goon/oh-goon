@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
-from oh_goon.core.models.diagnostic import DiagnosticEvent
+from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
+from oh_goon.core.models.diagnostic import MAX_DIAGNOSTIC_MESSAGE_CHARS, DiagnosticEvent
+from oh_goon.core.models.fleet_observation import AgentHarnessObservation
 from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep, ResolvedPlanStep
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.step_output import StepOutputObserver
@@ -12,6 +14,7 @@ from oh_goon.engine.command import CommandOutputObserver, CommandProcessObserver
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
 from oh_goon.integrations.fleet_plan_secret_redaction import (
     StreamingSecretRedactor,
+    redact_host_secret_text,
     streaming_host_secret_redactor,
 )
 
@@ -123,6 +126,100 @@ def observed_command_runner(
                     )
 
     return command_runner
+
+
+class StepDiagnosticObserver(Protocol):
+    def __call__(self, text: str, exception: BaseException | None = None) -> DiagnosticEvent: ...
+
+
+def observed_step_diagnostic(
+    *,
+    step: ResolvedPlanStep,
+    attempt_number: int,
+    observer: StepOutputObserver | None,
+    diagnostics: DiagnosticEmitter | None,
+    host_environment: Mapping[str, str],
+    fleet_run_id: str | None,
+    repository_id: str | None,
+) -> StepDiagnosticObserver:
+    """Retain safe control failures independently of transient output capture."""
+
+    def observe(text: str, exception: BaseException | None = None) -> DiagnosticEvent:
+        redacted = redact_diagnostic_text(redact_host_secret_text(step, text, host_environment))
+        bounded = redacted[:MAX_DIAGNOSTIC_MESSAGE_CHARS]
+        # A fresh safe exception preserves only the actual owner's frames.
+        # Original exception arguments, chained errors and locals stay private.
+        safe = RuntimeError(bounded).with_traceback(
+            exception.__traceback__ if exception is not None else None
+        )
+        event = DiagnosticEvent.from_exception(
+            safe,
+            source="native_agent_control",
+            owner="FleetPlanStepExecution",
+            operation=f"native_failure_attempt_{attempt_number}",
+            execution_affected=True,
+            failure_class="native_execution_failed",
+            fleet_run_id=fleet_run_id,
+            repository_id=repository_id,
+            step_id=step.step_id,
+            traceback_frames_only=True,
+        )
+        if exception is not None:
+            event = event.model_copy(update={"exception_type": exception.__class__.__name__})
+        if diagnostics is not None:
+            diagnostics.emit(event)
+        if observer is not None:
+            try:
+                observer(step.step_id, attempt_number, "stderr", bounded[:2048] + "\n")
+            except Exception as exc:
+                emit_output_observer_failure(
+                    diagnostics,
+                    exc,
+                    step_id=step.step_id,
+                    operation="control_diagnostic",
+                    fleet_run_id=fleet_run_id,
+                    repository_id=repository_id,
+                )
+        # The original native Step may retain this SAME sanitized fact in its
+        # existing journal observation, independent of optional diagnostic sinks.
+        return event
+
+    return observe
+
+
+def observed_native_visible_claim(
+    *,
+    step_id: str,
+    attempt_number: int,
+    diagnostics: DiagnosticEmitter | None,
+    fleet_run_id: str | None,
+    repository_id: str | None,
+) -> Callable[[AgentHarnessObservation], None]:
+    """Mirror already-redacted bounded visible claims to passive diagnostics.
+
+    Incremental storage can survive interruption before a Step result exists.
+    It never supplies Run completion, cleanup, verification or replay authority.
+    """
+
+    def observe(claim: AgentHarnessObservation) -> None:
+        if diagnostics is None:
+            return
+        diagnostics.emit(
+            DiagnosticEvent(
+                severity="INFO",
+                source="native_visible_claim",
+                owner="FleetPlanStepExecution",
+                operation=f"visible_native_claim_attempt_{attempt_number}",
+                message=claim.summary,
+                execution_affected=False,
+                failure_class="untrusted_native_claim",
+                fleet_run_id=fleet_run_id,
+                repository_id=repository_id,
+                step_id=step_id,
+            )
+        )
+
+    return observe
 
 
 def emit_output_observer_failure(

@@ -56,6 +56,10 @@ class _Tape:
         self.enforcer_receipt_available = False
         step = SimpleNamespace(
             step_id="verify",
+            kind="command",
+            exit_code=7,
+            reason="Original verifier failure",
+            native_agent_observations=(),
             order=1,
             step_execution_id="step-one",
             status=SimpleNamespace(value="FAILED"),
@@ -110,6 +114,8 @@ class _CanonicalRuns:
             ),
             outcome=FleetRunOutcome.FAILED,
             game_tape=self.tape,
+            repository_admissions=(),
+            journal_revision=100,
         )
 
     def events(self, run_id, after=0, *, limit=None):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import select
 import shlex
@@ -56,6 +57,11 @@ def add_ai_command(
     )
     parser.add_argument("--workspace", type=Path, default=Path(), help="Git repository root")
     parser.add_argument("--skill", type=Path, help="Caller-selected Skill source")
+    parser.add_argument(
+        "--handoff-from",
+        metavar="RUN_ID",
+        help="Seed a fresh native session from one explicit durable Run handoff as untrusted context",
+    )
     parser.add_argument("--config", type=Path, help="Provider/native execution catalog")
     prompt = parser.add_mutually_exclusive_group(required=True)
     prompt.add_argument("--prompt", help="Task for the selected native agent")
@@ -219,7 +225,15 @@ def run_ai_command(args: argparse.Namespace) -> int:
                 standard_process_isolation=isolation,
                 git_service=git,
             )
-            result, detail = _run_and_close(runtime, selected, workspace, skill, task, verification)
+            result, detail = _run_and_close(
+                runtime,
+                selected,
+                workspace,
+                skill,
+                task,
+                verification,
+                handoff_from=args.handoff_from,
+            )
         if args.as_json:
             print(detail.model_dump_json(indent=2))
         else:
@@ -241,11 +255,21 @@ def _run_and_close(
     skill: Path | None,
     task: str,
     verification: tuple[tuple[str, ...], ...],
+    *,
+    handoff_from: str | None = None,
 ) -> tuple[int, FleetRunDetail]:
     from oh_goon.cli import _shutdown_after_completed_command, _shutdown_after_primary_failure
 
     try:
-        result, detail = _run_selected(runtime, selected, workspace, skill, task, verification)
+        result, detail = _run_selected(
+            runtime,
+            selected,
+            workspace,
+            skill,
+            task,
+            verification,
+            handoff_from=handoff_from,
+        )
         if result not in (0, 130):
             _print_failure_stderr(runtime, detail)
     except BaseException:
@@ -325,9 +349,22 @@ def _run_selected(
     skill: Path | None,
     task: str,
     verification: tuple[tuple[str, ...], ...],
+    *,
+    handoff_from: str | None = None,
 ) -> tuple[int, FleetRunDetail]:
+    from oh_goon.cli_plan_run_readback import run_handoff_projection
+    from oh_goon.services.fleet_plans import _native_prior_context
+
     admitted = None
     try:
+        prior_context = None
+        if handoff_from is not None:
+            prior_context = json.dumps(
+                run_handoff_projection(runtime.runs.get(handoff_from)),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            _native_prior_context(prior_context)  # reject oversize before any new Run effect
         if any(
             Path(entry["path"]).resolve() == workspace
             for entry in runtime.repositories.exclusions()
@@ -343,8 +380,10 @@ def _run_selected(
             skill=skill,
             task=task,
             verification=verification,
+            **({"prior_context": prior_context} if prior_context is not None else {}),
         )
         print(f"Fleet Run ID: {admitted.fleet_run_id}", file=sys.stderr)
+        _print_handoff_reference(admitted.fleet_run_id)
         detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
     except KeyboardInterrupt:
         if admitted is None:
@@ -357,6 +396,11 @@ def _run_selected(
         )
         return 130, detail
     return (0 if detail.outcome is FleetRunOutcome.SUCCESS else 1), detail
+
+
+def _print_handoff_reference(fleet_run_id: str) -> None:
+    argv = ["oh-goon", "plan", "handoff", fleet_run_id, "--json"]
+    print("Durable Run handoff argv: " + json.dumps(argv), file=sys.stderr)
 
 
 @contextmanager

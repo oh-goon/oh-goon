@@ -138,3 +138,59 @@ def test_exception_event_redacts_credentials_and_local_user_paths() -> None:
     assert event.traceback is not None
     assert "hunter2" not in event.traceback
     assert "/home/alice" not in event.traceback
+
+
+def test_frame_only_exception_diagnostic_excludes_source_locals_and_error_chain(
+    monkeypatch,
+) -> None:
+    import linecache
+
+    def reject_source_lookup(*args, **kwargs):
+        raise AssertionError("frame-only diagnostics must not read source files")
+
+    monkeypatch.setattr(linecache, "getline", reject_source_lookup)
+    try:
+        try:
+            raise ValueError("private-protocol-chain-canary")
+        except ValueError as error:
+            raise RuntimeError("safe controller failure Bearer sensitive-token") from error
+    except RuntimeError as error:
+        event = DiagnosticEvent.from_exception(
+            error,
+            source="native_agent_control",
+            owner="FleetPlanStepExecution",
+            operation="native_failure_attempt_2",
+            execution_affected=True,
+            traceback_frames_only=True,
+        )
+    assert event.traceback is not None
+    assert f"in {__name__}.test_frame_only_exception_diagnostic" in event.traceback
+    assert "/home/" not in event.traceback
+    assert "private-protocol-chain-canary" not in event.traceback
+    assert "sensitive-token" not in event.traceback
+    assert "raise RuntimeError" not in event.traceback
+    assert "Bearer [REDACTED]" in event.traceback
+
+
+def test_frame_only_diagnostic_reports_omitted_control_frames() -> None:
+    def descend(depth: int) -> None:
+        if depth:
+            descend(depth - 1)
+        else:
+            raise RuntimeError("safe controller failure")
+
+    try:
+        descend(40)
+    except RuntimeError as error:
+        event = DiagnosticEvent.from_exception(
+            error,
+            source="native_agent_control",
+            owner="FleetPlanStepExecution",
+            operation="native_failure_attempt_1",
+            execution_affected=True,
+            traceback_frames_only=True,
+        )
+    assert event.traceback is not None
+    assert "additional control frames]" in event.traceback
+    assert "safe controller failure" in event.traceback
+    assert len(event.traceback) <= 20000

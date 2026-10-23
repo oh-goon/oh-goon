@@ -92,7 +92,9 @@ def test_host_capability_preserves_native_requirement_extras_as_diagnostic_inten
 ) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(original.replace("httpx2[ws]>=2.12", requirement), encoding="utf-8")
+    pyproject.write_text(
+        original.replace("httpx2[ws]>=2.12", requirement), encoding="utf-8"
+    )
     probes: list[tuple[str, str]] = []
     payload = _build(
         pyproject=pyproject,
@@ -100,7 +102,9 @@ def test_host_capability_preserves_native_requirement_extras_as_diagnostic_inten
         import_probe=lambda distribution, name: probes.append((distribution, name)),
         python_version="3.13.5",
     )
-    package = next(row for row in payload["packages"] if row["distribution"] == "httpx2")
+    package = next(
+        row for row in payload["packages"] if row["distribution"] == "httpx2"
+    )
     assert package["requirement"] == requirement
     assert package["status"] == "compatible"
     assert probes.count(("httpx2", "httpx2")) == 1
@@ -123,9 +127,17 @@ def test_host_capability_extras_do_not_relax_the_minimum_policy(
 ) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(original.replace("httpx2[ws]>=2.12", requirement), encoding="utf-8")
-    with pytest.raises(capability.HostedCapabilityError, match="minimum-compatible >= policy"):
-        _build(pyproject=pyproject, version_reader=_versions(), import_probe=_no_op_import_probe)
+    pyproject.write_text(
+        original.replace("httpx2[ws]>=2.12", requirement), encoding="utf-8"
+    )
+    with pytest.raises(
+        capability.HostedCapabilityError, match="minimum-compatible >= policy"
+    ):
+        _build(
+            pyproject=pyproject,
+            version_reader=_versions(),
+            import_probe=_no_op_import_probe,
+        )
 
 
 @pytest.mark.parametrize("version", ("3.11.9", "3.15.0"))

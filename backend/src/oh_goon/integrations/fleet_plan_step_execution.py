@@ -27,11 +27,13 @@ from oh_goon.core.agent_model_selection import (
     parse_one_local_model_query,
     prepend_repository_evidence,
 )
+from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
 from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.models.execution_identity import ExecutionIdentity
+from oh_goon.core.models.fleet_observation import AgentHarnessObservation
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
     ResolvedCommandStep,
@@ -113,8 +115,14 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     native_profile_command_runner,
 )
 from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
+from oh_goon.integrations.fleet_plan_secret_redaction import redact_host_secret_text
 from oh_goon.integrations.fleet_plan_step_lifecycle_observation import lifecycle_command_runner
-from oh_goon.integrations.fleet_plan_step_output_observation import observed_command_runner
+from oh_goon.integrations.fleet_plan_step_output_observation import (
+    StepDiagnosticObserver,
+    observed_command_runner,
+    observed_native_visible_claim,
+    observed_step_diagnostic,
+)
 from oh_goon.integrations.hashmarks.agent_tools import (
     PreparedAgentEvidence,
     prepare_agent_evidence,
@@ -203,6 +211,10 @@ class _StepProcess:
     command_runner: CommandRunner
     git_command_runner: CommandRunner
     managed_runtime: ManagedRuntimeSpec | None
+    # Safe controller diagnostics only; native protocol/source bytes stay private.
+    diagnostic_output: StepDiagnosticObserver | None = None
+    redact_visible_output: Callable[[str], str] | None = None
+    visible_output: Callable[[AgentHarnessObservation], None] | None = None
 
 
 def execute_direct_step(
@@ -1248,25 +1260,54 @@ def _with_output_observer(
     fleet_run_id: str | None,
     repository_id: str | None,
 ) -> _StepProcess:
-    if observer is None:
+    if (
+        observer is None
+        and diagnostics is None
+        and not isinstance(step, ResolvedLocalSearchAgentStep)
+    ):
         return process
-    command_runner = observed_command_runner(
-        process.command_runner,
-        step=step,
-        attempt_number=attempt_number,
-        observer=observer,
-        diagnostics=diagnostics,
-        host_environment=process.host_environment,
-        fleet_run_id=fleet_run_id,
-        repository_id=repository_id,
+    command_runner = (
+        observed_command_runner(
+            process.command_runner,
+            step=step,
+            attempt_number=attempt_number,
+            observer=observer,
+            diagnostics=diagnostics,
+            host_environment=process.host_environment,
+            fleet_run_id=fleet_run_id,
+            repository_id=repository_id,
+        )
+        if observer is not None
+        else process.command_runner
     )
+
+    def redact_visible_output(text: str) -> str:
+        return redact_diagnostic_text(redact_host_secret_text(step, text, process.host_environment))
+
     return _StepProcess(
         paths=process.paths,
         environment=process.environment,
         host_environment=process.host_environment,
         command_runner=command_runner,
-        git_command_runner=command_runner,
+        git_command_runner=command_runner if observer is not None else process.git_command_runner,
         managed_runtime=process.managed_runtime,
+        diagnostic_output=observed_step_diagnostic(
+            step=step,
+            attempt_number=attempt_number,
+            observer=observer,
+            diagnostics=diagnostics,
+            host_environment=process.host_environment,
+            fleet_run_id=fleet_run_id,
+            repository_id=repository_id,
+        ),
+        redact_visible_output=redact_visible_output,
+        visible_output=observed_native_visible_claim(
+            step_id=step.step_id,
+            attempt_number=attempt_number,
+            diagnostics=diagnostics,
+            fleet_run_id=fleet_run_id,
+            repository_id=repository_id,
+        ),
     )
 
 
@@ -1293,6 +1334,9 @@ def _with_lifecycle_observer(
         command_runner=runner,
         git_command_runner=runner,
         managed_runtime=process.managed_runtime,
+        diagnostic_output=process.diagnostic_output,
+        redact_visible_output=process.redact_visible_output,
+        visible_output=process.visible_output,
     )
 
 
