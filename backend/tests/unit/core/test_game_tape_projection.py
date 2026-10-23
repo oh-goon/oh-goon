@@ -22,8 +22,10 @@ from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
     FleetPlanResult,
     PlanEgressEvidence,
+    PlanIsolationBackendEvidence,
     PlanOutputEvidence,
     PlanResourceEvidence,
+    PlanStandardIsolationEvidence,
     PlanStepAttemptEvidence,
     PlanToolEvidence,
 )
@@ -715,3 +717,36 @@ def test_game_tape_lifecycle_rejects_unprojectable_terminal_facts(
 
     with pytest.raises(AssertionError, match="Unsupported step execution"):
         lifecycle.step_status(object(), terminal=True)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "changed",
+    (
+        {"host_and_external_ip_networking": "host_unrestricted"},
+        {"scoped_write_roots": ("src",)},
+        {"credential_visibility": "codex_auth_file_read_write"},
+    ),
+)
+def test_game_tape_attempt_comparison_retains_physical_scope_changes(
+    changed: dict[str, object],
+) -> None:
+    from oh_goon.core.game_tape_attempt_comparison import compare_adjacent_attempts
+
+    boundary = PlanStandardIsolationEvidence(
+        backend=PlanIsolationBackendEvidence(
+            backend_id="bubblewrap",
+            configuration_id="selected-backend",
+            kernel_boundary="shared_host_kernel",
+            remote_execution=False,
+            experimental=False,
+        ),
+        workspace_read_only=True,
+        broker_socket_mounted=False,
+        resource_owner="none",
+    )
+    first = _failed_attempt().model_copy(update={"standard_isolation": boundary})
+    second = first.model_copy(
+        update={"attempt": 2, "standard_isolation": boundary.model_copy(update=changed)}
+    )
+
+    assert compare_adjacent_attempts((first, second))[0].isolation_changed is True

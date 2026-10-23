@@ -98,3 +98,42 @@ def test_codex_login_rejects_malformed_native_effort(effort: str) -> None:
                 }
             )
         )
+
+
+def test_explicit_backend_sandbox_and_file_credentials_are_distinct_wire_authority() -> None:
+    login = CodexLoginConnection(home="/native/auth", model="native", reasoning_effort="ultra")
+    assert "credential_store" not in login.model_dump(mode="json")
+    assert "sandbox_owner" not in NativeAgentProfile().model_dump(mode="json")
+    profile = NativeAgentProfile(
+        backend="bubblewrap",
+        sandbox_owner="execution_backend",
+        codex_login=login.model_copy(update={"credential_store": "file"}),
+    )
+    wire = profile.model_dump(mode="json")
+    assert wire["sandbox_owner"] == "execution_backend"
+    assert wire["codex_login"]["credential_store"] == "file"
+
+
+@pytest.mark.parametrize("conflict", ["local", "native_credentials", "harness", "broker"])
+def test_backend_login_requires_explicit_external_file_authority(conflict: str) -> None:
+    login = {
+        "home": "/native/auth",
+        "model": "native",
+        "reasoning_effort": "ultra",
+        "credential_store": "file",
+    }
+    profile: dict[str, object] = {
+        "backend": "bubblewrap",
+        "sandbox_owner": "execution_backend",
+        "codex_login": login,
+    }
+    if conflict == "local":
+        profile["backend"] = "local"
+    elif conflict == "native_credentials":
+        login["credential_store"] = "native"
+    elif conflict == "harness":
+        profile["sandbox_owner"] = "harness"
+    else:
+        profile["inference_profile"] = "managed"
+    with pytest.raises(ValidationError):
+        NativeAgentProfile.model_validate(profile)

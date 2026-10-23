@@ -170,6 +170,10 @@ class FleetPlanService:
             raise FleetPlanInvalid("Adjudication/proposal requires the original bounded campaign")
         if selected.interactive and (self._terminal is None or role != "report"):
             raise FleetPlanInvalid("Interactive Agent requires its original terminal transport")
+        if selected.profile.sandbox_owner == "execution_backend" and role == "report":
+            raise FleetPlanInvalid(
+                "Protected native coding requires the read-only proposal and separately admitted scoped apply workflow"
+            )
         selected = self._prepare_native_agent(
             selected, workspace, read_only_workspace=role != "report" and not verification
         )
@@ -262,6 +266,8 @@ class FleetPlanService:
         """Bind and preflight the original backend before any native Run admission."""
         from oh_goon.integrations.fleet_plan_native_steps import require_native_agent_compatibility
 
+        protected = selected.profile.sandbox_owner == "execution_backend"
+        read_only_workspace = read_only_workspace or protected
         require_native_agent_compatibility(
             selected,
             role="review" if read_only_workspace else "report",
@@ -315,6 +321,11 @@ class FleetPlanService:
                         read_only_mounts=native_runtime_read_only_mounts(workspace, selected),
                         resources=selected.profile.resources,
                         read_only_workspace=read_only_workspace,
+                        protected_execution=protected,
+                        credential_file=Path(selected.profile.codex_login.home) / "auth.json"
+                        if protected and selected.profile.codex_login is not None
+                        else None,
+                        host_network=protected and selected.profile.codex_login is not None,
                         private_configuration_directory=(
                             Path(selected.definition.configuration_directory)
                             if selected.definition.configuration_directory is not None

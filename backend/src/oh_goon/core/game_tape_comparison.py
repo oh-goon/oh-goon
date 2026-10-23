@@ -94,6 +94,10 @@ def _step_diff(
         attempt_count_changed=_attempt_count(base) != _attempt_count(compared),
         tool_changed=_attempt_fact(base, "tool") != _attempt_fact(compared, "tool"),
         egress_changed=_attempt_fact(base, "egress") != _attempt_fact(compared, "egress"),
+        isolation_changed=(
+            _attempt_fact(base, "standard_isolation")
+            != _attempt_fact(compared, "standard_isolation")
+        ),
         resource_policy_changed=_resource_policy(base) != _resource_policy(compared),
         failure_signature_changed=_failure_signature(base) != _failure_signature(compared),
     )

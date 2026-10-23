@@ -1,7 +1,9 @@
 import hashlib
 import json
+import os
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -308,3 +310,138 @@ def test_pi_literal_credentials_reject_before_executable_discovery(
     with pytest.raises(AgentProviderError, match="credentials") as captured:
         resolve_native_agent(config, "pi", "local", workspace=tmp_path, environment={})
     assert "PRIVATE-KEY" not in str(captured.value)
+
+
+def test_protected_login_resolves_file_metadata_without_opening_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "native-auth"
+    home.mkdir()
+    credential = home / "auth.json"
+    credential.write_text("synthetic native-owned credential; not Oh-Goon JSON")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    program = executable(tmp_path / "codex")
+    config = AgentProvidersConfig.model_validate(
+        {
+            "native_agents": {"codex": {"executable": str(program)}},
+            "native_profiles": {
+                "protected": {
+                    "backend": "bubblewrap",
+                    "sandbox_owner": "execution_backend",
+                    "codex_login": {
+                        "home": str(home),
+                        "model": "gpt-6.1-sol",
+                        "reasoning_effort": "ultra",
+                        "credential_store": "file",
+                    },
+                }
+            },
+        }
+    )
+    original_path_open = Path.open
+    original_os_open = os.open
+
+    def path_open(path: Path, *args: Any, **kwargs: Any) -> Any:
+        assert path != credential, "Oh-Goon must not open native credential contents"
+        return original_path_open(path, *args, **kwargs)
+
+    def os_open(path: Any, *args: Any, **kwargs: Any) -> int:
+        assert path != str(credential) and path != credential, (
+            "Credential contents are native-owned"
+        )
+        return original_os_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", path_open)
+    monkeypatch.setattr(os, "open", os_open)
+    selected = resolve_native_agent(config, "codex", "protected", workspace=repo, environment={})
+    assert selected.profile.sandbox_owner == "execution_backend"
+    assert selected.profile.codex_login is not None
+    assert selected.profile.codex_login.home == str(home)
+    assert selected.profile.codex_login.credential_store == "file"
+    assert selected.connection is None
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory", "fifo", "symlink"])
+def test_file_login_refuses_unavailable_or_nonregular_authentication(
+    tmp_path: Path, kind: str
+) -> None:
+    home = tmp_path / "native-auth"
+    home.mkdir()
+    credential = home / "auth.json"
+    if kind == "directory":
+        credential.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(credential)
+    elif kind == "symlink":
+        original = tmp_path / "other-auth"
+        original.write_text("synthetic")
+        credential.symlink_to(original)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    program = executable(tmp_path / "codex")
+    config = AgentProvidersConfig.model_validate(
+        {
+            "native_agents": {"codex": {"executable": str(program)}},
+            "native_profiles": {
+                "protected": {
+                    "backend": "bubblewrap",
+                    "sandbox_owner": "execution_backend",
+                    "codex_login": {
+                        "home": str(home),
+                        "model": "native",
+                        "reasoning_effort": "ultra",
+                        "credential_store": "file",
+                    },
+                }
+            },
+        }
+    )
+    with pytest.raises(AgentProviderError, match="existing regular auth.json"):
+        resolve_native_agent(config, "codex", "protected", workspace=repo, environment={})
+
+
+@pytest.mark.parametrize("agent", ["opencode", "pi"])
+def test_unqualified_harness_backend_delegation_rejects_before_work(
+    tmp_path: Path, agent: str
+) -> None:
+    program = executable(tmp_path / agent)
+    config = AgentProvidersConfig.model_validate(
+        {
+            "native_agents": {agent: {"executable": str(program)}},
+            "native_profiles": {
+                "protected": {"backend": "bubblewrap", "sandbox_owner": "execution_backend"}
+            },
+        }
+    )
+    with pytest.raises(AgentProviderError, match="not qualified"):
+        resolve_native_agent(config, agent, "protected", workspace=tmp_path, environment={})
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("--sandbox", "read-only"),
+        ("-sworkspace-write",),
+        ("--dangerously-bypass-approvals-and-sandbox",),
+        ("--approve-for-me",),
+    ],
+)
+def test_backend_delegation_rejects_competing_native_policy_arguments(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    program = executable(tmp_path / "codex")
+    config = AgentProvidersConfig.model_validate_json(
+        json.dumps(
+            {
+                "native_agents": {
+                    "codex": {"executable": str(program), "arguments": list(arguments)}
+                },
+                "native_profiles": {
+                    "protected": {"backend": "bubblewrap", "sandbox_owner": "execution_backend"}
+                },
+            }
+        )
+    )
+    with pytest.raises(AgentProviderError, match="owns the native sandbox selection"):
+        resolve_native_agent(config, "codex", "protected", workspace=tmp_path, environment={})

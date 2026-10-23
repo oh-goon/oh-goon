@@ -29,6 +29,7 @@ from oh_goon.core.agent_model_selection import (
 )
 from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
 from oh_goon.core.models.agent_providers import ResolvedNativeAgent
+from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.fleet_plan import (
@@ -139,6 +140,9 @@ class CommandRunner(Protocol):
         read_only_mounts: tuple[StandardReadOnlyMount, ...] = (),
         broker_directory: Path | None = None,
         read_only_workspace: bool = False,
+        allowed_write_roots: tuple[Path, ...] = (),
+        credential_file: Path | None = None,
+        host_network: bool = False,
         private_configuration_directory: Path | None = None,
         preserve_native_executable_path: bool = True,
     ) -> CommandResult: ...
@@ -183,6 +187,7 @@ class StepRuntime:
     # only transports bytes; it is not an authorization or a second runner.
     agent_delivery_for: Callable[[str, str], bytes] | None = None
     execution_limits: FleetPlanRunLimits | None = None
+    repair_context: AgentRepairContext | None = None
     terminal: CommandTerminal | None = None
     standard_process_isolation: ProcessIsolationBackend | None = None
     execution_policy: PlanExecutionPolicy | None = None
@@ -219,6 +224,7 @@ def execute_direct_step(
             runtime.standard_process_isolation,
             runtime.workspace_pin,
             termination_requested=runtime.termination_requested,
+            repair_context=runtime.repair_context,
         )
         if runtime.native_profile is not None
         else _direct_step_command_runner
@@ -1068,12 +1074,22 @@ def _direct_step_command_runner(
     read_only_mounts: tuple[StandardReadOnlyMount, ...] = (),
     broker_directory: Path | None = None,
     read_only_workspace: bool = False,
+    allowed_write_roots: tuple[Path, ...] = (),
+    credential_file: Path | None = None,
+    host_network: bool = False,
+    private_configuration_directory: Path | None = None,
+    preserve_native_executable_path: bool = True,
     retain_output_tail: bool = False,
 ) -> CommandResult:
     if (
         read_only_mounts
         or broker_directory is not None
         or read_only_workspace
+        or allowed_write_roots
+        or credential_file is not None
+        or host_network
+        or private_configuration_directory is not None
+        or not preserve_native_executable_path
         or retain_output_tail
     ):
         raise FleetPlanInvalid("Native process options require a resolved native profile")

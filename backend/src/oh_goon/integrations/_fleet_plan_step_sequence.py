@@ -30,6 +30,7 @@ from oh_goon.integrations._fleet_plan_step_outcome import (
     failure_policy,
     is_finalizer,
     output_contract_failure,
+    process_boundary_settled,
     skipped_after_failure,
 )
 from oh_goon.integrations._fleet_plan_step_retry import (
@@ -82,6 +83,7 @@ class FleetPlanStepSequence:
         self._published: dict[str, dict[str, str]] = {}
         self._halt_normal = False
         self._halt_all = False
+        self._halt_all_reason = "Prior strict attempt teardown failed; execution stopped"
 
     @property
     def results(self) -> tuple[PlanStepExecution, ...]:
@@ -171,6 +173,7 @@ class FleetPlanStepSequence:
         self._results[-1] = self._results[-1].model_copy(update={"teardown": teardown})
         if isinstance(teardown, FailedPlanStepTeardownEvidence):
             self._halt_all = True
+            self._halt_all_reason = "Prior strict attempt teardown failed; execution stopped"
         self._record_output_lifecycle(step, record)
         self._record_terminal_lifecycle(step)
 
@@ -288,7 +291,7 @@ class FleetPlanStepSequence:
                     argv=(),
                     returncode=0,
                     skipped=True,
-                    stdout="Prior strict attempt teardown failed; execution stopped",
+                    stdout=self._halt_all_reason,
                 ),
                 before,
             )
@@ -299,7 +302,11 @@ class FleetPlanStepSequence:
     def _direct_artifacts(
         self, step: ResolvedPlanStep, record: _StepRecord
     ) -> tuple[PlanArtifactEvidence, ...]:
-        if record.evidence_repository is None or record.outcome.skipped:
+        if (
+            record.evidence_repository is None
+            or record.outcome.skipped
+            or process_boundary_settled(record.outcome) is False
+        ):
             return ()
         return collect_direct_artifacts(record.evidence_repository, step.artifacts)
 
@@ -309,7 +316,11 @@ class FleetPlanStepSequence:
         record: _StepRecord,
         prepared_run: PreparedPlanRun,
     ) -> tuple[PlanArtifactEvidence, ...]:
-        if record.evidence_repository is None or record.outcome.skipped:
+        if (
+            record.evidence_repository is None
+            or record.outcome.skipped
+            or process_boundary_settled(record.outcome) is False
+        ):
             return ()
         return collect_strict_artifacts(record.evidence_repository, step.artifacts, prepared_run)
 
@@ -341,6 +352,9 @@ class FleetPlanStepSequence:
             finished_at=record.finished_at,
         )
         self._results.append(evidence)
+        if process_boundary_settled(outcome) is False:
+            self._halt_all = True
+            self._halt_all_reason = "Prior execution cleanup is unverified; execution stopped"
         if isinstance(evidence, CompletedPlanStepExecution):
             self._published[step.step_id] = record.outputs
         elif (

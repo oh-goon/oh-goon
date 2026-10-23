@@ -572,3 +572,127 @@ def test_native_run_keeps_every_model_turn_bound_and_retains_step_local_claims(
             server.shutdown()
             worker.join(timeout=5)
     assert not worker.is_alive()
+
+
+@pytest.mark.parametrize("mode", ["failure", "malformed", "timeout", "output_limit"])
+def test_protected_codex_failure_withholds_credential_visible_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    repository = tmp_path / "teams" / "protected"
+    repository.mkdir(parents=True)
+    (repository / "source.py").write_text("VALUE = 41\n")
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    authentication = tmp_path / "authentication"
+    authentication.mkdir()
+    (authentication / "auth.json").write_text("{}")
+    (authentication / "auth.json").chmod(0o600)
+    executable = tmp_path / "bin" / "codex-fixture"
+    executable.parent.mkdir()
+    executable.write_text(
+        "#!/usr/bin/python3\n"
+        "import json,sys,time\n"
+        "sys.stdin.read()\n"
+        "secret='SYNTHETIC_PRIVATE_AUTH_OUTPUT'\n"
+        "print(secret, file=sys.stderr, flush=True)\n"
+        "print(json.dumps({'type':'item.completed','item':{'id':secret,'type':'command_execution','aggregated_output':secret}}),flush=True)\n"
+        + (
+            "time.sleep(30)\n"
+            if mode == "timeout"
+            else "sys.stdout.write(secret * 90000); sys.stdout.flush()\n"
+            if mode == "output_limit"
+            else "print(secret,flush=True)\n"
+            if mode == "malformed"
+            else "sys.exit(7)\n"
+        )
+    )
+    executable.chmod(0o700)
+    backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="protected-fixture",
+        definition=NativeAgentDefinition(executable=str(executable)),
+        profile=NativeAgentProfile(
+            backend="bubblewrap",
+            sandbox_owner="execution_backend",
+            timeout_seconds=10.0,
+            codex_login=CodexLoginConnection(
+                home=str(authentication),
+                model="synthetic",
+                reasoning_effort="low",
+                credential_store="file",
+            ),
+        ),
+        executable_sha256=native_executable_sha256(executable),
+        backend_configuration_id=backend.configuration_identity(),
+    )
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    runner = native_profile_command_runner(
+        repository, selected, backend, RepositoryWorkspaceAuthority.pin_repository_subject
+    )
+    runtime = ApplicationRuntime.build(
+        standard_local=True,
+        standard_process_isolation=backend,
+        git_service=GitService(
+            command_runner=runner, observation_runner=partial(runner, read_only_workspace=True)
+        ),
+    )
+    try:
+        runtime.locations.add(repository)
+        admitted = runtime.plans.run_native_agent(
+            selected=selected,
+            workspace=repository,
+            skill=None,
+            task="Review captured source",
+            role="review",
+        )
+        detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=30)
+        assert detail.outcome is not FleetRunOutcome.SUCCESS
+        live = runtime.runs.game_tape_live_output(admitted.fleet_run_id).model_dump_json()
+        assert "SYNTHETIC_PRIVATE_AUTH_OUTPUT" not in live
+        assert "SYNTHETIC_PRIVATE_AUTH_OUTPUT" not in detail.model_dump_json()
+        assert (repository / "source.py").read_text() == "VALUE = 41\n"
+    finally:
+        runtime.shutdown(wait_for_runs=True)
+
+
+def test_protected_coding_report_rejects_before_run_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    authentication = tmp_path / "authentication"
+    authentication.mkdir()
+    executable = tmp_path / "codex"
+    executable.write_text("#!/bin/sh\nexit 99\n")
+    executable.chmod(0o700)
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="protected",
+        definition=NativeAgentDefinition(executable=str(executable)),
+        profile=NativeAgentProfile(
+            backend="bubblewrap",
+            sandbox_owner="execution_backend",
+            codex_login=CodexLoginConnection(
+                home=str(authentication),
+                model="synthetic",
+                reasoning_effort="low",
+                credential_store="file",
+            ),
+        ),
+        executable_sha256=native_executable_sha256(executable),
+    )
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "database.sqlite"))
+    runtime = ApplicationRuntime.build(standard_local=True)
+    try:
+        with pytest.raises(FleetPlanInvalid, match="separately admitted scoped apply"):
+            runtime.plans.run_native_agent(
+                selected=selected,
+                workspace=repository,
+                skill=None,
+                task="Write source",
+            )
+        assert runtime.runs.history().items == ()
+    finally:
+        runtime.shutdown(wait_for_runs=True)

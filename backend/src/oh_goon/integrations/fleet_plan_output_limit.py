@@ -37,4 +37,7 @@ def _output_limit_outcome(step: ResolvedPlanStep, error: CommandOutputLimitExcee
         stderr=stderr,
         supervisor=error.supervisor,
         runtime_authority=error.runtime_authority,
+        standard_isolation=getattr(error, "standard_isolation", None),
+        physical_execution_id=getattr(error, "physical_execution_id", None),
+        stdout_evidence=getattr(error, "stdout_evidence", None),
     )

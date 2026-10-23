@@ -132,6 +132,35 @@ fallback metadata, so this proves installed managed transport, physical isolatio
 and typed review admission, not model-specific code-mode behavior, live model
 quality or a successful dogfood campaign.
 
+The backend-owned protected Codex profile has a separate installed probe. It uses
+synthetic ChatGPT credentials, the selected installation's bundled
+`gpt-6.1-sol` metadata and real Code Mode helper, through the original typed
+read-only review Run. Both HTTP and WebSocket cases verify denied source/Git
+mutations, private auth-file-only binding, allowed scratch, full instructions,
+native follow-up and compaction. It requires Linux Bubblewrap, OpenSSL and
+Python 3.14 for native compressed requests:
+
+```sh
+OH_GOON_NATIVE_CODEX=/opt/native-codex/bin/codex \
+OH_GOON_NATIVE_CODEX_RUNTIME_ROOT=/opt/native-codex \
+uv run --offline --frozen --no-sync --project backend pytest -m certification backend/tests/integration/services/test_native_codex_context.py -k installed_protected_codex
+```
+
+The existing OpenCode file also has an independent typed read-only review case
+using its advertised native shell and the same physical source boundary:
+
+```sh
+OH_GOON_NATIVE_OPENCODE=/opt/native-tools/bin/opencode \
+OH_GOON_NATIVE_OPENCODE_RUNTIME_ROOT=/opt/native-tools \
+uv run --offline --frozen --no-sync --project backend pytest -m certification backend/tests/integration/services/test_native_opencode_mcp.py -k reviews_through_the_read_only_boundary
+```
+
+These synthetic probes do not access real credentials or establish live account
+refresh, arbitrary final-record secrecy, complete repair convergence, WSL2 or
+container compatibility. [The selected profile contract](../../docs/AGENT_PROVIDERS.md#select-backend-owned-protected-codex-execution)
+records those boundaries. Keep the complete public installation outside the real
+authentication home; never copy credentials into these tests.
+
 The separate live-account probe uses real ChatGPT authentication and live model
 inference. Create a dedicated private Codex home outside the repository and native
 tool roots, and complete native `codex login` there; never copy the desktop auth

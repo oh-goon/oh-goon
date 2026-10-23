@@ -252,8 +252,13 @@ class PlanStandardIsolationEvidence(ImmutableModel):
     """Observed ordinary sandbox execution, without strict source/runtime custody."""
 
     backend: PlanIsolationBackendEvidence
-    host_and_external_ip_networking: Literal["denied"] = "denied"
+    host_and_external_ip_networking: Literal["denied", "host_unrestricted"] = "denied"
     workspace_read_only: bool
+    scoped_write_roots: tuple[str, ...] = Field(default=(), max_length=32)
+    protected_paths: tuple[str, ...] = Field(default=(), max_length=32)
+    credential_visibility: Literal["none", "codex_auth_file_read_write"] = "none"
+    preflight: Literal["verified", "not_recorded"] = "not_recorded"
+    filesystem_cleanup: Literal["verified", "unverified", "not_recorded"] = "not_recorded"
     broker_socket_mounted: bool
     private_configuration_overlay: bool = False
     resources: PlanResourceEvidence | None = None
@@ -309,6 +314,10 @@ class PlanExecutionSupervisorEvidence(ImmutableModel):
     leader_exited_before_group_quiescence: bool = False
     process_group_cleanup_requested: bool = False
     cleanup_reason: Literal["none", "timeout", "cancel", "output_cleanup", "output_limit"] = "none"
+    final_process_group_quiescent: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    forced_termination: bool | None = Field(default=None, exclude_if=lambda value: value is None)
     recovery_events: tuple[PlanExecutionRecoveryEventEvidence, ...] = Field(default_factory=tuple)
 
     @model_validator(mode="after")

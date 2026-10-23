@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import socket
@@ -508,3 +509,124 @@ def test_real_scoped_git_fingerprints_do_not_read_outside_workspace_links(tmp_pa
     pyproject.write_bytes(b"[project]\nname='approved'\n")
     regular = git.observe(repository).fingerprint
     assert regular.pyproject_sha256 == hashlib.sha256(b"[project]\nname='approved'\n").hexdigest()
+
+
+def _phase_context(phase, *, write_roots=("allowed",)):
+    from datetime import UTC, datetime, timedelta
+
+    from oh_goon.core.models.agent_repair import AgentRepairContext
+    from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits
+
+    return AgentRepairContext(
+        repair_id="protected-campaign",
+        attempt=2,
+        max_attempts=10,
+        limits=FleetPlanRunLimits(
+            deadline_at=datetime.now(UTC) + timedelta(minutes=2), step_timeout_seconds=30.0
+        ),
+        previous_run_id="review-run",
+        phase=phase,
+        review_pass=1,
+        original_execution_digest="original-execution",
+        candidate_identity="captured-candidate",
+        scope_identity="captured-scope",
+        write_roots=write_roots,
+    )
+
+
+def test_protected_runner_rechecks_exact_phase_roots_and_readonly_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    allowed = repository / "allowed"
+    allowed.mkdir()
+    backend = _fake_backend(tmp_path)
+    selected = replace(
+        _selection(backend),
+        profile=NativeAgentProfile(backend="bubblewrap", sandbox_owner="execution_backend"),
+    )
+    calls = []
+
+    def execute(request, **kwargs):
+        calls.append(request)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(backend, "execute", execute)
+    runner = native_profile_command_runner(
+        repository,
+        selected,
+        backend,
+        RepositoryWorkspaceAuthority.pin_repository_subject,
+        repair_context=_phase_context("repair"),
+    )
+    runner("/usr/bin/true")
+    runner("/usr/bin/true", read_only_workspace=True)
+    with pytest.raises(FleetPlanInvalid, match="original phase admission"):
+        runner("/usr/bin/true", allowed_write_roots=(repository / "outside",))
+    assert len(calls) == 2
+    assert calls[0].allowed_write_roots == (allowed,)
+    assert calls[1].allowed_write_roots == ()
+    assert all(request.read_only_workspace and request.protected_execution for request in calls)
+    assert all(request.credential_file is None and not request.host_network for request in calls)
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("phase", ["review", "repair", "verification"])
+def test_original_executor_transports_phase_scope_without_leaking_repair_authority(
+    tmp_path: Path, phase: str
+) -> None:
+    executable = shutil.which("bwrap")
+    if executable is None:
+        pytest.skip("native Bubblewrap not installed")
+    backend = BubblewrapProcessIsolation(executable)
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "allowed").mkdir()
+    (repository / "outside").write_text("protected source")
+    _git(repository, "init", "-q")
+    selected = replace(
+        _selection(backend),
+        profile=NativeAgentProfile(backend="bubblewrap", sandbox_owner="execution_backend"),
+    )
+    script = f"""
+import json,pathlib
+root=pathlib.Path('/workspace');facts=[]
+for relative in ('outside','.git/config'):
+    try: (root/relative).write_text('bad')
+    except OSError: facts.append(True)
+    else: facts.append(False)
+try: (root/'allowed/phase-result').write_text('approved repair')
+except OSError: writable=False
+else: writable=True
+facts.append(writable is {phase == "repair"})
+print(json.dumps(facts))
+"""
+    step = ResolvedCommandStep(step_id="phase-effect", argv=("/usr/bin/python3", "-c", script))
+    plan = ResolvedFleetPlan.create(
+        name="protected-phase",
+        description="",
+        steps=(step,),
+        execution=MaintenanceExecutionPolicy(),
+        native_agent=selected,
+    )
+    executor = FleetPlanRunExecutor(
+        GitService(),
+        process_isolation_backends=(),
+        standard_process_isolation=backend,
+        workspace_pin=RepositoryWorkspaceAuthority.pin_repository_subject,
+    )
+    result = executor.execute_direct_run(
+        repository, plan, cancel_requested=None, repair_context=_phase_context(phase)
+    )
+    assert len(result.steps) == 1
+    recorded = result.steps[0]
+    assert isinstance(recorded, CompletedPlanStepExecution)
+    assert recorded.returncode == 0
+    assert all(json.loads(result.stdout.strip()))
+    isolation = recorded.attempts[0].standard_isolation
+    assert isolation is not None and isolation.workspace_read_only
+    assert isolation.scoped_write_roots == (("allowed",) if phase == "repair" else ())
+    assert isolation.credential_visibility == "none"
+    assert isolation.host_and_external_ip_networking == "denied"
+    assert (repository / "outside").read_text() == "protected source"

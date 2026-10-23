@@ -276,6 +276,11 @@ def completed_phase_steps(
             or step.returncode != 0
             or len(step.attempts) != 1
             or step.attempts[0].supervisor is None
+            or step.attempts[0].supervisor.final_process_group_quiescent is not True
+            or (
+                step.attempts[0].standard_isolation is not None
+                and step.attempts[0].standard_isolation.filesystem_cleanup != "verified"
+            )
             or isinstance(step.teardown, FailedPlanStepTeardownEvidence)
             or step.attempts[0].supervisor.cleanup_reason not in ("none", "output_cleanup")
         ):

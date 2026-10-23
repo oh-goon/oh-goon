@@ -214,10 +214,19 @@ def resolve_native_agent(
             raise AgentProviderError(
                 "Codex authentication home must be outside the captured workspace"
             )
+        if login.credential_store == "file":
+            try:
+                mode = (native_home / "auth.json").lstat().st_mode
+                if not stat.S_ISREG(mode):
+                    raise OSError("not a regular credential file")
+            except OSError:
+                raise AgentProviderError(
+                    "Selected Codex file authentication requires its existing regular auth.json"
+                ) from None
         profile = profile.model_copy(
             update={"codex_login": login.model_copy(update={"home": str(native_home)})}
         )
-    validate_native_agent_arguments(name, definition.arguments)
+    validate_native_agent_arguments(name, definition.arguments, sandbox_owner=profile.sandbox_owner)
     executable = definition.executable
     if executable is None:
         executable = shutil.which(name, path=environment.get("PATH", ""))

@@ -117,6 +117,109 @@ there is no automatic fallback between the profiles. Authentication failures and
 unsupported native settings fail through the original Step result. The native
 connection's disclosure recipient is `codex`; reports remain untrusted claims.
 
+### Select backend-owned protected Codex execution
+
+A separate, explicitly selected profile can delegate Codex tool filesystem policy
+to Oh-Goon's existing Bubblewrap boundary:
+
+```json
+{
+  "native_agents": {
+    "codex": {
+      "executable": "/opt/codex/bin/codex",
+      "runtime_roots": ["/opt/codex"]
+    }
+  },
+  "native_profiles": {
+    "protected-signed-in": {
+      "backend": "bubblewrap",
+      "sandbox_owner": "execution_backend",
+      "allowed_agents": ["codex"],
+      "workspace_roots": ["/path/to/projects"],
+      "codex_login": {
+        "home": "/path/to/existing/.codex",
+        "model": "your-selected-native-model",
+        "reasoning_effort": "your-selected-native-effort",
+        "credential_store": "file"
+      }
+    }
+  }
+}
+```
+
+This is an explicit trusted-agent capability choice. Select it with the existing
+`--native-profile` and `--agent-providers-file` Plan options; it is never an
+automatic fallback for a failed nested sandbox. Existing local and managed
+profiles retain their existing behavior. The original Fleet workflow, typed
+review/proposal acceptors, mandatory Hashmarks delivery and native apply remain
+the execution and result owners. No additional agent loop is introduced.
+
+The source base is read-only in every phase. A repair Run receives only the
+directory write roots from its original admitted `AgentRepairContext`; proposal,
+review, re-review, Git observation and independent verification receive no source
+write islands. Git metadata stays read-only. File write roots are unsupported:
+atomic native replacement cannot replace a bind mount without widening its parent.
+Put disposable caches/test outputs outside protected source. A verifier that
+rewrites source fails rather than receiving a wider profile.
+
+Codex explicitly runs with its supported `danger-full-access` setting inside that
+external boundary. The external filesystem policy remains enforced. Only its exact
+invocation receives host networking and a read/write bind of the selected existing
+`auth.json` into an otherwise private `CODEX_HOME`. The complete original home,
+host sockets, other sessions and native state are not mounted. Oh-Goon inspects
+file metadata, never credential contents. Native file storage owns in-place saves
+and token refresh. Keyring/auto-store selection, credential migration and logout
+are outside this profile's supported contract. An absent, symlinked or multiply
+linked credential file fails admission.
+
+Raw output from that credential-visible invocation is withheld from live logs and
+failure diagnostics; the native parser still receives the stream. Sanitized event
+kinds and bounded typed phase results remain available. This mitigates raw tool
+output disclosure without reading credential values. Arbitrary agent-selected text
+inside a valid final record is not proven secret-free. That remaining PAE-05 privacy
+boundary needs separate qualification; the profile does not establish generic
+credential secrecy or completion of the protected-execution requirements.
+
+The agent and its tools can read and write that bound credential file and use host
+networking. This profile does not claim credential secrecy from the agent, generic
+network denial, or prevention of external API mutations. Use it only with explicit
+consent to those capabilities. Hashmarks producer, Git/hooks and independent
+verifiers receive neither native credentials nor host networking. Auth home and
+all public runtime/workspace trees must remain disjoint in both directions.
+
+Bubblewrap preflight exercises the actual requested mount topology before the
+agent starts. Unsupported native configuration uses `AGENT_PROVIDER_ERROR`; other admission or
+harness refusals use `FLEET_PLAN_INVALID`. Unavailable physical capabilities use
+`CAPABILITY_UNAVAILABLE`. EPERM is reported as observed setup denial, not an inferred LSM
+diagnosis. Process failure, cancellation, deadline and recovery retain their
+canonical original Run types and journal order. A blocked phase does not create
+successful dependent phases or synthetic Runs.
+
+Attempt evidence reports actual network access, base source mode, writable
+directories, credential-file exposure, preflight, process-group quiescence and
+private-filesystem cleanup. Historical missing facts remain not recorded.
+Known surviving descendants or unverified cleanup prevent successful protected
+completion; ordinary cleanup is distinct from strict custody/sealing.
+
+The installed opt-in tests exercise these combinations without real credentials:
+
+| Environment and harness | Selected boundary | Observed proof |
+| --- | --- | --- |
+| Native Linux, Codex 0.163.0, synthetic ChatGPT HTTP/WebSocket | Backend-owned Bubblewrap, private auth-file bind | Actual Code Mode tools, source/Git mutation denial, scratch, full stdin, follow-up and compaction in a typed review Run |
+| Native Linux, OpenCode 2.1.2, managed fixture | Existing harness profile with read-only Bubblewrap | Actual native shell, source/Git denial, scratch, broker/network boundary and typed complete review |
+| WSL2; nested/container combinations | Unqualified | Not run; no support claim |
+
+These tests do not establish live account refresh, a full repair campaign, arbitrary
+final-record secrecy or untrusted-workload qualification. The commands are in the
+existing optional-native test guidance.
+
+Support must be qualified per installed version, environment, backend and harness.
+An installed synthetic account/transport fixture proves its observed native
+protocol and filesystem behavior, not live account refresh or model quality.
+Live account, complete structured workflow, Linux/WSL2 and container combinations
+require their own actual evidence. No universal Linux/WSL/container capability
+or APP certification is implied by selecting this profile.
+
 Tasks accept `--prompt`, `--prompt-file PATH`, or `--prompt-file -` for stdin.
 The authored task limit is 4000 characters; file input is bounded before decoding.
 Private prepared task, repository and Skill context stay out of child argv.

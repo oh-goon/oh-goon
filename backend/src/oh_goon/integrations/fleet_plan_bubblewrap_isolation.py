@@ -10,8 +10,9 @@ from collections.abc import Callable
 from dataclasses import replace
 from itertools import islice
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import CapabilityUnavailable, FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanIsolationBackendEvidence,
@@ -27,8 +28,10 @@ from oh_goon.core.path_authority import HostSandboxPathMapping, map_host_text_to
 from oh_goon.core.path_layouts import SANDBOX_PATHS, AttemptPathLayout
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentProof
 from oh_goon.core.product_identity import stable_id
+from oh_goon.core.source_tree_policy import LIVE_CHECKOUT_PROTECTED_PATHS, is_transient_source_path
 from oh_goon.engine.command import (
     CommandCancelledError,
+    CommandOutputLimitExceeded,
     CommandOutputObserver,
     CommandProcessObserver,
     CommandResult,
@@ -70,9 +73,11 @@ from oh_goon.integrations.fleet_plan_local_lace_intent import (
 from oh_goon.integrations.fleet_plan_local_lace_recovery import lace_resource_binding
 from oh_goon.integrations.fleet_plan_process_isolation import (
     MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
+    STANDARD_CODEX_HOME,
     IsolatedProcessRequest,
     StandardIsolatedProcessRequest,
     StandardReadOnlyMount,
+    _require_standard_git_layout,
     verify_selected_backend,
 )
 from oh_goon.integrations.source_snapshot import verify_clean_source_snapshot
@@ -226,53 +231,59 @@ class BubblewrapProcessIsolation:
             {
                 "backend": self.configuration_identity(),
                 "resources": request.resources.model_dump(),
+                "workspace": str(request.workspace),
+                "read_only_workspace": request.read_only_workspace,
+                "write_roots": [str(root) for root in request.allowed_write_roots],
+                "mounts": [(str(m.source), str(m.target)) for m in request.read_only_mounts],
                 "private_configuration_directory": str(request.private_configuration_directory)
                 if request.private_configuration_directory is not None
+                else None,
+                "credential_file": str(request.credential_file)
+                if request.credential_file
+                else None,
+                "host_network": request.host_network,
+                "protected_execution": request.protected_execution,
+                "broker_directory": str(request.broker_directory)
+                if request.broker_directory
                 else None,
             },
         )
         if self._standard_available_configuration == configuration:
             return
         try:
-            result = run_command(
-                *standard_resource_scope_command(
-                    request.resources, self.standard_resource_executable
-                ),
-                self.executable,
-                "--unshare-user",
-                "--unshare-net",
-                "--unshare-pid",
-                "--die-with-parent",
-                *_standard_system_binds(),
-                "--proc",
-                "/proc",
-                "--dev",
-                "/dev",
-                *(
-                    (
-                        "--overlay-src",
-                        str(request.private_configuration_directory),
-                        "--tmp-overlay",
-                        "/config/native",
-                    )
-                    if request.private_configuration_directory is not None
-                    else ()
-                ),
-                "--",
-                "/bin/true",
+            result = self._execute_standard(
+                replace(request, argv=("/bin/true",), terminal=None, input_data=None),
                 timeout=10.0,
-                env={"PATH": os.defpath, **self._standard_resource_environment},
-                preserve_native_executable_path=False,
-                max_capture_bytes_per_stream=4096,
+                cancel_requested=None,
+                stream_output=None,
+                process_observer=None,
+                runtime_supervision=None,
+                _preflight=True,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
+            if request.protected_execution:
+                raise CapabilityUnavailable(
+                    "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_preflight; mechanism=native_launch"
+                ) from exc
             raise FleetPlanInvalid(
-                "Selected Bubblewrap namespace capability could not be established"
+                "Selected Bubblewrap mount/namespace preflight could not be established"
             ) from exc
         if result.returncode != 0:
+            if request.protected_execution:
+                raise CapabilityUnavailable(
+                    "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_preflight; "
+                    f"mechanism=native_setup; child_exit={result.returncode}"
+                )
             raise FleetPlanInvalid(
-                "Selected Bubblewrap user/PID/network namespaces are unavailable: "
+                "Selected Bubblewrap mount/namespace setup is unavailable: "
                 + result.stderr.strip()[:1000]
+            )
+        if request.protected_execution and (
+            result.supervisor is None or not result.supervisor.final_process_group_quiescent
+        ):
+            raise CapabilityUnavailable(
+                "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_preflight; "
+                "mechanism=process_tree_quiescence_unverified"
             )
         self._standard_available_configuration = configuration
 
@@ -286,7 +297,31 @@ class BubblewrapProcessIsolation:
         if self.require_local_resource_intent:
             raise FleetPlanInvalid("Strict custody configuration cannot consume ordinary authority")
         self._require_application_state_separation(request)
+        if request.protected_execution:
+            _require_standard_git_layout(request.workspace)
         private_file_identities = self._private_application_file_identities()
+        credential = request.credential_file
+        if credential is not None:
+            try:
+                metadata = credential.lstat()
+            except OSError as exc:
+                raise FleetPlanInvalid("Native credential file is unavailable") from exc
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_uid != os.getuid()
+                or metadata.st_mode & 0o077
+                or credential.name != "auth.json"
+                or credential.is_relative_to(request.workspace)
+                or request.workspace.is_relative_to(credential.parent)
+                or request.broker_directory is not None
+                or request.private_configuration_directory is not None
+                or request.allowed_write_roots
+            ):
+                raise FleetPlanInvalid("Native credential file exceeds its explicit private scope")
+            if (metadata.st_dev, metadata.st_ino) in private_file_identities:
+                raise FleetPlanInvalid("Native credential cannot expose private application state")
+            private_file_identities = private_file_identities | {(metadata.st_dev, metadata.st_ino)}
         unsafe_environment = sorted(
             name
             for name in request.env
@@ -322,6 +357,7 @@ class BubblewrapProcessIsolation:
             PurePosixPath("/home/fleet"),
             PurePosixPath("/cache"),
             PurePosixPath("/run/oh-goon-broker"),
+            STANDARD_CODEX_HOME,
         )
         home = Path.home().resolve()
         if home.is_relative_to(request.workspace):
@@ -331,6 +367,33 @@ class BubblewrapProcessIsolation:
         _require_standard_bind_structure(
             request.workspace, private_file_identities=private_file_identities
         )
+        roots = request.allowed_write_roots
+        for root in roots:
+            relative = root.relative_to(request.workspace)
+            current = request.workspace
+            for part in relative.parts:
+                current = current / part
+                if current.is_symlink():
+                    raise FleetPlanInvalid("Scoped native write roots cannot traverse symlinks")
+            if not root.is_dir():
+                raise FleetPlanInvalid(
+                    "Scoped native write roots require existing directories; file roots cannot preserve native atomic replacement"
+                )
+            if is_transient_source_path(relative) or any(
+                root != other and (root.is_relative_to(other) or other.is_relative_to(root))
+                for other in roots
+            ):
+                raise FleetPlanInvalid(
+                    "Scoped native write roots overlap protected source or another root"
+                )
+            if self._application_state_paths is not None and any(
+                root.is_relative_to(path) or path.is_relative_to(root)
+                for path in (*self._application_state_paths[0], *self._application_state_paths[1])
+            ):
+                raise FleetPlanInvalid("Scoped native writes overlap host-managed authority")
+            _require_standard_bind_structure(
+                root, private_file_identities=private_file_identities, writable=True
+            )
         targets: list[PurePosixPath] = []
         sources: set[Path] = {request.workspace}
         selected_mounts = request.read_only_mounts + (
@@ -349,6 +412,14 @@ class BubblewrapProcessIsolation:
             source, target = mount.source, mount.target
             if (
                 not source.exists()
+                or any(source.is_relative_to(root) or root.is_relative_to(source) for root in roots)
+                or (
+                    credential is not None
+                    and (
+                        source.is_relative_to(credential.parent)
+                        or credential.is_relative_to(source)
+                    )
+                )
                 or source == request.workspace
                 or (source in sources and source not in canonical_sources)
                 or source.is_socket()
@@ -410,156 +481,288 @@ class BubblewrapProcessIsolation:
         stream_output: CommandOutputObserver | None,
         process_observer: CommandProcessObserver | None,
         runtime_supervision: CommandRuntimeSupervision | None,
+        _preflight: bool = False,
     ) -> CommandResult:
         if cancel_requested is not None and cancel_requested():
             from oh_goon.engine.errors import OperationCancelledError
 
             raise OperationCancelledError("Standard sandbox cancelled before preparation")
-        self.require_standard_available(request)
+        if not _preflight:
+            self.require_standard_available(request)
+        else:
+            self._validate_standard_request(request)
         from oh_goon.integrations.fleet_plan_run import _write_minimal_etc
 
-        with (
-            tempfile.TemporaryDirectory(prefix="oh-goon-isolated-") as directory,
-            tempfile.TemporaryFile() as status,
-        ):
-            paths = AttemptPathLayout.from_root(Path(directory))
-            for path in (paths.home, paths.tmp, paths.cache, paths.config, paths.etc):
-                path.mkdir()
-            _write_minimal_etc(paths.etc)
-            args = _bubblewrap_prefix(self.executable, egress_mode="none")
-            args.insert(1, "--unshare-user")
-            args.extend(("--json-status-fd", str(status.fileno())))
-            if request.terminal is not None:
-                args.remove("--new-session")
-            for name in self._standard_resource_environment:
-                args.extend(("--unsetenv", name))
-            args.extend(_standard_system_binds())
-            args.extend(("--proc", "/proc", "--dev", "/dev"))
-            for name in ("passwd", "group", "nsswitch.conf", "hosts"):
-                args.extend(("--ro-bind", str(paths.etc / name), "/etc/" + name))
-            workspace_mode = "--ro-bind" if request.read_only_workspace else "--bind"
-            args.extend((workspace_mode, str(request.workspace), "/workspace"))
-            for source, target in (
-                (paths.home, "/home/fleet"),
-                (paths.tmp, "/tmp"),
-                (paths.cache, "/cache"),
-                (paths.config, "/config"),
+        temporary_base = Path(tempfile.gettempdir()).resolve()
+        if request.protected_execution and temporary_base.is_relative_to(request.workspace):
+            raise CapabilityUnavailable(
+                "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_setup; "
+                "mechanism=temporary_state_overlaps_source"
+            )
+        pending_error: (
+            CommandTimeoutExpired | CommandCancelledError | CommandOutputLimitExceeded | None
+        ) = None
+        acknowledged = False
+        result: CommandResult | None = None
+        directory: str | None = None
+        cleanup_error: OSError | None = None
+        try:
+            with (
+                tempfile.TemporaryDirectory(
+                    prefix="oh-goon-isolated-", dir=temporary_base
+                ) as directory,
+                tempfile.TemporaryFile() as status,
             ):
-                args.extend(("--bind", str(source), target))
-            if str(request.workspace) != "/workspace":
-                args.extend((workspace_mode, str(request.workspace), str(request.workspace)))
-            for mount in request.read_only_mounts:
-                args.extend(("--ro-bind", str(mount.source), str(mount.target)))
-            if request.private_configuration_directory is not None:
+                paths = AttemptPathLayout.from_root(Path(directory))
+                if request.protected_execution:
+                    scratch = Path(directory).resolve()
+                    immutable_inputs = (
+                        request.workspace,
+                        *(mount.source for mount in request.read_only_mounts),
+                    )
+                    if any(
+                        scratch.is_relative_to(root) or root.is_relative_to(scratch)
+                        for root in immutable_inputs
+                    ) or (
+                        request.credential_file is not None
+                        and (
+                            scratch.is_relative_to(request.credential_file.parent)
+                            or request.credential_file.is_relative_to(scratch)
+                        )
+                    ):
+                        raise CapabilityUnavailable(
+                            "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_setup; "
+                            "mechanism=temporary_state_overlaps_protected_authority"
+                        )
+                for path in (paths.home, paths.tmp, paths.cache, paths.config, paths.etc):
+                    path.mkdir()
+                _write_minimal_etc(paths.etc)
+                args = _bubblewrap_prefix(
+                    self.executable,
+                    egress_mode="host_unrestricted" if request.host_network else "none",
+                )
+                args.insert(1, "--unshare-user")
+                if not _preflight:
+                    args.extend(("--json-status-fd", str(status.fileno())))
+                if request.terminal is not None:
+                    args.remove("--new-session")
+                for name in self._standard_resource_environment:
+                    args.extend(("--unsetenv", name))
+                args.extend(_standard_system_binds())
+                args.extend(("--proc", "/proc", "--dev", "/dev"))
+                for name in ("passwd", "group", "nsswitch.conf", "hosts"):
+                    args.extend(("--ro-bind", str(paths.etc / name), "/etc/" + name))
+                workspace_mode = "--ro-bind" if request.read_only_workspace else "--bind"
+                args.extend((workspace_mode, str(request.workspace), "/workspace"))
+                for source, target in (
+                    (paths.home, "/home/fleet"),
+                    (paths.tmp, "/tmp"),
+                    (paths.cache, "/cache"),
+                    (paths.config, "/config"),
+                ):
+                    args.extend(("--bind", str(source), target))
+                if str(request.workspace) != "/workspace":
+                    args.extend((workspace_mode, str(request.workspace), str(request.workspace)))
+                for root in request.allowed_write_roots:
+                    relative = root.relative_to(request.workspace)
+                    for island_target in dict.fromkeys(
+                        (PurePosixPath("/workspace") / relative, PurePosixPath(root))
+                    ):
+                        args.extend(("--bind", str(root), str(island_target)))
+                if request.read_only_workspace:
+                    for protected_relative in sorted(LIVE_CHECKOUT_PROTECTED_PATHS):
+                        protected_source = request.workspace / protected_relative
+                        if protected_source.exists():
+                            for protected_target in dict.fromkeys(
+                                (
+                                    PurePosixPath("/workspace") / protected_relative,
+                                    PurePosixPath(protected_source),
+                                )
+                            ):
+                                args.extend(
+                                    ("--ro-bind", str(protected_source), str(protected_target))
+                                )
+                for mount in request.read_only_mounts:
+                    args.extend(("--ro-bind", str(mount.source), str(mount.target)))
+                if request.credential_file is not None:
+                    native_home = paths.home / "codex"
+                    native_home.mkdir(mode=0o700)
+                    args.extend(("--bind", str(native_home), str(STANDARD_CODEX_HOME)))
+                    args.extend(
+                        (
+                            "--bind",
+                            str(request.credential_file),
+                            str(STANDARD_CODEX_HOME / "auth.json"),
+                        )
+                    )
+                if request.private_configuration_directory is not None:
+                    args.extend(
+                        (
+                            "--overlay-src",
+                            str(request.private_configuration_directory),
+                            "--tmp-overlay",
+                            "/config/native",
+                        )
+                    )
+                if request.broker_directory is not None:
+                    args.extend(("--ro-bind", str(request.broker_directory), "/run/oh-goon-broker"))
+                mapping = tuple(
+                    sorted(
+                        [
+                            HostSandboxPathMapping.create(
+                                request.workspace, SANDBOX_PATHS.workspace
+                            ),
+                            *(
+                                HostSandboxPathMapping.create(mount.source, mount.target)
+                                for mount in request.read_only_mounts
+                                if mount.target == PurePosixPath(mount.source)
+                                or not any(
+                                    other.source == mount.source
+                                    and other.target == PurePosixPath(other.source)
+                                    for other in request.read_only_mounts
+                                )
+                            ),
+                            *(
+                                (
+                                    HostSandboxPathMapping.create(
+                                        request.private_configuration_directory,
+                                        PurePosixPath("/config/native"),
+                                    ),
+                                )
+                                if request.private_configuration_directory is not None
+                                else ()
+                            ),
+                        ],
+                        key=lambda item: len(str(item.host_root)),
+                        reverse=True,
+                    )
+                )
+                argv = tuple(map_host_text_to_sandbox(value, mapping) for value in request.argv)
+                environment = {
+                    name: (
+                        os.pathsep.join(
+                            map_host_text_to_sandbox(part, mapping)
+                            for part in value.split(os.pathsep)
+                        )
+                        if name == "PATH"
+                        else map_host_text_to_sandbox(value, mapping)
+                    )
+                    for name, value in request.env.items()
+                    if name not in {"SSH_AUTH_SOCK", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"}
+                }
+                environment.update(
+                    {
+                        "HOME": "/home/fleet",
+                        "USERPROFILE": "/home/fleet",
+                        "TMPDIR": "/tmp",
+                        "TMP": "/tmp",
+                        "TEMP": "/tmp",
+                        "XDG_CACHE_HOME": "/cache",
+                        "XDG_CONFIG_HOME": "/config",
+                        "XDG_DATA_HOME": "/home/fleet/.local/share",
+                        "XDG_STATE_HOME": "/home/fleet/.local/state",
+                    }
+                )
                 args.extend(
                     (
-                        "--overlay-src",
-                        str(request.private_configuration_directory),
-                        "--tmp-overlay",
-                        "/config/native",
+                        "--chdir",
+                        str(request.cwd),
+                        "--",
+                        *argv,
                     )
                 )
-            if request.broker_directory is not None:
-                args.extend(("--ro-bind", str(request.broker_directory), "/run/oh-goon-broker"))
-            mapping = tuple(
-                sorted(
-                    [
-                        HostSandboxPathMapping.create(request.workspace, SANDBOX_PATHS.workspace),
-                        *(
-                            HostSandboxPathMapping.create(mount.source, mount.target)
-                            for mount in request.read_only_mounts
-                            if mount.target == PurePosixPath(mount.source)
-                            or not any(
-                                other.source == mount.source
-                                and other.target == PurePosixPath(other.source)
-                                for other in request.read_only_mounts
-                            )
+                self._validate_standard_request(request)
+                try:
+                    result = run_command(
+                        *standard_resource_scope_command(
+                            request.resources, self.standard_resource_executable
                         ),
-                        *(
-                            (
-                                HostSandboxPathMapping.create(
-                                    request.private_configuration_directory,
-                                    PurePosixPath("/config/native"),
-                                ),
-                            )
-                            if request.private_configuration_directory is not None
-                            else ()
-                        ),
-                    ],
-                    key=lambda item: len(str(item.host_root)),
-                    reverse=True,
-                )
-            )
-            argv = tuple(map_host_text_to_sandbox(value, mapping) for value in request.argv)
-            environment = {
-                name: (
-                    os.pathsep.join(
-                        map_host_text_to_sandbox(part, mapping) for part in value.split(os.pathsep)
+                        *args,
+                        timeout=timeout,
+                        env={**environment, **self._standard_resource_environment},
+                        preserve_native_executable_path=False,
+                        cancel_requested=cancel_requested,
+                        termination_requested=request.termination_requested,
+                        stream_output=stream_output,
+                        process_observer=process_observer,
+                        runtime_supervision=runtime_supervision,
+                        terminal=request.terminal,
+                        input_data=request.input_data,
+                        pass_fds=(status.fileno(),),
+                        max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
+                        retain_output_tail=request.retain_output_tail,
                     )
-                    if name == "PATH"
-                    else map_host_text_to_sandbox(value, mapping)
+                except (
+                    CommandTimeoutExpired,
+                    CommandCancelledError,
+                    CommandOutputLimitExceeded,
+                ) as exc:
+                    pending_error = exc
+                if not _preflight:
+                    status.seek(0)
+                    acknowledged = _standard_workload_exec_completed(
+                        status.read(4097), result.returncode if result is not None else None
+                    )
+        except OSError as exc:
+            if pending_error is None:
+                if result is not None and acknowledged and not _preflight:
+                    return replace(
+                        result,
+                        standard_isolation=_standard_isolation_evidence(
+                            request, filesystem_cleanup="unverified"
+                        ),
+                        stderr=(
+                            result.stderr + "\nStandard sandbox filesystem cleanup is unverified"
+                        ).strip(),
+                    )
+                if request.protected_execution:
+                    raise CapabilityUnavailable(
+                        "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_setup; "
+                        f"mechanism=filesystem_or_native_launch; errno={exc.errno}; cleanup=unverified"
+                    ) from exc
+                raise FleetPlanInvalid(
+                    "Standard sandbox filesystem/namespace setup or cleanup could not be established"
+                ) from exc
+            cleanup_error = exc
+        cleanup_verified = (
+            cleanup_error is None and directory is not None and not Path(directory).exists()
+        )
+        if pending_error is not None:
+            if acknowledged:
+                pending_error.__dict__["standard_isolation"] = _standard_isolation_evidence(
+                    request, filesystem_cleanup="verified" if cleanup_verified else "unverified"
                 )
-                for name, value in request.env.items()
-                if name not in {"SSH_AUTH_SOCK", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"}
-            }
-            environment.update(
-                {
-                    "HOME": "/home/fleet",
-                    "USERPROFILE": "/home/fleet",
-                    "TMPDIR": "/tmp",
-                    "TMP": "/tmp",
-                    "TEMP": "/tmp",
-                    "XDG_CACHE_HOME": "/cache",
-                    "XDG_CONFIG_HOME": "/config",
-                    "XDG_DATA_HOME": "/home/fleet/.local/share",
-                    "XDG_STATE_HOME": "/home/fleet/.local/state",
-                }
-            )
-            args.extend(
-                (
-                    "--chdir",
-                    str(request.cwd),
-                    "--",
-                    *argv,
-                )
-            )
-            self._validate_standard_request(request)
-            try:
-                result = run_command(
-                    *standard_resource_scope_command(
-                        request.resources, self.standard_resource_executable
+            if cleanup_error is not None:
+                pending_error.add_note("Standard sandbox filesystem cleanup is unverified")
+                raise pending_error from cleanup_error
+            raise pending_error
+        if not cleanup_verified:
+            if result is not None and acknowledged and not _preflight:
+                return replace(
+                    result,
+                    standard_isolation=_standard_isolation_evidence(
+                        request, filesystem_cleanup="unverified"
                     ),
-                    *args,
-                    timeout=timeout,
-                    env={**environment, **self._standard_resource_environment},
-                    preserve_native_executable_path=False,
-                    cancel_requested=cancel_requested,
-                    termination_requested=request.termination_requested,
-                    stream_output=stream_output,
-                    process_observer=process_observer,
-                    runtime_supervision=runtime_supervision,
-                    terminal=request.terminal,
-                    input_data=request.input_data,
-                    pass_fds=(status.fileno(),),
-                    max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
-                    retain_output_tail=request.retain_output_tail,
+                    stderr=(
+                        result.stderr + "\nStandard sandbox filesystem cleanup is unverified"
+                    ).strip(),
                 )
-            except (CommandTimeoutExpired, CommandCancelledError) as exc:
-                status.seek(0)
-                if _standard_workload_exec_completed(status.read(4097), None):
-                    exc.standard_isolation = _standard_isolation_evidence(request)
-                raise
-            status.seek(0)
-            if not _standard_workload_exec_completed(status.read(4097), result.returncode):
-                if result.returncode == 0:
-                    raise FleetPlanInvalid(
-                        "Standard sandbox completed without native workload-exec evidence"
-                    )
-                return result
-            return replace(
-                result,
-                standard_isolation=_standard_isolation_evidence(request),
-            )
+            raise FleetPlanInvalid("Standard sandbox filesystem cleanup could not be verified")
+        assert result is not None
+        if _preflight:
+            return result
+        if not acknowledged:
+            if request.protected_execution:
+                raise CapabilityUnavailable(
+                    "Protected execution unavailable; backend=bubblewrap; phase=setup; "
+                    f"mechanism=native_workload_exec_ack; child_exit={result.returncode}"
+                )
+            if result.returncode == 0:
+                raise FleetPlanInvalid(
+                    "Standard sandbox completed without native workload-exec evidence"
+                )
+            return result
+        return replace(result, standard_isolation=_standard_isolation_evidence(request))
 
     def configuration_identity(self) -> str:
         return stable_id(
@@ -1139,6 +1342,8 @@ def _executable_sha256(path: str | None) -> str | None:
 
 def _standard_isolation_evidence(
     request: StandardIsolatedProcessRequest,
+    *,
+    filesystem_cleanup: Literal["verified", "unverified"] = "verified",
 ) -> PlanStandardIsolationEvidence:
     policy = request.resources
     limited = any(value is not None for value in policy.model_dump().values())
@@ -1150,7 +1355,19 @@ def _standard_isolation_evidence(
             remote_execution=False,
             experimental=False,
         ),
+        host_and_external_ip_networking="host_unrestricted" if request.host_network else "denied",
         workspace_read_only=request.read_only_workspace,
+        scoped_write_roots=tuple(
+            root.relative_to(request.workspace).as_posix() for root in request.allowed_write_roots
+        ),
+        protected_paths=tuple(path.as_posix() for path in sorted(LIVE_CHECKOUT_PROTECTED_PATHS))
+        if request.read_only_workspace
+        else (),
+        credential_visibility="codex_auth_file_read_write"
+        if request.credential_file is not None
+        else "none",
+        preflight="verified",
+        filesystem_cleanup=filesystem_cleanup,
         broker_socket_mounted=request.broker_directory is not None,
         private_configuration_overlay=request.private_configuration_directory is not None,
         resources=PlanResourceEvidence(
@@ -1204,6 +1421,7 @@ def _require_standard_bind_structure(
     *,
     system_runtime_roots: tuple[Path, ...] = (),
     private_file_identities: frozenset[tuple[int, int]] = frozenset(),
+    writable: bool = False,
 ) -> None:
     """Reject host IPC/special objects without reading file contents or following directory links.
 
@@ -1223,6 +1441,13 @@ def _require_standard_bind_structure(
             raise FleetPlanInvalid("Standard sandbox bind exceeds its physical entry budget")
         if (metadata.st_dev, metadata.st_ino) in private_file_identities:
             raise FleetPlanInvalid("Native bind exposes a private application file alias")
+        if writable and (
+            stat.S_ISLNK(metadata.st_mode)
+            or (stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1)
+        ):
+            raise FleetPlanInvalid(
+                "Scoped native write roots cannot expose symlinks or hardlinked files"
+            )
         if stat.S_ISLNK(metadata.st_mode):
             try:
                 target = path.resolve(strict=True)
@@ -1265,6 +1490,10 @@ def _require_standard_bind_structure(
                                 "Standard sandbox bind exceeds its pending-directory budget"
                             )
                         pending.append(Path(entry.path))
+                    elif writable and entry_metadata.st_nlink != 1:
+                        raise FleetPlanInvalid(
+                            "Scoped native write roots cannot expose hardlinked files"
+                        )
                     elif not stat.S_ISREG(mode):
                         raise FleetPlanInvalid(
                             "Standard sandbox bind exposes a host IPC/special object"

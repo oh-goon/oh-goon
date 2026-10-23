@@ -19,6 +19,8 @@ from typing import Any, Literal
 from oh_goon.core.agent_harness_contract import AgentHarnessObservation
 from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNativeAgent
 
+CODEX_BACKEND_HOME = "/oh-goon-codex-home"
+
 _MAX_EVENT_STREAM_BYTES = 1024 * 1024
 _MAX_EVENT_RECORD_BYTES = 256 * 1024
 _MAX_OBSERVATIONS = 128
@@ -111,7 +113,14 @@ def native_agent_command(
     if not workspace.is_absolute():
         raise AgentProviderError("Native command requires an absolute workspace")
     arguments = selected.definition.arguments
-    validate_native_agent_arguments(selected.agent, arguments)
+    validate_native_agent_arguments(
+        selected.agent, arguments, sandbox_owner=selected.profile.sandbox_owner
+    )
+    if (
+        selected.profile.sandbox_owner == "execution_backend"
+        and selected.profile.backend != "bubblewrap"
+    ):
+        raise AgentProviderError("Execution backend sandbox ownership requires Bubblewrap")
     if selected.agent == "codex" and interactive and selected.connection is None:
         raise AgentProviderError("Interactive Codex requires managed producer context delivery")
     configuration = selected.definition.configuration_directory
@@ -147,6 +156,11 @@ def native_agent_command(
             executable,
             "--no-daemon",
             *arguments,
+            *(
+                ("--sandbox", "danger-full-access")
+                if selected.profile.sandbox_owner == "execution_backend"
+                else ()
+            ),
             *(("exec", "--json", "--ephemeral") if not interactive else ()),
             "--cd",
             str(workspace),
@@ -159,8 +173,31 @@ def native_agent_command(
     )
 
 
-def validate_native_agent_arguments(agent: str, arguments: tuple[str, ...]) -> None:
-    """Reject known transport replacements before work; native code owns other options."""
+def validate_native_agent_arguments(
+    agent: str,
+    arguments: tuple[str, ...],
+    *,
+    sandbox_owner: Literal["harness", "execution_backend"] = "harness",
+) -> None:
+    """Reject replacement of owned transport or explicitly delegated enforcement."""
+    if sandbox_owner == "execution_backend":
+        if agent != "codex":
+            raise AgentProviderError(
+                "Execution backend sandbox ownership is not qualified for this native agent"
+            )
+        if any(
+            argument.partition("=")[0]
+            in {
+                "--sandbox",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--yolo",
+                "--approve-for-me",
+                "--not-so-yolo",
+            }
+            or (argument.startswith("-s") and not argument.startswith("--"))
+            for argument in arguments
+        ):
+            raise AgentProviderError("Execution backend owns the native sandbox selection")
     if agent == "pi" and any(argument.partition("=")[0] == "--api-key" for argument in arguments):
         raise AgentProviderError("Native credentials must not be supplied in command arguments")
     reserved = {
@@ -202,9 +239,13 @@ def codex_login_command(
     """Native sign-in and sandbox authority, without exporting authentication.
 
     Configure frozen native session instructions. Selected installed conformance
-    observes follow-up and compaction delivery, not model reasoning quality. Auth stays in the original
-    CODEX_HOME; the native tool filesystem never receives that directory.
-    Git and verification in this explicit local profile remain trusted local.
+    observes follow-up and compaction delivery, not model reasoning quality.
+    The harness-owned local profile keeps the original authentication home
+    outside native tool permissions.
+    Git and verification in the existing local profile remain trusted local.
+    Explicit execution-backend enforcement uses a private native home containing
+    only the separately bound file credential; child visibility and networking
+    remain the selected external boundary's declared guarantees.
     """
     login = selected.profile.codex_login
     if (
@@ -219,20 +260,32 @@ def codex_login_command(
     home = Path(login.home)
     writable = (workspace, scratch, *((evidence_state,) if evidence_state is not None else ()))
     require_codex_authentication_home_separation(home, (*read_roots, *writable))
-    filesystem = {":minimal": "read", **{str(root): "read" for root in read_roots}}
-    filesystem.update({str(root): "write" for root in writable})
-    rules = ", ".join(
-        f"{json.dumps(path, ensure_ascii=False)} = {json.dumps(access, ensure_ascii=False)}"
-        for path, access in filesystem.items()
-    )
+    delegated = selected.profile.sandbox_owner == "execution_backend"
+    if delegated:
+        if selected.profile.backend != "bubblewrap" or login.credential_store != "file":
+            raise AgentProviderError(
+                "Protected Codex login requires Bubblewrap and explicit file credentials"
+            )
+        permission_settings: tuple[str, ...] = ()
+    else:
+        filesystem = {":minimal": "read", **{str(root): "read" for root in read_roots}}
+        filesystem.update({str(root): "write" for root in writable})
+        rules = ", ".join(
+            f"{json.dumps(path, ensure_ascii=False)} = {json.dumps(access, ensure_ascii=False)}"
+            for path, access in filesystem.items()
+        )
+        permission_settings = (
+            'default_permissions="oh_goon"',
+            f"permissions.oh_goon={{filesystem={{{rules}}},network={{enabled=false}}}}",
+        )
     settings = (
         f"model={json.dumps(login.model, ensure_ascii=False)}",
         'model_provider="openai"',
         f"model_reasoning_effort={json.dumps(login.reasoning_effort, ensure_ascii=False)}",
         f"model_instructions_file={json.dumps(str(instructions), ensure_ascii=False)}",
         'approval_policy="never"',
-        'default_permissions="oh_goon"',
-        f"permissions.oh_goon={{filesystem={{{rules}}},network={{enabled=false}}}}",
+        *permission_settings,
+        *(('cli_auth_credentials_store="file"',) if login.credential_store == "file" else ()),
         f'projects.{json.dumps(str(workspace), ensure_ascii=False)}.trust_level="untrusted"',
         'web_search="disabled"',
         'shell_environment_policy.inherit="none"',
@@ -249,6 +302,7 @@ def codex_login_command(
         argv=(
             selected.definition.executable,
             "--no-daemon",
+            *(("--sandbox", "danger-full-access") if delegated else ()),
             "exec",
             "--json",
             "--ephemeral",
@@ -261,7 +315,10 @@ def codex_login_command(
             "-",
         ),
         input_file=instructions,
-        environment=(("CODEX_HOME", login.home), ("TMPDIR", str(scratch))),
+        environment=(
+            ("CODEX_HOME", CODEX_BACKEND_HOME if delegated else login.home),
+            ("TMPDIR", str(scratch)),
+        ),
     )
 
 

@@ -182,7 +182,7 @@ The existing owners enforce these contracts:
   Oh-Goon adds no authentication or agent loop. Its typed home/model/effort
   selection is frozen with the existing profile. The home is never copied,
   parsed, captured as repository source or exposed as a native tool root.
-- **Approved inference only.** The isolated workload has no host/external IP
+- **Approved managed inference only.** The broker-backed isolated workload has no host/external IP
   networking. Namespace-local HTTP reaches a fixed private Unix socket; the host
   broker permits only the selected API routes and exact model at the frozen
   endpoint. It refuses generic proxying, attachment retrieval through remote URLs
@@ -203,7 +203,7 @@ The existing owners enforce these contracts:
   transient output; no durable transcript or producer-packet replay is promised.
 
 Ordinary Bubblewrap evidence describes a shared host kernel, explicit mounts,
-network denial and selected native systemd resource caps. It does not establish
+the actual selected network mode and native systemd resource caps. It does not establish
 immutable runtime bytes, deep custody, installed-model quality or APP PASS.
 Workspace, configuration and explicit input binds reject host sockets, FIFOs
 and special objects before launch. System runtime links to host IPC outside all
@@ -212,6 +212,19 @@ the sandbox namespace. Links into another bound runtime root still fail, and
 private application file aliases remain forbidden in every bind.
 Writable private configuration overlays use native Bubblewrap 0.11 or newer
 capabilities; the selected workload rejects when they are unavailable.
+The separately selected `sandbox_owner: execution_backend` Codex profile delegates
+its tool filesystem enforcement to this same Bubblewrap owner. It retains source
+read-only by default and transports original `AgentRepairContext` directory roots
+only for the separately admitted native apply phase. Its exact Codex invocation
+alone receives host networking and a read/write original auth-file bind into a
+private native home. This is distinct from the existing local/native permission
+and managed-broker profiles: tool credential secrecy and network denial are not
+claimed. Profile compatibility and mount-topology preflight fail closed. Existing
+supervisor/Step/campaign owners require actual terminal quiescence and cleanup;
+Game Tape records effective facts, with missing historical facts left unknown.
+See [the explicit profile contract](../AGENT_PROVIDERS.md#select-backend-owned-protected-codex-execution)
+for scope, operator consent and qualification limits.
+
 The [retained workload ADR](../architecture/ADR_AGENT_WORKLOAD_CANONICAL_EXECUTION.md)
 continues to govern shared execution. Strict Agent execution remains unsupported;
 normal startup does not acquire a strict signer/custody qualification gate.

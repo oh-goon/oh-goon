@@ -5,12 +5,15 @@ from pathlib import Path
 from typing import Any, Literal
 
 from oh_goon.core.models.diagnostic import DiagnosticEvent
-from oh_goon.core.models.fleet_plan import ResolvedPlanStep
+from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep, ResolvedPlanStep
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.engine.command import CommandOutputObserver, CommandProcessObserver, CommandResult
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
-from oh_goon.integrations.fleet_plan_secret_redaction import streaming_host_secret_redactor
+from oh_goon.integrations.fleet_plan_secret_redaction import (
+    StreamingSecretRedactor,
+    streaming_host_secret_redactor,
+)
 
 
 def observed_command_runner(
@@ -35,10 +38,26 @@ def observed_command_runner(
         runtime_supervision: CommandRuntimeSupervision | None = None,
         **native_options: Any,
     ) -> CommandResult:
-        redactors = {
-            "stdout": streaming_host_secret_redactor(step, host_environment),
-            "stderr": streaming_host_secret_redactor(step, host_environment),
-        }
+        selected = step.native_agent if isinstance(step, ResolvedLocalSearchAgentStep) else None
+        credential_bearing_native_process = (
+            selected is not None
+            and selected.agent == "codex"
+            and selected.profile.sandbox_owner == "execution_backend"
+            and selected.profile.codex_login is not None
+            and bool(argv)
+            and argv[0] == selected.definition.executable
+            and native_options.get("credential_file") is not None
+        )
+        # Native authentication is opaque. Exact environment redaction cannot
+        # protect a file-backed credential printed by a descendant tool.
+        redactors: dict[Literal["stdout", "stderr"], StreamingSecretRedactor] = (
+            {}
+            if credential_bearing_native_process
+            else {
+                "stdout": streaming_host_secret_redactor(step, host_environment),
+                "stderr": streaming_host_secret_redactor(step, host_environment),
+            }
+        )
 
         def observe(stream: Literal["stdout", "stderr"], text: str) -> None:
             if stream_output is not None:
@@ -47,12 +66,16 @@ def observed_command_runner(
                 except Exception as exc:
                     emit_output_observer_failure(
                         diagnostics,
-                        exc,
+                        RuntimeError("Protected native protocol observer failed")
+                        if credential_bearing_native_process
+                        else exc,
                         step_id=step.step_id,
                         operation=f"provided_stream_{stream}",
                         fleet_run_id=fleet_run_id,
                         repository_id=repository_id,
                     )
+            if credential_bearing_native_process:
+                return
             try:
                 redacted = redactors[stream].feed(text)
                 if redacted:

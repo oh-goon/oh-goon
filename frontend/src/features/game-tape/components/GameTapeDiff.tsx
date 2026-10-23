@@ -67,6 +67,7 @@ export function GameTapeDiff({
               step.attempt_count_changed ? t("gameTape.diff.attemptsChanged", { base: step.base_attempt_count, current: step.compared_attempt_count }) : null,
               step.tool_changed ? t("gameTape.diff.toolChanged") : null,
               step.egress_changed ? t("gameTape.diff.egressChanged") : null,
+              step.isolation_changed ? t("gameTape.diff.isolationChanged") : null,
               step.resource_policy_changed ? t("gameTape.diff.resourcesChanged") : null,
               step.failure_signature_changed ? t("gameTape.diff.failureChanged") : null,
             ].filter(Boolean).join(" · ") || t("gameTape.diff.noFactChange")}</span>

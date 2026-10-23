@@ -15,6 +15,7 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
 )
 from oh_goon.integrations.agent_native_execution import (
+    CODEX_BACKEND_HOME,
     NativeAgentEventParser,
     codex_login_command,
     native_agent_command,
@@ -556,3 +557,72 @@ def test_opencode_unfinalized_or_blank_text_and_zero_exit_are_incomplete(
     assert not parse_native_agent_events(
         "opencode", events({"type": "step_start"}, {"type": "text", "part": part}), returncode=0
     ).settled
+
+
+@pytest.mark.parametrize("backend_owned", [False, True])
+def test_codex_file_login_preserves_native_authentication_and_instruction_transport(
+    tmp_path: Path, backend_owned: bool
+) -> None:
+    home = tmp_path / "native-auth"
+    home.mkdir()
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("full frozen task and producer evidence")
+    selected = replace(
+        selection("codex"),
+        profile=NativeAgentProfile(
+            backend="bubblewrap" if backend_owned else "local",
+            sandbox_owner="execution_backend" if backend_owned else "harness",
+            codex_login=CodexLoginConnection(
+                home=str(home),
+                model="gpt-6.1-sol",
+                reasoning_effort="ultra",
+                credential_store="file",
+            ),
+        ),
+    )
+    command = codex_login_command(
+        selected,
+        instructions=prompt,
+        workspace=tmp_path / "repo",
+        scratch=tmp_path / "scratch",
+        read_roots=(),
+    )
+    settings: dict[str, object] = {}
+    for index, value in enumerate(command.argv):
+        if value == "-c":
+            settings.update(tomllib.loads(command.argv[index + 1]))
+    assert settings["model"] == "gpt-6.1-sol"
+    assert settings["model_reasoning_effort"] == "ultra"
+    assert settings["model_instructions_file"] == str(prompt)
+    assert settings["cli_auth_credentials_store"] == "file"
+    assert settings["approval_policy"] == "never"
+    assert command.input_file == prompt and command.argv[-1] == "-"
+    assert dict(command.environment)["CODEX_HOME"] == (
+        CODEX_BACKEND_HOME if backend_owned else str(home)
+    )
+    if backend_owned:
+        assert "default_permissions" not in settings and "permissions" not in settings
+        assert command.argv[command.argv.index("--sandbox") + 1] == "danger-full-access"
+        assert str(home) not in command.argv
+    else:
+        assert settings["default_permissions"] == "oh_goon"
+        assert "--sandbox" not in command.argv
+
+
+def test_managed_codex_delegates_only_when_explicitly_selected(tmp_path: Path) -> None:
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("full task")
+    selected = replace(
+        selection("codex", arguments=("--model", "native-model")),
+        profile=NativeAgentProfile(backend="bubblewrap", sandbox_owner="execution_backend"),
+    )
+    command = native_agent_command(
+        selected, prompt_file=prompt, workspace=tmp_path, interactive=False
+    )
+    assert command.argv[command.argv.index("--sandbox") + 1] == "danger-full-access"
+    assert command.argv[command.argv.index("--model") + 1] == "native-model"
+    assert command.input_file == prompt
+    legacy = native_agent_command(
+        selection("codex"), prompt_file=prompt, workspace=tmp_path, interactive=False
+    )
+    assert "--sandbox" not in legacy.argv

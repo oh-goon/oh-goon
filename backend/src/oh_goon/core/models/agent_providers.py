@@ -217,6 +217,9 @@ class CodexLoginConnection(ImmutableModel):
     home: str = Field(min_length=1, max_length=4096)
     model: str = Field(min_length=1, max_length=256)
     reasoning_effort: str = Field(min_length=1, max_length=256)
+    credential_store: Literal["native", "file"] = Field(
+        default="native", exclude_if=lambda value: value == "native"
+    )
 
     @field_validator("home", "model", "reasoning_effort")
     @classmethod
@@ -230,6 +233,9 @@ class NativeAgentProfile(ImmutableModel):
     """Existing backend and resource policy selected for one native workload."""
 
     backend: Literal["local", "bubblewrap"] = "local"
+    sandbox_owner: Literal["harness", "execution_backend"] = Field(
+        default="harness", exclude_if=lambda value: value == "harness"
+    )
     allowed_agents: tuple[NativeAgentName, ...] = ("opencode", "pi", "codex")
     workspace_roots: tuple[str, ...] = Field(default=(), max_length=32)
     timeout_seconds: float = Field(default=7200.0, gt=0, le=21600, allow_inf_nan=False, strict=True)
@@ -239,12 +245,19 @@ class NativeAgentProfile(ImmutableModel):
 
     @model_validator(mode="after")
     def native_login_boundary(self) -> NativeAgentProfile:
-        if self.codex_login is not None and (
-            self.backend != "local" or self.inference_profile is not None
-        ):
-            raise ValueError(
-                "Codex login requires explicit local execution without broker inference"
-            )
+        if self.sandbox_owner == "execution_backend" and self.backend != "bubblewrap":
+            raise ValueError("Execution backend sandbox ownership requires Bubblewrap")
+        if self.codex_login is not None:
+            if self.inference_profile is not None:
+                raise ValueError("Codex login cannot use broker inference")
+            if self.backend == "bubblewrap" and (
+                self.sandbox_owner != "execution_backend"
+                or self.codex_login.credential_store != "file"
+            ):
+                raise ValueError(
+                    "Protected Codex login requires execution_backend sandbox ownership "
+                    "and explicit file credentials"
+                )
         return self
 
     @field_validator("allowed_agents")

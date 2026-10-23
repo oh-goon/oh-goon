@@ -16,8 +16,6 @@ from oh_goon.core.models.fleet_plan import (
     PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
     PLAN_TIMEOUT_RETURN_CODE,
     ResolvedPlanStep,
-    StepFailurePolicy,
-    StepLifecycle,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanOutputEvidence,
@@ -27,7 +25,9 @@ from oh_goon.core.models.fleet_plan_release_evidence import (
     KubernetesRolloutVerificationEvidence,
     PlanReleaseEffectEvidence,
 )
-from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt, RuntimeAuthorityReceipt
+from oh_goon.core.models.fleet_plan_step_primitives import StepFailurePolicy, StepLifecycle
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
+from oh_goon.engine.command_runtime_authority import RuntimeAuthorityReceipt
 from oh_goon.engine.errors import OperationCancelledError
 
 
@@ -51,6 +51,30 @@ class StepOutcome:
     standard_isolation: PlanStandardIsolationEvidence | None = None
     # Tail capture retains diagnostic text; evidence covers the whole original raw stream.
     stdout_evidence: PlanOutputEvidence | None = None
+
+    def __post_init__(self) -> None:
+        if process_boundary_settled(self) is False:
+            diagnostic = "Execution cleanup is unverified"
+            if diagnostic not in self.stderr:
+                object.__setattr__(
+                    self, "stderr", (self.stderr.rstrip() + "\n" + diagnostic).lstrip("\n")
+                )
+            if self.returncode == 0:
+                object.__setattr__(self, "returncode", PLAN_CONTRACT_RETURN_CODE)
+            object.__setattr__(self, "skipped", False)
+
+
+def process_boundary_settled(outcome: StepOutcome) -> bool | None:
+    """Preserve unknown historical closure and reject an observed cleanup failure."""
+    supervisor = outcome.supervisor
+    isolation = outcome.standard_isolation
+    if (supervisor is not None and not supervisor.final_process_group_quiescent) or (
+        isolation is not None and isolation.filesystem_cleanup == "unverified"
+    ):
+        return False
+    if supervisor is None or (isolation is not None and isolation.filesystem_cleanup != "verified"):
+        return None
+    return True
 
 
 def output_contract_failure(
@@ -100,6 +124,8 @@ def wait_for_retry(delay_seconds: float, cancel_requested: Callable[[], bool] | 
 
 
 def step_succeeded(step: ResolvedPlanStep, outcome: StepOutcome) -> bool:
+    if process_boundary_settled(outcome) is False:
+        return False
     if outcome.skipped:
         return True
     return outcome.returncode in getattr(step, "success_codes", (0,))
