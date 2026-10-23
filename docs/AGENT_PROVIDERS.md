@@ -191,8 +191,13 @@ The minimal Codex configuration disables its provider-hosted web search because
 the managed profile admits model inference only. Explicit native configuration
 remains unchanged; provider-executed tools and attachment retrieval through
 remote URLs or uploaded `file_id` references conflict with the broker and are
-rejected. This includes top-level `web_search_options`. Inline file bytes,
-data-image URLs, and native function schemas and arguments remain supported. See the native [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+rejected. This includes top-level `web_search_options`. The managed broker also
+rejects the top-level `prompt` field on Responses requests, including null or
+invalid shapes, because provider-hosted prompt templates are not admitted.
+Inline file bytes, data-image URLs, and native function schemas and arguments
+remain supported. Responses
+`instructions`, inline `input`, `prompt_cache_key`, `previous_response_id`, and
+`conversation` retain their native wire meaning. See the native [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 Explicit native configuration must target `http://127.0.0.1:18743` inside the
 namespace, use the selected API path/model and either no client key or the dummy

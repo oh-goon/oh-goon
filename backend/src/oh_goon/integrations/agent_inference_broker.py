@@ -108,6 +108,8 @@ def _request_body(raw: bytes, selected: ResolvedAgentModel, context: str) -> byt
         if any(key in body for key in ("mcp_servers", "remote_mcp_servers", "web_search_options")):
             raise ValueError("provider-executed services are not permitted")
         api = selected.provider.api
+        if api == "openai-responses" and "prompt" in body:
+            raise ValueError("provider-hosted prompts are not permitted")
         if "tools" in body:
             _check_tools(body["tools"], anthropic=api == "anthropic-messages")
         choice = body.get("tool_choice")
