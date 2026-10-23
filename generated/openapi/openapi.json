@@ -2216,13 +2216,8 @@
             "type": "string"
           },
           "reasoning_effort": {
-            "enum": [
-              "low",
-              "medium",
-              "high",
-              "xhigh",
-              "max"
-            ],
+            "maxLength": 256,
+            "minLength": 1,
             "title": "Reasoning Effort",
             "type": "string"
           }

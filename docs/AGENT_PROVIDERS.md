@@ -93,8 +93,10 @@ substitute for persisted refresh evidence. This probe reuses a selected sign-in;
 fresh browser sign-in uses the separate native interactive flow.
 The native sandbox permission probe remains
 separate; selection commands are in [backend test guidance](../backend/tests/README.md#optional-native-qualification).
-Model and reasoning effort are explicit native settings. User config
-and exec rules are ignored for this invocation, the project is untrusted, and
+Model and reasoning effort are explicit native settings. Oh-Goon transports
+bounded nonblank values without maintaining a model-effort allowlist; the
+installed Codex validates whether the selected model supports the effort. User
+config and exec rules are ignored for this invocation, the project is untrusted, and
 hooks, plugins, Apps, web search and native delegation are disabled. Native tools
 use Codex's restricted filesystem policy: platform binaries and selected runtime
 inputs are readable, the working repository and execution scratch are writable,

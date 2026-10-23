@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from oh_goon.core.models.agent_providers import (
     AgentProvidersConfig,
+    CodexLoginConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
 )
@@ -64,7 +65,7 @@ def test_native_defaults_do_not_request_inference_or_installation() -> None:
     assert NativeAgentProfile().timeout_seconds == 7200
 
 
-@pytest.mark.parametrize("conflict", ["bubblewrap", "broker", "effort"])
+@pytest.mark.parametrize("conflict", ["bubblewrap", "broker"])
 def test_codex_login_never_implicitly_downgrades_broker_policy(conflict: str) -> None:
     profile: dict[str, object] = {
         "codex_login": {
@@ -75,13 +76,25 @@ def test_codex_login_never_implicitly_downgrades_broker_policy(conflict: str) ->
     }
     if conflict == "bubblewrap":
         profile["backend"] = "bubblewrap"
-    elif conflict == "broker":
-        profile["inference_profile"] = "api"
     else:
-        profile["codex_login"] = {
-            "home": "/native/auth",
-            "model": "gpt-6-luna",
-            "reasoning_effort": "unknown",
-        }
+        profile["inference_profile"] = "api"
     with pytest.raises(ValidationError):
         NativeAgentProfile.model_validate(profile)
+
+
+@pytest.mark.parametrize(
+    "effort",
+    ["", " \t\r\n", "ultra\x00", "x" * 257],
+    ids=["empty", "whitespace", "nul", "oversized"],
+)
+def test_codex_login_rejects_malformed_native_effort(effort: str) -> None:
+    with pytest.raises(ValidationError):
+        CodexLoginConnection.model_validate_json(
+            json.dumps(
+                {
+                    "home": "/native/auth",
+                    "model": "gpt-6.1-sol",
+                    "reasoning_effort": effort,
+                }
+            )
+        )
