@@ -261,6 +261,7 @@ def codex_login_command(
     writable = (workspace, scratch, *((evidence_state,) if evidence_state is not None else ()))
     require_codex_authentication_home_separation(home, (*read_roots, *writable))
     delegated = selected.profile.sandbox_owner == "execution_backend"
+    temporary_directory = "/tmp" if delegated else str(scratch)
     if delegated:
         if selected.profile.backend != "bubblewrap" or login.credential_store != "file":
             raise AgentProviderError(
@@ -289,7 +290,7 @@ def codex_login_command(
         f'projects.{json.dumps(str(workspace), ensure_ascii=False)}.trust_level="untrusted"',
         'web_search="disabled"',
         'shell_environment_policy.inherit="none"',
-        f'shell_environment_policy.set={{PATH="/usr/local/bin:/usr/bin:/bin",TMPDIR={json.dumps(str(scratch), ensure_ascii=False)}}}',
+        f'shell_environment_policy.set={{PATH="/usr/local/bin:/usr/bin:/bin",TMPDIR={json.dumps(temporary_directory, ensure_ascii=False)}}}',
         "features.hooks=false",
         "features.plugin_hooks=false",
         "features.plugins=false",
@@ -317,7 +318,7 @@ def codex_login_command(
         input_file=instructions,
         environment=(
             ("CODEX_HOME", CODEX_BACKEND_HOME if delegated else login.home),
-            ("TMPDIR", str(scratch)),
+            ("TMPDIR", temporary_directory),
         ),
     )
 

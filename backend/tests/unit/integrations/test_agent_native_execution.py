@@ -596,6 +596,12 @@ def test_codex_file_login_preserves_native_authentication_and_instruction_transp
     assert settings["model_instructions_file"] == str(prompt)
     assert settings["cli_auth_credentials_store"] == "file"
     assert settings["approval_policy"] == "never"
+    expected_tmpdir = "/tmp" if backend_owned else str(tmp_path / "scratch")
+    assert 'shell_environment_policy.inherit="none"' in command.argv
+    assert settings["shell_environment_policy"] == {
+        "set": {"PATH": "/usr/local/bin:/usr/bin:/bin", "TMPDIR": expected_tmpdir},
+    }
+    assert dict(command.environment)["TMPDIR"] == expected_tmpdir
     assert command.input_file == prompt and command.argv[-1] == "-"
     assert dict(command.environment)["CODEX_HOME"] == (
         CODEX_BACKEND_HOME if backend_owned else str(home)

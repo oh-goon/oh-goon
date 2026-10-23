@@ -338,13 +338,14 @@ def test_installed_protected_codex_retains_context_with_native_code_mode(
         " else: raise AssertionError('protected write succeeded')\n"
         f"assert pathlib.Path({CODEX_BACKEND_HOME + '/auth.json'!r}).is_file()\n"
         f"assert not pathlib.Path({str(home)!r}).exists()\n"
-        "pathlib.Path('/tmp/protected-context-proof').write_text('allowed scratch')\n"
+        "assert os.environ['TMPDIR']=='/tmp'\n"
+        "(pathlib.Path(os.environ['TMPDIR'])/'protected-context-proof').write_text('allowed scratch')\n"
         "print('CONTEXT_FOLLOWUP_PROOF')\n"
     )
     followup = (
-        "import pathlib\n"
+        "import os,pathlib\n"
         "assert pathlib.Path('code.py').read_bytes()==b'VALUE = 41\\n'\n"
-        "assert pathlib.Path('/tmp/protected-context-proof').read_text()=='allowed scratch'\n"
+        "assert (pathlib.Path(os.environ['TMPDIR'])/'protected-context-proof').read_text()=='allowed scratch'\n"
         "print('CONTEXT_EDIT_PROOF')\n"
     )
     commands = tuple(shlex.join(("/usr/bin/python3", "-c", value)) for value in (script, followup))
@@ -391,6 +392,7 @@ def test_installed_protected_codex_retains_context_with_native_code_mode(
             assert 'model="gpt-6.1-sol"' in invocation.argv
             assert 'model_reasoning_effort="ultra"' in invocation.argv
             assert dict(invocation.environment)["CODEX_HOME"] == CODEX_BACKEND_HOME
+            assert dict(invocation.environment)["TMPDIR"] == "/tmp"
             assert invocation.input_file is not None
             prompt = invocation.input_file.read_bytes()
             payload = json.loads(prompt)

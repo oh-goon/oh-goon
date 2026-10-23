@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Thread
@@ -17,10 +18,24 @@ from oh_goon.cli_lock import run_stateless_lock
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.models.agent_providers import (
+    CodexLoginConnection,
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
 from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.models.agent_review import MAX_REVIEW_BYTES, AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
+from oh_goon.core.models.fleet_plan_evidence import CompletedPlanStepExecution
+from oh_goon.core.models.operation import FleetPlanOperationEvidence
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.product_identity import repository_id
+from oh_goon.engine.git import GitService
+from oh_goon.integrations.agent_native_execution import native_executable_sha256
+from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
+from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from tests.factories.agent_review import agent_review_case
 
@@ -641,3 +656,207 @@ def test_native_loop_reserves_review_and_retains_each_phase(
             release.set()
             server.shutdown()
             worker.join(timeout=5)
+
+
+_PROTECTED_PHASE_CODEX = r"""#!/usr/bin/python3
+import json,os,pathlib,sys
+prompt=sys.stdin.buffer.read(); data=json.loads(prompt)
+for index,argument in enumerate(sys.argv):
+    if argument=='-c' and sys.argv[index+1].startswith('model_instructions_file='):
+        assert pathlib.Path(json.loads(sys.argv[index+1].split('=',1)[1])).read_bytes()==prompt
+identity=data['identity']; context=data['context']; contract=data['output_contract']
+for root in (pathlib.Path(data['working_workspace']['root']),pathlib.Path('/workspace')):
+    for target in ('src/code.txt','.git/config','outside-agent-effect'):
+        try: (root/target).write_text('UNAUTHORIZED')
+        except OSError: pass
+        else: raise AssertionError('native reasoning obtained source writes')
+assert (pathlib.Path(os.environ['CODEX_HOME'])/'auth.json').is_file()
+pathlib.Path(os.environ['TMPDIR'],'native-disposable-state').write_text('scratch')
+source=(pathlib.Path(data['captured_repository'])/'src/code.txt').read_text()
+manifest=json.loads(pathlib.Path(data['complete_source_manifest']).read_text())
+member=next(m for m in manifest['repository'] if m['path']=='repo/src/code.txt')
+if 'oh-goon.agent-review/v1' in contract:
+    clean=source=='repaired\n'
+    record=dict(schema='oh-goon.agent-review/v1',**identity,verdict='CLEAN' if clean else 'FINDING',
+        summary='Complete review with physical source denial',
+        reviewed_paths={'complete_scope':identity['scope_identity']},findings=[] if clean else [
+            dict(finding_id='f1',explanation='Reproduced broken content',
+                evidence=[dict(path=member['path'],sha256=member['sha256'],line=1)])])
+elif 'oh-goon.agent-adjudication/v1' in contract:
+    refs=[dict(reviewer=r['reviewer'],finding_id=f['finding_id']) for r in context['reviews'] for f in r['findings']]
+    record=dict(schema='oh-goon.agent-adjudication/v1',candidate_identity=identity['candidate_identity'],
+        scope_identity=identity['scope_identity'],dispositions=[dict(**ref,decision='repair',rationale='One reproduced defect') for ref in refs],
+        queue=[dict(queue_id='q1',findings=refs,rationale='One causal root',regression_expectation='Verify repaired content')])
+else:
+    record=dict(schema='agent-patch-batch-v1',candidate_identity=identity['candidate_identity'],summary='Repair admitted source and behavioral check',
+        regressions=[dict(queue_id='q1',path='repo/tests/regression.txt',expectation='Require repaired content')],
+        operations=[dict(action='update',path='repo/src/code.txt',source_sha256=member['sha256'],replacement='repaired\n'),
+            dict(action='create',path='repo/tests/regression.txt',source_sha256=None,replacement='#!/bin/sh\n[ "$(cat src/code.txt)" = repaired ]\n')])
+print('RAW_NATIVE_AUTH_VISIBLE_CANARY',file=sys.stderr)
+print(json.dumps(dict(type='turn.started')))
+print(json.dumps(dict(type='item.completed',item=dict(type='agent_message',text=json.dumps(record)))))
+print(json.dumps(dict(type='turn.completed')))
+"""
+
+
+@pytest.mark.process
+@pytest.mark.skipif(
+    sys.platform != "linux" or shutil.which("bwrap") is None, reason="Linux Bubblewrap required"
+)
+def test_protected_native_campaign_keeps_exact_phase_scope_through_real_apply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installed_cli: None
+) -> None:
+    """A deterministic native protocol exercises real permission/admission transitions."""
+    public = tmp_path / "public-native"
+    public.mkdir()
+    program = public / "codex"
+    program.write_text(_PROTECTED_PHASE_CODEX)
+    program.chmod(0o755)
+    auth_home = tmp_path / "synthetic-auth"
+    auth_home.mkdir(mode=0o700)
+    auth = auth_home / "auth.json"
+    auth.write_text("synthetic fixture authentication; no real account")
+    auth.chmod(0o600)
+    backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="protected-phase-fixture",
+        definition=NativeAgentDefinition(executable=str(program), runtime_roots=(str(public),)),
+        profile=NativeAgentProfile(
+            backend="bubblewrap",
+            sandbox_owner="execution_backend",
+            allowed_agents=("codex",),
+            codex_login=CodexLoginConnection(
+                home=str(auth_home),
+                model="synthetic-native",
+                reasoning_effort="ultra",
+                credential_store="file",
+            ),
+        ),
+        executable_sha256=native_executable_sha256(program),
+        backend_configuration_id=backend.configuration_identity(),
+    )
+    resolver, path, repo, options = agent_review_case(tmp_path, native_agent=selected)
+    (repo / "src").mkdir()
+    (repo / "tests").mkdir()
+    (repo / "code.txt").rename(repo / "src/code.txt")
+    (repo / "check").write_text(
+        "#!/bin/sh\nset -eu\n[ ! -e /oh-goon-codex-home/auth.json ]\n"
+        'if [ -f tests/regression.txt ]; then /bin/sh tests/regression.txt; else [ "$(cat src/code.txt)" = repaired ]; fi\n'
+    )
+    # Reuse the real phase Goons as project imports, selected by the normal resolver.
+    for name in ("review", "adjudicate", "repair"):
+        source = tmp_path / "native-goons/agents" / name / "goon.yml"
+        source.write_text(source.read_text().replace("recipients: []", "recipients: [codex]"))
+    authored = yaml.safe_load(
+        (tmp_path / "native-goons/agents/agentic-review-repair-loop/goon.yml").read_text()
+    )
+    authored["execution"] = {"purpose": "verification"}
+    for edge in authored["goons"]:
+        edge["from"] = "native-goons"
+    path.write_text(yaml.safe_dump(authored, sort_keys=False))
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    index_before = (repo / ".git/index").read_bytes()
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state/app.sqlite"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    execution_lock = build_execution_lock(plan)
+    write_execution_lock(path.parent / "goon.lock", execution_lock)
+    lock_before = (path.parent / "goon.lock").read_bytes()
+    runner = native_profile_command_runner(
+        repo, selected, backend, RepositoryWorkspaceAuthority.pin_repository_subject
+    )
+    git = GitService(
+        command_runner=runner, observation_runner=partial(runner, read_only_workspace=True)
+    )
+    runtime = ApplicationRuntime.build(
+        standard_local=True, standard_process_isolation=backend, git_service=git
+    )
+    try:
+        runtime.locations.add(repo.parent)
+        result = runtime.plans.repair(
+            path,
+            repository_id=repository_id(repo),
+            budget=AgentRepairBudget(
+                max_attempts=2, timeout_seconds=180.0, step_timeout_seconds=30.0
+            ),
+            inputs=options["inputs"],
+            agent_repository_root=options["repository_root"],
+            agent_skill_root=options["skill_root"],
+            allowed_agent_acceptance=options["allowed_acceptance"],
+            review_write_roots=("src", "tests"),
+            native_agent=selected,
+            native_workspace=repo,
+        )
+        assert result.stop_reason.value == "converged", result.message
+        assert len(set(result.admitted_run_ids)) == 6 and not result.unresolved_run_ids
+        phases: list[str] = []
+        step_count = 0
+        records: list[AgentReviewRecord] = []
+        proposal_outputs: tuple[str, ...] | None = None
+        for index, detail in enumerate(result.attempts):
+            assert isinstance(detail.run.target, FleetPlanTarget)
+            context = detail.run.target.agent_repair
+            assert context is not None and context.phase is not None
+            phases.append(context.phase)
+            operation = detail.operations[0].evidence
+            assert isinstance(operation, FleetPlanOperationEvidence) and operation.plan is not None
+            phase_steps = operation.plan.steps
+            step_count += len(phase_steps)
+            if context.phase == "repair":
+                proposal_outputs = tuple(output.name for output in phase_steps[0].outputs)
+            assert context.previous_run_id == (
+                result.admitted_run_ids[index - 1] if index else None
+            )
+            assert context.original_execution_digest == execution_lock.digest
+            assert detail.outcome.value == "SUCCESS" and detail.run.status.terminal
+            assert runtime.runs.get(detail.run.fleet_run_id).operations == detail.operations
+            live = runtime.runs.game_tape_live_output(detail.run.fleet_run_id)
+            assert "RAW_NATIVE_AUTH_VISIBLE_CANARY" not in "".join(
+                chunk.text for chunk in live.chunks
+            )
+            for step in phase_steps:
+                assert isinstance(step, CompletedPlanStepExecution)
+                assert step.returncode == 0 and len(step.attempts) == 1
+                attempt = step.attempts[0]
+                isolation = attempt.standard_isolation
+                assert isolation is not None and isolation.workspace_read_only
+                assert isolation.filesystem_cleanup == "verified"
+                assert attempt.supervisor is not None
+                assert attempt.supervisor.final_process_group_quiescent is True
+                native = step.kind == "agent"
+                assert isolation.credential_visibility == (
+                    "codex_auth_file_read_write" if native else "none"
+                )
+                assert isolation.host_and_external_ip_networking == (
+                    "host_unrestricted" if native else "denied"
+                )
+                assert isolation.scoped_write_roots == (
+                    ("src", "tests") if context.phase == "repair" and not native else ()
+                )
+                assert not step.artifacts
+                records.extend(
+                    o.record
+                    for o in step.observations
+                    if isinstance(o, AgentReviewObservation)
+                    and isinstance(o.record, AgentReviewRecord)
+                )
+        assert phases == ["review", "adjudicate", "repair", "regression", "review", "verification"]
+        assert step_count == 13
+        assert [record.verdict for record in records] == ["FINDING"] * 4 + ["CLEAN"] * 4
+        assert (
+            records[0].candidate_identity
+            == next(iter(handoffs.values())).source.repository.content_identity
+        )
+        assert records[-1].candidate_identity != records[0].candidate_identity
+        assert "repo/tests/regression.txt" in records[-1].reviewed_paths
+        assert proposal_outputs == ("proposal",)
+        assert (repo / "src/code.txt").read_text() == "repaired\n"
+        assert (repo / "tests/regression.txt").is_file()
+        assert (repo / ".git/index").read_bytes() == index_before
+        assert (path.parent / "goon.lock").read_bytes() == lock_before
+    finally:
+        runtime.shutdown(wait_for_runs=True)
