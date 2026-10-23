@@ -8,6 +8,8 @@ from typing import cast
 import pytest
 
 from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
+    CodexServiceConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
     ResolvedNativeAgent,
@@ -272,7 +274,7 @@ def test_live_output_observer_failure_emits_diagnostic_without_changing_command_
     assert event.diagnostic_capability_affected == "live_output_capture"
 
 
-@pytest.mark.parametrize("launch", ["protected", "managed", "producer", "local"])
+@pytest.mark.parametrize("launch", ["protected", "managed", "producer", "local", "service"])
 def test_protected_stream_is_private_while_native_protocol_still_receives_it(launch):
     selected = ResolvedNativeAgent(
         agent="codex",
@@ -280,8 +282,13 @@ def test_protected_stream_is_private_while_native_protocol_still_receives_it(lau
         executable_sha256="a" * 64,
         definition=NativeAgentDefinition(executable="/native/codex"),
         profile=NativeAgentProfile(
-            backend="local" if launch == "local" else "bubblewrap",
-            sandbox_owner="harness" if launch == "local" else "execution_backend",
+            backend="local" if launch in {"local", "service"} else "bubblewrap",
+            sandbox_owner="harness" if launch in {"local", "service"} else "execution_backend",
+            codex_service=CodexServiceConnection(
+                home="/private/native", model="native", reasoning_effort="ultra"
+            )
+            if launch == "service"
+            else None,
         ),
     )
     step = ResolvedLocalSearchAgentStep(
@@ -330,7 +337,7 @@ def test_protected_stream_is_private_while_native_protocol_still_receives_it(lau
     assert "".join(text for stream, text in protocol if stream == "stdout") == canary
     assert "".join(text for stream, text in protocol if stream == "stderr") == canary
     retained = store.snapshot("run")
-    if launch in {"protected", "managed"}:
+    if launch in {"protected", "managed", "service"}:
         assert retained.chunks == ()
         assert canary not in retained.model_dump_json()
     else:
@@ -389,3 +396,70 @@ def test_protected_protocol_observer_exception_cannot_export_private_output():
     assert len(diagnostics) == 1
     assert diagnostics[0].message == "Protected native protocol observer failed"
     assert "synthetic-private-protocol-canary" not in diagnostics[0].model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "overlap",
+    ["workspace-equal", "workspace-parent", "workspace-child", "executable", "runtime-root"],
+)
+def test_codex_service_direct_run_rejects_native_state_overlap_before_source_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overlap: str
+) -> None:
+    from oh_goon.application import ApplicationRuntime
+    from oh_goon.integrations import agent_native_execution
+
+    workspace = tmp_path / "teams" / "repo"
+    workspace.mkdir(parents=True)
+    native_home = tmp_path / "native-owned"
+    native_home.mkdir()
+    program = tmp_path / "public" / "codex"
+    program.parent.mkdir()
+    program.write_text("synthetic executable; must not be read")
+    roots: tuple[str, ...] = ()
+    if overlap == "workspace-equal":
+        native_home = workspace
+    elif overlap == "workspace-parent":
+        native_home = workspace.parent
+    elif overlap == "workspace-child":
+        native_home = workspace / "private-native"
+        native_home.mkdir()
+    elif overlap == "executable":
+        program = native_home / "codex"
+        program.write_text("synthetic private file; must not be read")
+    else:
+        roots = (str(tmp_path),)
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="native-service",
+        definition=NativeAgentDefinition(executable=str(program), runtime_roots=roots),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(native_home), model="native", reasoning_effort="ultra"
+            )
+        ),
+        executable_sha256="a" * 64,
+    )
+    runtime = ApplicationRuntime.build(standard_local=True)
+    try:
+        monkeypatch.setattr(
+            agent_native_execution,
+            "verify_native_agent_executable",
+            lambda *args: pytest.fail("native file bytes were opened before separation"),
+        )
+        monkeypatch.setattr(
+            runtime.plans._resolver,
+            "resolve_frozen_agents",
+            lambda *args, **kwargs: pytest.fail("native state reached source capture"),
+        )
+        with pytest.raises(AgentProviderError, match="authentication home"):
+            runtime.plans.run_native_agent(
+                selected=selected,
+                workspace=workspace,
+                skill=None,
+                task="Native state must remain outside captured source",
+                role="review",
+            )
+        assert runtime.runs.history().items == ()
+    finally:
+        runtime.shutdown(wait_for_runs=True)

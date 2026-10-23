@@ -26,6 +26,10 @@ _MAX_MESSAGE_BYTES = 256 * 1024
 _MAX_REQUEST_BYTES = 4 * 1024 * 1024
 _MAX_PENDING_NOTIFICATIONS = 32
 _MAX_IGNORED_MESSAGES = 128
+_MAX_FEATURE_PAGES = 16
+_MAX_FEATURE_FLAGS = 512
+_FEATURE_PAGE_SIZE = 64
+_FEATURE_NAME = re.compile(r"^[a-z][a-z0-9_.]{0,127}$")
 _VERSION = re.compile(r"^[A-Za-z0-9_.-]+/([0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9_.-]+)?)\b")
 
 
@@ -100,8 +104,10 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         self._next_id = 0
         self._thread: str | None = None
         self._profile: str | None = None
+        self._instructions: str | None = None
         self._notifications: deque[dict[str, Any]] = deque()
         self._facts: dict[str, object] = {}
+        self._native_home: Path | None = None
         self._cleanup_status = "not_requested"
 
     async def __aenter__(self) -> Self:
@@ -136,6 +142,7 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
             raise AgentProviderError("Native Codex service connection already exists")
         self._owner = asyncio.current_task()
         self._facts.clear()
+        self._native_home = None
         stack = AsyncExitStack()
         self._stack = stack
         self._cleanup_status = "open"
@@ -194,6 +201,15 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
                 "capabilities": {"experimentalApi": self._experimental},
             },
         )
+        native_home = result.get("codexHome")
+        if isinstance(native_home, str):
+            candidate = Path(native_home)
+            try:
+                _socket_name(candidate)
+            except AgentProviderError:
+                pass
+            else:
+                self._native_home = candidate
         user_agent = result.get("userAgent")
         version = (
             _VERSION.match(user_agent)
@@ -223,6 +239,7 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         self._notifications.clear()
         self._thread = None
         self._profile = None
+        self._instructions = None
         if stack is not None:
             self._cleanup_status = "incomplete"
             try:
@@ -349,6 +366,102 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
             "permissionProfile/list", {"cwd": _socket_name(cwd), "cursor": cursor, "limit": 32}
         )
 
+    def require_native_home_separation(
+        self, read_roots: tuple[Path, ...], *, expected_home: Path | None = None
+    ) -> None:
+        """Reject tool grants that overlap native state without reading its files.
+
+        Paths are the original execution owner's normalized grants. The native
+        home is connection-private readiness metadata, never model/tool input.
+        Resolve only these directory identities to reject filesystem aliases;
+        native authentication/configuration file contents are never inspected.
+        """
+        self._require_owner()
+        native_home = self._native_home
+        if self._session is None or native_home is None:
+            raise AgentProviderError("Native Codex state separation is unavailable")
+        try:
+            native_home = native_home.resolve()
+        except (OSError, RuntimeError):
+            raise AgentProviderError("Native Codex state separation is unavailable") from None
+        if expected_home is not None:
+            try:
+                _socket_name(expected_home)
+                selected_home = expected_home.resolve()
+            except (AgentProviderError, OSError, RuntimeError):
+                raise AgentProviderError("Native Codex state separation is unavailable") from None
+            if native_home != selected_home:
+                raise AgentProviderError("Native Codex state differs from the resolved selection")
+        for root in read_roots:
+            try:
+                _socket_name(root)
+                root = root.resolve()
+            except (AgentProviderError, TypeError, AttributeError, OSError, RuntimeError):
+                raise AgentProviderError("Native Codex state separation is unavailable") from None
+            if root.is_relative_to(native_home) or native_home.is_relative_to(root):
+                raise AgentProviderError("Native Codex state overlaps an agent-readable root")
+
+    async def require_no_mcp_servers(self, thread_id: str) -> None:
+        """Require an empty native catalog without retaining its private inventory."""
+        self._require_experimental()
+        self._require_thread(thread_id)
+        result = await self._request(
+            "mcpServerStatus/list",
+            {
+                "threadId": thread_id,
+                "cursor": None,
+                "limit": 1,
+                "detail": "toolsAndAuthOnly",
+            },
+        )
+        if result.get("data") != [] or result.get("nextCursor") is not None:
+            raise AgentProviderError(
+                "Native Codex protected execution requires an empty MCP catalog"
+            )
+
+    async def feature_flags(self, thread_id: str) -> dict[str, bool]:
+        """Return bounded effective booleans, excluding native configuration values."""
+        self._require_experimental()
+        self._require_thread(thread_id)
+        flags: dict[str, bool] = {}
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        for _ in range(_MAX_FEATURE_PAGES):
+            result = await self._request(
+                "experimentalFeature/list",
+                {"threadId": thread_id, "cursor": cursor, "limit": _FEATURE_PAGE_SIZE},
+            )
+            data = result.get("data")
+            if not isinstance(data, list) or len(data) > _FEATURE_PAGE_SIZE:
+                raise AgentProviderError("Native Codex feature capability metadata is invalid")
+            for item in data:
+                if not isinstance(item, dict):
+                    raise AgentProviderError("Native Codex feature capability metadata is invalid")
+                name, enabled = item.get("name"), item.get("enabled")
+                if (
+                    not isinstance(name, str)
+                    or _FEATURE_NAME.fullmatch(name) is None
+                    or type(enabled) is not bool
+                    or name in flags
+                    or len(flags) >= _MAX_FEATURE_FLAGS
+                ):
+                    raise AgentProviderError("Native Codex feature capability metadata is invalid")
+                flags[name] = enabled
+            next_cursor = result.get("nextCursor")
+            if next_cursor is None:
+                return flags
+            if (
+                not isinstance(next_cursor, str)
+                or not next_cursor
+                or len(next_cursor) > 256
+                or not next_cursor.isprintable()
+                or next_cursor in seen_cursors
+            ):
+                raise AgentProviderError("Native Codex feature capability pagination is invalid")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+        raise AgentProviderError("Native Codex feature capability pagination bound exceeded")
+
     async def command_exec(
         self,
         command: tuple[str, ...],
@@ -396,9 +509,20 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
                 "ephemeral": ephemeral,
                 "approvalPolicy": "never",
                 "allowProviderModelFallback": False,
+                "environments": [
+                    {
+                        "environmentId": "local",
+                        "cwd": _socket_name(cwd),
+                        "runtimeWorkspaceRoots": [_socket_name(cwd)],
+                    }
+                ],
+                "selectedCapabilityRoots": [],
+                "runtimeWorkspaceRoots": [_socket_name(cwd)],
             },
         )
-        return self._select_thread(result, permissions)
+        selected = self._select_thread(result, permissions)
+        self._instructions = developer_instructions
+        return selected
 
     async def resume_thread(
         self,
@@ -406,12 +530,20 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         *,
         permissions: str,
         configuration: dict[str, Any] | None = None,
+        developer_instructions: str | None = None,
     ) -> dict[str, Any]:
         self._require_experimental()
         thread_id = _identifier(thread_id)
         permissions = _identifier(permissions)
+        if self._thread is None and developer_instructions is None:
+            raise AgentProviderError(
+                "Native continuation requires its original frozen instructions"
+            )
         if self._thread is not None and (
-            thread_id != self._thread or permissions != self._profile or configuration is not None
+            thread_id != self._thread
+            or permissions != self._profile
+            or configuration is not None
+            or (developer_instructions is not None and developer_instructions != self._instructions)
         ):
             raise AgentProviderError(
                 "Native continuation cannot replace its selected thread or profile"
@@ -423,9 +555,15 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
                 "permissions": _identifier(permissions),
                 "config": configuration,
                 "excludeTurns": True,
+                "developerInstructions": developer_instructions
+                if developer_instructions is not None
+                else self._instructions,
             },
         )
-        return self._select_thread(result, permissions, expected_id=thread_id)
+        selected = self._select_thread(result, permissions, expected_id=thread_id)
+        if developer_instructions is not None:
+            self._instructions = developer_instructions
+        return selected
 
     def _select_thread(
         self, result: dict[str, Any], permissions: str, *, expected_id: str | None = None

@@ -276,11 +276,46 @@ class FleetPlanService:
         require_native_workspace_runtime_separation(
             workspace, read_only_workspace=read_only_workspace
         )
+        if selected.profile.codex_service is not None:
+            from oh_goon.integrations.agent_native_execution import (
+                require_codex_authentication_home_separation,
+                verify_native_agent_executable,
+            )
+
+            service = selected.profile.codex_service
+            home = Path(service.home)
+            if not home.is_absolute() or ".." in home.parts:
+                raise FleetPlanInvalid("Codex service requires an explicit native state directory")
+            try:
+                home = home.resolve(strict=True)
+                if not home.is_dir():
+                    raise OSError("not a directory")
+            except (OSError, RuntimeError):
+                raise FleetPlanInvalid("Codex service state directory is unavailable") from None
+            require_codex_authentication_home_separation(
+                home,
+                (
+                    workspace,
+                    Path(selected.definition.executable or ""),
+                    *(Path(root) for root in selected.definition.runtime_roots),
+                ),
+            )
+            selected = replace(
+                selected,
+                profile=selected.profile.model_copy(
+                    update={"codex_service": service.model_copy(update={"home": str(home)})}
+                ),
+            )
+            verify_native_agent_executable(selected)
         if selected.profile.codex_login is not None:
             home = Path(selected.profile.codex_login.home)
             if workspace.is_relative_to(home) or home.is_relative_to(workspace):
                 raise FleetPlanInvalid("Codex authentication home must be outside the workspace")
-        if read_only_workspace and selected.profile.backend != "bubblewrap":
+        if (
+            read_only_workspace
+            and selected.profile.backend != "bubblewrap"
+            and selected.profile.codex_service is None
+        ):
             raise FleetPlanInvalid("Native read-only phases require the selected isolated backend")
         if selected.profile.backend == "bubblewrap":
             if (

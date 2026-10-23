@@ -13,7 +13,11 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
-from oh_goon.core.models.fleet_observation import AgentHarnessObservation, NativeAgentObservation
+from oh_goon.core.models.fleet_observation import (
+    AgentHarnessObservation,
+    NativeAgentObservation,
+    NativeServiceExecutionEvidence,
+)
 from oh_goon.core.models.fleet_plan import (
     ResolvedCommandStep,
     ResolvedFleetPlan,
@@ -46,13 +50,28 @@ def _native_step(agent: NativeAgentName) -> ResolvedLocalSearchAgentStep:
     )
 
 
-@pytest.mark.parametrize("agent_name", ("codex", "opencode", "pi"))
+@pytest.mark.parametrize(
+    ("agent_name", "service_execution"),
+    (("codex", False), ("codex", True), ("opencode", False), ("pi", False)),
+)
 def test_durable_native_claims_remain_step_local_and_cannot_overrule_process_failure(
     agent_name: NativeAgentName,
+    service_execution: bool,
 ) -> None:
     planned = (
         _native_step(agent_name),
         ResolvedCommandStep(step_id="verification", argv=("pytest",), timeout_seconds=10),
+    )
+    execution_facts = (
+        NativeServiceExecutionEvidence(
+            configuration_id="sha256:" + "4" * 64,
+            native_version="0.163.0",
+            permission_profile_id="oh_goon_selected_phase",
+            repository_access="read_only",
+            disabled_features=("apps", "hooks"),
+        )
+        if service_execution
+        else None
     )
     observation = NativeAgentObservation(
         agent=agent_name,
@@ -67,7 +86,10 @@ def test_durable_native_claims_remain_step_local_and_cannot_overrule_process_fai
         omitted_observations=6012,
         settled=True,
         failed=False,
+        execution=execution_facts,
     )
+    if execution_facts is None:
+        assert "execution" not in observation.model_dump(mode="json")
     output = PlanOutputEvidence(sha256=hashlib.sha256(b"").hexdigest(), byte_count=0, line_count=0)
     execution = FailedPlanStepExecution(
         step_id="agent",
@@ -106,6 +128,11 @@ def test_durable_native_claims_remain_step_local_and_cannot_overrule_process_fai
     assert agent.failure is not None and agent.failure.exit_code == 17
     assert agent.native_agent_observations == (observation,)
     assert agent.native_agent_observations[0].authority == "UNTRUSTED_HARNESS_CLAIM"
+    assert agent.native_agent_observations[0].execution == execution_facts
+    if execution_facts is not None:
+        assert execution_facts.authority == "ORIGINAL_STEP_EXECUTION"
+        assert execution_facts.preflight == "verified"
+        assert execution_facts.process_cleanup == "verified"
     assert agent.native_agent_observations[0].native_event_count == 6140
     assert agent.native_agent_observations[0].omitted_observations == 6012
     assert verification.native_agent_observations == ()

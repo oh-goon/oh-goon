@@ -163,6 +163,11 @@ class FleetPlanResolver:
             raise FleetPlanInvalid(
                 "Native Agent capture requires its explicit repository workspace"
             )
+        private_native_roots = (
+            (Path(native_agent.profile.codex_service.home),)
+            if native_agent is not None and native_agent.profile.codex_service is not None
+            else ()
+        )
         graph = self.analyze_source(plan_path)
         source_sha = graph.root.source_sha256
         if source_sha is None:
@@ -218,6 +223,7 @@ class FleetPlanResolver:
                     expected_repository=repository if native_agent is not None else None,
                     cancel_requested=cancel_requested,
                     tree_cache=trees,
+                    private_native_roots=private_native_roots,
                 )
                 if (
                     repository_reference is not None
@@ -731,6 +737,7 @@ class FleetPlanResolver:
         allowed_acceptance: tuple[str, ...],
         expected_source_sha256: str,
         skill_aliases: Mapping[str, str] | None = None,
+        private_native_roots: tuple[Path, ...] = (),
     ) -> dict[str, object]:
         """Read-only AG-01 projection through the original Plan/Goon graph and binder.
 
@@ -757,6 +764,7 @@ class FleetPlanResolver:
                 allowed_acceptance=allowed_acceptance,
                 plan_source_sha256=expected_source_sha256,
                 skill_aliases=aliases,
+                private_native_roots=private_native_roots,
             )
 
     def capture_agent_sources(
@@ -769,6 +777,7 @@ class FleetPlanResolver:
         allowed_acceptance: tuple[str, ...],
         expected_source_sha256: str,
         skill_aliases: Mapping[str, str] | None = None,
+        private_native_roots: tuple[Path, ...] = (),
     ) -> "FrozenAgentSourceCapture":
         """AG-02 prework capture using the same original graph and source reader.
 
@@ -785,6 +794,7 @@ class FleetPlanResolver:
             allowed_acceptance=allowed_acceptance,
             expected_source_sha256=expected_source_sha256,
             skill_aliases=skill_aliases,
+            private_native_roots=private_native_roots,
         )
 
     def _capture_agent_source_graph(
@@ -800,6 +810,7 @@ class FleetPlanResolver:
         previous_source: "FrozenAgentSourceCapture | None" = None,
         cancel_requested: Callable[[], bool] | None = None,
         locked_skills: tuple[LockedSkillSource, ...] | None = None,
+        private_native_roots: tuple[Path, ...] = (),
     ) -> "FrozenAgentSourceCapture":
         """One graph cut reused by AG-02A capture and AG-02B Step binding."""
         from oh_goon.services.agent_authoring_sources import capture_agent_sources
@@ -829,6 +840,7 @@ class FleetPlanResolver:
                 skill_aliases=aliases,
                 previous_source=previous_source,
                 cancel_requested=cancel_requested,
+                private_native_roots=private_native_roots,
             )
 
     def prepare_agent_step_handoff(

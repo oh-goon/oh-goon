@@ -76,6 +76,23 @@ OH_GOON_NATIVE_CODEX=/path/to/codex \
 uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_agent_run.py -k installed_codex
 ```
 
+The installed Codex service cases use only synthetic native state and a local
+Responses fixture. They qualify native tool follow-up, persisted protocol resume,
+explicit compaction, and an original Run with automatic compaction, frozen
+Hashmarks/Skill context, independent verification and durable cleanup evidence:
+
+```sh
+OH_GOON_NATIVE_CODEX=/opt/native-codex/bin/codex \
+OH_GOON_NATIVE_CODEX_RUNTIME_ROOT=/opt/native-codex \
+uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_codex_service.py backend/tests/integration/services/test_native_codex_service_run.py
+```
+
+Select one node when iterating on one defect. The public runtime must remain
+outside native stores. These cases establish neither real-account sign-in/refresh
+nor cross-Run continuation, WSL2/container compatibility or full repair campaigns.
+The owned Run's capability gates refuse ambient MCP/extension tool access and
+unsupported versions before its first model turn.
+
 The installed Codex context probe drives the real executable through the original
 Run and an independent verification Step. A bounded local Responses fixture
 requests real tools, reports enough usage to trigger native automatic compaction,

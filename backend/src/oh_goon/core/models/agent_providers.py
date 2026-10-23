@@ -226,6 +226,26 @@ class CodexLoginConnection(ImmutableModel):
         return value
 
 
+class CodexServiceConnection(ImmutableModel):
+    """Explicit native-owned directory scope and public service model settings.
+
+    Oh-Goon verifies directory separation without reading its files. Native Codex
+    alone owns authentication and personal configuration within that directory;
+    the original Step owns service startup and its explicit socket.
+    """
+
+    home: str = Field(min_length=1, max_length=4096)
+    model: str = Field(min_length=1, max_length=256)
+    reasoning_effort: str = Field(min_length=1, max_length=256)
+
+    @field_validator("home", "model", "reasoning_effort")
+    @classmethod
+    def bounded_native_value(cls, value: str) -> str:
+        if not value.strip() or "\x00" in value:
+            raise ValueError("native connection values must be nonblank without NUL")
+        return value
+
+
 class NativeAgentProfile(ImmutableModel):
     """Existing backend and resource policy selected for one native workload."""
 
@@ -239,11 +259,19 @@ class NativeAgentProfile(ImmutableModel):
     resources: CicdResourcePolicy = Field(default_factory=CicdResourcePolicy)
     inference_profile: str | None = None
     codex_login: CodexLoginConnection | None = None
+    codex_service: CodexServiceConnection | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def native_login_boundary(self) -> NativeAgentProfile:
         if self.sandbox_owner == "execution_backend" and self.backend != "bubblewrap":
             raise ValueError("Execution backend sandbox ownership requires Bubblewrap")
+        if self.codex_service is not None:
+            if self.codex_login is not None or self.inference_profile is not None:
+                raise ValueError("Codex service cannot use login-home or broker inference")
+            if self.backend != "local" or self.sandbox_owner != "harness":
+                raise ValueError("Codex service requires its native-owned tool sandbox")
         if self.codex_login is not None:
             if self.inference_profile is not None:
                 raise ValueError("Codex login cannot use broker inference")
@@ -404,7 +432,7 @@ class ResolvedNativeAgent:
 
     @property
     def disclosure_recipients(self) -> tuple[str, ...]:
-        if self.profile.codex_login is not None:
+        if self.profile.codex_login is not None or self.profile.codex_service is not None:
             return ("codex",)
         return (self.connection.provider_name,) if self.connection is not None else ()
 

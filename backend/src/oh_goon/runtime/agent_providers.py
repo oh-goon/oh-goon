@@ -26,6 +26,7 @@ from oh_goon.core.models.agent_providers import (
 )
 from oh_goon.integrations.agent_native_execution import (
     native_executable_sha256,
+    require_codex_authentication_home_separation,
     validate_native_agent_arguments,
 )
 from oh_goon.integrations.exact_file_write import (
@@ -131,6 +132,11 @@ def load_agent_providers(path: Path) -> AgentProvidersConfig:
                 )
                 if profile.codex_login is not None
                 else None,
+                "codex_service": profile.codex_service.model_copy(
+                    update={"home": _configuration_path(path, profile.codex_service.home)}
+                )
+                if profile.codex_service is not None
+                else None,
                 "workspace_roots": tuple(
                     str((path.parent / Path(root).expanduser()).resolve())
                     for root in profile.workspace_roots
@@ -207,6 +213,32 @@ def resolve_native_agent(
             "Native authentication and configuration remain service-owned; "
             "Codex/OpenCode configuration directories cannot be exposed to agent tools"
         )
+    service = profile.codex_service
+    if service is not None and (
+        name != "codex"
+        or definition.arguments
+        or definition.configuration_directory is not None
+        or profile.codex_login is not None
+        or profile.inference_profile is not None
+        or profile.backend != "local"
+        or profile.sandbox_owner != "harness"
+    ):
+        raise AgentProviderError(
+            "Codex service requires Codex with its native tool sandbox and no login-home, "
+            "broker inference or native argument/config overrides"
+        )
+    service_home = None
+    if service is not None:
+        try:
+            service_home = _existing_native_path(service.home, directory=True)
+        except OSError:
+            raise AgentProviderError(
+                "Selected Codex service state directory is unavailable"
+            ) from None
+        require_codex_authentication_home_separation(service_home, (selected_workspace,))
+        profile = profile.model_copy(
+            update={"codex_service": service.model_copy(update={"home": str(service_home)})}
+        )
     login = profile.codex_login
     if login is not None:
         if (
@@ -249,6 +281,10 @@ def resolve_native_agent(
             if definition.configuration_directory is not None
             else None
         )
+        if service_home is not None:
+            require_codex_authentication_home_separation(
+                service_home, (selected_executable, *runtime_roots)
+            )
         digest = native_executable_sha256(selected_executable)
     except OSError:
         raise AgentProviderError(
