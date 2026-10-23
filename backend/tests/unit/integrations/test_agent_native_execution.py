@@ -1,6 +1,8 @@
 import codecs
 import json
+import subprocess
 import tomllib
+from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from oh_goon.integrations.agent_native_execution import (
     codex_login_command,
     native_agent_command,
     parse_native_agent_events,
+    prepare_native_service_setup,
 )
 
 
@@ -615,3 +618,152 @@ def test_managed_codex_delegates_only_when_explicitly_selected(tmp_path: Path) -
         selection("codex"), prompt_file=prompt, workspace=tmp_path, interactive=False
     )
     assert "--sandbox" not in legacy.argv
+
+
+@pytest.mark.parametrize("agent", ["codex", "opencode"])
+def test_native_service_setup_has_no_io_or_ambient_secret_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
+) -> None:
+    class UnavailableEnvironment(Mapping[str, str]):
+        def __getitem__(self, key: str) -> str:
+            raise AssertionError("Service preparation read the environment")
+
+        def __iter__(self) -> Iterator[str]:
+            raise AssertionError("Service preparation iterated the environment")
+
+        def __len__(self) -> int:
+            raise AssertionError("Service preparation inspected the environment")
+
+    def refuse_io(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("Service preparation performed I/O")
+
+    monkeypatch.setenv("OPENCODE_PASSWORD", "synthetic-private-service-password")
+    program = tmp_path / "missing public runtime" / agent
+    socket = tmp_path / "operator-advertised.sock" if agent == "codex" else None
+    with monkeypatch.context() as boundary:
+        for method in ("resolve", "stat", "lstat", "open", "readlink", "cwd", "home"):
+            boundary.setattr(Path, method, refuse_io)
+        boundary.setattr(subprocess, "Popen", refuse_io)
+        boundary.setattr(subprocess, "run", refuse_io)
+        boundary.setattr(
+            "oh_goon.integrations.agent_native_execution.os.environ", UnavailableEnvironment()
+        )
+        recipe = prepare_native_service_setup(agent, executable=program, socket_path=socket)
+    assert recipe["status"] == "configured_not_connected"
+    assert recipe["started"] is False and recipe["execution_admitted"] is False
+    assert recipe["native_store_access"] == "not_requested"
+    assert recipe["unverified"] == [
+        "service_identity",
+        "native_authentication",
+        "effective_configuration",
+        "phase_policy",
+        "private_store_exclusion",
+        "tool_quiescence",
+    ]
+    assert "synthetic-private-service-password" not in json.dumps(recipe)
+
+
+def test_codex_service_recipe_preserves_native_advertised_alias(tmp_path: Path) -> None:
+    target = tmp_path / "native-owned-physical-socket"
+    advertised = tmp_path / "operator-advertised.sock"
+    advertised.symlink_to(target)
+    program = tmp_path / "public-codex"
+    recipe = prepare_native_service_setup("codex", executable=program, socket_path=advertised)
+    assert recipe["endpoint"] == "unix://" + str(advertised)
+    assert recipe["launch_argv"] == [
+        str(program),
+        "app-server",
+        "--listen",
+        "unix://" + str(advertised),
+    ]
+    assert recipe["connect_argv"] == [
+        str(program),
+        "app-server",
+        "proxy",
+        "--sock",
+        str(advertised),
+    ]
+    assert recipe["transport"] == "codex-app-server-jsonl-proxy"
+    assert recipe["recipe_interface_version"] == "0.163.0"
+    assert recipe["readiness"] == {
+        "methods": ["initialize", "initialized"],
+        "retained_fields": ["userAgent", "platformFamily", "platformOs"],
+    }
+    assert str(target) not in json.dumps(recipe)
+    assert "account/" not in json.dumps(recipe)
+
+
+def test_opencode_service_recipe_keeps_its_native_stdin_lease(tmp_path: Path) -> None:
+    program = tmp_path / "public-opencode"
+    recipe = prepare_native_service_setup("opencode", executable=program)
+    assert recipe["launch_argv"] == [
+        str(program),
+        "serve",
+        "--stdio",
+        "--hostname",
+        "127.0.0.1",
+        "--port",
+        "0",
+    ]
+    assert recipe["endpoint"] is None and recipe["connect_argv"] is None
+    assert recipe["transport"] == "opencode-v2-http"
+    assert recipe["recipe_interface_version"] == "2.1.2"
+    assert recipe["authentication"] == {"username": "opencode", "password_env": "OPENCODE_PASSWORD"}
+    assert recipe["stdin_lease"] is True
+    assert recipe["endpoint_discovery"] == {
+        "source": "first_stdout_json",
+        "field": "url",
+        "max_bytes": 65536,
+    }
+    assert recipe["readiness"] == {
+        "method": "GET",
+        "path": "/api/info",
+        "retained_fields": ["version", "pid"],
+    }
+
+
+@pytest.mark.parametrize("field", ["executable", "socket_path"])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        Path("relative/native"),
+        Path("/"),
+        Path("/native/../private"),
+        Path("//native/ambiguous"),
+        Path("/native/PRIVATE\x00"),
+        Path("/native/PRIVATE\n"),
+        Path("/native/PRIVATE\t"),
+        Path("/native/PRIVATE\x1b"),
+        Path("/native/PRIVATE\ud800"),
+        Path("/" + "x" * 4096),
+    ],
+)
+def test_service_recipe_refuses_invalid_paths_without_echoing_them(
+    field: str, invalid: Path
+) -> None:
+    arguments = {"executable": Path("/public/codex"), "socket_path": Path("/operator/control.sock")}
+    arguments[field] = invalid
+    with pytest.raises(AgentProviderError) as error:
+        prepare_native_service_setup("codex", **arguments)
+    assert "PRIVATE" not in str(error.value)
+    assert str(invalid) not in str(error.value)
+
+
+def test_service_recipe_requires_agent_specific_endpoint_selection() -> None:
+    program = Path("/public/native")
+    with pytest.raises(AgentProviderError, match="explicit advertised"):
+        prepare_native_service_setup("codex", executable=program)
+    with pytest.raises(AgentProviderError, match="does not accept"):
+        prepare_native_service_setup(
+            "opencode", executable=program, socket_path=Path("/operator/socket")
+        )
+    with pytest.raises(AgentProviderError) as error:
+        prepare_native_service_setup("PRIVATE_UNSUPPORTED", executable=program)
+    assert "PRIVATE_UNSUPPORTED" not in str(error.value)
+
+
+def test_service_recipe_accepts_printable_bounded_paths_without_resolving() -> None:
+    program = Path("/" + "x" * 4095)
+    socket = Path("/operator/printed æ socket")
+    recipe = prepare_native_service_setup("codex", executable=program, socket_path=socket)
+    assert recipe["connect_argv"] == [str(program), "app-server", "proxy", "--sock", str(socket)]

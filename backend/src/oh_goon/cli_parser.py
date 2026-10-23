@@ -42,12 +42,15 @@ def build_parser() -> argparse.ArgumentParser:
 def _add_agent_commands(subparsers):
     """Agent data operations and separately configured model connections."""
     agent = subparsers.add_parser(
-        "agent", help="Agent data operations and model provider connections"
+        "agent", help="Agent data operations, model providers and native service preparation"
     )
     commands = agent.add_subparsers(dest="agent_command", required=True)
     from oh_goon.cli_agent_providers import add_provider_commands
 
     add_provider_commands(commands)
+    from oh_goon.cli_agent_services import add_service_commands
+
+    add_service_commands(commands)
     apply = commands.add_parser(
         "apply", help="Apply one frozen source-bound replacement to the selected workspace"
     )

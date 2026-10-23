@@ -234,21 +234,40 @@ Unknown separation rejects protected admission. See the
 
 ## Native service integration design
 
-An explicit native service adapter is planned, not implemented. It belongs at the
-existing native integration boundary and consumes the same frozen harness input
-and typed phase acceptors. `runtime/agent_providers.py` freezes endpoint/protocol
-selection; existing Fleet admission and `AgentRepairContext` bind the workspace,
-phase and execution capabilities. The native service alone owns authentication,
-personal configuration, sessions, tools and compaction. No new reasoning loop,
-provider credential store, scheduler or recovery manager is introduced.
+The existing Agent CLI owns offline `agent service prepare`: explicit absolute
+public executable selection, a required absolute Codex socket path, and a
+versioned native setup recipe. It performs no executable/socket/store/environment
+secret reads, configuration writes, process launch, network request, account or
+session operation. Output remains `configured_not_connected`, `started: false`
+and `execution_admitted: false`; it creates no native profile or runtime consumer.
+There is no endpoint-probe command. See the [operator preparation
+contract](../AGENT_PROVIDERS.md#prepare-a-native-service-endpoint).
 
-Codex app-server and OpenCode's server/client-only SDK are native protocols to
-qualify. No endpoint has been established by reading these contracts, and an
-already running agent is not automatically an admitted service. Preserve the
-operator's existing server; do not start, dispose or kill it implicitly. The
-original execution owner must bind service/peer identity and a single owned native
-session, supervise its deadline, cancel that session and retain actual closure or
-uncertainty. A native abort acknowledgement is not physical teardown proof.
+Actual service execution remains planned. It belongs at the existing native
+integration boundary and must consume the same frozen harness input and typed
+phase acceptors. `runtime/agent_providers.py` remains the future endpoint/protocol
+resolution owner; existing Fleet admission and `AgentRepairContext` bind the
+workspace, phase and execution capabilities. The native service alone owns
+authentication, personal configuration, sessions, tools and compaction. No new
+reasoning loop, provider credential store, scheduler or recovery manager is
+introduced.
+
+Codex app-server and OpenCode's [V2 CLI](https://dev.opencode.ai/v2/docs/cli/) and
+[V2 API](https://dev.opencode.ai/v2/docs/api) are protocols to qualify. Prepared
+Codex server/proxy arguments retain the exact native socket path and native
+symlink/rendezvous checks. The OpenCode 2.1.2 recipe uses a parent-held stdin lease
+and readiness JSON before authenticated HTTP `/api/info`; `--stdio` is not a
+stdio-only API. A future parent supplies a fresh private `OPENCODE_PASSWORD`, not
+a native provider credential. Its secret must never reach argv, logs, model or
+tool environments. The current helper implements no parent lifecycle or network
+probe, and supplied paths have not been version-probed.
+
+No endpoint has been established by preparation, and an already running agent is
+not automatically an admitted service. Preserve the operator's existing server;
+do not start, dispose or kill it implicitly. The original execution owner must
+bind service/peer identity and a single owned native session, supervise its
+deadline, cancel that session and retain actual closure or uncertainty. A native
+abort acknowledgement is not physical teardown proof.
 
 The selected backend must establish the server's actual tool boundary. Sandboxing
 only the client does not constrain a pre-existing host server. Native permission

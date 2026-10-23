@@ -50,6 +50,89 @@ class NativeAgentEvents:
     omitted_observations: int = 0
 
 
+def prepare_native_service_setup(
+    agent: str, *, executable: Path, socket_path: Path | None = None
+) -> dict[str, object]:
+    """Author operator setup without touching programs, native stores or endpoints."""
+    if agent not in {"codex", "opencode"}:
+        raise AgentProviderError("Native service setup supports Codex or OpenCode")
+    if agent == "codex" and socket_path is None:
+        raise AgentProviderError("Codex service setup requires an explicit advertised socket path")
+    if agent == "opencode" and socket_path is not None:
+        raise AgentProviderError("OpenCode service setup does not accept a Unix socket path")
+    paths = (executable, *((socket_path,) if socket_path is not None else ()))
+    for path in paths:
+        if not isinstance(path, Path):
+            raise AgentProviderError("Native service setup requires explicit absolute paths")
+        value = str(path)
+        if (
+            not value.strip()
+            or len(value) > 4096
+            or not value.isprintable()
+            or not path.is_absolute()
+            or not path.name
+            or ".." in path.parts
+            or path.anchor == "//"
+        ):
+            raise AgentProviderError(
+                "Native service paths must be absolute, normalized and printable within 4096 characters"
+            )
+    if socket_path is not None and (
+        executable == socket_path
+        or executable in socket_path.parents
+        or socket_path in executable.parents
+    ):
+        raise AgentProviderError("Native executable and socket paths must be disjoint")
+    shared: dict[str, object] = {
+        "status": "configured_not_connected",
+        "agent": agent,
+        "started": False,
+        "execution_admitted": False,
+        "native_store_access": "not_requested",
+        "unverified": [
+            "service_identity",
+            "native_authentication",
+            "effective_configuration",
+            "phase_policy",
+            "private_store_exclusion",
+            "tool_quiescence",
+        ],
+    }
+    program = str(executable)
+    if agent == "codex":
+        assert socket_path is not None
+        advertised = str(socket_path)
+        endpoint = "unix://" + advertised
+        return {
+            **shared,
+            "recipe_interface_version": "0.163.0",
+            "transport": "codex-app-server-jsonl-proxy",
+            "endpoint": endpoint,
+            "launch_argv": [program, "app-server", "--listen", endpoint],
+            "connect_argv": [program, "app-server", "proxy", "--sock", advertised],
+            "readiness": {
+                "methods": ["initialize", "initialized"],
+                "retained_fields": ["userAgent", "platformFamily", "platformOs"],
+            },
+        }
+    return {
+        **shared,
+        "recipe_interface_version": "2.1.2",
+        "transport": "opencode-v2-http",
+        "endpoint": None,
+        "launch_argv": [program, "serve", "--stdio", "--hostname", "127.0.0.1", "--port", "0"],
+        "connect_argv": None,
+        "authentication": {"username": "opencode", "password_env": "OPENCODE_PASSWORD"},
+        "stdin_lease": True,
+        "endpoint_discovery": {
+            "source": "first_stdout_json",
+            "field": "url",
+            "max_bytes": 65536,
+        },
+        "readiness": {"method": "GET", "path": "/api/info", "retained_fields": ["version", "pid"]},
+    }
+
+
 def native_executable_sha256(path: Path) -> str:
     """Observe public executable bytes once with bounded, race-checked transfer."""
     if not os.access(path, os.X_OK):

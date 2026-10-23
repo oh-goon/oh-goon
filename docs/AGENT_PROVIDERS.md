@@ -141,12 +141,53 @@ Unknown separation blocks the protected workflow. Native store conventions stay
 with their native owner; Oh-Goon must not add an ambient path blacklist, scan
 stores or implement another native-configuration resolver to claim completion.
 
+### Prepare a native service endpoint
+
+`oh-goon agent service prepare` prints an offline recipe. It does not inspect the
+executable, socket, native home, settings, credentials or environment secrets;
+write configuration; start a process; connect to an endpoint; or submit work.
+Its result is `configured_not_connected`, with `started: false` and
+`execution_admitted: false`. It creates no native profile or runtime service
+selection. No endpoint probe command is implemented.
+
+Select an absolute public executable path explicitly; PATH discovery and native
+version probing are not part of preparation. Codex additionally requires an
+explicit absolute socket path. OpenCode rejects `--socket`. For a POSIX operator
+setup, create a private directory outside the repository and native stores using
+the operating system's `mktemp` (which creates the directory with mode 0700):
+
+```sh
+oh_goon_service_directory="$(mktemp -d /tmp/oh-goon-native-service.XXXXXXXX)"
+oh-goon agent service prepare --agent codex --executable /opt/native-codex/bin/codex --socket "$oh_goon_service_directory/codex.sock" --json
+oh-goon agent service prepare --agent opencode --executable /opt/native-opencode/bin/opencode --json
+```
+
+The helper only prints the following native setup contracts, based on the
+observed public Codex 0.163.0 and OpenCode 2.1.2 interfaces. It does not establish
+the version or compatibility of the executable at a supplied path:
+
+| Agent | Prepared native recipe and remaining owner work |
+| --- | --- |
+| Codex | Server argv: `app-server --listen unix://PATH`; client proxy argv: `app-server proxy --sock PATH`. Preserve the exact advertised socket path and native symlink/rendezvous validation; Oh-Goon must not manually resolve, replace or repoint it. The native service owns sign-in/configuration. No server or proxy is started by preparation. |
+| OpenCode 2.1.2 | Server argv: `serve --stdio --hostname 127.0.0.1 --port 0`. A future owning parent must generate a private ephemeral transport password in `OPENCODE_PASSWORD`, hold the stdin lease, parse bounded first-line JSON containing `url`, and use authenticated `GET /api/info` with Basic username `opencode`. Preparation implements none of that parent lifecycle and prints no secret value. |
+
+OpenCode's `--stdio` is a readiness/ownership channel; the service API still uses
+HTTP. Keep its transport credential out of argv, URLs, logs and agent/tool
+environments. Restrict a future client to the exact loopback endpoint, without
+redirects, ambient proxies, discovery or fallback. Plain HTTP over a non-loopback
+address is not this recipe. Remote transport and host/process secrecy require
+separate qualification. A bounded non-secret version/identity response establishes
+only endpoint readiness, never provider sign-in, model availability, native-store
+exclusion or protected execution. Do not call settings, auth, session-list or
+other broad APIs as a readiness substitute.
+
 ### Native service adapter design
 
-This is planned integration, not an implemented `native_service` profile, endpoint
-or CLI command. Existing native command adapters retain their current execution
-path. A running desktop/CLI instance alone does not establish a supported endpoint
-or protected tool access.
+Service execution remains planned integration. The preparation command above
+prints a recipe; there is no implemented `native_service` profile, connected
+endpoint or Run consumer. Existing native command adapters retain their current
+execution path. A running desktop/CLI instance alone does not establish a
+supported endpoint or protected tool access.
 
 The intended client submits exact frozen task, qualified Hashmarks evidence and
 Skill instructions through the native session protocol. The native service retains
@@ -157,15 +198,16 @@ verification and result acceptance; it does not rebuild the native reasoning loo
 | Native service | Protocol to qualify |
 | --- | --- |
 | Codex | Its [app-server protocol](https://learn.chatgpt.com/docs/app-server), with native-managed authentication, threads/turns and a version-specific effective tool policy. Public Codex 0.163.0 includes an explicit-socket proxy; that does not establish that a usable endpoint is running here. External-token authentication would transfer credential lifecycle to the caller and does not satisfy this design. |
-| OpenCode | Its [server API](https://opencode.ai/docs/server/) and [client-only SDK](https://opencode.ai/docs/sdk/#client-only) can address existing sessions, submit prompts, observe events, abort and continue native context. Qualify the selected server's protocol; do not start a second service implicitly. |
+| OpenCode | Its [V2 CLI](https://dev.opencode.ai/v2/docs/cli/) and [V2 API](https://dev.opencode.ai/v2/docs/api) describe the shared native service and owned session operations. Installed 2.1.2 uses `--server`, `OPENCODE_PASSWORD` and `/api/info`; V1 `attach`, SDK and `/global/health` examples do not define this recipe. Qualify the selected server's exact protocol; do not start or replace a shared service implicitly. |
 
 API transport does not enforce filesystem permissions on a server's tools. An
 Oh-Goon client inside Bubblewrap cannot constrain tools executed by an unrelated
 host service. Each admitted phase needs a qualified tool boundary that denies
 native-store access, enforces read-only review/proposal/re-review, and grants only
 separately admitted repair roots. OpenCode's
-[Plan agent](https://opencode.ai/docs/agents/) leaves shell actions under
-native permission configuration; selecting Plan is insufficient protection.
+[V2 permission contract](https://dev.opencode.ai/v2/docs/permissions/) leaves
+shell execution with host filesystem, process and network authority; selecting
+Plan or action rules is insufficient physical protection.
 Codex `externalSandbox` likewise delegates enforcement rather than creating it.
 A native harness sandbox may be the selected backend mechanism when its actual
 phase policy, private-read/write denials and lifecycle are verified. This does not
