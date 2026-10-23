@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 
 import pytest
@@ -11,11 +12,14 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.agent_review import (
+    MAX_REVIEW_BYTES,
     AgentAdjudicationRecord,
     AgentReviewRecord,
     accept_review,
     review_scope,
 )
+from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+from oh_goon.integrations.agent_review_execution import accept_agent_phase_output
 from oh_goon.services.fleet_plan_repair import AgentReviewRepairCampaign
 from tests.factories.agent_review import agent_review_case
 from tests.factories.shipped_templates import PLAN_TEMPLATES
@@ -544,3 +548,92 @@ def test_native_phase_constraints_fail_before_first_phase(tmp_path, attack):
             passes=3,
             write_roots=("code.txt",),
         )
+
+
+def test_review_context_retains_source_and_original_skill_for_adjudication(tmp_path):
+    resolver, path, repo, options = agent_review_case(tmp_path)
+    (tmp_path / "skills/adjudicate/SKILL.md").write_text("# Distinct adjudication guidance\n")
+    plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    campaign = AgentReviewRepairCampaign(
+        plan,
+        handoffs,
+        resolver=resolver,
+        plan_path=path,
+        capture_options=options,
+        passes=2,
+        write_roots=("code.txt",),
+    )
+    admitted = []
+    for step in campaign.plan.steps:
+        handoff = handoffs[step.step_id]
+        members = handoff.source.repository.members
+        full_paths = ["repo/" + member.path for member in members]
+        source = next(member for member in members if member.path == "code.txt")
+        wire = dict(
+            schema="oh-goon.agent-review/v1",
+            reviewer=step.step_id,
+            candidate_identity=handoff.source.repository.content_identity,
+            scope_identity=review_scope(handoff),
+            skill_identity=handoff.source.skill.content_identity,
+            verdict="FINDING",
+            summary="Reproduced source defect",
+            reviewed_paths={"complete_scope": review_scope(handoff)},
+            findings=[
+                dict(
+                    finding_id="f1",
+                    explanation="Repair the broken source",
+                    evidence=[dict(path="repo/code.txt", sha256=source.sha256, line=1)],
+                )
+            ],
+        )
+        text = json.dumps(wire)
+        assert len(text.encode()) < MAX_REVIEW_BYTES
+        outcome = accept_agent_phase_output(
+            step, handoff, StepOutcome(argv=("review",), returncode=0, stdout=text)
+        )
+        record = outcome.observations[0].record
+        assert record.reviewed_paths == tuple(full_paths)
+        assert record.model_dump(mode="json")["reviewed_paths"] == full_paths
+        assert json.loads(outcome.stdout) == wire
+        assert accept_review(outcome.stdout, handoff, step.step_id) == record
+        admitted.append(record)
+    campaign.reviews = tuple(admitted)
+    campaign.phase = "adjudicate"
+    phase = campaign._select_phase()
+    step = phase.steps[0]
+    context = json.loads(step.review_context)
+    assert len(step.review_context.encode()) < MAX_REVIEW_BYTES
+    assert len(context["reviews"]) == 4
+    for record, compact in zip(admitted, context["reviews"], strict=True):
+        assert compact["reviewed_paths"] == {"complete_scope": record.scope_identity}
+        assert compact["findings"] == record.model_dump(mode="json")["findings"]
+        assert compact["skill_identity"] == record.skill_identity
+    handoff = handoffs[step.step_id]
+    assert all(
+        record.skill_identity != handoff.source.skill.content_identity for record in admitted
+    )
+    finding_refs = [{"reviewer": record.reviewer, "finding_id": "f1"} for record in admitted]
+    adjudication = dict(
+        schema="oh-goon.agent-adjudication/v1",
+        candidate_identity=campaign.candidate_identity,
+        scope_identity=campaign.scope_identity,
+        dispositions=[
+            {**ref, "decision": "repair", "rationale": "One observed defect"}
+            for ref in finding_refs
+        ],
+        queue=[
+            dict(
+                queue_id="q1",
+                findings=finding_refs,
+                rationale="One causal root",
+                regression_expectation="Reproduce the source defect",
+            )
+        ],
+    )
+    accepted = accept_agent_phase_output(
+        step,
+        handoff,
+        StepOutcome(argv=("adjudicate",), returncode=0, stdout=json.dumps(adjudication)),
+    )
+    assert accepted.observations[0].record.model_dump(mode="json") == adjudication
+    assert (repo / "code.txt").read_text() == "broken\n"

@@ -18,6 +18,8 @@ from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.models.agent_repair import AgentRepairBudget
+from oh_goon.core.models.agent_review import MAX_REVIEW_BYTES, AgentReviewRecord
+from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.product_identity import repository_id
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from tests.factories.agent_review import agent_review_case
@@ -142,6 +144,13 @@ model = "synthetic/reviewer"
             10,
         ),
         (
+            "large_scope",
+            2,
+            "converged",
+            ["review", "adjudicate", "repair", "regression", "review", "verification"],
+            10,
+        ),
+        (
             "remote",
             2,
             "converged",
@@ -193,6 +202,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
     calls,
 ):
     observed = []
+    observed_scopes = {}
     entered = Event()
     release = Event()
 
@@ -205,6 +215,17 @@ def test_native_loop_reserves_review_and_retains_each_phase(
             source = json.loads(request["messages"][1]["content"])
             identity = source["identity"]
             observed.append(identity)
+            if scenario == "large_scope":
+                observed_scopes[identity["candidate_identity"]] = tuple(
+                    member["path"] for member in source["repository"]
+                )
+                if source["context"].get("reviews"):
+                    assert len(source["context"]["reviews"]) == 4
+                    assert len(json.dumps(source["context"]).encode()) <= MAX_REVIEW_BYTES
+                    assert all(
+                        review["reviewed_paths"] == {"complete_scope": identity["scope_identity"]}
+                        for review in source["context"]["reviews"]
+                    )
             if scenario in ("cancel", "timeout") or (
                 scenario == "cancel_repair" and len(observed) == 6
             ):
@@ -230,6 +251,11 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                         )
                     ],
                 )
+                if scenario == "large_scope":
+                    # Native-sized source names alone exceed the record budget;
+                    # the explicit complete-scope claim does not narrow that scope.
+                    assert len(json.dumps(record).encode()) > MAX_REVIEW_BYTES
+                    record["reviewed_paths"] = {"complete_scope": identity["scope_identity"]}
                 if (
                     scenario in ("leave_alone", "insufficient", "mismatched", "missing_coverage")
                     and len(observed) == 2
@@ -344,6 +370,11 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                 endpoint=f"http://127.0.0.1:{server.server_port}",
                 plan_template=template_key,
             )
+            if scenario == "large_scope":
+                cases = repo / "repository_evidence_and_verification_handoff_contracts"
+                cases.mkdir()
+                for index in range(1282):
+                    (cases / f"case_{index:04d}.txt").write_text("observed source\n")
             if scenario == "remote":
                 monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
                 registry = yaml.safe_load((tmp_path / ".goonskills.yml").read_text())
@@ -558,7 +589,21 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                     assert not detail.rerun_supported
                     assert runtime.runs.get(detail.run.fleet_run_id).operations == detail.operations
                     assert "fixture-secret-not-a-source" not in detail.model_dump_json()
-                if scenario in ("repair", "remote", "arbitrary", "regression"):
+                if scenario == "large_scope":
+                    records = [
+                        observation.record
+                        for detail in result.attempts
+                        for step in detail.operations[0].evidence.plan.steps
+                        for observation in step.observations
+                        if isinstance(observation, AgentReviewObservation)
+                        and isinstance(observation.record, AgentReviewRecord)
+                    ]
+                    assert len(records) == 8
+                    assert [record.verdict for record in records] == ["FINDING"] * 4 + ["CLEAN"] * 4
+                    assert len(observed_scopes[records[0].candidate_identity]) == 1284
+                    for record in records:
+                        assert record.reviewed_paths == observed_scopes[record.candidate_identity]
+                if scenario in ("repair", "remote", "arbitrary", "regression", "large_scope"):
                     assert (repo / "code.txt").read_text() == "repaired\n"
                     assert (repo / "regression.txt").is_file()
                     if scenario != "regression":
@@ -582,7 +627,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                     assert not (repo / "regression.txt").exists()
             finally:
                 runtime.shutdown(wait_for_runs=True)
-            if scenario == "repair":
+            if scenario in ("repair", "large_scope"):
                 reopened = ApplicationRuntime.build(standard_local=True)
                 try:
                     assert [

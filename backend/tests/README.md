@@ -110,6 +110,28 @@ retries and compaction. Reconnect diagnostics may recover only through a later
 native completion; explicit failed turns, missing completion and physical command
 failure still cannot pass.
 
+The installed managed-Codex review probe selects a complete public native
+installation and its explicit runtime root. Through the original Run, Bubblewrap
+and inference broker, a local Responses fixture requests a real native tool and
+then supplies a compact complete-scope review claim. It checks source write,
+host-private read and host-loopback denial, host-only credential isolation,
+qualified Hashmarks/Skill delivery on both requests, and canonical retained
+review membership:
+
+```sh
+OH_GOON_NATIVE_CODEX=/opt/native-codex/bin/codex \
+OH_GOON_NATIVE_CODEX_RUNTIME_ROOT=/opt/native-codex \
+uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_codex_managed_review.py
+```
+
+Keep the native distribution layout and companion programs in that public root;
+never select a credential store. Missing explicit selections skip this optional
+certification test. Its provider, model and host-only credential are synthetic;
+no real account or inference quota is used. The synthetic model may select native
+fallback metadata, so this proves installed managed transport, physical isolation
+and typed review admission, not model-specific code-mode behavior, live model
+quality or a successful dogfood campaign.
+
 The separate live-account probe uses real ChatGPT authentication and live model
 inference. Create a dedicated private Codex home outside the repository and native
 tool roots, and complete native `codex login` there; never copy the desktop auth

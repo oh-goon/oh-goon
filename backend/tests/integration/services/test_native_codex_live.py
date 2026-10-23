@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import tomllib
@@ -132,6 +133,7 @@ def test_live_chatgpt_refresh_and_coding_use_original_run(
         executable_sha256=native_executable_sha256(program),
     )
     native_facts: list[tuple[int, bool, bool]] = []
+    native_diagnostics: dict[str, Any] = {}
     native_occurrences: list[str] = []
     verification_launch_count = 0
 
@@ -168,6 +170,38 @@ def test_live_chatgpt_refresh_and_coding_use_original_run(
             assert actual_home == str(home)
             result = run_command(*argv, **kwargs)
             events = parse_native_agent_events("codex", result.stdout, returncode=result.returncode)
+            item_facts: list[dict[str, str | int]] = []
+            for line in result.stdout.splitlines():
+                if not line.strip():
+                    continue
+                item = json.loads(line).get("item")
+                if not isinstance(item, dict) or len(item_facts) >= 32:
+                    continue
+                item_type = item.get("type")
+                fact: dict[str, str | int] = {
+                    "type": item_type
+                    if item_type
+                    in (
+                        "agent_message",
+                        "error",
+                        "command_execution",
+                        "mcp_tool_call",
+                        "file_change",
+                    )
+                    else "other"
+                }
+                if item.get("status") in ("in_progress", "completed", "failed"):
+                    fact["status"] = item["status"]
+                if type(item.get("exit_code")) is int:
+                    fact["exit_code"] = item["exit_code"]
+                item_facts.append(fact)
+            native_diagnostics.update(
+                returncode=result.returncode,
+                settled=events.settled,
+                failed=events.failed,
+                items=item_facts,
+                observations=[item.summary for item in events.observations],
+            )
             # Never include native output, account details or RPC payloads in a
             # failing assertion. Keep only bounded typed execution facts.
             native_facts.append((result.returncode, events.settled, events.failed))
@@ -208,6 +242,28 @@ def test_live_chatgpt_refresh_and_coding_use_original_run(
         assert observation == (True, False, "codex", "live-chatgpt", native_occurrences[0])
         assert verifier.read_bytes() == verifier_bytes
         assert source.read_text(encoding="utf-8") != _BROKEN_SOURCE
+    except AssertionError as error:
+        native_diagnostics["verification_launches"] = verification_launch_count
+        for path, expected, key, invert in (
+            (source, _BROKEN_SOURCE.encode("utf-8"), "source_changed", True),
+            (verifier, verifier_bytes, "independent_verifier_unchanged", False),
+        ):
+            same: bool | None = None
+            nofollow = getattr(os, "O_NOFOLLOW", None)
+            if nofollow is not None:
+                try:
+                    descriptor = os.open(path, os.O_RDONLY | nofollow | os.O_NONBLOCK)
+                    with os.fdopen(descriptor, "rb") as stream:
+                        state = os.fstat(stream.fileno())
+                        if stat.S_ISREG(state.st_mode) and state.st_size <= 65536:
+                            payload = stream.read(65537)
+                            if len(payload) <= 65536:
+                                same = payload == expected
+                except OSError:
+                    pass
+            native_diagnostics[key] = (not same if invert else same) if same is not None else None
+        error.add_note("Bounded native execution facts: " + json.dumps(native_diagnostics))
+        raise
     finally:
         if runtime is not None:
             runtime.shutdown(wait_for_runs=True)

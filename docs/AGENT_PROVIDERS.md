@@ -101,7 +101,11 @@ inputs are readable, the working repository and execution scratch are writable,
 and tool networking is disabled. The authentication home and every native tool
 root must be separate filesystem trees: neither may contain the other, including
 through symlink aliases. The home cannot be part of the captured workspace.
-Native argument/config overrides are rejected.
+Select a complete public Codex installation in that separate tree, retaining its
+native distribution layout and companion programs such as `codex-code-mode-host`.
+An executable copied alone may start successfully while native tool initialization
+fails. Oh-Goon does not reconstruct an installation or copy credentials to repair
+it. Native argument/config overrides are rejected.
 
 Git hooks and separate verification Steps retain trusted local execution. This
 profile does not provide whole-process Bubblewrap isolation, broker endpoint

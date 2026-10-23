@@ -170,16 +170,19 @@ See [Fleet Plans](docs/development/FLEET_PLANS.md), [Shared Plans](docs/developm
 ## Agent Skills and bounded local model work
 
 Agent Steps use the same Resolver, Fleet execution, process supervision, and
-Game Tape as other Steps. The current implementation supports captured
-repository and Skill resources, bounded local Ollama tool turns, and a
-read-only Skill loop with up to four tool actions. An Agent can propose a
-bounded file replacement; an explicitly authored later command Step owns
-applying it, followed by an explicitly authored test Step.
+Game Tape as other Steps. They support captured repository and Skill resources,
+provider-backed review and proposals, and installed native coding agents.
+The [bounded review–repair loop](templates/plans/agents/agentic-review-repair-loop/README.md)
+runs ordered reviews, adjudication, a read-only proposal, native scoped apply,
+regression checks and fresh review before final verification. Each phase retains
+its own linked Run, candidate identity and native outcome. Callers explicitly
+select review-pass, deadline and write-root limits; convergence remains separate
+from release certification.
 
 A failed test can publish a declared bounded diagnostic to a later read-only
 Agent Step. The original test remains failed, and its diagnostic does not grant
-edit or retry authority. Recapturing changed source and autonomously repeating
-proposal, apply, and test is still open work.
+edit or retry authority. The bounded repair controller owns fresh captures and
+readmission; native agents retain their own reasoning, tools and compaction.
 
 Reusable development and review Skills come from **agentsCookbook**. See
 [Agent Skills](docs/AGENT_SKILLS.md) for the pinned upstream source, a recipe for
