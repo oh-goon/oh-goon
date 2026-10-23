@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -44,18 +45,29 @@ from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import (
+    CancelledFleetRun,
     CompletedFleetRun,
     FailedFleetRun,
     FleetRunDetail,
     FleetRunFailure,
     FleetRunProgress,
+    FleetRunState,
     RunningFleetRun,
 )
 from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, fleet_repository_scope
+from oh_goon.core.models.run_events import (
+    DescendantsQuiescentEvent,
+    ProcessStartedEvent,
+    ProcessStateUnknownEvent,
+    RunCancelledEvent,
+    RunFailedEvent,
+    StepCancelledEvent,
+)
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
+    FleetRunEventType,
     FleetRunOutcome,
     FleetRunStatus,
     GameTapeEventType,
@@ -750,3 +762,180 @@ def test_game_tape_attempt_comparison_retains_physical_scope_changes(
     )
 
     assert compare_adjacent_attempts((first, second))[0].isolation_changed is True
+
+
+@pytest.mark.parametrize("boundary", ["cancel", "unknown", "missing_terminal", "ongoing"])
+@pytest.mark.parametrize("clock", ["equal", "inverted"])
+def test_unreported_step_lifecycle_uses_canonical_facts_without_inventing_results(
+    tmp_path: Path, boundary: str, clock: str
+) -> None:
+    repository = RepositoryIdentity(path=tmp_path / "repo")
+    plan = ResolvedFleetPlan.create(
+        name="interrupted-phase",
+        description="",
+        execution=MaintenanceExecutionPolicy(),
+        steps=tuple(
+            ResolvedCommandStep(step_id=name, argv=("true",))
+            for name in ("prepare", "native", "later")
+        ),
+    )
+    target = _target(plan)
+    now = utc_now()
+    common: dict[str, Any] = dict(
+        fleet_run_id="run-phase",
+        target=target,
+        capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+        repository_scope=fleet_repository_scope(None),
+        targets=(repository,),
+        accepted_at=now,
+        started_at=now,
+        progress=FleetRunProgress(total=1, succeeded=0, failed=0, needs_attention=0),
+    )
+    run: FleetRunState
+    if boundary == "ongoing":
+        run = RunningFleetRun(status=FleetRunStatus.RUNNING, **common)
+    elif boundary == "cancel":
+        run = CancelledFleetRun(
+            status=FleetRunStatus.CANCELLED,
+            cancel_requested_at=now,
+            finished_at=now,
+            **common,
+        )
+    else:
+        run = FailedFleetRun(
+            status=FleetRunStatus.FAILED,
+            finished_at=now,
+            failure=FleetRunFailure.uncertain_repository_effects(1),
+            **common,
+        )
+    detail = FleetRunDetail(
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+        repository_admissions=repository_admissions_for(target, (repository,)),
+    )
+    operation_id = repository_attempt_operation_id(run.fleet_run_id, repository.repository_id)
+    events = list(
+        CanonicalFleetJournalBuilder(detail)
+        .run_started(now)
+        .repository_started(repository.repository_id, operation_id, now)
+        .step_reached(repository.repository_id, operation_id, "prepare", 1, now)
+        .step_started(repository.repository_id, operation_id, "prepare", 1, now)
+        .step_succeeded(repository.repository_id, operation_id, "prepare", 1, 0, now)
+        .step_reached(repository.repository_id, operation_id, "native", 2, now)
+        .step_started(repository.repository_id, operation_id, "native", 2, now)
+        .step_attempt_created(repository.repository_id, operation_id, "native", 2, 1, now)
+        .build()
+    )
+    physical: dict[str, Any] = dict(
+        fleet_run_id=run.fleet_run_id,
+        repository_id=repository.repository_id,
+        operation_id=operation_id,
+        step_id="native",
+        step_order=2,
+        attempt_number=1,
+        step_attempt_id="attempt-native",
+        physical_execution_id="physical-native",
+        pid=4321,
+        process_identity="original-process",
+    )
+    events.append(
+        ProcessStartedEvent(
+            event_type=FleetRunEventType.PROCESS_STARTED,
+            sequence=len(events) + 1,
+            generated_at=now,
+            **physical,
+        )
+    )
+    later_clock = now if clock == "equal" else now - timedelta(seconds=1)
+    if boundary == "cancel":
+        events.append(
+            StepCancelledEvent(
+                event_type=FleetRunEventType.STEP_CANCELLED,
+                sequence=len(events) + 1,
+                generated_at=later_clock,
+                fleet_run_id=run.fleet_run_id,
+                repository_id=repository.repository_id,
+                operation_id=operation_id,
+                step_id="native",
+                step_order=2,
+            )
+        )
+        # A later physical closure fact does not re-open the closed Step.
+        events.append(
+            DescendantsQuiescentEvent(
+                event_type=FleetRunEventType.DESCENDANTS_QUIESCENT,
+                sequence=len(events) + 1,
+                generated_at=now,
+                **physical,
+            )
+        )
+        events.append(
+            RunCancelledEvent(
+                event_type=FleetRunEventType.RUN_CANCELLED,
+                sequence=len(events) + 1,
+                generated_at=now,
+                fleet_run_id=run.fleet_run_id,
+            )
+        )
+    elif boundary in ("unknown", "missing_terminal"):
+        if boundary == "unknown":
+            events.append(
+                ProcessStateUnknownEvent(
+                    event_type=FleetRunEventType.PROCESS_STATE_UNKNOWN,
+                    sequence=len(events) + 1,
+                    generated_at=later_clock,
+                    reason="Original controller stopped without terminal evidence",
+                    **physical,
+                )
+            )
+        assert isinstance(run, FailedFleetRun)
+        events.append(
+            RunFailedEvent(
+                event_type=FleetRunEventType.RUN_FAILED,
+                sequence=len(events) + 1,
+                generated_at=now,
+                fleet_run_id=run.fleet_run_id,
+                failure=run.failure,
+            )
+        )
+    # Sequence, not tuple order or a wall-clock comparison, owns the observation.
+    detail = detail.model_copy(update={"lifecycle_events": tuple(reversed(events))})
+    tape = detail.game_tape
+    projected = tape.repositories[0]
+    expected = (
+        GameTapeStatus.CANCELLED
+        if boundary == "cancel"
+        else GameTapeStatus.RUNNING
+        if boundary == "ongoing"
+        else GameTapeStatus.INTERRUPTED
+    )
+    assert projected.status is expected
+    assert [step.status for step in projected.steps] == [
+        GameTapeStatus.PASSED,
+        expected,
+        GameTapeStatus.PLANNED if boundary == "ongoing" else GameTapeStatus.NOT_RUN,
+    ]
+    assert all(
+        step.attempts == () and step.exit_code is None and step.stdout_evidence is None
+        for step in projected.steps
+    )
+    assert all(step.finished_at is None for step in projected.steps)
+    not_reached = [
+        event.step_id
+        for event in tape.play_by_play
+        if event.event_type is GameTapeEventType.STEP_NOT_REACHED
+    ]
+    assert not_reached == ([] if boundary == "ongoing" else ["later"])
+    assert not any(
+        event.event_type is GameTapeEventType.REPOSITORY_NOT_RUN for event in tape.play_by_play
+    )
+    if boundary == "cancel":
+        assert any(
+            event.event_type is GameTapeEventType.STEP_CANCELLED for event in tape.play_by_play
+        )
+    if boundary == "unknown":
+        assert (
+            projected.runtime_progress is not None
+            and projected.runtime_progress.process_state == "UNKNOWN"
+        )
+    assert detail.operations == ()
