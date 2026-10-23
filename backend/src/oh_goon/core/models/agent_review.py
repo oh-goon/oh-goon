@@ -84,16 +84,23 @@ class AgentReviewRecord(ImmutableModel):
         return self
 
     def verify(self, handoff: FrozenAgentStepHandoff, occurrence: str) -> None:
-        handoff.verify()
         if (
             self.reviewer != occurrence
-            or self.candidate_identity != handoff.source.repository.content_identity
-            or self.scope_identity != review_scope(handoff)
             or self.skill_identity != handoff.source.skill.content_identity
         ):
             raise FleetPlanInvalid(
                 "review claim does not match its candidate, scope, Skill and occurrence"
             )
+        self.verify_source(handoff)
+
+    def verify_source(self, handoff: FrozenAgentStepHandoff) -> None:
+        """Recheck source-bound claims without replacing the original review Skill."""
+        handoff.verify()
+        if (
+            self.candidate_identity != handoff.source.repository.content_identity
+            or self.scope_identity != review_scope(handoff)
+        ):
+            raise FleetPlanInvalid("review claim does not match its candidate and scope")
         members = {"repo/" + member.path: member for member in handoff.source.repository.members}
         if len(set(self.reviewed_paths)) != len(self.reviewed_paths) or not set(
             self.reviewed_paths
@@ -110,15 +117,55 @@ class AgentReviewRecord(ImmutableModel):
                     raise FleetPlanInvalid("review evidence line is outside the captured member")
 
 
-def accept_review(text: str, handoff: FrozenAgentStepHandoff, occurrence: str) -> AgentReviewRecord:
-    data = decode_agent_record(text)
-    if data.get("schema") != "oh-goon.agent-review/v1":
+def _review_from_wire(data: object, handoff: FrozenAgentStepHandoff) -> AgentReviewRecord:
+    if not isinstance(data, dict) or data.get("schema") != "oh-goon.agent-review/v1":
         raise FleetPlanInvalid("Agent review must declare its record schema")
+    coverage = data.get("reviewed_paths")
+    if isinstance(coverage, dict):
+        if (
+            set(coverage) != {"complete_scope"}
+            or coverage["complete_scope"] != review_scope(handoff)
+            or data.get("scope_identity") != coverage["complete_scope"]
+            or data.get("verdict") not in ("CLEAN", "FINDING")
+        ):
+            raise FleetPlanInvalid("compact review coverage must declare the exact complete scope")
+        data = {
+            **data,
+            "reviewed_paths": [
+                "repo/" + member.path for member in handoff.source.repository.members
+            ],
+        }
     try:
-        result = AgentReviewRecord.model_validate(data)
+        return AgentReviewRecord.model_validate(data)
     except ValidationError as exc:
         raise FleetPlanInvalid("Agent review has an invalid typed record") from exc
+
+
+def accept_review(text: str, handoff: FrozenAgentStepHandoff, occurrence: str) -> AgentReviewRecord:
+    result = _review_from_wire(decode_agent_record(text), handoff)
     result.verify(handoff, occurrence)
+    return result
+
+
+def review_wire_record(
+    record: AgentReviewRecord, handoff: FrozenAgentStepHandoff, occurrence: str
+) -> dict[str, Any]:
+    """Compact only a verified complete claim; retained observations stay canonical."""
+    record.verify(handoff, occurrence)
+    data = record.model_dump(mode="json")
+    if record.verdict in ("CLEAN", "FINDING"):
+        data["reviewed_paths"] = {"complete_scope": record.scope_identity}
+    return data
+
+
+def review_from_context(data: dict[str, Any], handoff: FrozenAgentStepHandoff) -> AgentReviewRecord:
+    """Read previously admitted context against this phase's exact frozen repository.
+
+    The original review owner retains occurrence and Skill admission. A later
+    phase has its own Skill, which must not replace that review's provenance.
+    """
+    result = _review_from_wire(data, handoff)
+    result.verify_source(handoff)
     return result
 
 

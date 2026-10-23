@@ -521,6 +521,9 @@ class NativeAgentEventParser:
                 if isinstance(item, dict):
                     if item.get("type") == "agent_message" and isinstance(item.get("text"), str):
                         self._set_final_text(item["text"])
+                    elif item.get("type") == "error":
+                        self._settled = False
+                        self._observe("agent", "item.error")
                     elif item.get("type") in ("command_execution", "mcp_tool_call", "file_change"):
                         self._observe("tool", str(item["type"]), item.get("id"))
 

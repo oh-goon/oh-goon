@@ -19,6 +19,7 @@ from oh_goon.core.models.agent_review import (
     AgentAdjudicationRecord,
     AgentReviewRecord,
     review_scope,
+    review_wire_record,
 )
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
@@ -387,12 +388,21 @@ class AgentReviewRepairCampaign:
 
     def _select_phase(self) -> ResolvedFleetPlan:
         members = set(self.phases[self.phase])
+        reviews = []
+        # Command-only phases consume no Agent context. After apply their
+        # candidate intentionally differs from the preceding review source.
+        if self.phase in ("adjudicate", "repair"):
+            for record in self.reviews:
+                handoff = self.handoffs.get(record.reviewer)
+                if handoff is None:
+                    raise FleetPlanInvalid("review context lacks its original source handoff")
+                reviews.append(review_wire_record(record, handoff, record.reviewer))
         context = json.dumps(
             {
                 "candidate_identity": self.candidate_identity,
                 "scope_identity": self.scope_identity,
                 "write_roots": self.write_roots,
-                "reviews": [record.model_dump(mode="json") for record in self.reviews],
+                "reviews": reviews,
                 "adjudication": self.adjudication.model_dump(mode="json")
                 if self.adjudication
                 else None,

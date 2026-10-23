@@ -306,8 +306,14 @@ def test_codex_recovered_diagnostic_preserves_successful_terminal_result() -> No
         events(
             {"type": "turn.started"},
             {"type": "error", "message": "Native transport diagnostic"},
-            {"type": "item.completed", "item": {"type": "error"}},
-            {"type": "item.completed", "item": {"type": "command_execution", "id": "tool"}},
+            {
+                "type": "item.completed",
+                "item": {"type": "error", "message": "Private native startup diagnostic"},
+            },
+            {
+                "type": "item.completed",
+                "item": {"type": "command_execution", "id": "tool", "exit_code": 127},
+            },
             {"type": "item.completed", "item": {"type": "agent_message", "text": "Done"}},
             {"type": "turn.completed"},
         ),
@@ -315,7 +321,13 @@ def test_codex_recovered_diagnostic_preserves_successful_terminal_result() -> No
     )
     assert result.settled and not result.failed
     assert result.final_text == "Done"
-    assert any(item.summary == "codex: error" for item in result.observations)
+    assert [item.summary for item in result.observations] == [
+        "codex: turn.started",
+        "codex: error",
+        "codex: item.error",
+        "codex: command_execution",
+        "codex: turn.completed",
+    ]
     assert any(item.kind == "tool" for item in result.observations)
 
 
@@ -324,6 +336,14 @@ def test_codex_recovered_diagnostic_preserves_successful_terminal_result() -> No
     [
         ([{"type": "error"}], 0),
         ([{"type": "turn.completed"}, {"type": "error"}], 0),
+        ([{"type": "item.completed", "item": {"type": "error"}}], 0),
+        (
+            [
+                {"type": "turn.completed"},
+                {"type": "item.completed", "item": {"type": "error"}},
+            ],
+            0,
+        ),
         ([{"type": "turn.failed"}, {"type": "turn.completed"}], 0),
         ([{"type": "error"}, {"type": "turn.completed"}], 7),
     ],

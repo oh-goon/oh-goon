@@ -20,11 +20,12 @@ from oh_goon.core.agent_review_plan import agent_phase_role
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import AgentConnection, AgentMessage, ResolvedAgentModel
 from oh_goon.core.models.agent_review import (
-    AgentReviewRecord,
     accept_adjudication,
     accept_review,
     decode_agent_record,
+    review_from_context,
     review_scope,
+    review_wire_record,
 )
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff, FrozenSourceMember
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
@@ -111,7 +112,11 @@ def agent_phase_output_contract(step: ResolvedLocalSearchAgentStep) -> str:
         "review": (
             'Return one JSON object with schema="oh-goon.agent-review/v1", the exact identity fields, '
             "verdict (FINDING, CLEAN, LEAVE_ALONE, INSUFFICIENT_EVIDENCE), summary, reviewed_paths and findings array. "
-            "reviewed_paths must account for every supplied repo/ member exactly once for CLEAN or FINDING. "
+            "For CLEAN or FINDING, explicitly assert complete review with reviewed_paths="
+            '{"complete_scope":"<exact scope_identity>"}, or list every supplied repo/ member exactly once. '
+            "This asserts that the entire captured scope was reviewed; bounded evidence does not reduce it. "
+            "Partial review uses an explicit reviewed_paths list and INSUFFICIENT_EVIDENCE or LEAVE_ALONE. "
+            "The entire JSON record must fit 65536 UTF-8 bytes. "
             "Each finding has finding_id, explanation and evidence [{path, sha256, line}]. "
             "Only FINDING may have findings and requires at least one. "
             "CLEAN requires completing the selected Skill over the entire supplied scope. "
@@ -204,7 +209,7 @@ def accept_agent_phase_output(
         return outcome
     if role == "review":
         record = accept_review(outcome.stdout, handoff, step.step_id)
-        output = record.model_dump(mode="json")
+        output = review_wire_record(record, handoff, step.step_id)
         outcome = replace(
             outcome, observations=(*outcome.observations, AgentReviewObservation(record=record))
         )
@@ -245,7 +250,7 @@ def accept_agent_phase_output(
         context = decode_agent_record(step.review_context or "{}")
         adjudication = accept_adjudication(
             outcome.stdout,
-            tuple(AgentReviewRecord.model_validate(item) for item in context["reviews"]),
+            tuple(review_from_context(item, handoff) for item in context["reviews"]),
         )
         output = adjudication.model_dump(mode="json")
         outcome = replace(

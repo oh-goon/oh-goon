@@ -57,8 +57,15 @@ The native provider adapter receives the full captured closure without silent
 truncation. A request larger than its configured byte budget fails incomplete.
 
 Review records bind the occurrence, candidate, scope and Skill identities.
-Completed CLEAN and FINDING records account for every captured repository path;
-findings carry exact source hashes and line references. `LEAVE_ALONE` and
+Completed CLEAN and FINDING records account for every captured repository path.
+On the bounded wire, an Agent can explicitly declare
+`reviewed_paths: {"complete_scope": "<exact scope_identity>"}` instead of
+repeating the full path list. This remains a claim that it reviewed the complete
+captured scope, not permission to inspect only bounded evidence. Admission expands
+that exact scope to the canonical path tuple; retained observations and public
+records keep every path. Verified records use the same compact form in later
+phase context. Partial reviews retain explicit path lists and cannot become
+complete through compaction. Findings carry exact source hashes and line references. `LEAVE_ALONE` and
 `INSUFFICIENT_EVIDENCE` remain distinct and cannot satisfy the strict all-CLEAN
 goal. These are admitted Agent claims, not independent proof of semantic
 correctness. Skill text and model output confer no effects or certification.

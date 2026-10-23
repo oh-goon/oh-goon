@@ -15,7 +15,13 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
-from oh_goon.core.models.agent_review import AgentReviewRecord, review_scope
+from oh_goon.core.models.agent_review import (
+    AgentReviewRecord,
+    accept_review,
+    review_from_context,
+    review_scope,
+    review_wire_record,
+)
 from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
 from oh_goon.engine.command import CommandResult
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
@@ -311,14 +317,34 @@ def test_provider_worker_ignores_repository_python_imports_and_reports_native_fa
     assert not (scratch / "agent-provider-request.json").exists()
 
 
-@pytest.mark.parametrize("attack", [None, "bad_queue", "omitted_finding"])
+@pytest.mark.parametrize(
+    "attack",
+    [
+        None,
+        "bad_queue",
+        "omitted_finding",
+        "context_candidate",
+        "context_scope",
+        "context_partial",
+        "context_shape",
+    ],
+)
 def test_native_adjudication_uses_original_exact_finding_partition(tmp_path, attack):
     plan, handoffs, _ = native_phase_case(tmp_path)
     review = review_record(plan.steps[0], handoffs[plan.steps[0].step_id])
     step = next(step for step in plan.steps if agent_phase_role(step) == "adjudication")
-    step = step.model_copy(
-        update={"review_context": json.dumps({"reviews": [review.model_dump(mode="json")]})}
-    )
+    context_review = review.model_dump(mode="json")
+    if attack and attack.startswith("context_"):
+        context_review = review_wire_record(review, handoffs[review.reviewer], review.reviewer)
+        if attack == "context_candidate":
+            context_review["candidate_identity"] = "another-candidate"
+        elif attack == "context_scope":
+            context_review["reviewed_paths"]["complete_scope"] = "another-scope"
+        elif attack == "context_partial":
+            context_review["reviewed_paths"] = ["repo/code.txt"]
+        else:
+            context_review = "malformed review"
+    step = step.model_copy(update={"review_context": json.dumps({"reviews": [context_review]})})
     record = dict(
         schema="oh-goon.agent-adjudication/v1",
         candidate_identity=review.candidate_identity,
@@ -438,3 +464,114 @@ def test_provider_credentials_cannot_export_process_local_control_plane_authorit
             repository_evidence="Producer-qualified repository orientation",
         )
     assert not list(scratch.iterdir())
+
+
+@pytest.mark.parametrize(
+    "attack",
+    (
+        "wrong_scope",
+        "wrong_candidate",
+        "wrong_skill",
+        "wrong_reviewer",
+        "mixed_scope",
+        "missing_scope",
+        "nested_partial",
+        "partial_paths",
+        "duplicate_paths",
+        "incomplete_verdict",
+        "duplicate_scope_key",
+        "implicit_complete",
+    ),
+)
+def test_compact_review_requires_an_explicit_exact_whole_scope(tmp_path, attack):
+    plan, handoffs, _ = native_phase_case(tmp_path)
+    step = plan.steps[0]
+    handoff = handoffs[step.step_id]
+    record = review_record(step, handoff)
+    payload = review_wire_record(record, handoff, step.step_id)
+    if attack == "wrong_scope":
+        payload["reviewed_paths"]["complete_scope"] = "other"
+    elif attack in ("wrong_candidate", "wrong_skill", "wrong_reviewer"):
+        field = {
+            "wrong_candidate": "candidate_identity",
+            "wrong_skill": "skill_identity",
+            "wrong_reviewer": "reviewer",
+        }[attack]
+        payload[field] = "other"
+    elif attack == "mixed_scope":
+        payload["reviewed_paths"]["paths"] = ["repo/code.txt"]
+    elif attack == "missing_scope":
+        payload["reviewed_paths"] = {}
+    elif attack == "nested_partial":
+        payload["reviewed_paths"] = [{"complete_scope": record.scope_identity}]
+    elif attack == "partial_paths":
+        payload["reviewed_paths"] = ["repo/code.txt"]
+    elif attack == "duplicate_paths":
+        payload["reviewed_paths"] = ["repo/code.txt", "repo/code.txt"]
+    elif attack == "incomplete_verdict":
+        payload["verdict"] = "INSUFFICIENT_EVIDENCE"
+        payload["findings"] = []
+    elif attack == "implicit_complete":
+        payload["verdict"] = "CLEAN"
+        payload["findings"] = []
+        payload["reviewed_paths"] = []
+    text = json.dumps(payload)
+    if attack == "duplicate_scope_key":
+        text = text.replace('"complete_scope":', '"complete_scope":"other","complete_scope":')
+    with pytest.raises(FleetPlanInvalid):
+        accept_agent_phase_output(
+            step, handoff, StepOutcome(argv=("pi",), returncode=0, stdout=text)
+        )
+
+
+@pytest.mark.parametrize("attack", ["partial", "duplicate", "stale", "skill", "occurrence"])
+def test_compacting_a_retained_record_cannot_upgrade_invalid_coverage(tmp_path, attack):
+    plan, handoffs, _ = native_phase_case(tmp_path)
+    step = plan.steps[0]
+    handoff = handoffs[step.step_id]
+    record = review_record(step, handoff)
+    updates = {
+        "partial": {"reviewed_paths": ("repo/code.txt",)},
+        "duplicate": {"reviewed_paths": ("repo/code.txt", "repo/code.txt")},
+        "stale": {"candidate_identity": "stale"},
+        "skill": {"skill_identity": "another-skill"},
+        "occurrence": {"reviewer": "another-reviewer"},
+    }
+    with pytest.raises(FleetPlanInvalid):
+        review_wire_record(record.model_copy(update=updates[attack]), handoff, step.step_id)
+
+
+def test_partial_review_retains_explicit_paths_and_original_skill_provenance(tmp_path):
+    plan, handoffs, _ = native_phase_case(tmp_path)
+    step = plan.steps[0]
+    handoff = handoffs[step.step_id]
+    record = review_record(step, handoff).model_copy(
+        update={
+            "verdict": "INSUFFICIENT_EVIDENCE",
+            "findings": (),
+            "reviewed_paths": ("repo/code.txt",),
+        }
+    )
+    wire = review_wire_record(record, handoff, step.step_id)
+    assert wire["reviewed_paths"] == ["repo/code.txt"]
+    assert accept_review(json.dumps(wire), handoff, step.step_id) == record
+    assert review_from_context(wire, handoff) == record
+    stale = {**wire, "candidate_identity": "another-candidate"}
+    with pytest.raises(FleetPlanInvalid):
+        review_from_context(stale, handoff)
+
+
+def test_compact_clean_is_an_explicit_claim_with_canonical_complete_paths(tmp_path):
+    plan, handoffs, _ = native_phase_case(tmp_path)
+    step = plan.steps[0]
+    handoff = handoffs[step.step_id]
+    record = review_record(step, handoff).model_copy(update={"verdict": "CLEAN", "findings": ()})
+    payload = record.model_dump(mode="json")
+    payload["reviewed_paths"] = {"complete_scope": record.scope_identity}
+    accepted = accept_agent_phase_output(
+        step, handoff, StepOutcome(argv=("pi",), returncode=0, stdout=json.dumps(payload))
+    )
+    assert accepted.observations[0].record == record
+    assert accepted.observations[0].record.model_dump(mode="json")["reviewed_paths"] == [
+        "repo/" + member.path for member in handoff.source.repository.members
+    ]
