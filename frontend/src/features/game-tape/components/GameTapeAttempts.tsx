@@ -103,6 +103,7 @@ function AttemptTransitionCard({ transition }: { transition: GameTapeAttemptTran
     transition.argv_changed ? t("gameTape.attempts.argvChanged") : null,
     transition.tool_changed ? t("gameTape.attempts.toolChanged") : null,
     transition.egress_changed ? t("gameTape.attempts.egressChanged") : null,
+    transition.isolation_changed ? t("gameTape.attempts.isolationChanged") : null,
     transition.resource_policy_changed ? t("gameTape.attempts.resourcesChanged") : null,
     transition.cache_input_changed ? t("gameTape.attempts.cacheChanged") : null,
     transition.stdout_changed ? t("gameTape.attempts.stdoutChanged") : null,
@@ -128,6 +129,12 @@ function AttemptCard({ attempt }: { attempt: PlanStepAttemptEvidence }) {
       <div><dt>{t("gameTape.attempts.tool")}</dt><dd>{attempt.tool ? <><b>{attempt.tool.name}</b> · {attempt.tool.origin}<small><code>{shortSha(attempt.tool.sha256)}</code> · {attempt.tool.byte_count} B</small></> : "—"}</dd></div>
       <div><dt>{t("gameTape.attempts.egress")}</dt><dd>{attempt.egress.mode}<small>{t("gameTape.attempts.rules", { count: attempt.egress.rules?.length ?? 0 })}</small></dd></div>
       <div><dt>{t("gameTape.attempts.resources")}</dt><dd>{attempt.resources ? <>{formatAttemptResourceEnvelope(attempt.resources, t("gameTape.attempts.executorAvailable"))}<small>{resourceUsage(attempt)}</small></> : "—"}</dd></div>
+      {attempt.standard_isolation ? <>
+        <div><dt>{t("gameTape.attempts.sourceAccess")}</dt><dd>{attempt.standard_isolation.workspace_read_only ? t("gameTape.attempts.readOnly") : t("gameTape.attempts.writable")}<small>{t("gameTape.attempts.writeScopes")}: {(attempt.standard_isolation.scoped_write_roots ?? []).join(", ") || t("gameTape.attempts.noWriteScopes")}</small></dd></div>
+        <div><dt>{t("gameTape.attempts.credentials")}</dt><dd>{attempt.standard_isolation.credential_visibility === "codex_auth_file_read_write" ? t("gameTape.attempts.authFileReadWrite") : attempt.standard_isolation.credential_visibility === "none" ? t("gameTape.attempts.noCredentials") : t("gameTape.attempts.unknown")}</dd></div>
+        <div><dt>{t("gameTape.attempts.cleanup")}</dt><dd>{attempt.standard_isolation.filesystem_cleanup === "verified" ? t("gameTape.attempts.verified") : attempt.standard_isolation.filesystem_cleanup === "unverified" ? t("gameTape.attempts.unverified") : t("gameTape.attempts.unknown")}</dd></div>
+      </> : null}
+      <div><dt>{t("gameTape.attempts.quiescence")}</dt><dd>{attempt.supervisor?.final_process_group_quiescent === true ? t("gameTape.attempts.verified") : attempt.supervisor?.final_process_group_quiescent === false ? t("gameTape.attempts.unverified") : t("gameTape.attempts.unknown")}</dd></div>
       <div><dt>{t("gameTape.attempts.retry")}</dt><dd>{retry ? <>{retry.disposition}<small>{retryDetail(retry)}</small></> : t("gameTape.attempts.noRetryDecision")}</dd></div>
       <div><dt>stdout</dt><dd>{attempt.stdout_evidence.line_count} {t("gameTape.logs.lines").toLowerCase()}<small><code>{shortSha(attempt.stdout_evidence.sha256)}</code></small></dd></div>
       <div><dt>stderr</dt><dd>{attempt.stderr_evidence.line_count} {t("gameTape.logs.lines").toLowerCase()}<small><code>{shortSha(attempt.stderr_evidence.sha256)}</code></small></dd></div>

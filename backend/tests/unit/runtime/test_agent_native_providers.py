@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import tomllib
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     AgentProvidersConfig,
+    CodexLoginConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
 )
@@ -45,7 +47,6 @@ def test_codex_login_freezes_only_explicit_public_connection_facts(
     home.mkdir()
     # A special file would hang an attempted credential read. Resolution must
     # only resolve the home; native Codex retains all authentication semantics.
-    import os
 
     os.mkfifo(home / "auth.json")
     workspace = tmp_path / "repo"
@@ -308,3 +309,111 @@ def test_pi_literal_credentials_reject_before_executable_discovery(
     with pytest.raises(AgentProviderError, match="credentials") as captured:
         resolve_native_agent(config, "pi", "local", workspace=tmp_path, environment={})
     assert "PRIVATE-KEY" not in str(captured.value)
+
+
+def test_forged_protected_login_rejects_before_native_home_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import oh_goon.runtime.agent_providers as provider_owner
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    login = CodexLoginConnection(
+        home="/never-inspect-native-state", model="native", reasoning_effort="ultra"
+    )
+    profile = NativeAgentProfile.model_construct(
+        backend="bubblewrap", sandbox_owner="execution_backend", codex_login=login
+    )
+    config = AgentProvidersConfig().model_copy(update={"native_profiles": {"protected": profile}})
+    monkeypatch.setattr(
+        provider_owner,
+        "_existing_native_path",
+        lambda *args, **kwargs: pytest.fail("native state inspected before rejection"),
+    )
+    with pytest.raises(AgentProviderError, match="qualified service connection"):
+        resolve_native_agent(config, "codex", "protected", workspace=workspace, environment={})
+
+
+@pytest.mark.parametrize("agent", ["codex", "opencode"])
+def test_native_configuration_directory_rejects_before_file_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
+) -> None:
+    import oh_goon.runtime.agent_providers as provider_owner
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    config = AgentProvidersConfig(
+        native_agents={agent: NativeAgentDefinition(configuration_directory="/private/native")}
+    )
+    monkeypatch.setattr(
+        provider_owner,
+        "_existing_native_path",
+        lambda *args, **kwargs: pytest.fail("native configuration inspected before rejection"),
+    )
+    with pytest.raises(AgentProviderError, match="configuration remain service-owned"):
+        resolve_native_agent(config, agent, "local", workspace=workspace, environment={})
+
+
+@pytest.mark.parametrize("agent", ["codex", "opencode"])
+def test_catalog_rejects_native_configuration_before_resolving_any_native_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
+) -> None:
+    import oh_goon.runtime.agent_providers as provider_owner
+
+    catalog = tmp_path / "providers.json"
+    catalog.write_text(
+        json.dumps({"native_agents": {agent: {"configuration_directory": "private-native-state"}}})
+    )
+    monkeypatch.setattr(
+        provider_owner,
+        "_configuration_path",
+        lambda *args, **kwargs: pytest.fail("native state path resolved before rejection"),
+    )
+    with pytest.raises(AgentProviderError, match="configuration remain service-owned"):
+        load_agent_providers(catalog)
+
+
+@pytest.mark.parametrize("agent", ["opencode", "pi"])
+def test_unqualified_harness_backend_delegation_rejects_before_work(
+    tmp_path: Path, agent: str
+) -> None:
+    program = executable(tmp_path / agent)
+    config = AgentProvidersConfig.model_validate(
+        {
+            "native_agents": {agent: {"executable": str(program)}},
+            "native_profiles": {
+                "protected": {"backend": "bubblewrap", "sandbox_owner": "execution_backend"}
+            },
+        }
+    )
+    with pytest.raises(AgentProviderError, match="not qualified"):
+        resolve_native_agent(config, agent, "protected", workspace=tmp_path, environment={})
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("--sandbox", "read-only"),
+        ("-sworkspace-write",),
+        ("--dangerously-bypass-approvals-and-sandbox",),
+        ("--approve-for-me",),
+    ],
+)
+def test_backend_delegation_rejects_competing_native_policy_arguments(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    program = executable(tmp_path / "codex")
+    config = AgentProvidersConfig.model_validate_json(
+        json.dumps(
+            {
+                "native_agents": {
+                    "codex": {"executable": str(program), "arguments": list(arguments)}
+                },
+                "native_profiles": {
+                    "protected": {"backend": "bubblewrap", "sandbox_owner": "execution_backend"}
+                },
+            }
+        )
+    )
+    with pytest.raises(AgentProviderError, match="owns the native sandbox selection"):
+        resolve_native_agent(config, "codex", "protected", workspace=tmp_path, environment={})

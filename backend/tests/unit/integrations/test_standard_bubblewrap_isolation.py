@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import socket
+import tempfile
 import time
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -819,7 +820,7 @@ def test_unavailable_native_overlay_rejects_before_workload(
     assert len(calls) == 1 and calls[0][-1] == "/bin/true"
 
 
-@pytest.mark.parametrize("cause", ["timeout", "cancel"])
+@pytest.mark.parametrize("cause", ["timeout", "cancel", "output_limit"])
 @pytest.mark.parametrize("acknowledged", [False, True])
 def test_aborted_native_workload_retains_only_acknowledged_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cause: str, acknowledged: bool
@@ -830,6 +831,14 @@ def test_aborted_native_workload_retains_only_acknowledged_isolation(
         CommandTimeoutExpired(request.argv, 0.2, supervisor=CommandSupervisorReceipt())
         if cause == "timeout"
         else CommandCancelledError("cancelled", supervisor=CommandSupervisorReceipt())
+        if cause == "cancel"
+        else CommandOutputLimitExceeded(
+            stream="stdout",
+            limit_bytes=1,
+            stdout="bounded",
+            stderr="",
+            supervisor=CommandSupervisorReceipt(),
+        )
     )
 
     def abort(*argv: str, **kwargs: Any) -> CommandResult:
@@ -845,9 +854,11 @@ def test_aborted_native_workload_retains_only_acknowledged_isolation(
     with pytest.raises(type(error)) as caught:
         backend.execute(request, timeout=0.2, cancel_requested=None)
     assert caught.value is error
-    assert (error.standard_isolation is not None) is acknowledged
-    if error.standard_isolation is not None:
-        assert error.standard_isolation.backend.configuration_id == request.backend_configuration_id
+    isolation = getattr(error, "standard_isolation", None)
+    assert (isolation is not None) is acknowledged
+    if isolation is not None:
+        assert isolation.backend.configuration_id == request.backend_configuration_id
+        assert isolation.filesystem_cleanup == "verified"
 
 
 @pytest.mark.process
@@ -1355,3 +1366,314 @@ print(json.dumps(results))
     assert observed["node-code"] == 0 and observed["node-network"].startswith("denied:")
     assert observed["mcp"] == {"network": "denied", "foreign_visible": False}
     assert not observed["credential-visible"] and not observed["unrelated-source-visible"]
+
+
+@pytest.mark.parametrize(
+    "attack", ["file", "symlink", "hardlink", "overlap", "protected", "mount-alias"]
+)
+def test_scoped_native_writes_reject_aliases_and_unsupported_roots_before_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attack: str
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    allowed = workspace / "allowed"
+    allowed.mkdir()
+    changes: dict[str, Any] = {"allowed_write_roots": (allowed,)}
+    if attack == "file":
+        selected = workspace / "source.py"
+        selected.write_text("source")
+        changes["allowed_write_roots"] = (selected,)
+    elif attack == "symlink":
+        selected = workspace / "alias"
+        selected.symlink_to(allowed, target_is_directory=True)
+        changes["allowed_write_roots"] = (selected,)
+    elif attack == "hardlink":
+        private = tmp_path / "private"
+        private.write_text("outside source")
+        os.link(private, allowed / "alias")
+    elif attack == "overlap":
+        nested = allowed / "nested"
+        nested.mkdir()
+        changes["allowed_write_roots"] = (allowed, nested)
+    elif attack == "protected":
+        metadata = workspace / ".git"
+        metadata.mkdir()
+        changes["allowed_write_roots"] = (metadata,)
+    else:
+        changes["read_only_mounts"] = (StandardReadOnlyMount(allowed, PurePosixPath("/opt/alias")),)
+    request = _request(
+        backend, workspace, read_only_workspace=True, protected_execution=True, **changes
+    )
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("unsafe topology launched")
+    )
+    with pytest.raises(FleetPlanInvalid):
+        backend.require_standard_available(request)
+
+
+def test_protected_preflight_reports_unavailable_without_untrusted_child_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.core.errors import CapabilityUnavailable
+
+    backend = _backend(tmp_path, monkeypatch)
+    calls = []
+
+    def denied(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(1, "private child stdout", "PRIVATE-secret-path namespace EPERM")
+
+    monkeypatch.setattr(module, "run_command", denied)
+    request = _request(backend, tmp_path, read_only_workspace=True, protected_execution=True)
+    with pytest.raises(
+        CapabilityUnavailable, match="backend=bubblewrap.*mount_namespace_preflight"
+    ) as error:
+        backend.execute(request, timeout=1, cancel_requested=None)
+    assert len(calls) == 1
+    assert "PRIVATE" not in str(error.value) and "EPERM" not in str(error.value)
+
+
+def test_preflight_uses_and_keys_actual_workspace_write_mount_topology(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    first, second = workspace / "first", workspace / "second"
+    first.mkdir()
+    second.mkdir()
+    calls = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    request = _request(
+        backend,
+        workspace,
+        read_only_workspace=True,
+        protected_execution=True,
+        allowed_write_roots=(first,),
+    )
+    backend.require_standard_available(request)
+    backend.require_standard_available(request)
+    backend.require_standard_available(replace(request, allowed_write_roots=(second,)))
+    assert len(calls) == 2
+    for argv, selected in zip(calls, (first, second), strict=True):
+        triples = tuple(argv[i : i + 3] for i in range(len(argv) - 2))
+        assert ("--ro-bind", str(workspace), "/workspace") in triples
+        assert ("--ro-bind", str(workspace), str(workspace)) in triples
+        assert ("--bind", str(selected), "/workspace/" + selected.name) in triples
+        assert ("--bind", str(selected), str(selected)) in triples
+        assert argv[-1] == "/bin/true"
+
+
+@pytest.mark.process
+def test_protected_directory_writes_cannot_reopen_source_git_or_hardlink_alias(
+    tmp_path: Path,
+) -> None:
+    executable = shutil.which("bwrap")
+    if executable is None:
+        pytest.skip("native Bubblewrap not installed")
+    import subprocess
+
+    backend = BubblewrapProcessIsolation(executable)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    allowed = workspace / "allowed"
+    allowed.mkdir()
+    (workspace / "source").write_text("original")
+    (workspace / "original-root").write_text(str(workspace))
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    subprocess.run(["git", "-C", str(workspace), "add", "source"], check=True)
+    index = (workspace / ".git/index").read_bytes()
+    script = r"""
+import json,os,pathlib,subprocess
+root=pathlib.Path('/workspace'); original=pathlib.Path((root/'original-root').read_text()); facts=[]
+for alias in (root,original):
+    facts.append((alias/'source').read_text()=='original')
+    for operation in (
+        lambda:(alias/'source').write_text('bad'),
+        lambda:(alias/'new-outside').write_text('bad'),
+        lambda:(alias/'source').unlink(),
+        lambda:(alias/'source').rename(alias/'moved'),
+        lambda:(alias/'.git/config').write_text('bad'),
+    ):
+        try: operation()
+        except OSError: facts.append(True)
+        else: facts.append(False)
+    command=subprocess.run(['/usr/bin/git','-C',str(alias),'update-index','--force-remove','source'],capture_output=True)
+    facts.append(command.returncode!=0)
+    try:
+        os.link(alias/'source',alias/'allowed/escape')
+        (alias/'allowed/escape').write_text('bad')
+    except OSError: facts.append(True)
+    else: facts.append(False)
+    approved=alias/'allowed/new';approved.write_text('permitted');approved.rename(alias/'allowed/moved');(alias/'allowed/moved').unlink()
+    facts.append(not (alias/'allowed/moved').exists())
+print(json.dumps(facts))
+"""
+    with RepositoryWorkspaceAuthority.pin_repository_subject(workspace) as require_current:
+        request = _request(
+            backend,
+            workspace,
+            require_workspace_current=require_current,
+            read_only_workspace=True,
+            protected_execution=True,
+            allowed_write_roots=(allowed,),
+            argv=("/usr/bin/python3", "-c", script),
+        )
+        _require_native(backend, request)
+        result = backend.execute(request, timeout=10, cancel_requested=None)
+    assert result.returncode == 0, result.stderr
+    assert all(json.loads(result.stdout))
+    assert (workspace / "source").read_text() == "original"
+    assert (workspace / ".git/index").read_bytes() == index
+    assert result.standard_isolation is not None
+    assert result.standard_isolation.scoped_write_roots == ("allowed",)
+    assert result.standard_isolation.protected_paths == (".git",)
+    assert result.standard_isolation.filesystem_cleanup == "verified"
+
+
+@pytest.mark.parametrize("attempt", ["removed_credential", "host_network"])
+def test_native_file_auth_and_host_network_are_rejected_before_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attempt: str
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("unsupported authority reached launch")
+    )
+    if attempt == "removed_credential":
+        with pytest.raises(TypeError, match="credential_file"):
+            _request(
+                backend,
+                tmp_path,
+                read_only_workspace=True,
+                protected_execution=True,
+                credential_file=tmp_path / "synthetic-auth" / "auth.json",
+            )
+    else:
+        with pytest.raises(FleetPlanInvalid, match="supported admitted service transport"):
+            _request(
+                backend,
+                tmp_path,
+                read_only_workspace=True,
+                protected_execution=True,
+                host_network=True,
+            )
+
+
+@pytest.mark.parametrize("timed_out", [False, True])
+def test_cleanup_failure_cannot_publish_verified_success_or_replace_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, timed_out: bool
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    request = _request(backend, tmp_path)
+    timeout = CommandTimeoutExpired(request.argv, 1, supervisor=CommandSupervisorReceipt())
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        _native_exec_ack(argv)
+        if timed_out and "--json-status-fd" in argv:
+            raise timeout
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    backend.require_standard_available(request)
+
+    class CleanupDenied(tempfile.TemporaryDirectory):
+        def __exit__(self, *args):
+            super().__exit__(*args)
+            raise PermissionError("synthetic cleanup denial")
+
+    monkeypatch.setattr(module.tempfile, "TemporaryDirectory", CleanupDenied)
+    if timed_out:
+        with pytest.raises(CommandTimeoutExpired) as caught:
+            backend.execute(request, timeout=1, cancel_requested=None)
+        assert caught.value is timeout
+        assert timeout.standard_isolation is not None
+        assert timeout.standard_isolation.filesystem_cleanup == "unverified"
+    else:
+        result = backend.execute(request, timeout=1, cancel_requested=None)
+        assert result.returncode == 0
+        assert result.standard_isolation is not None
+        assert result.standard_isolation.filesystem_cleanup == "unverified"
+        assert result.stderr == "Standard sandbox filesystem cleanup is unverified"
+
+
+def test_protected_preflight_cannot_cache_nonquiescent_native_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.core.errors import CapabilityUnavailable
+
+    backend = _backend(tmp_path, monkeypatch)
+    calls = []
+
+    def unsettled(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(
+            0, "", "", supervisor=CommandSupervisorReceipt(final_process_group_quiescent=False)
+        )
+
+    monkeypatch.setattr(module, "run_command", unsettled)
+    request = _request(backend, tmp_path, read_only_workspace=True, protected_execution=True)
+    for _ in range(2):
+        with pytest.raises(CapabilityUnavailable, match="process_tree_quiescence_unverified"):
+            backend.execute(request, timeout=1, cancel_requested=None)
+    assert len(calls) == 2 and all(argv[-1] == "/bin/true" for argv in calls)
+
+
+def test_protected_native_temp_state_cannot_materialize_under_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.core.errors import CapabilityUnavailable
+
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: str(workspace))
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("overlapping scratch launched")
+    )
+    request = _request(backend, workspace, read_only_workspace=True, protected_execution=True)
+    with pytest.raises(CapabilityUnavailable, match="temporary_state_overlaps_source"):
+        backend.require_standard_available(request)
+    assert list(workspace.iterdir()) == []
+
+
+def test_protected_missing_exec_ack_is_a_setup_failure_with_bounded_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.core.errors import CapabilityUnavailable
+
+    backend = _backend(tmp_path, monkeypatch)
+    calls = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        if "--json-status-fd" not in argv:
+            return CommandResult(0, "", "")
+        return CommandResult(32, "PRIVATE stdout", "PRIVATE child stderr")
+
+    monkeypatch.setattr(module, "run_command", command)
+    request = _request(backend, tmp_path, read_only_workspace=True, protected_execution=True)
+    with pytest.raises(
+        CapabilityUnavailable, match="native_workload_exec_ack.*child_exit=32"
+    ) as caught:
+        backend.execute(request, timeout=1, cancel_requested=None)
+    assert len(calls) == 2
+    assert "PRIVATE" not in str(caught.value)
+
+
+def test_stale_native_host_network_authority_cannot_bypass_receiving_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    request = _request(backend, tmp_path, read_only_workspace=True, protected_execution=True)
+    object.__setattr__(request, "host_network", True)
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("stale networking launched")
+    )
+    with pytest.raises(FleetPlanInvalid, match="supported admitted service transport"):
+        backend.execute(request, timeout=1, cancel_requested=None)

@@ -48,6 +48,7 @@ def _physical_context_changed(transition: GameTapeAttemptTransition) -> bool:
             transition.argv_changed,
             transition.tool_changed,
             transition.egress_changed,
+            transition.isolation_changed,
             transition.resource_policy_changed,
             transition.cache_input_changed,
         )

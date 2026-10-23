@@ -38,9 +38,11 @@ evidence. Ordinary command output limits retain their existing failure behavior.
 
 Ordinary isolated attempts also retain `standard_isolation` only after the native
 Bubblewrap owner confirms workload execution. It records the actual backend
-configuration, shared-kernel boundary, denied host/external IP networking,
-workspace mode, private config/broker bindings and selected systemd resource
-policy. Missing usage measurements stay unavailable. This is separate from
+configuration, shared-kernel boundary, actual host/external IP networking,
+read-only source base and admitted writable directories, credential-file exposure,
+preflight, private filesystem cleanup, config/broker bindings and selected systemd
+resource policy. Actual supervisor quiescence is retained separately; absent
+historical facts remain unknown. Missing usage measurements stay unavailable. This is separate from
 strict custody and does not create an APP qualification receipt.
 
 ## Stable live refresh
@@ -59,7 +61,7 @@ Ordering is deterministic rather than interpretive: run-level failure first, the
 
 Game Tape has one chronological execution-ledger **projection**, not another persisted event store. `project_execution_ledger()` orders facts already durably owned by the run lifecycle, admitted `FleetPlanTarget`, `OperationReport`, and `PlanStepExecution`. It does not append journal events, mutate execution, infer log state, or create a second source of truth.
 
-The ledger vocabulary names observable facts such as run admission/start/terminal outcome, repository start/terminal outcome, and step reached/started/passed/failed/skipped/not-reached. Equal-timestamp ordering is deterministic and preserves resolved step order, so a previous step terminal event remains before the next step being reached.
+The ledger vocabulary names observable facts such as run admission/start/terminal outcome, repository start/terminal outcome, and step reached/started/passed/failed/skipped/not-reached. Canonical journal sequence owns causal order even when wall-clock timestamps are equal or inverted; a previous step terminal event remains before the next step being reached.
 
 `game_tape_lifecycle.py` is the one owner that maps durable run/repository/step facts to `GameTapeStatus`. Summary, Flow, Timeline, Play-by-Play, receipt, Search, and Run Diff consume that same meaning rather than reinterpreting statuses independently.
 
@@ -73,18 +75,32 @@ One stable `repository_execution_id` identifies a repository lane for a Fleet ru
 
 Game Tape uses explicit observability states:
 
-- `PLANNED`: present in the admitted plan but the containing repository execution has not produced a durable result yet.
+- `PLANNED`: present in the admitted plan without a canonical result or reached lifecycle fact yet.
 - `ADMITTED`: the Fleet run is queued/admitted.
-- `RUNNING`: the Fleet run is active.
-- `PASSED`: a defined successful execution result exists.
+- `RUNNING`: canonical facts show active work in a nonterminal execution.
+- `PASSED`: a defined successful result or canonical Step-success event exists.
 - `ATTENTION_REQUIRED`: the canonical operation completed with a non-failing attention verdict.
 - `FAILED`: execution produced a defined failing result.
-- `CANCELLED`: the run was explicitly cancelled.
-- `INTERRUPTED`: recovery says the run ended without a valid normal terminal execution outcome.
-- `NOT_RUN`: the step was in the admitted plan but no step execution result exists after the containing run/repository became terminal.
+- `CANCELLED`: explicit cancellation is recorded for this work.
+- `INTERRUPTED`: process state is unknown, or started work ended without a valid normal terminal outcome.
+- `NOT_RUN`: the step was in the admitted plan but no canonical result or lifecycle fact shows execution was reached before the containing run/repository became terminal.
 - `SKIPPED`: the executor durably recorded an explicit skip outcome.
 
 Game Tape does not infer lifecycle state from log text.
+
+When cancellation or controller loss prevents an OperationReport, original lifecycle
+facts still identify reached and closed work. A recorded Step cancellation remains
+CANCELLED; unknown process state or terminal started work without terminal proof is
+INTERRUPTED. Earlier recorded Step successes remain visible without inventing a
+PlanStepExecution. Untouched later Steps remain NOT_RUN. A started terminal
+repository without its operation result cannot remain RUNNING or become PASSED.
+The ledger never adds contradictory not-reached/not-run entries for observed work.
+
+These statuses do not reconstruct attempts, exit codes, output bytes, supervisor
+receipts or filesystem-cleanup proof. Cancelled/crashed Steps without a retained
+attempt result still lack that detailed receipt, and cleanup remains unverified.
+The original recovery outcome is preserved; observing that processes have stopped
+later cannot manufacture an earlier execution result.
 
 ## Timing
 
@@ -167,7 +183,7 @@ This remains observability, not replay. Game Tape does **not** create a reproduc
 
 Explicit retries remain explicit. Each physical attempt and its canonical retry disposition are visible, so “no hidden retries” means exactly that: Game Tape never invents an attempt, and configured retry behavior cannot disappear behind a single final status.
 
-Adjacent retries are compared once in `game_tape_attempt_comparison.py`. `GameTapeAttemptTransition` reports only direct physical differences between attempt N and N+1: whether the recorded retry decision explicitly links them, duration/exit/argv changes, repository-state continuity, executable/egress/resource/cache changes, and stdout/stderr evidence-hash changes. The browser renders those facts; it does not derive retry semantics itself.
+Adjacent retries are compared once in `game_tape_attempt_comparison.py`. `GameTapeAttemptTransition` reports only direct physical differences between attempt N and N+1: whether the recorded retry decision explicitly links them, duration/exit/argv changes, repository-state continuity, executable/egress/resource/cache changes, isolation evidence changes and stdout/stderr evidence-hash changes. The browser renders those facts; it does not derive retry semantics itself.
 
 ### Exact failure history
 
@@ -219,7 +235,7 @@ The same owner projects a selected-context window. Starting at the inspected run
 
 ### Retry physical-context summary
 
-`game_tape_retry_context.py` summarizes adjacent canonical `GameTapeAttemptTransition` facts once. A step with no canonical attempt evidence is `NO_ATTEMPT_EVIDENCE`; one physical attempt is `NOT_RETRIED`. Fully linked retries are `SAME_PHYSICAL_CONTEXT` unless repository continuity, argv, executable identity, egress policy, resource policy, or cache input changed; if any of those facts changed, the summary is `CHANGED_PHYSICAL_CONTEXT`. Missing/broken canonical retry linkage yields `INCOMPLETE_RETRY_EVIDENCE`.
+`game_tape_retry_context.py` summarizes adjacent canonical `GameTapeAttemptTransition` facts once. A step with no canonical attempt evidence is `NO_ATTEMPT_EVIDENCE`; one physical attempt is `NOT_RETRIED`. Fully linked retries are `SAME_PHYSICAL_CONTEXT` unless repository continuity, argv, executable identity, egress policy, resource policy, recorded isolation boundary, or cache input changed; if any of those facts changed, the summary is `CHANGED_PHYSICAL_CONTEXT`. Missing/broken canonical retry linkage yields `INCOMPLETE_RETRY_EVIDENCE`.
 
 Duration, return code, stdout hash and stderr hash are deliberately excluded from the physical-context classification. They describe what happened during an attempt, not the identity/policy of the context in which it ran. The Attempts view renders the backend-owned summary and still shows those outcome differences separately.
 
@@ -230,6 +246,12 @@ Play-by-Play renders the canonical execution-ledger projection in chronological 
 ## Logs and durable evidence
 
 Raw stdout/stderr remains transient execution data and is deliberately not persisted in run history. During an active Fleet run, command execution may project output through one bounded process-local `GameTapeLiveOutputStore`. Direct/bubblewrap execution streams chunks as they are read; transports that cannot prove incremental delivery may expose returned output only after that command returns rather than pretending it was live.
+
+The explicitly selected credential-visible protected Codex profile withholds its
+raw native streams and failure tails from the store while its parser continues to
+consume them. Typed final records remain untrusted text; arbitrary credential echo
+inside a valid record is not proven excluded. This is not a generic credential
+secrecy guarantee. Other profiles keep their existing stream behavior.
 
 Host-backed step secret values are stream-redacted **before** text enters the store. The redactor carries a bounded suffix across transport reads, so an exact secret split across stdout/stderr transport chunks is still replaced before storage. The store retains at most 2,000 chunks per run with a 16,384-character chunk bound and records repository, step, physical attempt, stream, 1-based redacted line range, sequence and dropped-chunk count. Observability callback failure cannot stop or alter process execution.
 
@@ -264,7 +286,7 @@ Tests and architecture review should preserve these rules:
 1. Flow order equals admitted `ResolvedFleetPlan.steps` order.
 2. Game Tape cannot mutate or schedule execution.
 3. Flow, Timeline, Play-by-Play, Attempts, Logs/evidence, Search, and inspector share one step execution identity/model.
-4. `NOT_RUN` means planned but no durable step execution result exists.
+4. `NOT_RUN` means planned and unreached according to canonical result/lifecycle facts; an absent OperationReport alone does not prove non-execution.
 5. Recovery interruption is not silently presented as ordinary failure.
 6. Structured durable Game Tape provenance never exposes secret/literal values; host-backed secret bytes are also redacted before transient live output enters the store.
 7. Wall-clock timing comes from execution evidence, never from UI estimation.

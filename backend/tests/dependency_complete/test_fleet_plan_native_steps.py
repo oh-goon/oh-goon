@@ -583,3 +583,14 @@ def test_native_timeout_retains_physical_failure_evidence_without_accepting_comp
     # Killing the native monitor can prevent its final successful-exec status.
     # The Plan still retains selected profile intent; no receipt is synthesized.
     assert outcome.standard_isolation is None
+
+
+def test_unsupported_backend_sandbox_harness_rejects_before_producer(tmp_path: Path) -> None:
+    _, _, step, _ = _case(tmp_path)
+    assert step.native_agent is not None
+    selected = replace(
+        step.native_agent,
+        profile=NativeAgentProfile(backend="bubblewrap", sandbox_owner="execution_backend"),
+    )
+    with pytest.raises(FleetPlanInvalid, match="not qualified for this native agent"):
+        require_native_agent_compatibility(selected, role="review")

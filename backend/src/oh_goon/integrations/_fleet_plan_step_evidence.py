@@ -157,7 +157,11 @@ def attempt_evidence(
         cache_input=cache_input,
         cache_output=cache_output,
         retained_cache=retained_cache,
-        egress=PlanEgressEvidence(mode="none")
+        egress=PlanEgressEvidence(
+            mode="host_unrestricted"
+            if outcome.standard_isolation.host_and_external_ip_networking == "host_unrestricted"
+            else "none"
+        )
         if outcome.standard_isolation is not None
         else _egress_evidence(step, effective_egress),
         resources=outcome.standard_isolation.resources
@@ -172,6 +176,8 @@ def attempt_evidence(
                 leader_exited_before_group_quiescence=outcome.supervisor.leader_exited_before_group_quiescence,
                 process_group_cleanup_requested=outcome.supervisor.process_group_cleanup_requested,
                 cleanup_reason=outcome.supervisor.cleanup_reason,
+                final_process_group_quiescent=outcome.supervisor.final_process_group_quiescent,
+                forced_termination=outcome.supervisor.forced_termination,
                 recovery_events=tuple(
                     PlanExecutionRecoveryEventEvidence(**event.as_dict())
                     for event in outcome.supervisor.recovery_events

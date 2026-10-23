@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Mapping, Protocol
 
 from oh_goon.core.errors import ExecutorPlacementLost, FleetPlanInvalid
 from oh_goon.core.models.agent_providers import ResolvedNativeAgent
+from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
@@ -83,6 +84,9 @@ class StandardIsolatedProcessRequest:
     input_data: bytes | None = field(default=None, repr=False)
     resources: CicdResourcePolicy = field(default_factory=CicdResourcePolicy)
     read_only_workspace: bool = False
+    allowed_write_roots: tuple[Path, ...] = ()
+    host_network: bool = False
+    protected_execution: bool = False
     retain_output_tail: bool = False
     termination_requested: Callable[[], TerminationSignal | None] | None = field(
         default=None, repr=False
@@ -99,6 +103,10 @@ class StandardIsolatedProcessRequest:
             or not callable(self.require_workspace_current)
             or not self.backend_configuration_id
             or type(self.read_only_workspace) is not bool
+            or type(self.host_network) is not bool
+            or type(self.protected_execution) is not bool
+            or type(self.allowed_write_roots) is not tuple
+            or len(self.allowed_write_roots) > 32
             or type(self.retain_output_tail) is not bool
         ):
             raise FleetPlanInvalid("Standard sandbox requires resolved workspace and launch intent")
@@ -114,6 +122,31 @@ class StandardIsolatedProcessRequest:
             raise FleetPlanInvalid("Standard sandbox input must be bounded bytes")
         if any(type(name) is not str or type(value) is not str for name, value in self.env.items()):
             raise FleetPlanInvalid("Standard sandbox environment requires resolved strings")
+        if self.host_network:
+            raise FleetPlanInvalid(
+                "Native host networking requires a supported admitted service transport"
+            )
+        if self.protected_execution and not self.read_only_workspace:
+            raise FleetPlanInvalid("Protected execution requires a read-only base workspace")
+        if not self.protected_execution and (self.allowed_write_roots or self.host_network):
+            raise FleetPlanInvalid(
+                "Native scoped writes, authentication and host network require explicit protected execution"
+            )
+        if self.allowed_write_roots and not self.read_only_workspace:
+            raise FleetPlanInvalid("Scoped native writes require a read-only base workspace")
+        if len(set(self.allowed_write_roots)) != len(self.allowed_write_roots):
+            raise FleetPlanInvalid("Scoped native write roots must be distinct")
+        for root in self.allowed_write_roots:
+            if (
+                not isinstance(root, Path)
+                or not root.is_absolute()
+                or ".." in root.parts
+                or root == workspace
+                or not root.is_relative_to(workspace)
+            ):
+                raise FleetPlanInvalid(
+                    "Scoped native write roots must be explicit workspace descendants"
+                )
         object.__setattr__(self, "workspace", workspace)
         object.__setattr__(self, "cwd", cwd)
         object.__setattr__(self, "env", MappingProxyType(dict(self.env)))
@@ -154,6 +187,7 @@ def native_profile_command_runner(
     workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None,
     *,
     termination_requested: Callable[[], TerminationSignal | None] | None = None,
+    repair_context: AgentRepairContext | None = None,
 ) -> Callable[..., CommandResult]:
     """Transport the frozen native profile to original Step and Git process births.
 
@@ -184,6 +218,12 @@ def native_profile_command_runner(
         raise FleetPlanInvalid("Native resource limits require the selected sandbox resource owner")
 
     common_mounts = native_runtime_read_only_mounts(workspace, native_agent) if sandboxed else ()
+    protected = native_agent.profile.sandbox_owner == "execution_backend"
+    admitted_roots = (
+        tuple(workspace / root for root in repair_context.write_roots)
+        if protected and repair_context is not None and repair_context.phase == "repair"
+        else ()
+    )
 
     def command_runner(
         *argv: str,
@@ -200,6 +240,8 @@ def native_profile_command_runner(
         broker_directory: Path | None = None,
         private_configuration_directory: Path | None = None,
         read_only_workspace: bool = False,
+        allowed_write_roots: tuple[Path, ...] = (),
+        host_network: bool = False,
         preserve_native_executable_path: bool = True,
         retain_output_tail: bool = False,
     ) -> CommandResult:
@@ -207,13 +249,24 @@ def native_profile_command_runner(
             raise FleetPlanInvalid("Native output tail selection must be a boolean")
         if cancel_requested is not None and cancel_requested():
             raise OperationCancelledError("Native workload cancelled before process launch")
+        if allowed_write_roots and (not protected or allowed_write_roots != admitted_roots):
+            raise FleetPlanInvalid("Native write roots differ from the original phase admission")
+        if protected:
+            allowed_write_roots = () if read_only_workspace else admitted_roots
+            read_only_workspace = True
+        if host_network:
+            raise FleetPlanInvalid(
+                "Native host networking requires a supported admitted service transport"
+            )
         if sandboxed:
             require_native_workspace_runtime_separation(
-                workspace, read_only_workspace=read_only_workspace
+                workspace, read_only_workspace=read_only_workspace and not allowed_write_roots
             )
         if not sandboxed:
             if (
                 read_only_workspace
+                or allowed_write_roots
+                or host_network
                 or broker_directory is not None
                 or private_configuration_directory is not None
             ):
@@ -254,6 +307,9 @@ def native_profile_command_runner(
                 input_data=input_data,
                 resources=native_agent.profile.resources,
                 read_only_workspace=read_only_workspace,
+                allowed_write_roots=allowed_write_roots,
+                host_network=host_network,
+                protected_execution=protected,
                 retain_output_tail=retain_output_tail,
                 termination_requested=termination_requested,
             )
@@ -311,6 +367,13 @@ def require_native_workspace_runtime_separation(
 def native_runtime_read_only_mounts(
     workspace: Path, native_agent: ResolvedNativeAgent
 ) -> tuple[StandardReadOnlyMount, ...]:
+    if (
+        native_agent.agent in {"codex", "opencode"}
+        and native_agent.definition.configuration_directory is not None
+    ):
+        raise FleetPlanInvalid(
+            "Native service authentication/configuration must remain outside agent execution"
+        )
     # These are the loaded runtime's existing paths, not a second installation
     # resolver or a broad bind of its source checkout/host home.
     roots = list(_loaded_native_host_runtime_roots())

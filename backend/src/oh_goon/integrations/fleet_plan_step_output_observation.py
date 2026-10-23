@@ -5,12 +5,15 @@ from pathlib import Path
 from typing import Any, Literal
 
 from oh_goon.core.models.diagnostic import DiagnosticEvent
-from oh_goon.core.models.fleet_plan import ResolvedPlanStep
+from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep, ResolvedPlanStep
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.engine.command import CommandOutputObserver, CommandProcessObserver, CommandResult
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
-from oh_goon.integrations.fleet_plan_secret_redaction import streaming_host_secret_redactor
+from oh_goon.integrations.fleet_plan_secret_redaction import (
+    StreamingSecretRedactor,
+    streaming_host_secret_redactor,
+)
 
 
 def observed_command_runner(
@@ -35,10 +38,26 @@ def observed_command_runner(
         runtime_supervision: CommandRuntimeSupervision | None = None,
         **native_options: Any,
     ) -> CommandResult:
-        redactors = {
-            "stdout": streaming_host_secret_redactor(step, host_environment),
-            "stderr": streaming_host_secret_redactor(step, host_environment),
-        }
+        selected = step.native_agent if isinstance(step, ResolvedLocalSearchAgentStep) else None
+        private_native_protocol = (
+            selected is not None
+            and selected.profile.sandbox_owner == "execution_backend"
+            and bool(argv)
+            and (
+                argv[0] == selected.definition.executable
+                or native_options.get("broker_directory") is not None
+            )
+        )
+        # Protected native protocol may contain private source and task data.
+        # Parse it internally without copying the raw stream into live output.
+        redactors: dict[Literal["stdout", "stderr"], StreamingSecretRedactor] = (
+            {}
+            if private_native_protocol
+            else {
+                "stdout": streaming_host_secret_redactor(step, host_environment),
+                "stderr": streaming_host_secret_redactor(step, host_environment),
+            }
+        )
 
         def observe(stream: Literal["stdout", "stderr"], text: str) -> None:
             if stream_output is not None:
@@ -47,12 +66,16 @@ def observed_command_runner(
                 except Exception as exc:
                     emit_output_observer_failure(
                         diagnostics,
-                        exc,
+                        RuntimeError("Protected native protocol observer failed")
+                        if private_native_protocol
+                        else exc,
                         step_id=step.step_id,
                         operation=f"provided_stream_{stream}",
                         fleet_run_id=fleet_run_id,
                         repository_id=repository_id,
                     )
+            if private_native_protocol:
+                return
             try:
                 redacted = redactors[stream].feed(text)
                 if redacted:

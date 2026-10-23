@@ -36,6 +36,7 @@ def _transition(
         ),
         tool_changed=_tool_identity(previous) != _tool_identity(current),
         egress_changed=previous.egress.policy_id != current.egress.policy_id,
+        isolation_changed=previous.standard_isolation != current.standard_isolation,
         resource_policy_changed=_resource_policy(previous) != _resource_policy(current),
         cache_input_changed=previous.cache_input != current.cache_input,
         stdout_changed=previous.stdout_evidence.sha256 != current.stdout_evidence.sha256,

@@ -43,7 +43,6 @@ from oh_goon.core.models.run_events import (
     TerminationRequestedEvent,
 )
 from oh_goon.core.models.target import FleetPlanTarget
-from oh_goon.core.vocabulary import GameTapeStatus
 
 
 def project_game_tape(detail: FleetRunDetail) -> GameTape:
@@ -116,12 +115,11 @@ def _repository_execution(
             ),
             None,
         )
-        live_steps = {
-            event.step_id: event.generated_at
+        repository_events = tuple(
+            event
             for event in detail.lifecycle_events
-            if isinstance(event, StepStartedEvent)
-            and event.repository_id == repository.repository_id
-        }
+            if getattr(event, "repository_id", None) == repository.repository_id
+        )
         steps = project_steps(
             detail.run.fleet_run_id,
             repository.repository_id,
@@ -131,14 +129,17 @@ def _repository_execution(
             source_label=plan_source_label(target) if target is not None else "resolved plan",
             terminal=detail.run.status.terminal,
             operation_reason_code=None,
-            live_started_at=live_steps,
+            lifecycle_events=repository_events,
         )
         return GameTapeRepositoryExecution(
             repository_execution_id=execution_id,
             repository=repository,
-            status=GameTapeStatus.RUNNING
-            if repository_start is not None
-            else repository_status(None, terminal=detail.run.status.terminal),
+            status=repository_status(
+                None,
+                terminal=detail.run.status.terminal,
+                started=repository_start is not None,
+                lifecycle_events=repository_events,
+            ),
             started_at=repository_start,
             fingerprint=environment_fingerprint(target, None, None),
             steps=steps,

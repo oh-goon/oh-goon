@@ -90,6 +90,7 @@ class GameTapeAttemptTransition(ImmutableModel):
     repository_state_continuity: bool
     tool_changed: bool
     egress_changed: bool
+    isolation_changed: bool = False
     resource_policy_changed: bool
     cache_input_changed: bool
     stdout_changed: bool
@@ -560,6 +561,7 @@ class GameTapeStepDiff(ImmutableModel):
     attempt_count_changed: bool
     tool_changed: bool
     egress_changed: bool
+    isolation_changed: bool = False
     resource_policy_changed: bool
     failure_signature_changed: bool
 

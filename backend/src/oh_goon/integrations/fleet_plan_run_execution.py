@@ -7,6 +7,7 @@ from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
@@ -204,6 +205,7 @@ class FleetPlanRunExecutor:
         lifecycle_observer: StepLifecycleObserver | None = None,
         agent_delivery_for: Callable[[str, str], bytes] | None = None,
         execution_limits: FleetPlanRunLimits | None = None,
+        repair_context: AgentRepairContext | None = None,
     ) -> PlanExecutionOutcome:
         """Execute one already-preflighted direct plan through live host authority."""
 
@@ -217,6 +219,7 @@ class FleetPlanRunExecutor:
             termination_requested=termination_requested,
             agent_delivery_for=agent_delivery_for,
             execution_limits=execution_limits,
+            repair_context=repair_context,
         )
         runtime = replace(
             runtime,
@@ -332,6 +335,7 @@ class FleetPlanRunExecutor:
         trusted_local_scope: TrustedLocalRunScope | None = None,
         agent_delivery_for: Callable[[str, str], bytes] | None = None,
         execution_limits: FleetPlanRunLimits | None = None,
+        repair_context: AgentRepairContext | None = None,
     ) -> StepRuntime:
         return StepRuntime(
             git=self._git,
@@ -348,6 +352,7 @@ class FleetPlanRunExecutor:
             trusted_local_scope=trusted_local_scope,
             agent_delivery_for=agent_delivery_for,
             execution_limits=execution_limits,
+            repair_context=repair_context,
             terminal=self._terminal,
             standard_process_isolation=self._standard_process_isolation,
             workspace_pin=self._workspace_pin,

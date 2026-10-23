@@ -22,6 +22,7 @@ from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_events import (
     RepositoryCompletedEvent,
+    RepositoryStartedEvent,
     RunCancelledEvent,
     RunCompletedEvent,
     RunFailedEvent,
@@ -177,6 +178,12 @@ def _not_run_repository_events(
     )
     if terminal is None:
         return []
+    observed_steps = {
+        step_id
+        for event in detail.lifecycle_events
+        if getattr(event, "repository_id", None) == repository.repository_id
+        and isinstance(step_id := getattr(event, "step_id", None), str)
+    }
     events = [
         _step_pending(
             terminal.sequence,
@@ -192,7 +199,14 @@ def _not_run_repository_events(
             order,
         )
         for order, step in enumerate(target.plan.steps, 1)
+        if step.step_id not in observed_steps
     ]
+    if any(
+        isinstance(event, RepositoryStartedEvent)
+        and event.repository_id == repository.repository_id
+        for event in detail.lifecycle_events
+    ):
+        return events
     events.append(
         _repo_event(
             terminal.sequence,

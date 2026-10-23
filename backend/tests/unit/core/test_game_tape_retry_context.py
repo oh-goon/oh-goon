@@ -59,3 +59,10 @@ def test_retry_context_preserves_missing_attempt_evidence() -> None:
 
     assert summary.classification == "NO_ATTEMPT_EVIDENCE"
     assert summary.retry_count == 0
+
+
+def test_retry_context_reports_changed_isolation_evidence() -> None:
+    summary = summarize_retry_context(2, (_transition(isolation_changed=True),))
+
+    assert summary.classification == "CHANGED_PHYSICAL_CONTEXT"
+    assert summary.physical_context_changed is True

@@ -18,10 +18,32 @@ from oh_goon.core.models.agent_review import (
     accept_review,
     review_scope,
 )
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_evidence import (
+    CompletedPlanStepExecution,
+    FleetPlanResult,
+    PlanEgressEvidence,
+    PlanExecutionSupervisorEvidence,
+    PlanIsolationBackendEvidence,
+    PlanOutputEvidence,
+    PlanStandardIsolationEvidence,
+    PlanStepAttemptEvidence,
+)
+from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
+from oh_goon.core.models.operation import FleetPlanOperationEvidence
+from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.run import CompletedFleetRun, FleetRunDetail, FleetRunProgress
+from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, fleet_repository_scope
+from oh_goon.core.time import utc_now
+from oh_goon.core.vocabulary import FleetRunStatus, OperationAction
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
 from oh_goon.integrations.agent_review_execution import accept_agent_phase_output
-from oh_goon.services.fleet_plan_repair import AgentReviewRepairCampaign
+from oh_goon.services.fleet_plan_repair import AgentReviewRepairCampaign, completed_phase_steps
 from tests.factories.agent_review import agent_review_case
+from tests.factories.capabilities import capability_snapshot
+from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+from tests.factories.operation_reports import make_operation_report
+from tests.factories.run_admission import repository_admissions_for
 from tests.factories.shipped_templates import PLAN_TEMPLATES
 
 
@@ -637,3 +659,111 @@ def test_review_context_retains_source_and_original_skill_for_adjudication(tmp_p
     )
     assert accepted.observations[0].record.model_dump(mode="json") == adjudication
     assert (repo / "code.txt").read_text() == "broken\n"
+
+
+@pytest.mark.parametrize(
+    "quiescent,cleanup",
+    [
+        (None, None),
+        (False, None),
+        (True, None),
+        (True, "not_recorded"),
+        (True, "unverified"),
+        (True, "verified"),
+    ],
+)
+def test_structured_phase_requires_affirmative_boundary_cleanup(tmp_path, quiescent, cleanup):
+    plan = ResolvedFleetPlan.create(
+        name="protected-phase",
+        description="",
+        requirements=(),
+        execution=MaintenanceExecutionPolicy(),
+        steps=(ResolvedCommandStep(step_id="review", argv=("true",)),),
+    )
+    output = PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
+    supervisor = PlanExecutionSupervisorEvidence.model_validate(
+        {
+            "process_group_cleanup_requested": True,
+            "cleanup_reason": "output_cleanup",
+            **(
+                {"final_process_group_quiescent": quiescent, "forced_termination": True}
+                if quiescent is not None
+                else {}
+            ),
+        }
+    )
+    # Existing retained receipts with no terminal observation stay unknown on readback.
+    supervisor = PlanExecutionSupervisorEvidence.model_validate_json(supervisor.model_dump_json())
+    assert supervisor.final_process_group_quiescent is quiescent
+    if quiescent is None:
+        assert "final_process_group_quiescent" not in supervisor.model_dump()
+        assert supervisor.forced_termination is None
+    attempt = PlanStepAttemptEvidence(
+        attempt=1,
+        returncode=0,
+        stdout_evidence=output,
+        stderr_evidence=output,
+        repository_state_before="source",
+        repository_state_after="source",
+        egress=PlanEgressEvidence(mode="none"),
+        supervisor=supervisor,
+        standard_isolation=PlanStandardIsolationEvidence(
+            backend=PlanIsolationBackendEvidence(
+                backend_id="bubblewrap",
+                configuration_id="fixture-boundary",
+                kernel_boundary="shared_host_kernel",
+                remote_execution=False,
+                experimental=False,
+            ),
+            workspace_read_only=True,
+            broker_socket_mounted=False,
+            resource_owner="none",
+            filesystem_cleanup=cleanup,
+        )
+        if cleanup is not None
+        else None,
+    )
+    step = CompletedPlanStepExecution(
+        step_id="review",
+        kind="command",
+        stdout_evidence=output,
+        stderr_evidence=output,
+        repository_state_before="source",
+        repository_state_after="source",
+        attempts=(attempt,),
+    )
+    target = structural_fleet_plan_target(plan)
+    repository = RepositoryIdentity(path=tmp_path)
+    report = make_operation_report(
+        repository,
+        OperationAction.EXECUTE_PLAN,
+        target=target,
+        evidence=FleetPlanOperationEvidence(
+            kind="FLEET_PLAN",
+            plan=FleetPlanResult(plan_id=plan.plan_id, steps=(step,)),
+        ),
+    )
+    now = utc_now()
+    run = CompletedFleetRun(
+        status=FleetRunStatus.COMPLETED,
+        fleet_run_id="fleet-test",
+        target=target,
+        capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+        repository_scope=fleet_repository_scope(None),
+        targets=(repository,),
+        accepted_at=now,
+        started_at=now,
+        finished_at=now,
+        progress=FleetRunProgress(total=1, succeeded=1, failed=0, needs_attention=0),
+    )
+    detail = FleetRunDetail(
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+        operations=(report,),
+        repository_admissions=repository_admissions_for(target, (repository,)),
+    )
+    if quiescent is True and cleanup in (None, "verified"):
+        assert completed_phase_steps(detail, plan) == (step,)
+    else:
+        with pytest.raises(FleetPlanInvalid, match="complete successful native attempt evidence"):
+            completed_phase_steps(detail, plan)

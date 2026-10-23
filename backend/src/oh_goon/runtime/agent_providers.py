@@ -92,6 +92,14 @@ def load_agent_providers(path: Path) -> AgentProvidersConfig:
         raise AgentProviderError(
             "Provider configuration must be valid UTF-8 JSON or TOML with unique keys"
         ) from exc
+    if any(
+        name in {"codex", "opencode"} and definition.configuration_directory is not None
+        for name, definition in config.native_agents.items()
+    ):
+        raise AgentProviderError(
+            "Native authentication and configuration remain service-owned; "
+            "Codex/OpenCode configuration directories cannot be exposed to agent tools"
+        )
     providers = {
         name: provider.model_copy(
             update={"ca_file": str((path.parent / Path(provider.ca_file).expanduser()).resolve())}
@@ -194,6 +202,11 @@ def resolve_native_agent(
             "Selected native workspace is outside the profile's workspace roots"
         )
     definition = config.native_agents.get(name, NativeAgentDefinition())
+    if name in {"codex", "opencode"} and definition.configuration_directory is not None:
+        raise AgentProviderError(
+            "Native authentication and configuration remain service-owned; "
+            "Codex/OpenCode configuration directories cannot be exposed to agent tools"
+        )
     login = profile.codex_login
     if login is not None:
         if (
@@ -203,6 +216,11 @@ def resolve_native_agent(
         ):
             raise AgentProviderError(
                 "Codex login requires Codex with its typed connection and no native argument/config overrides"
+            )
+        if profile.backend != "local" or profile.sandbox_owner != "harness":
+            raise AgentProviderError(
+                "Protected native sign-in requires a qualified service connection; "
+                "authentication and configuration files cannot be mounted into agent tools"
             )
         try:
             native_home = _existing_native_path(login.home, directory=True)
@@ -217,7 +235,7 @@ def resolve_native_agent(
         profile = profile.model_copy(
             update={"codex_login": login.model_copy(update={"home": str(native_home)})}
         )
-    validate_native_agent_arguments(name, definition.arguments)
+    validate_native_agent_arguments(name, definition.arguments, sandbox_owner=profile.sandbox_owner)
     executable = definition.executable
     if executable is None:
         executable = shutil.which(name, path=environment.get("PATH", ""))

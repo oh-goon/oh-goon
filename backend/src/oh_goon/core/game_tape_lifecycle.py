@@ -9,6 +9,14 @@ from oh_goon.core.models.fleet_plan_evidence import (
 )
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.run import FleetRunState, fleet_run_outcome
+from oh_goon.core.models.run_events import (
+    ProcessStateUnknownEvent,
+    StepCancelledEvent,
+    StepFailedEvent,
+    StepSkippedEvent,
+    StepStartedEvent,
+    StepSucceededEvent,
+)
 from oh_goon.core.vocabulary import (
     FleetRunFailureStage,
     FleetRunOutcome,
@@ -42,11 +50,27 @@ def run_status(run: FleetRunState) -> GameTapeStatus:
     )
 
 
-def repository_status(report: OperationReport | None, *, terminal: bool) -> GameTapeStatus:
+def repository_status(
+    report: OperationReport | None,
+    *,
+    terminal: bool,
+    started: bool = False,
+    lifecycle_events: tuple[object, ...] = (),
+) -> GameTapeStatus:
     """Interpret durable repository operation evidence once for every Game Tape view."""
 
     if report is None:
-        return GameTapeStatus.NOT_RUN if terminal else GameTapeStatus.PLANNED
+        if not started:
+            return GameTapeStatus.NOT_RUN if terminal else GameTapeStatus.PLANNED
+        if not terminal:
+            return GameTapeStatus.RUNNING
+        observed = _unreported_step_status(terminal=True, started=True, events=lifecycle_events)
+        # A closed Step cannot stand in for the absent whole-repository result.
+        return (
+            GameTapeStatus.CANCELLED
+            if observed is GameTapeStatus.CANCELLED
+            else GameTapeStatus.INTERRUPTED
+        )
     verdict = report.outcome.verdict
     if verdict is Verdict.FAILED:
         return GameTapeStatus.FAILED
@@ -63,11 +87,13 @@ def step_status(
     execution: PlanStepExecution | None,
     *,
     terminal: bool,
+    started: bool = False,
+    lifecycle_events: tuple[object, ...] = (),
 ) -> GameTapeStatus:
-    """Interpret canonical step evidence once; never infer state from logs or timing."""
+    """Interpret canonical result or journal facts, never parent success or timing."""
 
     if execution is None:
-        return GameTapeStatus.NOT_RUN if terminal else GameTapeStatus.PLANNED
+        return _unreported_step_status(terminal=terminal, started=started, events=lifecycle_events)
     if isinstance(getattr(execution, "teardown", None), FailedPlanStepTeardownEvidence):
         return GameTapeStatus.FAILED
     if isinstance(execution, CompletedPlanStepExecution):
@@ -79,3 +105,35 @@ def step_status(
     raise AssertionError(
         f"Unsupported step execution reached Game Tape projection: {type(execution).__name__}"
     )
+
+
+def _unreported_step_status(
+    *, terminal: bool, started: bool, events: tuple[object, ...]
+) -> GameTapeStatus:
+    closed = [
+        event
+        for event in events
+        if isinstance(
+            event, (StepSucceededEvent, StepFailedEvent, StepSkippedEvent, StepCancelledEvent)
+        )
+    ]
+    if closed:
+        latest = max(closed, key=lambda event: event.sequence)
+        if isinstance(latest, StepSucceededEvent):
+            return GameTapeStatus.PASSED
+        if isinstance(latest, StepFailedEvent):
+            return GameTapeStatus.FAILED
+        if isinstance(latest, StepSkippedEvent):
+            return GameTapeStatus.SKIPPED
+        return GameTapeStatus.CANCELLED
+    progress = [
+        event for event in events if isinstance(event, (StepStartedEvent, ProcessStateUnknownEvent))
+    ]
+    if progress:
+        latest_progress = max(progress, key=lambda event: event.sequence)
+        if isinstance(latest_progress, ProcessStateUnknownEvent):
+            return GameTapeStatus.INTERRUPTED
+        started = True
+    if started:
+        return GameTapeStatus.INTERRUPTED if terminal else GameTapeStatus.RUNNING
+    return GameTapeStatus.NOT_RUN if terminal else GameTapeStatus.PLANNED

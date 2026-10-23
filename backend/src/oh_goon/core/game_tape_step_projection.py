@@ -36,6 +36,7 @@ from oh_goon.core.models.game_tape import (
     GameTapeStepExecution,
     GameTapeWhy,
 )
+from oh_goon.core.models.run_events import StepStartedEvent
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary import GameTapeStatus
 
@@ -51,16 +52,29 @@ def project_steps(
     terminal: bool,
     operation_reason_code: str | None,
     live_started_at: dict[str, datetime] | None = None,
+    lifecycle_events: tuple[object, ...] = (),
 ) -> tuple[GameTapeStepExecution, ...]:
     by_id = {item.step_id: item for item in executions}
+    events_by_step: dict[str, list[object]] = {}
+    for event in lifecycle_events:
+        if (
+            getattr(event, "fleet_run_id", None) == fleet_run_id
+            and getattr(event, "repository_id", None) == repository_id
+            and isinstance(step_id := getattr(event, "step_id", None), str)
+        ):
+            events_by_step.setdefault(step_id, []).append(event)
     projected: list[GameTapeStepExecution] = []
     for order, step in enumerate(planned_steps, start=1):
         execution = by_id.get(step.step_id)
-        live_start = (live_started_at or {}).get(step.step_id)
-        status = (
-            GameTapeStatus.RUNNING
-            if execution is None and live_start is not None
-            else step_status(execution, terminal=terminal)
+        events = tuple(events_by_step.get(step.step_id, ()))
+        starts = [event for event in events if isinstance(event, StepStartedEvent)]
+        live_start = (
+            min(starts, key=lambda event: event.sequence).generated_at
+            if starts
+            else (live_started_at or {}).get(step.step_id)
+        )
+        status = step_status(
+            execution, terminal=terminal, started=live_start is not None, lifecycle_events=events
         )
         previous = projected[-1] if projected else None
         projected.append(

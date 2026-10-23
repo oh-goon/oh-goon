@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from oh_goon.core.fleet_plan_retry import retry_decision
-from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedPlanStep, StepFailurePolicy
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedPlanStep
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanStepAttemptEvidence,
     PublishedPlanOutputEvidence,
@@ -14,10 +14,12 @@ from oh_goon.core.models.fleet_plan_retry import (
     PlanRetryDecisionEvidence,
     ScheduledPlanRetryDecisionEvidence,
 )
+from oh_goon.core.models.fleet_plan_step_primitives import StepFailurePolicy
 from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.engine.git import GitObservation
 from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
+    process_boundary_settled,
     step_succeeded,
     wait_for_retry,
 )
@@ -146,11 +148,15 @@ def execute_strict_with_retries(
             step_order=step_order,
             output_observer=output_observer,
         )
-        sealed_outputs = attempt.seal_owned_outputs()
-        after = runtime.git.observe(attempt_repository, runtime.cancel_requested)
-        publication = _successful_strict_publication(
-            step, outcome, attempt_repository, prepared_run, attempt, sealed_outputs
-        )
+        if process_boundary_settled(outcome) is False:
+            after = runtime.git.observe(attempt_repository, runtime.cancel_requested)
+            publication = AttemptPublication({}, (), outcome, None, None)
+        else:
+            sealed_outputs = attempt.seal_owned_outputs()
+            after = runtime.git.observe(attempt_repository, runtime.cancel_requested)
+            publication = _successful_strict_publication(
+                step, outcome, attempt_repository, prepared_run, attempt, sealed_outputs
+            )
         outcome = publication.outcome
         evidence = None
         if not outcome.skipped:
@@ -215,13 +221,14 @@ def _execute_with_retries(
         published_evidence = physical.output_evidence
         succeeded = step_succeeded(step, outcome)
         decision: PlanRetryDecisionEvidence | None = None
-        if not outcome.skipped and not succeeded:
+        cleanup_failed = process_boundary_settled(outcome) is False
+        if not outcome.skipped and not succeeded and not cleanup_failed:
             decision = retry_decision(
                 policy, attempt_number=attempt_number, exit_code=outcome.returncode
             )
         if physical.evidence is not None:
             attempts.append(physical.evidence.model_copy(update={"retry": decision}))
-        if outcome.skipped or succeeded:
+        if outcome.skipped or succeeded or cleanup_failed:
             break
         if not _wait_for_scheduled_retry(decision, runtime.cancel_requested):
             break
@@ -241,7 +248,7 @@ def _successful_direct_publication(
     outcome: StepOutcome,
     repository: Path,
 ) -> AttemptPublication:
-    if outcome.skipped:
+    if outcome.skipped or process_boundary_settled(outcome) is False:
         return AttemptPublication({}, (), outcome, None, None)
     if not step_succeeded(step, outcome):
         # Explicitly continued, single-attempt direct command Steps may transport

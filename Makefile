@@ -16,6 +16,8 @@ STATE_HOME ?= $(if $(XDG_STATE_HOME),$(XDG_STATE_HOME),$(HOME)/.local/state)
 CACHE_HOME ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)
 TOOLING_TEST_RESUME_CONTEXT = --resume-context "node=$$(node --version 2>/dev/null || printf unavailable)" --resume-context "npm=$$(npm --version 2>/dev/null || printf unavailable)" --resume-context "uv=$$(uv --version 2>/dev/null || printf unavailable)" --resume-context "git=$$(git --version 2>/dev/null || printf unavailable)"
 PYTEST_RESUME ?= --resume
+# Empty preserves pytest's native testpaths; hosted CI partitions these with test-integration.
+BACKEND_CHECK_TEST_ROOTS ?=
 QUALIFY_EVIDENCE_DIR ?= ../OH_GOON_NATIVE_EVIDENCE
 A1_KERNEL_EVIDENCE_DIR ?= ../OH_GOON_A1L_KERNEL_EVIDENCE
 REPOSITORY_STATE_KEY = $(shell printf '%s' "$(CURDIR)" | sha256sum | cut -c1-16)
@@ -739,7 +741,7 @@ check-backend:
 	cd backend && uv run --offline --frozen --no-sync --group quality ruff check src tests
 	cd backend && uv run --offline --frozen --no-sync --group quality ruff format --check src tests
 	uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet guard
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "not certification"
+	cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "not certification" $(BACKEND_CHECK_TEST_ROOTS)
 
 backend-check: check-backend
 

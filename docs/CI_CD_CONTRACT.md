@@ -7,8 +7,10 @@ This document is the short product-level contract for local CI/CD execution. The
 ## Repository checks on GitHub
 
 The repository's [required-checks workflow](../.github/workflows/ci.yml) runs on
-every pull request, push to `main`, and merge-queue group. Each job materializes
-the committed uv/npm locks through `make init`, then invokes one existing owner
+pull-request updates and draft/readiness transitions, pushes to `main`, and
+merge-queue groups. Ready pull requests, `main` and merge-queue groups run all
+seven full checks. Each full job materializes the committed uv/npm locks through
+`make init`, then invokes one existing owner
 check: `backend-check`, `frontend-check`, `tooling-check`, `architecture`,
 `check-generated`, `test-integration`, or `build-release`. These are also the
 stable GitHub check names. The integration target executes both backend and cross-owner integration
@@ -22,10 +24,49 @@ Require changes through a pull request and disallow force pushes and deletion.
 These are GitHub repository settings; the workflow file alone does not enforce
 them. Keep existing stronger review requirements when updating the settings.
 
-Required jobs have no path filters or allowed failures. Full Git history supplies
-the PR-base quality-floor comparison. CI backend pytest stops at its first failure and reports the 40 slowest
-setup/call/teardown durations above 50 ms; a successful run covers the entire ordinary suite. Ubuntu 26.04 supplies the
-native Bubblewrap overlay features used by the selected agent tests. Each disposable runner enables
+To configure the existing [`main` ruleset](https://github.com/oh-goon/oh-goon/rules/25700231),
+open Settings → Rules → Rulesets and edit it rather than creating a duplicate.
+Set enforcement to **Active** for the default branch, add **Require a pull
+request before merging** and **Require status checks to pass**, select all seven
+names above from GitHub Actions, and require the branch to be up to date. Keep
+the bypass list empty and retain the deletion and force-push blocks. Enabling a
+ruleset containing only deletion/force-push rules does not require PRs or checks.
+The managed GitHub app can read ruleset metadata but cannot administer these
+settings; verify the active rules and check names independently of a green
+workflow run.
+
+Draft pull requests run only the nonrequired `draft-feedback` job: locked setup,
+lint, format, architecture and lock checks, without pytest suites. Mark a draft
+ready for review to launch all seven full checks for its current commit; later
+ready-PR pushes also run all seven. Returning to draft starts cheap feedback and
+cancels superseded runs through the existing concurrency policy. Focused tests
+remain the local iteration loop; draft feedback is not test or merge completion.
+
+The full job's draft condition is evaluated before matrix expansion, as specified
+by [GitHub's job-condition contract](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif).
+Its name expression includes a `full-checks-pending-review` fallback outside the
+seven required check names. For the skipped, unexpanded matrix, the observed
+GitHub jobs API displays that expression literally; it does not publish the
+seven target names. Verify this namespace separation when changing scheduling.
+Never conditionally skip a required check under its ordinary name:
+[GitHub treats a skipped job as success](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions).
+A new draft commit does not report the seven full checks; repository settings must require those
+exact names. Workflow scheduling does not install or prove those settings.
+
+Full required jobs have no path filters or allowed failures. Full Git history supplies
+the PR-base quality-floor comparison. Hosted `backend-check` selects unit and
+dependency-complete tests through Make's `BACKEND_CHECK_TEST_ROOTS`; the required
+`test-integration` job owns backend and cross-owner integration tests. Together
+they cover the entire ordinary backend suite once. Local `make backend-check`
+retains pytest's complete default testpaths. Make passes the selected roots
+directly in pytest's argv rather than `PYTEST_ADDOPTS`, so nested pytest processes
+do not inherit an unrelated test-root selection. Both hosted pytest jobs stop at
+their first failure and report the 40 slowest setup/call/teardown durations above
+50 ms. A successful run
+covers every ordinary test; no successful test receipts are reused across changed
+source. Publish coherent changes after focused checks so superseded full runs can
+be cancelled by the workflow's existing concurrency policy. Ubuntu 26.04 supplies the
+native Bubblewrap overlay features used by the selected agent tests. Each full-check runner enables
 unprivileged user namespaces for the ordinary Bubblewrap tests.
 Hosted runners use read-only tokens and do not retain checkout credentials or
 receive repository secrets. Installed-agent,

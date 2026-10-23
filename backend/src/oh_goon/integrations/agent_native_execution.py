@@ -50,6 +50,89 @@ class NativeAgentEvents:
     omitted_observations: int = 0
 
 
+def prepare_native_service_setup(
+    agent: str, *, executable: Path, socket_path: Path | None = None
+) -> dict[str, object]:
+    """Author operator setup without touching programs, native stores or endpoints."""
+    if agent not in {"codex", "opencode"}:
+        raise AgentProviderError("Native service setup supports Codex or OpenCode")
+    if agent == "codex" and socket_path is None:
+        raise AgentProviderError("Codex service setup requires an explicit advertised socket path")
+    if agent == "opencode" and socket_path is not None:
+        raise AgentProviderError("OpenCode service setup does not accept a Unix socket path")
+    paths = (executable, *((socket_path,) if socket_path is not None else ()))
+    for path in paths:
+        if not isinstance(path, Path):
+            raise AgentProviderError("Native service setup requires explicit absolute paths")
+        value = str(path)
+        if (
+            not value.strip()
+            or len(value) > 4096
+            or not value.isprintable()
+            or not path.is_absolute()
+            or not path.name
+            or ".." in path.parts
+            or path.anchor == "//"
+        ):
+            raise AgentProviderError(
+                "Native service paths must be absolute, normalized and printable within 4096 characters"
+            )
+    if socket_path is not None and (
+        executable == socket_path
+        or executable in socket_path.parents
+        or socket_path in executable.parents
+    ):
+        raise AgentProviderError("Native executable and socket paths must be disjoint")
+    shared: dict[str, object] = {
+        "status": "configured_not_connected",
+        "agent": agent,
+        "started": False,
+        "execution_admitted": False,
+        "native_store_access": "not_requested",
+        "unverified": [
+            "service_identity",
+            "native_authentication",
+            "effective_configuration",
+            "phase_policy",
+            "private_store_exclusion",
+            "tool_quiescence",
+        ],
+    }
+    program = str(executable)
+    if agent == "codex":
+        assert socket_path is not None
+        advertised = str(socket_path)
+        endpoint = "unix://" + advertised
+        return {
+            **shared,
+            "recipe_interface_version": "0.163.0",
+            "transport": "codex-app-server-jsonl-proxy",
+            "endpoint": endpoint,
+            "launch_argv": [program, "app-server", "--listen", endpoint],
+            "connect_argv": [program, "app-server", "proxy", "--sock", advertised],
+            "readiness": {
+                "methods": ["initialize", "initialized"],
+                "retained_fields": ["userAgent", "platformFamily", "platformOs"],
+            },
+        }
+    return {
+        **shared,
+        "recipe_interface_version": "2.1.2",
+        "transport": "opencode-v2-http",
+        "endpoint": None,
+        "launch_argv": [program, "serve", "--stdio", "--hostname", "127.0.0.1", "--port", "0"],
+        "connect_argv": None,
+        "authentication": {"username": "opencode", "password_env": "OPENCODE_PASSWORD"},
+        "stdin_lease": True,
+        "endpoint_discovery": {
+            "source": "first_stdout_json",
+            "field": "url",
+            "max_bytes": 65536,
+        },
+        "readiness": {"method": "GET", "path": "/api/info", "retained_fields": ["version", "pid"]},
+    }
+
+
 def native_executable_sha256(path: Path) -> str:
     """Observe public executable bytes once with bounded, race-checked transfer."""
     if not os.access(path, os.X_OK):
@@ -103,6 +186,14 @@ def native_agent_command(
     """
     if selected.agent not in ("opencode", "pi", "codex"):
         raise AgentProviderError("Unsupported native command protocol")
+    if (
+        selected.agent in {"codex", "opencode"}
+        and selected.definition.configuration_directory is not None
+    ):
+        raise AgentProviderError(
+            "Native authentication and configuration remain service-owned; "
+            "Codex/OpenCode configuration directories cannot be exposed to agent tools"
+        )
     executable = selected.definition.executable
     if executable is None or not Path(executable).is_absolute():
         raise AgentProviderError("Native command requires an already resolved executable")
@@ -111,7 +202,14 @@ def native_agent_command(
     if not workspace.is_absolute():
         raise AgentProviderError("Native command requires an absolute workspace")
     arguments = selected.definition.arguments
-    validate_native_agent_arguments(selected.agent, arguments)
+    validate_native_agent_arguments(
+        selected.agent, arguments, sandbox_owner=selected.profile.sandbox_owner
+    )
+    if (
+        selected.profile.sandbox_owner == "execution_backend"
+        and selected.profile.backend != "bubblewrap"
+    ):
+        raise AgentProviderError("Execution backend sandbox ownership requires Bubblewrap")
     if selected.agent == "codex" and interactive and selected.connection is None:
         raise AgentProviderError("Interactive Codex requires managed producer context delivery")
     configuration = selected.definition.configuration_directory
@@ -147,6 +245,11 @@ def native_agent_command(
             executable,
             "--no-daemon",
             *arguments,
+            *(
+                ("--sandbox", "danger-full-access")
+                if selected.profile.sandbox_owner == "execution_backend"
+                else ()
+            ),
             *(("exec", "--json", "--ephemeral") if not interactive else ()),
             "--cd",
             str(workspace),
@@ -159,8 +262,31 @@ def native_agent_command(
     )
 
 
-def validate_native_agent_arguments(agent: str, arguments: tuple[str, ...]) -> None:
-    """Reject known transport replacements before work; native code owns other options."""
+def validate_native_agent_arguments(
+    agent: str,
+    arguments: tuple[str, ...],
+    *,
+    sandbox_owner: Literal["harness", "execution_backend"] = "harness",
+) -> None:
+    """Reject replacement of owned transport or explicitly delegated enforcement."""
+    if sandbox_owner == "execution_backend":
+        if agent != "codex":
+            raise AgentProviderError(
+                "Execution backend sandbox ownership is not qualified for this native agent"
+            )
+        if any(
+            argument.partition("=")[0]
+            in {
+                "--sandbox",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--yolo",
+                "--approve-for-me",
+                "--not-so-yolo",
+            }
+            or (argument.startswith("-s") and not argument.startswith("--"))
+            for argument in arguments
+        ):
+            raise AgentProviderError("Execution backend owns the native sandbox selection")
     if agent == "pi" and any(argument.partition("=")[0] == "--api-key" for argument in arguments):
         raise AgentProviderError("Native credentials must not be supplied in command arguments")
     reserved = {
@@ -202,9 +328,12 @@ def codex_login_command(
     """Native sign-in and sandbox authority, without exporting authentication.
 
     Configure frozen native session instructions. Selected installed conformance
-    observes follow-up and compaction delivery, not model reasoning quality. Auth stays in the original
-    CODEX_HOME; the native tool filesystem never receives that directory.
-    Git and verification in this explicit local profile remain trusted local.
+    observes follow-up and compaction delivery, not model reasoning quality.
+    The harness-owned local profile keeps the original authentication home
+    outside native tool permissions.
+    Git and verification in the existing local profile remain trusted local.
+    Protected native sign-in requires a separately qualified service adapter;
+    authentication and configuration files are never delegated to agent tools.
     """
     login = selected.profile.codex_login
     if (
@@ -216,14 +345,24 @@ def codex_login_command(
         or selected.definition.executable is None
     ):
         raise AgentProviderError("Codex login requires its explicit headless native selection")
+    if selected.profile.backend != "local" or selected.profile.sandbox_owner != "harness":
+        raise AgentProviderError(
+            "Protected native sign-in requires a qualified service connection; "
+            "authentication and configuration files cannot be mounted into agent tools"
+        )
     home = Path(login.home)
     writable = (workspace, scratch, *((evidence_state,) if evidence_state is not None else ()))
     require_codex_authentication_home_separation(home, (*read_roots, *writable))
+    temporary_directory = str(scratch)
     filesystem = {":minimal": "read", **{str(root): "read" for root in read_roots}}
     filesystem.update({str(root): "write" for root in writable})
     rules = ", ".join(
         f"{json.dumps(path, ensure_ascii=False)} = {json.dumps(access, ensure_ascii=False)}"
         for path, access in filesystem.items()
+    )
+    permission_settings = (
+        'default_permissions="oh_goon"',
+        f"permissions.oh_goon={{filesystem={{{rules}}},network={{enabled=false}}}}",
     )
     settings = (
         f"model={json.dumps(login.model, ensure_ascii=False)}",
@@ -231,12 +370,11 @@ def codex_login_command(
         f"model_reasoning_effort={json.dumps(login.reasoning_effort, ensure_ascii=False)}",
         f"model_instructions_file={json.dumps(str(instructions), ensure_ascii=False)}",
         'approval_policy="never"',
-        'default_permissions="oh_goon"',
-        f"permissions.oh_goon={{filesystem={{{rules}}},network={{enabled=false}}}}",
+        *permission_settings,
         f'projects.{json.dumps(str(workspace), ensure_ascii=False)}.trust_level="untrusted"',
         'web_search="disabled"',
         'shell_environment_policy.inherit="none"',
-        f'shell_environment_policy.set={{PATH="/usr/local/bin:/usr/bin:/bin",TMPDIR={json.dumps(str(scratch), ensure_ascii=False)}}}',
+        f'shell_environment_policy.set={{PATH="/usr/local/bin:/usr/bin:/bin",TMPDIR={json.dumps(temporary_directory, ensure_ascii=False)}}}',
         "features.hooks=false",
         "features.plugin_hooks=false",
         "features.plugins=false",
@@ -261,7 +399,10 @@ def codex_login_command(
             "-",
         ),
         input_file=instructions,
-        environment=(("CODEX_HOME", login.home), ("TMPDIR", str(scratch))),
+        environment=(
+            ("CODEX_HOME", login.home),
+            ("TMPDIR", temporary_directory),
+        ),
     )
 
 

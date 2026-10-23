@@ -29,7 +29,12 @@ from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNati
 from oh_goon.core.models.fleet_observation import NativeAgentObservation
 from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedLocalSearchAgentStep
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
-from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES
+from oh_goon.engine.command import (
+    MAX_COMMAND_INPUT_BYTES,
+    CommandCancelledError,
+    CommandOutputLimitExceeded,
+    CommandTimeoutExpired,
+)
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
@@ -81,10 +86,19 @@ def require_native_agent_compatibility(
     """Compatibility and path-separation checks shared by preflight and Step receiver."""
     if role not in {"report", "review", "adjudication", "proposal"}:
         raise FleetPlanInvalid("Native Agent result role is unsupported")
+    if (
+        selected.agent in {"codex", "opencode"}
+        and selected.definition.configuration_directory is not None
+    ):
+        raise FleetPlanInvalid(
+            "Native authentication and configuration remain service-owned; "
+            "Codex/OpenCode configuration directories cannot be exposed to agent tools"
+        )
     if selected.profile.codex_login is not None:
         if (
             selected.agent != "codex"
             or selected.profile.backend != "local"
+            or selected.profile.sandbox_owner != "harness"
             or selected.connection is not None
             or selected.profile.inference_profile is not None
             or selected.interactive
@@ -92,7 +106,9 @@ def require_native_agent_compatibility(
             or selected.definition.arguments
             or selected.definition.configuration_directory is not None
         ):
-            raise FleetPlanInvalid("Codex login requires an explicit local headless report profile")
+            raise FleetPlanInvalid(
+                "Codex login requires its explicitly selected headless execution profile"
+            )
         home = Path(selected.profile.codex_login.home)
         if not home.is_absolute() or ".." in home.parts:
             raise FleetPlanInvalid("Codex authentication home must be outside native tool roots")
@@ -111,7 +127,11 @@ def require_native_agent_compatibility(
             "Native reasoning requires managed inference for mandatory Hashmarks delivery"
         )
     try:
-        validate_native_agent_arguments(selected.agent, selected.definition.arguments)
+        validate_native_agent_arguments(
+            selected.agent,
+            selected.definition.arguments,
+            sandbox_owner=selected.profile.sandbox_owner,
+        )
     except AgentProviderError as error:
         raise FleetPlanInvalid(str(error)) from error
     api = selected.connection.provider.api
@@ -179,6 +199,13 @@ def prepare_native_step_input(
         optional_capabilities=("observations",),
         required_capabilities=("terminal",) if selected.interactive else (),
     )
+    if (
+        selected.profile.sandbox_owner == "execution_backend"
+        and prepared.requested_effects.repository_access != "read_only"
+    ):
+        raise FleetPlanInvalid(
+            "Backend-owned native reasoning requires read-only source; repair uses its separately admitted native apply Step"
+        )
     if (
         step.role != "report" or prepared.requested_effects.repository_access == "read_only"
     ) and not sandboxed:
@@ -358,6 +385,7 @@ def execute_native_agent_step(
     selected = step.native_agent
     assert selected is not None
     sandboxed = selected.profile.backend == "bubblewrap"
+    private_output = sandboxed and selected.profile.sandbox_owner == "execution_backend"
     if runtime.cancel_requested is not None and runtime.cancel_requested():
         raise OperationCancelledError("Native Agent cancelled before repository evidence")
     frozen_mounts = (
@@ -459,18 +487,35 @@ def execute_native_agent_step(
                     *_codex_runtime_roots(selected),
                 ),
             )
-            result = process.command_runner(
-                *invocation.argv,
-                cwd=repository,
-                env={**process.environment, **dict(invocation.environment)},
-                timeout=_remaining(deadline),
-                cancel_requested=runtime.cancel_requested,
-                runtime_supervision=runtime.runtime_supervision,
-                input_data=prompt_data,
-                retain_output_tail=True,
-                stream_output=consume_native_output,
-                preserve_native_executable_path=True,
-            )
+            try:
+                result = process.command_runner(
+                    *invocation.argv,
+                    cwd=repository,
+                    env={**process.environment, **dict(invocation.environment)},
+                    timeout=_remaining(deadline),
+                    cancel_requested=runtime.cancel_requested,
+                    runtime_supervision=runtime.runtime_supervision,
+                    input_data=prompt_data,
+                    retain_output_tail=True,
+                    stream_output=consume_native_output,
+                    preserve_native_executable_path=True,
+                    read_only_workspace=sandboxed,
+                    read_only_mounts=(
+                        *frozen_mounts,
+                        StandardReadOnlyMount(control, PurePosixPath(control)),
+                    )
+                    if sandboxed
+                    else (),
+                )
+            except (
+                CommandTimeoutExpired,
+                CommandCancelledError,
+                CommandOutputLimitExceeded,
+            ) as error:
+                if private_output:
+                    error.stdout = ""
+                    error.stderr = ""
+                raise
         else:
             assert model is not None
             broker = stack.enter_context(
@@ -543,28 +588,40 @@ def execute_native_agent_step(
                     *argv,
                 )
                 input_data = None if terminal is not None else b""
-            result = process.command_runner(
-                *argv,
-                cwd=repository,
-                env=environment,
-                timeout=_remaining(deadline),
-                cancel_requested=runtime.cancel_requested,
-                runtime_supervision=runtime.runtime_supervision,
-                terminal=terminal,
-                input_data=input_data,
-                retain_output_tail=not selected.interactive,
-                stream_output=consume_native_output if parser is not None else None,
-                read_only_mounts=tuple(mounts),
-                broker_directory=broker.socket_path.parent if sandboxed else None,
-                private_configuration_directory=private_configuration if sandboxed else None,
-                preserve_native_executable_path=not sandboxed,
-                read_only_workspace=sandboxed
-                and (
-                    step.role != "report"
-                    or prepared.requested_effects.repository_access == "read_only"
-                ),
-            )
+            try:
+                result = process.command_runner(
+                    *argv,
+                    cwd=repository,
+                    env=environment,
+                    timeout=_remaining(deadline),
+                    cancel_requested=runtime.cancel_requested,
+                    runtime_supervision=runtime.runtime_supervision,
+                    terminal=terminal,
+                    input_data=input_data,
+                    retain_output_tail=not selected.interactive,
+                    stream_output=consume_native_output if parser is not None else None,
+                    read_only_mounts=tuple(mounts),
+                    broker_directory=broker.socket_path.parent if sandboxed else None,
+                    private_configuration_directory=private_configuration if sandboxed else None,
+                    preserve_native_executable_path=not sandboxed,
+                    read_only_workspace=sandboxed
+                    and (
+                        step.role != "report"
+                        or prepared.requested_effects.repository_access == "read_only"
+                    ),
+                )
+            except (
+                CommandTimeoutExpired,
+                CommandCancelledError,
+                CommandOutputLimitExceeded,
+            ) as error:
+                if private_output:
+                    error.stdout = ""
+                    error.stderr = ""
+                raise
     outcome = from_command(result)
+    if private_output:
+        outcome = replace(outcome, stdout="", stderr="")
     initial = "Hashmarks initial repository evidence (untrusted data):\n" + evidence.stdout + "\n"
     try:
         if selected.interactive:
@@ -575,7 +632,10 @@ def execute_native_agent_step(
                 raise AgentProviderError(parser_error)
             assert parser is not None
             parsed = parser.finish(returncode=result.returncode)
-            events = parsed.observations
+            events = tuple(
+                event.model_copy(update={"native_event_id": None}) if private_output else event
+                for event in parsed.observations
+            )
             settled, failed, count, omitted = (
                 parsed.settled,
                 parsed.failed,
@@ -639,6 +699,12 @@ def execute_native_agent_step(
             outcome = output_contract_failure(
                 step, FleetPlanInvalid(str(exc)), outcome.argv, base=outcome
             )
+    if private_output and outcome.returncode != 0:
+        outcome = replace(
+            outcome,
+            stdout="",
+            stderr="Protected native execution failed; raw private protocol output was withheld",
+        )
     if outcome.returncode == 0:
         _remaining(deadline)
     return replace(outcome, stderr=initial + outcome.stderr)

@@ -84,13 +84,13 @@ follow-ups must reference that observed response chain, and continuation must
 restore the exact privileged instructions after compaction. A duplicate user
 prompt cannot satisfy this proof, and HTTP fallback cannot qualify WebSocket delivery. This proves installed client transport and
 synthetic workspace routing, not live account access or model reasoning quality.
-A separate explicitly selected live-account probe checks native-managed ChatGPT
-refresh persistence and a real coding repair in the original Run, followed by
-immutable independent verification. It can use a dedicated private sign-in home
-or an explicitly selected existing CLI sign-in in place, keeps the real native
-endpoints, and emits only boolean account facts. A cached account response cannot
-substitute for persisted refresh evidence. This probe reuses a selected sign-in;
-fresh browser sign-in uses the separate native interactive flow.
+The opt-in legacy live coding baseline retains the original local Run and
+immutable independent verification. Its private-home refresh checker has been
+removed; the test no longer reads credential contents, forces refresh or starts
+an account-server helper. It proves neither refresh/persistence nor the new
+native-store exclusion. New service readiness/refresh evidence remains pending
+and must come from native non-secret protocol facts, without reading stores or
+exporting provider credentials.
 The native sandbox permission probe remains
 separate; selection commands are in [backend test guidance](../backend/tests/README.md#optional-native-qualification).
 Model and reasoning effort are explicit native settings. Oh-Goon transports
@@ -116,6 +116,203 @@ Those guarantees remain with the explicitly selected broker/Bubblewrap profile;
 there is no automatic fallback between the profiles. Authentication failures and
 unsupported native settings fail through the original Step result. The native
 connection's disclosure recipient is `codex`; reports remain untrusted claims.
+
+### Native-owned authentication and configuration
+
+Native authentication and personal configuration remain private to the native
+service. Oh-Goon and agent tools must not read, write, copy, migrate, archive or
+mount those stores. This applies to Codex authentication, Codex configuration,
+OpenCode authentication and OpenCode configuration, including aliases and any
+operator-selected locations. Oh-Goon-owned task/Skill evidence and its own provider
+catalog are separate inputs; they never authorize native-store access.
+
+The proposed protected signed-in auth-file profile is withdrawn. A
+`codex_login` selection with `backend: bubblewrap` is rejected before credential
+file access. There is no supported `credential_store: file` campaign recipe,
+whole-home mount or credential-visible fallback. Earlier synthetic file-bind
+experiments establish only their recorded historical protocol/filesystem facts;
+they do not qualify the required native-store exclusion or a service adapter.
+The existing local CLI profile above remains its separately scoped legacy mode;
+it cannot substitute for a protected native-service workflow. These guards remove
+named credential/configuration-directory routes; they do not prove that arbitrary
+runtime roots, captured source or file arguments cannot alias private native
+stores. Current CLI paths are unqualified for the new four-store exclusion.
+Unknown separation blocks the protected workflow. Native store conventions stay
+with their native owner; Oh-Goon must not add an ambient path blacklist, scan
+stores or implement another native-configuration resolver to claim completion.
+
+### Prepare a native service endpoint
+
+`oh-goon agent service prepare` prints an offline recipe. It does not inspect the
+executable, socket, native home, settings, credentials or environment secrets;
+write configuration; start a process; connect to an endpoint; or submit work.
+Its result is `configured_not_connected`, with `started: false` and
+`execution_admitted: false`. It creates no native profile or runtime service
+selection. The separate connection command below observes bounded readiness only.
+
+Select an absolute public executable path explicitly; PATH discovery and native
+version probing are not part of preparation. Codex additionally requires an
+explicit absolute socket path. OpenCode rejects `--socket`. For a POSIX operator
+setup, create a private directory outside the repository and native stores using
+the operating system's `mktemp` (which creates the directory with mode 0700):
+
+```sh
+oh_goon_service_directory="$(mktemp -d /tmp/oh-goon-native-service.XXXXXXXX)"
+oh-goon agent service prepare --agent codex --executable /opt/native-codex/bin/codex --socket "$oh_goon_service_directory/codex.sock" --json
+oh-goon agent service prepare --agent opencode --executable /opt/native-opencode/bin/opencode --json
+```
+
+The helper only prints the following native setup contracts, based on the
+observed public Codex 0.163.0 and OpenCode 2.1.2 interfaces. It does not establish
+the version or compatibility of the executable at a supplied path:
+
+| Agent | Prepared native recipe and remaining owner work |
+| --- | --- |
+| Codex | Server argv: `app-server --listen unix://PATH`; client proxy argv: `app-server proxy --sock PATH`. Preserve the exact advertised socket path and native symlink/rendezvous validation; Oh-Goon must not manually resolve, replace or repoint it. The native service owns sign-in/configuration. No server or proxy is started by preparation. |
+| OpenCode 2.1.2 | Server argv: `serve --stdio --hostname 127.0.0.1 --port 0`. A future owning parent must generate a private ephemeral transport password in `OPENCODE_PASSWORD`, hold the stdin lease, parse bounded first-line JSON containing `url`, and use authenticated `GET /api/info` with Basic username `opencode`. Preparation implements none of that parent lifecycle and prints no secret value. |
+
+OpenCode's `--stdio` is a readiness/ownership channel; the service API still uses
+HTTP. Keep its transport credential out of argv, URLs, logs and agent/tool
+environments. The readiness client accepts only the exact numeric-loopback HTTP
+endpoint and explicit port, without redirects, ambient proxies, discovery or
+fallback. Plain HTTP over a non-loopback address is not this recipe. Remote transport and host/process secrecy require
+separate qualification. A bounded non-secret version/identity response establishes
+only endpoint readiness, never provider sign-in, model availability, native-store
+exclusion or protected execution. Do not call settings, auth, session-list or
+other broad APIs as a readiness substitute.
+
+### Connect for readiness
+
+After the operator has established the native endpoint, connect explicitly:
+
+```sh
+oh-goon agent service connect --agent codex --socket "$oh_goon_service_directory/codex.sock" --json
+oh-goon agent service connect --agent opencode --endpoint "$oh_goon_opencode_endpoint" --password-env OH_GOON_OPENCODE_TRANSPORT_PASSWORD --json
+```
+
+`oh_goon_opencode_endpoint` must contain the exact selected loopback URL, and the
+named environment variable must contain its private transport password. Oh-Goon
+validates the endpoint before reading that one variable, freezes the value once,
+and does not read native credential or configuration stores. Do not substitute a
+provider token. The optional `--timeout-seconds` defaults to 10 and accepts a
+positive value up to 60. The whole readiness exchange has a deadline, including
+handshake and streamed response delivery; transport cleanup has its own bounded
+closure. Failed or uncertain cleanup cannot produce a successful closed report.
+
+Codex connects to the explicitly selected native Unix service and initializes
+its protocol. OpenCode performs only authenticated `GET /api/info`; the current
+client requires version 2.1.2 and retains only version and PID. Neither CLI path
+starts a native service, submits a task, lists sessions, calls auth/config APIs or
+adopts an existing conversation. Connection transport closes before the command
+returns. A successful report is `connected_not_qualified`, with
+`execution_admitted: false` and `connection_closed: true`; native authentication,
+phase policy, private-store exclusion and tool quiescence remain unverified.
+
+The [installed Codex service
+probe](../backend/tests/integration/services/test_native_codex_service.py) used
+0.163.0 with a complete public runtime outside synthetic native stores. Native
+service-known profiles denied source/Git mutations, private-store reads/writes
+and subprocess escapes during review and re-review; repair changed only the
+selected source directory, and scratch output remained available. The original
+process owner cancelled the server and verified process-group quiescence. These
+are model-free native policy observations, not admission of a service-backed Run:
+the reported profile identifier lacks full effective grants/configuration
+identity. An empty zero-turn thread starts, but native resume from a fresh
+connection refuses it before any persisted turn history. Persisted continuation,
+model follow-up, compaction and real-account sign-in/refresh remain unverified
+for this adapter. No real authentication/configuration files or model turns were
+used.
+
+The [installed OpenCode readiness
+probe](../backend/tests/integration/services/test_native_opencode_service.py)
+used a real 2.1.2 server with synthetic HOME/XDG state and a fresh transport
+password. Its PID matched original command-owner birth evidence; closing the
+client left the server available, and original owner cancellation established
+process-group quiescence. No session, account or inference operation ran. This
+non-stdio probe does not qualify the prepared stdin lease, continuation,
+private-store/tool isolation or a real account.
+
+### Native service adapter design
+
+Service connections now support explicit protocol readiness. There is no
+implemented `native_service` profile or service-backed Run consumer; protected
+model work remains unavailable. Preparation prints a recipe and connection reads
+readiness, without admitting execution. Existing native command adapters retain
+their current execution path. A running desktop/CLI instance alone does not
+establish a supported endpoint or protected tool access.
+
+A future admitted Run must submit exact frozen task, qualified Hashmarks evidence
+and Skill instructions through the native session protocol. The native service
+retains sign-in, refresh, personal configuration, conversation, tools and compaction.
+Oh-Goon retains Plan resolution, consent, phase admission, deadlines, cancellation,
+verification and result acceptance; it does not rebuild the native reasoning loop.
+
+| Native service | Protocol to qualify |
+| --- | --- |
+| Codex | Its [app-server protocol](https://learn.chatgpt.com/docs/app-server), with native-managed authentication, threads/turns and a version-specific effective tool policy. Public Codex 0.163.0 includes an explicit-socket proxy; that does not establish that a usable endpoint is running here. External-token authentication would transfer credential lifecycle to the caller and does not satisfy this design. |
+| OpenCode | Its [V2 CLI](https://dev.opencode.ai/v2/docs/cli/) and [V2 API](https://dev.opencode.ai/v2/docs/api) describe the shared native service and owned session operations. Installed 2.1.2 uses `--server`, `OPENCODE_PASSWORD` and `/api/info`; V1 `attach`, SDK and `/global/health` examples do not define this recipe. Qualify the selected server's exact protocol; do not start or replace a shared service implicitly. |
+
+API transport does not enforce filesystem permissions on a server's tools. An
+Oh-Goon client inside Bubblewrap cannot constrain tools executed by an unrelated
+host service. Each admitted phase needs a qualified tool boundary that denies
+native-store access, enforces read-only review/proposal/re-review, and grants only
+separately admitted repair roots. OpenCode's
+[V2 permission contract](https://dev.opencode.ai/v2/docs/permissions/) leaves
+shell execution with host filesystem, process and network authority; selecting
+Plan or action rules is insufficient physical protection.
+Codex `externalSandbox` likewise delegates enforcement rather than creating it.
+A native harness sandbox may be the selected backend mechanism when its actual
+phase policy, private-read/write denials and lifecycle are verified. This does not
+require another tool router or a redundant enclosing Bubblewrap layer. Qualify the
+installed native policy directly first, then reject missing guarantees before
+submission. Codex 0.163.0's stable
+[read-only policy](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/schema/typescript/v2/SandboxPolicy.ts)
+does not itself specify private-path read denial; newer documented fields cannot
+be assumed available in that installed protocol.
+
+The adapter must bind an explicitly selected endpoint, peer/service identity,
+protocol version, workspace and owned native session to the original Run. Keep
+service credentials and endpoints outside model/tool environments and input mounts.
+Do not scan user stores, adopt unrelated sessions, expose broad service access to
+tools, or infer enrollment from a successful health check. Use authenticated local
+IPC or an explicitly approved authenticated transport; reject endpoint substitution,
+redirects and session/workspace mismatches.
+
+Permit only the session operations needed by the admitted Run. Neither the adapter
+nor its tools may retrieve credential/configuration values, change provider login,
+use generic file readers against protected stores, install plugin/MCP resources,
+or shut down the global server as a convenience. A documented non-secret readiness
+response is distinct from token-bearing authentication or full configuration APIs;
+agent capabilities must not receive those control-plane routes. OpenCode
+publishes configuration, authentication, file and global-control APIs; its broad
+service credential is not a narrow agent capability. Filter session events to the
+owned session before retention and keep unrelated sessions and raw diagnostics out
+of evidence.
+
+The Codex transport includes native thread/turn continuation methods, but those
+methods are not a service-backed Run admission path. A symbolic thread/policy
+identifier is not proof of effective permissions. OpenCode currently exposes
+readiness and an explicit protected-execution refusal, with no submission or
+continuation methods. Native follow-up/compaction through admitted service Runs
+remains unverified. Each future new phase must re-admit tool scope; do not inherit
+repair rights into re-review. Cancellation targets the owned native
+turn/session, not a user's whole service. An abort response or disconnected stream
+alone does not establish tool quiescence. Reattachment must verify the same service,
+session, workspace and original authority; missing terminal or cleanup evidence
+remains unresolved. Never resubmit automatically after ambiguous acceptance, and
+never fall back to a CLI file mount or unrestricted service.
+
+Acceptance requires synthetic canaries in all four native-store classes: direct
+reads/writes, rename/delete, symlink/hardlink aliases, subprocess/tool/MCP access,
+file APIs and auth/config APIs must be denied to agent capabilities without
+Oh-Goon inspecting the values. The native service must still authenticate, retain
+its configuration and refresh internally. Test effective phase policies, native
+follow-up/compaction, scoped repair, read-only re-entry, endpoint substitution,
+lease loss, cancellation, crash and reattachment through original Run owners.
+Installed Codex/OpenCode protocol checks and a complete real workflow are separate
+from mock permission tests. Linux, supported WSL2 and advertised container
+combinations require their own evidence. No current result establishes this full
+service contract.
 
 Tasks accept `--prompt`, `--prompt-file PATH`, or `--prompt-file -` for stdin.
 The authored task limit is 4000 characters; file input is bounded before decoding.
@@ -177,13 +374,13 @@ execution rejects requested caps.
 Without explicit native configuration/model arguments, the adapter supplies a
 minimal private global native configuration for the selected broker/model.
 The native agent retains project configuration precedence and context/tool
-behavior. To select existing native preferences, supply
-`configuration_directory` and optional native `arguments` on that agent's
-catalog entry. These are opaque public native inputs; Oh-Goon does not parse
-model settings or discover/copy credential stores. Isolated execution presents
-this public directory through a private native copy-on-write overlay so trust,
-credential-store initialization and settings writes cannot mutate the host input.
-Its private state is discarded with the execution scratch.
+behavior. Codex and OpenCode reject `configuration_directory` before resolving
+or exposing that path, including formerly accepted public configuration directories.
+Use their managed bootstrap or qualify the native-service route; do not select a
+personal configuration/authentication store through another input. Pi retains its
+explicit public non-secret configuration-directory contract. That Pi directory uses
+a private copy-on-write overlay; disposable native state cannot modify the host
+input. User auth/configuration stores are never deployment inputs or runtime roots.
 
 Model context limits, output budgets and thinking controls belong to the native
 agent/provider configuration. Include reasoning tokens in the output budget.
@@ -205,8 +402,8 @@ remain supported. Responses
 `instructions`, inline `input`, `prompt_cache_key`, `previous_response_id`, and
 `conversation` retain their native wire meaning. See the native [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
-Explicit native configuration must target `http://127.0.0.1:18743` inside the
-namespace, use the selected API path/model and either no client key or the dummy
+For Pi's retained explicit configuration surface, native inference must target
+`http://127.0.0.1:18743` inside the namespace, use the selected API path/model and either no client key or the dummy
 key `oh-goon-local` (also supplied as `OH_GOON_NATIVE_BROKER_KEY`). The broker
 alone attaches the host credential. Model or
 endpoint conflicts fail; execution never falls back to a different model or host

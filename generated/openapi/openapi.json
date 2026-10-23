@@ -8231,6 +8231,11 @@
             "title": "From Attempt",
             "type": "integer"
           },
+          "isolation_changed": {
+            "default": false,
+            "title": "Isolation Changed",
+            "type": "boolean"
+          },
           "repository_state_continuity": {
             "title": "Repository State Continuity",
             "type": "boolean"
@@ -11570,6 +11575,11 @@
           },
           "failure_signature_changed": {
             "title": "Failure Signature Changed",
+            "type": "boolean"
+          },
+          "isolation_changed": {
+            "default": false,
+            "title": "Isolation Changed",
             "type": "boolean"
           },
           "provenance_changed": {
@@ -15233,6 +15243,15 @@
           "resources": {
             "$ref": "#/components/schemas/CicdResourcePolicy"
           },
+          "sandbox_owner": {
+            "default": "harness",
+            "enum": [
+              "harness",
+              "execution_backend"
+            ],
+            "title": "Sandbox Owner",
+            "type": "string"
+          },
           "timeout_seconds": {
             "default": 7200.0,
             "exclusiveMinimum": 0.0,
@@ -17472,6 +17491,28 @@
             "title": "Cleanup Reason",
             "type": "string"
           },
+          "final_process_group_quiescent": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Process Group Quiescent"
+          },
+          "forced_termination": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forced Termination"
+          },
           "leader_exited_before_group_quiescence": {
             "default": false,
             "title": "Leader Exited Before Group Quiescence",
@@ -18527,16 +18568,56 @@
             "title": "Broker Socket Mounted",
             "type": "boolean"
           },
+          "credential_visibility": {
+            "default": "none",
+            "enum": [
+              "none",
+              "codex_auth_file_read_write"
+            ],
+            "title": "Credential Visibility",
+            "type": "string"
+          },
+          "filesystem_cleanup": {
+            "default": "not_recorded",
+            "enum": [
+              "verified",
+              "unverified",
+              "not_recorded"
+            ],
+            "title": "Filesystem Cleanup",
+            "type": "string"
+          },
           "host_and_external_ip_networking": {
-            "const": "denied",
             "default": "denied",
+            "enum": [
+              "denied",
+              "host_unrestricted"
+            ],
             "title": "Host And External Ip Networking",
+            "type": "string"
+          },
+          "preflight": {
+            "default": "not_recorded",
+            "enum": [
+              "verified",
+              "not_recorded"
+            ],
+            "title": "Preflight",
             "type": "string"
           },
           "private_configuration_overlay": {
             "default": false,
             "title": "Private Configuration Overlay",
             "type": "boolean"
+          },
+          "protected_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Protected Paths",
+            "type": "array"
           },
           "resource_owner": {
             "enum": [
@@ -18555,6 +18636,15 @@
                 "type": "null"
               }
             ]
+          },
+          "scoped_write_roots": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Scoped Write Roots",
+            "type": "array"
           },
           "workspace_read_only": {
             "title": "Workspace Read Only",

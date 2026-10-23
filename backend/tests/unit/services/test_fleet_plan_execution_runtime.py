@@ -7,12 +7,23 @@ from typing import cast
 
 import pytest
 
-from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.agent_providers import (
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
+from oh_goon.core.models.fleet_plan import (
+    ResolvedCommandStep,
+    ResolvedFleetPlan,
+    ResolvedLocalSearchAgentStep,
+)
 from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
+from oh_goon.integrations.fleet_plan_step_output_observation import observed_command_runner
+from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from tests.factories.fleet_plan_executor import PhysicalFleetPlanExecutorHarness
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
 
@@ -259,3 +270,122 @@ def test_live_output_observer_failure_emits_diagnostic_without_changing_command_
     assert event.operation == "stream_stdout"
     assert event.execution_affected is False
     assert event.diagnostic_capability_affected == "live_output_capture"
+
+
+@pytest.mark.parametrize("launch", ["protected", "managed", "producer", "local"])
+def test_protected_stream_is_private_while_native_protocol_still_receives_it(launch):
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="explicit",
+        executable_sha256="a" * 64,
+        definition=NativeAgentDefinition(executable="/native/codex"),
+        profile=NativeAgentProfile(
+            backend="local" if launch == "local" else "bubblewrap",
+            sandbox_owner="harness" if launch == "local" else "execution_backend",
+        ),
+    )
+    step = ResolvedLocalSearchAgentStep(
+        step_id="native",
+        argv=("python",),
+        delivery_sha256="b" * 64,
+        handoff_identity="handoff",
+        source_step_id="native",
+        harness="native",
+        native_agent=selected,
+    )
+    store = GameTapeLiveOutputStore()
+    store.open_run("run")
+    protocol = []
+    canary = "synthetic-private-protocol-canary"
+
+    def command(*argv, stream_output, **kwargs):
+        stream_output("stdout", canary[:16])
+        stream_output("stdout", canary[16:])
+        stream_output("stderr", canary)
+        return CommandResult(argv=argv, returncode=7, stdout=canary, stderr=canary)
+
+    runner = observed_command_runner(
+        command,
+        step=step,
+        attempt_number=1,
+        observer=store.observer("run", "repo"),
+        diagnostics=None,
+        host_environment={},
+        fleet_run_id="run",
+        repository_id="repo",
+    )
+    argv = (
+        ("/native/python", "evidence")
+        if launch == "producer"
+        else ("/native/python", "-I", "-m", "oh_goon.integrations.agent_inference_relay")
+        if launch == "managed"
+        else ("/native/codex", "exec")
+    )
+    result = runner(
+        *argv,
+        stream_output=lambda stream, text: protocol.append((stream, text)),
+        **({"broker_directory": Path("/private/run/broker")} if launch == "managed" else {}),
+    )
+    assert result.returncode == 7
+    assert "".join(text for stream, text in protocol if stream == "stdout") == canary
+    assert "".join(text for stream, text in protocol if stream == "stderr") == canary
+    retained = store.snapshot("run")
+    if launch in {"protected", "managed"}:
+        assert retained.chunks == ()
+        assert canary not in retained.model_dump_json()
+    else:
+        assert canary in "".join(chunk.text for chunk in retained.chunks)
+
+
+def test_protected_protocol_observer_exception_cannot_export_private_output():
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="explicit",
+        executable_sha256="a" * 64,
+        definition=NativeAgentDefinition(executable="/native/codex"),
+        profile=NativeAgentProfile(
+            backend="bubblewrap",
+            sandbox_owner="execution_backend",
+        ),
+    )
+    step = ResolvedLocalSearchAgentStep(
+        step_id="native",
+        argv=("python",),
+        delivery_sha256="b" * 64,
+        handoff_identity="handoff",
+        source_step_id="native",
+        harness="native",
+        native_agent=selected,
+    )
+    diagnostics = []
+
+    class Diagnostics:
+        def emit(self, event):
+            diagnostics.append(event)
+
+    def command(*argv, stream_output, **kwargs):
+        stream_output("stdout", "synthetic-private-protocol-canary")
+        return CommandResult(argv=argv, returncode=0, stdout="", stderr="")
+
+    def broken_protocol(stream, text):
+        raise RuntimeError(text)
+
+    runner = observed_command_runner(
+        command,
+        step=step,
+        attempt_number=1,
+        observer=lambda *args: pytest.fail("private native output was exposed"),
+        diagnostics=Diagnostics(),
+        host_environment={},
+        fleet_run_id="run",
+        repository_id="repo",
+    )
+    result = runner(
+        "/native/codex",
+        "exec",
+        stream_output=broken_protocol,
+    )
+    assert result.returncode == 0
+    assert len(diagnostics) == 1
+    assert diagnostics[0].message == "Protected native protocol observer failed"
+    assert "synthetic-private-protocol-canary" not in diagnostics[0].model_dump_json()

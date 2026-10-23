@@ -36,11 +36,18 @@ class CodexResponsesFixture(AbstractContextManager["CodexResponsesFixture"]):
         account_id: str | None = None,
         tls_certificate: Path | None = None,
         tls_key: Path | None = None,
+        model_info: dict[str, Any] | None = None,
+        tool_commands: tuple[str, str] | None = None,
+        completion: Callable[[], str] | None = None,
     ) -> None:
         self.transport = transport
         self.prompt = prompt
         self.auth_token = auth_token
         self.account_id = account_id
+        self.model_info = model_info
+        self.tool_commands = tool_commands
+        self.completion = completion
+        self.model_requests = 0
         self.observations: list[dict[str, Any]] = []
         self.warmup_observations: list[dict[str, Any]] = []
         self.errors: list[str] = []
@@ -114,6 +121,12 @@ class CodexResponsesFixture(AbstractContextManager["CodexResponsesFixture"]):
                     )
                 elif self.path == "/backend-api/wham/config/bundle" and account_id is not None:
                     self._json({"requirements_toml": {}})
+                elif (
+                    fixture.model_info is not None
+                    and self.path.partition("?")[0] == "/backend-api/codex/models"
+                ):
+                    fixture.model_requests += 1
+                    self._json({"models": [fixture.model_info]})
                 elif (
                     fixture.transport == "websocket"
                     and self.path.endswith("/responses")
@@ -330,6 +343,8 @@ class CodexResponsesFixture(AbstractContextManager["CodexResponsesFixture"]):
                 sequence = self.request_count
             if sequence > 4:
                 raise ValueError("Inference count outside fixture bound")
+        if self.model_info is not None:
+            assert body["model"] == self.model_info["slug"], "Selected native model differs"
         prompt = self.prompt()
         assert prompt is not None
         original = prompt.decode("utf-8")
@@ -384,6 +399,21 @@ class CodexResponsesFixture(AbstractContextManager["CodexResponsesFixture"]):
             "previous_response_id": previous,
             "response_id": response_id,
             "chain_valid": chain_valid,
+            "model": body.get("model"),
+            "native_reasoning_effort": body.get("reasoning", {}).get("effort"),
+            "native_code_mode_output": any(
+                "Script completed" in value for value in outputs.values()
+            ),
+            "tool_declarations": [
+                {key: value for key, value in tool.items() if key in ("type", "name", "namespace")}
+                | {"nested_names": [item.get("name") for item in tool.get("tools", [])]}
+                for tool in body.get("tools", [])[:16]
+            ]
+            if self.model_info is not None
+            else [],
+            "native_tool_results": {key: value[:1600] for key, value in outputs.items()}
+            if self.model_info is not None
+            else {},
         }
         if warmup:
             self.warmup_observations.append(observation)
@@ -392,13 +422,19 @@ class CodexResponsesFixture(AbstractContextManager["CodexResponsesFixture"]):
         self._chains[response_id] = observation
         self._last_response = response_id
         if warmup:
-            return self._events(response_id, None, 0)
+            events = self._events(response_id, None, 0)
+            if self.model_info is not None:
+                for event in events:
+                    event["response"]["model"] = self.model_info["slug"]
+            return events
         if sequence in (1, 2):
             command = (
                 "printf CONTEXT_FOLLOWUP_PROOF"
                 if sequence == 1
                 else "printf 'VALUE = 42\\n' > code.py; printf CONTEXT_EDIT_PROOF"
             )
+            if self.tool_commands is not None:
+                command = self.tool_commands[sequence - 1]
             item: dict[str, Any] = {
                 "type": "custom_tool_call",
                 "id": f"ctc_context_{sequence}",
@@ -418,13 +454,20 @@ class CodexResponsesFixture(AbstractContextManager["CodexResponsesFixture"]):
                 "content": [
                     {
                         "type": "output_text",
-                        "text": "Installed Codex context transport complete",
+                        "text": self.completion()
+                        if self.completion is not None
+                        else "Installed Codex context transport complete",
                         "annotations": [],
                     }
                 ],
                 "status": "completed",
             }
-        return self._events(response_id, item, 2_000_000 if sequence == 2 else 1)
+        events = self._events(response_id, item, 2_000_000 if sequence == 2 else 1)
+        if self.model_info is not None:
+            for event in events:
+                if isinstance(event.get("response"), dict):
+                    event["response"]["model"] = self.model_info["slug"]
+        return events
 
     @staticmethod
     def _events(
