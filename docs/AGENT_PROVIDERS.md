@@ -148,7 +148,7 @@ executable, socket, native home, settings, credentials or environment secrets;
 write configuration; start a process; connect to an endpoint; or submit work.
 Its result is `configured_not_connected`, with `started: false` and
 `execution_admitted: false`. It creates no native profile or runtime service
-selection. No endpoint probe command is implemented.
+selection. The separate connection command below observes bounded readiness only.
 
 Select an absolute public executable path explicitly; PATH discovery and native
 version probing are not part of preparation. Codex additionally requires an
@@ -173,25 +173,77 @@ the version or compatibility of the executable at a supplied path:
 
 OpenCode's `--stdio` is a readiness/ownership channel; the service API still uses
 HTTP. Keep its transport credential out of argv, URLs, logs and agent/tool
-environments. Restrict a future client to the exact loopback endpoint, without
-redirects, ambient proxies, discovery or fallback. Plain HTTP over a non-loopback
-address is not this recipe. Remote transport and host/process secrecy require
+environments. The readiness client accepts only the exact numeric-loopback HTTP
+endpoint and explicit port, without redirects, ambient proxies, discovery or
+fallback. Plain HTTP over a non-loopback address is not this recipe. Remote transport and host/process secrecy require
 separate qualification. A bounded non-secret version/identity response establishes
 only endpoint readiness, never provider sign-in, model availability, native-store
 exclusion or protected execution. Do not call settings, auth, session-list or
 other broad APIs as a readiness substitute.
 
+### Connect for readiness
+
+After the operator has established the native endpoint, connect explicitly:
+
+```sh
+oh-goon agent service connect --agent codex --socket "$oh_goon_service_directory/codex.sock" --json
+oh-goon agent service connect --agent opencode --endpoint "$oh_goon_opencode_endpoint" --password-env OH_GOON_OPENCODE_TRANSPORT_PASSWORD --json
+```
+
+`oh_goon_opencode_endpoint` must contain the exact selected loopback URL, and the
+named environment variable must contain its private transport password. Oh-Goon
+validates the endpoint before reading that one variable, freezes the value once,
+and does not read native credential or configuration stores. Do not substitute a
+provider token. The optional `--timeout-seconds` defaults to 10 and accepts a
+positive value up to 60. The whole readiness exchange has a deadline, including
+handshake and streamed response delivery; transport cleanup has its own bounded
+closure. Failed or uncertain cleanup cannot produce a successful closed report.
+
+Codex connects to the explicitly selected native Unix service and initializes
+its protocol. OpenCode performs only authenticated `GET /api/info`; the current
+client requires version 2.1.2 and retains only version and PID. Neither CLI path
+starts a native service, submits a task, lists sessions, calls auth/config APIs or
+adopts an existing conversation. Connection transport closes before the command
+returns. A successful report is `connected_not_qualified`, with
+`execution_admitted: false` and `connection_closed: true`; native authentication,
+phase policy, private-store exclusion and tool quiescence remain unverified.
+
+The [installed Codex service
+probe](../backend/tests/integration/services/test_native_codex_service.py) used
+0.163.0 with a complete public runtime outside synthetic native stores. Native
+service-known profiles denied source/Git mutations, private-store reads/writes
+and subprocess escapes during review and re-review; repair changed only the
+selected source directory, and scratch output remained available. The original
+process owner cancelled the server and verified process-group quiescence. These
+are model-free native policy observations, not admission of a service-backed Run:
+the reported profile identifier lacks full effective grants/configuration
+identity. An empty zero-turn thread starts, but native resume from a fresh
+connection refuses it before any persisted turn history. Persisted continuation,
+model follow-up, compaction and real-account sign-in/refresh remain unverified
+for this adapter. No real authentication/configuration files or model turns were
+used.
+
+The [installed OpenCode readiness
+probe](../backend/tests/integration/services/test_native_opencode_service.py)
+used a real 2.1.2 server with synthetic HOME/XDG state and a fresh transport
+password. Its PID matched original command-owner birth evidence; closing the
+client left the server available, and original owner cancellation established
+process-group quiescence. No session, account or inference operation ran. This
+non-stdio probe does not qualify the prepared stdin lease, continuation,
+private-store/tool isolation or a real account.
+
 ### Native service adapter design
 
-Service execution remains planned integration. The preparation command above
-prints a recipe; there is no implemented `native_service` profile, connected
-endpoint or Run consumer. Existing native command adapters retain their current
-execution path. A running desktop/CLI instance alone does not establish a
-supported endpoint or protected tool access.
+Service connections now support explicit protocol readiness. There is no
+implemented `native_service` profile or service-backed Run consumer; protected
+model work remains unavailable. Preparation prints a recipe and connection reads
+readiness, without admitting execution. Existing native command adapters retain
+their current execution path. A running desktop/CLI instance alone does not
+establish a supported endpoint or protected tool access.
 
-The intended client submits exact frozen task, qualified Hashmarks evidence and
-Skill instructions through the native session protocol. The native service retains
-sign-in, refresh, personal configuration, conversation, tools and compaction.
+A future admitted Run must submit exact frozen task, qualified Hashmarks evidence
+and Skill instructions through the native session protocol. The native service
+retains sign-in, refresh, personal configuration, conversation, tools and compaction.
 Oh-Goon retains Plan resolution, consent, phase admission, deadlines, cancellation,
 verification and result acceptance; it does not rebuild the native reasoning loop.
 
@@ -237,8 +289,13 @@ service credential is not a narrow agent capability. Filter session events to th
 owned session before retention and keep unrelated sessions and raw diagnostics out
 of evidence.
 
-Continuation preserves native context while each new phase re-admits tool scope.
-Do not inherit repair rights into re-review. Cancellation targets the owned native
+The Codex transport includes native thread/turn continuation methods, but those
+methods are not a service-backed Run admission path. A symbolic thread/policy
+identifier is not proof of effective permissions. OpenCode currently exposes
+readiness and an explicit protected-execution refusal, with no submission or
+continuation methods. Native follow-up/compaction through admitted service Runs
+remains unverified. Each future new phase must re-admit tool scope; do not inherit
+repair rights into re-review. Cancellation targets the owned native
 turn/session, not a user's whole service. An abort response or disconnected stream
 alone does not establish tool quiescence. Reattachment must verify the same service,
 session, workspace and original authority; missing terminal or cleanup evidence

@@ -240,12 +240,17 @@ versioned native setup recipe. It performs no executable/socket/store/environmen
 secret reads, configuration writes, process launch, network request, account or
 session operation. Output remains `configured_not_connected`, `started: false`
 and `execution_admitted: false`; it creates no native profile or runtime consumer.
-There is no endpoint-probe command. See the [operator preparation
-contract](../AGENT_PROVIDERS.md#prepare-a-native-service-endpoint).
+The separate `agent service connect` command owns explicit readiness connection:
+Codex native protocol initialization or OpenCode authenticated `/api/info`. It
+reads only the explicitly named OpenCode transport-password variable, once after
+endpoint validation. It closes the client transport and reports
+`connected_not_qualified` with no execution admission or native-store access. See
+the [operator preparation](../AGENT_PROVIDERS.md#prepare-a-native-service-endpoint)
+and [connection](../AGENT_PROVIDERS.md#connect-for-readiness) contracts.
 
-Actual service execution remains planned. It belongs at the existing native
-integration boundary and must consume the same frozen harness input and typed
-phase acceptors. `runtime/agent_providers.py` remains the future endpoint/protocol
+Actual service-backed Run execution remains unsupported. It belongs at the
+existing native integration boundary and must consume the same frozen harness
+input and typed phase acceptors. `runtime/agent_providers.py` remains the future endpoint/protocol
 resolution owner; existing Fleet admission and `AgentRepairContext` bind the
 workspace, phase and execution capabilities. The native service alone owns
 authentication, personal configuration, sessions, tools and compaction. No new
@@ -259,8 +264,9 @@ symlink/rendezvous checks. The OpenCode 2.1.2 recipe uses a parent-held stdin le
 and readiness JSON before authenticated HTTP `/api/info`; `--stdio` is not a
 stdio-only API. A future parent supplies a fresh private `OPENCODE_PASSWORD`, not
 a native provider credential. Its secret must never reach argv, logs, model or
-tool environments. The current helper implements no parent lifecycle or network
-probe, and supplied paths have not been version-probed.
+tool environments. Preparation implements no parent lifecycle or native launch
+supervision. The separate connection adapter observes readiness;
+preparation does not establish the version at a supplied executable path.
 
 No endpoint has been established by preparation, and an already running agent is
 not automatically an admitted service. Preserve the operator's existing server;
@@ -268,6 +274,16 @@ do not start, dispose or kill it implicitly. The original execution owner must
 bind service/peer identity and a single owned native session, supervise its
 deadline, cancel that session and retain actual closure or uncertainty. A native
 abort acknowledgement is not physical teardown proof.
+
+[CodexServiceClient](../../backend/src/oh_goon/integrations/agent_codex_service.py)
+owns its native protocol transport and owned thread/turn continuation methods;
+those methods are not wired to original Run admission and do not convert a policy
+identifier into permission proof.
+[OpenCodeServiceClient](../../backend/src/oh_goon/integrations/agent_opencode_service.py)
+owns strict numeric-loopback HTTP authority, bounded readiness, sanitized
+version/PID facts and deterministic client closure. It exposes no session
+submission or continuation API and refuses protected execution through existing
+`CapabilityUnavailable`. No generic service request surface reaches agent tools.
 
 The selected backend must establish the server's actual tool boundary. Sandboxing
 only the client does not constrain a pre-existing host server. Native permission
@@ -316,6 +332,7 @@ normal startup does not acquire a strict signer/custody qualification gate.
 | Producer qualifications and evidence bounds | [Hashmarks Agent tools](../../backend/tests/unit/integrations/test_hashmarks_agent_tools.py) |
 | Passive harness data contract | [Harness contract](../../backend/tests/unit/core/test_agent_harness_contract.py), [effect requests](../../backend/tests/unit/services/test_skill03b_effect_requests.py) |
 | Native receiver and complete Run lifecycle | [Native Step contract](../../backend/tests/dependency_complete/test_fleet_plan_native_steps.py), [native Run](../../backend/tests/integration/services/test_native_agent_run.py) |
+| Native service readiness | Both explicit clients bound the entire readiness exchange and their transport teardown; safe failures preserve cleanup uncertainty and cancellation. [Codex transport](../../backend/tests/dependency_complete/test_agent_codex_service.py) covers native protocol/continuation and profile pinning. Its opt-in [installed service case](../../backend/tests/integration/services/test_native_codex_service.py) verifies model-free review/scoped-repair/re-review denials, synthetic private stores and original owner cleanup. Native empty-thread resume is refused; persisted continuation and effective-grant identity remain unverified. [OpenCode transport](../../backend/tests/dependency_complete/test_agent_opencode_service.py) covers authority, bounds, safe failures and client closure. The opt-in [installed OpenCode case](../../backend/tests/integration/services/test_native_opencode_service.py) verifies real 2.1.2 readiness, matching original process birth, no global shutdown on client close and original owner cancellation/quiescence using synthetic private state. It does not qualify stdin lease, native continuation, user authentication or private-store/tool isolation. |
 | Installed Codex instruction transport | Opt-in [native Codex context](../../backend/tests/integration/services/test_native_codex_context.py): synthetic API-key/ChatGPT authentication × HTTP/WebSocket, privileged task/Skill/producer context through native response chains, automatic compaction and continuation. ChatGPT discovery uses a local HTTPS backend; WebSocket cases reject inference HTTP fallback. Live account access and model quality remain separate. |
 | Live Codex account and coding | The [legacy live coding baseline](../../backend/tests/integration/services/test_native_codex_live.py) retains the original local Run and independent verifier; its credential-reading/forced-refresh helper is removed. It does not qualify native-store exclusion. Native-service acceptance remains TODO under the [adapter design](../AGENT_PROVIDERS.md#native-service-adapter-design): non-secret readiness/refresh facts, private-store/tool-boundary qualification and owned coding with independent verification. |
 | Ordinary physical boundaries and native resources | [Standard Bubblewrap](../../backend/tests/unit/integrations/test_standard_bubblewrap_isolation.py), [verification and Git observers](../../backend/tests/unit/integrations/test_native_plan_isolation.py) |
