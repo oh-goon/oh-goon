@@ -50,6 +50,29 @@ class _OriginalRuns:
             outcome=FleetRunOutcome.SUCCESS,
         )
 
+    def agent_campaign(self, run_id):
+        self.calls.append(("campaign", run_id))
+        if self.reject:
+            raise InvalidRequest("Selected Run is not part of a review-repair campaign")
+        return {
+            "schema": "oh-goon.agent-campaign-result/v1",
+            "campaign_id": "first-run",
+            "result": "incomplete",
+            "controller_result": {"availability": "unavailable", "stop_reason": None},
+            "incomplete_reasons": ["The controller stop receipt is not retained"],
+            "runs": [
+                {
+                    "fleet_run_id": run_id,
+                    "phase": "repair",
+                    "review_pass": 1,
+                    "status": "CANCELLED",
+                    "outcome": "CANCELLED",
+                }
+            ],
+            "reviews": [],
+            "findings": [],
+        }
+
     def events(self, run_id, after, *, limit=None):
         self.calls.append(("events", run_id, after, limit))
         return SimpleNamespace(
@@ -111,6 +134,51 @@ def test_status_text_keeps_same_projection_without_an_extra_read(capsys):
     assert _invoke(runs, "status", "run-x") == 0
     assert "Progress: 2/2" in capsys.readouterr().out
     assert runs.calls == [("get", "run-x")]
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_campaign_readback_preserves_original_result_and_interrupt_uncertainty(capsys, as_json):
+    runs = _OriginalRuns()
+    assert _invoke(runs, "campaign", "linked-run", *(["--json"] if as_json else [])) == 0
+    output = capsys.readouterr().out
+    if as_json:
+        data = json.loads(output)
+        assert data["campaign_id"] == "first-run" and data["result"] == "incomplete"
+        assert data["controller_result"]["availability"] == "unavailable"
+        assert data["runs"][0]["status"] == "CANCELLED"
+    else:
+        assert "Result: incomplete" in output and "controller stop receipt" in output
+    assert runs.calls == [("campaign", "linked-run")]
+
+
+def test_campaign_readback_rejects_a_run_without_campaign_authority(capsys):
+    runs = _OriginalRuns()
+    runs.reject = True
+    assert _invoke(runs, "campaign", "ordinary-run", "--json") == 2
+    assert "not part of" in json.loads(capsys.readouterr().out)["message"]
+
+
+def test_campaign_invocation_output_preserves_cancelled_before_admission(capsys):
+    from oh_goon.cli_runtime_plans import _print_agent_repair_result
+    from oh_goon.core.models.agent_repair import (
+        AgentRepairBudget,
+        AgentRepairResult,
+        AgentRepairStopReason,
+    )
+
+    receipt = AgentRepairResult(
+        repair_id="cancelled-before-admission",
+        budget=AgentRepairBudget(max_attempts=2, timeout_seconds=60, step_timeout_seconds=10),
+        stop_reason=AgentRepairStopReason.CANCELLED,
+        attempts=(),
+    )
+    assert _print_agent_repair_result(receipt, as_json=True, campaign=True) == 130
+    result = json.loads(capsys.readouterr().out)
+    assert result["schema"] == "oh-goon.agent-repair-result/v1"
+    assert result["campaign"]["schema"] == "oh-goon.agent-campaign-result/v1"
+    assert result["campaign"]["result"] == "incomplete"
+    assert result["campaign"]["controller_result"]["stop_reason"] == "cancelled"
+    assert result["campaign"]["runs"] == []
 
 
 def test_events_preserves_original_sequence_and_revision_without_recomputation(capsys):

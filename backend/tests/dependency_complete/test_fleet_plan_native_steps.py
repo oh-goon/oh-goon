@@ -24,9 +24,14 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.agent_review import review_scope
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.models.execution_identity import ExecutionIdentity
-from oh_goon.core.models.fleet_observation import NativeAgentObservation
+from oh_goon.core.models.fleet_observation import (
+    AgentHarnessObservation,
+    NativeAgentObservation,
+    NativeServiceExecutionEvidence,
+)
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
     ResolvedCommandStep,
@@ -773,9 +778,18 @@ def test_codex_service_receiver_rejects_conflicting_transport_authority(
         require_native_agent_compatibility(selected, role="review")
 
 
-@pytest.mark.parametrize("cancelled", [False, True])
+@pytest.mark.parametrize(
+    "cancelled,role",
+    [
+        (False, "review"),
+        (True, "review"),
+        (False, "adjudication"),
+        (False, "proposal"),
+        (False, "report"),
+    ],
+)
 def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancelled: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancelled: bool, role: str
 ) -> None:
     from oh_goon.integrations import agent_codex_service_execution as service_owner
 
@@ -800,7 +814,7 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
             update={"repository_access": "read_only", "recipients": ("codex",)}
         ),
     )
-    step = resolve_delivered_local_search_agent_step(handoff, native_agent=selected, role="review")
+    step = resolve_delivered_local_search_agent_step(handoff, native_agent=selected, role=role)
     packet = handoff.encode_prework_delivery()
     runtime = replace(
         runtime,
@@ -823,6 +837,18 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
     )
 
     def reject_service(**_kwargs: Any) -> Any:
+        schema = _kwargs["output_schema"]
+        if role == "adjudication":
+            assert schema["properties"]["candidate_identity"]["enum"] == [
+                handoff.source.repository.content_identity
+            ]
+            assert schema["properties"]["scope_identity"]["enum"] == [review_scope(handoff)]
+            assert "schema" in schema["required"]
+            for node in (schema, *schema["$defs"].values()):
+                assert node["additionalProperties"] is False
+                assert set(node["required"]) == set(node["properties"])
+        else:
+            assert schema is None
         rejected = service_owner.CodexServiceExecutionFailure(failure)
         if cancelled:
             raise service_owner.CodexServiceExecutionCancelled(rejected)
@@ -876,6 +902,87 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
     assert retained.attempts[0].supervisor.cleanup_reason == "cancel"
     assert retained.attempts[0].supervisor.final_process_group_quiescent is True
     assert retained.observations == (observation,)
+
+
+@pytest.mark.parametrize("rejection", ("phase", "protocol"))
+def test_private_native_rejection_retains_bounded_static_context_after_a_settled_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejection: str
+) -> None:
+    from oh_goon.integrations import agent_codex_service_execution as service_owner
+    from oh_goon.integrations import fleet_plan_native_steps as native_owner
+    from oh_goon.integrations.agent_native_execution import NativeAgentEvents
+
+    repository, handoff, step, runtime = _case(tmp_path, sandboxed=False)
+    selected = replace(
+        step.native_agent,
+        agent="codex",
+        definition=step.native_agent.definition.model_copy(update={"arguments": ()}),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(tmp_path / "native-owned"), model="native", reasoning_effort="low"
+            )
+        ),
+        connection=None,
+        backend_configuration_id=None,
+    )
+    handoff = replace(
+        handoff,
+        requested_effects=handoff.requested_effects.model_copy(
+            update={"repository_access": "read_only", "recipients": ("codex",)}
+        ),
+    )
+    step = resolve_delivered_local_search_agent_step(handoff, native_agent=selected, role="review")
+    packet = handoff.encode_prework_delivery()
+    runtime = replace(runtime, native_profile=selected, agent_delivery_for=lambda *_args: packet)
+    execution = service_owner.CodexServiceExecution(
+        outcome=StepOutcome(
+            argv=(selected.definition.executable, "app-server"),
+            returncode=0,
+            stdout="RAW_PRIVATE_NATIVE_PROTOCOL_CANARY",
+        ),
+        protocol=NativeAgentEvents(
+            tuple(
+                AgentHarnessObservation(kind="tool", summary="Bounded native tool claim")
+                for _ in range(127)
+            ),
+            "CLEAN",
+            True,
+            False,
+            130,
+        ),
+        execution=NativeServiceExecutionEvidence(
+            configuration_id="service-configuration",
+            native_version="0.163.0",
+            permission_profile_id="readonly",
+            repository_access="read_only",
+            disabled_features=(),
+        ),
+    )
+    monkeypatch.setattr(service_owner, "execute_codex_service_run", lambda **_kwargs: execution)
+    if rejection == "protocol":
+
+        def reject_submission(*_args, **_kwargs):
+            raise FleetPlanInvalid("RAW_PRIVATE_SUBMISSION_ERROR_CANARY")
+
+        monkeypatch.setattr(native_owner, "decode_agent_harness_submission", reject_submission)
+    outcome = execute_direct_step(repository, step, runtime, step_order=1)
+    assert outcome.returncode == PLAN_CONTRACT_RETURN_CODE
+    assert "RAW_PRIVATE" not in outcome.stdout + outcome.stderr
+    observation = next(
+        item for item in outcome.observations if isinstance(item, NativeAgentObservation)
+    )
+    assert observation.settled and not observation.failed
+    assert len(observation.events) == 128 and observation.omitted_observations == 1
+    diagnostic = observation.events[-1]
+    assert diagnostic.kind == "context"
+    assert (
+        "NATIVE_PHASE_OUTPUT_REJECTED"
+        if rejection == "phase"
+        else "NATIVE_PROTOCOL_SUBMISSION_REJECTED"
+    ) in diagnostic.summary
+    assert "RAW_PRIVATE" not in observation.model_dump_json()
+    assert NativeAgentObservation.model_validate_json(observation.model_dump_json()) == observation
+    assert not any(item.kind == "agent_review" for item in outcome.observations)
 
 
 @pytest.mark.process

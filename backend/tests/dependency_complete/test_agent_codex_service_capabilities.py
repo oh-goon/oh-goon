@@ -61,12 +61,15 @@ def native_capability_transport(
     return messages
 
 
-async def start_owned_thread(client: CodexServiceClient, cwd: Path) -> None:
+async def start_owned_thread(
+    client: CodexServiceClient, cwd: Path, *, configuration: dict[str, Any] | None = None
+) -> None:
     await client.start_thread(
         cwd=cwd,
         permissions="owned-profile",
         model="native-model",
         developer_instructions="Frozen repository and Skill context",
+        configuration=configuration,
     )
 
 
@@ -130,7 +133,7 @@ def test_unusable_native_home_metadata_cannot_admit_separation(
     asyncio.run(check())
 
 
-def test_zero_mcp_gate_only_uses_owned_thread_inventory(
+def test_mcp_exclusion_verification_only_accepts_its_owned_thread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     messages = native_capability_transport(
@@ -141,20 +144,19 @@ def test_zero_mcp_gate_only_uses_owned_thread_inventory(
 
     async def check() -> None:
         async with CodexServiceClient(tmp_path / "selected.sock", experimental_api=True) as client:
-            await start_owned_thread(client, tmp_path)
-            await client.require_no_mcp_servers("owned-thread")
+            configuration = await client.mcp_exclusion_configuration()
+            assert configuration == {"mcp_servers": {}}
+            await start_owned_thread(client, tmp_path, configuration=configuration)
+            await client.require_mcp_servers_excluded("owned-thread")
             with pytest.raises(AgentProviderError, match="selected thread"):
-                await client.require_no_mcp_servers("foreign-thread")
+                await client.require_mcp_servers_excluded("foreign-thread")
 
     asyncio.run(check())
     inventory = [item for item in messages if item["method"] == "mcpServerStatus/list"]
-    assert len(inventory) == 1
-    assert inventory[0]["params"] == {
-        "threadId": "owned-thread",
-        "cursor": None,
-        "limit": 1,
-        "detail": "toolsAndAuthOnly",
-    }
+    assert [item["params"] for item in inventory] == [
+        {"threadId": thread, "cursor": None, "limit": 64, "detail": "toolsAndAuthOnly"}
+        for thread in (None, "owned-thread")
+    ]
 
 
 @pytest.mark.parametrize(
@@ -167,23 +169,24 @@ def test_zero_mcp_gate_only_uses_owned_thread_inventory(
         {},
     ],
 )
-def test_nonempty_or_inconclusive_mcp_catalog_cannot_admit_execution(
+def test_inconclusive_mcp_inventory_cannot_admit_a_workload_thread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, response: dict[str, Any]
 ) -> None:
-    native_capability_transport(
+    messages = native_capability_transport(
         monkeypatch, native_home=str(tmp_path / "native-home"), capability=lambda _: response
     )
 
     async def check() -> None:
         async with CodexServiceClient(tmp_path / "selected.sock", experimental_api=True) as client:
-            await start_owned_thread(client, tmp_path)
-            with pytest.raises(AgentProviderError, match="empty MCP catalog") as error:
-                await client.require_no_mcp_servers("owned-thread")
+            with pytest.raises(AgentProviderError) as error:
+                await client.mcp_exclusion_configuration()
             assert "PRIVATE" not in str(error.value)
             assert "PRIVATE" not in json.dumps(client.metadata)
             assert client.metadata["execution_admitted"] is False
 
     asyncio.run(check())
+    assert "thread/start" not in [message["method"] for message in messages]
+    assert "turn/start" not in [message["method"] for message in messages]
 
 
 def test_native_feature_pages_return_only_effective_booleans(

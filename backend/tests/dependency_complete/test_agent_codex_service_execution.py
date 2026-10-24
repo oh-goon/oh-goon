@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import sys
 import time
 import tomllib
@@ -11,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -21,6 +23,7 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.agent_review import AgentAdjudicationRecord
 from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
 from oh_goon.core.models.fleet_plan_values import HostEnvironmentPart, ResolvedEnvironmentBinding
 from oh_goon.core.path_layouts import AttemptPathLayout
@@ -48,6 +51,7 @@ def execute_fixture(
     diagnostics: DiagnosticEmitter | None = None,
     notifications: list[dict[str, Any]] | None = None,
     protect_host_secret: bool = False,
+    output_schema: dict[str, Any] | None = None,
 ) -> tuple[
     Callable[[], execution.CodexServiceExecution],
     list[object],
@@ -184,9 +188,23 @@ def execute_fixture(
 
         async def start_thread(self, **_kwargs: Any) -> dict[str, Any]:
             events.append("thread_start")
+            assert _kwargs["configuration"] == {
+                "features.incremental_tools": False,
+                "mcp_servers": {"PRIVATE_NATIVE_REGISTRATION": {"enabled": False}},
+            }
+            if fault == "mcp_invalid_configuration":
+                raise AgentProviderError("Native Codex service refused the request")
             return {"thread": {"id": "owned-thread"}}
 
-        async def require_no_mcp_servers(self, thread: str) -> None:
+        async def mcp_exclusion_configuration(self) -> dict[str, Any]:
+            events.append("mcp_discovery")
+            if fault == "mcp_inventory":
+                raise AgentProviderError(
+                    "Native Codex MCP inventory is incomplete or exceeds its bound"
+                )
+            return {"mcp_servers": {"PRIVATE_NATIVE_REGISTRATION": {"enabled": False}}}
+
+        async def require_mcp_servers_excluded(self, thread: str) -> None:
             assert thread == "owned-thread"
             events.append("mcp_gate")
             if fault == "mcp":
@@ -194,7 +212,7 @@ def execute_fixture(
                     raise ValueError("RAW_SYNTHETIC_PRIVATE_ERROR_CHAIN")
                 except ValueError as error:
                     raise AgentProviderError(
-                        "Native Codex protected execution requires an empty MCP catalog"
+                        "Native Codex MCP tool exclusion was not established"
                     ) from error
 
         async def feature_flags(self, thread: str) -> dict[str, bool]:
@@ -218,6 +236,7 @@ def execute_fixture(
 
         async def start_turn(self, thread: str, task: str, **_kwargs: Any) -> dict[str, Any]:
             assert thread == "owned-thread" and task == "Captured task"
+            assert _kwargs["output_schema"] == output_schema
             events.append("model_turn")
             if fault == "turn_missing":
                 return {}
@@ -316,6 +335,7 @@ def execute_fixture(
             runtime=runtime,
             deadline=time.monotonic() + 5,
             read_only=True,
+            output_schema=output_schema,
         )
 
     return invoke, events, physical
@@ -338,8 +358,36 @@ def test_service_turn_success_retains_actual_owned_daemon_cancellation_receipt(
     assert result.outcome.stdout == "Native final report"
     assert result.outcome.returncode == 0 and result.protocol.settled is True
     assert events.index("mcp_gate") < events.index("model_turn")
+    assert events.index("store_separation") < events.index("mcp_discovery")
+    assert events.index("mcp_discovery") < events.index("thread_start") < events.index("mcp_gate")
+    assert events.count("thread_start") == 1 and events.count("model_turn") == 1
+    assert "PRIVATE_NATIVE_REGISTRATION" not in result.execution.model_dump_json()
     assert events.index("sandbox_qualification") < events.index("model_turn")
     assert events.index("disconnect") < events.index("process_closed")
+
+
+def test_service_turn_transports_the_selected_adjudication_schema_without_rewriting_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(execution, "uuid4", lambda: UUID(int=1))
+    schema = AgentAdjudicationRecord.model_json_schema(by_alias=True)
+    schema["required"] = list(schema["properties"])
+    schema["properties"]["candidate_identity"]["enum"] = ["agent-source-closure-v1-" + "a" * 64]
+    schema["properties"]["scope_identity"]["enum"] = ["agent-review-scope-v1-" + "a" * 64]
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, output_schema=schema)
+    result = invoke()
+    assert events.count("model_turn") == 1
+    assert result.protocol.final_text == "Native final report"
+    assert physical[0].supervisor.final_process_group_quiescent
+    # Reuse exactly the same configuration only after its owner proves quiescence.
+    shutil.rmtree(tmp_path / "control" / "service-private")
+    shutil.rmtree(tmp_path / "control" / "service-scratch")
+    schema["properties"]["candidate_identity"]["enum"] = ["agent-source-closure-v1-" + "b" * 64]
+    changed = invoke()
+    assert events.count("model_turn") == 2
+    assert physical[1].supervisor.final_process_group_quiescent
+    assert changed.execution.permission_profile_id == result.execution.permission_profile_id
+    assert changed.execution.configuration_id != result.execution.configuration_id
 
 
 @pytest.mark.parametrize("observer_fails", [False, True])
@@ -359,7 +407,7 @@ def test_safe_service_failure_reaches_original_stream_only_after_process_cleanup
         tmp_path, monkeypatch, fault="mcp", output_observer=observe
     )
     with pytest.raises(
-        execution.CodexServiceExecutionFailure, match="empty MCP catalog"
+        execution.CodexServiceExecutionFailure, match="MCP tool exclusion"
     ) as failure:
         invoke()
     assert "model_turn" not in events
@@ -368,7 +416,7 @@ def test_safe_service_failure_reaches_original_stream_only_after_process_cleanup
             "native-service",
             3,
             "stderr",
-            "Native Codex protected execution requires an empty MCP catalog\n",
+            "Native Codex MCP tool exclusion was not established\n",
         )
     ]
     assert failure.value.outcome.supervisor is physical[0].supervisor
@@ -399,8 +447,8 @@ def test_safe_service_failure_survives_runtime_shutdown_without_live_capture(
     assert event["step_id"] == "native-service"
     assert event["operation"] == "native_failure_attempt_3"
     assert event["exception_type"] == "AgentProviderError"
-    assert "empty MCP catalog" in event["message"]
-    assert "require_no_mcp_servers" in event["traceback"]
+    assert "MCP tool exclusion" in event["message"]
+    assert event["message"] in event["traceback"]
     journal_context = "\n".join(item.summary for item in failure.value.safe_diagnostics)
     assert event["message"] in journal_context
     assert event["traceback"] in journal_context
@@ -409,6 +457,21 @@ def test_safe_service_failure_survives_runtime_shutdown_without_live_capture(
     assert "RAW_SYNTHETIC_PRIVATE" not in json.dumps(retained)
     assert "SYNTHETIC_NATIVE_PROVIDER_SECRET" not in json.dumps(retained)
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("fault", ("mcp_inventory", "mcp_invalid_configuration"))
+def test_native_mcp_discovery_or_disable_rejection_closes_original_process_before_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault=fault)
+    with pytest.raises(execution.CodexServiceExecutionFailure) as error:
+        invoke()
+    assert events.count("mcp_discovery") == 1
+    assert events.count("thread_start") == (fault == "mcp_invalid_configuration")
+    assert "mcp_gate" not in events and "model_turn" not in events
+    assert len(physical) == 1 and physical[0].supervisor.final_process_group_quiescent
+    assert error.value.outcome.supervisor is physical[0].supervisor
+    assert "PRIVATE_NATIVE_REGISTRATION" not in str(error.value)
 
 
 def test_unqualified_native_cli_version_blocks_before_daemon_and_model_submission(

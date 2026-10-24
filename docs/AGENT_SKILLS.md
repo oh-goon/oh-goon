@@ -111,6 +111,97 @@ native final verification on the same candidate and scope. The returned
 `converged` result is scoped workflow convergence, separate from APP
 certification. A failed verification remains its original failed Run.
 
+`plan run --review-passes ... --json` includes a structured `campaign` projection
+alongside its invocation receipt: linked Runs, source-bound review findings and
+adjudications, admitted candidates, repair output metadata, and selected/native
+verification results. Findings retain their originating Run and Step, source
+path, digest and line. A later CLEAN claim does not independently establish an
+individual finding's resolution. Bounded native context diagnostics and original
+execution facts explain preflight failures without including model/tool transcripts;
+their existing claim and execution authority labels remain distinct.
+
+Use `oh-goon plan campaign FLEET_RUN_ID --json` with any linked Run to inspect the
+same retained evidence after interruption. It reads one original journal cut;
+it neither loads raw model transcripts nor resumes work. Missing Runs, absent
+Step results and nonterminal or cancelled Runs remain incomplete. The controller
+stop receipt currently belongs to the invocation, so durable readback reports
+`controller_result.availability: unavailable` and `result: incomplete`, including
+when final verification succeeded: the controller's subsequent final source
+recapture is not established by those Runs. Save the original invocation JSON
+when its final convergence decision is needed. A fresh authorized invocation is
+required for continuation.
+
+## Hashmarks dogfood acceptance
+
+This is the shared acceptance contract for the native Codex campaign and the
+[Hashmarks evidence handoff](https://github.com/Hugloss/Hashmarks/blob/main/docs/integration/OH_GOON_INTEGRATION.md#evidence-across-repair-candidates).
+Use the [native campaign example](../examples/agentic-review-repair-loop/README.md#native-codex-service-campaign)
+and existing owners; this contract adds no runtime admission rule or result store.
+
+Installed deterministic qualification and the first live Hashmarks repair are
+separate evidence. The existing
+[installed campaign cases](../backend/tests/integration/services/test_native_codex_service_run.py)
+run the selected real Codex executable, native tools, scoped apply, regression,
+fresh capture and journal readback against a small synthetic repository. Their
+local Responses fixture supplies deterministic model replies and synthetic native
+state. Those cases qualify lifecycle behavior; they do not establish autonomous
+reasoning quality, real-account readiness or a successful repair of Hashmarks.
+
+| Scenario | Required observed behavior |
+| --- | --- |
+| CLEAN | Every selected review returns accepted CLEAN on the admitted candidate; native final verification passes; no repair is applied. |
+| One known defect | A passing baseline and intentional mutation establish the defect first; source-bound findings lead to admitted proposal/apply, passing regression, fresh CLEAN review and passing verification. |
+| Multiple independent defects | Distinct findings, their adjudication and repair queue membership remain accounted for; each repair has regression evidence and the final candidate receives fresh review and verification. |
+| Interrupted repair | Cancellation stops further phase admission and unauthorized writes; native cleanup and retained Run evidence are inspected; incomplete work remains incomplete after reopening the original journal. |
+
+The installed cases cover those four scenarios and an additional complete repair
+with a configured MCP server whose tools remain disabled in every reasoning
+phase. Native metadata discovery may initialize that registered server; no model
+turn is submitted until workload exclusion is established. For the first live
+acceptance, use a disposable Hashmarks candidate,
+the four pinned cookbook reviews in declared order, and real native model
+inference through a compatible explicitly selected `codex_service` profile.
+Complete the known-defect path through every phase. A preflight rejection or a
+successful single Agent task does not satisfy that live milestone. The
+[Hashmarks workload recipe](https://github.com/Hugloss/Hashmarks/blob/main/docs/integration/OH_GOON_INTEGRATION.md#deterministic-narrow-dogfood-workload)
+defines the narrow glob mutation; an intentional mutation is never reported as a
+newly discovered upstream defect.
+
+Keep preparation and execution evidence outside source and preserve these exact
+facts in the existing export receipt, lock, invocation result and Run evidence:
+
+- Original source commit, admitted repository/candidate identities, and the exact
+  export exclusions. Exclude native project configuration by path before reading
+  or copying members; preserve the original native files. An exported candidate
+  has its own Git database and its own admitted review scope.
+- Loaded Hashmarks producer implementation identity, selected through Oh-Goon's
+  `backend/pyproject.toml` and `backend/uv.lock`. The target's own committed
+  `uv.lock` owns its native baseline and verification environment. Establish the
+  unmodified baseline and mutation failure there; an ambient environment is not
+  a substitute.
+- `goon.lock` execution digest, exact cookbook Skill pins and declared review
+  order. Recapture may refresh candidate bytes while retaining resolved execution
+  configuration and producer qualifications.
+- Native executable digest and public runtime selection, service profile/model,
+  repository and Skill roots, authorized write roots, review/timeout budgets, and
+  exact regression/final-verification commands. Native credentials and private
+  configuration contents are never evidence payloads. Keep the operator-owned
+  known-defect verifier outside the repair write roots, and establish its passing
+  baseline and seeded failure before the campaign.
+- Linked Run IDs, source-bound findings and adjudications, candidate transitions,
+  native Step exit/cleanup results, and selected, executed and unverified checks.
+  Preserve exact verification membership when supplied; do not infer test success
+  from a model claim or a command description.
+
+The original invocation's controller receipt decides workflow convergence;
+original Runs and native Step evidence decide execution outcomes. Save its JSON
+campaign result and inspect `plan campaign RUN_ID --json`. Retained readback
+without the invocation receipt reports the controller result unavailable and
+the campaign incomplete, including after successful final verification. Neither
+report authorizes continuation or publication. A fresh continuation needs fresh
+caller authority, capture and limits. PR preparation may use these facts; pushing
+or publishing a PR remains a separate explicitly authorized action.
+
 ## Prepare a development checkout
 
 From the repository root on Linux or WSL:

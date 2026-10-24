@@ -1,0 +1,44 @@
+version: 1
+execution:
+  purpose: verification
+goons:
+- import: agents/review
+  from: goons
+  as: single-source
+  phase: review
+  pass: [repo, goal, acceptance]
+  with:
+    skill: cookbook/single-source-of-truth-review
+- import: agents/review
+  from: goons
+  as: semantic-redecision
+  phase: review
+  pass: [repo, goal, acceptance]
+  with:
+    skill: cookbook/semantic-redecision-review
+- import: agents/review
+  from: goons
+  as: resolved-fact
+  phase: review
+  pass: [repo, goal, acceptance]
+  with:
+    skill: cookbook/resolved-fact-regression-review
+- import: agents/review
+  from: goons
+  as: consumer-contract
+  phase: review
+  pass: [repo, goal, acceptance]
+  with:
+    skill: cookbook/canonical-consumer-contract-review
+- import: agents/adjudicate
+  from: goons
+  phase: adjudicate
+  pass: [repo, goal, acceptance]
+- import: agents/repair
+  from: goons
+  phase: repair
+  pass: [repo, goal, acceptance]
+- import: agents/regression
+  phase: regression
+- import: agents/verification
+  phase: verification

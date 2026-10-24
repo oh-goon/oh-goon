@@ -12,22 +12,36 @@ import os
 import shlex
 import subprocess
 import sys
+import textwrap
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 import pytest
+import yaml
 
 from oh_goon.application import ApplicationRuntime
+from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
     CodexServiceConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.agent_repair import AgentRepairBudget
+from oh_goon.core.models.agent_review import AgentAdjudicationRecord, AgentReviewRecord
+from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
+from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.product_identity import repository_id
+from oh_goon.core.projections.agent_campaign import project_agent_campaign
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
+from oh_goon.integrations.agent_codex_service import CodexServiceClient
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.services.execution_lock_persistence import write_execution_lock
+from tests.factories.agent_review import agent_review_case
 from tests.fakes.codex_responses import CodexResponsesFixture
 
 _TASK = "Change VALUE to 42 and retain the supplied evidence through follow-up and compaction."
@@ -314,3 +328,555 @@ def test_installed_codex_service_run_retains_context_and_verifies_independently(
         finally:
             if runtime is not None:
                 runtime.shutdown(wait_for_runs=True)
+
+
+class _CampaignResponses(CodexResponsesFixture):
+    """Native tools run; the model returns deterministic source-bound phase data."""
+
+    def __init__(self, private: Path, cancelled: Event, scenario: str) -> None:
+        self.private = private
+        self.cancelled = cancelled
+        self.scenario = scenario
+        self.inputs: dict[tuple[str, str], dict[str, Any]] = {}
+        self.probed: set[tuple[str, str]] = set()
+        self.schema_bound_occurrences: set[tuple[str, str]] = set()
+        super().__init__(transport="http", prompt=lambda: None, auth_token=_TOKEN)
+
+    def _record(self, payload: dict[str, Any]) -> dict[str, Any]:
+        identity = payload["identity"]
+        repository = Path(payload["captured_repository"])
+        members = json.loads(Path(payload["complete_source_manifest"]).read_text())["repository"]
+        source = next(member for member in members if member["path"] == "repo/code.txt")
+        contract = payload["output_contract"]
+        if "oh-goon.agent-review/v1" in contract:
+            clean = (repository / "code.txt").read_text() == "repaired\n"
+            record = dict(
+                schema="oh-goon.agent-review/v1",
+                **identity,
+                verdict="CLEAN" if clean else "FINDING",
+                summary="Inspected complete captured source with native read-only tools",
+                reviewed_paths={"complete_scope": identity["scope_identity"]},
+                findings=[]
+                if clean
+                else [
+                    dict(
+                        finding_id="f1",
+                        explanation="The content fails the selected behavioral check",
+                        evidence=[dict(**source, line=1)],
+                    )
+                ],
+            )
+            if self.scenario == "multiple" and not clean:
+                other = next(member for member in members if member["path"] == "repo/alternate.txt")
+                record["findings"].append(
+                    dict(
+                        finding_id="f2",
+                        explanation="The independent alternate-content check also fails",
+                        evidence=[dict(**other, line=1)],
+                    )
+                )
+            return record
+        if "oh-goon.agent-adjudication/v1" in contract:
+            references = [
+                dict(reviewer=review["reviewer"], finding_id=finding["finding_id"])
+                for review in payload["context"]["reviews"]
+                for finding in review["findings"]
+            ]
+            return dict(
+                schema="oh-goon.agent-adjudication/v1",
+                candidate_identity=identity["candidate_identity"],
+                scope_identity=identity["scope_identity"],
+                dispositions=[
+                    dict(**reference, decision="repair", rationale="One reproducible defect")
+                    for reference in references
+                ],
+                queue=[
+                    dict(
+                        queue_id="q1" if finding == "f1" else "q2",
+                        findings=[
+                            reference
+                            for reference in references
+                            if reference["finding_id"] == finding
+                        ],
+                        rationale="The reviews identify the same source defect",
+                        regression_expectation="The check requires repaired content",
+                    )
+                    for finding in dict.fromkeys(
+                        reference["finding_id"] for reference in references
+                    )
+                ],
+            )
+        record = dict(
+            schema="agent-patch-batch-v1",
+            candidate_identity=identity["candidate_identity"],
+            summary="Repair source and add the causal regression check",
+            regressions=[
+                dict(
+                    queue_id="q1",
+                    path="repo/regression.txt",
+                    expectation="Require repaired content",
+                )
+            ],
+            operations=[
+                dict(
+                    action="update",
+                    path="repo/code.txt",
+                    source_sha256=source["sha256"],
+                    replacement="repaired\n",
+                ),
+                dict(
+                    action="create",
+                    path="repo/regression.txt",
+                    source_sha256=None,
+                    replacement='#!/bin/sh\n[ "$(cat code.txt)" = repaired ]\n',
+                ),
+            ],
+        )
+        if self.scenario == "multiple":
+            other = next(member for member in members if member["path"] == "repo/alternate.txt")
+            record["regressions"].append(
+                dict(
+                    queue_id="q2",
+                    path="repo/regression-other.txt",
+                    expectation="Require the independent repair",
+                )
+            )
+            record["operations"].extend(
+                [
+                    dict(
+                        action="update",
+                        path="repo/alternate.txt",
+                        source_sha256=other["sha256"],
+                        replacement="independently-repaired\n",
+                    ),
+                    dict(
+                        action="create",
+                        path="repo/regression-other.txt",
+                        source_sha256=None,
+                        replacement='#!/bin/sh\n[ "$(cat alternate.txt)" = independently-repaired ]\n',
+                    ),
+                ]
+            )
+        return record
+
+    def _response(
+        self, body: dict[str, Any], endpoint: BaseHTTPRequestHandler, transport: str
+    ) -> tuple[dict[str, Any], ...]:
+        self.request_count += 1
+        assert self.request_count <= 20
+        assert endpoint.headers.get("Authorization") == "Bearer " + _TOKEN
+        candidates = []
+        for item in body["input"]:
+            if item.get("role") != "developer":
+                continue
+            content = item.get("content", [])
+            texts = (
+                [content]
+                if isinstance(content, str)
+                else [part.get("text", "") for part in content]
+            )
+            for text in texts:
+                try:
+                    payload = json.loads(text)
+                except ValueError:
+                    continue
+                if isinstance(payload, dict) and "working_workspace" in payload:
+                    candidates.append(payload)
+        assert len(candidates) == 1
+        payload = candidates[0]
+        assert "UNADMITTED_MCP_GUIDANCE_CANARY" not in json.dumps(body)
+        assert "SYNTHETIC_PRIVATE_MCP_CONFIG_VALUE" not in json.dumps(body)
+        identity = payload["identity"]
+        key = identity["reviewer"], identity["candidate_identity"]
+        output_format = body.get("text", {}).get("format")
+        if "oh-goon.agent-adjudication/v1" in payload["output_contract"]:
+            assert isinstance(output_format, dict) and output_format["type"] == "json_schema"
+            assert output_format["strict"] is True
+            schema = output_format["schema"]
+            canonical_schema = AgentAdjudicationRecord.model_json_schema(by_alias=True)
+            assert set(schema["properties"]) == set(canonical_schema["properties"])
+            assert set(schema["required"]) == set(canonical_schema["properties"])
+            assert schema["additionalProperties"] is False
+            assert schema["$defs"] == canonical_schema["$defs"]
+            assert schema["properties"]["candidate_identity"]["enum"] == [
+                identity["candidate_identity"]
+            ]
+            assert schema["properties"]["scope_identity"]["enum"] == [identity["scope_identity"]]
+            self.schema_bound_occurrences.add(key)
+        else:
+            assert output_format is None or (
+                output_format.get("type") != "json_schema" and "schema" not in output_format
+            )
+        assert payload["working_workspace"]["repository_access"] == "read_only"
+        evidence = json.loads(payload["repository_evidence"])
+        assert evidence["capture_identity"] == identity["candidate_identity"]
+        assert evidence["producer_implementation_identity"] == require_loaded_hashmarks_runtime()
+        assert payload["skill_instructions"] and _TOKEN not in json.dumps(payload)
+        self.inputs[key] = payload
+        if key not in self.probed:
+            self.probed.add(key)
+            script = (
+                "import os,pathlib\n"
+                f"root=pathlib.Path({payload['working_workspace']['root']!r})\n"
+                f"private=pathlib.Path({str(self.private)!r})\n"
+                "for target in (root/'code.txt',root/'.git/config'):\n"
+                " try: target.write_text('UNAUTHORIZED')\n"
+                " except OSError: pass\n"
+                " else: raise AssertionError('native reasoning wrote protected source')\n"
+                "try: private.read_bytes()\n"
+                "except OSError: pass\n"
+                "else: raise AssertionError('native reasoning read its private store')\n"
+                "assert 'SERVICE_CAMPAIGN_KEY' not in os.environ\n"
+                "scratch=pathlib.Path(os.environ['TMPDIR'])/'phase-check'\n"
+                "scratch.write_text('scratch'); scratch.unlink()\n"
+                "print('CAMPAIGN_NATIVE_BOUNDARY_PROOF')\n"
+            )
+            command = shlex.join(("/usr/bin/python3", "-I", "-c", script))
+            tool_input = "text(await tools.exec_command(" + json.dumps({"cmd": command}) + "));"
+            if self.scenario == "configured_mcp":
+                assert "mcp__registered" not in json.dumps(body.get("tools", []))
+                tool_input = (
+                    "let blocked=false; try { await tools.mcp__registered__escape({}); } "
+                    "catch(error) { blocked=true; text('MCP_DISABLED_PROOF '+String(error)); } "
+                    "if (!blocked) throw Error('Unadmitted MCP tool became callable'); "
+                    + tool_input
+                )
+            item = dict(
+                type="custom_tool_call",
+                id=f"ctc_campaign_{self.request_count}",
+                call_id=f"campaign_{self.request_count}",
+                name="exec",
+                namespace="functions",
+                input=tool_input,
+                status="completed",
+            )
+        else:
+            outputs = [
+                json.dumps(item.get("output", ""))
+                for item in body["input"]
+                if item.get("type") == "custom_tool_call_output"
+            ]
+            assert any("CAMPAIGN_NATIVE_BOUNDARY_PROOF" in output for output in outputs)
+            if self.scenario == "configured_mcp":
+                assert any("MCP_DISABLED_PROOF" in output for output in outputs)
+            if self.scenario == "cancel" and "agent-patch-batch-v1" in payload["output_contract"]:
+                self.cancelled.set()
+            item = dict(
+                type="message",
+                id=f"msg_campaign_{self.request_count}",
+                role="assistant",
+                content=[
+                    dict(type="output_text", text=json.dumps(self._record(payload)), annotations=[])
+                ],
+                status="completed",
+            )
+        events = self._events(f"resp_campaign_{self.request_count}", item, 1)
+        for event in events:
+            if isinstance(event.get("response"), dict):
+                event["response"]["model"] = "gpt-6.1-sol"
+        return events
+
+
+@pytest.mark.certification
+@pytest.mark.parametrize("scenario", ("repair", "multiple", "clean", "cancel", "configured_mcp"))
+def test_installed_codex_service_campaign_preserves_phase_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str
+) -> None:
+    executable = os.environ.get("OH_GOON_NATIVE_CODEX")
+    runtime_root = os.environ.get("OH_GOON_NATIVE_CODEX_RUNTIME_ROOT")
+    if not executable or not runtime_root:
+        pytest.skip("Select installed Codex and its complete public runtime root explicitly")
+    if sys.platform != "linux":
+        pytest.skip("Installed native service qualification targets Linux")
+    program, public_runtime = Path(executable), Path(runtime_root)
+    assert program.is_absolute() and public_runtime.is_absolute()
+    assert program.is_relative_to(public_runtime)
+    native_home = tmp_path / "synthetic-native-home"
+    native_home.mkdir(mode=0o700)
+    private = native_home / "private-canary"
+    private.write_text("SYNTHETIC_NATIVE_PRIVATE_DATA")
+    refused_mcp_threads: list[str] = []
+    mcp_configuration = ""
+    if scenario == "configured_mcp":
+        original_exclusion_check = CodexServiceClient.require_mcp_servers_excluded
+
+        async def verify_native_tool_refusal(client: CodexServiceClient, thread_id: str) -> None:
+            await original_exclusion_check(client, thread_id)
+            # Use the native MCP RPC with its exact server/tool identity. The
+            # Code Mode helper spelling must not be the sole exclusion proof.
+            with pytest.raises(AgentProviderError, match="refused"):
+                await client._request(
+                    "mcpServer/tool/call",
+                    {
+                        "threadId": thread_id,
+                        "server": "registered",
+                        "tool": "escape",
+                        "arguments": {},
+                    },
+                )
+            refused_mcp_threads.append(thread_id)
+
+        monkeypatch.setattr(
+            CodexServiceClient, "require_mcp_servers_excluded", verify_native_tool_refusal
+        )
+        public_mcp = tmp_path / "public-mcp"
+        public_mcp.mkdir()
+        mcp_trace = tmp_path / "mcp-startup-trace"
+        mcp_program = public_mcp / "server.py"
+        mcp_program.write_text(
+            textwrap.dedent("""\
+            import json
+            import pathlib
+            import sys
+
+            trace = pathlib.Path(sys.argv[1])
+            with trace.open("a") as stream:
+                stream.write("startup\\n")
+            for line in sys.stdin:
+                request = json.loads(line)
+                if "id" not in request:
+                    continue
+                method = request.get("method")
+                if method == "initialize":
+                    result = {
+                        "protocolVersion": request["params"]["protocolVersion"],
+                        "capabilities": {"tools": {}, "resources": {}},
+                        "serverInfo": {"name": "synthetic-registered", "version": "1"},
+                        "instructions": "UNADMITTED_MCP_GUIDANCE_CANARY",
+                    }
+                elif method == "tools/list":
+                    result = {"tools": [{
+                        "name": "escape", "description": "Must never reach the workload",
+                        "inputSchema": {"type": "object", "properties": {}},
+                    }]}
+                elif method == "tools/call":
+                    with trace.open("a") as stream:
+                        stream.write("CALLED\\n")
+                    result = {"content": [{"type": "text", "text": "UNAUTHORIZED"}]}
+                else:
+                    result = {"resources": [], "resourceTemplates": [], "prompts": []}
+                print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+            """)
+        )
+        mcp_configuration = (
+            '\n[mcp_servers.registered]\ncommand="/usr/bin/python3"\nargs='
+            + json.dumps(["-u", str(mcp_program), str(mcp_trace)])
+            + '\n[mcp_servers.registered.env]\nMCP_PRIVATE_KEY="SYNTHETIC_PRIVATE_MCP_CONFIG_VALUE"\n'
+        )
+    cancelled = Event()
+    with _CampaignResponses(private, cancelled, scenario) as endpoint:
+        (native_home / "config.toml").write_text(
+            'model="gpt-6.1-sol"\nmodel_provider="campaign-fixture"\n'
+            '[model_providers.campaign-fixture]\nname="campaign-fixture"\n'
+            f"base_url={json.dumps(endpoint.base_url + '/v1')}\n"
+            'env_key="SERVICE_CAMPAIGN_KEY"\nwire_api="responses"\n'
+            "requires_openai_auth=false\nsupports_websockets=false\n"
+            "request_max_retries=0\nstream_max_retries=0\n" + mcp_configuration
+        )
+        native_config_before = (native_home / "config.toml").read_bytes()
+        monkeypatch.setenv("SERVICE_CAMPAIGN_KEY", _TOKEN)
+        monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state/app.sqlite"))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+        monkeypatch.setenv(
+            "PATH", str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
+        )
+        selected = ResolvedNativeAgent(
+            agent="codex",
+            profile_name="native-service-campaign",
+            definition=NativeAgentDefinition(
+                executable=str(program), runtime_roots=(str(public_runtime),)
+            ),
+            profile=NativeAgentProfile(
+                codex_service=CodexServiceConnection(
+                    home=str(native_home), model="gpt-6.1-sol", reasoning_effort="low"
+                )
+            ),
+            executable_sha256=native_executable_sha256(program),
+        )
+        resolver, path, repository, options = agent_review_case(tmp_path, native_agent=selected)
+        write_roots = ("code.txt", "regression.txt")
+        if scenario == "multiple":
+            (repository / "alternate.txt").write_text("independently-broken\n")
+            check = repository / "check"
+            check.write_text(check.read_text() + "/bin/sh regression-other.txt\n")
+            write_roots += ("alternate.txt", "regression-other.txt")
+        if scenario == "clean":
+            (repository / "code.txt").write_text("repaired\n")
+        source = yaml.safe_load(
+            (tmp_path / "native-goons/agents/agentic-review-repair-loop/goon.yml").read_text()
+        )
+        source["execution"] = {"purpose": "verification"}
+        for edge in source["goons"]:
+            edge["from"] = "native-goons"
+        path.write_text(yaml.safe_dump(source, sort_keys=False))
+        subprocess.run(["git", "init", "-q", str(repository)], check=True)
+        git_config = (repository / ".git/config").read_bytes()
+        plan, _, _ = resolver.resolve_frozen_agents(path, **options)
+        lock = build_execution_lock(plan)
+        write_execution_lock(path.parent / "goon.lock", lock)
+        lock_before = (path.parent / "goon.lock").read_bytes()
+        runtime = ApplicationRuntime.build(standard_local=True)
+        try:
+            runtime.locations.add(repository.parent)
+            result = runtime.plans.repair(
+                path,
+                repository_id=repository_id(repository),
+                budget=AgentRepairBudget(
+                    max_attempts=2, timeout_seconds=180, step_timeout_seconds=30
+                ),
+                inputs=options["inputs"],
+                agent_repository_root=options["repository_root"],
+                agent_skill_root=options["skill_root"],
+                allowed_agent_acceptance=options["allowed_acceptance"],
+                review_write_roots=write_roots,
+                native_agent=selected,
+                native_workspace=repository,
+                cancel_requested=cancelled.is_set,
+            )
+            facts = dict(
+                stop=result.stop_reason.value, message=result.message, errors=endpoint.errors
+            )
+            assert endpoint.errors == [], facts
+            assert len(endpoint.schema_bound_occurrences) == (0 if scenario == "clean" else 1)
+            assert result.stop_reason.value == (
+                "cancelled" if scenario == "cancel" else "converged"
+            ), facts
+            assert result.test_passed is (scenario != "cancel"), facts
+            phases, reviews, native_claims = [], [], []
+            for index, detail in enumerate(result.attempts):
+                target = detail.run.target
+                assert isinstance(target, FleetPlanTarget) and target.agent_repair is not None
+                context = target.agent_repair
+                phases.append(context.phase)
+                assert context.previous_run_id == (
+                    result.admitted_run_ids[index - 1] if index else None
+                )
+                assert context.original_execution_digest == lock.digest
+                assert runtime.runs.get(detail.run.fleet_run_id).operations == detail.operations
+                for operation in detail.operations:
+                    execution = getattr(operation.evidence, "plan", None)
+                    for step in execution.steps if execution is not None else ():
+                        for observation in step.observations:
+                            if isinstance(observation, AgentReviewObservation) and isinstance(
+                                observation.record, AgentReviewRecord
+                            ):
+                                reviews.append(observation.record)
+                            if isinstance(observation, NativeAgentObservation):
+                                native_claims.append(observation)
+                                if observation.execution is not None:
+                                    assert observation.execution.repository_access == "read_only"
+                                    assert observation.execution.process_cleanup == "verified"
+                                    assert observation.execution.mcp_catalog == "empty"
+                live = runtime.runs.game_tape_live_output(detail.run.fleet_run_id).model_dump_json()
+                assert _TOKEN not in live
+            assert (
+                phases
+                == {
+                    "repair": [
+                        "review",
+                        "adjudicate",
+                        "repair",
+                        "regression",
+                        "review",
+                        "verification",
+                    ],
+                    "multiple": [
+                        "review",
+                        "adjudicate",
+                        "repair",
+                        "regression",
+                        "review",
+                        "verification",
+                    ],
+                    "configured_mcp": [
+                        "review",
+                        "adjudicate",
+                        "repair",
+                        "regression",
+                        "review",
+                        "verification",
+                    ],
+                    "clean": ["review", "verification"],
+                    "cancel": ["review", "adjudicate", "repair"],
+                }[scenario]
+            ), facts
+            if scenario == "cancel":
+                # Cancellation can precede final native observation publication.
+                # Only the five already completed reasoning Steps are guaranteed.
+                assert 5 <= len(native_claims) <= 6
+            else:
+                assert (
+                    len(native_claims)
+                    == {"repair": 10, "multiple": 10, "clean": 4, "configured_mcp": 10}[scenario]
+                )
+            if scenario in ("repair", "multiple", "configured_mcp"):
+                assert [review.verdict for review in reviews] == ["FINDING"] * 4 + ["CLEAN"] * 4
+                assert reviews[0].candidate_identity != reviews[-1].candidate_identity
+                assert "repo/regression.txt" in reviews[-1].reviewed_paths
+                assert (repository / "regression.txt").is_file()
+                assert len(reviews[0].findings) == (2 if scenario == "multiple" else 1)
+            if scenario == "multiple":
+                assert (repository / "alternate.txt").read_text() == "independently-repaired\n"
+                assert (repository / "regression-other.txt").is_file()
+            if scenario == "cancel":
+                assert (repository / "code.txt").read_text() == "broken\n"
+                assert not (repository / "regression.txt").exists()
+            else:
+                assert not result.unresolved_run_ids
+                assert (repository / "code.txt").read_text() == "repaired\n"
+            assert (repository / ".git/config").read_bytes() == git_config
+            assert (path.parent / "goon.lock").read_bytes() == lock_before
+            assert private.read_text() == "SYNTHETIC_NATIVE_PRIVATE_DATA"
+            assert (native_home / "config.toml").read_bytes() == native_config_before
+            if scenario == "configured_mcp":
+                startup_trace = mcp_trace.read_text().splitlines()
+                assert startup_trace and set(startup_trace) == {"startup"}
+                assert len(endpoint.probed) == 10
+                assert len(refused_mcp_threads) == len(set(refused_mcp_threads)) == 10
+            invocation = project_agent_campaign(
+                result.repair_id, result.attempts, invocation=result
+            )
+            assert invocation["result"] == ("incomplete" if scenario == "cancel" else "converged")
+            assert invocation["controller_result"]["stop_reason"] == result.stop_reason.value
+            assert [row["fleet_run_id"] for row in invocation["runs"]] == list(
+                result.admitted_run_ids
+            )
+            assert len(invocation["findings"]) == sum(len(review.findings) for review in reviews)
+            if scenario in ("repair", "multiple", "configured_mcp"):
+                assert invocation["initial_candidate"] != invocation["final_candidate"]
+                assert all(
+                    finding["adjudication"] is not None for finding in invocation["findings"]
+                )
+                assert (
+                    invocation["repair_attempts"][0]["candidate_after"]
+                    == invocation["final_candidate"]
+                )
+            if result.converged:
+                assert invocation["verification"][-1]["phase"] == "verification"
+                assert invocation["verification"][-1]["unverified_step_ids"] == []
+            retained = runtime.runs.agent_campaign(result.admitted_run_ids[-1])
+            assert retained["campaign_id"] == result.repair_id
+            assert retained["result"] == "incomplete"
+            assert retained["controller_result"]["availability"] == "unavailable"
+            assert retained["runs"] == invocation["runs"]
+            assert retained["findings"] == invocation["findings"]
+            assert retained["verification"] == invocation["verification"]
+            assert _TOKEN not in json.dumps((invocation, retained))
+        finally:
+            runtime.shutdown(wait_for_runs=True)
+        if scenario == "cancel":
+            inference_requests = endpoint.request_count
+            reopened = ApplicationRuntime.build(standard_local=True)
+            try:
+                recovered = reopened.runs.agent_campaign(result.admitted_run_ids[-1])
+                assert recovered["result"] == "incomplete"
+                assert recovered["controller_result"]["availability"] == "unavailable"
+                for field in ("runs", "reviews", "findings", "repair_attempts", "verification"):
+                    assert recovered[field] == retained[field]
+                assert _TOKEN not in json.dumps(recovered)
+                assert (repository / "code.txt").read_text() == "broken\n"
+                assert not (repository / "regression.txt").exists()
+            finally:
+                reopened.shutdown(wait_for_runs=True)
+            assert endpoint.request_count == inference_requests
