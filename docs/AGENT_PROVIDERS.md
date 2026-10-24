@@ -615,9 +615,10 @@ Each backend instance retains at most eight successful namespace capability
 probes, keyed by the complete workspace, mounts, write scope, resources and
 backend identity. Every request still validates current workspace authority,
 explicit mount structure, private-file aliases and broker state before reuse,
-and rechecks them immediately before each native launch. Failed or nonquiescent
-probes are never retained. Source evidence, phase admission, execution and cleanup
-keep their existing owners and fresh checks.
+and rechecks them immediately before each native launch. Failed probes are never
+retained; protected probes also require verified process-tree quiescence. Source
+evidence, phase admission, execution and cleanup keep their existing owners and
+fresh checks.
 
 OpenCode uses its private `--standalone` server, Pi keeps its native agent loop,
 and Codex uses `--no-daemon`. The original process owner provides PTY transport,
