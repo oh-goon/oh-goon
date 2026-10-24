@@ -1470,6 +1470,150 @@ def test_preflight_uses_and_keys_actual_workspace_write_mount_topology(
         assert argv[-1] == "/bin/true"
 
 
+def test_successful_preflight_is_reused_across_interleaved_mount_topologies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    calls: list[tuple[str, ...]] = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    read = _request(backend, workspace, read_only_workspace=True)
+    write = replace(read, read_only_workspace=False)
+    for request in (read, write, read, write):
+        backend.require_standard_available(request)
+    assert len(calls) == 2
+    assert all(argv[-1] == "/bin/true" for argv in calls)
+
+
+def test_cached_topology_still_rejects_a_new_private_sidecar_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    sidecar = tmp_path / "private.sqlite-wal"
+    backend.bind_application_state(private_paths=(sidecar,), read_only_paths=())
+    calls: list[tuple[str, ...]] = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    read = _request(backend, workspace, read_only_workspace=True)
+    backend.require_standard_available(read)
+    backend.require_standard_available(replace(read, read_only_workspace=False))
+    backend.require_standard_available(read)
+    sidecar.write_text("new private journal pages")
+    os.link(sidecar, workspace / "public-looking-input")
+    with pytest.raises(FleetPlanInvalid, match="private application file alias"):
+        backend.require_standard_available(read)
+    assert len(calls) == 2
+
+
+def test_successful_preflight_retention_is_bounded_to_eight_topologies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    calls: list[tuple[str, ...]] = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    requests = []
+    for index in range(9):
+        if index == 8:
+            backend.require_standard_available(requests[0])
+        source = tmp_path / f"public-{index}"
+        source.write_text("public runtime")
+        request = _request(
+            backend,
+            workspace,
+            read_only_mounts=(StandardReadOnlyMount(source, PurePosixPath("/opt/public")),),
+        )
+        requests.append(request)
+        backend.require_standard_available(request)
+    backend.require_standard_available(requests[0])
+    assert len(calls) == 9
+    backend.require_standard_available(requests[1])
+    assert len(calls) == 10
+
+
+def test_failed_preflight_is_retried_instead_of_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    calls = 0
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        nonlocal calls
+        calls += 1
+        return CommandResult(1 if calls == 1 else 0, "", "namespace unavailable")
+
+    monkeypatch.setattr(module, "run_command", command)
+    request = _request(backend, workspace)
+    with pytest.raises(FleetPlanInvalid, match="setup is unavailable"):
+        backend.require_standard_available(request)
+    backend.require_standard_available(request)
+    backend.require_standard_available(request)
+    assert calls == 2
+
+
+@pytest.mark.parametrize("launch", ["preflight", "workload"])
+@pytest.mark.parametrize("attack", ["fifo", "private-hardlink"])
+def test_standard_setup_rechecks_changed_mounts_before_each_native_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, launch: str, attack: str
+) -> None:
+    from oh_goon.integrations import fleet_plan_run
+
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    private = tmp_path / "private.sqlite"
+    private.write_text("private application state")
+    backend.bind_application_state(private_paths=(private,), read_only_paths=())
+    original = fleet_plan_run._write_minimal_etc
+    preparations = 0
+    calls: list[tuple[str, ...]] = []
+
+    def prepare(path: Path) -> None:
+        nonlocal preparations
+        original(path)
+        preparations += 1
+        if preparations == (1 if launch == "preflight" else 2):
+            if attack == "fifo":
+                os.mkfifo(workspace / "late-input")
+            else:
+                os.link(private, workspace / "late-input")
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(fleet_plan_run, "_write_minimal_etc", prepare)
+    monkeypatch.setattr(module, "run_command", command)
+    with pytest.raises(FleetPlanInvalid, match="IPC/special|private application file alias"):
+        backend.execute(
+            _request(backend, workspace, read_only_workspace=True),
+            timeout=1,
+            cancel_requested=None,
+        )
+    assert len(calls) == (0 if launch == "preflight" else 1)
+    assert private.read_text() == "private application state"
+
+
 @pytest.mark.process
 def test_protected_directory_writes_cannot_reopen_source_git_or_hardlink_alias(
     tmp_path: Path,

@@ -79,7 +79,7 @@ def test_single_review_uses_normal_lock_and_run_without_loop_limits(
             pass
 
     with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        worker = Thread(target=server.serve_forever)
+        worker = Thread(target=partial(server.serve_forever, poll_interval=0.01))
         worker.start()
         try:
             _, path, repo, options = agent_review_case(tmp_path)
@@ -219,6 +219,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
 ):
     observed = []
     observed_scopes = {}
+    large_scope_paths: set[str] = set()
     entered = Event()
     release = Event()
 
@@ -378,7 +379,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
             pass
 
     with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        worker = Thread(target=server.serve_forever, daemon=True)
+        worker = Thread(target=partial(server.serve_forever, poll_interval=0.01), daemon=True)
         worker.start()
         try:
             resolver, path, repo, options = agent_review_case(
@@ -389,8 +390,11 @@ def test_native_loop_reserves_review_and_retains_each_phase(
             if scenario == "large_scope":
                 cases = repo / "repository_evidence_and_verification_handoff_contracts"
                 cases.mkdir()
-                for index in range(1282):
-                    (cases / f"case_{index:04d}.txt").write_text("observed source\n")
+                # Legal long names exercise the same record byte limit with fewer file operations.
+                for index in range(256):
+                    name = f"case_{index:04d}_" + "verification_evidence_contract_" * 6 + ".txt"
+                    (cases / name).write_text("observed source\n")
+                    large_scope_paths.add(f"repo/{cases.name}/{name}")
             if scenario == "remote":
                 monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
                 registry = yaml.safe_load((tmp_path / ".goonskills.yml").read_text())
@@ -616,7 +620,11 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                     ]
                     assert len(records) == 8
                     assert [record.verdict for record in records] == ["FINDING"] * 4 + ["CLEAN"] * 4
-                    assert len(observed_scopes[records[0].candidate_identity]) == 1284
+                    assert set(observed_scopes[records[0].candidate_identity]) == {
+                        "repo/code.txt",
+                        "repo/check",
+                        *large_scope_paths,
+                    }
                     for record in records:
                         assert record.reviewed_paths == observed_scopes[record.candidate_identity]
                 if scenario in ("repair", "remote", "arbitrary", "regression", "large_scope"):
@@ -742,7 +750,7 @@ def test_protected_native_campaign_keeps_exact_phase_scope_through_real_apply(
             pass
 
     with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        worker = Thread(target=server.serve_forever)
+        worker = Thread(target=partial(server.serve_forever, poll_interval=0.01))
         worker.start()
         try:
             backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")

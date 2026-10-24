@@ -6,10 +6,12 @@ import os
 import stat
 import subprocess
 import tempfile
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import replace
 from itertools import islice
 from pathlib import Path, PurePosixPath
+from threading import Lock
 from typing import Literal
 
 from oh_goon.core.errors import CapabilityUnavailable, FleetPlanInvalid
@@ -82,6 +84,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
 from oh_goon.integrations.source_snapshot import verify_clean_source_snapshot
 
 _STANDARD_RUNTIME_DIRECTORIES = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc/alternatives")
+_STANDARD_CAPABILITY_CACHE_LIMIT = 8
 
 
 class BubblewrapProcessIsolation:
@@ -139,7 +142,8 @@ class BubblewrapProcessIsolation:
         self.cgroup_root = cgroup_root
         self.cgroup_lock = cgroup_lock or control_root / "cgroups.lock"
         self.cgroup_state_dir = cgroup_state_dir or control_root / "cgroups"
-        self._standard_available_configuration: str | None = None
+        self._standard_available_configurations: OrderedDict[str, None] = OrderedDict()
+        self._standard_capability_lock = Lock()
         self._standard_system_checked = False
         self._application_state_paths: tuple[tuple[Path, ...], tuple[Path, ...]] | None = None
 
@@ -244,8 +248,12 @@ class BubblewrapProcessIsolation:
                 else None,
             },
         )
-        if self._standard_available_configuration == configuration:
-            return
+        # Reuse only a namespace probe, never mount/admission validation. Repeated
+        # Git topologies must survive interleaved, freshly materialized Agent inputs.
+        with self._standard_capability_lock:
+            if configuration in self._standard_available_configurations:
+                self._standard_available_configurations.move_to_end(configuration)
+                return
         try:
             result = self._execute_standard(
                 replace(request, argv=("/bin/true",), terminal=None, input_data=None),
@@ -281,7 +289,11 @@ class BubblewrapProcessIsolation:
                 "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_preflight; "
                 "mechanism=process_tree_quiescence_unverified"
             )
-        self._standard_available_configuration = configuration
+        with self._standard_capability_lock:
+            self._standard_available_configurations[configuration] = None
+            self._standard_available_configurations.move_to_end(configuration)
+            if len(self._standard_available_configurations) > _STANDARD_CAPABILITY_CACHE_LIMIT:
+                self._standard_available_configurations.popitem(last=False)
 
     def _validate_standard_request(
         self, request: StandardIsolatedProcessRequest
@@ -459,8 +471,8 @@ class BubblewrapProcessIsolation:
             raise OperationCancelledError("Standard sandbox cancelled before preparation")
         if not _preflight:
             self.require_standard_available(request)
-        else:
-            self._validate_standard_request(request)
+        # The private preflight caller has already validated the same request.
+        # Both probe and workload still revalidate immediately before native launch.
         from oh_goon.integrations.fleet_plan_run import _write_minimal_etc
 
         temporary_base = Path(tempfile.gettempdir()).resolve()
