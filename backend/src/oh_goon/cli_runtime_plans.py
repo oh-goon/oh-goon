@@ -33,6 +33,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
 from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail
+from oh_goon.core.projections.agent_campaign import project_agent_campaign
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.services.fleet_plan_resolution_context import AgentConnectionSelection
 
@@ -71,6 +72,7 @@ def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> i
         "steps": run_plan_readback,
         "outputs": run_plan_readback,
         "handoff": run_plan_readback,
+        "campaign": run_plan_readback,
         "schedule": _schedule,
         "reschedule": _reschedule,
     }
@@ -155,7 +157,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 requested_priority=args.priority,
                 **review_options,
             )
-            return _print_agent_repair_result(result, as_json=as_json)
+            return _print_agent_repair_result(result, as_json=as_json, campaign=review)
         native_options: _AgentRunSelection = (
             dict(native_agent=native, native_workspace=args.native_workspace)
             if native is not None
@@ -322,7 +324,7 @@ def _selected_repair_budget(args) -> AgentRepairBudget | None:
     )
 
 
-def _print_agent_repair_result(result, *, as_json: bool) -> int:
+def _print_agent_repair_result(result, *, as_json: bool, campaign: bool = False) -> int:
     receipt = {
         "schema": "oh-goon.agent-repair-result/v1",
         "repair_id": result.repair_id,
@@ -344,11 +346,18 @@ def _print_agent_repair_result(result, *, as_json: bool) -> int:
             for detail in result.attempts
         ],
     }
+    if campaign:
+        receipt["campaign"] = project_agent_campaign(
+            result.repair_id, result.attempts, invocation=result
+        )
     if as_json:
         print(json.dumps(receipt, sort_keys=True))
     else:
         print(f"Repair: {result.repair_id}")
         print(f"Stop reason: {result.stop_reason.value}")
+        if campaign:
+            print(f"Campaign result: {receipt['campaign']['result']}")
+            print(f"Inspect retained evidence: oh-goon plan campaign {result.repair_id} --json")
         for attempt in receipt["attempts"]:
             print(f"Run {attempt['fleet_run_id']}: {attempt['status']} / {attempt['outcome']}")
     return (

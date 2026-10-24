@@ -20,6 +20,7 @@ from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.agent_review import AgentAdjudicationRecord
 from oh_goon.integrations.agent_codex_service import (
     CodexServiceClient,
     NativeCodexCleanupIncomplete,
@@ -178,7 +179,11 @@ def test_explicit_native_profiles_and_continuation_remain_on_the_selected_thread
             )
             assert result["thread"]["id"] == thread
             await client.start_turn(
-                thread, "full initial task", permissions=profile, effort="ultra"
+                thread,
+                "full initial task",
+                permissions=profile,
+                effort="ultra",
+                output_schema=AgentAdjudicationRecord.model_json_schema(by_alias=True),
             )
             event = await client.next_notification(thread)
             assert event["params"]["delta"] == "owned progress"
@@ -238,6 +243,10 @@ def test_explicit_native_profiles_and_continuation_remain_on_the_selected_thread
         [{"type": "text", "text": "follow-up task"}],
     ]
     assert turns[0]["params"]["effort"] == "ultra"
+    assert turns[0]["params"]["outputSchema"] == AgentAdjudicationRecord.model_json_schema(
+        by_alias=True
+    )
+    assert turns[1]["params"]["outputSchema"] is None
     start = next(message for message in messages if message["method"] == "thread/start")
     assert start["params"]["developerInstructions"] == "frozen Hashmarks and Skill context"
     assert start["params"]["permissions"] == profile and "sandbox" not in start["params"]
@@ -251,6 +260,270 @@ def test_explicit_native_profiles_and_continuation_remain_on_the_selected_thread
         message["params"]["developerInstructions"] == start["params"]["developerInstructions"]
         for message in resumes
     )
+
+
+def _mcp_registration(name: str = "PRIVATE_OPAQUE_REGISTRATION") -> dict[str, Any]:
+    return {
+        "name": name,
+        "pluginId": None,
+        "runtimeStatus": "disabled",
+        "tools": {},
+        "resources": [],
+        "resourceTemplates": [],
+        "toolsError": None,
+        "serverInfo": {"description": "PRIVATE_NATIVE_INVENTORY"},
+    }
+
+
+@pytest.mark.parametrize("names", [(), ("opaque.native",), ('quoted."native"', "other/native")])
+def test_native_mcp_exclusion_uses_one_threadless_snapshot_and_one_exact_disabled_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: tuple[str, ...]
+) -> None:
+    messages: list[dict[str, Any]] = []
+    snapshots = []
+
+    async def endpoint(websocket: WebSocket) -> None:
+        await websocket.accept()
+        try:
+            while True:
+                message = await websocket.receive_json()
+                messages.append(message)
+                method = message["method"]
+                if method == "initialized":
+                    continue
+                if method == "initialize":
+                    result = _INITIAL
+                elif method == "mcpServerStatus/list":
+                    snapshots.append(message["params"])
+                    selected = names if len(snapshots) == 1 else tuple(reversed(names))
+                    result = {
+                        "data": [_mcp_registration(name) for name in selected],
+                        "nextCursor": None,
+                    }
+                elif method == "thread/start":
+                    assert len(snapshots) == 1
+                    assert message["params"]["config"] == {
+                        "mcp_servers": {name: {"enabled": False} for name in names}
+                    }
+                    result = {
+                        "thread": {"id": "owned"},
+                        "activePermissionProfile": {"id": "review"},
+                    }
+                else:
+                    assert method == "turn/start" and len(snapshots) == 2
+                    result = {"turn": {"id": "owned-turn"}}
+                await websocket.send_json({"id": message["id"], "result": result})
+        except WebSocketDisconnect:
+            pass
+
+    endpoint_transport(monkeypatch, endpoint)
+
+    async def check() -> None:
+        async with CodexServiceClient(tmp_path / "explicit.sock", experimental_api=True) as client:
+            configuration = await client.mcp_exclusion_configuration()
+            assert configuration == {"mcp_servers": {name: {"enabled": False} for name in names}}
+            before = len(messages)
+            with pytest.raises(AgentProviderError, match="one pre-thread snapshot"):
+                await client.mcp_exclusion_configuration()
+            assert len(messages) == before
+            await client.start_thread(
+                cwd=tmp_path,
+                permissions="review",
+                model="native",
+                developer_instructions="Frozen task and producer evidence",
+                configuration=configuration,
+            )
+            await client.require_mcp_servers_excluded("owned")
+            before = len(messages)
+            with pytest.raises(AgentProviderError, match="original snapshot"):
+                await client.require_mcp_servers_excluded("owned")
+            assert len(messages) == before
+            await client.start_turn("owned", "Captured task", permissions="review")
+            assert "PRIVATE" not in json.dumps(client.metadata)
+
+    asyncio.run(check())
+    assert snapshots == [
+        {"threadId": thread, "cursor": None, "limit": 64, "detail": "toolsAndAuthOnly"}
+        for thread in (None, "owned")
+    ]
+    assert [message["method"] for message in messages] == [
+        "initialize",
+        "initialized",
+        "mcpServerStatus/list",
+        "thread/start",
+        "mcpServerStatus/list",
+        "turn/start",
+    ]
+
+
+@pytest.mark.parametrize("stage", ("discovery", "verification"))
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "missing_data",
+        "invalid_data",
+        "invalid_entry",
+        "missing_cursor",
+        "pagination",
+        "overflow",
+        "duplicate",
+        "invalid_identifier",
+        "missing_origin",
+        "plugin_origin",
+    ),
+)
+def test_incomplete_or_unaddressable_native_mcp_inventory_fails_without_model_or_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str, fault: str
+) -> None:
+    messages: list[str] = []
+    snapshot_count = 0
+    bad: dict[str, Any] = {"data": [_mcp_registration()], "nextCursor": None}
+    if fault == "missing_data":
+        bad.pop("data")
+    elif fault == "invalid_data":
+        bad["data"] = {}
+    elif fault == "invalid_entry":
+        bad["data"] = [None]
+    elif fault == "missing_cursor":
+        bad.pop("nextCursor")
+    elif fault == "pagination":
+        bad["nextCursor"] = "PRIVATE_NATIVE_CURSOR"
+    elif fault == "overflow":
+        bad["data"] = [_mcp_registration(f"PRIVATE_{index}") for index in range(65)]
+    elif fault == "duplicate":
+        bad["data"].append(_mcp_registration())
+    elif fault == "invalid_identifier":
+        bad["data"][0]["name"] = "PRIVATE\nINVALID"
+    elif fault == "missing_origin":
+        bad["data"][0].pop("pluginId")
+    else:
+        bad["data"][0]["pluginId"] = "PRIVATE_PLUGIN_ORIGIN"
+
+    async def endpoint(websocket: WebSocket) -> None:
+        nonlocal snapshot_count
+        await websocket.accept()
+        try:
+            while True:
+                message = await websocket.receive_json()
+                method = message["method"]
+                messages.append(method)
+                if method == "initialized":
+                    continue
+                if method == "initialize":
+                    result = _INITIAL
+                elif method == "mcpServerStatus/list":
+                    snapshot_count += 1
+                    result = (
+                        bad
+                        if stage == "discovery" or snapshot_count == 2
+                        else {
+                            "data": [_mcp_registration()],
+                            "nextCursor": None,
+                        }
+                    )
+                else:
+                    assert method == "thread/start"
+                    result = {
+                        "thread": {"id": "owned"},
+                        "activePermissionProfile": {"id": "review"},
+                    }
+                await websocket.send_json({"id": message["id"], "result": result})
+        except WebSocketDisconnect:
+            pass
+
+    endpoint_transport(monkeypatch, endpoint)
+
+    async def check() -> None:
+        async with CodexServiceClient(tmp_path / "explicit.sock", experimental_api=True) as client:
+            with pytest.raises(AgentProviderError) as error:
+                configuration = await client.mcp_exclusion_configuration()
+                await client.start_thread(
+                    cwd=tmp_path,
+                    permissions="review",
+                    model="native",
+                    configuration=configuration,
+                    developer_instructions="Frozen task and producer evidence",
+                )
+                await client.require_mcp_servers_excluded("owned")
+            assert "PRIVATE" not in str(error.value)
+
+    asyncio.run(check())
+    assert snapshot_count == (1 if stage == "discovery" else 2)
+    assert messages.count("thread/start") == (stage == "verification")
+    assert "turn/start" not in messages
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ("active", "unknown_status", "tools", "resources", "templates", "tool_error", "new", "removed"),
+)
+def test_workload_mcp_capabilities_must_be_disabled_with_exact_frozen_membership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    methods: list[str] = []
+    snapshots = 0
+    changed = [_mcp_registration()]
+    if fault in ("active", "unknown_status"):
+        changed[0]["runtimeStatus"] = "connected" if fault == "active" else None
+    elif fault == "tools":
+        changed[0]["tools"] = {"PRIVATE_TOOL": {}}
+    elif fault == "resources":
+        changed[0]["resources"] = [{"PRIVATE_RESOURCE": True}]
+    elif fault == "templates":
+        changed[0]["resourceTemplates"] = [{"PRIVATE_TEMPLATE": True}]
+    elif fault == "tool_error":
+        changed[0]["toolsError"] = "PRIVATE_DISCOVERY_ERROR"
+    elif fault == "new":
+        changed.append(_mcp_registration("PRIVATE_ADDED"))
+    else:
+        changed = []
+
+    async def endpoint(websocket: WebSocket) -> None:
+        nonlocal snapshots
+        await websocket.accept()
+        try:
+            while True:
+                message = await websocket.receive_json()
+                method = message["method"]
+                methods.append(method)
+                if method == "initialized":
+                    continue
+                if method == "initialize":
+                    result = _INITIAL
+                elif method == "thread/start":
+                    result = {
+                        "thread": {"id": "owned"},
+                        "activePermissionProfile": {"id": "review"},
+                    }
+                else:
+                    assert method == "mcpServerStatus/list"
+                    snapshots += 1
+                    result = {
+                        "data": [_mcp_registration()] if snapshots == 1 else changed,
+                        "nextCursor": None,
+                    }
+                await websocket.send_json({"id": message["id"], "result": result})
+        except WebSocketDisconnect:
+            pass
+
+    endpoint_transport(monkeypatch, endpoint)
+
+    async def check() -> None:
+        async with CodexServiceClient(tmp_path / "explicit.sock", experimental_api=True) as client:
+            configuration = await client.mcp_exclusion_configuration()
+            await client.start_thread(
+                cwd=tmp_path,
+                permissions="review",
+                model="native",
+                configuration=configuration,
+                developer_instructions="Frozen task and producer evidence",
+            )
+            with pytest.raises(AgentProviderError) as error:
+                await client.require_mcp_servers_excluded("owned")
+            assert "PRIVATE" not in str(error.value)
+
+    asyncio.run(check())
+    assert snapshots == 2 and "turn/start" not in methods
 
 
 @pytest.mark.parametrize(

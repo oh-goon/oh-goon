@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event, Thread
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
@@ -354,6 +354,7 @@ def execute_codex_service_run(
     deadline: float,
     read_only: bool,
     evidence_state: Path | None = None,
+    output_schema: dict[str, Any] | None = None,
 ) -> CodexServiceExecution:
     """Execute one native turn, then close the owned process before reporting it."""
     connection = selected.profile.codex_service
@@ -392,6 +393,7 @@ def execute_codex_service_run(
     stop = Event()
     results: list[CommandResult | BaseException] = []
     protocol: NativeAgentEvents | None = None
+    mcp_exclusion_identity: str | None = None
     primary: BaseException | None = None
     # A new owned service must not adopt its parent's desktop/CLI conversation,
     # tool IPC or user-agent overrides. Native home/provider authentication stays
@@ -461,6 +463,7 @@ def execute_codex_service_run(
     worker.start()
 
     async def execute() -> NativeAgentEvents:
+        nonlocal mcp_exclusion_identity
         while not socket.exists():
             if runtime.cancel_requested is not None and runtime.cancel_requested():
                 raise OperationCancelledError("Codex service cancelled before readiness")
@@ -484,16 +487,18 @@ def execute_codex_service_run(
                 ),
                 expected_home=Path(connection.home),
             )
+            exclusions = await client.mcp_exclusion_configuration()
+            mcp_exclusion_identity = stable_id("codex-service-mcp-exclusions", exclusions)
             created = await client.start_thread(
                 cwd=repository,
                 permissions=profile,
                 model=connection.model,
                 developer_instructions=instructions.decode("utf-8"),
                 ephemeral=True,
-                configuration={"features.incremental_tools": False},
+                configuration={"features.incremental_tools": False, **exclusions},
             )
             thread = created["thread"]["id"]
-            await client.require_no_mcp_servers(thread)
+            await client.require_mcp_servers_excluded(thread)
             flags = await client.feature_flags(thread)
             if any(flags.get(name) is not False for name in _DISABLED_FEATURES):
                 raise AgentProviderError(
@@ -521,6 +526,7 @@ def execute_codex_service_run(
                 task,
                 permissions=profile,
                 effort=connection.reasoning_effort,
+                output_schema=output_schema,
             )
             started_turn = turn.get("turn")
             turn_id = started_turn.get("id") if isinstance(started_turn, dict) else None
@@ -621,6 +627,8 @@ def execute_codex_service_run(
                 "argv": argv,
                 "executable_sha256": selected.executable_sha256,
                 "native_home": connection.home,
+                "mcp_exclusion_identity": mcp_exclusion_identity,
+                "output_schema": output_schema,
             },
         ),
         native_version=version.stdout.strip().removeprefix("codex-cli "),

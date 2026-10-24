@@ -301,8 +301,9 @@ private-store/tool isolation or a real account.
 
 ### Native service adapter design
 
-The explicit `codex_service` profile runs one task through the original native
-Run/Step path. Each Step owns a fresh app-server process and private Unix endpoint;
+The explicit `codex_service` profile runs individual tasks and bounded
+review–repair campaigns through the original native Run/Step path. Each Agent
+Step owns a fresh app-server process and private Unix endpoint;
 an unrelated existing socket cannot authorize protected work. The original
 resolver captures source once, Hashmarks supplies mandatory qualified evidence,
 and the exact frozen task/Skill/evidence becomes native developer instructions.
@@ -361,25 +362,35 @@ PATH/TMPDIR environment. Login/config failures remain native failures.
 Before the first model turn, the original command owner verifies the selected
 binary's `--version` (currently qualified: `codex-cli 0.163.0`). A user-agent version
 from readiness is insufficient. Native RPC confirms disabled extension/browser/
-computer/delegation features, empty MCP inventory, and the selected native profile.
+computer/delegation features, MCP exclusion on the actual workload thread, and
+the selected native profile.
 Native-home directory identity, including symlink aliases, must be separate from
 every readable tool root. No native file contents are inspected. A disposable
 canary verifies native private/read-only denial and allowed scratch output; this
 preflight never attempts mutations against real repository files. Unsupported or
 inconclusive capability checks fail before model submission, without fallback.
 
-Native homes with configured MCP registrations are currently unsupported, including
-registrations disabled by native configuration. This profile makes no MCP-startup
-isolation claim. In Codex 0.163.0, the
+Native homes may retain config-backed MCP registrations. Before creating the workload
+thread, one threadless native status snapshot supplies at most 64 exact server IDs;
+only those IDs remain in connection-private control memory. The workload thread
+receives native per-ID `enabled=false` overrides without changing stored native
+configuration or reading its files. A complete native status readback must match
+that ID set, report every runtime as `disabled`, and contain empty tool/resource
+catalogs before the first model turn. Incomplete, malformed, changed or paginated
+inventories, unknown states, and unsupported extension origins fail before model
+submission; missing tools alone never proves exclusion. Existing disabled
+plugin/app features retain their own checks.
+
+This profile makes no MCP-startup isolation claim. In Codex 0.163.0, the
 [status collector](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/codex-mcp/src/mcp/mod.rs)
 can eagerly start configured servers, so status discovery is not a names-only
-preflight. An empty `mcp_servers={}` override retains lower-layer registrations
+or startup-free operation. Native owns that ordinary initialization and its
+credentials; the workload model receives neither discovered server instructions
+nor private configuration values. An empty `mcp_servers={}` override retains lower-layer registrations
 under native [table merging](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/merge.rs).
-Synthetic installed probes confirmed that per-thread named disables prevent that
-server from starting and report terminal `disabled` status with empty catalogs.
-They do not establish a safe generic discovery/suppression path. Oh-Goon keeps the
-fail-closed inventory gate, never edits native configuration to pass it, and does
-not treat missing tools or unknown runtime status as proof of MCP exclusion.
+The explicit per-ID overrides preserve each inherited registration and its native
+authentication. Native startup metadata is distinct from workload tool authority;
+the original daemon supervisor still owns final process closure and quiescence.
 
 The selected native profile denies the filesystem by default, grants only public
 runtime/frozen context and the admitted workspace, denies the private endpoint and
@@ -388,20 +399,34 @@ native project configuration contents, and disables tool networking. The reserve
 content-deny rule; this supports absent directories without creating them in
 source. Review is read-only;
 ordinary report coding can write its admitted workspace while Git metadata stays
-read-only. Verification Steps retain their existing trusted-local execution.
-This profile does not implement the full separately scoped repair/re-review
-campaign or strict/untrusted execution. It cannot be combined with `codex_login`,
-broker inference, native argument/config-directory overrides or resource caps.
+read-only. In the bounded campaign, review, adjudication, proposal and fresh
+re-review retain that read-only native policy and the existing typed result
+acceptors. The separate original batch apply Step validates the admitted write
+roots, candidate identity and every preimage before applying proposal data.
+Service adjudication passes the existing typed record's JSON Schema with exact
+frozen candidate/scope identities through native output-schema transport; the
+original acceptor still independently validates the returned record.
+Apply, regression and verification Steps retain their existing trusted-local
+execution. The controller captures the changed candidate once before subsequent
+reasoning and refuses changes outside the admitted repair phase. Select the
+existing `--review-passes`, `--repair-write-root`, `--repair-timeout` and
+`--repair-step-timeout` limits; each phase remains a separately admitted Fleet Run.
+This profile does not provide strict/untrusted execution. It cannot be combined
+with `codex_login`, broker inference, native argument/config-directory overrides
+or resource caps.
 
 Terminal native turn evidence and process closure are separate requirements. The
 original command owner stops the owned daemon and verifies group quiescence;
-the actual daemon shutdown/cancellation receipt remains in Step evidence. Client
-closure, compaction ACK or turn completion alone cannot report Run success.
+the actual daemon shutdown/cancellation receipt remains in Step evidence. A
+completed read-only native service Step with matching original execution evidence
+may carry this requested daemon cancellation; a cancelled or failed turn cannot
+advance the campaign. Client closure, compaction ACK or turn completion alone
+cannot report Run success.
 Raw service protocol stays private, and independent verification remains separate
 from native claims. Game Tape keeps bounded original-Step execution facts under
 `ORIGINAL_STEP_EXECUTION` separately from the parent
 `UNTRUSTED_HARNESS_CLAIM`: configuration/profile identity, observed native version,
-disabled features, empty MCP catalog, state separation, preflight and process
+disabled features, empty effective MCP catalog, state separation, preflight and process
 cleanup. Native Codex can create an empty reserved `.codex` directory in the
 workspace during setup; the agent cannot create, rename, remove or populate that
 directory. This is a native setup effect, so the profile claims agent-tool

@@ -29,6 +29,7 @@ _MAX_IGNORED_MESSAGES = 128
 _MAX_FEATURE_PAGES = 16
 _MAX_FEATURE_FLAGS = 512
 _FEATURE_PAGE_SIZE = 64
+_MAX_MCP_SERVERS = 64
 _FEATURE_NAME = re.compile(r"^[a-z][a-z0-9_.]{0,127}$")
 _VERSION = re.compile(r"^[A-Za-z0-9_.-]+/([0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9_.-]+)?)\b")
 
@@ -105,6 +106,9 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         self._thread: str | None = None
         self._profile: str | None = None
         self._instructions: str | None = None
+        self._mcp_server_ids: tuple[str, ...] | None = None
+        self._mcp_discovery_requested = False
+        self._mcp_verification_requested = False
         self._notifications: deque[dict[str, Any]] = deque()
         self._facts: dict[str, object] = {}
         self._native_home: Path | None = None
@@ -240,6 +244,9 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         self._thread = None
         self._profile = None
         self._instructions = None
+        self._mcp_server_ids = None
+        self._mcp_discovery_requested = False
+        self._mcp_verification_requested = False
         if stack is not None:
             self._cleanup_status = "incomplete"
             try:
@@ -401,23 +408,80 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
             if root.is_relative_to(native_home) or native_home.is_relative_to(root):
                 raise AgentProviderError("Native Codex state overlaps an agent-readable root")
 
-    async def require_no_mcp_servers(self, thread_id: str) -> None:
-        """Require an empty native catalog without retaining its private inventory."""
+    async def mcp_exclusion_configuration(self) -> dict[str, dict[str, dict[str, bool]]]:
+        """Resolve opaque native IDs once without exporting native configuration.
+
+        Native discovery may initialize configured servers under ordinary native
+        startup authority. No model turn or captured task is submitted here.
+        Only IDs survive this bounded snapshot, for the native per-thread disable
+        override; the controller never resolves transports or credentials.
+        """
+        self._require_experimental()
+        if self._thread is not None or self._mcp_discovery_requested:
+            raise AgentProviderError("Native Codex MCP exclusions require one pre-thread snapshot")
+        self._mcp_discovery_requested = True
+        result = await self._request(
+            "mcpServerStatus/list",
+            {
+                "threadId": None,
+                "cursor": None,
+                "limit": _MAX_MCP_SERVERS,
+                "detail": "toolsAndAuthOnly",
+            },
+        )
+        self._mcp_server_ids = self._mcp_snapshot_ids(result)
+        return {"mcp_servers": {name: {"enabled": False} for name in self._mcp_server_ids}}
+
+    @staticmethod
+    def _mcp_snapshot_ids(
+        result: dict[str, Any], *, require_disabled: bool = False
+    ) -> tuple[str, ...]:
+        data = result.get("data")
+        if (
+            type(data) is not list
+            or len(data) > _MAX_MCP_SERVERS
+            or "nextCursor" not in result
+            or result["nextCursor"] is not None
+        ):
+            raise AgentProviderError(
+                "Native Codex MCP inventory is incomplete or exceeds its bound"
+            )
+        identifiers: list[str] = []
+        for entry in data:
+            if type(entry) is not dict or "pluginId" not in entry or entry["pluginId"] is not None:
+                raise AgentProviderError("Native Codex MCP registration cannot be excluded safely")
+            name = _identifier(entry.get("name"))
+            if name in identifiers:
+                raise AgentProviderError("Native Codex MCP inventory has duplicate identifiers")
+            if require_disabled and (
+                entry.get("runtimeStatus") != "disabled"
+                or entry.get("tools") != {}
+                or entry.get("resources") != []
+                or entry.get("resourceTemplates") != []
+                or entry.get("toolsError") is not None
+            ):
+                raise AgentProviderError("Native Codex MCP tool exclusion was not established")
+            identifiers.append(name)
+        return tuple(identifiers)
+
+    async def require_mcp_servers_excluded(self, thread_id: str) -> None:
+        """Prove the sole workload thread has no usable registered capabilities."""
         self._require_experimental()
         self._require_thread(thread_id)
+        if self._mcp_server_ids is None or self._mcp_verification_requested:
+            raise AgentProviderError("Native Codex MCP exclusion requires its original snapshot")
+        self._mcp_verification_requested = True
         result = await self._request(
             "mcpServerStatus/list",
             {
                 "threadId": thread_id,
                 "cursor": None,
-                "limit": 1,
+                "limit": _MAX_MCP_SERVERS,
                 "detail": "toolsAndAuthOnly",
             },
         )
-        if result.get("data") != [] or result.get("nextCursor") is not None:
-            raise AgentProviderError(
-                "Native Codex protected execution requires an empty MCP catalog"
-            )
+        if set(self._mcp_snapshot_ids(result, require_disabled=True)) != set(self._mcp_server_ids):
+            raise AgentProviderError("Native Codex MCP inventory changed after exclusion")
 
     async def feature_flags(self, thread_id: str) -> dict[str, bool]:
         """Return bounded effective booleans, excluding native configuration values."""

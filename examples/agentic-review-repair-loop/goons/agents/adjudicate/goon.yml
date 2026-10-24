@@ -1,0 +1,14 @@
+version: 1
+inputs:
+  repo: {type: repository_reference}
+  goal: {default: canonical-architecture-clean}
+  acceptance: {type: acceptance_profile, default: agentic-review}
+  adjudication_skill: {type: skill_reference, default: local:skills/adjudicate}
+steps:
+- uses: agent
+  harness: native
+  role: adjudication
+  task: ${{ inputs.goal }}
+  requested_effects:
+    repository_access: read_only
+    recipients: [codex]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
 from oh_goon.core.capability_registry import (
@@ -9,6 +10,7 @@ from oh_goon.core.capability_registry import (
 )
 from oh_goon.core.errors import (
     ExecutorReadmissionNotAllowed,
+    FleetPlanInvalid,
     InvalidRunTransition,
     JournalConflict,
     StateConflict,
@@ -46,6 +48,7 @@ from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.product_identity import new_fleet_run_id
+from oh_goon.core.projections.agent_campaign import project_agent_campaign
 from oh_goon.core.run_identity import (
     require_fleet_run_detail_binding,
     require_fleet_run_scheduling_binding,
@@ -368,6 +371,23 @@ class FleetRunControlPlane:
             return detail
         return detail.model_copy(update={"producer_implementation_provenance": provenance})
 
+    def agent_campaign(self, fleet_run_id: str) -> dict[str, Any]:
+        """Inspect linked campaign Runs from one verified immutable journal cut."""
+        view = self._journal.read_view()
+        selected = view.required_run_detail(fleet_run_id)
+        target = selected.run.target
+        if (
+            not isinstance(target, FleetPlanTarget)
+            or target.agent_repair is None
+            or target.agent_repair.phase is None
+        ):
+            raise FleetPlanInvalid("Selected Run is not part of a review-repair campaign")
+        return project_agent_campaign(
+            target.agent_repair.repair_id,
+            view.run_details(),
+            journal_revision=view.revision,
+        )
+
     def history(
         self,
         *,
@@ -541,9 +561,12 @@ class FleetRunControlPlane:
         self._supervisor.quiesce()
 
     def cancel_active_for_shutdown(self) -> FleetRunState | None:
+        """Cancel only work submitted to this runtime's original supervisor."""
         active = self._journal.active_run()
         if active is None or active.status.terminal:
             return active
+        if not self._supervisor.is_active(active.fleet_run_id):
+            return None
         try:
             return self.cancel(active.fleet_run_id)
         except InvalidRunTransition:

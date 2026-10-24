@@ -188,6 +188,42 @@ def test_native_review_rejects_wrong_source_skill_occurrence_and_omission(tmp_pa
         )
 
 
+@pytest.mark.parametrize("native", [False, True])
+def test_partial_review_accepts_flat_identity_and_rejects_a_nested_identity_wrapper(
+    tmp_path, native
+):
+    if native:
+        plan, handoffs, _ = native_phase_case(tmp_path)
+    else:
+        resolver, path, _, options = agent_review_case(tmp_path)
+        plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    step = plan.steps[0]
+    handoff = handoffs[step.step_id]
+    record = review_record(step, handoff).model_copy(
+        update={
+            "verdict": "INSUFFICIENT_EVIDENCE",
+            "reviewed_paths": ("repo/code.txt",),
+            "findings": (),
+        }
+    )
+    accepted = accept_agent_phase_output(
+        step,
+        handoff,
+        StepOutcome(argv=("selected",), returncode=0, stdout=record.model_dump_json()),
+    )
+    assert accepted.returncode == 0
+    assert accepted.observations[0].record == record
+    nested = record.model_dump(mode="json")
+    nested["identity"] = {
+        field: nested.pop(field)
+        for field in ("reviewer", "candidate_identity", "scope_identity", "skill_identity")
+    }
+    with pytest.raises(FleetPlanInvalid, match="invalid typed record"):
+        accept_agent_phase_output(
+            step, handoff, StepOutcome(argv=("selected",), returncode=0, stdout=json.dumps(nested))
+        )
+
+
 def test_native_review_appends_typed_claim_without_losing_native_observations(tmp_path):
     plan, handoffs, _ = native_phase_case(tmp_path)
     step = plan.steps[0]
@@ -327,6 +363,7 @@ def test_provider_worker_ignores_repository_python_imports_and_reports_native_fa
         "context_scope",
         "context_partial",
         "context_shape",
+        "adjudication_scope",
     ],
 )
 def test_native_adjudication_uses_original_exact_finding_partition(tmp_path, attack):
@@ -367,6 +404,8 @@ def test_native_adjudication_uses_original_exact_finding_partition(tmp_path, att
         record["queue"][0]["findings"] = []
     elif attack == "omitted_finding":
         record["dispositions"] = []
+    elif attack == "adjudication_scope":
+        record["scope_identity"] = record["scope_identity"][:-3]
     outcome = StepOutcome(argv=("pi",), returncode=0, stdout=json.dumps(record))
     if attack:
         with pytest.raises(FleetPlanInvalid):
@@ -378,7 +417,15 @@ def test_native_adjudication_uses_original_exact_finding_partition(tmp_path, att
 
 
 @pytest.mark.parametrize(
-    "attack", [None, "wrong_candidate", "wrong_preimage", "bad_queue", "omitted_regression"]
+    "attack",
+    [
+        None,
+        "wrong_candidate",
+        "wrong_preimage",
+        "bad_queue",
+        "omitted_regression",
+        "review_identity_metadata",
+    ],
 )
 def test_native_proposal_retains_preimage_and_regression_queue_checks(tmp_path, attack):
     plan, handoffs, repo = native_phase_case(tmp_path)
@@ -425,6 +472,12 @@ def test_native_proposal_retains_preimage_and_regression_queue_checks(tmp_path, 
         record["regressions"][0]["queue_id"] = "other"
     elif attack == "omitted_regression":
         record["regressions"].pop()
+    elif attack == "review_identity_metadata":
+        record.update(
+            reviewer=step.step_id,
+            scope_identity=review_scope(handoff),
+            skill_identity=handoff.source.skill.content_identity,
+        )
     outcome = StepOutcome(argv=("pi",), returncode=0, stdout=json.dumps(record))
     if attack:
         with pytest.raises(FleetPlanInvalid):

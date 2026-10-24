@@ -163,6 +163,8 @@ The existing owners enforce these contracts:
 - **One execution boundary.** The selected profile survives command-only
   regression and verification phases. Git observations use the same backend
   with a read-only workspace, including repository-configured fsmonitor hooks.
+  The native-service profile keeps its existing trusted-local command/Git
+  authority; native tool read-only policy protects its reasoning phases.
   External linked-worktree metadata is rejected before work until the workspace
   authority exposes a supported scoped binding.
 - **Native configuration and tools.** Codex/OpenCode reject explicit
@@ -249,8 +251,11 @@ the [operator preparation](../AGENT_PROVIDERS.md#prepare-a-native-service-endpoi
 and [connection](../AGENT_PROVIDERS.md#connect-for-readiness) contracts.
 
 `NativeAgentProfile.codex_service` selects owned Codex service execution inside
-the existing `FleetPlanService.run_native_agent` → resolver → native Agent Step
-path. `runtime/agent_providers.py` resolves the public executable/runtime and
+the existing `FleetPlanService.run_native_agent` or bounded `repair` → resolver →
+native Agent Step path. `AgentReviewRepairCampaign` admits the selected service
+for read-only review, adjudication, proposal and re-review; the original batch
+apply and regression/verification commands retain trusted-local authority.
+`runtime/agent_providers.py` resolves the public executable/runtime and
 mutually exclusive profile once. Explicit service-home directory metadata must
 be separate from workspace, Skill and runtime inputs before source capture;
 `agent_authoring_sources.py` rejects private/native-state contents before
@@ -263,6 +268,9 @@ materializes explicit native phase policy and uses the supplied original command
 owner for version preflight, daemon birth, deadline, cancellation and quiescence.
 It consumes a native terminal turn and retains the actual daemon shutdown receipt;
 it never fabricates a successful command receipt from an RPC acknowledgement.
+The campaign recognizes requested daemon cancellation only for a completed
+read-only service Step with matching native identity and original execution
+evidence. Missing closure, failed turns and caller cancellation cannot advance it.
 `NativeAgentObservation.execution` stores original-Step preflight, native policy
 and process-closure facts under `ORIGINAL_STEP_EXECUTION`; conversation events
 retain `UNTRUSTED_HARNESS_CLAIM`. Empty native `.codex` setup directories may
@@ -294,9 +302,14 @@ abort acknowledgement is not physical teardown proof.
 [CodexServiceClient](../../backend/src/oh_goon/integrations/agent_codex_service.py)
 owns its native protocol transport and owned thread/turn continuation methods;
 the original owned Step consumes its narrow protocol. Non-secret native feature
-booleans, an empty thread MCP inventory and connection-private native-home path
-separation are checked before model work; no auth/config read or generic API route
-is exposed. Cold resume requires the original frozen instructions explicitly.
+booleans, bounded connection-private MCP IDs, effective workload-thread MCP
+exclusion and connection-private native-home path separation are checked before
+model work; no auth/config read or generic API route is exposed. Native threadless
+metadata discovery may initialize registered servers under ordinary startup
+semantics. Native per-ID disabled overrides leave stored configuration intact;
+the actual workload must report disabled runtimes and empty effective catalogs.
+The original daemon owner retains final cleanup authority. Cold resume requires
+the original frozen instructions explicitly.
 A profile identifier alone is never permission proof.
 [OpenCodeServiceClient](../../backend/src/oh_goon/integrations/agent_opencode_service.py)
 owns strict numeric-loopback HTTP authority, bounded readiness, sanitized
@@ -353,10 +366,10 @@ normal startup does not acquire a strict signer/custody qualification gate.
 | Native receiver and complete Run lifecycle | [Native Step contract](../../backend/tests/dependency_complete/test_fleet_plan_native_steps.py), [native Run](../../backend/tests/integration/services/test_native_agent_run.py) |
 | Native service readiness | Both explicit clients bound the entire readiness exchange and their transport teardown; safe failures preserve cleanup uncertainty and cancellation. [Codex transport](../../backend/tests/dependency_complete/test_agent_codex_service.py) covers native protocol/continuation and profile pinning. Its opt-in [installed service case](../../backend/tests/integration/services/test_native_codex_service.py) verifies model-free review/scoped-repair/re-review denials, synthetic private stores and original owner cleanup. Native empty-thread resume is refused. A separate installed local-provider case proves persisted protocol resume and compaction with explicit frozen instructions; the original [service Run case](../../backend/tests/integration/services/test_native_codex_service_run.py) proves tool follow-up, native automatic compaction and independent verification. Cross-Run session adoption and generic effective-grant identity remain unverified. [OpenCode transport](../../backend/tests/dependency_complete/test_agent_opencode_service.py) covers authority, bounds, safe failures and client closure. The opt-in [installed OpenCode case](../../backend/tests/integration/services/test_native_opencode_service.py) verifies real 2.1.2 readiness, matching original process birth, no global shutdown on client close and original owner cancellation/quiescence using synthetic private state. It does not qualify stdin lease, native continuation, user authentication or private-store/tool isolation. |
 | Installed Codex instruction transport | Opt-in [native Codex context](../../backend/tests/integration/services/test_native_codex_context.py): synthetic API-key/ChatGPT authentication × HTTP/WebSocket, privileged task/Skill/producer context through native response chains, automatic compaction and continuation. ChatGPT discovery uses a local HTTPS backend; WebSocket cases reject inference HTTP fallback. Live account access and model quality remain separate. |
-| Live Codex account and coding | The [legacy live coding baseline](../../backend/tests/integration/services/test_native_codex_live.py) retains the original local Run and independent verifier; its credential-reading/forced-refresh helper is removed. It does not qualify native-store exclusion. Native-service acceptance remains TODO under the [adapter design](../AGENT_PROVIDERS.md#native-service-adapter-design): non-secret readiness/refresh facts, private-store/tool-boundary qualification and owned coding with independent verification. |
+| Live Codex account and coding | The [legacy live coding baseline](../../backend/tests/integration/services/test_native_codex_live.py) retains the original local Run and independent verifier; its credential-reading/forced-refresh helper is removed. It does not qualify native-store exclusion. The [implemented native-service adapter](../AGENT_PROVIDERS.md#native-service-adapter-design) has separate synthetic installed qualification; real-account refresh/persistence qualification remains unverified and requires non-secret native lifecycle facts. |
 | Ordinary physical boundaries and native resources | [Standard Bubblewrap](../../backend/tests/unit/integrations/test_standard_bubblewrap_isolation.py), [verification and Git observers](../../backend/tests/unit/integrations/test_native_plan_isolation.py) |
 | Terminal, inference and observations | [Native terminal](../../backend/tests/unit/engine/test_command_terminal.py), [model broker](../../backend/tests/dependency_complete/test_agent_inference_broker.py), [Game Tape claims](../../backend/tests/unit/core/test_game_tape_native_agents.py) |
-| Linked review/repair Runs and source recapture | [Review/repair integration](../../backend/tests/integration/services/test_agent_review_repair_loop.py), [bounded repair](../../backend/tests/integration/test_agent_bounded_repair.py), [capture boundaries](../../backend/tests/unit/services/test_agent_repair_source_capture.py) |
+| Linked review/repair Runs and source recapture | [Review/repair integration](../../backend/tests/integration/services/test_agent_review_repair_loop.py), installed [Codex service campaign](../../backend/tests/integration/services/test_native_codex_service_run.py) cases for CLEAN, one/multiple independent defects and cancellation, [bounded repair](../../backend/tests/integration/test_agent_bounded_repair.py), [capture boundaries](../../backend/tests/unit/services/test_agent_repair_source_capture.py) |
 | Installed local model behavior | Opt-in [native model review](../../backend/tests/integration/test_agent01b3c_native_model_review.py) and [native Skill cycle](../../backend/tests/integration/test_agent01b3h_native_skill_cycle.py) |
 
 Synthetic model/HTTP fixtures establish protocol and lifecycle behavior within

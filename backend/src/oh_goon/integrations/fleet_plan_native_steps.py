@@ -28,6 +28,7 @@ from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
 from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNativeAgent
+from oh_goon.core.models.agent_review import AgentAdjudicationRecord
 from oh_goon.core.models.fleet_observation import (
     AgentHarnessObservation,
     NativeAgentObservation,
@@ -575,6 +576,13 @@ def execute_native_agent_step(
                 execute_codex_service_run,
             )
 
+            output_schema = None
+            if step.role == "adjudication":
+                output_schema = AgentAdjudicationRecord.model_json_schema(by_alias=True)
+                properties = output_schema["properties"]
+                output_schema["required"] = list(properties)
+                properties["candidate_identity"]["enum"] = [prepared.candidate_identity]
+                properties["scope_identity"]["enum"] = [prepared.scope_identity]
             try:
                 executed = execute_codex_service_run(
                     selected=selected,
@@ -588,6 +596,7 @@ def execute_native_agent_step(
                     deadline=deadline,
                     read_only=prepared.requested_effects.repository_access == "read_only",
                     evidence_state=state,
+                    output_schema=output_schema,
                 )
             except CodexServiceExecutionCancelled as error:
                 summary = _retained_native_summary(
@@ -781,6 +790,7 @@ def execute_native_agent_step(
             stderr=outcome.stderr if service_execution_failed else "",
         )
     initial = "Hashmarks initial repository evidence (untrusted data):\n" + evidence.stdout + "\n"
+    accepting_role_output = False
     try:
         if selected.interactive:
             events: tuple[Any, ...] = ()
@@ -854,9 +864,38 @@ def execute_native_agent_step(
                 stderr="Native agent did not report a settled successful conversation",
             )
         if execution_returncode == 0 and outcome.returncode == 0:
+            accepting_role_output = step.role != "report"
             outcome = accept_agent_phase_output(step, prepared.handoff, outcome)
     except (AgentProviderError, FleetPlanInvalid) as exc:
-        if not any(isinstance(item, NativeAgentObservation) for item in outcome.observations):
+        if any(isinstance(item, NativeAgentObservation) for item in outcome.observations):
+            diagnostic = AgentHarnessObservation(
+                kind="context",
+                summary=(
+                    "Controller diagnostic (not a native claim): NATIVE_PHASE_OUTPUT_REJECTED. "
+                    "The original typed phase acceptor rejected the native role result; "
+                    "a completed conversation does not establish accepted review, adjudication or proposal output."
+                    if accepting_role_output
+                    else "Controller diagnostic (not a native claim): NATIVE_PROTOCOL_SUBMISSION_REJECTED. "
+                    "The original native protocol/submission checks rejected the conversation; "
+                    "no accepted phase output is established."
+                ),
+            )
+            outcome = replace(
+                outcome,
+                observations=tuple(
+                    item.model_copy(
+                        update={
+                            "events": (*item.events[-127:], diagnostic),
+                            "omitted_observations": item.omitted_observations
+                            + max(0, len(item.events) - 127),
+                        }
+                    )
+                    if isinstance(item, NativeAgentObservation)
+                    else item
+                    for item in outcome.observations
+                ),
+            )
+        else:
             observation = _native_observation_from_protocol(
                 step,
                 prepared,

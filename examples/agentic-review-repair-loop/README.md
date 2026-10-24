@@ -54,3 +54,100 @@ Every review pass runs the four reviews in written order on one captured candida
 The result lists the separate Run IDs. Inspect each using `oh-goon plan steps RUN_ID` or `oh-goon plan tape RUN_ID`. Earlier findings, failures and candidate identities remain in their original Runs. Interrupted or expired invocations do not silently resume writes; a new invocation needs a fresh lock and fresh limits.
 
 To replace, append or reorder reviews, copy the small Composite Goon into your project's explicit local catalog and edit its ordered `phase: review` imports. Keep the other required phases. Any registered Skill can be selected with `with: {skill: your-alias}`; the controller does not recognize cookbook names. Unique unbound inputs are exposed automatically; `pass:` only routes deliberately shared names. The complete captured repository is the read scope, so the workflow never narrows scope to discard findings.
+
+## Native Codex service campaign
+
+The shared [Hashmarks dogfood acceptance contract](../../docs/AGENT_SKILLS.md#hashmarks-dogfood-acceptance)
+defines the required source, configuration and execution evidence, the four
+qualification scenarios, and the separate live Hashmarks repair milestone.
+
+[`native-plan.yml`](native-plan.yml) selects the same four pinned cookbook
+reviews and the existing regression/verification Goons. Its explicit local
+catalog declares native review, adjudication and proposal roles. All three
+roles have read-only tools; the ordinary batch apply command owns writes.
+The service profile uses the native `codex` disclosure recipient.
+
+Configure `codex_service` using the
+[native service profile](../../docs/AGENT_PROVIDERS.md#native-service-adapter-design).
+Select a complete public Codex 0.163.0 installation outside native state. Native
+Codex retains its existing sign-in and configuration; neither this example nor
+Oh-Goon opens or copies those stores. The selected home must support the
+documented capability preflight. Existing MCP registrations may remain in that
+home: native per-thread overrides disable their workload tools before model work.
+Metadata discovery may initialize the registered servers under ordinary native
+startup semantics; it does not grant those tools access to the campaign.
+
+Use the same native selection for lock and run. For example, with `PROVIDERS`
+pointing to your Oh-Goon provider catalog and `PROFILE` to its service profile:
+
+```sh
+GOAL='In review phases apply the selected Skill to the complete declared scope and report only proven findings in its class. In adjudication account for supplied findings. In proposal phases provide scoped repair data with behavioral regressions. Read-only reasoning never applies edits.'
+
+oh-goon lock "$WORKFLOW/native-plan.yml" \
+  --input repo=local:my-project \
+  --input "goal=$GOAL" \
+  --input regression_command=scripts/regression \
+  --input verification_command=scripts/verify \
+  --agent-repository-root "$PROJECTS" --agent-skill-root "$WORKFLOW" \
+  --allow-agent-acceptance agentic-review \
+  --native-agent codex --native-profile "$PROFILE" \
+  --native-workspace "$PROJECTS/my-project" --agent-providers-file "$PROVIDERS"
+
+oh-goon plan run "$WORKFLOW/native-plan.yml" \
+  --repository-id REPOSITORY_ID \
+  --input repo=local:my-project \
+  --input "goal=$GOAL" \
+  --input regression_command=scripts/regression \
+  --input verification_command=scripts/verify \
+  --agent-repository-root "$PROJECTS" --agent-skill-root "$WORKFLOW" \
+  --allow-agent-acceptance agentic-review \
+  --native-agent codex --native-profile "$PROFILE" \
+  --native-workspace "$PROJECTS/my-project" --agent-providers-file "$PROVIDERS" \
+  --review-passes 3 --repair-write-root src --repair-write-root tests \
+  --repair-timeout 1800 --repair-step-timeout 300 --json > campaign-result.json
+```
+
+Keep the workflow and report outside the source checkout. Save the invocation's
+JSON result: it includes the actual controller stop reason and structured
+campaign view. `oh-goon plan campaign RUN_ID --json` reads retained linked Runs;
+its controller result remains unavailable because the final stop receipt is
+invocation-only. Neither report authorizes continuation or PR publication.
+
+For a controlled Hashmarks workload, start from a disposable public-source
+export with an independent Git database. Exclude native project configuration
+by path before reading or copying source: `.codex/`, `.opencode/`,
+`opencode.json` and `opencode.jsonc`. Record the included source, exclusions and
+original commit; the exported scope is the admitted review scope. Preserve the
+original tree. If a full repository review exceeds the selected budget, declare a
+new focused, runnable export before capture and establish its passing baseline.
+Do not reduce an admitted scope after a finding or treat bounded orientation as
+proof that the whole scope was reviewed.
+
+The four selected Skills review architectural authority and consumer contracts.
+A shared classifier that simply omits `?` is a correctness defect, but does not
+by itself prove competing authority. Use an explicitly intentional architectural
+mutation in the disposable candidate instead: leave
+`hashmarks/paths.py::has_glob` correct and replace the `resolve_inputs` call to
+that owner in `hashmarks/inputs.py` with a second, stale classifier such as
+`if not any(ch in pattern for ch in "*["):`. The public `Glob("?.py")` contract
+then accepts the canonical classification while input resolution treats the same
+pattern as literal. Establish the original passing baseline and demonstrate that
+the question-mark behavior now fails; Codex must still prove any finding from
+source and public API evidence.
+
+For this mutation, authorize `hashmarks/inputs.py` and
+`tests/test_hardening.py` as write roots. Tailor `GOAL` to that input-classification
+question while preserving phase roles: review applies only the selected Skill;
+other reviewers may return CLEAN after completing their in-class review without
+finding a defect. Adjudication accounts for the actual findings, and only the
+proposal phase supplies repair data. Repository-relative write roots authorize
+the later batch apply; they do not grant write tools to a reviewer or proposal
+agent. Do not require a finding from every Skill or invent one to force a repair.
+
+Both native check scripts should use Hashmarks' committed uv lock and run against
+the declared export. Include task-evidence and post-change checks in final
+verification when those contracts are part of that runnable source scope. Fresh
+review obtains fresh Hashmarks evidence from the newly admitted candidate.
+Hashmarks' same-repository `post_change` delta cannot replace that capture
+boundary. This recipe defines qualification inputs; it does not establish that
+a live campaign has converged.
