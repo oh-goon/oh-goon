@@ -17,35 +17,51 @@ from oh_goon.integrations.hashmarks.agent_tools import (
 )
 
 
-def test_query_file_transport_delivers_private_task_without_argv_text(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+@pytest.mark.process
+def test_query_file_transport_delivers_private_task_without_argv_text(tmp_path: Path) -> None:
+    import subprocess
+
     captured = tmp_path / "captured"
     (captured / "repo").mkdir(parents=True)
-    (captured / "repo" / "widget.py").write_text("def handle_widget():\n    return 1\n")
+    source = captured / "repo" / "widget.py"
+    original_source = "def handle_widget():\n    return 1\n"
+    source.write_text(original_source)
     query = tmp_path / "query.txt"
     query.write_text("Review handle_widget, private-task-canary")
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "agent_tools",
-            "--root",
-            str(captured),
-            "--query-file",
-            str(query),
-            "--tool",
-            "task_evidence",
-            "--capture-identity",
-            "frozen",
-        ],
-    )
-    assert "private-task-canary" not in " ".join(sys.argv)
-    assert main() == 0
-    packet = json.loads(capsys.readouterr().out)
+    argv = [
+        sys.executable,
+        "-I",
+        "-m",
+        "oh_goon.integrations.hashmarks.agent_tools",
+        "--root",
+        str(captured),
+        "--query-file",
+        str(query),
+        "--tool",
+        "task_evidence",
+        "--capture-identity",
+        "frozen",
+    ]
+    assert "private-task-canary" not in " ".join(argv)
+    with (
+        (tmp_path / "stdout.json").open("w+b") as output,
+        (tmp_path / "stderr.txt").open("w+b") as errors,
+    ):
+        result = subprocess.run(
+            argv, cwd=tmp_path, stdout=output, stderr=errors, timeout=30, check=False
+        )
+        output.seek(0)
+        data = output.read(1_048_577)
+        errors.seek(0)
+        diagnostics = errors.read(65_537)
+    assert len(data) <= 1_048_576
+    assert len(diagnostics) <= 65_536
+    assert result.returncode == 0, diagnostics.decode("utf-8", errors="replace")
+    packet = json.loads(data)
     assert packet["capture_identity"] == "frozen"
     assert packet["producer"] == "Hashmarks"
     assert "handle_widget" in packet["presentation"]["text"]
+    assert source.read_text() == original_source
 
 
 @pytest.mark.parametrize("data", [b"x" * 65537, b"\xff", b"\x00", b"  "])

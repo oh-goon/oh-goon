@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from oh_goon.core.models.game_tape import (
-    GameTapeProducerImplementationProvenance,
-)
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.game_tape import GameTapeProducerImplementationProvenance
 
 
 class HashmarksRuntimeContractError(ValueError):

@@ -16,30 +16,15 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import SecretStr
 
-from oh_goon.core.agent_review_plan import agent_phase_role
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import AgentConnection, AgentMessage, ResolvedAgentModel
-from oh_goon.core.models.agent_review import (
-    accept_adjudication,
-    accept_review,
-    decode_agent_record,
-    review_from_context,
-    review_scope,
-    review_wire_record,
-)
-from oh_goon.core.models.agent_source import FrozenAgentStepHandoff, FrozenSourceMember
-from oh_goon.core.models.fleet_observation import AgentReviewObservation
-from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, from_command
-from oh_goon.integrations.agent_patch_apply import parse_batch_proposal
-from oh_goon.integrations.fleet_plan_environment import (
-    require_exportable_host_environment_name,
-    step_host_environment_names,
-)
 
 _HEADERS_ENV = "OH_GOON_AGENT_STEP_HEADERS"
 
 if TYPE_CHECKING:
+    from oh_goon.core.models.agent_source import FrozenAgentStepHandoff, FrozenSourceMember
+    from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
+    from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
     from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, _StepProcess
 
 
@@ -65,6 +50,8 @@ def provider_agent_request(
     repository_evidence: str,
 ) -> dict[str, Any]:
     """Use the complete captured closure; oversize input fails rather than truncating it."""
+    from oh_goon.core.models.agent_review import decode_agent_record, review_scope
+
     if step.connection is None:
         raise FleetPlanInvalid("provider Agent lacks its frozen connection")
     if type(repository_evidence) is not str or not repository_evidence.strip():
@@ -108,6 +95,8 @@ def provider_agent_request(
 
 def agent_phase_output_contract(step: ResolvedLocalSearchAgentStep) -> str:
     """One typed output instruction for provider and selected native phase agents."""
+    from oh_goon.core.agent_review_plan import agent_phase_role
+
     contracts = {
         "review": (
             'Return one JSON object with schema="oh-goon.agent-review/v1", the exact identity fields, '
@@ -157,6 +146,12 @@ def execute_provider_agent(
     timeout: float | None,
     repository_evidence: str,
 ) -> StepOutcome:
+    from oh_goon.integrations._fleet_plan_step_outcome import from_command
+    from oh_goon.integrations.fleet_plan_environment import (
+        require_exportable_host_environment_name,
+        step_host_environment_names,
+    )
+
     if step.connection is None:
         raise FleetPlanInvalid("provider Agent lacks its frozen connection")
     for name in step_host_environment_names(step):
@@ -202,6 +197,17 @@ def accept_agent_phase_output(
     A native process exit or generic CLEAN envelope never replaces these checks.
     Failed physical outcomes retain their original accounting and payload.
     """
+    from oh_goon.core.agent_review_plan import agent_phase_role
+    from oh_goon.core.models.agent_review import (
+        accept_adjudication,
+        accept_review,
+        decode_agent_record,
+        review_from_context,
+        review_wire_record,
+    )
+    from oh_goon.core.models.fleet_observation import AgentReviewObservation
+    from oh_goon.integrations.agent_patch_apply import parse_batch_proposal
+
     if outcome.returncode != 0:
         return outcome
     role = agent_phase_role(step)
