@@ -37,14 +37,15 @@ jobs:
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep strace
+          sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Materialize committed locks once
         run: make init
-      - name: Profile both validator versions on this runner
+      - name: Time both versions in reversed order without instrumentation
         shell: bash
         run: |
           set -euo pipefail
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
           umask 077
           bench_root="$RUNNER_TEMP/cold-bind-profile"
           bench_target="backend/src/oh_goon/integrations/fleet_plan_bubblewrap_isolation.py"
@@ -54,28 +55,29 @@ jobs:
           trap 'cp "$bench_root/candidate.py" "$bench_target"' EXIT
           uname -r
           stat -f -c %T /usr
-          for bench_variant in base candidate; do
+          bench_sample=0
+          for bench_variant in candidate base base candidate; do
+            bench_sample=$((bench_sample + 1))
             cp "$bench_root/$bench_variant.py" "$bench_target"
             sync
             printf '3\n' | sudo tee /proc/sys/vm/drop_caches > /dev/null
-            if ! uv run --offline --frozen --no-sync --project backend strace -c -e trace=stat,lstat,newfstatat,statx,fstat -o "$bench_root/$bench_variant-syscalls.txt" backend/.venv/bin/python -m cProfile -o "$bench_root/$bench_variant.prof" -m pytest -c backend/pyproject.toml -o addopts= -q backend/tests/unit/entrypoints/test_cli_ai.py::test_native_bubblewrap_preflight_retains_canonical_git_root --durations=1 > "$bench_root/$bench_variant.log" 2>&1; then
-              cat "$bench_root/$bench_variant.log"
+            if ! uv run --offline --frozen --no-sync --project backend python -m pytest -c backend/pyproject.toml -o addopts= -q backend/tests/unit/entrypoints/test_cli_ai.py::test_native_bubblewrap_preflight_retains_canonical_git_root --durations=1 > "$bench_root/$bench_sample-$bench_variant.log" 2>&1; then
+              cat "$bench_root/$bench_sample-$bench_variant.log"
               exit 1
             fi
-            cat "$bench_root/$bench_variant.log"
-            cat "$bench_root/$bench_variant-syscalls.txt"
+            cat "$bench_root/$bench_sample-$bench_variant.log"
           done
           uv run --offline --frozen --no-sync --project backend python - <<'PY'
-          import hashlib, json, os, pstats, sys, sysconfig
+          import hashlib, json, os, platform, re, sys
           from pathlib import Path
           root = Path(os.environ["RUNNER_TEMP"]) / "cold-bind-profile"
-          result = {"base": os.environ["OH_GOON_PROFILE_BASE"], "candidate": os.environ["OH_GOON_PROFILE_CANDIDATE"], "python": sys.version, "have_dirent_dtype": sysconfig.get_config_var("HAVE_DIRENT_D_TYPE"), "same_host": True, "cold_guest_caches_before_each": True, "samples": {}}
-          for variant in ("base", "candidate"):
-              stats = pstats.Stats(str(root / (variant + ".prof")))
-              methods = {}
-              for (file, line, name), values in stats.stats.items():
-                  if name in {"_require_standard_bind_structure", "_validate_standard_request", "test_native_bubblewrap_preflight_retains_canonical_git_root"} or "posix.DirEntry" in name or "posix.stat" in name or "posix.lstat" in name:
-                      methods[file + ":" + name] = {"calls": values[1], "self_seconds": values[2], "cumulative_seconds": values[3]}
-              result["samples"][variant] = {"source_sha256": hashlib.sha256((root / (variant + ".py")).read_bytes()).hexdigest(), "methods": methods, "syscalls": (root / (variant + "-syscalls.txt")).read_text(), "pytest": (root / (variant + ".log")).read_text()}
-          print("OH_GOON_MATCHED_PROFILE_JSON=" + json.dumps(result, sort_keys=True))
+          samples = []
+          for index, variant in enumerate(("candidate", "base", "base", "candidate"), 1):
+              log = (root / f"{index}-{variant}.log").read_text()
+              match = re.search(r"(\d+\.\d+)s call\s+.*test_native_bubblewrap_preflight_retains_canonical_git_root", log)
+              if match is None:
+                  raise RuntimeError(f"Missing native test duration in sample {index}")
+              samples.append({"index": index, "variant": variant, "source_sha256": hashlib.sha256((root / (variant + ".py")).read_bytes()).hexdigest(), "seconds": float(match.group(1)), "pytest": log})
+          result = {"base": os.environ["OH_GOON_PROFILE_BASE"], "candidate": os.environ["OH_GOON_PROFILE_CANDIDATE"], "python": sys.version, "kernel": platform.release(), "same_host": True, "cold_guest_caches_before_each": True, "instrumented": False, "hypervisor_cache_controlled": False, "samples": samples}
+          print("OH_GOON_MATCHED_TIMING_JSON=" + json.dumps(result, sort_keys=True))
           PY
