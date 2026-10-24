@@ -29,6 +29,16 @@ _CATEGORY_CLASSIFICATION: dict[str, TemplateClassification] = {
 }
 
 
+def template_usage(classification: TemplateClassification) -> dict[str, str]:
+    """Project catalog usage only; prerequisite availability and execution are unproved."""
+    usage = {
+        TemplateClassification.PRODUCTION: "runnable-with-prerequisites",
+        TemplateClassification.TEACHING_EXAMPLE: "teaching-example",
+        TemplateClassification.INTERNAL_SELF_HOSTING: "internal-owner-command",
+    }[classification]
+    return {"usage": usage, "readiness": "not-executed", "prerequisites": "not-checked"}
+
+
 def template_key_parts(value: str, *, kind: str) -> tuple[str, str]:
     """Return one exact category/name identity; no aliases or path guessing exist."""
 

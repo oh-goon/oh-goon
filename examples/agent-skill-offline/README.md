@@ -1,29 +1,11 @@
 # Offline Skill resource fixture
 
-This product fixture checks that a selected Skill and its supporting files travel
-together through source capture. Its tiny local review text, checklist, script,
-and asset are test data. Reusable review/development Skills remain in
-[agentsCookbook](https://github.com/Hugloss/agentsCookbook); the
-[optional Gitlink recipe](../agent-skill-cookbook/README.md) selects a real upstream
-Skill without adding a cookbook dependency to OH-Goon.
+Classification: preview-only-fixture
 
-Copy this directory in full, including `.goonskills.yml`, `goon.yml`, and all files
-under `skills/`. The name `team/review` resolves through the existing registry
-and source-capture owner. The relocation regression in
-[`test_skill02_pinned_gitlink.py`](../../backend/tests/unit/services/test_skill02_pinned_gitlink.py)
-uses this complete fixture.
+Verify that a selected Skill and its supporting files travel together through source capture. Its `opencode` declaration is preview-only and supplies no runnable native adapter.
 
-Use `oh-goon plan inputs goon.yml --source-closure` with the exact
-`--expect-sha256` from ordinary `plan inputs`, explicit `--repository-root`,
-`--skill-root .`, `--allow-acceptance review`, and these inputs:
+Keep `.goonskills.yml`, `goon.yml` and the complete `skills/` tree together. The existing local registry maps `team/review` to its Skill directory. The checklist, script and JSON asset are transported resources: source capture never executes `scripts/verify.sh` merely because it is present.
 
-- `--input repo=local:PROJECT`
-- `--input skill=team/review`
-- `--input acceptance=review`
+The relocation regression is [`test_agent_skill_relocation.py`](../../backend/tests/unit/services/test_agent_skill_relocation.py). It checks complete source delivery using isolated fixtures. Offline capture/relocation proves neither model availability nor a completed Fleet review.
 
-Capture and immutable delivery work offline. The included `scripts/verify.sh`
-is transported as a resource; selecting the Skill does not execute that script.
-The fixture's `opencode` Goon is preview-only. It is not an installed OpenCode
-adapter or a prerequisite for ordinary Agent execution. See
-[Agent Skills](../../docs/AGENT_SKILLS.md) for the supported local harnesses and
-their existing Fleet/Step execution path.
+These tiny resources are product test data. Reusable Skills remain in [agentsCookbook](https://github.com/Hugloss/agentsCookbook); the [pinned-source example](../agent-skill-cookbook/README.md) uses the canonical Git registry and selected `run.yml` without adding a cookbook dependency to Oh-Goon. See [Agent Skills](../../docs/AGENT_SKILLS.md) for supported execution and qualification.

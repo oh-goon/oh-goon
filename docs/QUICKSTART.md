@@ -144,37 +144,29 @@ uv run --offline --frozen --no-sync --project backend oh-goon local-state path
 make architecture
 ```
 
-### Save a local Lineup
+### Select one workflow configuration
 
-If you repeatedly apply one shared Plan to the same repositories:
-
-```bash
-oh-goon lineup save backend --name "Backend" --team ~/code/api --team ~/code/orders
-oh-goon lineup inspect backend
-# Replacing an existing Lineup requires --expected-revision from `lineup inspect --json`.
-oh-goon shared-plan preview python-quality --lineup backend
-oh-goon shared-plan run python-quality --lineup backend
-```
-
-Preview is read-only and uses the same declared Enforcer/admission requirements as the run. Run remains a separate explicit action.
-
-
-### Keep reusable Shared Plans locally
-
-Create a Shared Plan from a shipped `plan.yml` template and keep it for future Shared Runs:
+Register your repository in the UI, then use its repository ID in the generated
+selection:
 
 ```bash
-oh-goon shared-plan templates
-oh-goon shared-plan from-template python/quality python-quality
-oh-goon shared-plan from-template security/trivy-audit trivy-audit
-oh-goon shared-plan list
+oh-goon templates list --kind plan
+oh-goon templates init python/quality --output ./workflow
+# Edit workflow/run.yml: target.repository_id and relevant inputs.
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
 ```
 
-Run the Trivy audit Plan over every current repository in the saved League:
+The config chooses a shipped Plan directly, so an unchanged Plan needs no local
+copy. `inputs` supplies scalar values to the Goon-owned typed contract. Native
+uv/Ruff/Pytest configuration stays in your project. Inspection is read-only;
+validation is not execution, and a lock is not write permission. Source or
+selection changes require a new matching lock and fresh admission.
 
-```bash
-oh-goon shared-plan preview trivy-audit --all-teams
-oh-goon shared-plan run trivy-audit --all-teams
-```
-
-The run uses the selected Shared Plan only. Repository `goon.yml` files are omitted. Every explicit run performs a fresh Enforcer admission and a fresh scan; prior success is history, not permission.
+Use the [configuration guide](development/TEMPLATE_INPUT_INSPECTION.md) for
+project Plans, repository Goons and optional agent/repair groups. Shared Plan
+UI/service operations retain explicit multi-repository selection and their own
+reviewed identity. The removed Plan-path/values/flag assembly has no compatibility
+route.

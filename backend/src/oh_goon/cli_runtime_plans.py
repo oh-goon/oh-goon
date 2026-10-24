@@ -12,15 +12,7 @@ from typing import TypedDict
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_agent_providers import agent_connection_from_args
-from oh_goon.cli_plan_definition_commands import (
-    _check,
-    _diff,
-    _explain,
-    _inputs,
-    _prepare,
-    _preview,
-    _validate,
-)
+from oh_goon.cli_plan_definition_commands import _check, _diff
 from oh_goon.cli_plan_inputs import plan_inputs
 from oh_goon.cli_plan_run_readback import run_plan_readback
 from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
@@ -57,13 +49,8 @@ def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> i
     if args.command != "plan":
         return None
     handlers: dict[str, PlanHandler] = {
-        "validate": _validate,
-        "inputs": _inputs,
-        "explain": _explain,
         "check": _check,
         "diff": _diff,
-        "prepare": _prepare,
-        "preview": _preview,
         "run": _run,
         "status": run_plan_readback,
         "events": run_plan_readback,
@@ -128,6 +115,15 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         source_identity = (
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
+        if hasattr(args, "_run_configuration"):
+            source_identity["repository"] = args._run_configuration.repository.path
+            source_identity["source_graph"] = args._source_graph
+            source_identity["repository_goon"] = (
+                args._run_configuration.snapshot.selection.source.kind == "repository-goon"
+            )
+            source_identity["external_artifacts"] = (
+                args._run_configuration.snapshot.external_artifacts()
+            )
         if repair_budget is not None:
             review = getattr(args, "review_passes", None) is not None
             review_options: _AgentReviewRepairOptions = {}
@@ -156,6 +152,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 extensions_path=args.extensions,
                 requested_priority=args.priority,
                 **review_options,
+                **source_identity,
             )
             return _print_agent_repair_result(result, as_json=as_json, campaign=review)
         native_options: _AgentRunSelection = (
@@ -236,6 +233,13 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             print("Plan run interrupted.")
         return 130
     except (FleetDomainError, ValueError) as exc:
+        if hasattr(args, "_run_configuration"):
+            from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
+
+            diagnostic = safe_plan_diagnostic(exc)
+            message = f"{diagnostic['code']}: {diagnostic['safe_next_action']}"
+        else:
+            message = str(exc)
         if as_json:
             # Do not assert no effects: a failure can occur after Run creation.
             print(
@@ -244,13 +248,13 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                         "schema": _RUN_RESULT_SCHEMA,
                         "status": "error",
                         "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
-                        "message": str(exc),
+                        "message": message,
                     },
                     sort_keys=True,
                 )
             )
         else:
-            print(str(exc))
+            print(message)
         return 2
     if as_json:
         print(
@@ -274,54 +278,13 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     return 1
 
 
-def _selected_repair_budget(args) -> AgentRepairBudget | None:
-    review_passes = getattr(args, "review_passes", None)
-    if review_passes is not None and getattr(args, "repair_attempts", None) is not None:
-        raise FleetPlanInvalid("choose --review-passes or --repair-attempts")
-    if review_passes is not None and not getattr(args, "repair_write_root", None):
-        raise FleetPlanInvalid("review-repair requires at least one explicit --repair-write-root")
-    if review_passes is not None:
-        from oh_goon.integrations.agent_patch_apply import validate_write_roots
-
-        validate_write_roots(tuple(args.repair_write_root))
-    if review_passes is None and getattr(args, "repair_write_root", None):
-        raise FleetPlanInvalid("repair write roots require --review-passes")
-    if getattr(args, "agent_model_profile", None) or getattr(args, "agent_providers_file", None):
-        if (
-            not args.standard_local
-            or not args.wait
-            or args.agent_repository_root is None
-            or args.agent_skill_root is None
-            or not args.allow_agent_acceptance
-            or args.repair_attempts is not None
-        ):
-            raise FleetPlanInvalid("provider selection requires a standard-local Agent invocation")
-    limits = (
-        review_passes if review_passes is not None else getattr(args, "repair_attempts", None),
-        getattr(args, "repair_timeout", None),
-        getattr(args, "repair_step_timeout", None),
-    )
-    if all(value is None for value in limits):
+def _selected_repair_budget(args: argparse.Namespace) -> AgentRepairBudget | None:
+    selected = getattr(args, "_run_configuration", None)
+    if selected is None or selected.snapshot.selection.repair is None:
         return None
-    if (
-        any(value is None for value in limits)
-        or not args.standard_local
-        or not args.wait
-        or args.all_repositories
-        or len(args.repository_ids or ()) != 1
-        or getattr(args, "inputs_file", None) is not None
-        or args.repair_handoff
-        or args.agent_repository_root is None
-        or args.agent_skill_root is None
-        or not args.allow_agent_acceptance
-    ):
-        raise FleetPlanInvalid(
-            "repair requires all three limits, --standard-local --wait, one repository, "
-            "Agent roots and acceptance; inputs-file and repair-handoff are unavailable"
-        )
-    return AgentRepairBudget(
-        max_attempts=limits[0], timeout_seconds=limits[1], step_timeout_seconds=limits[2]
-    )
+    if not getattr(args, "authorize_repair", False):
+        raise FleetPlanInvalid("Bounded repair requires fresh per-Run authorization")
+    return selected.snapshot.selection.repair.budget()
 
 
 def _print_agent_repair_result(result, *, as_json: bool, campaign: bool = False) -> int:
@@ -842,6 +805,16 @@ def _schedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         source_identity = (
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
+        if hasattr(args, "_run_configuration"):
+            source_identity["repository"] = args._run_configuration.repository.path
+            source_identity["source_graph"] = args._source_graph
+            source_identity["repository_goon"] = (
+                args._run_configuration.snapshot.selection.source.kind == "repository-goon"
+            )
+            source_identity["external_artifacts"] = (
+                args._run_configuration.snapshot.external_artifacts()
+            )
+            source_identity["lock_path"] = args.lock_file
         definition = runtime.plans.schedule(
             args.plan,
             schedule_id=args.schedule_id,
@@ -870,6 +843,16 @@ def _reschedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         source_identity = (
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
+        if hasattr(args, "_run_configuration"):
+            source_identity["repository"] = args._run_configuration.repository.path
+            source_identity["source_graph"] = args._source_graph
+            source_identity["repository_goon"] = (
+                args._run_configuration.snapshot.selection.source.kind == "repository-goon"
+            )
+            source_identity["external_artifacts"] = (
+                args._run_configuration.snapshot.external_artifacts()
+            )
+            source_identity["lock_path"] = args.lock_file
         definition = runtime.plans.reschedule(
             args.plan,
             schedule_id=args.schedule_id,

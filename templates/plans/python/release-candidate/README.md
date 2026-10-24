@@ -1,45 +1,42 @@
 # python/release-candidate
 
-This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+Calculate candidate metadata, run Python quality and retain distribution artifacts.
 
-Calculate candidate metadata, run Python quality and retain the project’s distribution bundle. Building uses the project’s version; metadata calculation does not stamp a new version into source.
+**Status:** runnable with prerequisites. **Effects:** Writes metadata, runs checks and packages retained bytes.
 
-## Before you run
+**Prerequisites:** A committed `pyproject.toml` and native `uv.lock`; the selected group must supply Ruff, pytest and the chosen type checker. Prepare it with native `uv sync --locked --group dev` in the selected project. The locked group must also provide the project-owned `release-metadata` command; select the intended Git revision and channel. The locked group must provide the project-owned `package-artifacts` command; retained distribution bytes require configured content-store publication. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
-The selected locked project/group must provide the commands used by the chosen Goons. The project supplies `release-metadata`; choose its channel and revision explicitly. The project supplies `package-artifacts`; retained bundle bytes require configured strict execution and content-store publication.
+**What to edit:** initialize a workflow, then set the registered target and relevant caller choices in `workflow/run.yml`. The illustrative addresses, revision and digest below must identify your real workload before execution. The [first-run guide](../../../README.md) explains repository registration and prepared CLI use.
 
-## Use this Plan
+**Settings owner:** [`plan.yml`](plan.yml) owns ordered imports; imported Goons own input types/defaults, Steps, effects and outputs. `run.yml` selects values. Native project tools keep their own configuration.
 
 ```sh
-oh-goon templates show python/release-candidate --kind plan
-oh-goon plan inputs templates/plans/python/release-candidate/plan.yml
+oh-goon templates init python/release-candidate --output ./workflow
 ```
 
-Copy with `oh-goon templates show python/release-candidate --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
-
-## Configure a copy
-
-The Plan routes `project` and `dependency_group` to metadata, quality and packaging because they are shared names. Their schemas and defaults stay in the Goons. Other unique public inputs are exposed automatically.
-
-Save these choices as `values.yml`. Omitted optional inputs keep their Goon defaults; native project configuration still owns test and lint policy.
+Edit the generated `workflow/run.yml`; this shows one explicit selection:
 
 ```yaml
+version: 1
+source: {kind: catalog-plan, name: python/release-candidate}
+target: {repository_id: REPOSITORY_ID}
 inputs:
+  project: .
+  dependency_group: dev
+  typechecker: ty
   release_channel: production
   revision: abc1234
-  typechecker: ty
 ```
-
-Validate and lock the same selection:
 
 ```sh
-oh-goon plan validate plan.yml --inputs-file values.yml
-oh-goon lock plan.yml --inputs-file values.yml
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
 ```
 
-Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.
+**Expected outputs:** Release metadata, JUnit evidence, retained distribution bundle and package manifest. Building uses the project’s existing version.
 
+**Failures:** invalid inputs fail before work. Inspection/validation do not prove installed tools, reachable services or successful effects. Native failures remain failed Steps with their exit status and logs. A changed source or execution selection requires a new lock.
 
-## Project release policy
-
-The project owns its release-metadata and packaging commands. Metadata outputs describe candidate values; this Plan does not change the committed project version. Adapt the project command when your release policy needs different behavior.
+**Customize:** change caller values in `run.yml`. For structural changes, create a project Plan with ordinary ordered `goons:` imports and select it with `source: {kind: file-plan, path: plan.yml}`; see [Plan authoring](../../README.md). Keep secrets in declared execution environment bindings.

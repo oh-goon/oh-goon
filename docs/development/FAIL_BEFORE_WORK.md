@@ -31,18 +31,18 @@ runtime-only failures remain runtime failures
 
 ### Read-only authoring before runtime
 
-`oh-goon plan validate` compiles the Plan using the same canonical
+`oh-goon config validate run.yml` compiles the Plan using the same canonical
 `FleetPlanResolver` used for execution, without initializing the local
 application database, Run journal or executor. This is read-only authoring
 feedback and is **not** Enforcer admission, host preparation, physical LACE
-qualification or permission to execute. `plan run` continues to use the
+qualification or permission to execute. `run run.yml` continues to use the
 canonical stateful Fleet admission path; validation neither creates nor
 silently repairs the execution environment. A failed validation does not
 create `goon.lock` or run workload commands.
 
 ### Run output is presentation, not new execution authority
 
-`oh-goon plan run --json` reports the single existing Fleet Run submission and
+`oh-goon run run.yml --json` reports the single existing Fleet Run submission and
 waited terminal facts. It does not reclassify outcomes, mint admission, start an
 alternative executor, infer native custody, or promote a JSON success to APP
 certification. Per-invocation progress-to-stderr selection keeps the machine

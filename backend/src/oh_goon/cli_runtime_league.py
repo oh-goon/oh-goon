@@ -4,9 +4,7 @@ import argparse
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_plan_inputs import plan_inputs
-from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
-from oh_goon.core.models.run import FailedFleetRun
-from oh_goon.core.vocabulary import FleetRunOutcome
+from oh_goon.core.errors import FleetDomainError
 
 
 def run_league_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int | None:
@@ -50,8 +48,6 @@ def run_league_command(runtime: ApplicationRuntime, args: argparse.Namespace) ->
 
     if args.command != "team":
         return None
-    if args.team_command == "run":
-        return _run_team(runtime, args)
     if args.team_command != "validate":
         return 2
     try:
@@ -72,61 +68,11 @@ def run_league_command(runtime: ApplicationRuntime, args: argparse.Namespace) ->
     return 0
 
 
-def _run_team(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
-    admitted = None
-    try:
-        team = runtime.league.configured_team(args.repository)
-        admitted = runtime.goon.run(
-            args.repository,
-            expected_pipeline_sha256=team.pipeline.sha256,
-            inputs=plan_inputs(args),
-            fleet_run_id=args.fleet_run_id,
-            requested_priority=args.priority,
-        )
-        if not args.as_json:
-            print(f"Fleet Run ID: {admitted.fleet_run_id}")
-            print("Status: admitted — waiting for Final Whistle")
-        detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
-    except KeyboardInterrupt:
-        if admitted is None:
-            print("Local run interrupted before admission.")
-            return 130
-        try:
-            runtime.runs.cancel(admitted.fleet_run_id)
-            detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
-            print(f"Cancellation requested: {detail.run.fleet_run_id}")
-            print(f"Status: {detail.run.status.value}")
-        except FleetDomainError as exc:
-            print(f"Cancellation could not be confirmed: {exc}")
-        return 130
-    except (FleetDomainError, ValueError) as exc:
-        print(str(exc))
-        return 2
-    if args.as_json:
-        print(detail.model_dump_json(indent=2))
-    else:
-        print(f"Requested from: {args.repository.expanduser().resolve()}")
-        print("Entrypoint: goon.yml")
-        print(f"Status: {detail.run.status.value}")
-        print(f"Outcome: {detail.outcome.value}")
-        if isinstance(detail.run, FailedFleetRun):
-            failure = detail.run.failure
-            print(f"Failure: {failure.code} stage={failure.stage.value}")
-            print(f"Reason: {failure.message}")
-            print(f"Inspect: oh-goon dev explain-run {detail.run.fleet_run_id}")
-    return 0 if detail.outcome is FleetRunOutcome.SUCCESS else 1
-
-
 def _run_shared_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     try:
         if args.shared_plan_command in {"list", "templates", "history", "from-template", "save"}:
             return _shared_plan_catalog_command(runtime, args)
-        repository_ids = _shared_plan_repository_ids(runtime, args)
-        if args.shared_plan_command == "preview":
-            return _preview_shared_plan(runtime, args, repository_ids)
-        if args.shared_plan_command != "run":
-            return 2
-        return _run_shared_plan(runtime, args, repository_ids)
+        return 2
     except (FleetDomainError, OSError, UnicodeError, ValueError) as exc:
         print(str(exc))
         return 2
@@ -201,95 +147,6 @@ def _shared_plan_catalog_command(runtime: ApplicationRuntime, args: argparse.Nam
     print(f"Saved: {document.plan_key}/plan.yml")
     print(f"SHA-256: {document.sha256}")
     return 0
-
-
-def _preview_shared_plan(
-    runtime: ApplicationRuntime,
-    args: argparse.Namespace,
-    repository_ids: set[str],
-) -> int:
-    preview = runtime.shared_plan.preview(
-        args.plan_key,
-        repository_ids=repository_ids,
-        inputs=plan_inputs(args),
-    )
-    if args.as_json:
-        print(preview.model_dump_json(indent=2))
-        return 0 if preview.blocked_count == 0 else 1
-    print(f"Shared Plan plan.yml: {preview.plan_key}")
-    print(f"Plan SHA-256: {preview.sha256}")
-    print(f"Ready Teams: {preview.ready_count}")
-    print(f"Blocked Teams: {preview.blocked_count}")
-    for team in preview.teams:
-        if team.state == "READY":
-            print(f"  READY   {team.repository.name} plan_id={team.preview.plan_id}")
-        else:
-            print(f"  BLOCKED {team.repository.name}: {team.reason}")
-    return 0 if preview.blocked_count == 0 else 1
-
-
-def _run_shared_plan(
-    runtime: ApplicationRuntime,
-    args: argparse.Namespace,
-    repository_ids: set[str],
-) -> int:
-    admitted = None
-    try:
-        inputs = plan_inputs(args)
-        preview = runtime.shared_plan.preview(
-            args.plan_key, repository_ids=repository_ids, inputs=inputs
-        )
-        if preview.blocked_count:
-            raise FleetPlanInvalid(
-                f"Shared Plan preview blocked {preview.blocked_count} selected Team(s); resolve the reported blockers before execution"
-            )
-        admitted = runtime.shared_plan.run(
-            args.plan_key,
-            repository_ids=repository_ids,
-            inputs=inputs,
-            fleet_run_id=args.fleet_run_id,
-            requested_priority=args.priority,
-            expected_plan_id=preview.plan_id,
-            expected_execution_digest=preview.execution_digest,
-            expected_plan_revision=preview.sha256,
-            repository_instance_ids={
-                team.repository.repository_id: team.repository_instance_id for team in preview.teams
-            },
-        )
-        if not args.as_json:
-            print(f"Fleet Run ID: {admitted.fleet_run_id}")
-            print(f"Shared Plan plan.yml: {args.plan_key}")
-            print(f"Selected Teams: {len(repository_ids)}")
-            print("Repository goon.yml files: omitted for this run")
-        detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
-    except KeyboardInterrupt:
-        if admitted is None:
-            print("Shared Run interrupted before admission.")
-            return 130
-        try:
-            runtime.runs.cancel(admitted.fleet_run_id)
-            detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
-            print(f"Cancellation requested: {detail.run.fleet_run_id}")
-            print(f"Status: {detail.run.status.value}")
-        except FleetDomainError as exc:
-            print(f"Cancellation could not be confirmed: {exc}")
-        return 130
-    if args.as_json:
-        print(detail.model_dump_json(indent=2))
-    else:
-        print(f"Status: {detail.run.status.value}")
-        print(f"Outcome: {detail.outcome.value}")
-    return 0 if detail.outcome is FleetRunOutcome.SUCCESS else 1
-
-
-def _shared_plan_repository_ids(runtime: ApplicationRuntime, args: argparse.Namespace) -> set[str]:
-    if getattr(args, "all_teams", False):
-        return runtime.shared_plan.all_repository_ids()
-    lineup_key = getattr(args, "lineup_key", None)
-    if lineup_key:
-        return runtime.lineups.repository_ids(lineup_key)
-    teams = tuple(getattr(args, "teams", None) or ())
-    return runtime.shared_plan.repository_ids(teams)
 
 
 def _run_lineup_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:

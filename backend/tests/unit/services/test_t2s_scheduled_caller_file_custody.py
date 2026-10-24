@@ -8,7 +8,6 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from oh_goon.cli_plan_input_files import read_caller_input_file
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.caller_input_file import ScheduledCallerFileReceipt
 from oh_goon.core.models.target import FleetPlanTarget
@@ -16,14 +15,18 @@ from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.services.fleet_caller_file_freshness import require_target_caller_file_fresh
 from oh_goon.services.fleet_plans import FleetPlanService
+from oh_goon.services.run_configuration import load_run_configuration
 from oh_goon.services.schedule_admission import _admission_plan
 from tests.factories.schedules import schedule_create
 
 
 def _fresh(tmp_path: Path, content="inputs:\n  coverage_threshold: 85\n"):
-    source = tmp_path / "staging.yml"
-    source.write_text(content)
-    identity = read_caller_input_file(source, root=tmp_path).authority()
+    source = tmp_path / "run.yml"
+    source.write_text(
+        "version: 1\nsource: {kind: catalog-plan, name: python/quality}\n"
+        "target: {repository_id: selected-repository}\n" + content
+    )
+    identity = load_run_configuration(source).authority()
     return source, identity
 
 
@@ -59,7 +62,7 @@ def test_scheduled_receipt_only_references_frozen_plan_and_no_caller_root(tmp_pa
     receipt = target.scheduled_caller_file
     assert receipt is not None and receipt.sha256 == identity.sha256
     assert receipt.execution_digest == target.execution_digest
-    assert receipt.relative_path == "staging.yml"
+    assert receipt.relative_path == "run.yml"
     assert "caller_root" not in target.model_dump_json()
     assert "85" not in receipt.model_dump_json()
     assert FleetPlanTarget.model_validate_json(target.model_dump_json()) == target
@@ -131,7 +134,7 @@ def test_target_receipt_fails_on_forged_execution_digest_dual_source_or_invalid_
         )
 
 
-def test_legacy_schedule_target_wire_identity_is_unchanged():
+def test_schedule_target_without_caller_source_round_trips():
     target = schedule_create().target
     encoded = target.model_dump_json()
     assert "scheduled_caller_file" not in encoded
@@ -208,7 +211,11 @@ def test_schedule_create_reschedule_cas_and_changed_file_do_not_reselect_without
     with pytest.raises(FleetPlanInvalid):
         service.reschedule(Path("plan.yml"), caller_input_file=original_identity, **opts)
     assert definitions.get("daily") == first
-    new_identity = read_caller_input_file(source, root=tmp_path).authority()
+    source.write_text(
+        "version: 1\nsource: {kind: catalog-plan, name: python/quality}\n"
+        "target: {repository_id: selected-repository}\ninputs: {coverage_threshold: 86}\n"
+    )
+    new_identity = load_run_configuration(source).authority()
     second = service.reschedule(Path("plan.yml"), caller_input_file=new_identity, **opts)
     assert second.record_version == 1
     assert second.target.scheduled_caller_file.sha256 == new_identity.sha256

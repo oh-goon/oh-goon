@@ -2,16 +2,17 @@
 
 Build one OCI archive, publish that workspace explicitly, then copy the archive to a digest-qualified registry reference through Fleet's typed publisher. Credentials are named host-backed env sources used only to create an attempt-private auth file. No mutable tag is created.
 
-## Use this Goon
+**Status:** runnable with prerequisites. **Effects:** Builds an image then publishes the exact producer workspace by digest.
 
-```sh
-oh-goon templates show oci/publish-image --kind goon
-oh-goon plan inputs templates/goons/oci/publish-image/goon.yml
-```
+**Prerequisites:** A compatible isolated builder, selected base-pull registry and separate destination publication registry with declared host credentials.
 
-Use `goons: [oci/publish-image]` in a Plan to keep the Goon defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed values, renamed inputs or producer references; route shared names explicitly with `pass:`/`with:`. A Composite Goon declares which child inputs it exposes. The [authoring guide](../../../README.md) shows values files, explicit local sources and how to append Steps to your own Atomic Goon.
+**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
 
-Prepare the selected OCI execution provider and registry access before execution. Base-image pull and destination publication registries are independent inputs. Credentials use the declared host-backed environment sources, never values files. Inspect digest/workspace outputs through the Run; publishing and retained bytes require their configured owners.
+**Expected outputs:** `OCI_DIGEST` and `OCI_REFERENCE`; the base registry is not inferred as the destination.
+
+**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
+
+**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
 
 ## Contract
 

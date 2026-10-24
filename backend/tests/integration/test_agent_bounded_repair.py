@@ -325,48 +325,16 @@ def test_repair_budget_cannot_be_reused_through_generic_rerun(tmp_path, monkeypa
         runtime.shutdown(wait_for_runs=True)
 
 
-def test_cli_runs_the_bounded_loop_and_reports_native_run_truth(tmp_path, monkeypatch, capsys):
-    import json
+def test_removed_single_file_repair_cli_refuses_before_native_work(tmp_path, monkeypatch):
+    from oh_goon.cli import main
 
-    from oh_goon.cli_parser import build_parser
-    from oh_goon.cli_runtime_plans import run_plan_command
-
-    plan, repo, options, _, _ = _repair_case(tmp_path, monkeypatch)
-    argv = [
-        "plan",
-        "run",
-        str(plan),
-        "--repository-id",
-        repository_id(repo),
-        "--standard-local",
-        "--wait",
-        "--json",
-        "--repair-attempts",
-        "2",
-        "--repair-timeout",
-        "30",
-        "--repair-step-timeout",
-        "10",
-        "--agent-repository-root",
-        str(options["agent_repository_root"]),
-        "--agent-skill-root",
-        str(options["agent_skill_root"]),
-        "--allow-agent-acceptance",
-        "review",
-    ]
-    for name, value in options["inputs"].items():
-        argv += ["--input", f"{name}={value}"]
-    runtime = ApplicationRuntime.build(standard_local=True)
-    try:
-        runtime.locations.add(repo.parent.parent)
-        assert run_plan_command(runtime, build_parser().parse_args(argv)) == 0
-        receipt = json.loads(capsys.readouterr().out)
-        assert receipt["schema"] == "oh-goon.agent-repair-result/v1"
-        assert receipt["stop_reason"] == "test_passed"
-        assert len(receipt["attempts"]) == len(receipt["admitted_run_ids"]) == 2
-        assert all(attempt["game_tape_status"] != "PASSED" for attempt in receipt["attempts"])
-    finally:
-        runtime.shutdown(wait_for_runs=True)
+    plan, repo, _, _, _ = _repair_case(tmp_path, monkeypatch)
+    before = (repo / "code.txt").read_bytes()
+    with pytest.raises(SystemExit) as error:
+        main(["plan", "run", str(plan), "--repair-attempts", "2"])
+    assert error.value.code == 2
+    assert (repo / "code.txt").read_bytes() == before
+    assert not (tmp_path / "calls").exists()
 
 
 def test_model_cannot_expand_the_operator_selected_write_path(tmp_path, monkeypatch):
@@ -404,22 +372,31 @@ def test_model_cannot_expand_the_operator_selected_write_path(tmp_path, monkeypa
         runtime.shutdown(wait_for_runs=True)
 
 
-def test_installed_cli_executes_operator_owned_goon_in_a_real_process(tmp_path, monkeypatch):
+def test_installed_cli_executes_selected_repository_goon_in_a_real_process(tmp_path, monkeypatch):
     import json
 
-    _, repo, options, _, _ = _repair_case(tmp_path, monkeypatch)
-    goon = tmp_path / "goon.yml"
-    goon.write_text(
-        "execution: {purpose: verification}\n"
-        + (tmp_path / "goons/agent/search/goon.yml").read_text()
+    import yaml
+
+    _, repo, _, _, _ = _repair_case(tmp_path, monkeypatch)
+    (repo / "goon.yml").write_text(
+        "execution: {purpose: verification}\nsteps:\n- run: printf from-native-config-cli\n"
     )
-    _lock(goon, options)
+    config = tmp_path / "run.yml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "repository-goon"},
+                "target": {"repository_id": repository_id(repo)},
+            }
+        )
+    )
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent.parent)
     finally:
         runtime.shutdown(wait_for_runs=True)
-    argv = [
+    prefix = [
         "uv",
         "run",
         "--project",
@@ -428,35 +405,32 @@ def test_installed_cli_executes_operator_owned_goon_in_a_real_process(tmp_path, 
         "--frozen",
         "--no-sync",
         "oh-goon",
-        "plan",
-        "run",
-        str(goon),
-        "--standard-local",
-        "--wait",
-        "--json",
-        "--repository-id",
-        repository_id(repo),
-        "--repair-attempts",
-        "2",
-        "--repair-timeout",
-        "30",
-        "--repair-step-timeout",
-        "10",
-        "--agent-repository-root",
-        str(options["agent_repository_root"]),
-        "--agent-skill-root",
-        str(options["agent_skill_root"]),
-        "--allow-agent-acceptance",
-        "review",
     ]
-    for name, value in options["inputs"].items():
-        argv += ["--input", f"{name}={value}"]
-    completed = subprocess.run(argv, capture_output=True, text=True, timeout=45, check=False)
+    locked = subprocess.run(
+        [*prefix, "lock", str(config)], capture_output=True, text=True, timeout=30, check=False
+    )
+    assert locked.returncode == 0, locked.stdout + locked.stderr
+    completed = subprocess.run(
+        [*prefix, "run", str(config), "--json"],
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+    )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     receipt = json.loads(completed.stdout)
-    assert receipt["stop_reason"] == "test_passed"
-    assert len(receipt["admitted_run_ids"]) == 2
-    assert (repo / "code.txt").read_text() == "final repaired content\n"
+    assert receipt["status"] == "COMPLETED"
+    assert receipt["outcome"] == "SUCCESS"
+    reopened = ApplicationRuntime.build(standard_local=True)
+    try:
+        detail = reopened.runs.get(receipt["fleet_run_id"])
+        assert detail.run.target.source.kind == "team_goon"
+        step = detail.operations[0].evidence.plan.steps[0]
+        assert step.returncode == 0
+        assert step.stdout_evidence.sha256 == hashlib.sha256(b"from-native-config-cli").hexdigest()
+        assert detail.game_tape.status.value == "PASSED"
+    finally:
+        reopened.shutdown(wait_for_runs=True)
 
 
 @pytest.mark.parametrize("readback", ["absent", "unknown"])

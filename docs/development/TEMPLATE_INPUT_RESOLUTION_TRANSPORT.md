@@ -9,9 +9,9 @@ canonical Fleet resolver/admission/executor. The catalog READMEs explain intent 
 
 | Boundary | One authority | What it decides / may carry | Must not do |
 | --- | --- | --- | --- |
-| Source selection | Repository `goon.yml` **or** selected Shared `plan.yml` | Exact mutually exclusive source and selected repository set | Merge sources or fall back to repository YAML in a Shared Run |
+| Source selection | Repository `goon.yml` **or** selected Shared `plan.yml` | One captured run.yml source selection and explicit registered target | Merge sources or fall back to repository YAML in a Shared Run |
 | Composition | `FleetPlanResolver` plus canonical catalog/source graph | Ordered Plan → imported Goons → Steps; imported paths, unique unbound Plan inputs, explicit `with:` edges (or import-local `pass:` compiled to the same edges), step/output reference identity | Broadcast shared names, invent schemas, synthesize Plan Steps, search aliases, re-resolve inside Steps |
-| Caller values | CLI caller-input collector and the same canonical input binder | Explicit `--input` values and a captured `--inputs-file`, with explicit CLI values winning over file values | Accept duplicate CLI/YAML names, retry an invalid final value through another source, or let the file define input schemas |
+| Caller values | Captured run.yml selection and the same canonical input binder | One scalar `inputs` mapping, without overlays or flag precedence | Accept duplicate YAML names, retry an invalid explicit value through another source, or let run.yml define input schemas |
 | Input source | `fleet_plan_input_resolution.resolve_input_sources` | First **defined** `from:` source: `env`, repository-contained `yaml`/`toml`/one-line `text`, or native Git fact | Run shell/expressions, infer missing values, copy secrets into input sources |
 | Contract | `core.fleet_plan_composition.bind_inputs` and owning Goon input definition | Validate/coerce the selected value, apply child's declared default **only when no source was defined**, reject unknown/missing/invalid inputs | Let Plan/README repeat or relax child schemas |
 | Admission | `FleetAdmissionPlanner` and `RUN_ADMITTED` receipt | Prove source subject, resolved Plan and repository requirements before effects | Run a probe Step to discover predictable invalid input/requirements |
@@ -136,77 +136,26 @@ For provenance of projected input definitions, see
 It never resolves current values, overrides Goon constraints, admits a run, or
 executes a Step. The input schema remains owned by the original Goon.
 
-## Caller-selected input files
+## One selected run configuration
 
-The Plan CLI accepts a caller-selected scalar mapping for diagnostic commands
-(`validate`, `prepare`, `preview`, `explain`, `check`, and `diff`) and for
-`run`, `schedule`, and `reschedule`. `--input name=value` and `--inputs-file`
-may be combined; the CLI value wins for overlapping names. Invalid explicit values fail at
-the original Goon binder; they do not fall back to `from:` or a default. For
-`diff`, the same mapping is supplied to both roots and each root's binder
-rejects any input it does not accept.
+The normal CLI selects one versioned `run.yml`; it captures the configuration
+bytes, contained path and file identity once. Its scalar `inputs` mapping feeds
+the original binder. The config does not copy child schemas or define a second
+value-resolution precedence. `config inspect`, `config validate`, `lock` and
+`run` consume that one selection. See the
+[configuration guide](TEMPLATE_INPUT_INSPECTION.md) for the supported grammar.
 
-After [development setup](../DEVELOPMENT.md), invoke the source CLI from the
-repository root:
+The target's freshness owner verifies the captured config identity at execution
+boundaries. A changed, missing, replaced or inaccessible file refuses before
+effects. The receiver consumes resolved authority rather than rereading the
+file into a new semantic decision. A captured filename/digest is provenance;
+it is not an imported-source-closure proof or admission.
 
-```yaml
-# values/staging.yml
-inputs:
-  typechecker: ty
-```
-
-```sh
-uv run --offline --frozen --no-sync --project backend oh-goon plan validate \
-  templates/plans/python/quality/plan.yml --inputs-file values/staging.yml
-```
-
-The invocation working directory is the sole caller-file containment root.
-The collector rejects traversal, symlink components, missing or nonregular
-files, and paths outside that root. YAML must contain one top-level `inputs`
-mapping, at most 64 unique canonical names, and at most 65,536 UTF-8 bytes.
-Values are scalar strings, integers, booleans, or null. Duplicate keys,
-aliases, anchors, merges, tags, expressions, nested mappings, and arrays are
-rejected. The file supplies values; the imported Goon still owns their types,
-defaults, and constraints. Inputs remain unsuitable for credentials.
-
-One read captures the parsed mapping and an immutable observation of its
-caller root, contained relative path, device/inode, and byte SHA-256. This is
-file provenance, not an imported-source-closure proof. `lock` uses the same collector. Direct Goon and Shared Plan command families do not acquire this CLI option; `plan inputs`
-inspects contracts and accepts no caller values.
-
-### Manual Run freshness
-
-`plan run --inputs-file` completes the existing Run ingress preflight before
-reading Plan source or the caller file. The resulting `FleetPlanTarget` carries
-the already resolved values and a `caller_input_file` identity containing the
-caller root, relative path, device/inode, and SHA-256, without copying file
-values into that identity.
-
-The existing Fleet source-freshness owner checks that exact file before and
-after target preparation, before admission, and in the queued worker before
-`RUN_STARTED` or effects. A changed, missing, replaced, or inaccessible file
-fails at that boundary; a remote or restarted worker cannot relocate it or
-reparse it into a new value choice. These are freshness checks at defined
-boundaries, not an atomic file lock across every Step. Values already frozen
-in an admitted target do not change retroactively.
-
-### Scheduled values and provenance
-
-`plan schedule` and `plan reschedule` accept the same input mapping at authoring
-time. After the original preparation and freshness checks,
-`FleetPlanService._prepare_scheduled_target` converts the live file identity
-to an immutable schedule-origin receipt bound to the prepared target execution
-digest. The receipt contains the relative filename and YAML-byte SHA-256;
-it omits the absolute caller root, inode, file bytes, and raw values.
-
-The existing SQLite Schedule definition retains both the resolved Plan and
-that receipt. Future occurrences copy them into the original Fleet Run and
-never reread the creator's file. Deleting or editing the file therefore does
-not change an accepted Schedule. Choosing new values requires an explicit
-`plan reschedule`, with the existing compare-and-swap and generation rules.
-A target cannot contain both the manual live-file identity and a frozen
-scheduled receipt. Targets created without an input file omit both optional
-source fields and retain their existing serialization.
+Service-owned Shared Plans and Schedules retain their distinct reviewed-source,
+execution-digest and generation contracts. Accepted Schedules freeze resolved
+values and source provenance rather than rereading a creator's config on every
+occurrence. Creating a new Schedule is a separate explicit operation; run.yml
+is not an iterator or scheduler.
 
 ## Routing presentation
 
@@ -217,8 +166,7 @@ on the resolved Plan. It records each input/environment name and occurrence,
 source digest and available YAML marks, selected origin, structural parent or
 producer edge, and external-source candidate outcomes. Missing, null and empty
 external candidates retain their existing fallthrough behavior. Candidates
-after the first defined source are `not_evaluated` without being read. CLI
-collection records CLI versus caller-file selection before the existing immutable
+after the first defined source are `not_evaluated` without being read. Selection capture records the run.yml origin before the existing immutable
 target is prepared; Schedules retain that selection without reopening the file.
 
 The Journal retains this metadata with the target in `RUN_ADMITTED`. It is outside
@@ -228,10 +176,9 @@ input may have no root YAML mark. The trace retains at most 4096 decisions and
 reports the omitted count without changing execution membership. Values,
 defaults, patterns, file contents and native argv are not copied into this trace.
 
-`plan validate --diagnostics [--json]` and `plan explain --diagnostics [--json]`
-return safe accepted/rejected authoring explanations without admission.
-Successful diagnostics say `resolved_not_executed`. Ordinary legacy explain and
-`--routes` retain their scopes. `plan tape RUN_ID [--json]` and
+`config inspect` and `config validate` return safe configuration and authoring
+explanations without admission. Their human and JSON output use the same captured
+selection and canonical owner projections. `plan tape RUN_ID [--json]` and
 `dev explain-run RUN_ID --json` expose retained configuration through Game Tape,
 without rereading source or resolving current values. Missing historical lineage
 is unavailable, not reconstructed.
@@ -240,24 +187,18 @@ This does not add a generic preflight, native feasibility probes, new input
 contracts or execution authority. Existing admission, preparation and native
 execution owners retain their decisions.
 
-`plan explain --routes [--json]` projects exact compiled import occurrences,
-active root-input recipient bindings and producer reference identities from
-**one existing resolved source cut**. The report exposes neither values nor
-Step results. Its root-file digest must not be treated as a source closure
-digest, and `resolved_not_executed` must not be treated as admission.
-Legacy `plan explain --json`, native resolver, caller-file custody, Fleet
-admission and runtime output binding semantics do not change. See
-[input routing](TEMPLATE_INPUT_INSPECTION.md#resolved-recipient-routing).
+Canonical input-routing projection preserves exact compiled import occurrences,
+active recipient bindings and producer references. It never reveals input values
+or Step results, and it never treats a root digest as closure or admission.
 
 ## Structured validation refusal
 
 The canonical input binder and projected contract materializer attach typed
-rejection metadata for safe opt-in `plan validate` and `plan explain`
-diagnostics. Presentation maps only those typed codes to user-readable next
+rejection metadata for safe configuration diagnostics. Presentation maps only those typed codes to user-readable next
 actions; arbitrary exceptions become a generic refusal without raw source
 paths or values. This changes no input precedence, Run preparation, resolution
 snapshot, or admission authority. See
-[safe rejection diagnostics](TEMPLATE_INPUT_INSPECTION.md#safe-rejection-diagnostics).
+[configuration reporting](TEMPLATE_INPUT_INSPECTION.md#one-human-and-json-report).
 
 ## Explicit local Goon sources
 

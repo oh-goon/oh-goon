@@ -113,22 +113,32 @@ Both modes resolve into the same immutable execution representation and then use
 
 Choose folders in the UI to discover Git repositories. Every discovered Git root remains visible as a repository; missing or invalid `goon.yml` files are reported rather than silently skipped.
 
-Useful CLI equivalents:
+For normal CLI work, select one `run.yml`. Register the target repository in the
+UI first, then use its canonical repository ID in the generated file:
 
 ```bash
-oh-goon league scan
-oh-goon team validate /path/to/team
-oh-goon team run /path/to/team
-
-oh-goon shared-plan preview python-quality --team /path/to/api --team /path/to/worker
-oh-goon shared-plan run python-quality --team /path/to/api --team /path/to/worker
+oh-goon templates list --kind plan
+oh-goon templates init python/quality --output ./workflow
+# Edit workflow/run.yml: target.repository_id and relevant inputs.
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
 ```
 
-Preview is read-only. Execution always performs fresh resolution and admission at the effect boundary.
+Inspection is local and read-only. Validation proves the selected source and
+typed inputs; neither command grants permission or proves native prerequisites.
+Locking freezes execution identity, and Run admission checks freshness before
+effects. The [configuration guide](docs/development/TEMPLATE_INPUT_INSPECTION.md)
+explains the three source selections and their owners.
+
+This is a clean replacement of the former Plan-path plus input/agent flag
+assembly. Unsupported commands, old selection files and unknown schema versions
+are refused; there is no compatibility parser, conversion or fallback route.
 
 ## Plan → Goon → Step
 
-Oh Goon has one authoring model:
+`run.yml` selects a workflow and target; executable authoring stays in one model:
 
 ```text
 Plan

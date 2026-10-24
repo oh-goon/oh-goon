@@ -2,14 +2,17 @@
 
 Run a read-only Trivy filesystem vulnerability scan and retain its actual machine-readable report.
 
-## Use this Goon
+**Status:** runnable with prerequisites. **Effects:** Queries vulnerability data and writes the declared report.
 
-```sh
-oh-goon templates show security/trivy-audit --kind goon
-oh-goon plan inputs templates/goons/security/trivy-audit/goon.yml
-```
+**Prerequisites:** Installed native scanners and admitted declared online egress. Trivy report bytes require strict content-store publication.
 
-Use `goons: [security/trivy-audit]` in a Plan to keep the Goon defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed values, renamed inputs or producer references; route shared names explicitly with `pass:`/`with:`. A Composite Goon declares which child inputs it exposes. The [authoring guide](../../../README.md) shows values files, explicit local sources and how to append Steps to your own Atomic Goon.
+**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+
+**Expected outputs:** Native scanner status and the declared report; nonzero findings remain a failed Step.
+
+**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
+
+**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
 
 Install the selected native scanner and configure its declared online access. A nonzero vulnerability result remains a failure. Trivy’s retained report requires configured strict content-store publication; the package’s retention contract explains what can be retrieved.
 

@@ -1,6 +1,7 @@
-"""UX-C read-only Plan drafts through the ONE canonical compiler and source graph.
+"""Plan authoring through the canonical compiler and source graph.
 
-This module does not run Plans, save Plans, reread caller input files or admit work.
+Drafts stay in memory. Explicit initialization publishes a new workflow;
+neither operation runs Plans, rereads caller selections or admits effects.
 """
 
 from __future__ import annotations
@@ -8,23 +9,176 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_composition import coerce_input
+from oh_goon.core.models.fleet_plan import CompiledGoonImportStep
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.template_identity import template_classification, template_reference_allowed
 from oh_goon.integrations.fleet_plan_compilation import (
-    parse_fleet_yaml_document,
     parse_plan_template,
 )
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
-from oh_goon.services.fleet_plan_input_inspection import inspect_projected_inputs
+from oh_goon.services.fleet_plan_input_inspection import InputInspection, inspect_projected_inputs
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.template_plan_draft_comparison import compare_resolved_drafts
+
+
+def initialize_run_configuration(
+    key: str,
+    output: Path,
+    *,
+    reviewers: Sequence[tuple[str, str]] = (),
+) -> Path:
+    """Author one selection, optionally a normal Composite; never admit effects."""
+    import tempfile
+
+    from oh_goon.core.models.agent_providers import DEFAULT_NATIVE_AGENT_PROFILE
+    from oh_goon.core.models.fleet_plan import AgentPlanStep
+    from oh_goon.core.template_identity import TemplateClassification
+    from oh_goon.integrations.exact_file_write import (
+        prepared_text_file,
+        publish_new_text_tree,
+        replace_prepared_file,
+    )
+
+    selected = output.expanduser().absolute()
+    if ".." in output.parts:
+        raise FleetPlanInvalid("Output cannot contain parent-directory traversal")
+    for component in (selected, *selected.parents):
+        if component.is_symlink():
+            raise FleetPlanInvalid("Output cannot contain symlink components")
+    if selected.exists():
+        raise FleetPlanInvalid("Output already exists; choose a fresh destination")
+    if template_classification(key, kind="Plan") is TemplateClassification.INTERNAL_SELF_HOSTING:
+        raise FleetPlanInvalid("Internal Plans use their owning Make/certification command")
+    if reviewers and key != "agents/agentic-review-repair-loop":
+        raise FleetPlanInvalid("Reviewer authoring requires agents/agentic-review-repair-loop")
+    source = PlanTemplateStore().source(key)
+    goons = _FrozenGoonSources(GoonTemplateStore())
+    resolver = FleetPlanResolver(goon_templates=goons)
+    graph = resolver.analyze_source(source.path, compiled_overrides={source.path: source.compiled})
+    interface = inspect_projected_inputs(graph)
+    payload: dict[str, Any] = {
+        "version": 1,
+        "source": {"kind": "catalog-plan", "name": key},
+        "target": {"repository_id": "REPOSITORY_ID"},
+    }
+    required = {
+        item.definition.name: f"REQUIRED_{item.definition.name}"
+        for item in interface
+        if item.definition.required and item.definition.default is None
+    }
+    agent_steps = [
+        step
+        for owner, identifier in graph.agent_step_sources()
+        for step in graph.node(owner).compiled.steps
+        if isinstance(step, AgentPlanStep) and step.step_id == identifier
+    ]
+    phases: set[str] = set()
+
+    def collect_phases(owner: Path) -> None:
+        for step in graph.node(owner).compiled.steps:
+            if isinstance(step, CompiledGoonImportStep):
+                if step.phase is not None:
+                    phases.add(step.phase)
+                collect_phases(graph.goon(owner, step).path)
+
+    collect_phases(graph.root.path)
+    if graph.has_agent_source_contract():
+        required.pop("acceptance", None)
+        acceptance = next(
+            (item.definition.default for item in interface if item.definition.name == "acceptance"),
+            None,
+        )
+        selection = (
+            {"implementation": "pi", "profile": DEFAULT_NATIVE_AGENT_PROFILE}
+            if any(step.harness == "native" for step in agent_steps)
+            else {"model_profile": "REQUIRED_MODEL_PROFILE"}
+        )
+        payload["agent"] = {
+            **selection,
+            "acceptance": acceptance or "REQUIRED_ACCEPTANCE",
+            "repository_root": "/approved/repositories",
+            "skill_root": ".",
+        }
+    if required:
+        payload["inputs"] = required
+    if "repair" in phases:
+        payload["repair"] = {
+            "review_passes": 5,
+            "write_roots": ["REQUIRED_WRITE_ROOT"],
+            "timeout_seconds": 1800,
+            "step_timeout_seconds": 300,
+        }
+    files: dict[str, str] = {}
+    if reviewers:
+        files = _reviewer_workflow_files(goons, reviewers)
+        payload["source"] = {"kind": "file-plan", "path": "plan.yml"}
+    rendered = "# Select the registered target and replace REQUIRED values before validation.\n"
+    rendered += f"# Selected Plan source SHA-256: {source.sha256} (provenance, not a lock).\n"
+    files["run.yml"] = rendered + yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
+    # Staging is generator-owned execution scratch, independent of the chosen
+    # output path. Publication pins native directories before its first write.
+    with tempfile.TemporaryDirectory(prefix="oh-goon-workflow-") as temporary:
+        staging = Path(temporary)
+        for relative, content in files.items():
+            destination = staging / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with prepared_text_file(destination, content) as prepared:
+                replace_prepared_file(prepared, destination)
+        if reviewers:
+            resolver.analyze_source(staging / "plan.yml")
+        publish_new_text_tree(selected, files, commit_last="run.yml")
+    return selected / "run.yml"
+
+
+def _reviewer_workflow_files(
+    goons: _FrozenGoonSources, reviewers: Sequence[tuple[str, str]]
+) -> dict[str, str]:
+    """Replace authoring review edges; the original Composite owns all other phases."""
+    from oh_goon.integrations.fleet_plan_compilation import parse_goon_template
+
+    source = goons.source("agents/agentic-review-repair-loop")
+    original = source.document.payload
+    edges = original["goons"]
+    prototype = next(edge for edge in edges if edge.get("phase") == "review")
+    review = goons.source(prototype["import"])
+    skill = next(item for item in review.compiled.inputs if item.name == "skill")
+    aliases: set[str] = set()
+    selected: list[dict[str, Any]] = []
+    if len(reviewers) > 32:
+        raise FleetPlanInvalid("Reviewer authoring permits at most 32 explicit occurrences")
+    for alias, reference in reviewers:
+        if not alias or alias in aliases:
+            raise FleetPlanInvalid("Reviewer aliases must be nonempty and unique")
+        aliases.add(alias)
+        coerce_input(skill, reference, context="reviewer authoring")
+        selected.append({**prototype, "as": alias, "with": {"skill": reference}})
+    composite = {**original, "goons": selected + [e for e in edges if e.get("phase") != "review"]}
+    content = yaml.safe_dump(composite, sort_keys=False, allow_unicode=True)
+    parse_goon_template(
+        content, source="authored reviewer Composite", expected_name="review-repair"
+    )
+    plan = {
+        "version": 1,
+        "execution": {"purpose": "verification"},
+        "goons": [{"import": "agents/review-repair", "from": "goons"}],
+    }
+    return {
+        "goons/agents/review-repair/goon.yml": content,
+        "goons/agents/review-repair/README.md": (
+            "# agents/review-repair\n\n"
+            "Project-owned ordered reviewers and the canonical remaining repair phases.\n"
+            "Edit ordinary imports here; Skill sources remain in .goonskills.yml.\n"
+        ),
+        "plan.yml": yaml.safe_dump(plan, sort_keys=False),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +250,7 @@ def _edit(items: list[object], action: Mapping[str, Any]) -> None:
         raise FleetPlanInvalid("UX-C supports only add, replace, remove, move")
 
 
-def _values_yaml(values: Mapping[str, object], inspections: tuple) -> str:
+def _values_yaml(values: Mapping[str, object], inspections: tuple[InputInspection, ...]) -> str:
     definitions = {i.definition.name: i.definition for i in inspections}
     if len(values) > 64 or set(values) - set(definitions):
         raise FleetPlanInvalid("UX-C unknown caller value or more than 64 caller names")
@@ -106,7 +260,9 @@ def _values_yaml(values: Mapping[str, object], inspections: tuple) -> str:
             raise FleetPlanInvalid(f"UX-C caller value {name!r} must be scalar")
         if isinstance(value, str) and "${{" in value:
             raise FleetPlanInvalid("UX-C caller values cannot contain expressions")
-        typed[name] = coerce_input(definitions[name], value, context="UX-C draft")
+        typed[name] = coerce_input(
+            definitions[name], cast(PlanInputValue, value), context="UX-C draft"
+        )
     result = yaml.safe_dump({"inputs": typed}, allow_unicode=True, sort_keys=False)
     if len(result.encode("utf-8")) > 65536:
         raise FleetPlanInvalid("UX-C values draft exceeds caller-file limit")
@@ -131,7 +287,7 @@ def propose_plan(
         raise FleetPlanInvalid("UX-C stale Plan source; refresh original revision")
     if not isinstance(edits, (list, tuple)) or len(edits) > 64:
         raise FleetPlanInvalid("UX-C edits must be at most 64 operations")
-    original = parse_fleet_yaml_document(source.content, source=str(source.path)).payload
+    original = source.document.payload
     items = original.get("goons")
     if not isinstance(items, list):
         raise FleetPlanInvalid("UX-C original Plan has no ordered Goon list")
@@ -156,7 +312,11 @@ def propose_plan(
         plan_yaml, source="UX-C draft", expected_name=source.path.parent.name
     )
     owner_class = template_classification(key, kind="Plan")
+    proposed_imports: list[CompiledGoonImportStep] = []
     for step in compiled.steps:
+        if not isinstance(step, CompiledGoonImportStep):
+            raise FleetPlanInvalid("Plan authoring requires only ordered Goon imports")
+        proposed_imports.append(step)
         child_class = template_classification(step.goon, kind="Goon")
         if not template_reference_allowed(owner_class, child_class):
             raise FleetPlanInvalid(
@@ -192,9 +352,13 @@ def propose_plan(
         original_missing=original_missing,
         proposed_missing=bool(missing),
     )
-    old = [(s.step_id, s.goon) for s in source.compiled.steps]
-    new = [(s.step_id, s.goon) for s in compiled.steps]
-    imports = sorted({(s.goon, graph.goon(source.path, s).source_sha256) for s in compiled.steps})
+    old = []
+    for original_step in source.compiled.steps:
+        if not isinstance(original_step, CompiledGoonImportStep):
+            raise FleetPlanInvalid("Plan authoring requires only ordered Goon imports")
+        old.append((original_step.step_id, original_step.goon))
+    new = [(s.step_id, s.goon) for s in proposed_imports]
+    imports = sorted({(s.goon, graph.goon(source.path, s).source_sha256) for s in proposed_imports})
     change_classes: list[str] = []
     if hashlib.sha256(plan_yaml.encode()).hexdigest() != source.sha256:
         change_classes.append("source_changed")

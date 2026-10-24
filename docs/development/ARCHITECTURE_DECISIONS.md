@@ -216,4 +216,15 @@ Generated OpenAPI and frontend API files are checked-in contract source. The bac
 
 ## Plan, Goon and lock ownership
 
-`plan.yml` owns human-authored execution intent and ordered Goon selection. `goon.yml` owns executable behavior, composition, inputs and requirements. One canonical resolver produces the immutable resolved execution. `goon.lock` is only its compact deterministic fingerprint. Enforcer/admission owns whether it may run, executor performs the already-admitted identity, and Game Tape owns what actually happened.
+`run.yml` owns one explicit operator selection: existing source, registered target,
+scalar inputs and relevant agent/repair choices. It is captured once and normalized
+into the original invocation model; it never defines Steps, source overlays,
+credentials, native model metadata or stored consent. The former public
+Plan-path/input/root/agent flag assembly is removed without compatibility readers.
+`plan.yml` owns human-authored execution intent and ordered Goon selection.
+`goon.yml` owns executable behavior, composition, inputs and requirements. One
+canonical resolver produces the immutable resolved execution. `goon.lock` is only
+its compact deterministic fingerprint. Enforcer/admission owns whether it may run,
+executor performs the already-admitted identity, and Game Tape owns what actually
+happened. Internal certification/release retain their owner-controlled frontdoors
+and state-owned locks; they are not alternate normal configuration routes.

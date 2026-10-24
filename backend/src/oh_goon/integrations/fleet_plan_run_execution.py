@@ -26,6 +26,7 @@ from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.path_authority import StrictHostPathAuthority, canonical_path
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
@@ -206,9 +207,13 @@ class FleetPlanRunExecutor:
         agent_delivery_for: Callable[[str, str], bytes] | None = None,
         execution_limits: FleetPlanRunLimits | None = None,
         repair_context: AgentRepairContext | None = None,
+        execution_target: FleetPlanTarget | None = None,
     ) -> PlanExecutionOutcome:
         """Execute one already-preflighted direct plan through live host authority."""
 
+        if execution_target is not None:
+            if execution_target.plan != plan:
+                raise FleetPlanInvalid("Admitted execution target differs from the selected Plan")
         if plan.execution.purpose is ExecutionPurpose.CICD:
             raise FleetPlanInvalid("Strict CI/CD plans require execute_strict_run")
         runtime = self._step_runtime(
@@ -225,7 +230,9 @@ class FleetPlanRunExecutor:
             runtime,
             git=self.git_for_plan(repository, plan, termination_requested=termination_requested),
             execution_policy=plan.execution,
-            execution_identity=ExecutionIdentity(digest=build_execution_lock(plan).digest),
+            execution_identity=execution_target.identity
+            if execution_target is not None
+            else ExecutionIdentity(digest=build_execution_lock(plan).digest),
             native_profile=plan.native_agent,
         )
         sequence = FleetPlanStepSequence(repository, runtime, output_observer)

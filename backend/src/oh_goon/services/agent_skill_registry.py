@@ -1,4 +1,4 @@
-"""One adjacent YAML registry: local aliases and grouped native Git sources."""
+"""One selected Skill-root registry: local aliases and grouped native Git sources."""
 
 from __future__ import annotations
 
@@ -163,7 +163,7 @@ def _add_alias(aliases: dict[str, str], name: object, reference: str) -> None:
 
 @contextmanager
 def original_skill_aliases(
-    plan_path: Path,
+    skill_root: Path,
     explicit_aliases: Mapping[str, str] | None,
     *,
     locked_sources: tuple[LockedSkillSource, ...] | None = None,
@@ -175,13 +175,7 @@ def original_skill_aliases(
     if isinstance(explicit_aliases, FrozenSkillRegistry):
         yield explicit_aliases
         return
-    if locked_sources is None and not update_sources:
-        from oh_goon.services.execution_lock_persistence import LOCK_FILE_NAME, load_execution_lock
-
-        lock_path = plan_path.parent / LOCK_FILE_NAME
-        if lock_path.exists():
-            locked_sources = load_execution_lock(lock_path).skill_sources
-    path = plan_path.parent / REGISTRY_FILE_NAME
+    path = skill_root / REGISTRY_FILE_NAME
     if not os.path.lexists(path):
         if locked_sources:
             raise FleetPlanInvalid(

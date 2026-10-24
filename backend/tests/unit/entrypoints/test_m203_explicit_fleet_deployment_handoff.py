@@ -6,16 +6,21 @@ import pytest
 
 from oh_goon import cli
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
+from oh_goon.runtime.plan_templates import PlanTemplateStore
 from tests.unit.services.test_group_a_fleet_provisioning_authority import provisioned
 
+INTERNAL_PLAN = str(PlanTemplateStore().root / "oh-goon/app-certification/plan.yml")
 PLAN_ARGS = [
-    "plan",
-    "run",
-    "nonexistent-plan.yml",
+    "dev",
+    "_run-plan",
+    INTERNAL_PLAN,
     "--repository-id",
     "repo-1",
     "--fleet-run-id",
     "durable-run",
+    "--lock-file",
+    "goon.lock",
+    "--strict",
 ]
 
 
@@ -66,7 +71,16 @@ def test_wrong_run_enrollment_blocks_before_any_runtime_or_plan_read(
 ):
     provisioner = deployment_provisioner
     _guard_before_work(monkeypatch)
-    args = ["plan", "run", "missing.yml", "--repository-id", "repo-1"]
+    args = [
+        "dev",
+        "_run-plan",
+        INTERNAL_PLAN,
+        "--repository-id",
+        "repo-1",
+        "--lock-file",
+        "goon.lock",
+        "--strict",
+    ]
     if run_id is not None:
         args.extend(["--fleet-run-id", run_id])
     with pytest.raises(TrustProtocolError, match="(not explicitly provisioned|identity required)"):
@@ -79,9 +93,9 @@ def test_wrong_run_enrollment_blocks_before_any_runtime_or_plan_read(
         ["serve"],
         ["start"],
         ["self", "certify", "--plan"],
-        ["plan", "validate", "missing.yml"],
-        ["plan", "prepare", "missing.yml"],
-        ["plan", "preview", "missing.yml", "repo-1"],
+        ["config", "inspect", "missing.yml"],
+        ["config", "validate", "missing.yml"],
+        ["lock", "missing.yml"],
     ],
 )
 def test_deployment_handoff_cannot_be_ignored_or_leak_to_other_commands(
@@ -89,7 +103,7 @@ def test_deployment_handoff_cannot_be_ignored_or_leak_to_other_commands(
 ):
     provisioner = deployment_provisioner
     _guard_before_work(monkeypatch)
-    with pytest.raises(TrustProtocolError, match="only valid for plan run"):
+    with pytest.raises(TrustProtocolError):
         cli.main(args, fleet_provisioner=provisioner)
 
 
@@ -116,5 +130,7 @@ def test_ordinary_shell_cli_cannot_read_environment_as_provisioner(monkeypatch):
         ),
     )
     monkeypatch.setattr(cli, "_execute_stateful_command", lambda _runtime, _args: 2)
-    assert cli.main(PLAN_ARGS) == 2
+    shell_args = [item for item in PLAN_ARGS if item != "--strict"]
+    shell_args.append("--standard-local")
+    assert cli.main(shell_args) == 2
     assert observed == ["standard-local"]

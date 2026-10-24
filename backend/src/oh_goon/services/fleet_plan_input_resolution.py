@@ -35,6 +35,7 @@ class InputResolutionContext:
     repository: Path | None = None
     environment: Mapping[str, str] | None = None
     git: GitService = GitService()
+    observe_environment: bool = True
 
 
 def resolve_input_sources(
@@ -76,13 +77,24 @@ def _resolve_source(
     input_name: str,
 ) -> tuple[bool, PlanInputValue, str, Literal["missing", "null", "empty", "selected"]]:
     if isinstance(source, EnvInputSource):
+        if not context.observe_environment:
+            raise FleetPlanInputRejected(
+                "Environment-backed input was not observed by read-only inspection",
+                diagnostic_code="EXTERNAL_INPUT_NOT_OBSERVED",
+                input_names=(input_name,),
+            )
         environment = context.environment
         if environment is None:
             return False, None, f"env:{source.name}", "missing"
-        value = environment.get(source.name)
-        if value is None or value == "":
-            return False, None, f"env:{source.name}", "missing" if value is None else "empty"
-        return True, value, f"env:{source.name}", "selected"
+        environment_value = environment.get(source.name)
+        if environment_value is None or environment_value == "":
+            return (
+                False,
+                None,
+                f"env:{source.name}",
+                "missing" if environment_value is None else "empty",
+            )
+        return True, environment_value, f"env:{source.name}", "selected"
 
     if isinstance(source, YamlInputSource):
         repository = _require_repository(context, input_name=input_name, source="yaml")

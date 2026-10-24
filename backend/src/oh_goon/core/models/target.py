@@ -5,7 +5,10 @@ from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.execution_lock_identity import (
+    build_execution_lock,
+    canonical_external_identities,
+)
 from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.caller_input_file import (
@@ -16,6 +19,7 @@ from oh_goon.core.models.execution_identity import (
     ExecutionIdentity,
     ResolvedExecutionReference,
 )
+from oh_goon.core.models.execution_lock_models import LockedExternalArtifact
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedLocalSearchAgentStep
 from oh_goon.core.models.goon_plan_source import FleetPlanSource
 from oh_goon.core.vocabulary import MigrationMode, UvRecipeId
@@ -67,6 +71,9 @@ class FleetPlanTarget(ImmutableModel):
     plan: ResolvedFleetPlan
     source: FleetPlanSource
     identity: ExecutionIdentity
+    lock_artifacts: tuple[LockedExternalArtifact, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
     agent_deliveries: tuple[AgentStepDeliveryReference, ...] = ()
     agent_repair: AgentRepairContext | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -78,13 +85,27 @@ class FleetPlanTarget(ImmutableModel):
         default=None, exclude_if=lambda value: value is None
     )
 
+    @field_validator("lock_artifacts")
+    @classmethod
+    def normalize_lock_artifacts(
+        cls, value: tuple[LockedExternalArtifact, ...]
+    ) -> tuple[LockedExternalArtifact, ...]:
+        return canonical_external_identities(value)
+
     @model_validator(mode="after")
     def validate_execution_identity(self) -> FleetPlanTarget:
-        expected = build_execution_lock(self.plan).digest
+        expected = build_execution_lock(self.plan, external_identities=self.lock_artifacts).digest
         if self.identity.digest != expected:
             raise ValueError(
                 "Fleet Plan execution identity does not match the resolved Plan semantics"
             )
+        caller_file = self.caller_input_file or self.scheduled_caller_file
+        if self.lock_artifacts and caller_file is not None:
+            matching = [
+                item for item in self.lock_artifacts if item.path == caller_file.relative_path
+            ]
+            if len(matching) != 1 or matching[0].digest != f"sha256:{caller_file.sha256}":
+                raise ValueError("Caller source does not match the locked external artifact")
         configuration = self.plan.configuration
         if configuration is not None:
             caller_file = self.caller_input_file or self.scheduled_caller_file

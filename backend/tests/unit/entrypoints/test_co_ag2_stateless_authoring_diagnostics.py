@@ -30,39 +30,6 @@ def _resolver() -> FleetPlanResolver:
     return FleetPlanResolver(goon_templates=GoonTemplateStore())
 
 
-def test_explain_matches_original_owner_without_database(monkeypatch, capsys):
-    _without_runtime(monkeypatch)
-    source = _quality()
-    expected = _resolver().explain(source)
-    assert main(["plan", "explain", str(source), "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == json.loads(expected.model_dump_json())
-
-
-def test_routes_preserves_original_value_redaction_and_input_origin(monkeypatch, capsys, tmp_path):
-    _without_runtime(monkeypatch)
-    source = _quality()
-    file = tmp_path / "inputs.yml"
-    file.write_text("inputs:\n  typechecker: ty\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    assert (
-        main(["plan", "explain", str(source), "--routes", "--json", "--inputs-file", "inputs.yml"])
-        == 0
-    )
-    routed = json.loads(capsys.readouterr().out)
-    assert routed["schema"] == "oh-goon.plan-input-routing/v1"
-    assert routed["status"] == "resolved_not_executed"
-    assert (
-        next(item for item in routed["inputs"] if item["name"] == "typechecker")["origin"]["kind"]
-        == "inputs_file"
-    )
-    assert (
-        next(item for item in routed["inputs"] if item["name"] == "typechecker")["origin"]["path"]
-        == "inputs.yml"
-    )
-    assert all("value" not in item for item in routed["bindings"])
-    assert not (tmp_path / "goon.lock").exists()
-
-
 def test_diff_matches_single_original_semantic_projection_without_database(monkeypatch, capsys):
     _without_runtime(monkeypatch)
     before = _quality()
@@ -72,31 +39,6 @@ def test_diff_matches_single_original_semantic_projection_without_database(monke
     actual = json.loads(capsys.readouterr().out)
     assert actual == json.loads(expected.model_dump_json())
     assert actual["before_plan_id"] != actual["after_plan_id"]
-
-
-def test_explain_diagnostic_rejects_bad_input_without_runtime_or_secret_echo(monkeypatch, capsys):
-    _without_runtime(monkeypatch)
-    private = "SENSITIVE_VALUE_DO_NOT_PRINT"
-    assert (
-        main(
-            [
-                "plan",
-                "explain",
-                str(_quality()),
-                "--routes",
-                "--diagnostics",
-                "--json",
-                "--input",
-                f"unknown={private}",
-            ]
-        )
-        == 2
-    )
-    raw = capsys.readouterr().out
-    result = json.loads(raw)
-    assert result["status"] == "rejected"
-    assert result["execution"] == "not_started_by_diagnostic"
-    assert private not in raw
 
 
 def test_diff_rejects_invalid_plan_without_runtime_or_lock_write(monkeypatch, capsys, tmp_path):

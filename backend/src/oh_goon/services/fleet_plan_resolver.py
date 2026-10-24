@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from dataclasses import replace
 from functools import cache
 from pathlib import Path
@@ -117,6 +117,8 @@ class FleetPlanResolver:
         inputs: dict[str, PlanInputValue] | None = None,
         repository: Path | None = None,
         environment: Mapping[str, str] | None = None,
+        resolved_inputs: dict[str, PlanInputValue] | None = None,
+        observe_environment: bool = True,
     ) -> ResolvedFleetPlan:
         plan, _, _ = self._resolve_graph(
             source_graph,
@@ -125,6 +127,8 @@ class FleetPlanResolver:
             trace=None,
             repository=repository,
             environment=environment,
+            resolved_inputs=resolved_inputs,
+            observe_environment=observe_environment,
         )
         return plan
 
@@ -142,6 +146,8 @@ class FleetPlanResolver:
         connection: AgentConnectionSelection | None = None,
         locked_skills: tuple[LockedSkillSource, ...] | None = None,
         update_skills: bool = False,
+        require_review_phases: bool | None = None,
+        source_graph: FleetPlanSourceGraph | None = None,
         native_agent: ResolvedNativeAgent | None = None,
         repository: Path | None = None,
         git_service: GitService | None = None,
@@ -168,20 +174,19 @@ class FleetPlanResolver:
             if native_agent is not None and native_agent.profile.codex_service is not None
             else ()
         )
-        graph = self.analyze_source(plan_path)
+        graph = source_graph if source_graph is not None else self.analyze_source(plan_path)
+        if graph.root.path != navigation_path(plan_path):
+            raise FleetPlanInvalid("Captured source graph differs from the selected Plan")
+        graph.validate_agent_selection(
+            native_selected=native_agent is not None, require_review_phases=require_review_phases
+        )
         source_sha = graph.root.source_sha256
         if source_sha is None:
             raise FleetPlanInvalid("Agent Plan source fingerprint is unavailable")
         graph_identity = graph.immutable_source_closure_identity()
-        aliases_context = original_skill_aliases(
-            graph.root.path,
-            None,
-            locked_sources=locked_skills,
-            update_sources=update_skills,
-            cancel_requested=cancel_requested,
-            native_workspace=repository if native_agent is not None else None,
-        )
-        with aliases_context as aliases:
+        with ExitStack() as owned_sources:
+            aliases: Mapping[str, str] | None = None
+            aliases_loaded = False
             if callable(connection):
                 connection = cache(connection)
             deliveries: dict[str, FrozenAgentStepHandoff] = {}
@@ -195,7 +200,7 @@ class FleetPlanResolver:
                 definitions: tuple[PlanInputDefinition, ...],
                 values: dict[str, PlanInputValue],
             ) -> FrozenAgentStepHandoff:
-                nonlocal repository_reference
+                nonlocal repository_reference, aliases, aliases_loaded
                 if cancel_requested is not None and cancel_requested():
                     raise OperationCancelledError("Agent source capture cancelled")
                 old = previous.get(occurrence) if previous is not None else None
@@ -210,6 +215,20 @@ class FleetPlanResolver:
                     require_agent_step_handoff(
                         step, old, owner_source_sha256=graph.node(owner).source_sha256
                     )
+                if not aliases_loaded:
+                    # Root and child bindings have already passed through the
+                    # canonical resolver before source acquisition is possible.
+                    aliases = owned_sources.enter_context(
+                        original_skill_aliases(
+                            skill_root,
+                            None,
+                            locked_sources=locked_skills,
+                            update_sources=update_skills,
+                            cancel_requested=cancel_requested,
+                            native_workspace=repository if native_agent is not None else None,
+                        )
+                    )
+                    aliases_loaded = True
                 source = capture_agent_sources(
                     definitions,
                     values,
@@ -254,7 +273,9 @@ class FleetPlanResolver:
                 native_agent=native_agent,
                 repository=repository,
                 input_git_service=git_service,
-                skill_sources=aliases.pins if isinstance(aliases, FrozenSkillRegistry) else (),
+                skill_sources=lambda: aliases.pins
+                if isinstance(aliases, FrozenSkillRegistry)
+                else (),
             )
             if not deliveries or (previous is not None and deliveries.keys() != previous.keys()):
                 raise FleetPlanInvalid("Agent delivery membership is incomplete")
@@ -272,6 +293,7 @@ class FleetPlanResolver:
         handoff: "FrozenAgentStepHandoff | None" = None,
         cancel_requested: Callable[[], bool] | None = None,
         locked_skills: tuple[LockedSkillSource, ...] | None = None,
+        source_graph: FleetPlanSourceGraph | None = None,
     ) -> tuple[ResolvedFleetPlan, "FrozenAgentStepHandoff", str]:
         """One original source graph, immutable packet, original typed pipeline.
 
@@ -283,7 +305,9 @@ class FleetPlanResolver:
 
         if cancel_requested is not None and cancel_requested():
             raise OperationCancelledError("Agent source capture cancelled")
-        graph = self.analyze_source(plan_path)
+        graph = source_graph if source_graph is not None else self.analyze_source(plan_path)
+        if graph.root.path != navigation_path(plan_path):
+            raise FleetPlanInvalid("Captured source graph belongs to a different selected source")
         matches = graph.agent_step_sources()
         if len(matches) != 1 or graph.root.source_sha256 is None:
             raise FleetPlanInvalid("standard-local Agent requires exactly one original Agent Step")
@@ -307,7 +331,7 @@ class FleetPlanResolver:
             nullcontext(None)
             if handoff is not None
             else original_skill_aliases(
-                graph.root.path,
+                skill_root,
                 None,
                 locked_sources=locked_skills,
                 cancel_requested=cancel_requested,
@@ -755,7 +779,7 @@ class FleetPlanResolver:
             source_graph.root.path,
         )
         values = bind_inputs(compiled, inputs, context=str(plan_path))
-        with original_skill_aliases(source_graph.root.path, skill_aliases) as aliases:
+        with original_skill_aliases(skill_root, skill_aliases) as aliases:
             return explain_agent_sources(
                 compiled.inputs,
                 values,
@@ -824,7 +848,7 @@ class FleetPlanResolver:
         )
         values = bind_inputs(compiled, inputs, context=str(source_graph.root.path))
         with original_skill_aliases(
-            source_graph.root.path,
+            skill_root,
             skill_aliases,
             locked_sources=locked_skills,
             cancel_requested=cancel_requested,
@@ -908,9 +932,12 @@ class FleetPlanResolver:
         agent_owner_path: Path | None = None,
         agent_capture: AgentCapture | None = None,
         agent_connection: AgentConnectionSelection | None = None,
-        skill_sources: tuple[LockedSkillSource, ...] = (),
+        skill_sources: tuple[LockedSkillSource, ...]
+        | Callable[[], tuple[LockedSkillSource, ...]] = (),
         native_agent: ResolvedNativeAgent | None = None,
         input_git_service: GitService | None = None,
+        resolved_inputs: dict[str, PlanInputValue] | None = None,
+        observe_environment: bool = True,
     ) -> tuple[ResolvedFleetPlan, Path, str | None]:
         plan_path = source_graph.root.path
         plan_root = source_graph.containment_root
@@ -948,6 +975,7 @@ class FleetPlanResolver:
                 repository=repository,
                 environment=(os.environ if environment is None else environment),
                 git=input_git_service or self._git_service,
+                observe_environment=observe_environment,
             ),
         )
         # AG-01 is only a prework source inspection contract. Enabling typed
@@ -959,6 +987,8 @@ class FleetPlanResolver:
                     "Run/Step admission, LACE and disclosure gates are not qualified"
                 )
         input_values = bind_inputs(compiled, inputs or {}, context=str(plan_path))
+        if resolved_inputs is not None:
+            resolved_inputs.update(input_values)
         if agent_handoff is not None:
             from oh_goon.services.agent_authoring_sources import agent_source_references
 
@@ -996,7 +1026,7 @@ class FleetPlanResolver:
                 imports=scope.imports,
                 steps=steps,
                 step_sources=scope.step_sources,
-                skill_sources=skill_sources,
+                skill_sources=skill_sources() if callable(skill_sources) else skill_sources,
                 configuration=context.diagnostics.evidence(),
                 native_agent=native_agent,
             )

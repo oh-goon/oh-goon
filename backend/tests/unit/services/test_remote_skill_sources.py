@@ -6,6 +6,7 @@ import subprocess
 import pytest
 import yaml
 
+from oh_goon.cli_configuration import prepare_configuration
 from oh_goon.cli_lock import run_stateless_lock
 from oh_goon.cli_parser import build_parser
 from oh_goon.core.errors import FleetPlanInvalid
@@ -191,6 +192,10 @@ def test_native_registry_transports_workspace_fence_before_pinned_acquisition(
     )
 
     resolver, path, remote, _, options = case(tmp_path, monkeypatch)
+    goon = path.parent / "goons/agent/review/goon.yml"
+    goon.write_text(
+        goon.read_text().replace("harness: local-search", "harness: native\n  role: review")
+    )
     selected = ResolvedNativeAgent(
         agent="pi",
         profile_name="isolated",
@@ -217,7 +222,9 @@ def test_branch_advances_only_on_explicit_update_and_cache_miss_keeps_pin(tmp_pa
     for cache_miss in (False, True):
         if cache_miss:
             shutil.rmtree(skill_source_cache())
-        current, captured, _ = resolver.resolve_frozen_agents(path, **options)
+        current, captured, _ = resolver.resolve_frozen_agents(
+            path, locked_skills=original.skill_sources, **options
+        )
         verify_execution_lock(original, build_execution_lock(current))
         assert current.skill_sources[0].commit == commit
         assert captured == handoffs
@@ -268,36 +275,51 @@ def test_changed_declaration_fails_before_acquisition_with_existing_lock(
 
     monkeypatch.setattr(GitService, "run", unavailable)
     with pytest.raises(FleetPlanInvalid, match="Skill"):
-        resolver.resolve_frozen_agents(path, **options)
+        resolver.resolve_frozen_agents(path, locked_skills=plan.skill_sources, **options)
 
 
 def test_failed_refresh_preserves_lock_and_cleans_partial_checkout(tmp_path, monkeypatch, capsys):
     _, path, remote, _, options = case(tmp_path, monkeypatch)
     # The CLI uses the shipped catalogue; keep the same authored Goon locally.
     path.write_text("goons:\n- import: agent/review\n  from: goons\n  with: {skill: team/review}\n")
-    flags = [
-        "lock",
-        str(path),
-        "--input",
-        "repo=local:product",
-        "--input",
-        "acceptance=review",
-        "--agent-repository-root",
-        str(options["repository_root"]),
-        "--agent-skill-root",
-        str(path.parent),
-        "--allow-agent-acceptance",
-        "review",
-    ]
+    from oh_goon.core.models.repository import RepositoryIdentity
+
+    product = options["repository_root"] / "product"
+    (product / ".git").mkdir()
+    league = tmp_path / "league.yml"
+    league.write_text(yaml.safe_dump({"version": 1, "folders": [str(product)]}))
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    selection = path.parent / "run.yml"
+    selection.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "file-plan", "path": "plan.yml"},
+                "target": {"repository_id": RepositoryIdentity(path=product).repository_id},
+                "inputs": {"repo": "local:product"},
+                "agent": {
+                    "model_profile": "fixture",
+                    "acceptance": "review",
+                    "repository_root": str(options["repository_root"]),
+                    "skill_root": ".",
+                },
+            }
+        )
+    )
+    flags = ["lock", str(selection)]
     parser = build_parser()
-    assert run_stateless_lock(parser.parse_args(flags)) == 0
+    args = parser.parse_args(flags)
+    prepare_configuration(args)
+    assert run_stateless_lock(args) == 0
     lock = (path.parent / "goon.lock").read_bytes()
     git(remote, "branch", "-m", "moved")
-    assert run_stateless_lock(parser.parse_args(flags + ["--update-skills"])) == 2
+    args = parser.parse_args(flags + ["--update-skills"])
+    prepare_configuration(args)
+    assert run_stateless_lock(args) == 2
     assert (path.parent / "goon.lock").read_bytes() == lock
     diagnostic = capsys.readouterr().out
-    assert "Skill source 'team' at 'main'" in diagnostic
-    assert "Git fetch failed" in diagnostic
+    assert "PLAN_RESOLUTION_REJECTED" in diagnostic
+    assert str(remote) not in diagnostic
     repository = next(skill_source_cache().glob("*.git"))
     assert not (repository / "worktrees").exists()
 
@@ -313,7 +335,7 @@ def test_locked_commit_unavailable_never_falls_back_to_current_branch(tmp_path, 
     git(remote, "add", ".")
     git(remote, "commit", "-qm", "replacement")
     with pytest.raises(FleetPlanInvalid, match="Git"):
-        resolver.resolve_frozen_agents(path, **options)
+        resolver.resolve_frozen_agents(path, locked_skills=plan.skill_sources, **options)
     assert not tuple(skill_source_cache().glob("*.git"))
 
 
@@ -391,3 +413,37 @@ def test_failed_capture_closes_native_worktree(tmp_path, monkeypatch, failure):
     repository = next(skill_source_cache().glob("*.git"))
     assert not (repository / "worktrees").exists()
     assert not (path.parent / "goon.lock").exists()
+
+
+def test_explicit_skill_root_does_not_discover_an_unselected_lock(tmp_path, monkeypatch):
+    resolver, path, _, commit, options = case(tmp_path, monkeypatch)
+    (options["skill_root"] / "goon.lock").write_text("unselected ambient lock bytes\n")
+    plan, _, _ = resolver.resolve_frozen_agents(path, **options)
+    assert plan.skill_sources[0].commit == commit
+
+
+@pytest.mark.parametrize("invalid", ["missing", "invalid", "unknown"])
+def test_caller_rejections_precede_remote_skill_acquisition(tmp_path, monkeypatch, invalid):
+    import oh_goon.services.agent_skill_registry as registry
+
+    resolver, path, _, _, options = case(tmp_path, monkeypatch)
+    # A real valid Git/registry/source-capture baseline proves the rejected
+    # mutations are the caller contract rather than an unusable fixture.
+    baseline, deliveries, _ = resolver.resolve_frozen_agents(path, **options)
+    assert len(baseline.skill_sources) == 1
+    assert len(deliveries) == 2
+    inputs = dict(options["inputs"])
+    if invalid == "missing":
+        inputs.pop("repo")
+    elif invalid == "invalid":
+        inputs["acceptance"] = True
+    else:
+        inputs["unknown_caller"] = "not-selected"
+    options["inputs"] = inputs
+
+    def acquire(*args, **kwargs):
+        pytest.fail("invalid caller inputs reached remote Skill acquisition")
+
+    monkeypatch.setattr(registry, "prepare_skill_source", acquire)
+    with pytest.raises(FleetPlanInvalid):
+        resolver.resolve_frozen_agents(path, **options)

@@ -421,13 +421,6 @@ def _fail_bootstrap(
     return 2
 
 
-def _plan_input_args(inputs: dict[str, str]) -> list[str]:
-    args: list[str] = []
-    for key in sorted(inputs):
-        args.extend(["--input", f"{key}={inputs[key]}"])
-    return args
-
-
 def _plan_lock_path(lock_root: Path, plan: str) -> Path:
     """Return the isolated certification lock owned for one canonical Plan."""
     return lock_root / f"{Path(plan).parent.name}.goon.lock"
@@ -443,7 +436,8 @@ def _run_plan(
     deployment_plan_run: Callable[[list[str], dict[str, str]], tuple[int, str]] | None = None,
     deployment_context_guard: Callable[[dict[str, str]], str | None] | None = None,
 ) -> tuple[int, str]:
-    input_args = _plan_input_args(inputs or {})
+    if inputs:
+        return 2, "Internal certification and release Plans accept no caller inputs"
     lock_path = _plan_lock_path(lock_root, plan)
     if deployment_plan_run is not None:
         # Deployment APP has no user inputs. Reject these before League discovery
@@ -456,7 +450,7 @@ def _run_plan(
             return 2, failure
     bootstrap_commands = (
         ["league", "add-folder", str(ROOT)],
-        ["lock", plan, *input_args, "--output", str(lock_path)],
+        ["dev", "_lock-plan", plan, "--output", str(lock_path)],
     )
     for command in bootstrap_commands:
         result = _backend_cli(command, env=env)
@@ -466,12 +460,11 @@ def _run_plan(
             return result.returncode, output
 
     plan_args = [
-        "plan",
-        "run",
+        "dev",
+        "_run-plan",
         plan,
         "--repository-id",
         repo_id,
-        *input_args,
         "--lock-file",
         str(lock_path),
         "--wait",
@@ -559,8 +552,8 @@ def _run_self_plan(
     if deployment_plan_run is not None:
         deployment_owner = deployment_plan_run
         expected_args = [
-            "plan",
-            "run",
+            "dev",
+            "_run-plan",
             APP_PLAN,
             "--repository-id",
             repo_id,

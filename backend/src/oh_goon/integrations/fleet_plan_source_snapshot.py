@@ -13,6 +13,7 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import CompiledExecutionTemplate
 from oh_goon.core.template_identity import catalog_template_name
 from oh_goon.integrations.fleet_plan_compilation import (
+    ParsedFleetYamlDocument,
     compile_goon_document,
     compile_plan_document,
     parse_fleet_yaml_document,
@@ -36,6 +37,7 @@ class FleetPlanSourceSnapshot:
     sha256: str
     compiled: CompiledExecutionTemplate
     step_positions: Mapping[str, FleetPlanStepPosition]
+    document: ParsedFleetYamlDocument
     value_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
 
 
@@ -68,6 +70,7 @@ def read_fleet_plan_source(
         sha256=hashlib.sha256(raw).hexdigest(),
         compiled=compiled,
         step_positions=MappingProxyType(_step_positions(document.root, compiled)),
+        document=document,
         value_positions=MappingProxyType(_value_positions(document.root, compiled)),
     )
 

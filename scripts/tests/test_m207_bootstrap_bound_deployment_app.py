@@ -35,7 +35,7 @@ def test_deployment_app_rejects_extra_inputs_before_league_and_lock(
         deployment_context_guard=record_deployment_context_guard,
         deployment_plan_run=lambda *_a: pytest.fail("APP workload called"),
     )
-    assert rc == 2 and "without inputs" in why
+    assert rc == 2 and "no caller inputs" in why
     assert seen == []
 
 
@@ -61,8 +61,8 @@ def test_deployment_callback_binds_exact_bootstrap_repo_and_lock(
     ) -> tuple[int, str]:
         assert deployment_plan_run is not None
         original = [
-            "plan",
-            "run",
+            "dev",
+            "_run-plan",
             workflow.APP_PLAN,
             "--repository-id",
             "repo-a",
@@ -135,7 +135,7 @@ def test_false_callback_success_cannot_bypass_persisted_app_pass(
     assert "APP CERTIFICATION PASSED" not in capsys.readouterr().out
 
 
-def test_non_deployment_plan_with_inputs_preserves_existing_behavior(
+def test_internal_plan_with_inputs_refuses_before_lock_or_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands = []
@@ -157,5 +157,5 @@ def test_non_deployment_plan_with_inputs_preserves_existing_behavior(
         lock_root=Path("/state/locks"),
         inputs={"test": "input"},
     )
-    assert rc == 0
-    assert "--input" in commands[1]
+    assert rc == 2
+    assert commands == []

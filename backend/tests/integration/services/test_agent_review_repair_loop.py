@@ -14,7 +14,8 @@ import pytest
 import yaml
 
 from oh_goon.application import ApplicationRuntime
-from oh_goon.cli_lock import run_stateless_lock
+from oh_goon.cli import main
+from oh_goon.cli_configuration import prepare_configuration
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.execution_lock_identity import build_execution_lock
@@ -48,10 +49,7 @@ def installed_cli(monkeypatch):
     monkeypatch.setenv("PATH", str(cli.parent) + os.pathsep + os.environ.get("PATH", ""))
 
 
-@pytest.mark.parametrize("profile_flags", [[], ["--agent-model-profile", "review"]])
-def test_single_review_uses_normal_lock_and_run_without_loop_limits(
-    tmp_path, monkeypatch, capsys, profile_flags
-):
+def test_single_review_uses_normal_lock_and_run_without_loop_limits(tmp_path, monkeypatch, capsys):
     observed = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -100,38 +98,36 @@ model = "synthetic/reviewer"
             monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "database.sqlite"))
             monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
             monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-            selection = [
-                "--input",
-                "repo=local:repo",
-                "--agent-repository-root",
-                str(options["repository_root"]),
-                "--agent-skill-root",
-                str(tmp_path),
-                "--allow-agent-acceptance",
-                "agentic-review",
-                "--agent-providers-file",
-                str(providers),
-                *profile_flags,
-            ]
+            monkeypatch.setenv("OH_GOON_PROVIDERS_FILE", str(providers))
+            league = tmp_path / "league.yml"
+            league.write_text(yaml.safe_dump({"version": 1, "folders": [str(repo.parent)]}))
+            monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+            configuration = tmp_path / "run.yml"
+            configuration.write_text(
+                yaml.safe_dump(
+                    {
+                        "version": 1,
+                        "source": {"kind": "file-plan", "path": "plan.yml"},
+                        "target": {"repository_id": repository_id(repo)},
+                        "inputs": {"repo": "local:repo"},
+                        "agent": {
+                            "model_profile": "review",
+                            "acceptance": "agentic-review",
+                            "repository_root": str(options["repository_root"]),
+                            "skill_root": ".",
+                        },
+                    }
+                )
+            )
             parser = build_parser()
-            assert run_stateless_lock(parser.parse_args(["lock", str(path), *selection])) == 0
+            assert main(["lock", str(configuration)]) == 0
             capsys.readouterr()
             runtime = ApplicationRuntime.build(standard_local=True)
             try:
                 runtime.locations.add(repo.parent)
-                args = parser.parse_args(
-                    [
-                        "plan",
-                        "run",
-                        str(path),
-                        "--repository-id",
-                        repository_id(repo),
-                        "--standard-local",
-                        "--wait",
-                        "--json",
-                        *selection,
-                    ]
-                )
+                args = parser.parse_args(["run", str(configuration), "--json"])
+                prepare_configuration(args)
+                args.command, args.plan_command = "plan", "run"
                 assert run_plan_command(runtime, args) == 0
                 receipt = json.loads(capsys.readouterr().out)
                 detail = runtime.runs.get(receipt["fleet_run_id"])
@@ -809,8 +805,39 @@ def test_protected_native_campaign_keeps_exact_phase_scope_through_real_apply(
             monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
             monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
             monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-            plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
-            execution_lock = build_execution_lock(plan)
+            from oh_goon.services.run_configuration import load_run_configuration
+
+            configuration = tmp_path / "run.yml"
+            configuration.write_text(
+                yaml.safe_dump(
+                    {
+                        "version": 1,
+                        "source": {"kind": "file-plan", "path": "plan.yml"},
+                        "target": {"repository_id": repository_id(repo)},
+                        "inputs": options["inputs"],
+                        "agent": {
+                            "implementation": selected.agent,
+                            "profile": selected.profile_name,
+                            "acceptance": "agentic-review",
+                            "repository_root": str(options["repository_root"]),
+                            "skill_root": ".",
+                        },
+                        "repair": {
+                            "review_passes": 2,
+                            "write_roots": ["src", "tests"],
+                            "timeout_seconds": 180,
+                            "step_timeout_seconds": 30,
+                        },
+                    }
+                )
+            )
+            snapshot = load_run_configuration(configuration)
+            options["inputs"] = snapshot.inputs
+            graph = resolver.analyze_source(path)
+            plan, handoffs, _ = resolver.resolve_frozen_agents(path, source_graph=graph, **options)
+            execution_lock = build_execution_lock(
+                plan, external_artifacts=snapshot.external_artifacts()
+            )
             write_execution_lock(path.parent / "goon.lock", execution_lock)
             lock_before = (path.parent / "goon.lock").read_bytes()
             runner = native_profile_command_runner(
@@ -827,16 +854,19 @@ def test_protected_native_campaign_keeps_exact_phase_scope_through_real_apply(
                 result = runtime.plans.repair(
                     path,
                     repository_id=repository_id(repo),
-                    budget=AgentRepairBudget(
-                        max_attempts=2, timeout_seconds=180.0, step_timeout_seconds=30.0
-                    ),
+                    budget=snapshot.selection.repair.budget(),
                     inputs=options["inputs"],
                     agent_repository_root=options["repository_root"],
                     agent_skill_root=options["skill_root"],
                     allowed_agent_acceptance=options["allowed_acceptance"],
-                    review_write_roots=("src", "tests"),
+                    review_write_roots=snapshot.selection.repair.write_roots,
                     native_agent=selected,
                     native_workspace=repo,
+                    repository=repo,
+                    source_graph=graph,
+                    lock_path=snapshot.lock_path,
+                    external_artifacts=snapshot.external_artifacts(),
+                    caller_input_file=snapshot.authority(),
                 )
                 assert result.stop_reason.value == "converged", result.message
                 assert len(observed) == 10
@@ -847,6 +877,8 @@ def test_protected_native_campaign_keeps_exact_phase_scope_through_real_apply(
                 proposal_outputs: tuple[str, ...] | None = None
                 for index, detail in enumerate(result.attempts):
                     assert isinstance(detail.run.target, FleetPlanTarget)
+                    assert detail.run.target.lock_artifacts == execution_lock.external
+                    assert detail.run.target.caller_input_file == snapshot.authority()
                     context = detail.run.target.agent_repair
                     assert context is not None and context.phase is not None
                     phases.append(context.phase)

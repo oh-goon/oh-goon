@@ -51,15 +51,15 @@ def test_app_test_runner_owns_bootstrap_not_goon_order() -> None:
     assert "oh_goon.runtime." not in runner
     assert "observe_local_executor_capacity" not in runner
     assert '"league", "add-folder"' in runner
-    assert '["lock", plan, *input_args, "--output", str(lock_path)]' in runner
+    assert '["dev", "_lock-plan", plan, "--output", str(lock_path)]' in runner
     assert '"--lock-file",' in runner
     assert any(
         isinstance(node, (ast.List, ast.Tuple))
         and len(node.elts) >= 3
         and [ast.dump(item) for item in node.elts[:3]]
         == [
-            ast.dump(ast.Constant(value="plan")),
-            ast.dump(ast.Constant(value="run")),
+            ast.dump(ast.Constant(value="dev")),
+            ast.dump(ast.Constant(value="_run-plan")),
             ast.dump(ast.Name(id="plan", ctx=ast.Load())),
         ]
         for node in ast.walk(ast.parse(runner))

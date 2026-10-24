@@ -487,26 +487,54 @@ def test_native_plan_run_reuses_frozen_cli_selection_and_original_run_owner(
     )
     load = Mock(wraps=load_agent_providers)
     monkeypatch.setattr("oh_goon.cli_ai.load_agent_providers", load)
-    argv = [
-        "plan",
-        "run",
-        str(native_cli.workspace / "goon.yml"),
-        "--repository-id",
-        "selected",
-        "--native-agent",
-        "pi",
-        "--native-workspace",
-        str(native_cli.workspace),
-        "--agent-providers-file",
-        str(native_cli.config),
-        "--agent-repository-root",
-        str(native_cli.workspace.parent),
-        "--agent-skill-root",
-        str(native_cli.workspace.parent),
-        "--allow-agent-acceptance",
-        "native",
-        "--json",
-    ]
+    import yaml
+
+    from oh_goon.core.models.repository import RepositoryIdentity
+
+    root = native_cli.workspace.parent
+    league = root / "league.yml"
+    league.write_text(yaml.safe_dump({"version": 1, "folders": [str(native_cli.workspace)]}))
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_PROVIDERS_FILE", str(native_cli.config))
+    skill = root / "skills/task"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Task\nInspect the selected project.\n")
+    (native_cli.workspace / "goon.yml").write_text("""version: 1
+inputs:
+  repo: {type: repository_reference}
+  skill: {type: skill_reference}
+  acceptance: {type: acceptance_profile}
+steps:
+- uses: agent
+  harness: native
+  task: inspect this project
+  requested_effects:
+    repository_access: read_only
+    recipients: [host]
+""")
+    config = root / "run.yml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "repository-goon"},
+                "target": {
+                    "repository_id": RepositoryIdentity.model_validate(
+                        {"path": native_cli.workspace}
+                    ).repository_id
+                },
+                "inputs": {"repo": "local:project", "skill": "local:skills/task"},
+                "agent": {
+                    "implementation": "pi",
+                    "profile": "isolated",
+                    "acceptance": "native",
+                    "repository_root": str(root),
+                    "skill_root": ".",
+                },
+            }
+        )
+    )
+    argv = ["run", str(config), "--json"]
     assert main(argv) == 0
     load.assert_called_once_with(native_cli.config)
     call = native_cli.runtime.plans.run.call_args.kwargs
@@ -541,28 +569,38 @@ steps:
 
     capture = Mock(wraps=capture_agent_sources)
     monkeypatch.setattr("oh_goon.services.agent_authoring_sources.capture_agent_sources", capture)
-    argv = [
-        "lock",
-        str(recipe),
-        "--native-agent",
-        "pi",
-        "--native-workspace",
-        str(native_cli.workspace),
-        "--agent-providers-file",
-        str(native_cli.config),
-        "--agent-repository-root",
-        str(root),
-        "--agent-skill-root",
-        str(root),
-        "--allow-agent-acceptance",
-        "native",
-        "--input",
-        "repo=local:project",
-        "--input",
-        "skill=local:skills/task",
-        "--input",
-        "acceptance=native",
-    ]
+    import yaml
+
+    from oh_goon.core.models.repository import RepositoryIdentity
+
+    league = root / "league.yml"
+    league.write_text(yaml.safe_dump({"version": 1, "folders": [str(native_cli.workspace)]}))
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_PROVIDERS_FILE", str(native_cli.config))
+    recipe.rename(native_cli.workspace / "goon.yml")
+    config = root / "run.yml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "repository-goon"},
+                "target": {
+                    "repository_id": RepositoryIdentity.model_validate(
+                        {"path": native_cli.workspace}
+                    ).repository_id
+                },
+                "inputs": {"repo": "local:project", "skill": "local:skills/task"},
+                "agent": {
+                    "implementation": "pi",
+                    "profile": "isolated",
+                    "acceptance": "native",
+                    "repository_root": str(root),
+                    "skill_root": ".",
+                },
+            }
+        )
+    )
+    argv = ["lock", str(config)]
     assert main(argv) == 0
     capture.assert_called_once()
     before = load_execution_lock(root / "goon.lock").digest

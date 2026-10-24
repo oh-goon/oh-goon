@@ -44,8 +44,7 @@ or partially classified phases fail before work. Ordinary unclassified Plans
 retain their existing execution behavior.
 
 For a single provider review, import `agents/review` without `phase:`, bind its
-`skill` and use the normal `lock` / `plan run` commands
-with matching source roots, acceptance and provider flags. Review-pass and
+`skill` and use the normal `lock run.yml` / `run run.yml` commands with one matching config selection. Review-pass and
 repair-write limits apply only to loops. Adjudication and proposal Agents consume
 the preceding phases' admitted records and require the loop context.
 
@@ -92,8 +91,8 @@ bytes per replacement. Create targets use existing directories. Native command
 argument limits also apply to the selected write roots. These limits are checked
 before their responsible effect; an unavailable proof never becomes CLEAN.
 
-Use `--review-passes`, repeated `--repair-write-root`, `--repair-timeout` and
-`--repair-step-timeout` with the existing explicit standard-local invocation.
+Select `repair.review_passes`, `repair.write_roots`, `repair.timeout_seconds`
+and `repair.step_timeout_seconds` in the same `run.yml`.
 Five review passes permit at most four repairs, reserving fresh re-review.
 The existing bounded Fleet repair driver admits a distinct linked Run for
 each phase. It retains native outcomes, deadlines, cancellation, teardown,
@@ -111,7 +110,7 @@ native final verification on the same candidate and scope. The returned
 `converged` result is scoped workflow convergence, separate from APP
 certification. A failed verification remains its original failed Run.
 
-`plan run --review-passes ... --json` includes a structured `campaign` projection
+`oh-goon run run.yml --json` includes a structured `campaign` projection
 alongside its invocation receipt: linked Runs, source-bound review findings and
 adjudications, admitted candidates, repair output metadata, and selected/native
 verification results. Findings retain their originating Run and Step, source
@@ -250,7 +249,7 @@ or grant shell, network, or repository-write capabilities.
 | Failed-test feedback | An explicitly selected earlier command output can feed a later `local-model-skill-loop` Step. | The recipient remains read-only, and an earlier failed test keeps the Run failed. |
 | Automatic repair | A caller-bounded test → proposal → apply → retest sequence can repeat with fresh captures. | Each attempt is a separate original Fleet Run; native test results decide continuation. |
 
-Ordinary local execution defaults to `plan run` and uses the
+Ordinary local execution selects `oh-goon run run.yml` and uses the
 existing supervised host backend. This profile does not claim kernel sandbox
 isolation. Its supported workload, process cleanup, and output contracts are
 separate from optional high-security qualification. The
@@ -260,14 +259,16 @@ sets that product direction.
 Use the source CLI to inspect the exact options:
 
 ```bash
-uv run --offline --frozen --no-sync --project backend oh-goon plan run --help
+uv run --offline --frozen --no-sync --project backend oh-goon run --help
 uv run --offline --frozen --no-sync --project backend oh-goon lock --help
 ```
 
 ## Select a Skill
 
-Create `.goonskills.yml` next to the root Plan or Goon. Declare each remote
-collection once, then list the Skill directories you want:
+Create `.goonskills.yml` under the explicit `agent.skill_root`. Selecting `.`
+places it beside `run.yml`, including when the config selects a shipped Plan.
+That same root owns local Skill resources; there is no catalog-directory fallback.
+Declare each remote collection once, then list the Skill directories you want:
 
 ```yaml
 sources:
@@ -327,11 +328,12 @@ continues to be owned by agentsCookbook.
 | [Offline resources](../examples/agent-skill-offline/README.md) | Verify that a Skill, references, script resource, and asset survive source capture and relocation together. |
 | [Local search](../examples/agent-skill-local-search/README.md) | Demonstrate frozen-source preparation for the original fixed-string search Step. |
 
-Agent authoring binds the repository, Skill, and acceptance inputs explicitly.
-The execution CLI uses `--agent-repository-root`, `--agent-skill-root`, and
-`--allow-agent-acceptance`; normal resolution and `goon.lock` validation still
-apply. The `plan inputs --source-closure` command may prepare remote sources and uses
-`--repository-root`, `--skill-root`, and `--allow-acceptance` for source inspection.
+Agent authoring binds repository, Skill and acceptance inputs explicitly.
+Select implementation, profile, model profile, repository/Skill roots and
+acceptance in the relevant `agent` group of `run.yml`. The config supplies no
+native model metadata or private credentials. Normal `config inspect` remains
+local and cannot fetch remote Skill sources; explicit locking uses the original
+source capture owner. No stored selection grants fresh effect consent.
 
 ## Capture a repaired source for another attempt
 
@@ -363,7 +365,7 @@ the original Run lifecycle still owns execution and cancellation.
 
 ## Automatic bounded repair
 
-`FleetPlanService.repair` and `plan run --repair-attempts` execute an explicitly
+The internal `FleetPlanService.repair` service can execute an explicitly
 authorized four-Step workflow: native test, `local-model-proposal`, native
 `oh-goon agent apply`, and native retest. The operator selects the repository,
 Skill, model, tools and exact apply path in the existing Goon/Plan contract.
@@ -413,17 +415,11 @@ installations, the apply command may use
 `uv run --project /absolute/path/to/oh-goon/backend --offline --frozen --no-sync oh-goon agent apply ...`.
 The ordinary apply CLI owns path selection and source-digest validation.
 
-Review and author the initial lock with the normal `oh-goon lock` command and
-the same Agent inputs/roots. Then authorize the loop explicitly:
-
-```bash
-uv run --offline --frozen --no-sync --project backend oh-goon plan run /path/to/goon.yml \
-  --standard-local --wait --repository-id YOUR_REPOSITORY_ID \
-  --agent-repository-root /authorized/repos --agent-skill-root /authorized/skills \
-  --allow-agent-acceptance review \
-  --input repo=local:team/app --input skill=local:team/review --input acceptance=review \
-  --repair-attempts 3 --repair-timeout 120 --repair-step-timeout 30 --json
-```
+The normal public setup uses the shipped bounded review–repair Plan and a
+single `run.yml`; see its [example](../examples/agentic-review-repair-loop/README.md).
+The direct four-Step repair service described here retains its original explicit
+internal `AgentRepairBudget` contract. It is not a second public CLI configuration
+route.
 
 All three limits are required; there is no implicit repair budget. The attempt
 ceiling is 1–32. The deadlines travel with each admitted target and bound native

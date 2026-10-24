@@ -36,16 +36,19 @@ def build_execution_lock(
     plan: ResolvedFleetPlan,
     *,
     external_artifacts: Iterable[tuple[str, bytes]] = (),
+    external_identities: Iterable[LockedExternalArtifact] = (),
 ) -> ExecutionLock:
     """Project one resolved Plan into its compact canonical execution lock."""
     top_level = tuple(item for item in plan.imports if item.parent_import_id is None)
     goons = tuple(LockedGoon(goon=item.name, digest=_goon_digest(plan, item)) for item in top_level)
-    external = tuple(
-        LockedExternalArtifact(path=_normalize_relative_path(path), digest=_bytes_digest(payload))
-        for path, payload in sorted(
-            external_artifacts, key=lambda item: _normalize_relative_path(item[0])
-        )
+    supplied_bytes = tuple(
+        LockedExternalArtifact(path=path, digest=_bytes_digest(payload))
+        for path, payload in external_artifacts
     )
+    supplied_identities = tuple(external_identities)
+    if supplied_bytes and supplied_identities:
+        raise FleetPlanInvalid("Select external artifact bytes or frozen identities, never both")
+    external = canonical_external_identities(supplied_bytes or supplied_identities)
     plan_digest = _plan_digest(plan, goons)
     overall = sha256_digest(
         {
@@ -68,6 +71,24 @@ def build_execution_lock(
         skill_sources=plan.skill_sources,
         digest=overall,
     )
+
+
+def canonical_external_identities(
+    identities: Iterable[LockedExternalArtifact],
+) -> tuple[LockedExternalArtifact, ...]:
+    """Normalize one external identity set for locks and transported targets."""
+    external = tuple(
+        sorted(
+            (
+                LockedExternalArtifact(path=_normalize_relative_path(item.path), digest=item.digest)
+                for item in identities
+            ),
+            key=lambda item: item.path,
+        )
+    )
+    if len({item.path for item in external}) != len(external):
+        raise FleetPlanInvalid("External artifact paths must be unique after normalization")
+    return external
 
 
 def verify_execution_lock(expected: ExecutionLock, actual: ExecutionLock) -> None:

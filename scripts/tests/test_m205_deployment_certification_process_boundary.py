@@ -157,8 +157,8 @@ def test_original_object_reaches_inprocess_owner_callback_without_serialization(
         )
         return deployment_plan_run(
             [
-                "plan",
-                "run",
+                "dev",
+                "_run-plan",
                 workflow.APP_PLAN,
                 "--repository-id",
                 "repo-a",
@@ -266,8 +266,9 @@ def test_plan_cli_transport_only_after_existing_canonical_lock(
         deployment_plan_run=record_deployment_plan_run,
     )
     assert rc == 0 and "Fleet Run ID: run-a" in out
-    assert [c[0] for c in commands] == ["league", "lock"]
-    assert plans[0][:3] == ["plan", "run", workflow.APP_PLAN]
+    assert commands[0][:2] == ["league", "add-folder"]
+    assert commands[1][:2] == ["dev", "_lock-plan"]
+    assert plans[0][:3] == ["dev", "_run-plan", workflow.APP_PLAN]
     assert (
         plans[0][plans[0].index("--lock-file") + 1]
         == "/tmp/locks/app-certification.goon.lock"

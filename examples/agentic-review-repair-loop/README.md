@@ -1,111 +1,55 @@
 # Agentic Review–Repair Loop
 
-This example selects four pinned agentsCookbook reviews and two small local product fixtures. The shipped [Plan](../../templates/plans/agents/agentic-review-repair-loop/README.md) and [Composite Goon](../../templates/goons/agents/agentic-review-repair-loop/README.md) each remain two-file packages. No cookbook checkout is needed to build or test Oh-Goon.
+Classification: runnable-with-prerequisites
 
-Copy this example into your workflow directory. Its `.goonskills.yml` declares
-the agentsCookbook repository once and selects four Skill directories. Native
-Git prepares the source in Oh-Goon's managed cache; the first `lock` command
-records the exact commit in `goon.lock`. Keep the registry, Plan, local resources
-and generated lock together.
+Run four ordered pinned agentsCookbook reviews, adjudication, proposal, scoped native apply, regressions and final verification. Repository evidence is disclosed to the configured model; admitted repair can write only the explicitly selected roots.
 
-Normal runs reuse the recorded commit. A missing cache restores that same
-commit. To refresh a branch or tag deliberately, repeat your lock command with
-`--update-skills`. No submodule setup or committed Gitlink is required.
+**Prerequisites:** an initialized Oh-Goon installation, registered workload repository, explicit approved repository root, configured provider/model profile and captured Skills. The project must supply executable regression and verification scripts. A native campaign additionally needs an installed supported agent and qualified compatible profile. External/native availability is not established by this example.
 
-Configure an installed model or API endpoint once using [provider profiles](../../docs/AGENT_PROVIDERS.md):
+Initialize a new workflow using the shipped Plan:
 
 ```sh
-oh-goon agent providers setup --provider ollama --model YOUR_INSTALLED_MODEL
+oh-goon templates init agents/agentic-review-repair-loop --output ./workflow
 ```
 
-Use `--provider litellm --model YOUR_MODEL_ALIAS` for a configured LiteLLM endpoint. Native model IDs may contain slashes. API keys stay in the environment named by that configuration. The profile's endpoint and model parameters become execution facts; key values never enter the lock or source packet.
-
-Supply executable project checks, for example `scripts/regression` and `scripts/verify`. Their native exit status must be zero only when the intended checks pass. Include behavioral regressions for repaired defects in the admitted write scope. A model's regression claim is not proof that a test detects the defect; native checks and fresh review provide the observable evidence.
-
-Set `PROJECTS` to the parent of the workload Git repository `my-project`, `WORKFLOW` to this separate workflow directory. First author and inspect the immutable execution lock:
+Copy this example’s `.goonskills.yml` and `skills/` tree into the workflow. Edit `workflow/run.yml` using [the complete provider selection](run.yml): set the exact target ID, repository reference/root, configured `agent.model_profile`, executable check paths and bounded `repair` group. Do not copy provider endpoints, keys or native settings into this file. `.goonskills.yml` declares the cookbook source once; `goon.lock` owns the captured commit. The local adjudication/repair Skills are product fixtures, not a review catalog.
 
 ```sh
-oh-goon lock "$WORKFLOW/plan.yml" \
-  --input repo=local:my-project \
-  --input regression_command=scripts/regression \
-  --input verification_command=scripts/verify \
-  --agent-repository-root "$PROJECTS" --agent-skill-root "$WORKFLOW" \
-  --allow-agent-acceptance agentic-review
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml --authorize-repair
 ```
 
-Register `PROJECTS` with `oh-goon league add-folder` and get the workload's exact repository ID from `oh-goon league scan --json`. Then run:
+The [shipped Composite](../../templates/goons/agents/agentic-review-repair-loop/goon.yml) owns phase order. Every review pass runs all four reviews over one captured candidate. Incomplete execution/evidence stops the phase. Findings lead to adjudication, proposal, native scoped apply and regressions; the next pass restarts at the first reviewer. Five passes allow at most four repairs. Completion requires fresh accepted CLEAN records from all reviewers with exact scope accounting and successful final verification on that same candidate.
+
+The `--authorize-repair` action grants fresh consent for this invocation; it is required on each effectful run and is never stored in `run.yml`. A checked-in selection grants no fresh write consent. Interrupted/expired runs do not silently resume writes. Lock/source/provider/Skill changes need explicit refreshed authority. Native checks own their result; a model’s test claim is not regression proof.
+
+Read the returned Run IDs with `oh-goon plan steps RUN_ID` and `oh-goon plan tape RUN_ID`. Earlier findings, failures and candidate identities remain in their original Runs. These outcomes do not grant APP certification.
+
+To choose a different reviewer roster, initialize a fresh workflow with explicit ordered authoring choices:
 
 ```sh
-oh-goon plan run "$WORKFLOW/plan.yml" \
-  --repository-id REPOSITORY_ID \
-  --input repo=local:my-project \
-  --input regression_command=scripts/regression \
-  --input verification_command=scripts/verify \
-  --agent-repository-root "$PROJECTS" --agent-skill-root "$WORKFLOW" \
-  --allow-agent-acceptance agentic-review \
-  --review-passes 5 --repair-write-root src --repair-write-root tests \
-  --repair-timeout 1800 --repair-step-timeout 300
+oh-goon templates init agents/agentic-review-repair-loop --output ./custom-workflow \
+  --review authority=cookbook/single-source-of-truth-review \
+  --review consumers=cookbook/canonical-consumer-contract-review
 ```
 
-Omit `--agent-model-profile` to use the configured default; pass it to both lock and run to override that selection. Ordinary execution runs on the host through the normal Fleet lifecycle and waits for completion. Select another JSON or TOML catalog with `--agent-providers-file` on both commands. It does not claim sandbox containment or APP certification.
+This writes an ordinary project-owned Composite at `goons/agents/review-repair/`, a Plan selecting it and a `run.yml` selecting that contained Plan. The Composite owns the ordered `phase: review` imports and retains the canonical adjudicate/repair/regression/verification edges. `.goonskills.yml` remains the sole Skill-source registry; copy it and required local Skill resources separately before locking. No cookbook Skill bodies are generated.
 
-Every review pass runs the four reviews in written order on one captured candidate. Findings do not skip later safe reviews. An incomplete execution or evidence record stops the phase. Findings lead to adjudication, proposal, native scoped apply and native regressions. The next pass starts at the first review. Five review passes allow at most four repairs. All reviewers must return accepted CLEAN records with exact scope accounting before final verification may run. Verification must pass on that same candidate.
-
-The result lists the separate Run IDs. Inspect each using `oh-goon plan steps RUN_ID` or `oh-goon plan tape RUN_ID`. Earlier findings, failures and candidate identities remain in their original Runs. Interrupted or expired invocations do not silently resume writes; a new invocation needs a fresh lock and fresh limits.
-
-To replace, append or reorder reviews, copy the small Composite Goon into your project's explicit local catalog and edit its ordered `phase: review` imports. Keep the other required phases. Any registered Skill can be selected with `with: {skill: your-alias}`; the controller does not recognize cookbook names. Unique unbound inputs are exposed automatically; `pass:` only routes deliberately shared names. The complete captured repository is the read scope, so the workflow never narrows scope to discard findings.
+Edit the ordinary imports to replace, append or reorder reviews. Duplicate/missing aliases and invalid Skill references reject before publication. There is no runtime reviewer array or second scheduler. `run.yml` is published last as the completion marker; interrupted output without it is incomplete and is never overwritten or automatically removed.
 
 ## Native Codex service campaign
 
-The shared [Hashmarks dogfood acceptance contract](../../docs/AGENT_SKILLS.md#hashmarks-dogfood-acceptance)
-defines the required source, configuration and execution evidence, the four
-qualification scenarios, and the separate live Hashmarks repair milestone.
+The [Hashmarks acceptance contract](../../docs/AGENT_SKILLS.md#hashmarks-dogfood-acceptance) defines separate qualification scenarios and source/evidence requirements. This recipe alone is not a live convergence receipt.
 
-[`native-plan.yml`](native-plan.yml) selects the same four pinned cookbook
-reviews and the existing regression/verification Goons. Its explicit local
-catalog declares native review, adjudication and proposal roles. All three
-roles have read-only tools; the ordinary batch apply command owns writes.
-The service profile uses the native `codex` disclosure recipient.
+[`native-plan.yml`](native-plan.yml) explicitly selects local native review/adjudication/proposal Goons and the existing project check Goons. The native roles have read-only tools; the ordinary batch apply owner performs writes. Keep the Plan, `goons/`, registry and local Skill resources together under the workflow root.
 
-Configure `codex_service` using the
-[native service profile](../../docs/AGENT_PROVIDERS.md#native-service-adapter-design).
-Select a complete public Codex 0.163.0 installation outside native state. Native
-Codex retains its existing sign-in and configuration; neither this example nor
-Oh-Goon opens or copies those stores. The selected home must support the
-documented capability preflight. Existing MCP registrations may remain in that
-home: native per-thread overrides disable their workload tools before model work.
-Metadata discovery may initialize the registered servers under ordinary native
-startup semantics; it does not grant those tools access to the campaign.
+For this distinct native workflow, copy [native-run.yml](native-run.yml) to the new workflow’s `run.yml` and set its target/root/check paths. Configure a real `codex_service` profile in the provider catalog and use its exact name as `agent.profile` (the example `codex-service` is a placeholder). This native selection uses `agent.implementation: codex` and omits `agent.model_profile`; native model/auth/settings remain native-owned.
 
-Use the same native selection for lock and run. For example, with `PROVIDERS`
-pointing to your Oh-Goon provider catalog and `PROFILE` to its service profile:
+Choose a complete supported public Codex installation outside private native state. Configure it through the [native service profile](../../docs/AGENT_PROVIDERS.md#native-service-adapter-design); do not copy or read personal auth/config stores. Native preflight and per-thread tool restrictions remain mandatory under that owner. Lock and run the same `run.yml` using the commands above.
 
-```sh
-GOAL='In review phases apply the selected Skill to the complete declared scope and report only proven findings in its class. In adjudication account for supplied findings. In proposal phases provide scoped repair data with behavioral regressions. Read-only reasoning never applies edits.'
-
-oh-goon lock "$WORKFLOW/native-plan.yml" \
-  --input repo=local:my-project \
-  --input "goal=$GOAL" \
-  --input regression_command=scripts/regression \
-  --input verification_command=scripts/verify \
-  --agent-repository-root "$PROJECTS" --agent-skill-root "$WORKFLOW" \
-  --allow-agent-acceptance agentic-review \
-  --native-agent codex --native-profile "$PROFILE" \
-  --native-workspace "$PROJECTS/my-project" --agent-providers-file "$PROVIDERS"
-
-oh-goon plan run "$WORKFLOW/native-plan.yml" \
-  --repository-id REPOSITORY_ID \
-  --input repo=local:my-project \
-  --input "goal=$GOAL" \
-  --input regression_command=scripts/regression \
-  --input verification_command=scripts/verify \
-  --agent-repository-root "$PROJECTS" --agent-skill-root "$WORKFLOW" \
-  --allow-agent-acceptance agentic-review \
-  --native-agent codex --native-profile "$PROFILE" \
-  --native-workspace "$PROJECTS/my-project" --agent-providers-file "$PROVIDERS" \
-  --review-passes 3 --repair-write-root src --repair-write-root tests \
-  --repair-timeout 1800 --repair-step-timeout 300 --json > campaign-result.json
-```
+Set `inputs.goal` to the task’s actual scope and phase contract: reviews apply only the selected Skill and report proven in-class findings; adjudication accounts for those findings; proposal supplies scoped repair data with behavioral regressions. The read-only phases never apply edits.
 
 Keep the workflow and report outside the source checkout. Save the invocation's
 JSON result: it includes the actual controller stop reason and structured
