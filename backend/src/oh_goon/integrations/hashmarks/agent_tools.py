@@ -9,13 +9,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.integrations.hashmarks.runtime_contract import (
     loaded_hashmarks_version,
     require_loaded_hashmarks_runtime,
 )
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 
 
 @dataclass(frozen=True)
