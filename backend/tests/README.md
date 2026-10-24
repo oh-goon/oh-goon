@@ -213,6 +213,26 @@ qualification for the new native-service/private-store contract, and has not bee
 rerun for that contract. Missing explicit selections still skip this optional
 baseline; a selected coding failure still fails the test.
 
+The baseline enters through `oh-goon ai` with an explicit native catalog,
+caller-selected Skill and frozen reference resource. It exercises a range-merging
+repair and a multi-module NDJSON reporting CLI, including lazy record validation,
+aggregation, exact filtering, UTF-8 input and error exits. Each case starts with a
+failing immutable verifier, then checks two ordered verification Steps with quoted
+paths and literal arguments. Hashmarks follow-up, Skill delivery and native model
+settings remain observable separately from independent verification results.
+
+```sh
+OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \
+OH_GOON_LIVE_CODEX_HOME=/path/to/existing/.codex \
+OH_GOON_LIVE_CODEX_MODEL=gpt-6-luna \
+uv run --offline --frozen --no-sync --project backend pytest -m certification backend/tests/integration/services/test_native_codex_live.py
+```
+
+The selected native installation and the loaded Oh-Goon/Python runtime must be
+outside the authentication-home tree, as required by the existing native tool
+permissions. These cases request low reasoning effort and consume real inference;
+they do not require a local model server.
+
 The [implemented native-service adapter](../../docs/AGENT_PROVIDERS.md#native-service-adapter-design)
 uses a dedicated owned process/session and has the separate synthetic installed
 qualification above. Native services retain authentication, configuration and
