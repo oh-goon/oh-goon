@@ -19,6 +19,7 @@ from oh_goon.core.models.execution_lock_models import (
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedImport
 
 LOCK_VERSION = 1
+_NATIVE_AGENT_ADAPTER = TypeAdapter(ResolvedNativeAgent)
 
 
 def sha256_digest(payload: Any) -> str:
@@ -133,11 +134,7 @@ def _plan_digest(
         "root_requirements": _root_requirements(plan),
         "ordered_goons": [item.goon for item in goons],
         **(
-            {
-                "native_agent": TypeAdapter(ResolvedNativeAgent).dump_python(
-                    plan.native_agent, mode="json"
-                )
-            }
+            {"native_agent": _NATIVE_AGENT_ADAPTER.dump_python(plan.native_agent, mode="json")}
             if plan.native_agent is not None
             else {}
         ),
