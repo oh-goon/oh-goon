@@ -6,8 +6,10 @@ import subprocess
 import time
 from threading import Thread
 
-from oh_goon.runtime.process_group import process_group_exists as _process_group_exists
+from oh_goon.runtime.process_group import process_group_exists
 from oh_goon.runtime.termination import ProcessTreeTerminationReceipt, TerminationRequest
+
+_process_group_exists = process_group_exists
 
 POLL_INTERVAL_SECONDS = 0.1
 TERMINATION_GRACE_SECONDS = 1.0

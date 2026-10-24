@@ -162,16 +162,7 @@ def test_shared_plan_preview_identity_creates_schedule_without_source_adjacent_l
     created = SimpleNamespace(schedule_id="nightly")
     schedules = Mock()
     schedules.create_prepared.return_value = created
-    schedule_league = SimpleNamespace(
-        repositories=Mock(
-            return_value=(
-                SimpleNamespace(
-                    repository_id=repository.repository_id,
-                    repository_instance_id=instances[repository.repository_id],
-                ),
-            )
-        )
-    )
+    schedule_league = SimpleNamespace(repositories=Mock(return_value=(repository,)))
     service = SharedPlanScheduleService(store, schedule_league, plans, schedules)
 
     result = service.create(

@@ -1,4 +1,4 @@
-// OPENAPI_SHA256: d08ce0a508523047d3c780b29687a6c0f187aaf321c365741bbcc50eaf959afe
+// OPENAPI_SHA256: 1a968b27973d1de09b103c882fad3173ed4f59d6246472add3cc7487e6fe7fb4
 // AUTO-GENERATED static runtime validators compiled from FastAPI/OpenAPI.
 // Component validators live in deterministic internal shards; transport consumes this facade only.
 // This file executes schema-specific checks; it does not interpret JSON Schema at runtime.

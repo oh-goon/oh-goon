@@ -28,7 +28,7 @@ def automatic_migration_plan(
             validation_steps=("uv lock", "uv sync --frozen", "git diff --cached --check"),
         )
     if source is MigrationSource.PIP_TOOLS:
-        add = ("uv", "add", "--no-sync", "-r", "requirements.in")
+        add: tuple[str, ...] = ("uv", "add", "--no-sync", "-r", "requirements.in")
         if has_compiled_requirements:
             add += ("-c", "requirements.txt")
         return AutomaticMigrationPlan(

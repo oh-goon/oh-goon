@@ -2,16 +2,19 @@
 
 Demonstrate explicit inputs, native command outputs and scoped environment imports in a sequential project workflow.
 
+**Status:** teaching example. **Effects:** Runs project scripts/tests/build and can publish.
+
+**Prerequisites:** Project-owned preparation/publication scripts, the locked native uv/test/build tools and the declared host token. This is a teaching workflow; the project scripts can publish.
+
+**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+
+**Expected outputs:** The prepare Step publishes `RELEASE_TAG`; following commands consume explicit output/environment bindings.
+
+**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
+
+**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
+
 **Teaching example. Not a production baseline. Atomic Goon.**
-
-## Use this Goon
-
-```sh
-oh-goon templates show advanced/isolated-dataflow --kind goon
-oh-goon plan inputs templates/goons/advanced/isolated-dataflow/goon.yml
-```
-
-Use `goons: [advanced/isolated-dataflow]` in a Plan to keep the Goon defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed values, renamed inputs or producer references; route shared names explicitly with `pass:`/`with:`. A Composite Goon declares which child inputs it exposes. The [authoring guide](../../../README.md) shows values files, explicit local sources and how to append Steps to your own Atomic Goon.
 
 This teaching workflow requires the project-owned preparation/publication scripts and locked tools illustrated by the existing certification fixture. Its declared Step outputs and environment imports are explicit dataflow; native failure remains authoritative.
 

@@ -15,7 +15,9 @@ import json
 import os
 import sys
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 from .hosted_dependency_capability import (
     PYPROJECT,
@@ -30,6 +32,27 @@ from .hosted_dependency_capability import (
 ROOT = Path(__file__).resolve().parents[4]
 LOCK = ROOT / "backend/uv.lock"
 SCHEMA = "oh-goon.project-runtime-capability/v2"
+
+
+class ProjectCapabilityReport(TypedDict):
+    schema: str
+    authority: str
+    native_environment_authority: str
+    resolution_authority: str
+    intent_authority: str
+    compatibility_decision: str
+    registry_evaluated: bool
+    uv_artifact_cache_evaluated: bool
+    interpreter: str
+    python_version: str
+    declared_requires_python: str
+    dependency_intent_sha256: str
+    dependency_resolution_sha256: str
+    declared_runtime_dependencies: list[str]
+    packages: list[dict[str, object]]
+    blockers: list[str]
+    result: str
+    identity: NotRequired[str]
 
 
 def _runtime_dependencies(pyproject: Path) -> tuple[dict[str, str], str]:
@@ -54,7 +77,7 @@ def _runtime_dependencies(pyproject: Path) -> tuple[dict[str, str], str]:
 
 def build_project_capability(
     *, pyproject: Path = PYPROJECT, lock: Path = LOCK
-) -> dict[str, object]:
+) -> ProjectCapabilityReport:
     if not lock.is_file():
         raise HostedCapabilityError(f"committed dependency resolution is missing: {lock}")
     dependencies, requires_python = _runtime_dependencies(pyproject)
@@ -85,7 +108,7 @@ def build_project_capability(
             row["status"] = "observed"
         packages.append(row)
 
-    base: dict[str, object] = {
+    base: ProjectCapabilityReport = {
         "schema": SCHEMA,
         "authority": "materialized-project-runtime-observation",
         "native_environment_authority": "uv sync --locked",
@@ -112,7 +135,7 @@ def build_project_capability(
     return base
 
 
-def _write_atomic(path: Path, payload: dict[str, object]) -> None:
+def _write_atomic(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:

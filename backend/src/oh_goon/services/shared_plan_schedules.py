@@ -3,6 +3,7 @@ from __future__ import annotations
 from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceStale
 from oh_goon.core.models.goon_plan_source import SharedPlanSource
 from oh_goon.core.models.schedule import ScheduleCreate, ScheduleDefinition
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary import ScheduleState
 from oh_goon.runtime.shared_plans import SharedPlanFileStore
 from oh_goon.services.fleet_plans import FleetPlanService
@@ -53,7 +54,7 @@ class SharedPlanScheduleService:
         stale_instances = [
             repository_id
             for repository_id in repository_ids
-            if current_repositories[repository_id].repository_instance_id
+            if repository_subject_instance_id(current_repositories[repository_id].path)
             != expected_repository_instance_ids[repository_id]
         ]
         if stale_instances:
@@ -70,7 +71,7 @@ class SharedPlanScheduleService:
         target = self._plans.prepare_reviewed_execution_target(
             self._store.path(document.plan_key),
             expected_execution_digest=expected_execution_digest,
-            inputs=inputs,
+            inputs=dict(inputs) if inputs is not None else None,
             source=SharedPlanSource(plan_key=document.plan_key, sha256=document.sha256),
             expected_plan_id=expected_plan_id,
             root_expected_name=document.plan_key,

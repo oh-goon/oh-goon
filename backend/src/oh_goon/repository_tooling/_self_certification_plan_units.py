@@ -5,7 +5,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, NotRequired, TypedDict
 
 from oh_goon.core.file_digest import sha256_file_with_size, update_digest_from_file
 
@@ -34,6 +34,38 @@ INHERITED_CLOSURE_CONTRACTS: dict[str, tuple[str, ...]] = {
         "init-doctor-diagnostic-only",
     ),
 }
+
+
+class ShardPayload(TypedDict):
+    id: str
+    unit: str
+    test_count: int
+    members: list[str]
+    execution_unit_id: str
+    execution_budget_seconds: int
+    command: list[str]
+
+
+class ShardPlan(TypedDict):
+    surface: str
+    surface_identity: str
+    strategy: str
+    test_count: int
+    assigned: int
+    duplicates: int
+    missing: int
+    marker_expression: str
+    shards: list[ShardPayload]
+
+
+class SourceUnitSpec(TypedDict):
+    unit: str
+    surface: str
+    strategy: str
+    execution_budget_seconds: int
+    command: list[str]
+    requires: NotRequired[list[str]]
+    evidence_level: NotRequired[str]
 
 
 def _source_gate_dependencies(source_units: list[dict[str, object]]) -> dict[str, tuple[str, ...]]:
@@ -121,7 +153,7 @@ class Shard:
             }
         )
 
-    def as_payload(self) -> dict[str, object]:
+    def as_payload(self) -> ShardPayload:
         return {
             "id": self.shard_id,
             "unit": self.unit_name,
@@ -165,7 +197,7 @@ def scripts_non_certification_shards(root: Path) -> tuple[Shard, ...]:
     return tuple(shards)
 
 
-def shard_plan(root: Path) -> dict[str, object]:
+def shard_plan(root: Path) -> ShardPlan:
     shards = scripts_non_certification_shards(root)
     members = [member for shard in shards for member in shard.members]
     return {
@@ -181,7 +213,7 @@ def shard_plan(root: Path) -> dict[str, object]:
     }
 
 
-def _lifecycle_certification_unit_specs() -> tuple[dict[str, object], ...]:
+def _lifecycle_certification_unit_specs() -> tuple[SourceUnitSpec, ...]:
     pytest = ["backend/.venv/bin/python", "-m", "pytest", "-c", "backend/pyproject.toml"]
     return (
         {
@@ -225,7 +257,7 @@ def _lifecycle_certification_unit_specs() -> tuple[dict[str, object], ...]:
     )
 
 
-def _direct_unit_specs() -> tuple[dict[str, object], ...]:
+def _direct_unit_specs() -> tuple[SourceUnitSpec, ...]:
     return (
         {
             "unit": STATIC_GOON_ADMISSION_UNIT,
@@ -325,20 +357,20 @@ def _executable_identity(root: Path, command: list[str]) -> dict[str, object]:
     }
 
 
-def _toolchain_identity(root: Path, unit: dict[str, object]) -> str:
-    return _sha256_json(_executable_identity(root, list(unit["command"])))
+def _toolchain_identity(root: Path, command: list[str]) -> str:
+    return _sha256_json(_executable_identity(root, command))
 
 
 def _source_units(root: Path) -> list[dict[str, object]]:
     units: list[dict[str, object]] = []
     for spec in _direct_unit_specs():
-        unit = dict(spec)
+        unit: dict[str, object] = dict(spec)
         unit["phase"] = "source"
         unit.setdefault("evidence_level", "L1_LOGIC")
         if str(unit["unit"]) != STATIC_GOON_ADMISSION_UNIT:
             unit.setdefault("requires", [STATIC_GOON_ADMISSION_UNIT])
         unit["execution_unit_id"] = _sha256_json(spec)
-        unit["toolchain_identity"] = _toolchain_identity(root, unit)
+        unit["toolchain_identity"] = _toolchain_identity(root, spec["command"])
         units.append(unit)
     for shard in scripts_non_certification_shards(root):
         unit = {
@@ -352,7 +384,7 @@ def _source_units(root: Path) -> list[dict[str, object]]:
             "command": shard.command,
             "evidence_level": "L1_LOGIC",
         }
-        unit["toolchain_identity"] = _toolchain_identity(root, unit)
+        unit["toolchain_identity"] = _toolchain_identity(root, shard.command)
         units.append(unit)
     return units
 

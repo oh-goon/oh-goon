@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, cast
 
 if sys.platform == "win32":
     import msvcrt
@@ -156,7 +156,7 @@ def prune_orphan_staging(layout: ContentStorePathLayout, lock_path: Path) -> Sta
                     or payload.get("stage_name") != stage_name
                 ):
                     raise ValueError("invalid stage owner record")
-                pid = int(payload["pid"])
+                pid = int(cast(int | str | float, payload["pid"]))
                 identity = str(payload["process_identity"])
             except (KeyError, TypeError, ValueError):
                 refused.append(stage_name)
@@ -174,7 +174,7 @@ def prune_orphan_staging(layout: ContentStorePathLayout, lock_path: Path) -> Sta
             try:
                 if payload is None or payload.get("schema") != STAGE_OWNER_SCHEMA:
                     raise ValueError("invalid stage owner record")
-                pid = int(payload["pid"])
+                pid = int(cast(int | str | float, payload["pid"]))
                 identity = str(payload["process_identity"])
             except (KeyError, TypeError, ValueError):
                 refused.append(owner_path.name)
@@ -392,7 +392,7 @@ def _validated_lease_record(path: Path, payload: dict[str, object]) -> tuple[str
     object_id = str(payload.get("object_id", ""))
     owner_repository_id = str(payload.get("owner_repository_id", ""))
     try:
-        pid = int(payload["pid"])
+        pid = int(cast(int | str | float, payload["pid"]))
         identity = str(payload["process_identity"])
     except (KeyError, TypeError, ValueError) as exc:
         raise FleetPlanInvalid(

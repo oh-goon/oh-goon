@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 
 from oh_goon.core.errors import LocationNotDirectory
@@ -24,15 +25,15 @@ class LocationService:
     def list(self) -> list[Path]:
         return self.snapshot()[0]
 
-    def unavailable(self) -> list[Path]:
+    def unavailable(self) -> builtins.list[Path]:
         """Return configured roots that are currently not accessible directories."""
         return self.snapshot()[1]
 
-    def add(self, path: Path) -> list[Path]:
+    def add(self, path: Path) -> builtins.list[Path]:
         resolved = path.expanduser().resolve()
         if not resolved.is_dir():
             raise LocationNotDirectory("Location must be an existing directory")
         return self._state.add_location(resolved)
 
-    def remove(self, path: Path, *, expected_revision: str) -> list[Path]:
+    def remove(self, path: Path, *, expected_revision: str) -> builtins.list[Path]:
         return self._state.remove_location(path, expected_revision=expected_revision)

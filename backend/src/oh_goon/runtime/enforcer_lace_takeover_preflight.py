@@ -39,8 +39,8 @@ def require_original_takeover_lineage_in(
     epoch: int,
     lease_identity: str,
     auth: ReceiptAuthenticator,
-    admitted_executor_generation: int,
-    admitted_issuer_key_id: str,
+    admitted_executor_generation: int | None,
+    admitted_issuer_key_id: str | None,
 ) -> OriginalTakeoverPreflight:
     """Compare original signed admission, resource intent and current session in one cut."""
     if not journal.connection.in_transaction:

@@ -48,7 +48,7 @@ def prove_wheel_owner(
         relative = f"oh_goon/native_issuer/{name}.py"
         if relative not in filenames:
             raise WheelAuthorityFailure(f"issuer owner missing from installed wheel: {name}")
-        path = Path(distribution.locate_file(relative)).resolve(strict=True)
+        path = Path(str(distribution.locate_file(relative))).resolve(strict=True)
         owner = import_module(f"oh_goon.native_issuer.{name}")
         compatibility = import_module(f"oh_goon.repository_tooling.{name}")
         actual = Path(getattr(owner, "__file__", "")).resolve()

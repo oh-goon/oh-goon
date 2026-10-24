@@ -21,14 +21,22 @@ def test_issuer_uses_existing_native_owner_and_no_second_hash_engine() -> None:
     }
     assert "issue_observed_repository_source_identity" in names
     assert "admitted_repository_source_identity" in names
+    imports = {
+        (node.module, alias.name, alias.asname or alias.name)
+        for node in ast.walk(parsed)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
     assert (
-        "from oh_goon.integrations.source_snapshot import source_snapshot_identity"
-        in source
-    )
+        "oh_goon.integrations.source_snapshot",
+        "source_snapshot_identity",
+        "source_snapshot_identity",
+    ) in imports
     assert (
-        "from oh_goon.core.product_identity import repository_subject_instance_id"
-        in source
-    )
+        "oh_goon.core.product_identity",
+        "repository_subject_instance_id",
+        "repository_subject_instance_id",
+    ) in imports
     assert "hashlib" not in source and "identify_path" not in source
     assert (
         "from oh_goon.integrations.hashmarks.identity import identify_path"

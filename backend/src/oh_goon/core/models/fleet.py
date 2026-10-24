@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from oh_goon.core.models.run import CancelledFleetRun, CompletedFleetRun, FailedFleetRun
+
+if TYPE_CHECKING:
+    from oh_goon.core.projections.fleet_context import FleetProjectionContext
+
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field, computed_field, model_validator
@@ -90,7 +97,7 @@ class OperationState(ImmutableModel):
             return ReadinessState.FAILED
         return ReadinessState.NOT_CHECKED
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def explanation(self) -> RepositoryExplanation:
         from oh_goon.core.projections.explanation import explain_operation
@@ -119,22 +126,22 @@ class IncludedFleetRepository(_FleetRepositoryBase):
     update: OperationState | None = None
     verify: OperationState | None = None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def exclusion_reason(self) -> None:
         return None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def excluded_at(self) -> None:
         return None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def readiness_state(self) -> ReadinessState:
         return self.init.readiness_state if self.init is not None else ReadinessState.NOT_CHECKED
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def needs_attention(self) -> bool:
         if self.readiness_state.needs_attention:
@@ -145,12 +152,12 @@ class IncludedFleetRepository(_FleetRepositoryBase):
             if action is not OperationAction.INIT
         )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def has_current_plan(self) -> bool:
         return self.plan is not None and self.plan.current_successful
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def current_branch_position(self) -> GitPosition | None:
         if self.init is None or self.init.is_stale:
@@ -160,17 +167,17 @@ class IncludedFleetRepository(_FleetRepositoryBase):
             return None
         return evidence.readiness.position
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def last_plan_verdict(self) -> Verdict:
         return self._last_verdict(self.plan)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def last_update_verdict(self) -> Verdict:
         return self._last_verdict(self.update)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def last_verify_verdict(self) -> Verdict:
         return self._last_verdict(self.verify)
@@ -179,7 +186,7 @@ class IncludedFleetRepository(_FleetRepositoryBase):
     def _last_verdict(state: OperationState | None) -> Verdict:
         return state.verdict if state is not None else Verdict.NOT_CHECKED
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def guidance(self) -> RepositoryExplanation:
         from oh_goon.core.projections.explanation import explain_repository_guidance
@@ -211,12 +218,12 @@ class ExcludedFleetRepository(_FleetRepositoryBase):
     exclusion_reason: str = Field(min_length=1)
     excluded_at: AwareDatetime
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def readiness_state(self) -> Literal[ReadinessState.NOT_CHECKED]:
         return ReadinessState.NOT_CHECKED
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def guidance(self) -> RepositoryExplanation:
         from oh_goon.core.projections.explanation import explain_repository_guidance
@@ -230,52 +237,52 @@ class ExcludedFleetRepository(_FleetRepositoryBase):
             exclusion_reason=self.exclusion_reason,
         )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def needs_attention(self) -> Literal[False]:
         return False
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def has_current_plan(self) -> Literal[False]:
         return False
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def current_branch_position(self) -> None:
         return None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def last_plan_verdict(self) -> Literal[Verdict.NOT_CHECKED]:
         return Verdict.NOT_CHECKED
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def last_update_verdict(self) -> Literal[Verdict.NOT_CHECKED]:
         return Verdict.NOT_CHECKED
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def last_verify_verdict(self) -> Literal[Verdict.NOT_CHECKED]:
         return Verdict.NOT_CHECKED
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def init(self) -> None:
         return None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def plan(self) -> None:
         return None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def update(self) -> None:
         return None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def verify(self) -> None:
         return None
@@ -306,28 +313,28 @@ class FleetSnapshot(ImmutableModel):
     active_fleet_run: FleetRunDetail | None = None
     latest_fleet_runs: tuple[FleetRunDetail, ...] = Field(default_factory=tuple)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def summary(self) -> FleetSummary:
         from oh_goon.core.projections.fleet import build_fleet_summary
 
         return build_fleet_summary(self._projection_context())
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def attention(self) -> FleetAttention:
         from oh_goon.core.projections.attention import build_fleet_attention
 
         return build_fleet_attention(self._projection_context())
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def review_preparation(self) -> ReviewPreparation | None:
         from oh_goon.core.projections.review import build_review_preparation
 
         return build_review_preparation(self._projection_context())
 
-    def _projection_context(self):
+    def _projection_context(self) -> FleetProjectionContext:
         from oh_goon.core.projections.fleet_context import FleetProjectionContext
 
         return FleetProjectionContext.build(
@@ -364,9 +371,9 @@ class FleetSnapshot(ImmutableModel):
         details = self._run_details()
         run_times = [detail.run.accepted_at for detail in details]
         for detail in details:
-            if detail.run.status is not FleetRunStatus.QUEUED:
+            if detail.run.status is not FleetRunStatus.QUEUED and detail.run.started_at is not None:
                 run_times.append(detail.run.started_at)
-            if detail.run.status.terminal:
+            if isinstance(detail.run, (CompletedFleetRun, CancelledFleetRun, FailedFleetRun)):
                 run_times.append(detail.run.finished_at)
         operation_times = [
             report.provenance.finished_at for detail in details for report in detail.operations

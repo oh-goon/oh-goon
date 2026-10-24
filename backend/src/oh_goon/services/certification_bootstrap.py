@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
 
-if os.name == "nt":
+if sys.platform == "win32":
     import msvcrt
 else:
     import fcntl
@@ -19,8 +21,12 @@ from oh_goon.core.source_layout_policy import assert_canonical_source_layout
 from oh_goon.core.strict_executor_authority import (
     CERTIFICATION_CGROUP_ROOT_ENV,
     EXECUTORS_FILE_ENV,
-    SYSTEMD_DELEGATED_ENV,
-    SYSTEMD_SUBGROUP_ENV,
+)
+from oh_goon.core.strict_executor_authority import (
+    SYSTEMD_DELEGATED_ENV as SYSTEMD_DELEGATED_ENV,
+)
+from oh_goon.core.strict_executor_authority import (
+    SYSTEMD_SUBGROUP_ENV as SYSTEMD_SUBGROUP_ENV,
 )
 from oh_goon.integrations._fleet_plan_cgroup_resources import (
     delegated_process_subgroup,
@@ -58,9 +64,11 @@ from oh_goon.services.certification_workspace_retention import (
     CertificationRunWorkspaceReconciliation,
     certification_run_workspace_names,
     certification_state_label,
-    certification_state_root,
     certification_state_roots,
     reconcile_certification_run_workspaces_under_lease,
+)
+from oh_goon.services.certification_workspace_retention import (
+    certification_state_root as certification_state_root,
 )
 
 REQUIRED_CERTIFICATION_CONTROLLERS = {"cpu", "memory", "pids"}
@@ -152,7 +160,7 @@ def _reconcile_certification_state(
 
 
 @contextmanager
-def certification_state_lease(state_root: Path):
+def certification_state_lease(state_root: Path) -> Iterator[None]:
     """Acquire one non-blocking workflow lease for the shared certification control DB.
 
     SQLite supports cooperating concurrent readers/writers, but certification is a
@@ -166,7 +174,7 @@ def certification_state_lease(state_root: Path):
     fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0), 0o600)
     try:
         try:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 os.lseek(fd, 0, os.SEEK_SET)
                 if os.fstat(fd).st_size == 0:
                     os.write(fd, b"0")
@@ -184,7 +192,7 @@ def certification_state_lease(state_root: Path):
         yield
     finally:
         try:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 os.lseek(fd, 0, os.SEEK_SET)
                 msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
             else:
@@ -296,7 +304,9 @@ def _require_certification_database_ready(database: Path) -> None:
     )
 
 
-def _require_database_path_identity(database: Path, identity, *, proof: str) -> None:
+def _require_database_path_identity(
+    database: Path, identity: os.stat_result, *, proof: str
+) -> None:
     current = database.stat()
     if (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
         return
@@ -307,7 +317,7 @@ def _require_database_path_identity(database: Path, identity, *, proof: str) -> 
 
 
 def _prove_certification_database_endurance(
-    admitted: LocalDatabase, database: Path, identity
+    admitted: LocalDatabase, database: Path, identity: os.stat_result
 ) -> None:
     for _ in range(CERTIFICATION_DATABASE_INDEPENDENT_REOPEN_PROOFS):
         LocalDatabase(database, journal_mode="DELETE").durable_revision()

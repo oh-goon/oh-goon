@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Literal
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_tool_requirements import step_execution_tool
@@ -235,7 +236,7 @@ def _hash_file(path: Path) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
-def _tool_origin(path: Path, repository: Path) -> str:
+def _tool_origin(path: Path, repository: Path) -> Literal["workspace", "host"]:
     try:
         RepositoryPathSpace.from_root(repository).relative(path, label="tool evidence path")
     except FleetPlanInvalid:
@@ -297,7 +298,7 @@ def _execution_authority_diagnostic(
             terminal_proof_bytes=0,
         )
     else:
-        mechanism = (
+        mechanism: Literal["remote_sealed_execution", "sealed_memfd_bind"] = (
             "remote_sealed_execution"
             if attempt.isolation_backend.remote_execution
             else "sealed_memfd_bind"

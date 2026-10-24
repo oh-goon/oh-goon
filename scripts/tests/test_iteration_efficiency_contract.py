@@ -174,17 +174,54 @@ def test_command_supervision_avoids_multithreaded_preexec_and_ru_cold_parallelis
         node
         for node in guard_tree.body
         if isinstance(node, ast.If)
-        and isinstance(node.test, ast.Name)
-        and node.test.id == "__package__"
+        and any(
+            isinstance(child, ast.ImportFrom)
+            and child.module == "oh_goon.runtime"
+            and any(alias.name == "exec_guard_protocol" for alias in child.names)
+            for child in node.body
+        )
     )
+    # Python owns the branch decision; a type-only condition must never make
+    # direct -S execution import the installed product package.
+    condition = compile(ast.Expression(conditional.test), "exec-guard-import", "eval")
+    for package, expected in ((None, False), ("", False), ("oh_goon.runtime", True)):
+        assert (
+            bool(
+                eval(
+                    condition,
+                    {"__builtins__": {}},
+                    {"TYPE_CHECKING": False, "__package__": package},
+                )
+            )
+            is expected
+        )
     assert any(
         isinstance(node, ast.ImportFrom) and node.module == "oh_goon.runtime"
         for node in conditional.body
     )
-    assert any(
-        isinstance(node, ast.Import)
-        and any(alias.name == "exec_guard_protocol" for alias in node.names)
+    direct_imports = {
+        (alias.name, alias.asname or alias.name)
         for node in conditional.orelse
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    direct_dynamic_bindings = {
+        (target.id, ast.unparse(node.value))
+        for node in conditional.orelse
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert ("exec_guard_protocol", "exec_guard_protocol") in direct_imports or (
+        "exec_guard_protocol",
+        "importlib.import_module('exec_guard_protocol')",
+    ) in direct_dynamic_bindings
+    assert not any(
+        isinstance(node, ast.ImportFrom)
+        and node.module is not None
+        and node.module.startswith("oh_goon")
+        for branch in conditional.orelse
+        for node in ast.walk(branch)
     )
     assert "os.setsid()" in guard
 

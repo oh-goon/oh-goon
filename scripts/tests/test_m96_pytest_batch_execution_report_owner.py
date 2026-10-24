@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+
 import ast
 import json
 from pathlib import Path
@@ -58,7 +60,7 @@ def test_execution_report_projection_follows_schema_owner_mutation(
         "PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_VERSION",
         7,
     )
-    args = SimpleNamespace(
+    args = argparse.Namespace(
         granularity="files",
         batch_timeout=10,
         suite_timeout=20,

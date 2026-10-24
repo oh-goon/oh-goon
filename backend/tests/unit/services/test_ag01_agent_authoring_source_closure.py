@@ -176,64 +176,24 @@ def test_reject_unbounded_and_duplicate_role_definitions(tmp_path):
         )
 
 
-def test_existing_plan_inputs_cli_uses_pre_runtime_owner_without_new_agent_command(
-    tmp_path, capsys, monkeypatch
+def test_explicit_source_closure_service_does_not_create_runtime_or_admission(
+    tmp_path, monkeypatch
 ):
-    from oh_goon import cli
-    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+    from oh_goon.application import ApplicationRuntime
 
-    root = tmp_path / "goon.yml"
-    root.write_text(
-        """inputs:
-  repo: {type: repository_reference}
-  skill: {type: skill_reference}
-  acceptance: {type: acceptance_profile}
-steps:
-- run: echo preview-only
-""",
-        encoding="utf-8",
-    )
-    repo_root = tmp_path / "repositories"
-    repo = repo_root / "target"
-    repo.mkdir(parents=True)
-    (repo / "a.txt").write_text("hello\n")
-    skill_root = tmp_path / "skills"
-    skill = skill_root / "review"
-    skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text("# Review\n")
-    _, digest = FleetPlanResolver().input_definitions_with_source(root)
+    resolver, plan, values, options, _, _ = _setup(tmp_path)
 
     def forbidden(*_args, **_kwargs):
-        raise AssertionError("AG-01 must not create ApplicationRuntime or Run state")
+        raise AssertionError("source capture cannot create ApplicationRuntime or Run state")
 
-    monkeypatch.setattr(cli, "_build_application_runtime", forbidden)
-    args = [
-        "plan",
-        "inputs",
-        str(root),
-        "--source-closure",
-        "--expect-sha256",
-        digest,
-        "--repository-root",
-        str(repo_root),
-        "--skill-root",
-        str(skill_root),
-        "--allow-acceptance",
-        "semantic-verifier",
-        "--input",
-        "repo=local:target",
-        "--input",
-        "skill=local:review",
-        "--input",
-        "acceptance=semantic-verifier",
-    ]
-    assert cli.main(args) == 0
-    import json
-
-    report = json.loads(capsys.readouterr().out)
+    monkeypatch.setattr(ApplicationRuntime, "build", forbidden)
+    report = resolver.explain_agent_sources(plan, inputs=values, **options)
     assert report["original_enforcer_admission"] == "NOT_ATTEMPTED"
-    assert report["skill"]["members"][0]["path"] == "SKILL.md"
-    assert cli.main(args[:-2]) == 2  # missing acceptance fails before any effects
+    assert "SKILL.md" in {member["path"] for member in report["skill"]["members"]}
+    with pytest.raises(FleetPlanInvalid):
+        resolver.explain_agent_sources(
+            plan, inputs={k: v for k, v in values.items() if k != "acceptance"}, **options
+        )
 
 
 def test_team_skill_alias_is_explicitly_frozen_and_cannot_chain_or_expand_authority(tmp_path):

@@ -2,15 +2,23 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import NoReturn, TypedDict
 
 from oh_goon.core.errors import InvalidRunTransition
-from oh_goon.core.execution_lifecycle_validation import validate_execution_lifecycle
+from oh_goon.core.execution_lifecycle_validation import (
+    ExecutionLifecycleEvent,
+    validate_execution_lifecycle,
+)
+from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     FailedPlanStepExecution,
+    PlanStepExecution,
     SkippedPlanStepExecution,
 )
 from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
+from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import (
     CancelledFleetRun,
     CancellingFleetRun,
@@ -24,6 +32,7 @@ from oh_goon.core.models.run import (
 )
 from oh_goon.core.models.run_admission import (
     FleetExecutionAdmission,
+    FleetRepositoryScope,
     PlanRepositoryAdmissionEvidence,
 )
 from oh_goon.core.models.run_events import (
@@ -58,13 +67,27 @@ from oh_goon.core.models.run_events import (
     StorageMaintenanceRecordedEvent,
     TerminationRequestedEvent,
 )
+from oh_goon.core.models.run_launch import ApplicationLaunchReceipt
 from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceFact
+from oh_goon.core.models.target import OperationTarget
 from oh_goon.core.product_identity import (
     repository_attempt_operation_id,
     validate_repository_attempt_operation_id,
 )
-from oh_goon.core.vocabulary import FleetRunStatus, Verdict
+from oh_goon.core.vocabulary import FleetRunSource, FleetRunStatus, Verdict
+
+
+class _RunFields(TypedDict):
+    fleet_run_id: str
+    source: FleetRunSource
+    target: OperationTarget | None
+    capability: CapabilitySnapshot
+    repository_scope: FleetRepositoryScope
+    targets: tuple[RepositoryIdentity, ...]
+    accepted_at: datetime
+    progress: FleetRunProgress
+
 
 OperationResolver = Callable[[str], OperationReport | None]
 
@@ -78,7 +101,7 @@ class _RunFold:
     state: FleetRunState
     execution: FleetExecutionAdmission
     repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...]
-    application_launch: object
+    application_launch: ApplicationLaunchReceipt
     scheduling: SchedulingEnvelope | None
     completed_reports: list[OperationReport] = field(default_factory=list)
     storage_maintenance: list[FleetContentMaintenanceFact] = field(default_factory=list)
@@ -219,7 +242,7 @@ class _RunFold:
         if isinstance(self.state, _TERMINAL_STATES):
             raise InvalidRunTransition("Reconciliation must be required before run terminalization")
 
-    def _apply_execution_lifecycle(self, event: FleetRunEvent) -> None:
+    def _apply_execution_lifecycle(self, event: ExecutionLifecycleEvent) -> None:
         validate_execution_lifecycle(self.state, event, self.lifecycle_events)
 
     def _apply_storage_maintenance(self, event: StorageMaintenanceRecordedEvent) -> None:
@@ -434,7 +457,7 @@ class _RunFold:
                 )
 
     @staticmethod
-    def _step_settlement_matches(execution, terminal) -> bool:
+    def _step_settlement_matches(execution: PlanStepExecution, terminal: FleetRunEvent) -> bool:
         if isinstance(execution, CompletedPlanStepExecution):
             return (
                 isinstance(terminal, StepSucceededEvent)
@@ -494,7 +517,7 @@ class _RunFold:
             needs_attention=attention,
         )
 
-    def _common(self) -> dict[str, object]:
+    def _common(self) -> _RunFields:
         return {
             "fleet_run_id": self.state.fleet_run_id,
             "source": self.state.source,
@@ -506,7 +529,7 @@ class _RunFold:
             "progress": self._progress(),
         }
 
-    def _invalid_from(self, event: FleetRunEvent) -> None:
+    def _invalid_from(self, event: FleetRunEvent) -> NoReturn:
         raise InvalidRunTransition(
             f"{event.event_type.value} is not valid from {self.state.status.value}"
         )

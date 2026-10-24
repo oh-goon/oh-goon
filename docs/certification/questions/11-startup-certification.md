@@ -213,7 +213,7 @@ How must strict Fleet execute native uv-generated Python launchers without rebui
 How must Fleet freeze the native shared-library closure of Python stdlib extension modules such as `_ssl`, and why is freezing only the interpreter binary's `ldd` dependencies insufficient?
 
 ## Q130
-Why must certification-generated `goon.lock` bytes live in isolated certification state instead of the source checkout, how can `plan run` still prove the exact locked execution through an explicit lock path, and why should a raw storage `EIO` be treated as an environment/storage failure rather than a source defect?
+Why must certification-generated `goon.lock` bytes live in isolated certification state instead of the source checkout, how can the internal certification execution owner still prove the exact locked execution through an explicit state-owned lock path, and why should a raw storage `EIO` be treated as an environment/storage failure rather than a source defect?
 ## Q131
 Why must first-checkout init invoke native uv/npm directly instead of placing an Oh-Goon filesystem/cache admission model in front of them, why must certification separately prove its owned mutable state before admission, how must mid-run host-storage loss such as EROFS/EIO/SQLite open failure be contained without being misreported as a source/test failure, and why must run-log/diagnostic persistence remain non-authoritative when storage disappears?
 

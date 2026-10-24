@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -36,6 +36,7 @@ from oh_goon.core.models.run_admission import (
     PlanRepositoryAdmissionEvidence,
     StrictFleetExecutionAdmission,
 )
+from oh_goon.core.models.run_launch import ApplicationLaunchReceipt
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.run_identity import require_fleet_run_detail_binding
@@ -58,7 +59,14 @@ from oh_goon.services.fleet_strict_policy_enrollment import StrictFleetPolicyEnr
 
 if TYPE_CHECKING:
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+    from oh_goon.core.models.fleet_plan import ResolvedPlanStep
+    from oh_goon.core.ports.original_mount_intent import OriginalMountIntentDescriptor
+    from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
     from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
+    from oh_goon.runtime.enforcer_lace_fleet_resource_owner import (
+        OriginalFleetLocalLaceRecoveryOwner,
+        OriginalFleetLocalLaceReservation,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +168,10 @@ class FleetRunLifecycle:
             from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 
             raise TrustProtocolError(UNPROVISIONED_FLEET_PLAN_INGRESS)
+        if run_id is None:
+            from oh_goon.core.enforcer_lace_trust import TrustProtocolError
+
+            raise TrustProtocolError("explicit Fleet Run identity required")
         self._fleet_provisioner.require_enrolled_identity(run_id)
 
     def require_fleet_prework_available(
@@ -209,6 +221,10 @@ class FleetRunLifecycle:
 
                 raise TrustProtocolError("replay Fleet ingress requires its own Enforcer cutover")
             if type(self._fleet_provisioner) is FleetPreworkProvisioner:
+                if run_id is None:
+                    from oh_goon.core.enforcer_lace_trust import TrustProtocolError
+
+                    raise TrustProtocolError("explicit Fleet Run identity required")
                 binding = self._fleet_provisioner.resolve(run_id)
                 if isinstance(target.plan.execution, CicdExecutionPolicy):
                     if type(binding) is not StrictFleetPolicyEnrollment:
@@ -287,7 +303,9 @@ class FleetRunLifecycle:
             from oh_goon.core.enforcer_lace_trust import TrustProtocolError
             from oh_goon.services.fleet_admission import FleetAdmissionPlanner
 
-            binding = self._fleet_prework
+            binding: (
+                FleetPreworkComposition | FleetPolicyEnrollment | StrictFleetPolicyEnrollment | None
+            ) = self._fleet_prework
             if type(self._fleet_provisioner) is FleetPreworkProvisioner:
                 binding = self._fleet_provisioner.resolve(fleet_run_id)
             if type(binding) not in (
@@ -296,6 +314,10 @@ class FleetRunLifecycle:
                 StrictFleetPolicyEnrollment,
             ):
                 raise TrustProtocolError(UNPROVISIONED_FLEET_ADMISSION)
+            assert isinstance(
+                binding,
+                (FleetPreworkComposition, FleetPolicyEnrollment, StrictFleetPolicyEnrollment),
+            )
             if (
                 type(binding) in (FleetPolicyEnrollment, StrictFleetPolicyEnrollment)
                 and not self._require_compiled_fleet_contract
@@ -366,6 +388,7 @@ class FleetRunLifecycle:
                     trusted_public_roots=binding.trusted_public_roots,
                     control_state_root=binding.control_state_root,
                 )
+            assert isinstance(binding, FleetPreworkComposition)
             return FleetAdmissionPlanner.reserve_atomic_fleet_prework_ingress(
                 execution=self._execution,
                 expected_durable_revision=expected_durable_revision,
@@ -516,7 +539,7 @@ class FleetRunLifecycle:
         source: FleetRunSource,
         readmitted_from_run_id: str | None,
         rerun_from_run_id: str | None,
-        application_launch,
+        application_launch: ApplicationLaunchReceipt,
         schedule_run_id: str | None = None,
     ) -> tuple[ExecutionTicket, FleetRunState]:
         ticket = self._execution.reserve_fleet_in(
@@ -559,11 +582,14 @@ class FleetRunLifecycle:
         expected_durable_revision: int,
         repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...],
         source: FleetRunSource,
-        application_launch,
+        application_launch: ApplicationLaunchReceipt,
         schedule_run_id: str | None = None,
     ) -> tuple[ExecutionTicket, FleetRunState]:
         """M176: strict scheduler's original capacity+lease+Run+causal write cut."""
         from oh_goon.services.fleet_admission import FleetAdmissionPlanner
+
+        target = intent.target
+        assert isinstance(target, FleetPlanTarget)
 
         ticket = self._execution.reserve_fleet_in(
             connection,
@@ -588,7 +614,7 @@ class FleetRunLifecycle:
         )
         # The original executor pool rechecks the physical backend and its
         # durable reservation; a provisioner is not an alternate selector.
-        self._executor_pool.require_bound_in(connection, placement, intent.target.plan)
+        self._executor_pool.require_bound_in(connection, placement, target.plan)
         state = FleetAdmissionPlanner.publish_compiled_strict_fleet_in(
             connection=connection,
             execution=self._execution,
@@ -599,7 +625,7 @@ class FleetRunLifecycle:
             targets=targets,
             fleet_run_id=fleet_run_id,
         )
-        self._executor_pool.require_bound_in(connection, placement, intent.target.plan)
+        self._executor_pool.require_bound_in(connection, placement, target.plan)
         return ticket, state
 
     def reserve_original_agent_source_for_attempt(
@@ -658,6 +684,8 @@ class FleetRunLifecycle:
             or source_attempt.paths.root.parent.name != storage_component(step_id)
         ):
             raise TrustProtocolError("Agent source staging requires exact original Step attempt")
+        strict_execution = expected.execution
+        assert isinstance(strict_execution, StrictFleetExecutionAdmission)
         run_id = session.require_fleet_run_id()
         validate_repository_attempt_operation_id(run_id, repository_id, operation_id)
         binding = self._fleet_provisioner.resolve(run_id)
@@ -710,7 +738,9 @@ class FleetRunLifecycle:
             if row[2] != session.original_fleet_lease_token():
                 raise CausalJournalError("original Agent source lease differs from Fleet owner")
 
-            def stage_after_original_reservation(handoff, reservation_seq: int) -> None:
+            def stage_after_original_reservation(
+                handoff: FrozenAgentStepHandoff, reservation_seq: int
+            ) -> None:
                 if source_attempt is None:
                     return
                 # Original attempt storage owner, not the Resolver, stages the
@@ -743,7 +773,7 @@ class FleetRunLifecycle:
                 signer_grant=SignerTrustEpochAuthority(connection).active(),
                 step_id=step_id,
                 attempt_identity=attempt_digest,
-                executor_generation=expected.execution.placement.executor_capacity.executor_generation,
+                executor_generation=strict_execution.placement.executor_capacity.executor_generation,
                 packet=packet,
                 expected_handoff_identity=expected_handoff_identity,
                 after_reservation=stage_after_original_reservation
@@ -770,7 +800,7 @@ class FleetRunLifecycle:
         attempt_number: int,
         source_attempt: "FleetPlanStepAttempt",
         handoff: "FrozenAgentStepHandoff",
-    ):
+    ) -> OriginalMountIntentDescriptor:
         """AG-02B2B3B2: read-only original Fleet cut for a staged mount intent.
 
         The SAME signed original stage receipt, operational Step attempt, live
@@ -812,6 +842,8 @@ class FleetRunLifecycle:
         ):
             raise TrustProtocolError("original strict Fleet Agent attempt/stage required")
         handoff.verify()
+        strict_execution = expected.execution
+        assert isinstance(strict_execution, StrictFleetExecutionAdmission)
         run_id = session.require_fleet_run_id()
         validate_repository_attempt_operation_id(run_id, repository_id, operation_id)
         binding = self._fleet_provisioner.resolve(run_id)
@@ -823,7 +855,7 @@ class FleetRunLifecycle:
             "oh-goon/original-fleet-agent-attempt/v1", attempt_id.encode("ascii")
         )
 
-        def original_cut(connection: sqlite3.Connection):
+        def original_cut(connection: sqlite3.Connection) -> OriginalMountIntentDescriptor:
             self.require_execution_authority_in(connection, run_id, expected)
             if session.cancel_requested_in(connection):
                 raise CausalJournalError("Fleet cancellation fences Agent source mount intent")
@@ -890,7 +922,7 @@ class FleetRunLifecycle:
                 len(staged) != 1
                 or reserve["handoff_identity"] != handoff.handoff_identity
                 or reserve["executor_generation"]
-                != expected.execution.placement.executor_capacity.executor_generation
+                != strict_execution.placement.executor_capacity.executor_generation
                 or reserve["lease_identity"] != row[2]
                 or reserve["control_epoch"] != row[1]
                 or staged[0]["payload"]["binding"]["attempt_identity"] != attempt_digest
@@ -919,6 +951,9 @@ class FleetRunLifecycle:
         self,
         session: ExecutionSession,
         expected: FleetExecutionAuthority,
+    ) -> (
+        Callable[[ResolvedPlanStep, FleetPlanStepAttempt, int], OriginalFleetLocalLaceReservation]
+        | None
     ):
         """Capture one original authenticated Fleet Run authority, not a journal signer.
 
@@ -952,7 +987,9 @@ class FleetRunLifecycle:
             raise TrustProtocolError("admitted physical backend differs from native enrollment")
         configured = binding.configured
 
-        def for_step(step, attempt, ordinal):
+        def for_step(
+            step: ResolvedPlanStep, attempt: FleetPlanStepAttempt, ordinal: int
+        ) -> OriginalFleetLocalLaceReservation:
             if (
                 not isinstance(step.step_id, str)
                 or not step.step_id
@@ -1077,7 +1114,9 @@ class FleetRunLifecycle:
                 raise TrustProtocolError("original local Bubblewrap recovery admission missing")
             return ticket
 
-    def original_local_lace_recovery_backend(self, expected: FleetExecutionAuthority):
+    def original_local_lace_recovery_backend(
+        self, expected: FleetExecutionAuthority
+    ) -> ProcessIsolationBackend:
         """Obtain recovery observation config from the original executor inventory.
 
         Authority is checked by ``local_lace_recovery_owner`` through its
@@ -1096,7 +1135,7 @@ class FleetRunLifecycle:
         self,
         session: ExecutionSession,
         expected: FleetExecutionAuthority,
-    ):
+    ) -> OriginalFleetLocalLaceRecoveryOwner:
         """Bind recovery to this *already activated* original Fleet owner.
 
         No startup signer, fabricated takeover lease or new admission is created.
@@ -1124,7 +1163,9 @@ class FleetRunLifecycle:
         if expected.execution.placement.isolation_backend.backend_id != "bubblewrap":
             raise TrustProtocolError("remote LACE cannot be recovered by local Bubblewrap owner")
         run_id = session.require_fleet_run_id()
-        binding = self._fleet_provisioner.resolve(run_id)
+        provisioner = self._fleet_provisioner
+        assert isinstance(provisioner, FleetPreworkProvisioner)
+        binding = provisioner.resolve(run_id)
         if type(binding) is not StrictFleetPolicyEnrollment:
             raise TrustProtocolError("original strict Fleet policy enrollment required")
         binding.configured.require_unchanged(binding.current)
@@ -1160,7 +1201,7 @@ class FleetRunLifecycle:
                 grant = SignerTrustEpochAuthority(connection).active()
                 require_original_restart_issuer_in(
                     connection,
-                    provisioner=self._fleet_provisioner,
+                    provisioner=provisioner,
                     binding=binding,
                     run_id=run_id,
                     grant=grant,
@@ -1401,10 +1442,10 @@ class FleetRunLifecycle:
                 )
                 self._executor_pool.release_run_in(connection, fleet_run_id)
         except BaseException:
-            detail = self._journal.read_view().run_detail(fleet_run_id)
-            if detail is None or not detail.run.status.cancel_request_satisfied:
+            failed_detail = self._journal.read_view().run_detail(fleet_run_id)
+            if failed_detail is None or not failed_detail.run.status.cancel_request_satisfied:
                 raise
-            return detail.run
+            return failed_detail.run
         return state
 
     def finish(

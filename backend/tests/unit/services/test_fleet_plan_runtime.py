@@ -10,6 +10,7 @@ import pytest
 
 from oh_goon.core.errors import FleetExtensionInvalid, FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import (
+    ExtensionDeclaration,
     ManagedToolRuntime,
     ResolvedCommandStep,
     ResolvedFleetPlan,
@@ -133,6 +134,25 @@ def _sync_extensions(root: Path, catalog: Path) -> tuple:
 
 def _resolver(root: Path) -> FleetPlanResolver:
     return FleetPlanResolver(_extension_store(root), _tools(root))
+
+
+def test_extension_local_source_must_be_a_directory_before_git_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "extension.txt"
+    source.write_text("not a source directory", encoding="utf-8")
+    git_acquisition = Mock(side_effect=AssertionError("Git must not acquire an invalid source"))
+    monkeypatch.setattr(
+        "oh_goon.engine.fleet_extensions.capture_native_git_authority", git_acquisition
+    )
+    with pytest.raises(FleetPlanInvalid, match="local extension source is not a directory"):
+        _extension_store(tmp_path).sync(
+            ExtensionDeclaration(
+                name="quality", source=source.name, revision="a" * 40, commands=("quality-lint",)
+            ),
+            catalog_root=tmp_path,
+        )
+    git_acquisition.assert_not_called()
 
 
 def test_extension_runtime_must_be_prepared_and_sync_repairs_missing_environment(

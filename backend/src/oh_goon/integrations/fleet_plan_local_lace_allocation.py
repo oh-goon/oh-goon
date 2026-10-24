@@ -10,14 +10,25 @@ import json
 import os
 import stat
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
 
 from oh_goon.core.enforcer_lace_trust import canonical_bytes, digest
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.ports.local_lace_allocation import LocalLaceAllocationObservation
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentProof
 from oh_goon.engine.command import run_command
-from oh_goon.integrations._fleet_plan_cgroup_resources import _is_cgroup2_path, _process_identity
-from oh_goon.integrations._fleet_plan_restricted_egress import _control_environment
+from oh_goon.integrations._fleet_plan_cgroup_resources import (
+    CgroupV2AttemptLease,
+    _is_cgroup2_path,
+    _process_identity,
+)
+from oh_goon.integrations._fleet_plan_restricted_egress import (
+    RestrictedEgressLease,
+    _control_environment,
+)
 from oh_goon.integrations.fleet_plan_local_lace_intent import _identity, local_resource_identities
 from oh_goon.integrations.fleet_plan_local_lace_recovery import lace_resource_binding
 
@@ -74,7 +85,7 @@ def _original_record(
     for key, value in expected.items():
         if record.get(key) != value:
             raise FleetPlanInvalid("local LACE native owner record has foreign resource identity")
-    return record
+    return cast(dict[str, object], record)
 
 
 def _native_list(executable: str, args: tuple[str, ...], *, kind: str) -> list[dict[str, object]]:
@@ -95,15 +106,15 @@ def _native_list(executable: str, args: tuple[str, ...], *, kind: str) -> list[d
             data = data["nftables"]
         if type(data) is not list or any(type(item) is not dict for item in data):
             raise ValueError("invalid native response")
-        return data
+        return cast(list[dict[str, object]], data)
     except (ValueError, TypeError) as exc:
         raise FleetPlanInvalid(f"local LACE {kind} native observation malformed") from exc
 
 
 def observe_local_allocation(
-    cgroup: object,
-    network: object | None,
-    request: object,
+    cgroup: CgroupV2AttemptLease,
+    network: RestrictedEgressLease | None,
+    request: IsolatedProcessRequest,
     *,
     proof: LocalLaceIntentProof | None = None,
 ) -> LocalLaceAllocationObservation:
@@ -162,15 +173,15 @@ def observe_local_allocation(
         or not any(
             item.get("ifname") == network.host_veth
             or (
-                type(item.get("ifname")) is str
-                and item["ifname"].startswith(network.host_veth + "@")
+                isinstance(ifname := item.get("ifname"), str)
+                and ifname.startswith(network.host_veth + "@")
             )
             for item in links
         )
         or not any(
-            type(item.get("table")) is dict
-            and item["table"].get("family") == "inet"
-            and item["table"].get("name") == network.table
+            isinstance(table := item.get("table"), dict)
+            and table.get("family") == "inet"
+            and table.get("name") == network.table
             for item in nftables
         )
     ):

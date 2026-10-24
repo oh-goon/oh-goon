@@ -1,47 +1,45 @@
 # oci/publish-image
 
-This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+Build and publish an immutable OCI image reference.
 
-Standalone production build-and-publish Plan. The image is built as a retained OCI archive and published only to its digest-qualified registry reference. OCI_REGISTRY_USERNAME and OCI_REGISTRY_PASSWORD are required host-backed credential sources; no mutable tag is created.
+**Status:** runnable with prerequisites. **Effects:** Builds an image and publishes by digest to the selected destination.
 
-## Use this Plan
+**Prerequisites:** A compatible isolated OCI builder, a repository Containerfile with digest-pinned base images, the selected base-pull registry and configured retained workspace storage. Supply `OCI_REGISTRY_USERNAME` and `OCI_REGISTRY_PASSWORD` through their declared host environment bindings for the destination registry. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+
+**What to edit:** initialize a workflow, then set the registered target and relevant caller choices in `workflow/run.yml`. The illustrative addresses, revision and digest below must identify your real workload before execution. The [first-run guide](../../../README.md) explains repository registration and prepared CLI use.
+
+**Settings owner:** [`plan.yml`](plan.yml) owns ordered imports; imported Goons own input types/defaults, Steps, effects and outputs. `run.yml` selects values. Native project tools keep their own configuration.
 
 ```sh
-oh-goon templates show oci/publish-image --kind plan
-oh-goon plan inputs templates/plans/oci/publish-image/plan.yml
+oh-goon templates init oci/publish-image --output ./workflow
 ```
 
-Copy with `oh-goon templates show oci/publish-image --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
-
-Prepare the selected OCI execution provider and registry access before execution. Base-image pull and destination publication registries are independent inputs. Credentials use the declared host-backed environment sources, never values files. Inspect digest/workspace outputs through the Run; publishing and retained bytes require their configured owners.
-
-## Configure a copy
-
-Save the following illustrative values as `values.yml`. Replace example infrastructure addresses and targets with your own before submitting work. Credentials remain in the declared environment bindings.
+Edit the generated `workflow/run.yml`; this shows one explicit selection:
 
 ```yaml
+version: 1
+source: {kind: catalog-plan, name: oci/publish-image}
+target: {repository_id: REPOSITORY_ID}
 inputs:
   base_registry_hostname: registry.example.com
-  publish_registry_hostname: harbor.example.com
-  publish_repository: team/app
   containerfile: Dockerfile
   context: .
   platform: linux/amd64
+  publish_registry_hostname: harbor.example.com
+  publish_repository: team/app
 ```
-
-Validate and lock the same selection:
 
 ```sh
-oh-goon plan validate plan.yml --inputs-file values.yml
-oh-goon lock plan.yml --inputs-file values.yml
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
 ```
 
-Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.
+**Expected outputs:** `OCI_DIGEST` and `OCI_REFERENCE` from the publisher. The base-pull registry and destination registry are independent choices; no mutable tag is created.
 
+**Failures:** invalid inputs fail before work. Inspection/validation do not prove installed tools, reachable services or successful effects. Native failures remain failed Steps with their exit status and logs. A changed source or execution selection requires a new lock.
 
-## OCI registry and caller-choice contract
+**Customize:** change caller values in `run.yml`. For structural changes, create a project Plan with ordinary ordered `goons:` imports and select it with `source: {kind: file-plan, path: plan.yml}`; see [Plan authoring](../../README.md). Keep secrets in declared execution environment bindings.
 
-See the [OCI input/registry audit](../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md).
-The Plan projects caller choices only; typed Goon schemas and explicit producer
-bindings remain the machine authority. Never infer the publication registry from
-the base-image pull registry.
+See the [OCI input/registry audit](../../../../docs/development/TEMPLATE_OCI_INPUT_AUTHORITY.md) for typed workspace and digest lineage.

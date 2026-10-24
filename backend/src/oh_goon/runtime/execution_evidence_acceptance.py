@@ -113,14 +113,14 @@ class ExecutionEvidenceAcceptanceAuthority:
 
     def _validate_live_authority(
         self,
-        workspace,
-        assignment,
-        lease,
-        materialization,
+        workspace: WorkspaceRef,
+        assignment: ExecutionAssignment,
+        lease: WorkspaceLease,
+        materialization: ExecutionMaterialization,
         *,
-        output_checkpoint_id,
-        producer_work_identity,
-        quiescence,
+        output_checkpoint_id: str,
+        producer_work_identity: str | None,
+        quiescence: WriterQuiescenceEvidence | None,
     ) -> None:
         if self._assignments.assignment(assignment.assignment_id) != assignment:
             raise ExecutionEvidenceRejected("Assignment differs from durable authority")
@@ -139,7 +139,11 @@ class ExecutionEvidenceAcceptanceAuthority:
 
     @staticmethod
     def _validate_materialized_scope(
-        workspace, assignment, lease, materialization, producer_work_identity
+        workspace: WorkspaceRef,
+        assignment: ExecutionAssignment,
+        lease: WorkspaceLease,
+        materialization: ExecutionMaterialization,
+        producer_work_identity: str | None,
     ) -> None:
         if (
             assignment.attempt_id != materialization.attempt_id
@@ -178,16 +182,16 @@ class ExecutionEvidenceAcceptanceAuthority:
 
     @staticmethod
     def _new_acceptance(
-        workspace,
-        assignment,
-        lease,
-        materialization,
+        workspace: WorkspaceRef,
+        assignment: ExecutionAssignment,
+        lease: WorkspaceLease,
+        materialization: ExecutionMaterialization,
         *,
-        output_checkpoint_id,
-        result_identity,
-        evidence_artifact_ids,
-        producer_work_identity,
-        accepted_at,
+        output_checkpoint_id: str,
+        result_identity: str,
+        evidence_artifact_ids: tuple[str, ...],
+        producer_work_identity: str | None,
+        accepted_at: datetime,
     ) -> AcceptedExecutionEvidence:
         payload = {
             "attempt_id": assignment.attempt_id,
@@ -206,17 +210,26 @@ class ExecutionEvidenceAcceptanceAuthority:
             "result_identity": result_identity,
             "evidence_artifact_ids": list(evidence_artifact_ids),
         }
-        return AcceptedExecutionEvidence(
-            acceptance_id=new_execution_evidence_acceptance_id(),
-            acceptance_fingerprint=stable_id("execution-evidence-acceptance", payload),
-            accepted_at=accepted_at,
-            **payload,
+        return AcceptedExecutionEvidence.model_validate(
+            {
+                "acceptance_id": new_execution_evidence_acceptance_id(),
+                "acceptance_fingerprint": stable_id("execution-evidence-acceptance", payload),
+                "accepted_at": accepted_at,
+                **payload,
+            }
         )
 
     @staticmethod
     def _load_durable_rows(
-        connection, workspace, assignment, lease, materialization, output_checkpoint_id
-    ):
+        connection: sqlite3.Connection,
+        workspace: WorkspaceRef,
+        assignment: ExecutionAssignment,
+        lease: WorkspaceLease,
+        materialization: ExecutionMaterialization,
+        output_checkpoint_id: str,
+    ) -> tuple[
+        sqlite3.Row | None, sqlite3.Row | None, sqlite3.Row | None, sqlite3.Row, sqlite3.Row | None
+    ]:
         state = connection.execute(
             "SELECT current_checkpoint_id, current_lease_id FROM workspace_state WHERE workspace_id=?",
             (workspace.workspace_id,),
@@ -246,15 +259,21 @@ class ExecutionEvidenceAcceptanceAuthority:
 
     def _validate_durable_rows(
         self,
-        connection,
-        rows,
-        workspace,
-        assignment,
-        lease,
-        materialization,
+        connection: sqlite3.Connection,
+        rows: tuple[
+            sqlite3.Row | None,
+            sqlite3.Row | None,
+            sqlite3.Row | None,
+            sqlite3.Row,
+            sqlite3.Row | None,
+        ],
+        workspace: WorkspaceRef,
+        assignment: ExecutionAssignment,
+        lease: WorkspaceLease,
+        materialization: ExecutionMaterialization,
         *,
-        output_checkpoint_id,
-        producer_work_identity,
+        output_checkpoint_id: str,
+        producer_work_identity: str | None,
     ) -> datetime:
         state, lease_row, assignment_row, materialization_row, output_row = rows
         self._validate_durable_workspace_and_lease(
@@ -282,6 +301,7 @@ class ExecutionEvidenceAcceptanceAuthority:
         # before original-owner acceptance INSERT. This is the single write-cut
         # clock for both rejection and the eventual receipt.
         accepted_at = utc_now()
+        assert lease_row is not None  # validated by the original durable lease owner above
         try:
             persisted_expires_at = datetime.fromisoformat(lease_row["expires_at"])
             persisted_issued_at = datetime.fromisoformat(lease_row["issued_at"])
@@ -299,7 +319,11 @@ class ExecutionEvidenceAcceptanceAuthority:
 
     @staticmethod
     def _validate_durable_workspace_and_lease(
-        state, lease_row, assignment, lease, output_checkpoint_id
+        state: sqlite3.Row | None,
+        lease_row: sqlite3.Row | None,
+        assignment: ExecutionAssignment,
+        lease: WorkspaceLease,
+        output_checkpoint_id: str,
     ) -> None:
         if state is None or state["current_lease_id"] != lease.lease_id:
             raise ExecutionEvidenceRejected("Workspace lease moved before result acceptance")
@@ -330,7 +354,12 @@ class ExecutionEvidenceAcceptanceAuthority:
 
     @staticmethod
     def _validate_durable_assignment_and_materialization(
-        assignment_row, materialization_row, workspace, assignment, lease, materialization
+        assignment_row: sqlite3.Row | None,
+        materialization_row: sqlite3.Row,
+        workspace: WorkspaceRef,
+        assignment: ExecutionAssignment,
+        lease: WorkspaceLease,
+        materialization: ExecutionMaterialization,
     ) -> None:
         if (
             assignment_row is None
@@ -370,7 +399,9 @@ class ExecutionEvidenceAcceptanceAuthority:
 
     @staticmethod
     def _validate_durable_producer(
-        materialization_row, materialization, producer_work_identity
+        materialization_row: sqlite3.Row,
+        materialization: ExecutionMaterialization,
+        producer_work_identity: str | None,
     ) -> None:
         payload = json.loads(materialization_row["payload_json"])
         durable = tuple(
@@ -398,7 +429,9 @@ class ExecutionEvidenceAcceptanceAuthority:
             )
 
     @staticmethod
-    def _persist_acceptance(connection, value: AcceptedExecutionEvidence) -> None:
+    def _persist_acceptance(
+        connection: sqlite3.Connection, value: AcceptedExecutionEvidence
+    ) -> None:
         try:
             connection.execute(
                 """INSERT INTO execution_evidence_acceptances(
@@ -450,7 +483,7 @@ class ExecutionEvidenceAcceptanceAuthority:
 
     @staticmethod
     def _checkpoint_descends_from(
-        connection,
+        connection: sqlite3.Connection,
         *,
         output_checkpoint_id: str,
         input_checkpoint_id: str,

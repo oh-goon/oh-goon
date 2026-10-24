@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from typing import TypedDict
 
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
 from oh_goon.core.models.capability import CapabilitySnapshot
@@ -13,6 +14,13 @@ from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.runtime.execution import ExecutionSession
 from oh_goon.services.repository_effect_execution import RepositoryEffectExecution
+
+
+class _TargetExecutionOptions(TypedDict, total=False):
+    validate_authority_in: Callable[[sqlite3.Connection], None]
+    activity: Callable[[str], None]
+    local_lace_intent_for: Callable[..., LocalLaceIntentReservation]
+    admitted_run: FleetRunDetail
 
 
 def _emit_activity(activity: Callable[[str], None] | None, message: str) -> None:
@@ -33,7 +41,7 @@ def _execute_target(
     local_lace_intent_for: Callable[..., LocalLaceIntentReservation] | None = None,
     admitted_run: FleetRunDetail | None = None,
 ) -> None:
-    kwargs: dict[str, object] = {}
+    kwargs: _TargetExecutionOptions = {}
     if validate_authority_in is not None:
         kwargs["validate_authority_in"] = validate_authority_in
     if activity is not None:

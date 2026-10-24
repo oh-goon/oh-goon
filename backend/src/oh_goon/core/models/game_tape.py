@@ -132,12 +132,12 @@ class GameTapeStepExecution(ImmutableModel):
         default_factory=tuple, max_length=4
     )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def attempt_count(self) -> int:
         return len(self.attempts)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def retry_context(self) -> GameTapeRetryContextSummary:
         from oh_goon.core.game_tape_retry_context import summarize_retry_context
@@ -317,7 +317,7 @@ class GameTapeRepositoryExecution(ImmutableModel):
     steps: tuple[GameTapeStepExecution, ...] = Field(default_factory=tuple)
     runtime_progress: GameTapeRuntimeProgress | None = None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def duration_ms(self) -> int | None:
         if self.started_at is None or self.finished_at is None:
@@ -334,12 +334,12 @@ class GameTapeRepositoryExecution(ImmutableModel):
             return slowest.step_id, 0
         return slowest.step_id, round((slowest.duration_ms or 0) * 100 / total)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def bottleneck_step_id(self) -> str | None:
         return self._bottleneck()[0]
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def bottleneck_percent(self) -> int | None:
         return self._bottleneck()[1]
@@ -424,7 +424,7 @@ class GameTapeReceipt(ImmutableModel):
     started_at: AwareDatetime | None = None
     finished_at: AwareDatetime | None = None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def duration_ms(self) -> int | None:
         """Derive run duration from the lifecycle timestamps owned by this receipt."""
@@ -484,7 +484,7 @@ class GameTape(ImmutableModel):
     enforcer_receipt_available: bool = False
     why_not: GameTapeWhyNotDiagnostic | None = None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def hidden_issue_count(self) -> int:
         return max(0, self.issue_count - len(self.issue_focus))
@@ -492,7 +492,7 @@ class GameTape(ImmutableModel):
     play_by_play: tuple[GameTapeEvent, ...] = Field(default_factory=tuple)
     repositories: tuple[GameTapeRepositoryExecution, ...]
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def summary(self) -> GameTapeSummary:
         """Derive bounded run/repository/step counts from the repositories already owned by the tape."""
@@ -500,7 +500,7 @@ class GameTape(ImmutableModel):
 
         return project_summary(self.repositories)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def team(self) -> GameTapeTeamComposition:
         """Derive team composition from repository execution truth already owned by the tape."""
@@ -510,7 +510,7 @@ class GameTape(ImmutableModel):
         failures = project_repository_failure_focus(self.repositories)
         return project_team_composition(self.repositories, failures)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def observability(self) -> GameTapeObservabilityReceipt:
         """Expose the current Game Tape evidence-lifecycle policy without storing a per-run copy."""

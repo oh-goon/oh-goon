@@ -200,7 +200,7 @@ class SharedPlanService:
         document = self._store.read(plan_key, expected_revision=expected_revision)
         plan, source_sha256 = self._plans.resolve_with_source(
             self._store.path(document.plan_key),
-            inputs=inputs,
+            inputs=dict(inputs) if inputs is not None else None,
             root_expected_name=document.plan_key,
         )
         self._require_source_revision(document, source_sha256)
@@ -224,7 +224,7 @@ class SharedPlanService:
         document = self._store.read(plan_key, expected_revision=expected_revision)
         plan, source_sha256 = self._plans.resolve_with_source(
             self._store.path(document.plan_key),
-            inputs=inputs,
+            inputs=dict(inputs) if inputs is not None else None,
             root_expected_name=document.plan_key,
         )
         self._require_source_revision(document, source_sha256)
@@ -245,7 +245,7 @@ class SharedPlanService:
         document = self._store.read(plan_key, expected_revision=expected_revision)
         plan, source_sha256 = self._plans.resolve_with_source(
             self._store.path(document.plan_key),
-            inputs=inputs,
+            inputs=dict(inputs) if inputs is not None else None,
             root_expected_name=document.plan_key,
         )
         self._require_source_revision(document, source_sha256)
@@ -287,7 +287,7 @@ class SharedPlanService:
             try:
                 preview = self._plans.preview_resolved(plan, repository.path)
             except (FleetDomainError, ValueError) as exc:
-                team = BlockedSharedPlanRepositoryPreview(
+                team: SharedPlanRepositoryPreview = BlockedSharedPlanRepositoryPreview(
                     repository=repository,
                     repository_instance_id=before_instance,
                     reason=str(exc),
@@ -340,7 +340,7 @@ class SharedPlanService:
             repository_ids=repository_ids,
             fleet_run_id=fleet_run_id,
             requested_priority=requested_priority,
-            inputs=inputs,
+            inputs=dict(inputs) if inputs is not None else None,
             source=SharedPlanSource(plan_key=document.plan_key, sha256=document.sha256),
             expected_plan_id=expected_plan_id,
             expected_repository_instance_ids=repository_instance_ids,

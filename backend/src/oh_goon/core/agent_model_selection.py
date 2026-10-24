@@ -8,7 +8,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.agent_source import FrozenSourceMember
 
 from oh_goon.core.errors import FleetPlanInvalid
 
@@ -430,7 +433,7 @@ class LocalModelPatchProposal:
 def parse_local_model_patch_proposal(
     output: str,
     *,
-    members: tuple[object, ...],
+    members: tuple[FrozenSourceMember, ...],
     inspected_paths: frozenset[str],
 ) -> LocalModelPatchProposal:
     """Accept one bounded whole-file replacement for a file actually inspected.

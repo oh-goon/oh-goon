@@ -17,6 +17,7 @@ from oh_goon.core.models.fleet_plan import (
     GitPlanStep,
     MissingConfigPolicy,
     PlanArtifactDeclaration,
+    PlanStep,
     PreCommitPlanStep,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
@@ -195,7 +196,7 @@ def _convert_script(
     issues: list[GitLabImportIssue],
     timeout_seconds: float,
     artifacts: tuple[PlanArtifactDeclaration, ...],
-):
+) -> CommandPlanStep | PreCommitPlanStep | GitPlanStep:
     script = script.strip()
     if not script:
         raise FleetPlanInvalid(f"GitLab job produced an empty script for {step_id}")
@@ -254,7 +255,7 @@ def _native_step(
     timeout_seconds: float,
     artifacts: tuple[PlanArtifactDeclaration, ...],
     issues: list[GitLabImportIssue],
-):
+) -> CommandPlanStep | PreCommitPlanStep | GitPlanStep:
     if argv[:3] == ("pre-commit", "run", "--all-files") and len(argv) == 3:
         return PreCommitPlanStep(
             step_id=step_id,
@@ -436,7 +437,7 @@ def native_goon_yaml(migration: GitLabGoonMigration) -> str:
     return banner + yaml.safe_dump(payload, sort_keys=False)
 
 
-def _step_yaml(step) -> dict[str, Any]:
+def _step_yaml(step: PlanStep) -> dict[str, Any]:
     data = step.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
     uses = step.kind
     step_id = step.step_id

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -19,6 +20,7 @@ from oh_goon.core.models.operation import (
     SuccessfulOperationOutcome,
 )
 from oh_goon.core.models.provenance import OperationProvenance, RepositoryStateFingerprint
+from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.path_authority import StrictHostPathAuthority
 from oh_goon.core.ports.capability_runner import (
@@ -60,7 +62,7 @@ class PreparedStrictFleetPlanExecution:
         return self.runner._run_strict(self.prepared_run, request)
 
     @property
-    def maintenance_receipt(self):
+    def maintenance_receipt(self) -> FleetContentMaintenanceReceipt | None:
         return self.prepared_run.maintenance_receipt
 
     def close(self) -> None:
@@ -85,7 +87,7 @@ class FleetPlanRunner:
         diagnostics: DiagnosticEmitter | None = None,
         terminal: CommandTerminal | None = None,
         standard_process_isolation: ProcessIsolationBackend | None = None,
-        workspace_pin=None,
+        workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None = None,
     ) -> None:
         self._git = git
         self._content_store = content_store
@@ -168,6 +170,7 @@ class FleetPlanRunner:
             raise StateConflict(
                 "Strict Fleet CI/CD requires process-isolation authority admitted before RUN_ADMITTED"
             )
+        assert request.repository_admission is not None
         prepared_run = self._steps.prepare_strict_run(
             attempt.repository,
             target.plan,
@@ -207,6 +210,7 @@ class FleetPlanRunner:
             if target.agent_deliveries
             else None,
             repair_context=target.agent_repair,
+            execution_target=target,
             execution_limits=target.agent_repair.limits
             if target.agent_repair is not None
             else None,
@@ -219,7 +223,9 @@ class FleetPlanRunner:
         ).fingerprint
         return self._operation_execution(request, execution, after=after)
 
-    def _agent_delivery_for(self, target: FleetPlanTarget, repository_id: str):
+    def _agent_delivery_for(
+        self, target: FleetPlanTarget, repository_id: str
+    ) -> Callable[[str, str], bytes]:
         """One content-store transport port, bound to original admitted Step identity."""
         import hashlib
 
@@ -271,7 +277,9 @@ class FleetPlanRunner:
             )
         return self._operation_execution(request, execution, after=after)
 
-    def _lifecycle_observer(self, request: CapabilityExecutionRequest):
+    def _lifecycle_observer(
+        self, request: CapabilityExecutionRequest
+    ) -> StepLifecycleObserver | None:
         factory = self._lifecycle_observer_factory
         fleet_run_id = request.attempt.fleet_run_id
         if factory is None or fleet_run_id is None:

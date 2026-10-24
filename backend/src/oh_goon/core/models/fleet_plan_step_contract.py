@@ -242,7 +242,7 @@ class PlanStepCapabilities(ImmutableModel):
         return self
 
 
-def compile_simple_network_alias(value):
+def compile_simple_network_alias(value: object) -> object:
     """Compile the friendly ``network: bool`` authoring form to canonical egress.
 
     ``network: false`` is the normal default and therefore normally omitted.

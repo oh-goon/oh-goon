@@ -7,6 +7,7 @@ single timeout/refinement execution engine remain in ``test_batches``.
 
 from __future__ import annotations
 
+import argparse
 import concurrent.futures
 import hashlib
 import json
@@ -16,9 +17,11 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol, TypedDict
 
 from oh_goon.repository_tooling import pytest_execution_report as execution_report_contract
 from oh_goon.repository_tooling.pytest_execution_membership import (
+    ExecutionMembershipReceipt,
     ExecutionMembershipStore,
     execution_run_identity,
 )
@@ -39,6 +42,21 @@ from oh_goon.runtime.recovery_evidence import (
     ExecutionRecoveryEvent,
     recovery_work_identity,
 )
+
+
+class MembershipReceiptProjection(Protocol):
+    def as_dict(self) -> dict[str, object]: ...
+
+
+class BatchExecutionReport(TypedDict):
+    batch_index: int
+    members: list[str]
+    attempt_count: int
+    returncode: int
+    duration_ms: int
+    environment_retry_count: int
+    timeout_refinements: list[str]
+    recovery_events: list[dict[str, object]]
 
 
 @dataclass(frozen=True)
@@ -133,12 +151,14 @@ class _BatchRunState:
     failures: int = 0
     deselected_batches: int = 0
     suite_timed_out: bool = False
-    batch_reports: list[dict[str, object]] = field(default_factory=list)
+    batch_reports: list[BatchExecutionReport] = field(default_factory=list)
     recovery_events: list[ExecutionRecoveryEvent] = field(default_factory=list)
     refinement_history: RefinementHistory = field(default_factory=RefinementHistory)
 
 
-def _discover_runnable_members(parser, args) -> NativePytestCollection:
+def _discover_runnable_members(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> NativePytestCollection:
     try:
         collection = collect_native_pytest(
             tuple(args.paths),
@@ -153,7 +173,9 @@ def _discover_runnable_members(parser, args) -> NativePytestCollection:
     return collection
 
 
-def _select_batches(parser, args, members: tuple[str, ...]) -> tuple[Batch, ...]:
+def _select_batches(
+    parser: argparse.ArgumentParser, args: argparse.Namespace, members: tuple[str, ...]
+) -> tuple[Batch, ...]:
     batches = _chunks(members, args.batch_size)
     if args.batch is None:
         return batches
@@ -164,7 +186,7 @@ def _select_batches(parser, args, members: tuple[str, ...]) -> tuple[Batch, ...]
 
 
 def _resume_schedule(
-    args, batches: tuple[Batch, ...], receipt_store: MemberReceiptStore
+    args: argparse.Namespace, batches: tuple[Batch, ...], receipt_store: MemberReceiptStore
 ) -> tuple[frozenset[str], tuple[Batch, ...], int]:
     reusable: set[str] = set()
     scheduled: list[Batch] = []
@@ -184,7 +206,7 @@ def _resume_schedule(
 
 
 def _execution_authority(
-    args,
+    args: argparse.Namespace,
     resume_context: ResumeContext,
     scheduled: tuple[Batch, ...],
     reusable: frozenset[str],
@@ -215,7 +237,7 @@ def _execution_authority(
     return plan_identity, run_identity, store
 
 
-def _build_batch_plan(parser, args) -> _BatchPlan:
+def _build_batch_plan(parser: argparse.ArgumentParser, args: argparse.Namespace) -> _BatchPlan:
     started = time.monotonic()
     collection = _discover_runnable_members(parser, args)
     members = tuple(collection.groups(args.granularity))
@@ -266,7 +288,7 @@ def _build_batch_plan(parser, args) -> _BatchPlan:
     )
 
 
-def _print_batch_plan(args, plan: _BatchPlan) -> None:
+def _print_batch_plan(args: argparse.Namespace, plan: _BatchPlan) -> None:
     print("=== PYTEST BATCH PLAN ===", flush=True)
     print(
         f"Granularity: {args.granularity} | members={len(plan.members)} | "
@@ -289,7 +311,7 @@ def _print_batch_plan(args, plan: _BatchPlan) -> None:
         )
 
 
-def _print_resume_plan(args, plan: _BatchPlan) -> None:
+def _print_resume_plan(args: argparse.Namespace, plan: _BatchPlan) -> None:
     context = plan.resume_context
     print(
         "=== PYTEST RESUME PLAN === "
@@ -307,7 +329,7 @@ def _print_resume_plan(args, plan: _BatchPlan) -> None:
         )
 
 
-def _new_run_state(args, plan: _BatchPlan) -> _BatchRunState:
+def _new_run_state(args: argparse.Namespace, plan: _BatchPlan) -> _BatchRunState:
     started = plan.started
     deadline = started + args.suite_timeout if args.suite_timeout is not None else None
     return _BatchRunState(
@@ -322,7 +344,7 @@ def _new_run_state(args, plan: _BatchPlan) -> _BatchRunState:
 
 def _submit_next(
     pool: concurrent.futures.ThreadPoolExecutor,
-    args,
+    args: argparse.Namespace,
     plan: _BatchPlan,
     state: _BatchRunState,
     callbacks: BatchCallbacks,
@@ -405,7 +427,7 @@ def _print_batch_failure(
 
 
 def _retry_resource_pressure(
-    args,
+    args: argparse.Namespace,
     state: _BatchRunState,
     batch: Batch,
     attempt: int,
@@ -436,7 +458,11 @@ def _retry_resource_pressure(
 
 
 def _consume_future(
-    args, state: _BatchRunState, future: _BatchFuture, batch: Batch, callbacks: BatchCallbacks
+    args: argparse.Namespace,
+    state: _BatchRunState,
+    future: _BatchFuture,
+    batch: Batch,
+    callbacks: BatchCallbacks,
 ) -> bool:
     rc, output, elapsed, events = future.result()
     state.recovery_events.extend(events)
@@ -464,7 +490,7 @@ def _consume_future(
 
 
 def _consume_done_futures(
-    args,
+    args: argparse.Namespace,
     plan: _BatchPlan,
     state: _BatchRunState,
     pool: concurrent.futures.ThreadPoolExecutor,
@@ -481,7 +507,9 @@ def _consume_done_futures(
     return completed
 
 
-def _run_batch_executor(args, plan: _BatchPlan, callbacks: BatchCallbacks) -> _BatchRunState:
+def _run_batch_executor(
+    args: argparse.Namespace, plan: _BatchPlan, callbacks: BatchCallbacks
+) -> _BatchRunState:
     state = _new_run_state(args, plan)
     with concurrent.futures.ThreadPoolExecutor(max_workers=plan.workers) as pool:
         completed = plan.fully_reused_batches
@@ -509,7 +537,9 @@ def _run_batch_executor(args, plan: _BatchPlan, callbacks: BatchCallbacks) -> _B
     return state
 
 
-def _apply_terminal_failures(args, plan: _BatchPlan, state: _BatchRunState) -> None:
+def _apply_terminal_failures(
+    args: argparse.Namespace, plan: _BatchPlan, state: _BatchRunState
+) -> None:
     if state.selected_batches == 0 and state.deselected_batches > 0:
         state.failures += 1
         print(
@@ -528,7 +558,9 @@ def _apply_terminal_failures(args, plan: _BatchPlan, state: _BatchRunState) -> N
         )
 
 
-def _finalize_membership(plan: _BatchPlan, state: _BatchRunState):
+def _finalize_membership(
+    plan: _BatchPlan, state: _BatchRunState
+) -> tuple[ExecutionMembershipReceipt, Path]:
     receipt, path = plan.execution_membership_store.finalize(
         selected=plan.selected_members,
         resumed=tuple(sorted(plan.reusable_members)),
@@ -554,7 +586,11 @@ def _finalize_membership(plan: _BatchPlan, state: _BatchRunState):
 
 
 def _print_final_result(
-    plan: _BatchPlan, state: _BatchRunState, receipt, receipt_path: Path, duration: float
+    plan: _BatchPlan,
+    state: _BatchRunState,
+    receipt: ExecutionMembershipReceipt,
+    receipt_path: Path,
+    duration: float,
 ) -> None:
     print(
         "=== PYTEST MEMBERSHIP RECEIPT === "
@@ -576,7 +612,12 @@ def _print_final_result(
 
 
 def _execution_report(
-    args, plan: _BatchPlan, state: _BatchRunState, receipt, receipt_path: Path, duration: float
+    args: argparse.Namespace,
+    plan: _BatchPlan,
+    state: _BatchRunState,
+    receipt: MembershipReceiptProjection,
+    receipt_path: Path,
+    duration: float,
 ) -> dict[str, object]:
     return {
         "schema": execution_report_contract.execution_report_schema(),
@@ -605,7 +646,7 @@ def _execution_report(
     }
 
 
-def _finish_batch_run(args, plan: _BatchPlan, state: _BatchRunState) -> int:
+def _finish_batch_run(args: argparse.Namespace, plan: _BatchPlan, state: _BatchRunState) -> int:
     _apply_terminal_failures(args, plan, state)
     duration = time.monotonic() - state.suite_started
     receipt, receipt_path = _finalize_membership(plan, state)
@@ -618,7 +659,9 @@ def _finish_batch_run(args, plan: _BatchPlan, state: _BatchRunState) -> int:
     return 0 if state.failures == 0 else 1
 
 
-def run_batch_cli(parser, args, callbacks: BatchCallbacks) -> int:
+def run_batch_cli(
+    parser: argparse.ArgumentParser, args: argparse.Namespace, callbacks: BatchCallbacks
+) -> int:
     plan = _build_batch_plan(parser, args)
     _print_batch_plan(args, plan)
     state = _run_batch_executor(args, plan, callbacks)

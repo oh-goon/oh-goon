@@ -112,17 +112,11 @@ def test_release_package_goon_never_depends_on_live_checkout_materialization() -
     assert "release-source-package-artifact" not in goon
 
 
-def test_persistent_artifact_policy_consumes_retained_bytes_and_reuses_app_plan() -> (
-    None
-):
+def test_release_docs_do_not_advertise_obsolete_packaging_route() -> None:
     docs = "\n".join(
         path.read_text(encoding="utf-8")
         for path in (PREPARE_README, APP_README, APP_DOC, LOCAL_DOC)
     )
-    assert "retained" in docs
-    assert "fresh" in docs or "new repository" in docs
-    assert "oh-goon/app-certification" in docs
-    assert "same `oh-goon/app-certification` Plan" in docs
     assert "make package-slim" not in docs
     assert "make package-slim" not in ROOT_README.read_text(encoding="utf-8")
 

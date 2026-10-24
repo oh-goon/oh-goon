@@ -55,15 +55,12 @@ From a dependency-complete source checkout:
 uv run --locked --project backend oh-goon-repository-understanding-exam verify
 ```
 
-The shipped verification Plan runs the same exam-material verification through normal Fleet execution:
-
-```bash
-uv run --locked --project backend oh-goon plan run \
-  templates/plans/oh-goon/repository-understanding-certification/plan.yml \
-  --repository-id <oh-goon-repository-id>
-```
-
-Canonical `make init` materializes dependencies before verification. The Plan then runs the atomic `oh-goon/repository-exam` Goon against that initialized repository and retains `repository-understanding-certification-manifest.json` as evidence; it does not reacquire dependencies.
+The internal `oh-goon/repository-understanding-certification` Plan imports the
+atomic `oh-goon/repository-exam` Goon and retains its manifest through the original
+Fleet owner. It is internal qualification material, not a portable public
+`run.yml` example. Use the explicit exam-material verification command above
+for this diagnostic. Canonical `make init` materializes dependencies first;
+exam verification does not reacquire them or certify repository understanding.
 
 ## 2. Prepare the blind candidate checkout
 

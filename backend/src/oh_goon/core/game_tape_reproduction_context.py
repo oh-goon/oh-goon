@@ -1,13 +1,19 @@
 from __future__ import annotations
 
-from oh_goon.core.models.game_tape import GameTapeRepositoryExecution, GameTapeStepExecution
+from typing import Literal
+
+from oh_goon.core.models.game_tape import (
+    GameTapeEnvironmentFingerprint,
+    GameTapeRepositoryExecution,
+    GameTapeStepExecution,
+)
 from oh_goon.core.models.game_tape_reproduction_context import (
     GameTapeEvidenceMatch,
     GameTapeReproductionContextComparison,
     GameTapeReproductionContextSummary,
 )
 
-_CONTEXT_DIMENSIONS = 5
+_CONTEXT_DIMENSIONS: Literal[5] = 5
 
 
 def compare_reproduction_context(
@@ -40,6 +46,7 @@ def _summary(values: tuple[GameTapeEvidenceMatch, ...]) -> GameTapeReproductionC
     matching = values.count("MATCH")
     different = values.count("DIFFERENT")
     known = matching + different
+    classification: Literal["CHANGED_CONTEXT", "SAME_CONTEXT", "INCOMPLETE_CONTEXT"]
     if different:
         classification = "CHANGED_CONTEXT"
     elif known == _CONTEXT_DIMENSIONS:
@@ -61,7 +68,7 @@ def _match(left: object | None, right: object | None) -> GameTapeEvidenceMatch:
     return "MATCH" if left == right else "DIFFERENT"
 
 
-def _isolation(fingerprint) -> tuple[str, str, str] | None:
+def _isolation(fingerprint: GameTapeEnvironmentFingerprint) -> tuple[str, str, str] | None:
     if (
         fingerprint.isolation_backend_id is None
         or fingerprint.isolation_configuration_id is None

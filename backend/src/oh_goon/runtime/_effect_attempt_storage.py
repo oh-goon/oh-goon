@@ -15,11 +15,13 @@ from oh_goon.core.models.reconciliation import RepositoryReconciliation
 from oh_goon.core.models.target import OperationTarget
 from oh_goon.core.vocabulary import EffectAttemptOwner, EffectAttemptStatus, EffectBoundaryKind
 
-_ATTEMPT_ADAPTER = TypeAdapter(RepositoryEffectAttempt)
+_ATTEMPT_ADAPTER: TypeAdapter[RepositoryEffectAttempt] = TypeAdapter(RepositoryEffectAttempt)
 _CAPABILITY_ADAPTER = TypeAdapter(CapabilitySnapshot)
-_TARGET_ADAPTER = TypeAdapter(OperationTarget)
+_TARGET_ADAPTER: TypeAdapter[OperationTarget] = TypeAdapter(OperationTarget)
 _FINGERPRINT_ADAPTER = TypeAdapter(RepositoryStateFingerprint)
-_RECONCILIATION_ADAPTER = TypeAdapter(RepositoryReconciliation)
+_RECONCILIATION_ADAPTER: TypeAdapter[RepositoryReconciliation] = TypeAdapter(
+    RepositoryReconciliation
+)
 
 
 def all_in(connection: sqlite3.Connection) -> list[RepositoryEffectAttempt]:

@@ -50,8 +50,10 @@ def _build_repository_indexes(
 ) -> _RepositoryIndexes:
     timelines: dict[str, list[OperationFact]] = {}
     reconciliations: dict[str, list[EffectReconciliationCommitted]] = {}
-    for entry in operation_facts:
-        timelines.setdefault(entry.report.repository.repository_id, []).append(entry)
+    for operation_entry in operation_facts:
+        timelines.setdefault(operation_entry.report.repository.repository_id, []).append(
+            operation_entry
+        )
     for entry in entries:
         if isinstance(entry, EffectReconciliationCommitted):
             reconciliations.setdefault(entry.evidence.effect.repository.repository_id, []).append(
@@ -137,7 +139,7 @@ class JournalIndex:
         }
         repository_indexes = _build_repository_indexes(entries, operation_facts)
         reconciliations_by_operation: dict[str, list[EffectReconciliationCommitted]] = {}
-        acknowledgements_by_operation: Mapping[str, EffectAcknowledgementCommitted] = {}
+        acknowledgements_by_operation: dict[str, EffectAcknowledgementCommitted] = {}
         run_events: dict[str, list[FleetRunEvent]] = {}
         admitted: list[tuple[int, str]] = []
         current_fleet_plan_operations: dict[
@@ -181,8 +183,8 @@ class JournalIndex:
             key=lambda state: (state.accepted_at, state.fleet_run_id),
         )
         readmission_child_by_parent = _build_readmission_index(run_details_by_id)
-        latest_run_by_intent: Mapping[tuple[str, str], str] = {}
-        latest_run_by_family: Mapping[OperationAction, str] = {}
+        latest_run_by_intent: dict[tuple[str, str], str] = {}
+        latest_run_by_family: dict[OperationAction, str] = {}
         for state in ordered_states:
             latest_run_by_intent[
                 operation_intent_key(state.capability.capability_id, state.target)

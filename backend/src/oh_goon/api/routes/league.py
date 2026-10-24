@@ -8,6 +8,7 @@ from oh_goon.api.dependencies import (
 )
 from oh_goon.api.schemas.league import (
     LeagueLineupSaveRequest,
+    SafePlanInputDiagnostic,
     SharedPlanFromTemplateRequest,
     SharedPlanInputInspection,
     SharedPlanLockPreviewRequest,
@@ -171,7 +172,10 @@ def inspect_shared_plan_inputs(
             inputs=request.inputs,
         )
     except FleetPlanInvalid as exc:
-        return SharedPlanInputInspection(status="rejected", diagnostic=safe_plan_diagnostic(exc))
+        return SharedPlanInputInspection(
+            status="rejected",
+            diagnostic=SafePlanInputDiagnostic.model_validate(safe_plan_diagnostic(exc)),
+        )
     return SharedPlanInputInspection(
         status="accepted", plan_key=plan_key, sha256=sha256, plan_id=plan_id
     )

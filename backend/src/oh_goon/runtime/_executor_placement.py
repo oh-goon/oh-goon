@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from oh_goon.core.errors import (
     ExecutorAdmissionBlocked,
@@ -14,10 +14,12 @@ from oh_goon.core.models.fleet_executor import FleetExecutorPlacement
 from oh_goon.core.models.fleet_executor_operations import (
     ExecutorAdmissionMode,
     ExecutorTrustState,
+    FleetExecutorOperationalState,
     PlacementQueueEntry,
     PlacementQueueSnapshot,
 )
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_isolation import isolation_requirements
 from oh_goon.core.models.repository import RepositoryIdentity
@@ -36,7 +38,7 @@ from oh_goon.runtime._executor_configuration import (
     ExecutorPoolConfiguration,
 )
 from oh_goon.runtime._executor_operations import ExecutorOperatorControls
-from oh_goon.runtime._executor_placement_queue import ExecutorPlacementQueue
+from oh_goon.runtime._executor_placement_queue import ExecutorPlacementQueue, PlacementQueueTicket
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.executor_capacity import FleetExecutorCapacityReservations
 
@@ -55,7 +57,7 @@ class _OperationalRejected(Exception):
         super().__init__(reason)
 
 
-_PLACEMENT_POLICY = "priority_rendezvous_fifo_v2"
+_PLACEMENT_POLICY: Literal["priority_rendezvous_fifo_v2"] = "priority_rendezvous_fifo_v2"
 
 
 class ExecutorPlacementAdmission:
@@ -258,7 +260,7 @@ class ExecutorPlacementAdmission:
     def _try_once(
         self,
         *,
-        ticket,
+        ticket: PlacementQueueTicket,
         fleet_run_id: str,
         plan: ResolvedFleetPlan,
         execution: CicdExecutionPolicy,
@@ -321,10 +323,10 @@ class ExecutorPlacementAdmission:
     def _commit_candidate(
         self,
         *,
-        ticket,
+        ticket: PlacementQueueTicket,
         fleet_run_id: str,
         candidate: ConfiguredFleetExecutor,
-        backend_evidence,
+        backend_evidence: PlanIsolationBackendEvidence,
         execution: CicdExecutionPolicy,
         target_count: int,
         rank: int,
@@ -410,7 +412,7 @@ def _preflight_configured_executor_feasibility(
     )
 
 
-def _new_admission_block_reason(operational) -> str | None:
+def _new_admission_block_reason(operational: FleetExecutorOperationalState) -> str | None:
     if operational.admission_mode is ExecutorAdmissionMode.DRAINING:
         return "draining; new placement disabled"
     if operational.trust_state is ExecutorTrustState.REVOKED:

@@ -51,7 +51,8 @@ def _wait_http(
         try:
             with urllib.request.urlopen(url, timeout=1.0) as response:
                 if response.status == 200:
-                    return response.read()
+                    body: bytes = response.read()
+                    return body
         except (OSError, urllib.error.URLError):
             pass
         time.sleep(0.2)

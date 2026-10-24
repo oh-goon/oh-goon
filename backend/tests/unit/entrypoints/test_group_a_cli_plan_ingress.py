@@ -25,10 +25,22 @@ from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 
 def args(*, run_id: str | None = None, inputs=None) -> Namespace:
     parsed = build_parser().parse_args(
-        ["plan", "run", "missing-plan.yml", "--repository-id", "repo", "--strict", "--no-wait"]
+        [
+            "dev",
+            "_run-plan",
+            "missing-plan.yml",
+            "--repository-id",
+            "repo",
+            "--strict",
+            "--no-wait",
+            "--lock-file",
+            "goon.lock",
+        ]
     )
+    parsed.command, parsed.plan_command = "plan", "run"
     parsed.fleet_run_id = run_id
-    parsed.plan_inputs = inputs
+    parsed._selected_inputs = dict(item.split("=", 1) for item in inputs or () if "=" in item)
+    parsed._caller_input_origins = dict.fromkeys(parsed._selected_inputs, "caller_file")
     return parsed
 
 
@@ -121,9 +133,13 @@ def test_hardened_cli_accepts_only_exact_enrolled_identity_then_delegates_one_pl
                 "source": None,
                 "expected_plan_id": None,
                 "root_expected_name": None,
-                "lock_path": None,
+                "lock_path": Path("goon.lock"),
                 "caller_input_file": None,
-                "caller_input_origins": {"ENV": "cli"},
+                "caller_input_origins": {"ENV": "caller_file"},
+                "external_artifacts": (),
+                "repository_goon": False,
+                "source_graph": None,
+                "repository": None,
             },
         )
     ]

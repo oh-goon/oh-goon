@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -37,14 +38,14 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _canonical_identity(payload: dict[str, Any]) -> str:
+def _canonical_identity(payload: Mapping[str, object]) -> str:
     unsigned = dict(payload)
     unsigned.pop("identity", None)
     encoded = json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
-def _validate_host_capability_header(payload: dict[str, Any]) -> None:
+def _validate_host_capability_header(payload: Mapping[str, object]) -> None:
     if payload.get("schema") != hosted_capability_contract.SCHEMA:
         raise RuntimeError("unsupported hosted dependency capability schema")
     if (
@@ -64,7 +65,7 @@ def _validate_host_capability_header(payload: dict[str, Any]) -> None:
     _validate_host_capability_runtime(payload)
 
 
-def _validate_host_capability_identity(payload: dict[str, Any]) -> None:
+def _validate_host_capability_identity(payload: Mapping[str, object]) -> None:
     identity = payload.get("identity")
     if not isinstance(identity, str) or identity != _canonical_identity(payload):
         raise RuntimeError("hosted dependency capability identity does not match payload")
@@ -73,7 +74,7 @@ def _validate_host_capability_identity(payload: dict[str, Any]) -> None:
         raise RuntimeError("hosted dependency capability lacks dependency-intent identity")
 
 
-def _validate_host_capability_runtime(payload: dict[str, Any]) -> None:
+def _validate_host_capability_runtime(payload: Mapping[str, object]) -> None:
     interpreter = payload.get("interpreter")
     if interpreter != str(Path(sys.executable).resolve()):
         raise RuntimeError("hosted dependency capability interpreter does not match receipt writer")
@@ -93,14 +94,14 @@ def _validate_host_capability_runtime(payload: dict[str, Any]) -> None:
         )
 
 
-def _dependency_name_set(payload: dict[str, Any], field: str) -> set[str]:
+def _dependency_name_set(payload: Mapping[str, object], field: str) -> set[str]:
     value = payload.get(field)
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise RuntimeError(f"hosted dependency capability {field} is invalid")
     return set(value)
 
 
-def _validate_host_capability_packages(payload: dict[str, Any]) -> None:
+def _validate_host_capability_packages(payload: Mapping[str, object]) -> None:
     packages = payload.get("packages")
     if not isinstance(packages, list):
         raise RuntimeError("hosted dependency capability packages are invalid")
@@ -130,7 +131,9 @@ def _validate_host_capability_packages(payload: dict[str, Any]) -> None:
 
 
 def _load_host_capability(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload: object = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError("hosted dependency capability must contain a JSON object")
     _validate_host_capability_header(payload)
     _validate_host_capability_packages(payload)
     return payload
@@ -146,9 +149,9 @@ def _effective_marker(extra_marker: str) -> str:
 
 def _expected_manifest(args: argparse.Namespace) -> list[tuple[str, int]]:
     if args.surface == "all":
-        surfaces = SURFACES
+        surfaces: tuple[str, ...] = SURFACES
     elif args.surface in SURFACES:
-        surfaces = (args.surface,)
+        surfaces = (str(args.surface),)
     else:
         raise RuntimeError(f"unsupported hosted diagnostic surface: {args.surface}")
     if args.first_batch <= 0 or args.batch_limit <= 0:

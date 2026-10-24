@@ -14,12 +14,6 @@ from oh_goon.cli_runtime_state import run_state_command
 
 
 def run_stateful_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
-    if args.command == "lock":
-        # Retain the stateful service adapter for API/in-process parity; the
-        # ordinary CLI now enters this same original lock owner without DB.
-        from oh_goon.cli_lock import run_lock_with_owner
-
-        return run_lock_with_owner(args, runtime.plans.lock)
     for handler in (
         run_enforcer_command,
         run_league_command,

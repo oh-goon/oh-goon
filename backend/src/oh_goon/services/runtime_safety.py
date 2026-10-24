@@ -28,7 +28,7 @@ class RuntimeSafetyService:
         return RuntimeSafetyAssessment(
             proof=proof,
             repair_plan=self._auditor.repair_plan(audit),
-            effect_quarantines=self._auditor.quarantines(cut),
+            effect_quarantines=tuple(self._auditor.quarantines(cut)),
         )
 
     def refresh(self) -> AssessedRuntimeSafetyProof:

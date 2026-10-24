@@ -372,7 +372,7 @@ class JournalReadView:
             )
         return FleetRunHistoryPage(
             journal_revision=self.revision,
-            items=items,
+            items=tuple(items),
             next_before_revision=items[-1].admitted_revision if has_more and items else None,
         )
 

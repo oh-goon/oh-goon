@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from oh_goon.repository_tooling.architecture.common import Violation
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
@@ -34,7 +36,7 @@ _PENDING_ROLES = (
 )
 
 
-def expected_subjects(policy: dict) -> tuple[str, ...]:
+def expected_subjects(policy: dict[str, Any]) -> tuple[str, ...]:
     """Derive the complete review scope from the one source-backed registry."""
     claims = policy["families"]["admission_issuer_evidence"]["claims"]
     return tuple(
@@ -46,7 +48,7 @@ def expected_subjects(policy: dict) -> tuple[str, ...]:
     )
 
 
-def _canonical(payload: dict) -> bytes:
+def _canonical(payload: Mapping[str, object]) -> bytes:
     return (json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
 
 

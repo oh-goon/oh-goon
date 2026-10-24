@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from oh_goon.core.models.game_tape import (
     GameTapeAttemptTransition,
     GameTapeRetryContextSummary,
@@ -27,6 +29,9 @@ def summarize_retry_context(
         )
     linked = sum(item.retry_linked for item in transitions)
     changed = any(_physical_context_changed(item) for item in transitions)
+    classification: Literal[
+        "INCOMPLETE_RETRY_EVIDENCE", "CHANGED_PHYSICAL_CONTEXT", "SAME_PHYSICAL_CONTEXT"
+    ]
     if len(transitions) != attempt_count - 1 or linked != len(transitions):
         classification = "INCOMPLETE_RETRY_EVIDENCE"
     elif changed:

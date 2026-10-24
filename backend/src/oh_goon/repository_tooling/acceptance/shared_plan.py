@@ -235,15 +235,16 @@ def _assert_preview(
     not_applicable: Path,
 ) -> None:
     teams = require_preview_counts(preview, ready=3, blocked=0, label="Shared Plan preview")
-    by_path = {
-        team["repository"]["path"]: team
-        for team in teams
-        if isinstance(team.get("repository"), dict)
-        and isinstance(team["repository"].get("path"), str)
-    }
+    by_path: dict[str, dict[str, object]] = {}
+    for team in teams:
+        selected_repository = team.get("repository")
+        if isinstance(selected_repository, dict):
+            repository_path = selected_repository.get("path")
+            if isinstance(repository_path, str):
+                by_path[repository_path] = team
     for repository in (ready_with_repo_goon, ready_without_repo_goon, not_applicable):
-        team = by_path.get(str(repository.resolve()))
-        if not isinstance(team, dict) or team.get("state") != "READY":
+        selected_team = by_path.get(str(repository.resolve()))
+        if not isinstance(selected_team, dict) or selected_team.get("state") != "READY":
             raise RuntimeError(
                 f"Shared Plan did not keep {repository.name} as a valid Team preview"
             )

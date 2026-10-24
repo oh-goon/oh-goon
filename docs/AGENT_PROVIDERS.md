@@ -170,8 +170,8 @@ inputs are readable, the working repository and execution scratch are writable,
 and tool networking is disabled. Hashmarks follow-up commands retain the loaded
 Python runtime's canonical paths and lexical aliases from the existing runtime
 mount owner, executing the original interpreter without a system-Python fallback.
-The authentication home and every native tool root must be separate filesystem
-trees: neither may contain the other, including
+The authentication home and every native tool
+root must be separate filesystem trees: neither may contain the other, including
 through symlink aliases. The home cannot be part of the captured workspace.
 Select a complete public Codex installation in that separate tree, retaining its
 native distribution layout and companion programs such as `codex-code-mode-host`.
@@ -412,8 +412,8 @@ original acceptor still independently validates the returned record.
 Apply, regression and verification Steps retain their existing trusted-local
 execution. The controller captures the changed candidate once before subsequent
 reasoning and refuses changes outside the admitted repair phase. Select the
-existing `--review-passes`, `--repair-write-root`, `--repair-timeout` and
-`--repair-step-timeout` limits; each phase remains a separately admitted Fleet Run.
+existing `repair.review_passes`, `repair.write_roots`,
+`repair.timeout_seconds` and `repair.step_timeout_seconds` selections in `run.yml`; each phase remains a separately admitted Fleet Run.
 This profile does not provide strict/untrusted execution. It cannot be combined
 with `codex_login`, broker inference, native argument/config-directory overrides
 or resource caps.
@@ -657,31 +657,27 @@ untrusted claims in Game Tape, separately from execution and verification result
 
 Authored workflows use `harness: native` and a `role` of `report`, `review`,
 `adjudication` or `proposal`. The implementation is independent of the authored
-role. `oh-goon lock` and `oh-goon plan run` accept `--native-agent`,
-`--native-profile` and `--native-workspace`; use `--agent-providers-file` for the
-same catalog. Retain the explicit repository/Skill roots and acceptance options.
-The selected native workspace must equal the captured Plan repository. The lock
-binds executable, profile and backend configuration; changing them requires a new
-lock. There is no native-specific workflow scheduler or journal.
+role. Select `agent.implementation`, `agent.profile`, the repository and Skill
+roots, and `agent.acceptance` in one `run.yml`. The selected target supplies the
+repository workspace identity; a path alone cannot replace it. The lock binds
+the native implementation/profile and effective backend configuration. Changing
+a selected authority requires a new lock. No native-specific scheduler or
+journal is introduced.
 
-Review/adjudication/proposal roles require headless read-only isolated execution
-and the existing typed result contracts. The complete review/repair workflow
-uses `--review-passes`, `--repair-write-root`, `--repair-timeout` and
-`--repair-step-timeout`. Legacy `--repair-attempts` retains its local single-file
-proposal contract. Native proposals remain data until the original batch apply
-Step checks preimages and write scope. Regression and verification Steps retain
-the selected profile in phases without an Agent. Git observations run in that
-profile with a read-only workspace. Linked Git metadata outside the selected
-workspace is rejected until it has a supported scoped metadata binding.
+Review/adjudication/proposal roles require the original read-only execution and
+typed result contracts. The review–repair workflow selects grouped `repair`
+limits in the same config. Native proposals remain data until the original
+batch apply Step checks preimages and write scope. Regression/verification
+Steps retain their selected profile. Linked Git metadata outside the selected
+workspace requires its supported scoped metadata binding.
 
-The existing direct-model [Agentic Review–Repair Loop](AGENT_SKILLS.md#native-agentic-reviewrepair-loop)
-uses model profiles through the supervised Agent Step. Select a profile
-with `--agent-model-profile` on `lock` and `plan run`, or keep `default_model`.
-`--agent-providers-file` selects an explicit configuration; otherwise the normal
-configuration path applies. Endpoint and model parameters are frozen before
-admission; credential values remain in process environment/header authority.
-Legacy local-model harnesses retain their explicit Ollama contract. Merely
-configuring a provider grants no Step effects or verification authority.
+OH-Goon-managed inference selects a named catalog model with
+`agent.model_profile`. The provider catalog remains the sole connection/model
+profile owner; native-managed settings remain native-owned. Endpoint and model
+parameters freeze before admission, while credential values stay in the original
+environment/header authority. A profile or configured endpoint is not proof of
+connection, compatible wire protocol, model installation, native authentication,
+containment qualification, or admitted permission.
 
 ## Configure once
 

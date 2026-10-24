@@ -246,7 +246,7 @@ class ScheduleExecutionStore:
             if isinstance(e, FailedScheduleRun) and e.failure is not None
             else None
         )
-        finished = e.finished_at.isoformat() if e.status.terminal else None
+        finished = e.finished_at.isoformat() if not isinstance(e, RunningScheduleRun) else None
         cur = c.execute(
             """UPDATE schedule_executions SET repository_runs_json=?, status=?, attention_json=?, failure_json=?, finished_at=?, record_version=? WHERE schedule_run_id=? AND record_version=?""",
             (

@@ -282,7 +282,7 @@ def _unsafe_tar_name(name: str) -> bool:
     return path.is_absolute() or ".." in path.parts or "\\" in name
 
 
-def _json_tar_member(tar: tarfile.TarFile, name: str, *, max_bytes: int):
+def _json_tar_member(tar: tarfile.TarFile, name: str, *, max_bytes: int) -> object:
     try:
         member = tar.getmember(name)
     except KeyError as exc:
@@ -293,7 +293,8 @@ def _json_tar_member(tar: tarfile.TarFile, name: str, *, max_bytes: int):
     if stream is None:
         raise ValueError(f"Fleet OCI archive {name} cannot be read")
     try:
-        return json.loads(stream.read(max_bytes + 1))
+        data: object = json.loads(stream.read(max_bytes + 1))
+        return data
     except json.JSONDecodeError as exc:
         raise ValueError(f"Fleet OCI archive {name} is not valid JSON") from exc
 

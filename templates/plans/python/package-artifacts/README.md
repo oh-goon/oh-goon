@@ -1,35 +1,39 @@
 # python/package-artifacts
 
-This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+Build the project’s distribution bundle and retain it for independent retrieval.
 
-Build through the project-owned packaging command and retain its distribution bundle for independent retrieval.
+**Status:** runnable with prerequisites. **Effects:** Executes packaging and publishes artifact bytes.
 
-## Before you run
+**Prerequisites:** A committed Python project and uv lock. The locked group must provide the project-owned `package-artifacts` command; retained distribution bytes require configured content-store publication. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
-The selected locked project/group must provide the commands used by the chosen Goons. The project supplies `package-artifacts`; retained bundle bytes require configured strict execution and content-store publication.
+**What to edit:** initialize a workflow, then set the registered target and relevant caller choices in `workflow/run.yml`. The illustrative addresses, revision and digest below must identify your real workload before execution. The [first-run guide](../../../README.md) explains repository registration and prepared CLI use.
 
-## Use this Plan
+**Settings owner:** [`plan.yml`](plan.yml) owns ordered imports; imported Goons own input types/defaults, Steps, effects and outputs. `run.yml` selects values. Native project tools keep their own configuration.
 
 ```sh
-oh-goon templates show python/package-artifacts --kind plan
-oh-goon plan inputs templates/plans/python/package-artifacts/plan.yml
+oh-goon templates init python/package-artifacts --output ./workflow
 ```
 
-Copy with `oh-goon templates show python/package-artifacts --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
-
-## Configure a copy
-
-Save the selected project and locked tool group as `values.yml`:
+Edit the generated `workflow/run.yml`; this shows one explicit selection:
 
 ```yaml
+version: 1
+source: {kind: catalog-plan, name: python/package-artifacts}
+target: {repository_id: REPOSITORY_ID}
 inputs:
   project: .
   dependency_group: dev
 ```
 
 ```sh
-oh-goon plan validate plan.yml --inputs-file values.yml
-oh-goon lock plan.yml --inputs-file values.yml
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
 ```
 
-Use the same selection when submitting the Plan. The project command’s own configuration remains authoritative.
+**Expected outputs:** `package-distributions.tar` uses content-store retention; `package-artifacts.json` is evidence. The project command owns packaging semantics.
+
+**Failures:** invalid inputs fail before work. Inspection/validation do not prove installed tools, reachable services or successful effects. Native failures remain failed Steps with their exit status and logs. A changed source or execution selection requires a new lock.
+
+**Customize:** change caller values in `run.yml`. For structural changes, create a project Plan with ordinary ordered `goons:` imports and select it with `source: {kind: file-plan, path: plan.yml}`; see [Plan authoring](../../README.md). Keep secrets in declared execution environment bindings.

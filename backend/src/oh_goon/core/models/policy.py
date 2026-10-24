@@ -42,7 +42,7 @@ class PolicySnapshot(StrictPolicyModel):
     values: PolicyValues
     sources: PolicySources
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def policy_id(self) -> str:
         return stable_id(

@@ -17,7 +17,7 @@ class _ToolHealthBase(ImmutableModel):
     status: ToolStatus
     required: bool
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def reason_code(self) -> ToolHealthReason:
         return {
@@ -67,7 +67,7 @@ class SystemHealth(ImmutableModel):
     runtime_safety: RuntimeSafetyProof
     background_failures: tuple[BackgroundFailure, ...]
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def status(self) -> SystemHealthStatus:
         if any(tool.required and tool.status is not ToolStatus.READY for tool in self.tools):

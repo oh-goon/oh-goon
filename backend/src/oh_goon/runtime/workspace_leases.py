@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable
 from datetime import timedelta
 from typing import Literal
@@ -380,7 +381,7 @@ class WorkspaceLeaseStore:
             )
 
     @staticmethod
-    def _state_for_update(connection, workspace_id: str) -> WorkspaceState:
+    def _state_for_update(connection: sqlite3.Connection, workspace_id: str) -> WorkspaceState:
         row = connection.execute(
             "SELECT * FROM workspace_state WHERE workspace_id=?", (workspace_id,)
         ).fetchone()
@@ -397,7 +398,7 @@ class WorkspaceLeaseStore:
 
     @staticmethod
     def _write_workspace_lease_state(
-        connection,
+        connection: sqlite3.Connection,
         current: WorkspaceState,
         *,
         lifecycle_state: WorkspaceLifecycleState,
@@ -432,7 +433,7 @@ class WorkspaceLeaseStore:
         )
 
 
-def _workspace_lease(row) -> WorkspaceLease:
+def _workspace_lease(row: sqlite3.Row) -> WorkspaceLease:
     return WorkspaceLease(
         lease_id=row["lease_id"],
         workspace_id=row["workspace_id"],

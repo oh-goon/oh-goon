@@ -30,11 +30,11 @@ def test_run_plan_transports_exact_bootstrap_lock_into_locked_execution(
         repo_id="repo-1",
         env={},
         lock_root=tmp_path / "locks",
-        inputs={"source": "exact"},
+        inputs={},
     )
     assert rc == 0
     lock_command = backend_calls[1]
-    assert lock_command[:2] == ["lock", plan]
+    assert lock_command[:3] == ["dev", "_lock-plan", plan]
     produced = Path(lock_command[lock_command.index("--output") + 1])
     execution = streamed[0]
     consumed = Path(execution[execution.index("--lock-file") + 1])

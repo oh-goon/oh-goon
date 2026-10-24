@@ -11,7 +11,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock, local
-from typing import Literal, TypeVar
+from typing import TYPE_CHECKING, Literal, Mapping, TypeVar, cast
+
+if TYPE_CHECKING:
+    from oh_goon.core.enforcer_lace_trust import (
+        AdmittedRunContract,
+        AuthenticatedReceipt,
+        ReceiptAuthenticator,
+    )
+    from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustGrant
 from uuid import uuid4
 
 from oh_goon.core.errors import DatabaseSchemaMismatch
@@ -20,17 +28,25 @@ from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_DELETE as SQLI
 from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_WAL as SQLITE_JOURNAL_WAL
 from oh_goon.runtime._database_policy import (
     DATABASE_SCHEMA_POLICY,
-    DATABASE_SCHEMA_VERSION,
-    database_filesystem_type,
-    default_database_path,
-    inspect_database_path,
     sqlite_journal_mode_for_path,
+)
+from oh_goon.runtime._database_policy import (
+    DATABASE_SCHEMA_VERSION as DATABASE_SCHEMA_VERSION,
 )
 from oh_goon.runtime._database_policy import (
     database_filesystem_is_local as database_filesystem_is_local,
 )
 from oh_goon.runtime._database_policy import (
+    database_filesystem_type as database_filesystem_type,
+)
+from oh_goon.runtime._database_policy import (
     database_path_for_environment as database_path_for_environment,
+)
+from oh_goon.runtime._database_policy import (
+    default_database_path as default_database_path,
+)
+from oh_goon.runtime._database_policy import (
+    inspect_database_path as inspect_database_path,
 )
 from oh_goon.runtime._database_policy import inspect_local_database as inspect_local_database
 from oh_goon.runtime._database_schema import _SCHEMA_SQL
@@ -548,7 +564,12 @@ class LocalDatabase:
         finally:
             connection.set_authorizer(None)
 
-    def enroll_signer_trust_atomically(self, *, policy_snapshot, roots):
+    def enroll_signer_trust_atomically(
+        self,
+        *,
+        policy_snapshot: tuple[tuple[int, int], tuple[int, ...], bytes],
+        roots: Mapping[str, tuple[str, bytes]],
+    ) -> SignerTrustGrant:
         """Canonical SQLite enrollment; signer domain checks stay with signer owner."""
         from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustEpochAuthority
 
@@ -558,7 +579,7 @@ class LocalDatabase:
                     connection, policy_snapshot=policy_snapshot, roots=roots
                 )
 
-    def revoke_signer_trust_atomically(self, *, expected) -> None:
+    def revoke_signer_trust_atomically(self, *, expected: SignerTrustGrant) -> None:
         """A stale signer generation may not commit a competing revocation."""
         from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustEpochAuthority
 
@@ -568,7 +589,13 @@ class LocalDatabase:
                     connection, expected=expected
                 )
 
-    def rotate_signer_trust_atomically(self, *, expected, policy_snapshot, roots):
+    def rotate_signer_trust_atomically(
+        self,
+        *,
+        expected: SignerTrustGrant,
+        policy_snapshot: tuple[tuple[int, int], tuple[int, ...], bytes],
+        roots: Mapping[str, tuple[str, bytes]],
+    ) -> SignerTrustGrant:
         from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustEpochAuthority
 
         with self.transaction(write=True) as connection:
@@ -585,9 +612,9 @@ class LocalDatabase:
         lease_identity: str,
         next_epoch: int,
         next_lease_identity: str,
-        signer_grant,
-        policy_snapshot,
-        roots,
+        signer_grant: SignerTrustGrant,
+        policy_snapshot: tuple[tuple[int, int], tuple[int, ...], bytes],
+        roots: Mapping[str, tuple[str, bytes]],
     ) -> None:
         """DB1B2 pre-live transfer with an exact signer fence in ONE SQLite cut.
 
@@ -616,15 +643,15 @@ class LocalDatabase:
     def publish_causal_admission_atomically(
         self,
         *,
-        contract,
-        receipt,
-        authenticator,
+        contract: AdmittedRunContract,
+        receipt: AuthenticatedReceipt,
+        authenticator: ReceiptAuthenticator,
         control_epoch: int,
         lease_identity: str,
-        operational_admission,
-        before_commit=None,
+        operational_admission: Callable[[sqlite3.Connection], T],
+        before_commit: Callable[[], None] | None = None,
         operational_committed: Callable[[sqlite3.Connection], bool] | None = None,
-    ):
+    ) -> T | CausalAdmissionCommit:
         """Explicit pre-live named atomic admission, not an alternate Fleet launcher.
 
         The deployed Fleet path remains FleetAdmissionPlanner under this same
@@ -698,7 +725,7 @@ class LocalDatabase:
             )
         return CausalAdmissionCommit(
             "ALREADY_COMMITTED" if replay else "COMMITTED",
-            run_id,
+            cast(str, run_id),
             contract.identity,
             control_epoch,
             lease_identity,
@@ -708,9 +735,9 @@ class LocalDatabase:
         self,
         connection: sqlite3.Connection,
         *,
-        contract,
-        receipt,
-        authenticator,
+        contract: AdmittedRunContract,
+        receipt: AuthenticatedReceipt,
+        authenticator: ReceiptAuthenticator,
         control_epoch: int,
         lease_identity: str,
         operational_committed: Callable[[sqlite3.Connection], bool],

@@ -22,7 +22,7 @@ class _RuntimeSafetyProofBase(ImmutableModel):
     status: RuntimeSafetyStatus
     checked_at: str = Field(default_factory=lambda: utc_now().isoformat())
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def effects_allowed(self) -> bool:
         return self.status is RuntimeSafetyStatus.PROVEN_SAFE
@@ -86,7 +86,7 @@ class RuntimeSafetyAssessment(ImmutableModel):
     repair_plan: RepairPlan
     effect_quarantines: tuple[RepositoryEffectQuarantine, ...] = Field(default_factory=tuple)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def audit(self) -> InvariantAudit:
         return runtime_safety_audit(self.proof)

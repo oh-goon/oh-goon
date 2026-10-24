@@ -1,211 +1,112 @@
-"""T4 independent CLI tests: evidence codes from original owners, zero value echo."""
+"""Canonical config diagnostics retain owner codes without unsafe value echo."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+import yaml
 
-from oh_goon.cli_parser import build_parser
+from oh_goon.cli import main
 from oh_goon.cli_plan_diagnostics import safe_plan_diagnostic
-from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid
 from oh_goon.runtime.goon_templates import GoonTemplateStore
-from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
-
-
-def _args(command: str, *rest: str):
-    return build_parser().parse_args(["plan", command, *rest])
-
-
-def _runtime():
-    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
-    return SimpleNamespace(
-        plans=SimpleNamespace(
-            resolve=resolver.resolve,
-            explain=resolver.explain,
-            explain_routing=resolver.explain_routing,
-        )
-    )
-
-
-def _plan(name="python/quality") -> str:
-    return str(PlanTemplateStore().source(name).path)
+from tests.factories.run_configuration import write_run_configuration
 
 
 @pytest.mark.parametrize(
-    "command,tail",
+    "source,values,code,names",
     [
-        ("validate", ()),
-        ("explain", ()),
-        ("explain", ("--routes",)),
+        (
+            "python/quality",
+            {"typechecker": "PRIVATE_TOKEN_SENTINEL"},
+            "INVALID_INPUT_VALUE",
+            ["typechecker"],
+        ),
+        ("python/quality", {"unknown": "PRIVATE_TOKEN_SENTINEL"}, "UNKNOWN_INPUT", ["unknown"]),
+        ("oci/publish-image", {}, "MISSING_REQUIRED_INPUT", ["base_registry_hostname"]),
     ],
 )
-def test_typed_violations_are_machine_safe_and_exit_2(command, tail, capsys):
-    args = _args(
-        command, _plan(), *tail, "--diagnostics", "--json", "--input", "typechecker=invalid"
-    )
-    assert run_plan_command(_runtime(), args) == 2
-    raw = capsys.readouterr().out
-    diag = json.loads(raw)
-    assert diag == {
-        "schema": "oh-goon.plan-validation-diagnostic/v1",
-        "status": "rejected",
-        "stage": "input_contract",
-        "code": "INVALID_INPUT_VALUE",
-        "inputs": ["typechecker"],
-        "safe_next_action": "Use plan inputs to inspect the owning Goon's type and constraints; correct the caller value.",
-        "execution": "not_started_by_diagnostic",
-    }
-    assert "101" not in raw
-    assert "plan_id" not in raw
-
-
-def test_unknown_input_exact_name_but_not_supplied_secret(capsys):
-    secret = "VERY_SECRET_SENTINEL_123"
-    assert (
-        run_plan_command(
-            _runtime(),
-            _args(
-                "explain",
-                _plan(),
-                "--routes",
-                "--diagnostics",
-                "--json",
-                "--input",
-                f"unknown={secret}",
-            ),
-        )
-        == 2
-    )
-    rendered = capsys.readouterr().out
-    assert json.loads(rendered)["code"] == "UNKNOWN_INPUT"
-    assert json.loads(rendered)["inputs"] == ["unknown"]
-    assert secret not in rendered
-
-
-def test_missing_required_value_reports_public_name_only(capsys):
-    assert (
-        run_plan_command(
-            _runtime(),
-            _args("explain", _plan("oci/publish-image"), "--routes", "--diagnostics", "--json"),
-        )
-        == 2
-    )
-    output = json.loads(capsys.readouterr().out)
-    assert output["code"] == "MISSING_REQUIRED_INPUT"
-    assert "base_registry_hostname" in output["inputs"]
-    assert output["status"] == "rejected"
-
-
-def test_external_error_never_echoes_untrusted_details(capsys):
-    secret = "PRIVATE_TOKEN=do-not-show"
-    runtime = SimpleNamespace(
-        plans=SimpleNamespace(
-            explain_routing=lambda *a, **kw: (
-                (_ for _ in ()).throw(FleetPlanInvalid(f"bad file with {secret}"))
-            )
-        )
-    )
-    assert (
-        run_plan_command(
-            runtime, _args("explain", "missing/plan.yml", "--routes", "--diagnostics", "--json")
-        )
-        == 2
-    )
-    raw = capsys.readouterr().out
-    assert json.loads(raw)["code"] == "PLAN_RESOLUTION_REJECTED"
-    assert secret not in raw and "missing/plan.yml" not in raw
-
-
-def test_bad_cli_input_never_echoes_secret_in_diagnostics(capsys):
-    assert (
-        run_plan_command(
-            _runtime(),
-            _args(
-                "explain",
-                _plan(),
-                "--routes",
-                "--json",
-                "--diagnostics",
-                "--input",
-                "SECRET_ONLY_NO_EQUALS",
-            ),
-        )
-        == 2
-    )
-    raw = capsys.readouterr().out
-    assert json.loads(raw)["code"] == "PLAN_RESOLUTION_REJECTED"
-    assert "SECRET_ONLY_NO_EQUALS" not in raw
-
-
-def test_cli_override_is_accepted_and_not_misattributed_to_file(tmp_path, monkeypatch, capsys):
-    (tmp_path / "params.yml").write_text("inputs:\n  typechecker: pyright\n")
-    monkeypatch.chdir(tmp_path)
-    assert (
-        run_plan_command(
-            _runtime(),
-            _args(
-                "explain",
-                _plan(),
-                "--routes",
-                "--json",
-                "--input",
-                "typechecker=ty",
-                "--inputs-file",
-                "params.yml",
-            ),
-        )
-        == 0
-    )
-    doc = json.loads(capsys.readouterr().out)
-    selected = next(item for item in doc["inputs"] if item["name"] == "typechecker")
-    assert selected["origin"] == {"kind": "supplied"}
-    assert all("value" not in item for item in doc["bindings"])
-
-
-@pytest.mark.parametrize("command", ["validate", "explain"])
-def test_successful_diagnostics_are_value_free_and_preserve_caller_origins(
-    command, tmp_path, monkeypatch, capsys
+def test_typed_violations_keep_original_codes_without_value_echo(
+    tmp_path, monkeypatch, capsys, source, values, code, names
 ):
-    (tmp_path / "params.yml").write_text(
-        "inputs:\n  typechecker: pyright\n  project: private-source-path\n"
+    config = write_run_configuration(
+        tmp_path, monkeypatch, source={"kind": "catalog-plan", "name": source}, inputs=values
     )
-    monkeypatch.chdir(tmp_path)
-    assert (
-        run_plan_command(
-            _runtime(),
-            _args(
-                command,
-                _plan(),
-                "--diagnostics",
-                "--json",
-                "--inputs-file",
-                "params.yml",
-                "--input",
-                "typechecker=ty",
-            ),
-        )
-        == 0
-    )
+    assert main(["config", "validate", str(config), "--json"]) == 2
     raw = capsys.readouterr().out
     report = json.loads(raw)
-    assert report["status"] == "accepted"
-    assert report["execution"] == "resolved_not_executed"
-    assert len(report["configuration"]["caller_file_sha256"]) == 64
-    entries = {
-        item["name"]: item for item in report["configuration"]["entries"] if item["scope"] is None
-    }
-    assert entries["typechecker"]["binding"]["kind"] == "cli"
-    assert entries["project"]["binding"]["kind"] == "caller_file"
-    assert "private-source-path" not in raw and "pyright" not in raw
+    diagnostic = report["diagnostic"]
+    assert diagnostic["code"] == code
+    assert all(name in diagnostic["inputs"] for name in names)
+    assert diagnostic["execution"] == "not_started_by_diagnostic"
+    assert report["proof"]["admission"] == "not-started"
+    assert "PRIVATE_TOKEN_SENTINEL" not in raw
+    assert not config.with_name("goon.lock").exists()
 
 
-def test_real_cli_distinguishes_plan_root_from_import_named_root(tmp_path, monkeypatch, capsys):
-    from oh_goon.cli import main
+def test_external_error_never_echoes_untrusted_detail(tmp_path, monkeypatch, capsys):
+    import oh_goon.cli_configuration as commands
+
+    config = write_run_configuration(tmp_path, monkeypatch)
+
+    def reject(*args, **kwargs):
+        raise FleetPlanInvalid("PRIVATE_TOKEN_SENTINEL /private/native/config")
+
+    monkeypatch.setattr(commands, "inspect_run_configuration", reject)
+    assert main(["config", "validate", str(config), "--json"]) == 2
+    raw = capsys.readouterr().out
+    assert json.loads(raw)["code"] == "PLAN_RESOLUTION_REJECTED"
+    assert "PRIVATE_TOKEN_SENTINEL" not in raw and "/private/native/config" not in raw
+
+
+@pytest.mark.parametrize("implementation", ["pi", "opencode", "codex"])
+def test_native_inspection_does_not_read_private_native_state_or_launch(
+    tmp_path, monkeypatch, capsys, implementation
+):
+    import subprocess
+
+    config = write_run_configuration(
+        tmp_path,
+        monkeypatch,
+        source={"kind": "catalog-plan", "name": "agents/native-review"},
+        inputs={"repo": "local:repository", "skill": "local:review"},
+        agent=True,
+    )
+    selection = yaml.safe_load(config.read_text())
+    selection["agent"].pop("model_profile")
+    selection["agent"].update(implementation=implementation, profile="isolated-managed")
+    config.write_text(yaml.safe_dump(selection))
+    private = tmp_path / "private-native-home"
+    private.mkdir()
+    (private / "auth.json").write_text('{"token": "PRIVATE_NATIVE_SENTINEL"}')
+    monkeypatch.setenv("HOME", str(private))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(private))
+    original_open = Path.open
+
+    def public_source_only(path, *args, **kwargs):
+        assert not path.is_relative_to(private), "inspection read native private state"
+        return original_open(path, *args, **kwargs)
+
+    def no_process(*args, **kwargs):
+        pytest.fail("configuration inspection launched a native or network process")
+
+    monkeypatch.setattr(Path, "open", public_source_only)
+    monkeypatch.setattr(subprocess, "Popen", no_process)
+    assert main(["config", "inspect", str(config), "--json"]) == 0
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert report["proof"]["native_availability"] == "unknown"
+    assert report["proof"]["skill_closure"] == "not-captured"
+    assert "PRIVATE_NATIVE_SENTINEL" not in output
+    assert not config.with_name("goon.lock").exists()
+
+
+def test_configuration_lineage_distinguishes_root_and_import_named_root(
+    tmp_path, monkeypatch, capsys
+):
     from oh_goon.runtime import goon_templates
 
     sources = {
@@ -230,37 +131,19 @@ steps:
         (package / "goon.yml").write_text(source, encoding="utf-8")
         (package / "README.md").write_text(f"# general/{name}\n", encoding="utf-8")
     monkeypatch.setattr(goon_templates, "default_goon_templates_root", lambda: catalog)
-    path = tmp_path / "plan.yml"
-    path.write_text(
-        "version: 1\ninputs: [value]\ngoons:\n- import: general/parent\n  as: root\n",
-        encoding="utf-8",
+    config = write_run_configuration(
+        tmp_path,
+        monkeypatch,
+        plan_content="version: 1\ninputs: [value]\ngoons:\n- import: general/parent\n  as: root\n",
+        inputs={"value": "chosen-public-value"},
     )
-    command = [
-        "plan",
-        "validate",
-        str(path),
-        "--diagnostics",
-        "--input",
-        "value=private-root-scope-canary",
-    ]
-    assert main(command) == 0
-    output = capsys.readouterr().out
-    lines = output.splitlines()
-    assert any(line.startswith("  <root>.input.value: cli ") for line in lines)
-    imported = next(line for line in lines if line.startswith("  root.input.value:"))
-    nested = next(line for line in lines if line.startswith("  root.leaf.input.value:"))
-    assert " <- <root>.input.value " in imported
-    assert " <- root.input.value " in nested
-    assert "private-root-scope-canary" not in output
-
-    assert main([*command, "--json"]) == 0
-    entries = {
-        entry["scope"]: entry
-        for entry in json.loads(capsys.readouterr().out)["configuration"]["entries"]
-    }
+    assert main(["config", "validate", str(config), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    entries = {entry["scope"]: entry for entry in report["configuration_evidence"]["entries"]}
     assert set(entries) == {None, "root", "root.leaf"}
     assert entries["root"]["binding"]["parent_scope"] is None
     assert entries["root.leaf"]["binding"]["parent_scope"] == "root"
+    assert [entry["occurrence"] for entry in report["occurrences"]] == [["root"], ["root", "leaf"]]
 
 
 def test_unsafe_input_name_and_exception_are_not_serialized():
@@ -275,46 +158,7 @@ def test_unsafe_input_name_and_exception_are_not_serialized():
     assert safe_plan_diagnostic(ValueError("private path /tmp/private"))["inputs"] == []
 
 
-def test_diagnostic_opt_in_does_not_change_normal_success(capsys):
-    args = _args("explain", _plan(), "--routes", "--json")
-    assert run_plan_command(_runtime(), args) == 0
-    original = json.loads(capsys.readouterr().out)
-    args = _args("explain", _plan(), "--routes", "--json", "--diagnostics")
-    assert run_plan_command(_runtime(), args) == 0
-    modified = json.loads(capsys.readouterr().out)
-    assert modified == original
-    assert modified["schema"] == "oh-goon.plan-input-routing/v1"
-
-
-def test_non_opted_in_failure_text_remains_legacy(capsys):
-    assert (
-        run_plan_command(
-            _runtime(),
-            _args("explain", _plan(), "--routes", "--json", "--input", "typechecker=invalid"),
-        )
-        == 2
-    )
-    raw = capsys.readouterr().out
-    assert "must be" in raw and "oh-goon.plan-validation-diagnostic/v1" not in raw
-
-
-def test_human_opt_in_safe_codes_and_action(capsys):
-    assert (
-        run_plan_command(
-            _runtime(),
-            _args("validate", _plan(), "--diagnostics", "--input", "typechecker=invalid"),
-        )
-        == 2
-    )
-    output = capsys.readouterr().out
-    assert "Plan rejected: INVALID_INPUT_VALUE" in output
-    assert "Next action:" in output
-    assert "101" not in output
-
-
-def test_projected_input_ambiguity_uses_original_compiler_owner(tmp_path: Path):
-    from oh_goon.runtime.goon_templates import GoonTemplateStore
-
+def test_projected_ambiguity_retains_compiler_owner(tmp_path):
     goons = tmp_path / "goons" / "general" / "leaf"
     goons.mkdir(parents=True)
     (goons / "goon.yml").write_text(
@@ -323,13 +167,61 @@ def test_projected_input_ambiguity_uses_original_compiler_owner(tmp_path: Path):
     )
     (goons / "README.md").write_text("leaf", encoding="utf-8")
     plan = tmp_path / "plan.yml"
-    plan.write_text(
-        "version: 1\ninputs: [owner]\ngoons:\n- general/leaf\n- general/leaf\n", encoding="utf-8"
-    )
-    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(tmp_path / "goons"))
+    plan.write_text("version: 1\ninputs: [owner]\ngoons:\n- general/leaf\n- general/leaf\n")
     with pytest.raises(FleetPlanInputRejected) as error:
-        resolver.resolve(plan)
-    doc = safe_plan_diagnostic(error.value)
-    assert doc["code"] == "AMBIGUOUS_PROJECTED_INPUT"
-    assert doc["inputs"] == ["owner"]
-    assert doc["status"] == "rejected"
+        FleetPlanResolver(goon_templates=GoonTemplateStore(tmp_path / "goons")).resolve(plan)
+    assert safe_plan_diagnostic(error.value)["code"] == "AMBIGUOUS_PROJECTED_INPUT"
+
+
+def test_environment_backed_values_are_unobserved_during_inspection(tmp_path, monkeypatch, capsys):
+    config = write_run_configuration(
+        tmp_path,
+        monkeypatch,
+        plan_content="""version: 1
+goons:
+- import: python/typecheck
+  with:
+    typechecker:
+      from:
+      - env: PRIVATE_CHECKER_SELECTION
+""",
+    )
+    monkeypatch.setenv("PRIVATE_CHECKER_SELECTION", "PRIVATE_INVALID_VALUE")
+    for command, code in (("inspect", 0), ("validate", 2)):
+        assert main(["config", command, str(config), "--json"]) == code
+        output = capsys.readouterr().out
+        report = json.loads(output)
+        assert report["status"] == "contract-inspected"
+        assert report["diagnostic"]["code"] == "EXTERNAL_INPUT_NOT_OBSERVED"
+        assert report["diagnostic"]["inputs"] == ["typechecker"]
+        assert "PRIVATE_INVALID_VALUE" not in output
+        assert report["proof"]["execution"] == "not-started"
+    assert main(["lock", str(config)]) == 2
+    assert "PRIVATE_INVALID_VALUE" not in capsys.readouterr().out
+    assert not config.with_name("goon.lock").exists()
+
+
+def test_defined_repository_source_prevents_unneeded_environment_observation(
+    tmp_path, monkeypatch, capsys
+):
+    config = write_run_configuration(
+        tmp_path,
+        monkeypatch,
+        plan_content="""version: 1
+goons:
+- import: python/typecheck
+  with:
+    typechecker:
+      from:
+      - yaml: {path: selected-checker.yml, key: checker}
+      - env: PRIVATE_UNUSED_CHECKER
+""",
+    )
+    (tmp_path / "repository" / "selected-checker.yml").write_text("checker: ty\n")
+    monkeypatch.setenv("PRIVATE_UNUSED_CHECKER", "PRIVATE_INVALID_VALUE")
+    assert main(["config", "validate", str(config), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "inputs-valid"
+    assert report["diagnostic"] is None
+    assert main(["lock", str(config)]) == 0
+    assert config.with_name("goon.lock").is_file()

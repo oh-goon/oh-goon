@@ -114,20 +114,22 @@ def test_native_cli_success_journal_and_game_tape_survive_restart(tmp_path, monk
         "version: 1\ninputs:\n  label: {type: string, default: private-history-canary}\n"
         "steps:\n- id: hello\n  run: sh scripts/hello.sh\n"
     )
-    assert main(["lock", str(source)]) == 0
-    capsys.readouterr()
+    import yaml
+
     _register(repo)
-    data = _cli(
-        [
-            "plan",
-            "run",
-            str(repo / "goon.yml"),
-            "--repository-id",
-            repository_id(repo),
-            "--json",
-        ],
-        capsys,
+    configuration = tmp_path / "run.yml"
+    configuration.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "repository-goon"},
+                "target": {"repository_id": repository_id(repo)},
+            }
+        )
     )
+    assert main(["lock", str(configuration)]) == 0
+    capsys.readouterr()
+    data = _cli(["run", str(configuration), "--json"], capsys)
     assert data["exit"] == 0
     assert data["status"] == "COMPLETED"
     assert data["outcome"] == "SUCCESS"

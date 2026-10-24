@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import TypedDict
 
 from oh_goon.core.effect_attempts import (
     require_effect_attempt_transition,
@@ -29,6 +30,20 @@ from oh_goon.core.product_identity import new_operation_id
 from oh_goon.core.vocabulary import EffectAttemptStatus, EffectBoundaryKind
 
 
+class _EffectTransitionFields(TypedDict):
+    operation_id: str
+    repository: RepositoryIdentity
+    capability: CapabilitySnapshot
+    target: OperationTarget | None
+    origin: RepositoryEffectOrigin
+    baseline: RepositoryStateFingerprint
+    effect_boundary: EffectBoundaryKind
+    execution_input_id: str | None
+    record_version: int
+    started_at: datetime
+    updated_at: datetime
+
+
 def begin_effect_attempt(
     repository: Path,
     capability: CapabilitySnapshot,
@@ -44,7 +59,7 @@ def begin_effect_attempt(
     return ClaimedRepositoryEffectAttempt(
         status=EffectAttemptStatus.CLAIMED,
         operation_id=operation_id or new_operation_id(),
-        repository=RepositoryIdentity(path=resolved),
+        repository=RepositoryIdentity.model_validate({"path": resolved}),
         capability=capability,
         target=target,
         origin=origin,
@@ -138,7 +153,7 @@ def _transition_fields(
     current: RepositoryEffectAttempt,
     *,
     transitioned_at: datetime,
-) -> dict[str, object]:
+) -> _EffectTransitionFields:
     return {
         "operation_id": current.operation_id,
         "repository": current.repository,

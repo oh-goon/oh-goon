@@ -7,18 +7,18 @@ import tarfile
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.path_authority import RepositoryPathSpace
 from oh_goon.engine.command import (
-    CommandCancelledError,
     CommandOutputObserver,
     CommandResult,
     RuntimeAuthorityReceipt,
     run_command,
 )
+from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations._fleet_plan_sandbox_launch import sandbox_process_launch
 from oh_goon.integrations.content_snapshot import replace_tree_from_tar_gz_stream, verify_snapshot
@@ -65,7 +65,7 @@ class OpenSandboxCliTransport:
         stream_output: CommandOutputObserver | None = None,
     ) -> CommandResult:
         if cancel_requested is not None and cancel_requested():
-            raise CommandCancelledError(
+            raise OperationCancelledError(
                 "Fleet OpenSandbox attempt was cancelled before sandbox creation"
             )
         resources = request.attempt.resources
@@ -152,7 +152,9 @@ def _execute_open_sandbox_attempt(
             "upload Fleet sandbox request",
         )
         if cancel_requested is not None and cancel_requested():
-            raise CommandCancelledError("Fleet OpenSandbox attempt cancelled before process launch")
+            raise OperationCancelledError(
+                "Fleet OpenSandbox attempt cancelled before process launch"
+            )
         execution = _run_osb(
             settings,
             "command",
@@ -231,7 +233,7 @@ def _command_result_from_remote(
     stderr = str(result.get("stderr", ""))
     _observe_returned_output(stream_output, stdout, stderr)
     try:
-        returncode = int(result["returncode"])
+        returncode = int(cast(int | str | float, result["returncode"]))
     except (KeyError, TypeError, ValueError) as exc:
         raise FleetPlanInvalid("OpenSandbox Fleet runner result has no integer returncode") from exc
     return CommandResult(
@@ -340,7 +342,7 @@ def _create_sandbox(
         raise FleetPlanInvalid("OpenSandbox sandbox creation failed") from exc
     if not isinstance(body, dict) or not isinstance(body.get("id"), str) or not body["id"].strip():
         raise FleetPlanInvalid("OpenSandbox create response is missing sandbox id")
-    return body["id"].strip()
+    return cast(str, body["id"].strip())
 
 
 def _destroy_sandbox(settings: OpenSandboxSettings, sandbox_id: str) -> None:
@@ -452,14 +454,14 @@ def _request_payload(
     toolchain_root = staging_root / "toolchain"
     toolchain_root.mkdir(parents=True, exist_ok=True)
     toolchain: list[dict[str, object]] = []
-    for index, binding in enumerate(attempt.host_tools):
-        destination = toolchain_root / f"{index:03d}-{binding.name}"
-        shutil.copyfile(binding.execution_snapshot_path, destination)
+    for index, host_tool in enumerate(attempt.host_tools):
+        destination = toolchain_root / f"{index:03d}-{host_tool.name}"
+        shutil.copyfile(host_tool.execution_snapshot_path, destination)
         toolchain.append(
             {
-                "name": binding.name,
+                "name": host_tool.name,
                 "source": f"input/toolchain/{destination.name}",
-                "mode": binding.execution_snapshot_path.stat().st_mode & 0o777,
+                "mode": host_tool.execution_snapshot_path.stat().st_mode & 0o777,
             }
         )
     return {
@@ -527,7 +529,7 @@ def _restore_result_archives(
     result: dict[str, object],
     result_archives: dict[str, Path],
 ) -> None:
-    if int(result.get("protocol", -1)) != _RUNNER_PROTOCOL:
+    if int(cast(int | str | float, result.get("protocol", -1))) != _RUNNER_PROTOCOL:
         raise FleetPlanInvalid("OpenSandbox Fleet runner returned an incompatible protocol version")
     result_paths = [("workspace_archive", request.attempt.paths.workspace)]
     if not any(

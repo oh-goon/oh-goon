@@ -15,7 +15,7 @@ PLAYWRIGHT_PACKAGES = (
 )
 
 
-Runner = Callable[..., subprocess.CompletedProcess[object]]
+Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 class BrowserAcceptanceEnvironmentError(ValueError):
@@ -73,13 +73,15 @@ def locked_playwright_version(root: Path = ROOT, *, runner: Runner = subprocess.
         raise BrowserAcceptanceEnvironmentError(
             "npm ls did not return readable JSON for the Playwright lock selection"
         ) from exc
-    versions = {name: set() for name in ("@playwright/test", "playwright", "playwright-core")}
+    versions: dict[str, set[str]] = {
+        name: set() for name in ("@playwright/test", "playwright", "playwright-core")
+    }
     _collect_npm_versions(payload, versions)
     if any(not values for values in versions.values()):
         raise BrowserAcceptanceEnvironmentError(
             "npm lock selection must contain @playwright/test, playwright and playwright-core"
         )
-    selected = set().union(*versions.values())
+    selected = set[str]().union(*versions.values())
     if any(len(values) != 1 for values in versions.values()) or len(selected) != 1:
         raise BrowserAcceptanceEnvironmentError(
             "npm lock selection must use one exact Playwright version"

@@ -144,8 +144,8 @@ def resolve_plan_step(
                 "when": step.when,
             }
         )
-    capabilities = compile_step_capabilities(step, value_compiler)
     if isinstance(step, CommandPlanStep):
+        capabilities = compile_step_capabilities(step, value_compiler)
         if step.uv is not None:
             argv = list(step.argv)
             index = argv.index("--project")
@@ -172,6 +172,7 @@ def resolve_plan_step(
             environment=compiled_environment(step, value_compiler),
         )
     if isinstance(step, DependencyInventoryPlanStep):
+        capabilities = compile_step_capabilities(step, value_compiler)
         return ResolvedDependencyInventoryStep(
             **step.model_dump(exclude={"step_id", "capabilities"}),
             step_id=step_id,

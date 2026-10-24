@@ -41,7 +41,7 @@ class FleetExecutorStatus(ImmutableModel):
     active_fleet_run_ids: tuple[str, ...] = ()
     operational_revision: int = Field(ge=0)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def accepting_new_runs(self) -> bool:
         return (

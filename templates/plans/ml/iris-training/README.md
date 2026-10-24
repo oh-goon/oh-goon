@@ -1,53 +1,41 @@
 # ml/iris-training
 
-This Plan explicitly selects strict CI/CD execution. Configure its executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+Train and evaluate through a repository-provided `iris-train` command.
 
-Run the project’s Iris training command with configurable training and evaluation inputs.
+**Status:** teaching example. **Effects:** Executes training and writes metrics and model parameters.
 
-**Teaching example. Not a production MLOps template.**
+**Prerequisites:** The project must implement `iris-train` in its locked `ml` group. The existing template-certification Iris fixture is the reference workload; this template does not install a training program. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
-## Use this Plan
+**What to edit:** initialize a workflow, then set the registered target and relevant caller choices in `workflow/run.yml`. The illustrative addresses, revision and digest below must identify your real workload before execution. The [first-run guide](../../../README.md) explains repository registration and prepared CLI use.
+
+**Settings owner:** [`plan.yml`](plan.yml) owns ordered imports; imported Goons own input types/defaults, Steps, effects and outputs. `run.yml` selects values. Native project tools keep their own configuration.
 
 ```sh
-oh-goon templates show ml/iris-training --kind plan
-oh-goon plan inputs templates/plans/ml/iris-training/plan.yml
+oh-goon templates init ml/iris-training --output ./workflow
 ```
 
-Copy with `oh-goon templates show ml/iris-training --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
-
-Use the Iris workload under the existing template-certification fixture as the project-command reference. Its locked `ml` group supplies `iris-train`. Change seed, split, accuracy and iteration inputs through caller values. Metrics are evidence; durable model-parameter bytes use the configured content store.
-
-This Plan intentionally does one thing: select `ml/iris-train` and expose its deterministic training/evaluation inputs at the run boundary. It contains no executable Steps.
-
-Use it to learn the Oh Goon authoring model for ML work:
-
-```text
-Plan ml/iris-training
-  → Goon ml/iris-train
-      → lock check
-      → explicit dependency cache acquisition
-      → offline deterministic train/evaluate
-```
-
-The Plan intentionally leaves CPU/memory/process caps unspecified; effective capacity comes from the admitted executor and remains visible in resolved Plan/admission evidence. See the Goon README for repository requirements, outputs, and the production ML concerns intentionally omitted from this example.
-
-## Configure a copy
-
-Save these training choices as `values.yml`. The native project command evaluates accuracy and returns the actual result.
+Edit the generated `workflow/run.yml`; this shows one explicit selection:
 
 ```yaml
+version: 1
+source: {kind: catalog-plan, name: ml/iris-training}
+target: {repository_id: REPOSITORY_ID}
 inputs:
-  random_seed: '42'
-  test_size_percent: '20'
-  minimum_accuracy_percent: '90'
-  max_iterations: '300'
+  random_seed: 42
+  test_size_percent: 20
+  minimum_accuracy_percent: 90
+  max_iterations: 300
 ```
-
-Validate and lock the same selection:
 
 ```sh
-oh-goon plan validate plan.yml --inputs-file values.yml
-oh-goon lock plan.yml --inputs-file values.yml
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
 ```
 
-Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.
+**Expected outputs:** `ml-output/iris-training-metrics.json` is evidence; `ml-output/iris-model-parameters.json` has retained content-store bytes. Native command success determines acceptance.
+
+**Failures:** invalid inputs fail before work. Inspection/validation do not prove installed tools, reachable services or successful effects. Native failures remain failed Steps with their exit status and logs. A changed source or execution selection requires a new lock.
+
+**Customize:** change caller values in `run.yml`. For structural changes, create a project Plan with ordinary ordered `goons:` imports and select it with `source: {kind: file-plan, path: plan.yml}`; see [Plan authoring](../../README.md). Keep secrets in declared execution environment bindings.

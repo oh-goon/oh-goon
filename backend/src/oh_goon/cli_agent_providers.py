@@ -18,6 +18,7 @@ from oh_goon.core.models.agent_providers import (
     AgentProvider,
     AgentProviderError,
     AgentProvidersConfig,
+    ProviderApi,
 )
 from oh_goon.integrations.agent_provider_client import AgentProviderClient
 from oh_goon.runtime.agent_providers import (
@@ -26,7 +27,7 @@ from oh_goon.runtime.agent_providers import (
     load_agent_providers,
 )
 
-_PROVIDERS = {
+_PROVIDERS: dict[str, tuple[ProviderApi, str, str | None]] = {
     "ollama": ("ollama", "http://127.0.0.1:11434", None),
     "litellm": ("openai-chat-completions", "http://127.0.0.1:4000/v1", None),
     "openrouter": ("openai-chat-completions", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
@@ -42,7 +43,7 @@ def agent_connection_from_args(args: argparse.Namespace) -> AgentConnection:
     )
 
 
-def add_provider_commands(commands) -> None:
+def add_provider_commands(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     providers = commands.add_parser(
         "providers", help="Configure external model provider connections"
     )
@@ -79,6 +80,7 @@ def add_provider_commands(commands) -> None:
 
 def run_provider_command(args: argparse.Namespace) -> int:
     path = agent_providers_path(os.environ, args.config)
+    report: dict[str, object]
     try:
         if args.provider_command == "schema":
             print(json.dumps(AgentProvidersConfig.model_json_schema(), indent=2))
@@ -155,16 +157,17 @@ def run_provider_command(args: argparse.Namespace) -> int:
     else:
         print(f"Provider configuration: {path}")
         print("Configuration is valid. No provider connection or installation check performed.")
-        for name, provider in report["providers"].items():
-            print(f"  {name}: {provider['api']} at {provider['base_url']}")
-        for name, model in report["models"].items():
-            suffix = " (default)" if name == report["default_model"] else ""
-            print(f"  model {name}: {model['provider']} / {model['model']}{suffix}")
+        for name, provider in config.providers.items():
+            print(f"  {name}: {provider.api} at {provider.base_url}")
+        for name, model in config.models.items():
+            suffix = " (default)" if name == config.default_model else ""
+            print(f"  model {name}: {model.provider} / {model.model}{suffix}")
     return 0
 
 
 def _prompt(args: argparse.Namespace, limit: int) -> str:
     try:
+        data: bytes
         if args.prompt is not None:
             data = args.prompt.encode("utf-8")
         elif str(args.prompt_file) == "-":

@@ -5,7 +5,7 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedPreCommitStep,
     ResolvedStepSource,
 )
-from oh_goon.core.models.fleet_plan_evidence import PlanExecutionInputEvidence
+from oh_goon.core.models.fleet_plan_evidence import FleetPlanResult, PlanExecutionInputEvidence
 from oh_goon.core.models.fleet_plan_requirements import RepositoryRequirement
 from oh_goon.core.models.game_tape import (
     GameTapeEnvironmentFingerprint,
@@ -157,7 +157,7 @@ def _requirement_description(requirement: RepositoryRequirement) -> str:
     return f"{kind.replace('_', ' ')} · {facts}"
 
 
-def _fleet_plan_result(report: OperationReport):
+def _fleet_plan_result(report: OperationReport) -> FleetPlanResult | None:
     evidence = report.evidence
     return evidence.plan if isinstance(evidence, FleetPlanOperationEvidence) else None
 

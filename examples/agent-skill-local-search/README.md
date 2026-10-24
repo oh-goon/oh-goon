@@ -1,5 +1,7 @@
 # Frozen local-search fixture
 
+Classification: integration-fixture
+
 This small product example demonstrates the existing Resolver capture and Step
 preparation contract. Its one-sentence `SKILL.md` is test data. Reusable review
 and development Skills are owned by

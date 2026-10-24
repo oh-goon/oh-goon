@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 from oh_goon.core.dependency_version_filter import (
     parse_version_specifier,
     version_matches_specifier,
@@ -34,7 +36,7 @@ class DependencyAdvisoryService:
                 for row in self._store.package_rows(package_name)
                 if str(row["repository_id"]) in current
             ]
-            grouped: dict[str, list[object]] = {}
+            grouped: dict[str, list[sqlite3.Row]] = {}
             for row in rows:
                 grouped.setdefault(str(row["repository_id"]), []).append(row)
             affected = not_affected = unclassified = 0

@@ -28,8 +28,7 @@ from oh_goon.repository_tooling._repository_understanding_policy_primitives impo
     CLAIM_STATES as CLAIM_STATES,
 )
 from oh_goon.repository_tooling._repository_understanding_policy_primitives import (
-    DEFAULT_QUALIFICATION_PROFILE,
-    qualification_profile,
+    DEFAULT_QUALIFICATION_PROFILE as DEFAULT_QUALIFICATION_PROFILE,
 )
 from oh_goon.repository_tooling._repository_understanding_policy_primitives import (
     DIMENSION_NORMALIZATION_POLICY_VERSION as DIMENSION_NORMALIZATION_POLICY_VERSION,
@@ -54,6 +53,9 @@ from oh_goon.repository_tooling._repository_understanding_policy_primitives impo
 )
 from oh_goon.repository_tooling._repository_understanding_policy_primitives import (
     qualification_policy_manifest as qualification_policy_manifest,
+)
+from oh_goon.repository_tooling._repository_understanding_policy_primitives import (
+    qualification_profile,
 )
 from oh_goon.repository_tooling._repository_understanding_policy_primitives import (
     weighted_harmonic as weighted_harmonic,

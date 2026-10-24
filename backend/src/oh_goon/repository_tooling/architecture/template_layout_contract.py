@@ -4,7 +4,7 @@ import re
 import tomllib
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from oh_goon.core.source_transport_metadata import authored_source_entries
 from oh_goon.repository_tooling.architecture.common import Violation

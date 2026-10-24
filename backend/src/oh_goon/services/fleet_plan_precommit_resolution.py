@@ -21,7 +21,7 @@ def resolve_pre_commit(
     environment = value_compiler.compile_imports(env_names=step.imports.env)
     if tools is None:
         raise FleetPlanInvalid(
-            "Fleet plan tool runtime is not configured; run 'oh-goon plan prepare <plan.yml>'"
+            "Fleet plan tool runtime is not configured; prepare the original managed runtime through FleetPlanService.prepare before locking"
         )
     runtime = tools.resolve_prepared_pre_commit(DEFAULT_PRE_COMMIT_REQUIREMENT)
     return ResolvedPreCommitStep(

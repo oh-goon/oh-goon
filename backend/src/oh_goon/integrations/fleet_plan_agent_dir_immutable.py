@@ -32,7 +32,7 @@ def _directory_flags(fd: int) -> int:
         fcntl.ioctl(fd, _FS_IOC_GETFLAGS, buf, True)
     except OSError as exc:
         raise FleetPlanInvalid("Linux directory immutable flags unavailable") from exc
-    return struct.unpack("@l", buf)[0]
+    return int(struct.unpack("@l", buf)[0])
 
 
 def require_original_agent_directory_immutable(fd: int) -> None:

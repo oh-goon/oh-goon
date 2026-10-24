@@ -220,6 +220,8 @@ aggregation, exact filtering, UTF-8 input and error exits. Each case starts with
 failing immutable verifier, then checks two ordered verification Steps with quoted
 paths and literal arguments. Hashmarks follow-up, Skill delivery and native model
 settings remain observable separately from independent verification results.
+On Linux, file-backed stdin and file inputs also exercise the reporting CLI under
+a native 64 MiB memory limit; other platforms explicitly skip that one case.
 
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \

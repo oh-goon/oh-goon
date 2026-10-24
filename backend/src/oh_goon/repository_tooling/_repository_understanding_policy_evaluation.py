@@ -64,7 +64,13 @@ def validate_inputs(
         raise ValueError("exam snapshot must contain questions")
     if not isinstance(observations, list):
         raise ValueError("grader observations must be a list")
-    by_id = {item.get("id"): item for item in observations if isinstance(item, dict)}
+    by_id: dict[str, dict[str, Any]] = {}
+    for item in observations:
+        if isinstance(item, dict):
+            question_id = item.get("id")
+            if not isinstance(question_id, str):
+                raise ValueError("grader observation requires a question id")
+            by_id[question_id] = item
     expected_ids = [item["id"] for item in questions]
     if list(by_id) != expected_ids:
         raise ValueError(

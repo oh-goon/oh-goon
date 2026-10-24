@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal, cast
+
 from oh_goon.core.execution_ledger import project_execution_ledger
 from oh_goon.core.game_tape_identity import repository_execution_id
 from oh_goon.core.game_tape_lifecycle import repository_status, run_status
@@ -42,6 +44,7 @@ from oh_goon.core.models.run_events import (
     StepStartedEvent,
     TerminationRequestedEvent,
 )
+from oh_goon.core.models.shard_execution import CanonicalShardResultEvidence
 from oh_goon.core.models.target import FleetPlanTarget
 
 
@@ -200,7 +203,9 @@ def _runtime_progress(detail: FleetRunDetail, repository_id: str) -> GameTapeRun
     if not relevant:
         return None
     latest = max(relevant, key=lambda event: event.sequence)
-    process_state = "NOT_STARTED"
+    process_state: Literal[
+        "NOT_STARTED", "STARTING", "RUNNING", "UNKNOWN", "EXITED", "QUIESCENT"
+    ] = "NOT_STARTED"
     if isinstance(latest, ProcessStartingEvent):
         process_state = "STARTING"
     if isinstance(latest, ProcessStartedEvent):
@@ -249,8 +254,8 @@ def _verification_execution_boundary(
         return None
     return GameTapeVerificationExecutionBoundary(
         producer_version=evidence.producer_version,
-        producer_artifact_identity=evidence.producer_artifact_identity,
-        producer_implementation_identity=evidence.producer_implementation_identity,
+        producer_artifact_identity=cast(str, evidence.producer_artifact_identity),
+        producer_implementation_identity=cast(str, evidence.producer_implementation_identity),
         producer_implementation_provenance=(
             producer_provenance
             if producer_provenance is not None
@@ -258,17 +263,17 @@ def _verification_execution_boundary(
             == evidence.producer_implementation_identity
             else None
         ),
-        producer_contract_identity=evidence.producer_contract_identity,
-        repository_identity=evidence.repository_content_identity,
-        revision_identity=evidence.verification_revision_identity,
+        producer_contract_identity=cast(str, evidence.producer_contract_identity),
+        repository_identity=cast(str, evidence.repository_content_identity),
+        revision_identity=cast(str, evidence.verification_revision_identity),
         selection_evidence_identity=evidence.verification_selection_evidence_identity,
         producer_provenance_identity=evidence.verification_selection_evidence_identity,
         producer_repository_generation=evidence.producer_repository_generation,
         producer_identity_generation=evidence.producer_identity_generation,
         producer_evidence_hashes=evidence.producer_evidence_hashes,
-        selected_membership_identity=evidence.selected_membership_identity,
+        selected_membership_identity=cast(str, evidence.selected_membership_identity),
         selected_members=evidence.selected_members,
-        actual_executed_membership_identity=evidence.actual_executed_membership_identity,
+        actual_executed_membership_identity=cast(str, evidence.actual_executed_membership_identity),
         actual_executed_members=evidence.actual_executed_members,
         execution_plan_identity=evidence.plan_identity,
         execution_context_identity=evidence.execution_context_identity,
@@ -283,14 +288,15 @@ def _shard_lineage(result: FleetPlanResult | None) -> tuple[GameTapeShardLineage
         return ()
 
     projected: list[GameTapeShardLineage] = []
+    shard_execution = result.shard_execution
 
-    def visit(item) -> None:
+    def visit(item: CanonicalShardResultEvidence) -> None:
         projected.append(
             GameTapeShardLineage(
-                producer_contract_identity=result.shard_execution.producer_contract_identity,
-                producer_artifact_identity=result.shard_execution.producer_artifact_identity,
-                producer_contract_schema=result.shard_execution.producer_contract_schema,
-                producer_version=result.shard_execution.producer_version,
+                producer_contract_identity=shard_execution.producer_contract_identity,
+                producer_artifact_identity=shard_execution.producer_artifact_identity,
+                producer_contract_schema=shard_execution.producer_contract_schema,
+                producer_version=shard_execution.producer_version,
                 shard_id=item.shard_id,
                 described_work_identity=item.described_work_identity,
                 physical_work_identity=item.physical_work_identity,

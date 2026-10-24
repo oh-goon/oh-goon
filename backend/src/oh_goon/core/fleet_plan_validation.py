@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
 
@@ -17,6 +17,9 @@ from oh_goon.core.models.fleet_plan_step_contract import (
 from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
 from oh_goon.core.path_authority import repository_relative_parts
 from oh_goon.core.product_identity import stable_id
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.fleet_plan import ResolvedPlanStep
 
 
 def validate_resolved_plan(plan: Any) -> None:
@@ -173,7 +176,11 @@ def _validate_step_dataflow(step: Any, prior: set[str], published: dict[str, set
                 "or let the program read the imported environment value."
             )
     condition = getattr(step, "when", None)
-    if getattr(condition, "kind", None) == "step_status" and condition.step_id not in prior:
+    if (
+        condition is not None
+        and getattr(condition, "kind", None) == "step_status"
+        and condition.step_id not in prior
+    ):
         raise ValueError(
             f"Resolved Fleet step {step.step_id} condition must reference an earlier step: {condition.step_id}"
         )
@@ -211,7 +218,10 @@ def _validate_step_paths(step: Any) -> None:
         if not isinstance(item, PlanStreamOutput)
     )
     condition = getattr(step, "when", None)
-    if getattr(condition, "kind", None) in {"path_exists", "path_missing"}:
+    if condition is not None and getattr(condition, "kind", None) in {
+        "path_exists",
+        "path_missing",
+    }:
         values.append((condition.path, "condition path"))
     for value, kind in values:
         try:
@@ -420,8 +430,8 @@ def _validate_plan_identity(plan: Any) -> None:
         raise ValueError("Resolved Fleet plan_id must match canonical resolved content")
 
 
-def _runtime_strings(step: Any) -> tuple[str, ...]:
-    if step.kind == "agent" and getattr(step, "feedback_reference", None) is not None:
+def _runtime_strings(step: ResolvedPlanStep) -> tuple[str, ...]:
+    if step.kind == "agent" and step.feedback_reference is not None:
         return (step.feedback_reference,)
     if step.kind == "command":
         return step.argv

@@ -9,7 +9,7 @@ from oh_goon.repository_tooling.release.runtime_journey import (
 
 
 def prepare_runtime_acceptance_repositories(
-    temp: Path, *, interruptible_step_seconds: int
+    temp: Path, *, interruptible_step_seconds: float
 ) -> tuple[Path, Path, Path, Path, Path]:
     """Materialize the repository fixtures owned by local runtime acceptance."""
     repositories = temp / "repositories"

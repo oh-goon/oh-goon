@@ -10,9 +10,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from types import TracebackType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedPlanStep
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepTeardownEvidence,
@@ -27,6 +28,7 @@ from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent, TrustedLocalRunScope
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
+from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
 from oh_goon.core.path_authority import (
     AttemptWorkspaceAuthority,
     RepositoryPathSpace,
@@ -40,6 +42,7 @@ from oh_goon.core.path_layouts import (
     AttemptPathLayout,
     RunPathLayout,
 )
+from oh_goon.core.ports.original_mount_intent import OriginalSandboxMount
 from oh_goon.core.source_tree_policy import EXECUTION_RUNTIME_MATERIALIZATION_ROOTS
 from oh_goon.integrations._fleet_plan_host_resources import HostToolBinding
 from oh_goon.integrations._fleet_plan_run_lineage import _RunLineage
@@ -151,6 +154,7 @@ class FleetPlanStepAttempt:
         source = getattr(handoff, "source", None)
         if not callable(getattr(handoff, "verify", None)) or source is None:
             raise FleetPlanInvalid("original Agent Step frozen source required")
+        handoff = cast(FrozenAgentStepHandoff, handoff)
         handoff.verify()
         trees = (source.repository, source.skill)
         for tree in trees:
@@ -222,8 +226,8 @@ class FleetPlanStepAttempt:
                                         or info.st_uid != os.geteuid()
                                     ):
                                         raise FleetPlanInvalid("Agent staged file custody invalid")
-                                    with os.fdopen(file_fd, "rb", closefd=False) as stream:
-                                        actual = stream.read(len(member.data) + 1)
+                                    with os.fdopen(file_fd, "rb", closefd=False) as reader:
+                                        actual = reader.read(len(member.data) + 1)
                                     if (
                                         len(actual) != len(member.data)
                                         or hashlib.sha256(actual).hexdigest() != member.sha256
@@ -332,7 +336,9 @@ class FleetPlanStepAttempt:
         finally:
             os.close(root_fd)
 
-    def _inspect_agent_prework_readonly_mount(self, handoff: object, stage: dict[str, object]):
+    def _inspect_agent_prework_readonly_mount(
+        self, handoff: object, stage: dict[str, object]
+    ) -> OriginalSandboxMount:
         """AG-02B2B3B: no-effect proposal for the ORIGINAL LACE mount intent.
 
         Read ONLY the original attempt-private stage, not the repository or
@@ -349,6 +355,7 @@ class FleetPlanStepAttempt:
         source = getattr(handoff, "source", None)
         if not callable(getattr(handoff, "verify", None)) or source is None:
             raise FleetPlanInvalid("original frozen Agent Step handoff required")
+        handoff = cast(FrozenAgentStepHandoff, handoff)
         handoff.verify()
         trees = (source.repository, source.skill)
         expected: dict[str, tuple[int, str]] = {}
@@ -566,7 +573,7 @@ class PreparedPlanRun:
         # bounded SQLite observer whose connection is closed as soon as preparation
         # returns. Never retain that callback into workload execution.
         self._cancel_requested: Callable[[], bool] | None = None
-        self._maintenance_receipt = None
+        self._maintenance_receipt: FleetContentMaintenanceReceipt | None = None
         if run_parent is not None:
             run_parent = ensure_private_directory(run_parent)
         self._temporary = tempfile.TemporaryDirectory(prefix="oh-goon-plan-", dir=run_parent)
@@ -657,7 +664,7 @@ class PreparedPlanRun:
         return self._inputs.import_skips.get(step_id)
 
     @property
-    def maintenance_receipt(self):
+    def maintenance_receipt(self) -> FleetContentMaintenanceReceipt | None:
         return self._maintenance_receipt
 
     def close(self) -> None:
@@ -932,15 +939,15 @@ def _frozen_sandbox_source(attempt: FleetPlanStepAttempt, target: PurePosixPath)
         sandbox_path = toolchain / binding.name
         if target == sandbox_path or (binding.name == "sh" and target == PurePosixPath("/bin/sh")):
             return binding.execution_snapshot_path
-    for binding in attempt.sandbox_bindings:
-        sandbox_root = binding.sandbox_path
+    for sandbox_binding in attempt.sandbox_bindings:
+        sandbox_root = sandbox_binding.sandbox_path
         if sandbox_root is None:
             continue
         if target == sandbox_root:
-            return binding.snapshot_path
-        if target.is_relative_to(sandbox_root) and binding.snapshot_path.is_dir():
+            return sandbox_binding.snapshot_path
+        if target.is_relative_to(sandbox_root) and sandbox_binding.snapshot_path.is_dir():
             relative = target.relative_to(sandbox_root)
-            return binding.snapshot_path / Path(*relative.parts)
+            return sandbox_binding.snapshot_path / Path(*relative.parts)
     reserved = (
         PurePosixPath("/workspace"),
         PurePosixPath("/cache"),

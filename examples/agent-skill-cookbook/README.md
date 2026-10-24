@@ -1,18 +1,18 @@
-# Select a pinned agentsCookbook Skill
+# Review with a pinned agentsCookbook Skill
 
-Use a real upstream Skill as caller-selected input to OH-Goon. This recipe runs
-in **your own workflow repository**, after `make init` has initialized your
-OH-Goon checkout. It adds no cookbook checkout, adapter, or catalog to OH-Goon.
+Classification: runnable-with-prerequisites
 
-The example selects
-[`codebase-finding-derivation`](https://github.com/Hugloss/agentsCookbook/blob/40be826e6883d819ee6cf5c10946c793f0ef0f5f/skills/codebase-finding-derivation/SKILL.md)
-at commit `40be826e6883d819ee6cf5c10946c793f0ef0f5f`, verified from the public
-repository on 2026-10-18. The Skill is maintained by agentsCookbook. OH-Goon owns
-source capture and the existing Agent Step execution contract.
+Run a typed read-only review using the existing `agents/native-review` Plan and the upstream `codebase-finding-derivation` Skill. Admitted repository evidence is disclosed to the selected native model recipient. A review result does not grant write authority or establish passing verification.
 
-## Declare the source once
+**Prerequisites:** an initialized Oh-Goon installation, registered workload repository, installed Pi/OpenCode/Codex and a compatible isolated managed profile in the provider catalog. Native sign-in, model settings, context window and compaction stay native-owned. Remote Git source capture may need network/cache access; ordinary inspection does not fetch it.
 
-Create `.goonskills.yml` beside your root Plan or Goon:
+Initialize a separate workflow, then copy the included `.goonskills.yml` into it:
+
+```sh
+oh-goon templates init agents/native-review --output ./workflow
+```
+
+Edit `workflow/run.yml` using [the complete selection](run.yml). Set the real `target.repository_id`, `inputs.repo`, approved `agent.repository_root` and selected implementation/profile. Keep `agent.skill_root: .` and the registry beside `run.yml`. The registry owns the Git source/ref/directories once; do not copy these facts into the run selection:
 
 ```yaml
 sources:
@@ -23,45 +23,13 @@ sources:
       - skills/codebase-finding-derivation
 ```
 
-Select `cookbook/codebase-finding-derivation` in the existing `skill` input.
-OH-Goon uses native Git to prepare the source in its managed cache. The normal
-`oh-goon lock` command records the exact revision in `goon.lock`. Branches and
-tags work too: ordinary execution keeps the locked commit, and `lock
---update-skills` deliberately refreshes it. A cache miss fetches the locked
-commit again. No submodule or `.gitmodules` setup is needed.
-
-## Inspect the selected source
-
-Your authored Plan/Goon must already declare `repo: repository_reference`,
-`skill: skill_reference`, and `acceptance: acceptance_profile` inputs for an
-Agent Step. The commands below use `goon.yml` as that root entrypoint and
-`my-project` as a repository beneath the explicitly authorized repository root.
-Replace the paths and names with your own. Keep the workflow root as the
-current directory:
-
 ```sh
-OH_GOON_SOURCE=/absolute/path/to/oh-goon
-REPOSITORY_ROOT=/absolute/path/to/approved-repositories
-uv run --project "$OH_GOON_SOURCE/backend" --offline --frozen --no-sync oh-goon plan inputs goon.yml --json
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
 ```
 
-Copy the reported `root_source_sha256` into `SOURCE_SHA` and inspect the complete
-source selection:
+Lock captures the exact remote commit and Skill closure in `goon.lock`; normal execution reuses that identity. Changing the selected source/profile requires explicit new lock authority. No cookbook checkout is needed to build or test Oh-Goon.
 
-```sh
-SOURCE_SHA=the_reported_root_source_sha256
-uv run --project "$OH_GOON_SOURCE/backend" --offline --frozen --no-sync oh-goon plan inputs goon.yml --source-closure --expect-sha256 "$SOURCE_SHA" --repository-root "$REPOSITORY_ROOT" --skill-root . --allow-acceptance review --input repo=local:my-project --input skill=cookbook/codebase-finding-derivation --input acceptance=review
-```
-
-The report's Skill reference binds the exact repository, commit and Skill path;
-its members include the upstream `SKILL.md`. This verifies source selection and
-capture. Source inspection may prepare the declared remote source; it does not run a review.
-
-For execution, select an existing supported Agent harness, its permitted model
-recipient and installed model, and a narrow task suited to that harness. Reuse
-ordinary `goon.lock` and Fleet admission with `--agent-skill-root` pointing to
-this workflow root. The current bounded Skill loop permits up to four read-only
-tool actions followed by evaluation; a general review may require a larger
-inspection scope than that permits. See [Agent Skills](../../docs/AGENT_SKILLS.md)
-for execution options and native qualification. Skill prose never expands the
-harness's tools, permissions, action budget, or authority to report PASS.
+Expected output is the native typed review record. Findings, incomplete scope, unavailable agent/provider and failed admission retain their real outcomes. Inspection/validation alone cannot prove a completed review. Select a different registered Skill through `inputs.skill`; retain original effect and acceptance admission. See [Agent Skills](../../docs/AGENT_SKILLS.md) and [provider configuration](../../docs/AGENT_PROVIDERS.md).

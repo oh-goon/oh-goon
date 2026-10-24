@@ -31,9 +31,9 @@ class SystemHealthService:
         tools.extend(self._inspect_tool(name, required=False) for name in self.OPTIONAL)
         proof = self._runtime_safety.refresh()
         return SystemHealth(
-            tools=tools,
+            tools=tuple(tools),
             runtime_safety=proof,
-            background_failures=self._background_failures(),
+            background_failures=tuple(self._background_failures()),
         )
 
     def _inspect_tool(self, name: str, *, required: bool) -> ToolHealth:

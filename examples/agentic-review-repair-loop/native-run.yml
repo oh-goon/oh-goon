@@ -1,0 +1,18 @@
+version: 1
+source: {kind: file-plan, path: native-plan.yml}
+target: {repository_id: REPOSITORY_ID}
+inputs:
+  repo: local:my-project
+  regression_command: scripts/regression
+  verification_command: scripts/verify
+agent:
+  implementation: codex
+  profile: codex-service
+  acceptance: agentic-review
+  repository_root: /approved/repositories
+  skill_root: .
+repair:
+  review_passes: 3
+  write_roots: [src, tests]
+  timeout_seconds: 1800
+  step_timeout_seconds: 300

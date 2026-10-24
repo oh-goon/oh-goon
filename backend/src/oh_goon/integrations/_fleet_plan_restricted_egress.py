@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from ipaddress import IPv4Network, ip_network
@@ -460,7 +460,7 @@ def _restricted_egress_pool(backend: RestrictedEgressHost) -> IPv4Network:
 
 
 @contextmanager
-def _egress_allocation_lock(path: Path):
+def _egress_allocation_lock(path: Path) -> Iterator[None]:
     import fcntl
     import stat
 

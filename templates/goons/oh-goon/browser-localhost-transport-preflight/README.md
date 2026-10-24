@@ -2,16 +2,17 @@
 
 Fail closed before browser qualification unless the same Node TCP stack used by Playwright can connect to a live IPv4 localhost endpoint and promptly observe `ECONNREFUSED` after that exact endpoint closes.
 
-## Use this Goon
+**Status:** internal owner command. **Effects:** Runs the repository-owned native command and records verification/release evidence.
 
-```sh
-oh-goon templates show oh-goon/browser-localhost-transport-preflight --kind goon
-oh-goon plan inputs templates/goons/oh-goon/browser-localhost-transport-preflight/goon.yml
-```
+**Prerequisites:** This repository’s prepared checkout. `make init` owns dependency materialization once; the owning Make/certification lifecycle consumes that environment.
 
-Use `goons: [oh-goon/browser-localhost-transport-preflight]` in a Plan to keep the Goon defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed values, renamed inputs or producer references; route shared names explicitly with `pass:`/`with:`. A Composite Goon declares which child inputs it exposes. The [authoring guide](../../../README.md) shows values files, explicit local sources and how to append Steps to your own Atomic Goon.
+**What to edit / settings owner:** the repository owns this internal package and its native command. Use its owning Make/certification route; do not initialize it as a portable user workflow. `source_workspace` inputs, when declared, are typed earlier-producer references and never host paths.
 
-This is an internal Oh-Goon workload. Use this repository’s prepared checkout and its owning Make/certification command. Workspace-reference inputs must come from the selected producer; they are not host directory paths. Results belong to the original Run and Game Tape.
+See the [internal Plan guide](../../../plans/oh-goon/app-certification/README.md) and [self-hosting boundaries](../../../../docs/development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md).
+
+**Expected outputs:** The owning command’s actual result and declared evidence. A diagnostic does not grant APP certification.
+
+**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
 
 The probe allocates an OS-selected ephemeral port. It does not hard-code Vite ports, inspect WSL routing internals, or require a particular WSL networking mode. WSL mirrored networking is diagnostic guidance only when the observable localhost transport contract fails.
 

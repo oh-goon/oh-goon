@@ -9,7 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
+
+if TYPE_CHECKING:
+    from oh_goon.services.fleet_strict_policy_enrollment import StrictFleetEnrollmentIntent
 
 from oh_goon.core.enforcer_lace_trust import ReceiptAuthenticator, TrustProtocolError
 from oh_goon.core.execution_environment import ResolvedExecutionEnvironment
@@ -28,7 +31,7 @@ class FleetPolicyEnrollment:
     authenticator: ReceiptAuthenticator
     configured: ResolvedExecutionEnvironment
     current: ResolvedExecutionEnvironment
-    intent: FleetRunAdmissionIntent
+    intent: FleetRunAdmissionIntent | StrictFleetEnrollmentIntent
     repository_scope: FleetRepositoryScope
     targets: tuple[RepositoryIdentity, ...]
     path_authority: StrictHostPathAuthority

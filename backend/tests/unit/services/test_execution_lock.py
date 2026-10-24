@@ -257,9 +257,11 @@ def test_missing_lock_fails_closed_and_verified_object_reaches_run_target(tmp_pa
     class RecordingResolver(FleetPlanResolver):
         last_resolved = None
 
-        def resolve_source_graph(self, source_graph, *, extensions_path=None, inputs=None):
+        def resolve_source_graph(
+            self, source_graph, *, extensions_path=None, inputs=None, repository=None
+        ):
             plan = super().resolve_source_graph(
-                source_graph, extensions_path=extensions_path, inputs=inputs
+                source_graph, extensions_path=extensions_path, inputs=inputs, repository=repository
             )
             self.last_resolved = plan
             return plan
@@ -373,3 +375,104 @@ def test_shared_run_target_count_is_not_part_of_execution_lock(tmp_path: Path) -
     five_thousand_targets = {f"repo-{index}" for index in range(5000)}
     assert one_target != five_thousand_targets
     assert render_execution_lock(build_execution_lock(plan)) == lock
+
+
+def test_frozen_external_identities_reconstruct_the_same_canonical_lock(tmp_path):
+    from oh_goon.core.models.execution_lock_models import LockedExternalArtifact
+
+    goons = tmp_path / "goons"
+    _package(goons, "general/a", _atomic("a"))
+    path = tmp_path / "plan.yml"
+    _plan(path, ("general/a",))
+    plan, _ = _resolve(path, goons)
+    original = build_execution_lock(
+        plan, external_artifacts=(("z/receipt", b"receipt"), ("workflow/run.yml", b"selection"))
+    )
+    transported = tuple(reversed(original.external))
+    assert build_execution_lock(plan, external_identities=transported) == original
+    alias = LockedExternalArtifact(path="workflow\\run.yml", digest=original.external[0].digest)
+    assert build_execution_lock(plan, external_identities=(alias, original.external[1])) == original
+    with pytest.raises(FleetPlanInvalid, match="never both"):
+        build_execution_lock(
+            plan,
+            external_artifacts=(("run.yml", b"selection"),),
+            external_identities=original.external,
+        )
+    with pytest.raises(FleetPlanInvalid, match="unique"):
+        build_execution_lock(plan, external_identities=(original.external[0], alias))
+
+
+@pytest.mark.parametrize("scheduled", [False, True])
+def test_target_binds_full_lock_and_exact_live_or_scheduled_config_receipt(tmp_path, scheduled):
+    import hashlib
+
+    from oh_goon.core.models.caller_input_file import (
+        CallerInputFileIdentity,
+        ScheduledCallerFileReceipt,
+    )
+    from oh_goon.core.models.execution_identity import ExecutionIdentity
+    from oh_goon.core.models.execution_lock_models import LockedExternalArtifact
+
+    goons = tmp_path / "goons"
+    _package(goons, "general/a", _atomic("a"))
+    path = tmp_path / "plan.yml"
+    _plan(path, ("general/a",))
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(goons))
+    plan = resolver.resolve(path)
+    base = prepare_reviewed_execution_target(
+        resolver, path, expected_execution_digest=build_execution_lock(plan).digest
+    )
+    selection = b"one exact captured configuration"
+    sha = hashlib.sha256(selection).hexdigest()
+    full = build_execution_lock(plan, external_artifacts=(("run.yml", selection),))
+    if scheduled:
+        receipt = {
+            "scheduled_caller_file": ScheduledCallerFileReceipt(
+                relative_path="run.yml", sha256=sha, execution_digest=full.digest
+            )
+        }
+    else:
+        receipt = {
+            "caller_input_file": CallerInputFileIdentity(
+                caller_root=tmp_path,
+                relative_path="run.yml",
+                sha256=sha,
+                source_device=1,
+                source_inode=2,
+            )
+        }
+    values = (
+        base.model_dump()
+        | receipt
+        | {"identity": ExecutionIdentity(digest=full.digest), "lock_artifacts": full.external}
+    )
+    target = FleetPlanTarget.model_validate(values)
+    assert target.execution_digest == full.digest
+    assert FleetPlanTarget.model_validate_json(target.model_dump_json()) == target
+    raw = dict(values, identity=base.identity)
+    with pytest.raises(ValueError, match="resolved Plan semantics"):
+        FleetPlanTarget.model_validate(raw)
+    forged = LockedExternalArtifact(path="run.yml", digest="sha256:" + "a" * 64)
+    altered = dict(
+        values,
+        identity=ExecutionIdentity(
+            digest=build_execution_lock(plan, external_identities=(forged,)).digest
+        ),
+        lock_artifacts=(forged,),
+    )
+    with pytest.raises(ValueError, match="locked external artifact"):
+        FleetPlanTarget.model_validate(altered)
+    missing = LockedExternalArtifact(path="other.yml", digest=full.external[0].digest)
+    altered = dict(
+        values,
+        identity=ExecutionIdentity(
+            digest=build_execution_lock(plan, external_identities=(missing,)).digest
+        ),
+        lock_artifacts=(missing,),
+    )
+    with pytest.raises(ValueError, match="locked external artifact"):
+        FleetPlanTarget.model_validate(altered)
+    # Retained targets that predate config artifact custody retain their original
+    # semantics and serialization; no historical Run bytes are rewritten.
+    assert "lock_artifacts" not in base.model_dump(mode="json")
+    assert FleetPlanTarget.model_validate_json(base.model_dump_json()) == base

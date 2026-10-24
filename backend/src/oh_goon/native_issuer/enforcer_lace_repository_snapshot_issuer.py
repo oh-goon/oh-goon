@@ -24,8 +24,12 @@ from oh_goon.core.enforcer_lace_trust import (
     digest,
 )
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
-from oh_goon.core.product_identity import repository_subject_instance_id
-from oh_goon.integrations.source_snapshot import source_snapshot_identity
+from oh_goon.core.product_identity import (
+    repository_subject_instance_id as repository_subject_instance_id,
+)
+from oh_goon.integrations.source_snapshot import (
+    source_snapshot_identity as source_snapshot_identity,
+)
 
 SOURCE_FIELD = "source_identity"
 SOURCE_IDENTITY_DOMAIN = "oh-goon/fleet-repository-source-authority/v1"

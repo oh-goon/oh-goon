@@ -5,14 +5,14 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, cast
 
 from oh_goon.core.process_birth import ProcessBirthIdentity
 
 LAUNCH_MANIFEST_SCHEMA = "oh-goon.launch/v1"
 LAUNCH_MANIFEST_KIND = "launch_manifest"
 
-T = TypeVar("T")
+T = TypeVar("T", covariant=True)
 
 
 class LaunchLifecycleState(StrEnum):
@@ -289,7 +289,7 @@ class LaunchManifest:
         if not observed.issubset(requested):
             raise ValueError("observed launch services must exist in launch intent")
         if self.observed.owner_process is not None:
-            owner_facts = [self.observed.owner_process.pid]
+            owner_facts: list[ObservedFact[object]] = [self.observed.owner_process.pid]
             if self.observed.owner_process.birth_identity is not None:
                 owner_facts.append(self.observed.owner_process.birth_identity)
             for fact in owner_facts:
@@ -303,13 +303,13 @@ class LaunchManifest:
                     raise ValueError("observed fact belongs to another launch owner generation")
 
     def to_payload(self) -> dict[str, object]:
-        return _json_compatible(asdict(self))
+        return cast(dict[str, object], _json_compatible(asdict(self)))
 
     def to_json(self) -> str:
         return json.dumps(self.to_payload(), sort_keys=True, separators=(",", ":"))
 
 
-def _json_compatible(value):
+def _json_compatible(value: object) -> object:
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, StrEnum):

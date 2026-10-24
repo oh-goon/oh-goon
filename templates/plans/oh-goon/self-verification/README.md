@@ -1,25 +1,19 @@
 # oh-goon/self-verification
 
-Canonical fast self-verification Plan for one exact initialized Oh-Goon source revision.
+Run the fast internal verification graph for one initialized Oh-Goon revision.
 
-## Use this Plan
+**Status:** internal owner command. Use this repository’s owner command rather than initializing a portable user workflow.
 
-```sh
-oh-goon templates show oh-goon/self-verification --kind plan
-oh-goon plan inputs templates/plans/oh-goon/self-verification/plan.yml
-```
-
-Copy with `oh-goon templates show oh-goon/self-verification --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
-
-This is an internal Oh-Goon workload. Use this repository’s prepared checkout and its owning Make/certification command. Workspace-reference inputs must come from the selected producer; they are not host directory paths. Results belong to the original Run and Game Tape.
-
-This is a normal verification Plan, not a privileged verifier. `make init` owns dependency/interpreter materialization once. Self verification consumes that initialized repository and must not reacquire dependencies. Plan resolution, locking, execution evidence, cancellation and Game Tape remain normal Oh-Goon machinery.
-
-The fast boundary covers P0 execution integrity, repository tooling, semantic architecture ownership, generated contracts, integration behavior, and repository-understanding certification. Full `oh-goon self certify` selects the lean `oh-goon/app-certification` Plan; `make verify` owns broader diagnostics.
-
-## Validate your copy
+**Effects and prerequisites:** uses the prepared Oh-Goon checkout and its declared native commands. Run `make init` once to materialize the committed dependencies; verification consumes that environment.
 
 ```sh
-oh-goon plan validate plan.yml
-oh-goon lock plan.yml
+oh-goon self verify
 ```
+
+**What to edit / settings owner:** repository owners maintain [`plan.yml`](plan.yml), its imported Goons and the Make lifecycle. This package is not a general user configuration example.
+
+The Plan selects backend P0, tooling, architecture, generated contracts, integration and repository-exam checks. The broader Make diagnostic flow and canonical `make certify` retain their separate meanings; passing diagnostics alone is not APP PASS.
+
+**Outputs and failures:** native checks, Run/Step evidence and Game Tape preserve their actual results. A failed, unavailable or interrupted check stays unverified. No model statement or diagnostic result substitutes for canonical certification.
+
+**Customize:** change the owning repository contract and focused regressions; do not copy this internal Plan into a different product. See the [execution/certification contract](../../../../docs/CI_CD_CONTRACT.md).

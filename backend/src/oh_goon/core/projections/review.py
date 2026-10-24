@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.review import ReviewPreparation
+from oh_goon.core.models.run import CancelledFleetRun, CompletedFleetRun, FailedFleetRun
 from oh_goon.core.projections.fleet_context import FleetProjectionContext
 from oh_goon.core.vocabulary import OperationAction, Verdict
 
@@ -12,7 +13,11 @@ def build_review_preparation(context: FleetProjectionContext) -> ReviewPreparati
         return None
     prepared = context.latest_run_family(OperationAction.PREPARE_REVIEW)
     prepared_ids: set[str] = set()
-    update_finished_at = update.run.finished_at if update.run.status.terminal else None
+    update_finished_at = (
+        update.run.finished_at
+        if isinstance(update.run, (CompletedFleetRun, CancelledFleetRun, FailedFleetRun))
+        else None
+    )
     if (
         update_finished_at is not None
         and prepared is not None
@@ -39,5 +44,5 @@ def build_review_preparation(context: FleetProjectionContext) -> ReviewPreparati
     return ReviewPreparation(
         update_fleet_run_id=update.run.fleet_run_id,
         target=update.run.target,
-        repositories=reviewable,
+        repositories=tuple(reviewable),
     )

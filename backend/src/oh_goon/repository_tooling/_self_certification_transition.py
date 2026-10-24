@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from oh_goon.repository_tooling._self_certification_plan_evidence import (
     _load_package_build_evidence,
@@ -39,6 +40,11 @@ from oh_goon.repository_tooling.self_certification_artifacts import (
     verify_retained_artifact_set,
 )
 
+if TYPE_CHECKING:
+    from oh_goon.repository_tooling.self_certification_plan import SelfCertificationPlan
+
+Evidence = dict[str, object] | None
+
 
 def stage_parent_source_input(root: Path, candidate: Path) -> dict[str, object]:
     root = root.resolve()
@@ -53,7 +59,7 @@ def stage_parent_source_input(root: Path, candidate: Path) -> dict[str, object]:
     return verified
 
 
-def _current_plan(root: Path) -> dict[str, object]:
+def _current_plan(root: Path) -> SelfCertificationPlan:
     from oh_goon.repository_tooling.self_certification_plan import self_certification_plan
 
     return self_certification_plan(root)
@@ -62,7 +68,7 @@ def _current_plan(root: Path) -> dict[str, object]:
 @dataclass(frozen=True, slots=True)
 class _ArtifactTransitionContext:
     root: Path
-    payload: dict[str, object]
+    payload: SelfCertificationPlan
     source_identity: str
     verification_config_identity: str
     state_dir: Path
@@ -73,7 +79,7 @@ class _ArtifactTransitionContext:
         return [item for item in self.payload["all_units"] if item.get("phase") == "source"]
 
 
-def _transition_context(root: Path, payload: dict[str, object]) -> _ArtifactTransitionContext:
+def _transition_context(root: Path, payload: SelfCertificationPlan) -> _ArtifactTransitionContext:
     source_identity = str(payload["source_identity"])
     verification_config_identity = str(payload["verification_config_identity"])
     return _ArtifactTransitionContext(
@@ -106,7 +112,7 @@ def _execute_source_zip(ctx: _ArtifactTransitionContext) -> int:
     return 0
 
 
-def _package_inputs(ctx: _ArtifactTransitionContext):
+def _package_inputs(ctx: _ArtifactTransitionContext) -> tuple[Evidence, Path, str]:
     build_evidence = _load_package_build_evidence(
         ctx.root, ctx.source_identity, ctx.verification_config_identity, ctx.seal_identity
     )
@@ -115,7 +121,9 @@ def _package_inputs(ctx: _ArtifactTransitionContext):
     return build_evidence, source_zip, source_zip_sha256
 
 
-def _verify_source_identity_transition(ctx: _ArtifactTransitionContext, build_evidence) -> int:
+def _verify_source_identity_transition(
+    ctx: _ArtifactTransitionContext, build_evidence: Evidence
+) -> int:
     if build_evidence is None:
         return 3
     verify_sealed_source_zip_identity(
@@ -170,9 +178,9 @@ def _execute_early_package_transition(
 def _build_handoff_transition(
     ctx: _ArtifactTransitionContext,
     source_zip_sha256: str,
-    patch_evidence,
-    replay_evidence,
-    fresh_zip_evidence,
+    patch_evidence: Evidence,
+    replay_evidence: Evidence,
+    fresh_zip_evidence: Evidence,
 ) -> int:
     if patch_evidence is None or replay_evidence is None or fresh_zip_evidence is None:
         return 3
@@ -196,7 +204,7 @@ def _execute_artifact_evidence_transition(
     ctx: _ArtifactTransitionContext,
     unit_name: str,
     source_zip_sha256: str,
-    patch_evidence,
+    patch_evidence: Evidence,
 ) -> int | None:
     replay_evidence = (
         load_patch_replay_evidence(ctx.state_dir, source_zip_sha256, patch_evidence)
@@ -237,7 +245,7 @@ def _execute_artifact_evidence_transition(
         else None
     )
     if unit_name == "package/manifest":
-        if sidecar_evidence is None:
+        if sidecar_evidence is None or replay_evidence is None or fresh_zip_evidence is None:
             return 3
         build_artifact_manifest(
             ctx.root,
@@ -261,9 +269,9 @@ def _execute_persistence_transition(
     ctx: _ArtifactTransitionContext,
     unit_name: str,
     source_zip_sha256: str,
-    sidecar_evidence,
-    replay_evidence,
-    fresh_zip_evidence,
+    sidecar_evidence: Evidence,
+    replay_evidence: Evidence,
+    fresh_zip_evidence: Evidence,
 ) -> int | None:
     manifest_evidence = (
         load_manifest_evidence(

@@ -188,6 +188,8 @@ class _CanonicalPlans:
 
 def _invoke(runtime, capsys, argv):
     args = build_parser().parse_args(argv)
+    if args.command == "dev":
+        args.command, args.plan_command = "plan", "run"
     code = run_plan_command(runtime, args)
     streams = capsys.readouterr()
     assert streams.err == ""
@@ -205,9 +207,11 @@ def test_full_agent_run_id_resume_and_existing_evidence_views(capsys):
         runtime,
         capsys,
         [
-            "plan",
-            "run",
+            "dev",
+            "_run-plan",
             "plan.yml",
+            "--lock-file",
+            "goon.lock",
             "--repository-id",
             "repo-1",
             "--fleet-run-id",

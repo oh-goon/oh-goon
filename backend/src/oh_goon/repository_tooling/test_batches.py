@@ -284,7 +284,7 @@ def _run(
             f"BATCH TIMEOUT RECOVERY: bisecting {len(members)} members "
             f"into {len(groups[0])}+{len(groups[1])}\n",
         ]
-        child_codes: list[int] = []
+        child_codes = []
         for child in groups:
             child_rc, child_output = run_group(child, is_refinement=True)
             child_codes.append(child_rc)

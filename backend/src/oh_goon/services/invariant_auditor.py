@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections import Counter
+from typing import TypedDict
 
 from oh_goon.core.effect_attempts import LIVE_OWNED_EFFECT_STATUSES
 from oh_goon.core.errors import JournalCorruption
@@ -25,6 +26,7 @@ from oh_goon.core.models.recovery import (
     RestartRecoveryAction,
     RestartRecoveryFinding,
 )
+from oh_goon.core.models.schedule_execution import ScheduleRunRecord
 from oh_goon.core.product_identity import validate_repository_attempt_operation_id
 from oh_goon.core.vocabulary import EffectAttemptOwner
 from oh_goon.runtime.database import LocalDatabase
@@ -39,6 +41,13 @@ from oh_goon.runtime.safety_cut import (
 )
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.services.effect_quarantine import effect_quarantines
+
+
+class _SafetyCutFields(TypedDict):
+    durable_revision: int
+    active_lease: ExecutionLease | None
+    effect_attempts: tuple[RepositoryEffectAttempt, ...]
+    active_schedules: tuple[ScheduleRunRecord, ...]
 
 
 class SystemInvariantAuditor:
@@ -67,7 +76,7 @@ class SystemInvariantAuditor:
 
     def read_cut_in(self, connection: sqlite3.Connection) -> RuntimeSafetyCut:
         durable_revision = read_durable_revision(connection)
-        common = dict(
+        common: _SafetyCutFields = dict(
             durable_revision=durable_revision,
             active_lease=self._execution.active_lease_in(connection),
             effect_attempts=tuple(self._attempts.all_in(connection)),
@@ -84,14 +93,14 @@ class SystemInvariantAuditor:
         if isinstance(cut, JournalCorruptRuntimeSafetyCut):
             return InvariantAudit(
                 durable_revision=cut.durable_revision,
-                findings=[
+                findings=(
                     PlainInvariantFinding(
                         finding_type="PLAIN",
                         code="JOURNAL_INTEGRITY_FAILED",
                         severity=InvariantSeverity.ERROR,
                         message=cut.journal_error,
-                    )
-                ],
+                    ),
+                ),
             )
         findings: list[InvariantFinding] = []
         findings.extend(self._execution_findings(cut))
@@ -101,7 +110,7 @@ class SystemInvariantAuditor:
         return InvariantAudit(
             durable_revision=cut.durable_revision,
             journal_revision=cut.journal.revision,
-            findings=findings,
+            findings=tuple(findings),
         )
 
     def repair_plan(self, audit: InvariantAudit) -> RepairPlan:
@@ -110,7 +119,7 @@ class SystemInvariantAuditor:
             for finding in audit.findings
             if (action := repair_action_for(finding)) is not None
         ]
-        return RepairPlan(findings=list(audit.findings), actions=actions)
+        return RepairPlan(findings=audit.findings, actions=tuple(actions))
 
     @staticmethod
     def quarantines(cut: RuntimeSafetyCut) -> list[RepositoryEffectQuarantine]:
@@ -179,7 +188,7 @@ class SystemInvariantAuditor:
         return findings
 
     @staticmethod
-    def _attempt_findings(cut: RuntimeSafetyCut) -> list[InvariantFinding]:
+    def _attempt_findings(cut: ConsistentRuntimeSafetyCut) -> list[InvariantFinding]:
         findings: list[InvariantFinding] = []
         live_fleet_repositories: Counter[tuple[str, str]] = Counter()
         for attempt in cut.effect_attempts:

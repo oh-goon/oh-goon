@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
+
 from oh_goon.core.fleet_plan_tool_requirements import (
     step_execution_tool,
     step_execution_tool_names,
@@ -12,12 +14,30 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedOciBuildStep,
     ResolvedOciPublishStep,
     ResolvedOciTagAssertStep,
+    ResolvedPlanStep,
     ResolvedPreCommitStep,
 )
 from oh_goon.core.models.fleet_plan_diagnostics import PlanConfigurationEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import (
     CicdExecutionPolicy,
     ParallelRepositoryExecution,
+)
+from oh_goon.core.models.fleet_plan_requirements import (
+    RepositoryFileExistsRequirement,
+    RepositoryFolderExistsRequirement,
+    RepositoryPathExistsRequirement,
+    RepositoryRequirement,
+    UvProjectRequirement,
+)
+from oh_goon.core.models.fleet_plan_step_contract import (
+    PlanCacheSource,
+    PlanStepEgress,
+    PlanWorkspaceSource,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    PlanArtifactDeclaration,
+    PlanPublishedOutput,
+    PlanStreamOutput,
 )
 from oh_goon.integrations.fleet_plan_containerfile_policy import oci_build_repository_policy_id
 
@@ -99,7 +119,7 @@ def _execution_policy_summary(plan: ResolvedFleetPlan) -> tuple[str, ...]:
     )
 
 
-def _requirements_summary(requirements) -> tuple[str, ...]:
+def _requirements_summary(requirements: Sequence[RepositoryRequirement]) -> tuple[str, ...]:
     if not requirements:
         return ("Repository requirements: none",)
     lines = [f"Repository requirements: {len(requirements)}"]
@@ -108,10 +128,17 @@ def _requirements_summary(requirements) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _requirement_summary(requirement) -> str:
-    if requirement.kind in {"path_exists", "file_exists", "folder_exists"}:
+def _requirement_summary(requirement: RepositoryRequirement) -> str:
+    if isinstance(
+        requirement,
+        (
+            RepositoryFileExistsRequirement,
+            RepositoryFolderExistsRequirement,
+            RepositoryPathExistsRequirement,
+        ),
+    ):
         return f"  require {requirement.kind}: {requirement.path}"
-    if requirement.kind == "uv_project":
+    if isinstance(requirement, UvProjectRequirement):
         return f"  require uv_project: group={requirement.group}"
     qualifiers = []
     if requirement.non_empty:
@@ -125,7 +152,7 @@ def _requirement_summary(requirement) -> str:
     )
 
 
-def _oci_step_summary(step) -> str | None:
+def _oci_step_summary(step: ResolvedPlanStep) -> str | None:
     if isinstance(step, ResolvedOciBuildStep):
         registries = ",".join(item.image_authority for item in step.registries) or "scratch-only"
         return (
@@ -181,7 +208,7 @@ def _oci_step_summary(step) -> str | None:
     return None
 
 
-def _step_summary(step) -> tuple[str, ...]:
+def _step_summary(step: ResolvedPlanStep) -> tuple[str, ...]:
     workspace_source = _source_summary(step.workspace.source)
     cache_source = _source_summary(step.cache.source)
     transient_codes = ",".join(str(code) for code in step.retry.known_transient_exit_codes) or "-"
@@ -216,7 +243,7 @@ def _step_summary(step) -> tuple[str, ...]:
         if_missing = step.if_missing.value if step.if_missing is not None else "embedded-config"
         lines.append(
             "    pre_commit: "
-            f"mode={step.mode.value} if_missing={if_missing} "
+            f"if_missing={if_missing} "
             f"runner={step.runner_requirement} runtime_id={step.runtime_id}"
         )
     if step.kind == "extension":
@@ -235,7 +262,7 @@ def _step_summary(step) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _source_summary(source) -> str:
+def _source_summary(source: PlanWorkspaceSource | PlanCacheSource) -> str:
     if source.kind == "step":
         return f"{source.kind}:{source.step_id}"
     if source.kind == "retained":
@@ -243,11 +270,11 @@ def _source_summary(source) -> str:
     return source.kind
 
 
-def _csv(values) -> str:
+def _csv(values: Iterable[object]) -> str:
     return ",".join(str(value) for value in values) or "-"
 
 
-def _egress(egress) -> str:
+def _egress(egress: PlanStepEgress) -> str:
     if egress.mode == "none" or egress.mode == "host_unrestricted":
         return egress.mode
     rules = []
@@ -257,13 +284,16 @@ def _egress(egress) -> str:
     return f"{egress.mode}[{';'.join(rules)}]"
 
 
-def _artifacts(values) -> str:
+def _artifacts(values: Sequence[PlanArtifactDeclaration]) -> str:
     if not values:
         return "-"
     return ",".join(f"{item.path}:{item.retention}" for item in values)
 
 
-def _outputs(values) -> str:
+def _outputs(values: Sequence[PlanPublishedOutput | PlanStreamOutput]) -> str:
     if not values:
         return "-"
-    return ",".join(f"{item.name}={item.path}({item.max_bytes}B)" for item in values)
+    return ",".join(
+        f"{item.name}={item.path if isinstance(item, PlanPublishedOutput) else item.stream}({item.max_bytes}B)"
+        for item in values
+    )

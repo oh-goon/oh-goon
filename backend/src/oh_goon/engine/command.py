@@ -15,11 +15,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Thread
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
+from oh_goon.core.models.runtime_supervision import WatchdogDecision
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.product_identity import new_physical_execution_id
 from oh_goon.engine.command_capture import CommandCapture, TextCapture
@@ -30,8 +31,12 @@ from oh_goon.engine.command_process_tree import (
     terminate_owned_process_tree,
 )
 from oh_goon.engine.command_runtime_authority import (
-    RuntimeAuthorityBinding,
-    RuntimeAuthorityReceipt,
+    RuntimeAuthorityBinding as RuntimeAuthorityBinding,
+)
+from oh_goon.engine.command_runtime_authority import (
+    RuntimeAuthorityReceipt as RuntimeAuthorityReceipt,
+)
+from oh_goon.engine.command_runtime_authority import (
     bind_command_runtime_authority,
     sanitized_child_environment,
 )
@@ -116,17 +121,17 @@ class CommandProcessLifecycleEvent:
 class CommandTimeoutExpired(subprocess.TimeoutExpired):
     def __init__(
         self,
-        cmd,
-        timeout,
+        cmd: str | Sequence[str],
+        timeout: float,
         *,
-        output=None,
-        stderr=None,
+        output: str | bytes | None = None,
+        stderr: str | bytes | None = None,
         supervisor: CommandSupervisorReceipt,
         runtime_authority: RuntimeAuthorityReceipt | None = None,
         duration_ms: int = 0,
         physical_execution_id: str | None = None,
         standard_isolation: PlanStandardIsolationEvidence | None = None,
-    ):
+    ) -> None:
         super().__init__(cmd, timeout, output=output, stderr=stderr)
         self.supervisor = supervisor
         self.runtime_authority = runtime_authority
@@ -143,7 +148,7 @@ class CommandSupervisionTerminated(RuntimeError):
         self,
         message: str,
         *,
-        decision,
+        decision: WatchdogDecision,
         supervisor: CommandSupervisorReceipt,
         runtime_authority: RuntimeAuthorityReceipt | None = None,
     ) -> None:
@@ -467,10 +472,22 @@ def _start_supervised_command(
             output_errors,
         )
         if terminal is not None
-        else _reader(process.stdout, "stdout", capture.stdout, stream_output, output_errors)
+        else _reader(
+            cast(_CommandOutputPipe | None, process.stdout),
+            "stdout",
+            capture.stdout,
+            stream_output,
+            output_errors,
+        )
     )
     stderr_reader = (
-        _reader(process.stderr, "stderr", capture.stderr, stream_output, output_errors)
+        _reader(
+            cast(_CommandOutputPipe | None, process.stderr),
+            "stderr",
+            capture.stderr,
+            stream_output,
+            output_errors,
+        )
         if not merge_stderr and terminal is None
         else Thread(target=lambda: None, name="oh-goon-stderr-merged", daemon=True)
     )
@@ -1032,7 +1049,7 @@ def _raise_if_output_limited(
     process: subprocess.Popen[str],
     readers: tuple[Thread, Thread],
     capture: CommandCapture,
-    runtime_authority: RuntimeAuthorityReceipt,
+    runtime_authority: RuntimeAuthorityReceipt | None,
     *,
     argv: tuple[str, ...],
     already_finished: bool = False,
@@ -1055,7 +1072,7 @@ def _output_limit_error(
     readers: tuple[Thread, Thread],
     stdout_capture: TextCapture,
     stderr_capture: TextCapture,
-    runtime_authority: RuntimeAuthorityReceipt,
+    runtime_authority: RuntimeAuthorityReceipt | None,
     *,
     argv: tuple[str, ...],
     already_finished: bool = False,
@@ -1133,8 +1150,27 @@ def _terminal_reader(
     return Thread(target=read, name="oh-goon-terminal-output", daemon=True)
 
 
+class _CommandOutputBuffer(Protocol):
+    def read1(self, size: int) -> bytes: ...
+
+
+class _CommandOutputPipe(Protocol):
+    """Text wrapper guaranteed by the native Popen(text=True) output owner."""
+
+    @property
+    def encoding(self) -> str | None: ...
+    @property
+    def errors(self) -> str | None: ...
+    @property
+    def buffer(self) -> _CommandOutputBuffer: ...
+    @property
+    def closed(self) -> bool: ...
+
+    def close(self) -> None: ...
+
+
 def _reader(
-    pipe,
+    pipe: _CommandOutputPipe | None,
     stream: Literal["stdout", "stderr"],
     capture: TextCapture,
     observer: CommandOutputObserver | None,

@@ -10,14 +10,35 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable, TypeVar, cast
+
+if TYPE_CHECKING:
+    from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
 
 from oh_goon.core.enforcer_lace_trust import ReceiptAuthenticator
 from oh_goon.core.ports.local_lace_allocation import LocalLaceAllocationObservation
+from oh_goon.core.ports.local_lace_cleanup import LocalLaceCleanupTicket, NativeCleanupResult
+from oh_goon.core.ports.local_lace_crash_reconciliation import LocalLaceCrashObservation
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentProof
+from oh_goon.core.ports.local_lace_orphan_inventory import (
+    LocalLaceOrphanInventory,
+    LocalLaceOrphanSubject,
+)
+from oh_goon.core.ports.original_mount_intent import OriginalMountIntentDescriptor
+from oh_goon.core.ports.physical_observation import (
+    OriginalRecoveryPhysicalSample,
+    PhysicalObservationScope,
+)
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError, CausalRunJournal
 from oh_goon.runtime.enforcer_lace_local_resource_intent import LocalLaceJournalReservation
+from oh_goon.runtime.enforcer_lace_original_physical_sampling import (
+    OriginalPhysicalConvergenceAssessment,
+    OriginalPhysicalSamplingBinding,
+)
+from oh_goon.runtime.enforcer_lace_takeover_recovery import LocalLaceTakeoverObligation
 from oh_goon.runtime.execution import ExecutionSession
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +62,8 @@ class OriginalFleetLocalLaceReservation:
     agent_attempt_identity_in: Callable[[sqlite3.Connection], str] | None = None
 
     def reserve(self, request: object, backend: object) -> LocalLaceIntentProof:
+        request = cast("IsolatedProcessRequest", request)
+
         def original_cut(connection: sqlite3.Connection) -> LocalLaceIntentProof:
             self.validate_authority_in(connection)
             if self.session.cancel_requested_in(connection):
@@ -254,11 +277,11 @@ class OriginalFleetLocalLaceRecoveryOwner:
             else self.session.mutate
         )(original_cut)
 
-    def rediscovery_subject(self, *, intent_run_seq: int):
+    def rediscovery_subject(self, *, intent_run_seq: int) -> LocalLaceOrphanSubject:
         """Read the exact current-epoch recovery claim in the original Fleet write cut."""
         from oh_goon.runtime.enforcer_lace_orphan_subject import subject_in
 
-        def original_cut(connection: sqlite3.Connection):
+        def original_cut(connection: sqlite3.Connection) -> LocalLaceOrphanSubject:
             self.validate_authority_in(connection)
             journal = CausalRunJournal(connection)
             row = journal._row(self.run_id)
@@ -283,7 +306,9 @@ class OriginalFleetLocalLaceRecoveryOwner:
             else self.session.mutate
         )(original_cut)
 
-    def record_rediscovery(self, subject, inventory) -> int:
+    def record_rediscovery(
+        self, subject: LocalLaceOrphanSubject, inventory: LocalLaceOrphanInventory
+    ) -> int:
         """Bind native read-only inventory to the still-current original recovery claim."""
         from oh_goon.runtime.enforcer_lace_orphan_subject import inventory_in
 
@@ -312,11 +337,11 @@ class OriginalFleetLocalLaceRecoveryOwner:
             else self.session.mutate
         )(original_cut)
 
-    def prepare_cleanup(self, subject):
+    def prepare_cleanup(self, subject: LocalLaceOrphanSubject) -> LocalLaceCleanupTicket:
         """Durably bind the original observed inventory; no native effect permission."""
         from oh_goon.runtime.enforcer_lace_cleanup_attempt import prepare_cleanup_in
 
-        def original_cut(connection: sqlite3.Connection):
+        def original_cut(connection: sqlite3.Connection) -> LocalLaceCleanupTicket:
             self.validate_authority_in(connection)
             if self.session.cancel_requested_in(connection):
                 raise CausalJournalError("Fleet cancellation fences recovery preparation")
@@ -338,7 +363,7 @@ class OriginalFleetLocalLaceRecoveryOwner:
             else self.session.mutate
         )(original_cut)
 
-    def record_cleanup_blocker(self, ticket, *, failure_code: str) -> int:
+    def record_cleanup_blocker(self, ticket: LocalLaceCleanupTicket, *, failure_code: str) -> int:
         """A current original owner may record failure, never terminal absence."""
         from oh_goon.runtime.enforcer_lace_cleanup_attempt import abort_cleanup_in
 
@@ -369,7 +394,9 @@ class OriginalFleetLocalLaceRecoveryOwner:
             else self.session.mutate
         )(original_cut)
 
-    def execute_native_cleanup(self, ticket, native_action):
+    def execute_native_cleanup(
+        self, ticket: LocalLaceCleanupTicket, native_action: Callable[[], NativeCleanupResult]
+    ) -> NativeCleanupResult:
         """One-shot fenced native action. Caller MUST hold both native owner locks.
 
         C1 tickets are not executable by themselves. The original session first
@@ -381,8 +408,8 @@ class OriginalFleetLocalLaceRecoveryOwner:
             execute_native_cleanup_in,
         )
 
-        def cut(action):
-            def transaction(connection):
+        def cut(action: Callable[[CausalRunJournal, int, str], _T]) -> _T:
+            def transaction(connection: sqlite3.Connection) -> _T:
                 self.validate_authority_in(connection)
                 if self.session.cancel_requested_in(connection):
                     raise CausalJournalError("Fleet cancellation fences native recovery")
@@ -419,7 +446,12 @@ class OriginalFleetLocalLaceRecoveryOwner:
             )
         )
 
-    def reconcile_crash(self, *, intent_run_seq: int, native_observer):
+    def reconcile_crash(
+        self,
+        *,
+        intent_run_seq: int,
+        native_observer: Callable[[LocalLaceOrphanSubject], LocalLaceCrashObservation],
+    ) -> int:
         """Original recovery-coordinator entrypoint; no native action permitted.
 
         The native observer is a trusted read-only integration injected by the
@@ -460,8 +492,13 @@ class OriginalFleetLocalLaceRecoveryOwner:
         )(original_cut)
 
     def sample_recovery_physical_unqualified(
-        self, *, intent_run_seq: int, scope, mount_intent, proc_root: Path = Path("/proc")
-    ):
+        self,
+        *,
+        intent_run_seq: int,
+        scope: PhysicalObservationScope,
+        mount_intent: OriginalMountIntentDescriptor,
+        proc_root: Path = Path("/proc"),
+    ) -> OriginalRecoveryPhysicalSample:
         """One original owner records the bounded, UNQUALIFIED shared observation.
 
         The original journal authenticates claim, allocation, cgroup identity,
@@ -487,7 +524,7 @@ class OriginalFleetLocalLaceRecoveryOwner:
         ):
             raise CausalJournalError("provisioned original Fleet sampling lineage required")
 
-        def validate_cut(connection):
+        def validate_cut(connection: sqlite3.Connection) -> OriginalPhysicalSamplingBinding:
             self.validate_authority_in(connection)
             if self.session.cancel_requested_in(connection):
                 raise CausalJournalError("Fleet cancellation fences kernel sampling")
@@ -531,7 +568,7 @@ class OriginalFleetLocalLaceRecoveryOwner:
             mount_intent_identity=before.mount_intent_identity,
         )
 
-        def record_cut(connection):
+        def record_cut(connection: sqlite3.Connection) -> None:
             after = validate_cut(connection)
             if before != after:
                 raise CausalJournalError(
@@ -591,15 +628,19 @@ class OriginalFleetLocalLaceRecoveryOwner:
         return sample
 
     def assess_recovery_physical_convergence_unqualified(
-        self, *, intent_run_seq: int, scope, mount_intent
-    ):
+        self,
+        *,
+        intent_run_seq: int,
+        scope: PhysicalObservationScope,
+        mount_intent: OriginalMountIntentDescriptor,
+    ) -> OriginalPhysicalConvergenceAssessment:
         """Read-only, claim-fenced P3 assessment. No observer, effects or gate PASS."""
         from oh_goon.runtime.enforcer_lace_original_physical_sampling import (
             assess_original_physical_convergence_unqualified,
             require_original_physical_sampling_in,
         )
 
-        def original_cut(connection):
+        def original_cut(connection: sqlite3.Connection) -> OriginalPhysicalConvergenceAssessment:
             self.validate_authority_in(connection)
             journal = CausalRunJournal(connection)
             row = journal._row(self.run_id)
@@ -631,11 +672,11 @@ class OriginalFleetLocalLaceRecoveryOwner:
         )
         return mutate(original_cut)
 
-    def pending_takeover_recovery(self):
+    def pending_takeover_recovery(self) -> tuple[LocalLaceTakeoverObligation, ...]:
         """Bounded original-session worklist; NEVER grants native cleanup."""
         from oh_goon.runtime.enforcer_lace_takeover_recovery import pending_takeover_in
 
-        def original_cut(connection: sqlite3.Connection):
+        def original_cut(connection: sqlite3.Connection) -> tuple[LocalLaceTakeoverObligation, ...]:
             self.validate_authority_in(connection)
             if self.session.cancel_requested_in(connection):
                 raise CausalJournalError("Fleet cancellation fences takeover worklist")
@@ -678,7 +719,12 @@ class OriginalFleetLocalLaceRecoveryOwner:
             else self.session.mutate
         )(original_cut)
 
-    def resume_reconciled_takeover(self, *, intent_run_seq: int, native_observer):
+    def resume_reconciled_takeover(
+        self,
+        *,
+        intent_run_seq: int,
+        native_observer: Callable[[LocalLaceOrphanSubject], LocalLaceCrashObservation],
+    ) -> tuple[int, int]:
         """One renewed claim and fresh read-only native reconciliation.
 
         Requires an already transferred, live original Fleet session. The prior

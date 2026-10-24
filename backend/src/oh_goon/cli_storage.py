@@ -10,9 +10,15 @@ from oh_goon.runtime.storage_health import (
     resolve_storage_capacity_policy,
 )
 from oh_goon.runtime.storage_lifecycle import (
+    StorageCensus,
+    StorageClass,
+    StoragePruneReport,
     measure_storage,
     prune_generic_storage,
     storage_census,
+)
+from oh_goon.services.certification_workspace_retention import (
+    CertificationRunWorkspaceReconciliation,
 )
 
 
@@ -59,7 +65,9 @@ def _run_storage_prune(args: argparse.Namespace) -> int:
     return 0
 
 
-def _print_storage_prune_report(report, certification) -> None:
+def _print_storage_prune_report(
+    report: StoragePruneReport, certification: CertificationRunWorkspaceReconciliation
+) -> None:
     print("OH-GOON STORAGE PRUNE")
     print(f"Removed run logs: {report.removed_run_logs}")
     print(f"Removed run workspaces: {len(report.removed_run_workspaces)}")
@@ -81,7 +89,7 @@ def _print_storage_prune_report(report, certification) -> None:
     print(f"Refused launch capabilities: {len(report.refused_launch_access)}")
 
 
-def _measurement_payload(path, *, enabled: bool) -> dict[str, int] | None:
+def _measurement_payload(path: Path | None, *, enabled: bool) -> dict[str, int] | None:
     if not enabled:
         return None
     measured = measure_storage(path)
@@ -90,7 +98,7 @@ def _measurement_payload(path, *, enabled: bool) -> dict[str, int] | None:
     return {"entries": measured.entries, "bytes": measured.bytes}
 
 
-def _storage_record(item, *, measure: bool) -> dict[str, object]:
+def _storage_record(item: StorageClass, *, measure: bool) -> dict[str, object]:
     record: dict[str, object] = {
         "storage_id": item.storage_id,
         "path": str(item.path) if item.path is not None else None,
@@ -125,7 +133,7 @@ def _print_storage_record(record: dict[str, object], *, measure: bool) -> None:
     print(f"  Usage:      {measurement['entries']} entries / {measurement['bytes']} bytes")
 
 
-def _unclassified_payload(census, *, measure: bool) -> list[dict[str, object]]:
+def _unclassified_payload(census: StorageCensus, *, measure: bool) -> list[dict[str, object]]:
     return [
         {
             "path": str(item.path),
@@ -137,7 +145,7 @@ def _unclassified_payload(census, *, measure: bool) -> list[dict[str, object]]:
     ]
 
 
-def _print_unclassified(census, *, measure: bool) -> None:
+def _print_unclassified(census: StorageCensus, *, measure: bool) -> None:
     if not census.unclassified:
         return
     print("\nUNCLASSIFIED OH-GOON STORAGE")

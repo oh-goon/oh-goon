@@ -26,6 +26,8 @@ from oh_goon.core.enforcer_lace_trust import (
     digest,
 )
 from oh_goon.core.models.fleet_plan_requirements import UvProjectRequirement
+from oh_goon.core.models.run_events import RunAdmittedEvent
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.path_authority import RepositoryPathSpace
 from oh_goon.integrations.native_uv_lock import native_uv_locked_project_issue
 from oh_goon.native_issuer.enforcer_lace_captured_run_issuer import _read_original_admission
@@ -36,11 +38,14 @@ LOCK_FIELD = "lock_identity"
 LOCK_DOMAIN = "oh-goon/fleet-run-selected-native-uv-locks/v1"
 
 
-def _selected_projects(journal: Journal, run_id: str, *, prework: PreworkRunCapture | None = None):
+def _selected_projects(
+    journal: Journal, run_id: str, *, prework: PreworkRunCapture | None = None
+) -> tuple[RunAdmittedEvent, int, dict[str, tuple[str, ...]], dict[str, Path]]:
     admitted, revision = _read_original_admission(journal, run_id, prework=prework)
-    requirements = tuple(
-        r for r in admitted.target.plan.requirements if isinstance(r, UvProjectRequirement)
-    )
+    target = admitted.target
+    if not isinstance(target, FleetPlanTarget):
+        raise TrustProtocolError("native uv lock selection requires a Fleet Plan target")
+    requirements = tuple(r for r in target.plan.requirements if isinstance(r, UvProjectRequirement))
     if not requirements:
         raise TrustProtocolError("admitted Plan has no selected native uv lock authority")
     pairs = tuple(sorted((r.project, r.group) for r in requirements))

@@ -238,12 +238,12 @@ def accept_container(
             subprocess.run((*compose, "up", "-d", "oh-goon"), cwd=root, env=env, check=True)
             _wait_http(f"{base}/healthz")
             locations = _request_json("GET", f"{base}/api/locations", access_token=access_token)
-            if "/repositories" not in locations.get("locations", []):  # type: ignore[union-attr]
+            if "/repositories" not in locations.get("locations", []):
                 return ("replacement container did not restore persisted League configuration",)
             persisted_run = _request_json(
                 "GET", f"{base}/api/fleet/runs/{run_id}", access_token=access_token
             )
-            if persisted_run.get("fleet_run_id") != run_id:  # type: ignore[union-attr]
+            if persisted_run.get("fleet_run_id") != run_id:
                 return ("replacement container did not restore persisted SQLite Game Tape state",)
         finally:
             _cleanup_compose(compose, root=root, env=env)

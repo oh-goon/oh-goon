@@ -6690,6 +6690,14 @@
             "title": "Kind",
             "type": "string"
           },
+          "lock_artifacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LockedExternalArtifact"
+            },
+            "title": "Lock Artifacts",
+            "type": "array"
+          },
           "plan": {
             "$ref": "#/components/schemas/ResolvedFleetPlan"
           },
@@ -14501,6 +14509,28 @@
         "title": "LocationsResponse",
         "type": "object"
       },
+      "LockedExternalArtifact": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "digest"
+        ],
+        "title": "LockedExternalArtifact",
+        "type": "object"
+      },
       "LockedSkillSource": {
         "additionalProperties": false,
         "description": "One declared Git collection resolved by native Git to an exact commit.",
@@ -17622,6 +17652,7 @@
               "none",
               "timeout",
               "cancel",
+              "authority",
               "output_cleanup",
               "output_limit"
             ],

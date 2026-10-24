@@ -51,7 +51,9 @@ def build_migration_execution(
         ),
         repository=attempt.repository,
         outcome=(
-            SuccessfulOperationOutcome(state="successful", verdict=verdict, reason_code=reason)
+            SuccessfulOperationOutcome.model_validate(
+                {"state": "successful", "verdict": verdict, "reason_code": reason}
+            )
             if verdict.successful
             else FailedOperationOutcome(state="failed", returncode=1, reason_code=reason)
         ),
@@ -60,9 +62,11 @@ def build_migration_execution(
             migration=MigrationResult(
                 source=source,
                 readiness=MigrationReadiness.SAFE_AUTOMATIC,
-                created_files=[name for name in changed if name in {"pyproject.toml", "uv.lock"}],
-                changed_files=changed,
-                validation_steps=list(validation_steps),
+                created_files=tuple(
+                    name for name in changed if name in {"pyproject.toml", "uv.lock"}
+                ),
+                changed_files=tuple(changed),
+                validation_steps=tuple(validation_steps),
                 branch=branch,
                 commit=commit,
             ),

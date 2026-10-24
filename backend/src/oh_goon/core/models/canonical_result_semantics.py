@@ -3,7 +3,8 @@ from __future__ import annotations
 from pydantic import Field
 
 from oh_goon.core.models.base import ImmutableModel
-from oh_goon.core.vocabulary.result_semantics import CanonicalResultStatus, FailureImpact
+from oh_goon.core.vocabulary.result_semantics import CanonicalResultStatus as CanonicalResultStatus
+from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
 
 class CanonicalAcceptedResult(ImmutableModel):

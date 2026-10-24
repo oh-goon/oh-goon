@@ -1,11 +1,39 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
 from oh_goon.repository_tooling import check_quality_ratchet as quality
+
+
+def test_cli_rejects_non_object_quality_floor_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    floors, python_coverage, frontend_coverage = _coverage_files(tmp_path)
+    _write(floors, {"python": {"lines": 80, "branches": 80}})
+    _write(
+        python_coverage,
+        {
+            "totals": {
+                "percent_statements_covered": 95,
+                "num_branches": 10,
+                "covered_branches": 9,
+            }
+        },
+    )
+    _patch_paths(monkeypatch, tmp_path, floors, python_coverage, frontend_coverage)
+    monkeypatch.setattr(
+        sys, "argv", ["oh-goon-quality-ratchet", "check", "--area", "python"]
+    )
+    quality.main()
+
+    floors.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must contain a JSON object"):
+        quality.main()
 
 
 def _write(path: Path, payload: dict[str, object]) -> None:

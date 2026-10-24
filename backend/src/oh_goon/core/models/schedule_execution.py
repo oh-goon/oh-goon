@@ -124,7 +124,7 @@ type ScheduleRunRecord = Annotated[
     | CancelledScheduleRun,
     Field(discriminator="status"),
 ]
-_SCHEDULE_RUN_ADAPTER = TypeAdapter(ScheduleRunRecord)
+_SCHEDULE_RUN_ADAPTER: TypeAdapter[ScheduleRunRecord] = TypeAdapter(ScheduleRunRecord)
 
 
 def parse_schedule_run(value: object) -> ScheduleRunRecord:

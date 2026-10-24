@@ -70,16 +70,18 @@ def load_executor_trust_policy(path: Path) -> FleetPlanExecutorTrustPolicy:
             )
         try:
             entries.append(
-                FleetPlanExecutorTrustEntry(
-                    key_id=key_id,
-                    executor_name=row.get("executor_name"),
-                    executor_versions=tuple(versions),
-                    public_key_base64=public_key_base64,
-                    public_key_fingerprint=hashlib.sha256(key_bytes).hexdigest(),
-                    active_from=active_from,
-                    expires_at=expires_at,
-                    revoked_at=revoked_at,
-                    revocation_mode=revocation_mode,
+                FleetPlanExecutorTrustEntry.model_validate(
+                    {
+                        "key_id": key_id,
+                        "executor_name": row.get("executor_name"),
+                        "executor_versions": tuple(versions),
+                        "public_key_base64": public_key_base64,
+                        "public_key_fingerprint": hashlib.sha256(key_bytes).hexdigest(),
+                        "active_from": active_from,
+                        "expires_at": expires_at,
+                        "revoked_at": revoked_at,
+                        "revocation_mode": revocation_mode,
+                    }
                 )
             )
         except (ValidationError, TypeError, ValueError) as exc:

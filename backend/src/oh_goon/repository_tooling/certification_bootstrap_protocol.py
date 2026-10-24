@@ -7,6 +7,7 @@ from oh_goon.core.enforcer_lace_trust import (
     UNPROVISIONED_FLEET_ADMISSION,
     UNPROVISIONED_FLEET_PLAN_INGRESS,
 )
+from oh_goon.core.models.fleet_plan_diagnostics import SelfPlanDescriptor as SelfPlanDescriptor
 
 SUCCESS_RECORD_ID = "OH_GOON_CERTIFICATION_BOOTSTRAP"
 ERROR_RECORD_ID = "OH_GOON_CERTIFICATION_BOOTSTRAP_ERROR"

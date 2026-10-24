@@ -15,7 +15,9 @@ import os
 import re
 import stat
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TypedDict
 
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.trust_custody_evidence_contract import (
@@ -36,7 +38,40 @@ class ReviewRejected(ValueError):
     """Intake rejected: no effect or trust decision is authorized."""
 
 
-def _canonical(payload: dict) -> bytes:
+class IntakeAuthority(TypedDict):
+    schema: str
+    status: str
+    gate_a: str
+    runtime_authority: bool
+    approval: str
+    T1_migration_authorized: bool
+
+
+class PacketIntake(IntakeAuthority):
+    review_subject: str
+    proposed_disposition: str
+    packet_sha256: str
+    reviewer_public_key_sha256: str
+    evidence_file_count: int
+
+
+class DossierIntake(IntakeAuthority):
+    reviewed_subject_count: int
+    proposed_dispositions: dict[str, str]
+    review_dossier_sha256: str
+    reviewer_public_key_sha256: str
+    independent_custody_verified: bool
+
+
+class ReviewComparison(IntakeAuthority):
+    reviewed_subject_count: int
+    primary_review_sha256: str
+    secondary_review_sha256: str
+    reviewer_keys_distinct: bool
+    independent_custody_verified: bool
+
+
+def _canonical(payload: Mapping[str, object]) -> bytes:
     return (json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode()
 
 
@@ -59,7 +94,7 @@ def _read_bounded(root_fd: int, leaf: str, max_bytes: int) -> bytes:
                 data = stream.read(max_bytes + 1)
             after = os.fstat(fd)
 
-            def identity(s):
+            def identity(s: os.stat_result) -> tuple[int, int, int, int, int]:
                 return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
 
             if (
@@ -103,19 +138,21 @@ def inspect_packet(
     *,
     policy_root: Path = ROOT,
     packet_fd: int | None = None,
-) -> dict:
+) -> PacketIntake:
     """Authenticate *intake only*. Never returns a trust grant, Gate A PASS or T1 decision."""
+    if packet_fd is None and packet_dir is None:
+        raise ReviewRejected("packet directory or descriptor is required")
     if not _HEX.fullmatch(expected_key_sha256):
         raise ReviewRejected("externally pinned reviewer key digest is required")
     try:
         public_key = _read_external_key(reviewer_public_key)
         if hashlib.sha256(public_key).hexdigest() != expected_key_sha256:
             raise ReviewRejected("reviewer public key does not match out-of-band pin")
-        directory_fd = (
-            os.dup(packet_fd)
-            if packet_fd is not None
-            else os.open(packet_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        )
+        if packet_fd is not None:
+            directory_fd = os.dup(packet_fd)
+        else:
+            assert packet_dir is not None
+            directory_fd = os.open(packet_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             packet = _read_bounded(directory_fd, "review.json", _MAX_PACKET)
             sig_hex = _read_bounded(directory_fd, "review.sig", 129).decode("ascii")
@@ -220,7 +257,7 @@ def inspect_dossier(
     expected_key_sha256: str,
     *,
     policy_root: Path = ROOT,
-) -> dict:
+) -> DossierIntake:
     """Reconcile ALL registered subjects via the existing per-packet verifier.
 
     One complete signed submission is still neither independent corroboration nor
@@ -311,7 +348,7 @@ def compare_review_dossiers(
     secondary_pin: str,
     *,
     policy_root: Path = ROOT,
-) -> dict:
+) -> ReviewComparison:
     """Detect disagreements, not independent trust custody or reviewer independence.
 
     Two distinct review *keys* are not evidence of two real-world custodians.
@@ -360,6 +397,7 @@ def main(argv: list[str] | None = None) -> int:
             args.corroborator_public_key,
             args.expected_corroborator_key_sha256,
         )
+        result: IntakeAuthority
         if any(x is not None for x in comparison):
             if args.dossier_dir is None or not all(x is not None for x in comparison):
                 raise ReviewRejected(

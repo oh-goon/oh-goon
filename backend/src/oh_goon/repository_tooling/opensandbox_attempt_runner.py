@@ -281,14 +281,13 @@ def _bind_runtime_execution(payload: dict[str, Any], root: Path) -> dict[str, An
         shebang = _fd_shebang(executable_fd)
         interpreter_path: str | None = None
         interpreter_identity: str | None = None
+        interpreter_resolved_path: str | None = None
         if shebang is not None:
             interpreter_path = shebang[0]
             interpreter = _resolve_runtime_path(root, interpreter_path)
             interpreter_fd = _open_runtime_file(interpreter, label="interpreter")
             interpreter_identity = _fd_identity(interpreter_fd)
             interpreter_resolved_path = "/" + interpreter.relative_to(root.resolve()).as_posix()
-        if shebang is None:
-            interpreter_resolved_path = None
         return {
             "authority": {
                 "executable_path": executable_path,

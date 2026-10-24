@@ -28,7 +28,7 @@ class FleetExecutorIdentity:
 class ExecutorCapacityEvidenceInput:
     fleet_run_id: str
     executor: FleetExecutorIdentity
-    source: str
+    source: Literal["local_verified", "remote_operator_attested"]
     backend_configuration_id: str
     capacity_cpu_millis: int
     capacity_memory_bytes: int
@@ -39,7 +39,7 @@ class ExecutorCapacityEvidenceInput:
     per_attempt_memory_bytes: int | None
     per_attempt_max_processes: int | None
     pool_id: str
-    placement_policy: str
+    placement_policy: Literal["priority_rendezvous_fifo_v2"]
     placement_rank: int
     executor_priority: int
 
@@ -65,7 +65,7 @@ class PlanExecutorCapacityEvidence(ImmutableModel):
     per_attempt_memory_bytes: int | None = Field(default=None, ge=64 * 1024 * 1024)
     per_attempt_max_processes: int | None = Field(default=None, ge=16)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def inventory_id(self) -> str:
         return stable_id(
@@ -80,7 +80,7 @@ class PlanExecutorCapacityEvidence(ImmutableModel):
             ),
         )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def health_attestation_id(self) -> str:
         return stable_id(
@@ -94,7 +94,7 @@ class PlanExecutorCapacityEvidence(ImmutableModel):
             },
         )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def placement_id(self) -> str:
         return stable_id(
@@ -111,7 +111,7 @@ class PlanExecutorCapacityEvidence(ImmutableModel):
             ),
         )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def reservation_id(self) -> str:
         return stable_id(
@@ -129,21 +129,21 @@ class PlanExecutorCapacityEvidence(ImmutableModel):
             ),
         )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def reserved_cpu_millis(self) -> int:
         if self.per_attempt_cpu_millis is None:
             return 0
         return self.per_attempt_cpu_millis * self.admitted_parallelism
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def reserved_memory_bytes(self) -> int:
         if self.per_attempt_memory_bytes is None:
             return 0
         return self.per_attempt_memory_bytes * self.admitted_parallelism
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def reserved_max_processes(self) -> int | None:
         if self.per_attempt_max_processes is None:

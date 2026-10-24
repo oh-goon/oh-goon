@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 from oh_goon.core.enforcer_lace_trust import ReceiptAuthenticator
 from oh_goon.core.ports.local_lace_allocation import LocalLaceAllocationObservation
@@ -14,6 +14,10 @@ from oh_goon.runtime.enforcer_lace_journal import CausalJournalError, CausalRunJ
 
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
+
+
+class _BackendConfiguration(Protocol):
+    def configuration_identity(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +43,7 @@ class LocalLaceJournalReservation:
     backend_configuration_identity: str
 
     def reserve(self, request: IsolatedProcessRequest, backend: object) -> LocalLaceIntentProof:
+        backend = cast(_BackendConfiguration, backend)
         if (
             type(request.fleet_run_id) is not str
             or request.fleet_run_id != self.run_id

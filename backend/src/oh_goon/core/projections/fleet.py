@@ -44,7 +44,7 @@ def build_fleet_snapshot(
     )
     return FleetSnapshot(
         provenance=provenance,
-        repositories=list(context.repositories),
+        repositories=context.repositories,
         active_fleet_run=context.active_fleet_run,
-        latest_fleet_runs=list(context.latest_fleet_runs),
+        latest_fleet_runs=context.latest_fleet_runs,
     )

@@ -10,7 +10,7 @@ from oh_goon.core.vocabulary import OperationAction
 
 
 def run_operation_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int | None:
-    if args.command != "run":
+    if args.command != "operation":
         return None
     repository = args.repository.expanduser().resolve()
     operation_id = getattr(args, "operation_id", None) or new_operation_id()

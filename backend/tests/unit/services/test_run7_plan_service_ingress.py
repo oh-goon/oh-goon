@@ -262,21 +262,21 @@ def test_cli_to_real_plan_service_to_one_fleet_admission_returns_original_id(
     monkeypatch.setattr(control, "start_prepared_plan", admit)
     args = build_parser().parse_args(
         [
-            "plan",
-            "run",
+            "dev",
+            "_run-plan",
             str(path),
             "--repository-id",
             "repo-1",
             "--fleet-run-id",
             "known",
-            "--input",
-            "release_channel=beta",
-            "--input",
-            "revision=abcdef1",
+            "--lock-file",
+            str(tmp_path / "goon.lock"),
             "--json",
             "--no-wait",
         ]
     )
+    args.command, args.plan_command = "plan", "run"
+    args._selected_inputs = values
     assert run_plan_command(SimpleNamespace(plans=plans), args) == 0
     assert json.loads(capsys.readouterr().out) == {
         "schema": "oh-goon.plan-run-result/v1",
@@ -320,16 +320,19 @@ def test_cli_enrollment_revoked_after_preflight_refuses_before_plan_source(
     plan.write_text("INVALID: [", encoding="utf-8")
     args = build_parser().parse_args(
         [
-            "plan",
-            "run",
+            "dev",
+            "_run-plan",
             str(plan),
             "--repository-id",
             "repo-1",
             "--fleet-run-id",
             "known",
             "--json",
+            "--lock-file",
+            str(tmp_path / "goon.lock"),
         ]
     )
+    args.command, args.plan_command = "plan", "run"
     assert run_plan_command(SimpleNamespace(plans=plans), args) == 2
     assert json.loads(capsys.readouterr().out)["status"] == "error"
     assert preflights == ["known", "known"]

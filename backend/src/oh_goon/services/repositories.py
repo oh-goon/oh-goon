@@ -26,7 +26,7 @@ class RepositoryService:
 
     def included(
         self, view: LocalStateReadView | None = None
-    ) -> list[IncludedRepositoryCatalogEntry]:
+    ) -> builtins.list[IncludedRepositoryCatalogEntry]:
         """Return the included catalog from one captured local-state view."""
         return [
             entry for entry in self.list(view) if isinstance(entry, IncludedRepositoryCatalogEntry)
@@ -45,11 +45,13 @@ class RepositoryService:
             reason,
             expected_durable_revision=revision,
         )
-        return ExcludedRepositoryCatalogEntry(
-            scope=FleetScope.EXCLUDED,
-            repository=entry.repository,
-            exclusion_reason=record["reason"],
-            excluded_at=record["excluded_at"],
+        return ExcludedRepositoryCatalogEntry.model_validate(
+            {
+                "scope": FleetScope.EXCLUDED,
+                "repository": entry.repository,
+                "exclusion_reason": record["reason"],
+                "excluded_at": record["excluded_at"],
+            }
         )
 
     def include(

@@ -23,10 +23,12 @@ def project_failure_sequence(
 ) -> GameTapeFailureSequence:
     """Project one bounded slice of the canonical chronological failure analysis."""
     sample = analysis.sample
-    positions = (
-        *("PRIOR" for _ in range(sample.prior_count)),
+    prior: tuple[GameTapeFailureSequencePosition, ...] = ("PRIOR",)
+    later: tuple[GameTapeFailureSequencePosition, ...] = ("LATER",)
+    positions: tuple[GameTapeFailureSequencePosition, ...] = (
+        *(prior * sample.prior_count),
         "SELECTED",
-        *("LATER" for _ in range(sample.later_count)),
+        *(later * sample.later_count),
     )
     transitions = project_sequence_transitions(sample.transitions)
     return GameTapeFailureSequence(

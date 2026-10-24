@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from oh_goon.core.models.execution_assignment import ExecutionAssignment
 from oh_goon.core.models.recovery_lifecycle import RecoveryAdmission, RecoveryFailureEvidence
 from oh_goon.core.models.workspace import CandidateCheckpoint
@@ -34,6 +36,7 @@ class RecoveryLifecycle:
         if max_attempts < 2 or max_attempts > 32:
             raise ValueError("Recovery max_attempts must be within 2..32")
 
+        disposition: Literal["ADMITTED", "BLOCKED"]
         if attempt_ordinal > max_attempts:
             return self._decision(
                 previous_assignment=previous_assignment,
@@ -90,7 +93,7 @@ class RecoveryLifecycle:
         attempt_ordinal: int,
         max_attempts: int,
         exact_work_identity: str,
-        disposition: str,
+        disposition: Literal["ADMITTED", "BLOCKED"],
         reason: str,
     ) -> RecoveryAdmission:
         return RecoveryAdmission(

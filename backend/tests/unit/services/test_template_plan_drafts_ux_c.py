@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.cli_plan_input_files import read_caller_input_file
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations.fleet_plan_compilation import parse_plan_template
 from oh_goon.runtime.plan_templates import PlanTemplateStore
+from oh_goon.services.run_configuration import load_run_configuration
 from oh_goon.services.template_plan_drafts import propose_plan
 
 
@@ -73,10 +73,14 @@ def test_values_are_canonical_and_validate_with_actual_caller_file_reader(origin
     assert not result.report["missing_required_inputs"]
     assert result.report["preview_ready"]
     assert "abcdef1234567890abcdef1234567890abcdef12" not in json.dumps(result.report)
-    path = tmp_path / "values.yml"
-    path.write_text(result.values_yaml, encoding="utf-8")
-    snap = read_caller_input_file(path, root=tmp_path)
-    assert snap.values() == selected
+    path = tmp_path / "run.yml"
+    path.write_text(
+        "version: 1\nsource: {kind: file-plan, path: plan.yml}\n"
+        "target: {repository_id: selected-repository}\n" + result.values_yaml,
+        encoding="utf-8",
+    )
+    snap = load_run_configuration(path)
+    assert snap.inputs == selected
 
 
 @pytest.mark.parametrize(
@@ -213,3 +217,196 @@ def test_all_shipped_plans_generate_canonical_readonly_proposals(key):
     assert proposal.report["status"] == "DRAFT_ONLY_NOT_ADMITTED"
     assert proposal.report["closure_digest"] is None
     assert parse_plan_template(proposal.plan_yaml).steps == source.compiled.steps
+
+
+def test_reviewer_authoring_generates_a_normal_ordered_composite(tmp_path):
+    import yaml
+
+    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+    from tests.factories.agent_review import agent_review_case
+
+    output = tmp_path / "workflow"
+    requested = (
+        ("consumer", "local:skills/canonical-consumer-contract-review"),
+        ("authority", "local:skills/single-source-of-truth-review"),
+    )
+    path = initialize_run_configuration(
+        "agents/agentic-review-repair-loop", output, reviewers=requested
+    )
+    snapshot = load_run_configuration(path)
+    assert snapshot.selection.source.kind == "file-plan"
+    assert snapshot.selection.agent.implementation is None
+    assert snapshot.selection.agent.model_profile == "REQUIRED_MODEL_PROFILE"
+    assert snapshot.selection.repair.write_roots == ("REQUIRED_WRITE_ROOT",)
+    assert "reviews" not in yaml.safe_load(path.read_text())
+    composite = output / "goons/agents/review-repair/goon.yml"
+    authored = yaml.safe_load(composite.read_text())
+    assert [(edge["as"], edge["with"]["skill"]) for edge in authored["goons"][:2]] == list(
+        requested
+    )
+    original = yaml.safe_load(
+        (
+            PlanTemplateStore().root.parent / "goons/agents/agentic-review-repair-loop/goon.yml"
+        ).read_text()
+    )
+    assert authored["goons"][2:] == [
+        edge for edge in original["goons"] if edge["phase"] != "review"
+    ]
+    assert not (output / ".goonskills.yml").exists()
+    assert not list(output.rglob("SKILL.md"))
+    # Real source capture and resolver prove the generated authoring format runs
+    # through the existing graph, binder and phased source owners.
+    resolver, _, _, options = agent_review_case(tmp_path / "fixture")
+    resolved, _, _ = resolver.resolve_frozen_agents(snapshot.source_path(), **options)
+    from oh_goon.core.agent_review_plan import agent_review_phases
+
+    phases = agent_review_phases(resolved)
+    assert [len(phases[name]) for name in phases] == [2, 1, 2, 1, 1]
+    assert [item.import_id for item in resolved.imports if item.phase == "review"] == [
+        "agents-review-repair.consumer",
+        "agents-review-repair.authority",
+    ]
+    assert resolver.analyze_source(snapshot.source_path()).has_agent_source_contract()
+
+
+@pytest.mark.parametrize(
+    "reviewers",
+    [
+        (("", "local:skills/review"),),
+        (("same", "local:skills/review"), ("same", "local:skills/other")),
+        (("../escape", "local:skills/review"),),
+        (("review", ""),),
+        (("review", "../outside"),),
+        (("agents-adjudicate", "local:skills/review"),),
+    ],
+)
+def test_invalid_reviewer_intent_fails_before_publication(tmp_path, reviewers):
+    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+
+    output = tmp_path / "workflow"
+    with pytest.raises(FleetPlanInvalid):
+        initialize_run_configuration(
+            "agents/agentic-review-repair-loop", output, reviewers=reviewers
+        )
+    assert not output.exists()
+
+
+def test_reviewer_authoring_refuses_other_plans_and_any_existing_destination(tmp_path):
+    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+
+    selected = (("review", "local:skills/review"),)
+    with pytest.raises(FleetPlanInvalid, match="Reviewer authoring"):
+        initialize_run_configuration("python/quality", tmp_path / "new", reviewers=selected)
+    output = tmp_path / "existing"
+    output.mkdir()
+    with pytest.raises(FleetPlanInvalid, match="already exists"):
+        initialize_run_configuration(
+            "agents/agentic-review-repair-loop", output, reviewers=selected
+        )
+    assert list(output.iterdir()) == []
+
+
+def test_failed_companion_publication_has_no_run_selection_and_keeps_foreign_files(
+    tmp_path, monkeypatch
+):
+    import os
+
+    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+
+    output = tmp_path / "workflow"
+    link = os.link
+
+    def conflict(source, target, **kwargs):
+        if target == "goon.yml":
+            (output / "goons/agents/review-repair/goon.yml").write_text(
+                "concurrently authored user data\n"
+            )
+        return link(source, target, **kwargs)
+
+    monkeypatch.setattr(os, "link", conflict)
+    with pytest.raises(FileExistsError):
+        initialize_run_configuration(
+            "agents/agentic-review-repair-loop",
+            output,
+            reviewers=(("review", "local:skills/review"),),
+        )
+    assert not (output / "run.yml").exists()
+    assert (output / "goons/agents/review-repair/goon.yml").read_text() == (
+        "concurrently authored user data\n"
+    )
+    assert not list(tmp_path.glob(".workflow.*"))
+
+
+@pytest.mark.parametrize(
+    ("key", "native", "repair"),
+    [
+        ("agents/native-review", True, False),
+        ("agents/native-coding", True, False),
+        ("agents/agentic-review-repair-loop", False, True),
+    ],
+)
+def test_default_agent_selections_follow_the_compiled_harness_and_phases(
+    tmp_path, key, native, repair
+):
+    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+
+    path = initialize_run_configuration(key, tmp_path / "workflow")
+    selected = load_run_configuration(path).selection
+    assert selected.source.kind == "catalog-plan"
+    assert (selected.agent.implementation == "pi") is native
+    assert (selected.agent.model_profile == "REQUIRED_MODEL_PROFILE") is not native
+    assert (selected.repair is not None) is repair
+    assert sorted(item.name for item in path.parent.iterdir()) == ["run.yml"]
+
+
+def test_parent_retarget_cannot_redirect_workflow_publication(tmp_path, monkeypatch):
+    import tempfile
+
+    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+
+    selected_parent = tmp_path / "selected"
+    selected_parent.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    original = tempfile.TemporaryDirectory
+
+    def retarget(*args, **kwargs):
+        selected_parent.rename(tmp_path / "original-parent")
+        selected_parent.symlink_to(outside, target_is_directory=True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", retarget)
+    with pytest.raises(OSError):
+        initialize_run_configuration("python/quality", selected_parent / "workflow")
+    assert not list(outside.iterdir())
+    assert not list((tmp_path / "original-parent").iterdir())
+
+
+def test_parent_retarget_after_pinning_refuses_completion_and_never_follows_symlink(
+    tmp_path, monkeypatch
+):
+    import os
+
+    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+
+    selected_parent = tmp_path / "selected"
+    selected_parent.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    linked = os.link
+
+    def retarget(source, target, **kwargs):
+        if target == "plan.yml":
+            selected_parent.rename(tmp_path / "original-parent")
+            selected_parent.symlink_to(outside, target_is_directory=True)
+        return linked(source, target, **kwargs)
+
+    monkeypatch.setattr(os, "link", retarget)
+    with pytest.raises(OSError, match="directory changed"):
+        initialize_run_configuration(
+            "agents/agentic-review-repair-loop",
+            selected_parent / "workflow",
+            reviewers=(("review", "local:skills/review"),),
+        )
+    assert not list(outside.iterdir())
+    assert not (tmp_path / "original-parent/workflow/run.yml").exists()

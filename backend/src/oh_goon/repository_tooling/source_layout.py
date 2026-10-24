@@ -6,10 +6,12 @@ from pathlib import Path, PurePosixPath
 
 from oh_goon.core.source_layout_policy import (
     SourceLayoutIssue,
-    canonical_source_layout_issues,
 )
 from oh_goon.core.source_layout_policy import (
     assert_canonical_source_layout as assert_canonical_source_layout,
+)
+from oh_goon.core.source_layout_policy import (
+    canonical_source_layout_issues as canonical_source_layout_issues,
 )
 from oh_goon.core.source_layout_policy import (
     render_source_layout_issues as _render_source_layout_issues,
@@ -27,7 +29,7 @@ from oh_goon.core.source_tree_policy import TRANSIENT_DIRECTORY_NAMES as TRANSIE
 from oh_goon.core.source_tree_policy import TRANSIENT_FILE_NAMES as TRANSIENT_FILE_NAMES
 from oh_goon.core.source_tree_policy import TRANSIENT_RELATIVE_PATHS as TRANSIENT_RELATIVE_PATHS
 from oh_goon.core.source_tree_policy import (
-    is_transient_source_path,
+    is_transient_source_path as is_transient_source_path,
 )
 
 ROOT = Path(__file__).resolve().parents[4]

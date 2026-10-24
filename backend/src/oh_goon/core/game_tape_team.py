@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
+from typing import cast
 
 from oh_goon.core.models.game_tape import GameTapeIssueFocus, GameTapeRepositoryExecution
 from oh_goon.core.models.game_tape_team import (
@@ -22,8 +24,8 @@ def project_team_composition(
         and repository.finished_at is not None
         and repository.finished_at >= repository.started_at
     )
-    started_at = min((item.started_at for item in timed), default=None)
-    finished_at = max((item.finished_at for item in timed), default=None)
+    started_at = min((cast(datetime, item.started_at) for item in timed), default=None)
+    finished_at = max((cast(datetime, item.finished_at) for item in timed), default=None)
     overlap_ids = _overlap_ids(timed)
     counts = Counter(item.status for item in repositories)
     return GameTapeTeamComposition(

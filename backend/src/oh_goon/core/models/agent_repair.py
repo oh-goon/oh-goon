@@ -43,7 +43,7 @@ class AgentRepairContext(ImmutableModel):
     write_roots: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
-    def validate_attempt(self):
+    def validate_attempt(self) -> AgentRepairContext:
         if self.attempt > self.max_attempts:
             raise ValueError("repair attempt exceeds caller budget")
         if (self.previous_run_id is None) != (self.attempt == 1):

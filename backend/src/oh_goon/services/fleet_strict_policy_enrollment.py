@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
+from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import (
     FleetRepositoryScope,
     FleetRunAdmissionIntent,
@@ -76,8 +77,10 @@ class StrictFleetPolicyEnrollment(FleetPolicyEnrollment):
         run_id: str,
         intent: FleetRunAdmissionIntent,
         scope: FleetRepositoryScope,
-        targets: list,
+        targets: list[RepositoryIdentity],
     ) -> None:
+        if not isinstance(intent.target, FleetPlanTarget):
+            raise TrustProtocolError("strict Fleet enrollment requires a Plan target")
         self.require_preplanning(run_id=run_id, target=intent.target)
         execution = intent.execution
         scheduling = intent.scheduling

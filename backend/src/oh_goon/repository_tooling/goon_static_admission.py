@@ -4,9 +4,11 @@ import argparse
 import json
 from pathlib import Path
 
+from oh_goon.services.goon_execution_requirements import StaticAdmissionIssuePayload
 from oh_goon.services.goon_static_admission import (
     REQUIREMENTS_FILE,
     SCHEMA,
+    CanonicalGoonAdmissionPayload,
     StaticAdmissionIssue,
     canonical_step_required_tools,
     compile_canonical_goons,
@@ -22,7 +24,7 @@ __all__ = [
 ]
 
 
-def _print_issue(issue: dict[str, object]) -> None:
+def _print_issue(issue: StaticAdmissionIssuePayload) -> None:
     location = str(issue.get("goon") or "catalog")
     if issue.get("step_id"):
         location += f"/{issue['step_id']}"
@@ -37,7 +39,7 @@ def _print_issue(issue: dict[str, object]) -> None:
         print("  Unresolved: " + edge)
 
 
-def _print_human(payload: dict[str, object]) -> None:
+def _print_human(payload: CanonicalGoonAdmissionPayload) -> None:
     print("CANONICAL GOON STATIC ADMISSION")
     print(f"Status: {payload['status']}")
     print(f"Goons: {payload['goon_count']}")

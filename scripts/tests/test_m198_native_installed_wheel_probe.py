@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Callable
 from importlib.metadata import Distribution
 from pathlib import Path
@@ -187,9 +188,40 @@ def test_native_wheel_qualification_script_never_reuses_checkout_imports() -> No
     # This probe, not --no-deps, owns the installed-wheel positive decision.
     assert 'distribution=metadata.distribution("oh-goon")' in probe_source
     assert "members = distribution.files" in probe_source
-    assert (
-        "path = Path(distribution.locate_file(relative)).resolve(strict=True)"
-        in probe_source
+    origin_assignments = [
+        node.value
+        for node in ast.walk(ast.parse(probe_source))
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and node.value.func.attr == "resolve"
+        and isinstance(node.value.func.value, ast.Call)
+        and isinstance(node.value.func.value.func, ast.Name)
+        and node.value.func.value.func.id == "Path"
+    ]
+    installed_origin = next(
+        value
+        for value in origin_assignments
+        if any(
+            keyword.arg == "strict"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is True
+            for keyword in value.keywords
+        )
+    )
+    assert isinstance(installed_origin.func, ast.Attribute)
+    assert isinstance(installed_origin.func.value, ast.Call)
+    assert len(installed_origin.func.value.args) == 1
+    located = installed_origin.func.value.args[0]
+    if (
+        isinstance(located, ast.Call)
+        and isinstance(located.func, ast.Name)
+        and located.func.id == "str"
+    ):
+        assert len(located.args) == 1 and not located.keywords
+        located = located.args[0]
+    assert ast.dump(located) == ast.dump(
+        ast.parse("distribution.locate_file(relative)", mode="eval").body
     )
     assert "actual != path or compatibility is not owner" in probe_source
     assert '"authenticated_replay_authority": "NOT_ESTABLISHED"' in probe_source

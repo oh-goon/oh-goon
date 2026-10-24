@@ -8,6 +8,7 @@ from oh_goon.core.models.shared_plan import (
     LeagueLineupDocument,
     LeagueLineupInspection,
     LeagueLineupSummary,
+    LeagueLineupTeam,
     ReadyLeagueLineupTeam,
     UnavailableLeagueLineupTeam,
 )
@@ -55,7 +56,7 @@ class LeagueLineupService:
     def inspect(self, lineup_key: str) -> LeagueLineupInspection:
         document = self.read(lineup_key)
         current = {repository.path: repository for repository in self._league.repositories()}
-        teams = []
+        teams: list[LeagueLineupTeam] = []
         for configured_path in document.repositories:
             repository = current.get(configured_path)
             if repository is None:

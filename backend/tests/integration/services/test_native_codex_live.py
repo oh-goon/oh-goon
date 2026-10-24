@@ -229,12 +229,14 @@ class EventlogContract(unittest.TestCase):
             with self.subTest(duration=value), self.assertRaisesRegex(ValueError, r"^line 1:"):
                 list(iter_records([ndjson(event(duration_ms=value))]))
 
-    def test_invalid_json_uses_physical_line_number(self):
-        values = ["\n", ndjson(event()), " \t\n", "{broken\n"]
-        parsed = iter(iter_records(values))
-        self.assertEqual(next(parsed), event())
-        with self.assertRaisesRegex(ValueError, r"^line 4:"):
-            next(parsed)
+    def test_invalid_records_use_physical_line_number(self):
+        for invalid in ("{broken\n", ndjson(event(duration_ms=True))):
+            with self.subTest(invalid=invalid):
+                values = ["\n", ndjson(event()), " \t\n", invalid]
+                parsed = iter(iter_records(values))
+                self.assertEqual(next(parsed), event())
+                with self.assertRaisesRegex(ValueError, r"^line 4:"):
+                    next(parsed)
 
     def test_record_shape_service_and_status_validation(self):
         invalid = [[], None, {}, event(service=""), event(service=None), event(service=7),
@@ -252,13 +254,46 @@ class EventlogContract(unittest.TestCase):
         self.assertEqual(summarize(iter(records), service="missing"), [])
         self.assertEqual(summarize(iter(records), service=""), [])
 
-    def test_cli_stdin_filter(self):
+    def test_cli_stdin_filter_and_errors(self):
         result = cli("--service", "api", text=ndjson(event("api-v2", 99), event("api", 7)))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
         self.assertTrue(result.stdout.endswith("\n"))
         self.assertEqual(json.loads(result.stdout),
                          [{"service": "api", "count": 1, "errors": 0, "total_ms": 7}])
+        for invalid in ("{broken\n", ndjson(event(duration_ms=True))):
+            with self.subTest(invalid=invalid):
+                failed = cli(text=ndjson(event()) + "\n" + invalid)
+                self.assertEqual(failed.returncode, 2)
+                self.assertEqual(failed.stdout, "")
+                self.assertRegex(failed.stderr, r"line 3:")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "RLIMIT_AS streaming proof requires Linux")
+    def test_cli_streams_stdin_and_file_with_bounded_memory(self):
+        count = 131072
+        row = ndjson(event(status="error"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "large-events.ndjson"
+            with path.open("w", encoding="utf-8") as stream:
+                for _ in range(count):
+                    stream.write(row)
+            for mode in ("stdin", "file"):
+                with self.subTest(mode=mode), path.open("rb") as stream:
+                    result = subprocess.run(
+                        [sys.executable, "-I", "-B", "-c",
+                         "import resource,runpy,sys;"
+                         "resource.setrlimit(resource.RLIMIT_AS,(64*1024*1024,64*1024*1024));"
+                         "sys.path.insert(0,sys.argv.pop(1));"
+                         "runpy.run_module('eventlog',run_name='__main__')",
+                         str(repository), *([str(path)] if mode == "file" else [])],
+                        stdin=stream, text=True, capture_output=True, timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stderr, "")
+                    self.assertTrue(result.stdout.endswith("\n"))
+                    self.assertEqual(json.loads(result.stdout),
+                                     [{"service": "api", "count": count,
+                                       "errors": count, "total_ms": count * 3}])
 
     def test_cli_utf8_file_and_input_failures(self):
         with tempfile.TemporaryDirectory() as directory:

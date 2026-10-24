@@ -39,8 +39,10 @@ def extract_security_findings(payload: dict[str, Any] | list[Any] | None) -> lis
                 advisory_id=advisory_id,
                 package=package,
                 version=version,
-                aliases=[str(value) for value in node.get("aliases", []) if isinstance(value, str)],
-                fixed_versions=_fixed_versions(node),
+                aliases=tuple(
+                    str(value) for value in node.get("aliases", []) if isinstance(value, str)
+                ),
+                fixed_versions=tuple(_fixed_versions(node)),
                 summary=str(node.get("summary")) if node.get("summary") else None,
             )
         for key, value in node.items():

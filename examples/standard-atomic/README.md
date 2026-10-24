@@ -1,28 +1,15 @@
-# Standard Linux/WSL Atomic Goon — actual subprocess example
+# Standard Linux/WSL Atomic Goon
 
-This Goon explicitly uses the **maintenance** purpose for operator-owned trusted
-code. It is not a CI/CD isolation sandbox and is not suitable for hostile scripts.
+Classification: integration-fixture
 
-The original `goon.lock` was created using:
+Exercise actual Linux subprocesses through the production resolver and direct Step executor. This shell-only Goon selects the maintenance purpose for operator-owned trusted code. It is not an untrusted-code isolation sandbox.
 
-```bash
-uv run --locked --project backend oh-goon lock examples/standard-atomic/goon.yml
+The fixture includes its source, script and lock. The focused integration uses a disposable operator-owned copy and checks real success, nonzero exit, cancellation, command timeout and Goon-definition drift:
+
+```sh
+uv run --project backend --offline --frozen --no-sync pytest -q backend/tests/integration/test_exec01_standard_atomic_linux.py
 ```
 
-The locked Goon is tested with real Linux subprocesses through the production
-resolver and direct Step executor, without a mocked `run_command`:
+Run from the Oh-Goon source root after native setup. There is no Python workload here, so no workload `uv.lock` is applicable. Privileged custody and native containment are separate qualification boundaries.
 
-```bash
-cd backend
-uv run --locked pytest -q tests/integration/test_exec01_standard_atomic_linux.py
-```
-
-This tests real success, nonzero exit, cancellation, backend-provided command
-timeout, and Goon definition drift. It uses a disposable operator-owned copy
-of this directory. No privileged `fs-verity`, immutable-directory ioctl,
-container daemon, cgroup writer or high-security host certification is required.
-
-**Current limitation:** This is a physical Step-run integration slice, *not*
-a complete `oh-goon plan run --wait` / Fleet admission and durable Game Tape
-E2E. That product-level capability remains EXEC-01B (P0). There is no Python
-project in this shell-only fixture, so a `uv.lock` is not applicable here.
+This is a physical Step integration slice. It does not establish complete Fleet admission, a terminal Run and durable Game Tape end to end. For normal runnable workflows use [one selected `run.yml`](../../templates/README.md), canonical lock and fresh Run admission; this direct-executor fixture is not an alternate public launch path.

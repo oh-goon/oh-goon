@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -291,7 +292,10 @@ def _spawn_registered_service(
 
 
 def _fail_if_required_service_exited(
-    owner, plan, processes, log_tail: collections.deque[str] | None = None
+    owner: LocalLaunchOwner,
+    plan: LocalLaunchPlan,
+    processes: Sequence[subprocess.Popen[str]],
+    log_tail: collections.deque[str] | None = None,
 ) -> None:
     exited = None
     for service, process in zip(plan.services, processes, strict=True):
@@ -330,7 +334,13 @@ def _fail_if_required_service_exited(
     )
 
 
-def _observe_readiness(owner, plan, ready, last, probe) -> None:
+def _observe_readiness(
+    owner: LocalLaunchOwner,
+    plan: LocalLaunchPlan,
+    ready: set[str],
+    last: dict[str, str],
+    probe: Callable[[LocalServicePlan], tuple[bool, str]],
+) -> None:
     for service in plan.services:
         if service.service in ready:
             continue
@@ -423,7 +433,7 @@ def start_contributor_launch(
         owner_pid=os.getpid(),
     )
     LocalLaunchAccessStore.from_database(database_path).publish(
-        launch_id=_launch_id(owner),
+        launch_id=owner.identity.launch_id,
         owner_generation=owner.identity.owner_generation,
         token=token,
     )

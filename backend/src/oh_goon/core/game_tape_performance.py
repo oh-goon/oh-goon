@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from statistics import median
+from typing import Literal
 
 from oh_goon.core.errors import InvalidRequest
 from oh_goon.core.models.game_tape import (
@@ -171,7 +172,9 @@ def _comparison(
         if baseline.median_duration_ms > 0
         else None
     )
-    direction = "SAME" if delta == 0 else "SLOWER" if delta > 0 else "FASTER"
+    direction: Literal["SAME", "SLOWER", "FASTER"] = (
+        "SAME" if delta == 0 else "SLOWER" if delta > 0 else "FASTER"
+    )
     return GameTapeDurationComparison(
         current_duration_ms=current_duration_ms,
         baseline=baseline,

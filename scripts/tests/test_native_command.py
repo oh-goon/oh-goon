@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+
 from typing import Any
 from collections.abc import Sequence
 
@@ -12,6 +14,17 @@ import pytest
 from oh_goon.repository_tooling import native_command
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _has_canonical_banner_command(source: str) -> bool:
+    expected = ast.dump(
+        ast.parse("('sh', str(_COMMAND_BANNER), label, detail)", mode="eval").body
+    )
+    return any(
+        ast.dump(node.value) == expected
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+    )
 
 
 @pytest.mark.parametrize(
@@ -238,7 +251,7 @@ def test_native_command_banner_uses_repository_command_banner_owner() -> None:
         ROOT / "backend/src/oh_goon/repository_tooling/native_command.py"
     ).read_text(encoding="utf-8")
     assert '_COMMAND_BANNER = _ROOT / "scripts" / "command_banner.sh"' in source
-    assert 'command = ("sh", str(_COMMAND_BANNER), label, detail)' in source
+    assert _has_canonical_banner_command(source)
     assert 'command = ("bash", str(_COMMAND_BANNER)' not in source
     assert 'print(f"\\n=== NATIVE TOOL COMMAND' not in source
 
@@ -251,7 +264,7 @@ def test_command_banner_interpreter_has_one_repository_authority() -> None:
     run_step = (ROOT / "scripts/run_step.sh").read_text(encoding="utf-8")
     run_logged = (ROOT / "scripts/run_logged.sh").read_text(encoding="utf-8")
 
-    assert 'command = ("sh", str(_COMMAND_BANNER), label, detail)' in native
+    assert _has_canonical_banner_command(native)
     assert "COMMAND_BANNER = sh scripts/command_banner.sh" in makefile
     assert 'sh scripts/command_banner.sh "$label" "$detail"' in run_step
     assert 'sh "$ROOT/scripts/command_banner.sh" "OH-GOON ${label^^}"' in run_logged
