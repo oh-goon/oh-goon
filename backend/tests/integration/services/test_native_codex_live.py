@@ -168,7 +168,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                 if not line.strip():
                     continue
                 item = json.loads(line).get("item")
-                if not isinstance(item, dict) or len(item_facts) >= 32:
+                if not isinstance(item, dict):
                     continue
                 item_type = item.get("type")
                 if (
@@ -189,6 +189,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                             == require_loaded_hashmarks_runtime()
                         ):
                             hashmarks_followup_succeeded = True
+                if len(item_facts) >= 32:
+                    continue
                 fact: dict[str, str | int] = {
                     "type": item_type
                     if item_type

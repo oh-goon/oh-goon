@@ -216,12 +216,7 @@ class BubblewrapProcessIsolation:
         """Prove the requested ordinary namespace capability before workload effects."""
         private_file_identities = self._validate_standard_request(request)
         if not self._standard_system_checked:
-            roots: list[Path] = []
-            for value in _STANDARD_RUNTIME_DIRECTORIES:
-                path = Path(value).resolve()
-                if path.is_dir() and not any(path.is_relative_to(root) for root in roots):
-                    roots.append(path)
-            system_runtime_roots = tuple(roots)
+            system_runtime_roots = _standard_system_roots()
             for path in system_runtime_roots:
                 _require_standard_bind_structure(
                     path,
@@ -394,7 +389,8 @@ class BubblewrapProcessIsolation:
             if request.private_configuration_directory is not None
             else ()
         )
-        canonical_sources = {
+        system_sources = _standard_system_roots()
+        canonical_sources = set(system_sources) | {
             mount.source for mount in selected_mounts if mount.target == PurePosixPath(mount.source)
         }
         for mount in selected_mounts:
@@ -403,7 +399,10 @@ class BubblewrapProcessIsolation:
                 not source.exists()
                 or any(source.is_relative_to(root) or root.is_relative_to(source) for root in roots)
                 or source == request.workspace
-                or (source in sources and source not in canonical_sources)
+                or (
+                    source in sources
+                    and not any(source.is_relative_to(root) for root in canonical_sources)
+                )
                 or source.is_socket()
                 or source == home
                 or source in (Path("/tmp"), Path("/var/tmp"))
@@ -432,7 +431,11 @@ class BubblewrapProcessIsolation:
                     "Standard sandbox read-only mount exceeds its explicit scope"
                 )
             targets.append(target)
-            if source not in sources:
+            # Public runtime aliases use the system-bind owner's structural
+            # check, including its synthetic /dev link semantics.
+            if source not in sources and not any(
+                source.is_relative_to(root) for root in system_sources
+            ):
                 _require_standard_bind_structure(
                     source, private_file_identities=private_file_identities
                 )
@@ -571,6 +574,14 @@ class BubblewrapProcessIsolation:
                     )
                 if request.broker_directory is not None:
                     args.extend(("--ro-bind", str(request.broker_directory), "/run/oh-goon-broker"))
+                canonical_sources = (
+                    *_standard_system_roots(),
+                    *(
+                        mount.source
+                        for mount in request.read_only_mounts
+                        if mount.target == PurePosixPath(mount.source)
+                    ),
+                )
                 mapping = tuple(
                     sorted(
                         [
@@ -582,9 +593,7 @@ class BubblewrapProcessIsolation:
                                 for mount in request.read_only_mounts
                                 if mount.target == PurePosixPath(mount.source)
                                 or not any(
-                                    other.source == mount.source
-                                    and other.target == PurePosixPath(other.source)
-                                    for other in request.read_only_mounts
+                                    mount.source.is_relative_to(root) for root in canonical_sources
                                 )
                             ),
                             *(
@@ -1366,6 +1375,15 @@ def _standard_workload_exec_completed(payload: bytes, returncode: int | None) ->
         and type(records[1]["exit-code"]) is int
         and (returncode is None or records[1]["exit-code"] == returncode)
     )
+
+
+def _standard_system_roots() -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for value in _STANDARD_RUNTIME_DIRECTORIES:
+        path = Path(value).resolve()
+        if path.is_dir() and not any(path.is_relative_to(root) for root in roots):
+            roots.append(path)
+    return tuple(roots)
 
 
 def _standard_system_binds() -> tuple[str, ...]:
