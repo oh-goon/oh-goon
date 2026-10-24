@@ -26,7 +26,7 @@ questions:
   severity: critical
   expected_claims:
   - id: concept
-    statement: --all-repositories is an explicit operator decision for plan run. Empty/omitted repository scope must never be interpreted as all repositories; plan run retains explicit Shared Run target scope.
+    statement: run.yml target.repository_id explicitly selects one registered repository. Empty or omitted target scope refuses and must never expand to all repositories; Shared Run service/API operations retain their own explicit reviewed target set.
     critical: true
   - id: ownership_boundary
     statement: Destructive/effectful target scope must be explicit.
@@ -125,7 +125,7 @@ questions:
   severity: critical
   expected_claims:
   - id: concept
-    statement: --all-repositories is an explicit operator decision for plan run. Empty/omitted repository scope must never be interpreted as all repositories; plan run retains explicit Shared Run target scope.
+    statement: run.yml target.repository_id explicitly selects one registered repository. Empty or omitted target scope refuses and must never expand to all repositories; Shared Run service/API operations retain their own explicit reviewed target set.
     critical: true
   - id: ownership_boundary
     statement: Destructive/effectful target scope must be explicit.

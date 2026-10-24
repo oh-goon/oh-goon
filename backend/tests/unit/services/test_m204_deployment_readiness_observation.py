@@ -111,7 +111,7 @@ def test_untrusted_deployment_probe_fails_closed_before_any_work(tmp_path, monke
         conn.close()
 
 
-def test_readiness_does_not_enter_cli_or_create_ambient_deployment(monkeypatch):
+def test_readiness_does_not_enter_cli_or_create_ambient_deployment(tmp_path, monkeypatch):
     from oh_goon import cli
 
     monkeypatch.setenv("OH_GOON_FLEET_PROVISIONER", "fake")
@@ -129,20 +129,10 @@ def test_readiness_does_not_enter_cli_or_create_ambient_deployment(monkeypatch):
         ),
     )
     monkeypatch.setattr(cli, "_execute_stateful_command", lambda _runtime, _args: 2)
-    assert (
-        cli.main(
-            [
-                "plan",
-                "run",
-                "missing.yml",
-                "--repository-id",
-                "repo-1",
-                "--fleet-run-id",
-                "durable-run",
-            ]
-        )
-        == 2
-    )
+    from tests.factories.run_configuration import write_run_configuration
+
+    configuration = write_run_configuration(tmp_path, monkeypatch)
+    assert cli.main(["run", str(configuration), "--fleet-run-id", "durable-run"]) == 2
     assert observed == ["standard-local"]
 
 

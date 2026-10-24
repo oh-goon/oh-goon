@@ -1826,10 +1826,10 @@ questions:
   - id: concept
     statement: Certification must not mutate the checkout merely to carry generated execution identity. Backend certification bootstrap owns an
       isolated state root and a dedicated lock directory there. The workflow generates the exact `goon.lock` for the resolved APP/release Plan
-      into that state-owned path with `oh-goon lock --output`, then passes the same path explicitly to `oh-goon plan run --lock-file`. Fleet still
+      into that state-owned path through the owner-controlled internal lock command, then passes the same path explicitly to the internal certification Run command. Fleet still
       resolves the current source, loads the supplied lock, recomputes the expected execution fingerprint and fails closed on missing, malformed,
-      stale or tampered identity; the explicit path changes storage ownership, not locked-execution semantics. Normal interactive `oh-goon lock`
-      retains the source-adjacent default. A raw `[Errno 5] Input/output error` represents physical/storage failure and is therefore environment-classified
+      stale or tampered identity; the explicit path changes storage ownership, not locked-execution semantics. Normal interactive `oh-goon lock run.yml`
+      writes the lock beside the selected configuration. A raw `[Errno 5] Input/output error` represents physical/storage failure and is therefore environment-classified
       rather than being asserted to be an application/source defect.
     critical: true
   - id: ownership_boundary

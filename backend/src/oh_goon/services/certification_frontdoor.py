@@ -245,7 +245,7 @@ def _deployment_context_mismatch(
 
 
 def _canonical_app_handoff_args(args: list[str]) -> bool:
-    """Only the fixed workflow APP grammar may reach the original Fleet CLI.
+    """Only the fixed internal workflow APP grammar may reach Fleet.
 
     No caller-provided options, duplicate Run IDs, extra inputs or an alternate
     Plan/lock can replace the precise M205 in-process handoff.
@@ -253,7 +253,7 @@ def _canonical_app_handoff_args(args: list[str]) -> bool:
     if (
         type(args) is not list
         or len(args) != 9
-        or args[:4] != ["plan", "run", APP_PLAN, "--repository-id"]
+        or args[:4] != ["dev", "_run-plan", APP_PLAN, "--repository-id"]
         or args[5] != "--lock-file"
         or args[7:] != ["--wait", "--repair-handoff"]
     ):
@@ -273,7 +273,7 @@ def _run_deployment_plan(
     fleet_provisioner: object,
     fleet_run_id: str,
 ) -> tuple[int, str]:
-    """Transport original Fleet custody into the *same* process's Plan CLI.
+    """Transport original Fleet custody into the same process's internal command.
 
     The bootstrap-proven database and League identities must already match the
     deployment's process-owned runtime selection. Never update os.environ

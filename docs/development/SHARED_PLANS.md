@@ -53,11 +53,12 @@ Examples:
 ```bash
 oh-goon shared-plan templates
 oh-goon shared-plan from-template security/trivy-audit nightly-security
-oh-goon shared-plan preview nightly-security --all-teams
-oh-goon shared-plan run nightly-security --all-teams
 ```
 
-The explicit local key in the second command is required; Oh-Goon does not invent one from the template path.
+The explicit local key is required; Oh-Goon does not invent one from the template
+path. Preview/run selections for saved Shared Plans remain UI/service operations.
+Normal CLI execution uses `oh-goon run run.yml`; it does not retain the former
+Shared Plan launch flags as an alternate configuration path.
 
 ## One execution engine
 

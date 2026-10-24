@@ -68,17 +68,18 @@ class FleetToolStore:
             lock_sha256 = sha256_file(lockfile)
         except OSError as exc:
             raise FleetPlanInvalid(
-                f"Pinned pre-commit runtime is not prepared; run 'oh-goon plan prepare <plan.yml>': {exc}"
+                f"Pinned pre-commit runtime is not prepared; prepare the original managed runtime "
+                f"through FleetPlanService.prepare before locking: {exc}"
             ) from exc
         expected = _project_text(requirement).encode("utf-8")
         if pyproject_bytes != expected:
             raise FleetPlanInvalid(
-                "Prepared pre-commit runtime metadata changed; run plan prepare again"
+                "Prepared pre-commit runtime metadata changed; prepare the original managed runtime through FleetPlanService.prepare before locking"
             )
         executable = self.command_path(runtime_id, "pre-commit")
         if not executable.is_file():
             raise FleetPlanInvalid(
-                "Prepared pre-commit executable is missing; run plan prepare again"
+                "Prepared pre-commit executable is missing; prepare the original managed runtime through FleetPlanService.prepare before locking"
             )
         return ManagedToolRuntime(
             runtime_id=runtime_id,
@@ -116,7 +117,7 @@ class FleetToolStore:
             )
             if check.returncode != 0:
                 raise FleetPlanInvalid(
-                    "Prepared pre-commit runtime is stale or incomplete; run plan prepare again"
+                    "Prepared pre-commit runtime is stale or incomplete; prepare the original managed runtime through FleetPlanService.prepare before locking"
                 )
             executable = self.command_path(runtime_id, "pre-commit")
             if not executable.is_file():

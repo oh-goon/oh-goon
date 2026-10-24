@@ -340,7 +340,7 @@ def test_cli_direct_quarantine_is_a_clean_domain_failure(tmp_path: Path, capsys)
 
     runtime = SimpleNamespace(operations=OperationStub())
     args = SimpleNamespace(
-        command="run",
+        command="operation",
         repository=tmp_path / "repo",
         action=OperationAction.UPDATE.value,
         as_json=False,

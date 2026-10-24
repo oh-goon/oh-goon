@@ -14,16 +14,21 @@ from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 
 
 def _args(*flags: str):
-    return build_parser().parse_args(
+    # Direct handler proof uses the owner-only resolved invocation transport.
+    args = build_parser().parse_args(
         [
-            "plan",
-            "run",
+            "dev",
+            "_run-plan",
             "some-plan.yml",
             "--repository-id",
             "repo-1",
+            "--lock-file",
+            "goon.lock",
             *flags,
         ]
     )
+    args.command, args.plan_command = "plan", "run"
+    return args
 
 
 class _Plans:
@@ -123,3 +128,18 @@ def test_async_human_run_reports_the_admitted_run(capsys):
         "Plan ID: plan-sha",
         "Status: QUEUED",
     ]
+
+
+def test_wait_interruption_requests_original_durable_cancellation(monkeypatch, capsys):
+    from unittest.mock import Mock
+
+    from oh_goon import cli_runtime_plans as command
+
+    runtime = _runtime()
+    runtime.runs.cancel = Mock()
+    monkeypatch.setattr(
+        command, "_wait_for_terminal_with_progress", Mock(side_effect=KeyboardInterrupt)
+    )
+    assert _run(runtime, _args("--json")) == 130
+    runtime.runs.cancel.assert_called_once_with("fleet-1")
+    assert json.loads(capsys.readouterr().out)["status"] == "interrupted"

@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from oh_goon.cli_plan_input_files import read_caller_input_file
 from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from oh_goon.services.run_configuration import load_run_configuration
 from tests.factories.agent_review import agent_review_case
 from tests.factories.shipped_templates import AGENT_PLAN_TEMPLATES
 
@@ -366,19 +366,28 @@ def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
     for key in plans.keys():
         source = plans.source(key)
         guide = source.path.with_name("README.md").read_text()
-        example = re.search(r"```yaml\n(inputs:.*?\n)```", guide, re.S)
+        example = re.search(r"```yaml\n(version: 1\nsource:.*?\n)```", guide, re.S)
         if example is None:
             assert not resolver.inspect_inputs(source.path), key
             resolver.resolve(source.path)
             continue
-        values = tmp_path / "values.yml"
-        values.write_text(example.group(1))
-        snapshot = read_caller_input_file(values, root=tmp_path)
+        selection = tmp_path / "run.yml"
+        selection.write_text(example.group(1))
+        snapshot = load_run_configuration(selection)
+        assert snapshot.source_path(plan_templates=plans) == source.path
         if key in AGENT_PLAN_TEMPLATES:
             agent_resolver, path, repository, options = agent_review_case(
                 tmp_path / key, plan_template=key
             )
-            options["inputs"] = snapshot.values()
+            options["inputs"] = snapshot.inputs
+            # The README selects project-owned scripts; supply those real fixture
+            # executables rather than changing the documented input selection.
+            for command in ("regression_command", "verification_command"):
+                if relative := snapshot.inputs.get(command):
+                    script = repository / str(relative)
+                    script.parent.mkdir(parents=True, exist_ok=True)
+                    script.write_bytes((repository / "check").read_bytes())
+                    script.chmod(0o755)
             from oh_goon.core.models.agent_providers import (
                 NativeAgentDefinition,
                 NativeAgentProfile,
@@ -410,7 +419,7 @@ def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
                 options["allowed_acceptance"] = ("agentic-review", "native-coding")
             resolved, _, _ = agent_resolver.resolve_frozen_agents(path, **options)
         else:
-            resolved = resolver.resolve(source.path, inputs=snapshot.values())
+            resolved = resolver.resolve(source.path, inputs=snapshot.inputs)
         assert resolved.steps, key
 
 

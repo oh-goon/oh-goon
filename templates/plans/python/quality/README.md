@@ -1,44 +1,40 @@
 # python/quality
 
-Run formatting, lint, one selected type checker and tests using native project configuration. Start here for an ordinary local Python workflow.
+Check formatting, lint, one selected type checker and tests using native project configuration.
 
-## Before you run
+**Status:** runnable with prerequisites. **Effects:** Reads project source and writes the declared test report.
 
-The selected locked project/group must provide the commands used by the chosen Goons.
+**Prerequisites:** A committed `pyproject.toml` and native `uv.lock`; the selected group must supply Ruff, pytest and the chosen type checker. Prepare it with native `uv sync --locked --group dev` in the selected project.
 
-## Use this Plan
+**What to edit:** initialize a workflow, then set the registered target and relevant caller choices in `workflow/run.yml`. The illustrative addresses, revision and digest below must identify your real workload before execution. The [first-run guide](../../../README.md) explains repository registration and prepared CLI use.
+
+**Settings owner:** [`plan.yml`](plan.yml) owns ordered imports; imported Goons own input types/defaults, Steps, effects and outputs. `run.yml` selects values. Native project tools keep their own configuration.
 
 ```sh
-oh-goon templates show python/quality --kind plan
-oh-goon plan inputs templates/plans/python/quality/plan.yml
+oh-goon templates init python/quality --output ./workflow
 ```
 
-Copy with `oh-goon templates show python/quality --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
-
-## Configure a copy
-
-The default Plan is just:
+Edit the generated `workflow/run.yml`; this shows one explicit selection:
 
 ```yaml
 version: 1
-goons:
-- python/quality
-```
-
-Its public inputs are available automatically; the Plan repeats no input declarations or forwarding. For a fixed override, replace the plain import with `import: python/quality` and `with: {typechecker: ty}`. Fixed bindings are excluded from automatic caller overrides. To choose values per run, keep the plain import and use caller values below.
-
-Save these choices as `values.yml`. Omitted optional inputs keep their Goon defaults; native project configuration still owns test and lint policy.
-
-```yaml
+source: {kind: catalog-plan, name: python/quality}
+target: {repository_id: REPOSITORY_ID}
 inputs:
+  project: .
+  dependency_group: dev
   typechecker: ty
 ```
 
-Validate and lock the same selection:
-
 ```sh
-oh-goon plan validate plan.yml --inputs-file values.yml
-oh-goon lock plan.yml --inputs-file values.yml
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
 ```
 
-Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.
+**Expected outputs:** `junit.xml` in the selected project is evidence. Native Ruff/type-checker/pytest exits determine Step outcomes.
+
+**Failures:** invalid inputs fail before work. Inspection/validation do not prove installed tools, reachable services or successful effects. Native failures remain failed Steps with their exit status and logs. A changed source or execution selection requires a new lock.
+
+**Customize:** change caller values in `run.yml`. For structural changes, create a project Plan with ordinary ordered `goons:` imports and select it with `source: {kind: file-plan, path: plan.yml}`; see [Plan authoring](../../README.md). Keep secrets in declared execution environment bindings.

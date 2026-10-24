@@ -5,26 +5,83 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 from collections import Counter
 from pathlib import Path
 
+from oh_goon.core.template_identity import template_classification, template_usage
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
+from oh_goon.runtime.template_discovery import template_readme_description
 
 _LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^\)]+)\)")
 _LEXICAL = ("pass", "with", "from", "run", "uses", "inputs", "outputs", "goons", "steps")
+_EXAMPLE_CLASSIFICATIONS = frozenset(
+    {
+        "runnable-with-prerequisites",
+        "preview-only-fixture",
+        "integration-fixture",
+        "source-capture-fixture",
+        "configuration-example",
+    }
+)
+
+
+def _source_revision(root: Path) -> dict[str, str | bool | None]:
+    revision = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    dirty = subprocess.run(
+        ["git", "-C", str(root), "diff", "--quiet", "HEAD", "--"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return {
+        "commit": revision.stdout.strip() if revision.returncode == 0 else None,
+        "tracked_worktree_changed": dirty.returncode != 0 if revision.returncode == 0 else None,
+        "qualification": "source census only; no execution or usability claim",
+    }
+
+
+def _example_inventory(root: Path) -> list[dict]:
+    records = []
+    for directory in sorted((root / "examples").iterdir()):
+        if not directory.is_dir():
+            continue
+        readme = directory / "README.md"
+        content = readme.read_text(encoding="utf-8") if readme.is_file() else ""
+        match = re.search(r"(?mi)^Classification:\s*([a-z-]+)\s*$", content)
+        classification = match.group(1) if match else "unclassified"
+        records.append(
+            {
+                "name": directory.name,
+                "readme_path": readme.relative_to(root).as_posix(),
+                "readme_present": readme.is_file(),
+                "documented_classification": classification,
+                "classification_recognized": classification in _EXAMPLE_CLASSIFICATIONS,
+                "selection_present": (directory / "run.yml").is_file(),
+                "qualification": "documentation classification; execution not established",
+            }
+        )
+    return records
 
 
 def collect(root: Path) -> dict:
     root = root.resolve()
-    records, links, totals = [], [], Counter()
+    records: list[dict] = []
+    links: list[dict] = []
+    totals: Counter[str] = Counter()
     for kind, store in (
         ("goon", GoonTemplateStore(root / "templates/goons")),
         ("plan", PlanTemplateStore(root / "templates/plans")),
     ):
         for key in store.keys():
             snap = store.source(key)  # original source reader and canonical compiler
-            doc = store.read(key)
             compiled = snap.compiled
             steps = [
                 {
@@ -46,13 +103,29 @@ def collect(root: Path) -> dict:
                 {
                     "kind": kind,
                     "key": key,
-                    "classification": str(doc.classification),
+                    "classification": str(template_classification(key, kind=kind.title())),
+                    "purpose": template_readme_description(snap.path.parent, kind=kind.title()),
                     "source_path": snap.path.relative_to(root).as_posix(),
                     "root_source_sha256": snap.sha256,
                     "inputs_defined": [x.name for x in compiled.inputs],
                     "inputs_projected": list(compiled.projected_inputs),
                     "ordered_steps": steps,
                     "outputs": outputs,
+                    "declared_requirements": [
+                        x.model_dump(mode="json") for x in compiled.requirements
+                    ],
+                    "execution": compiled.execution.model_dump(mode="json")
+                    if compiled.execution
+                    else None,
+                    "step_capabilities": [
+                        {
+                            "id": step.step_id,
+                            "capabilities": step.capabilities.model_dump(mode="json"),
+                        }
+                        for step in compiled.steps
+                        if hasattr(step, "capabilities")
+                    ],
+                    **template_usage(template_classification(key, kind=kind.title())),
                     "repeated_import_packages": sorted(
                         x for x, c in Counter(refs).items() if c > 1
                     ),
@@ -93,12 +166,17 @@ def collect(root: Path) -> dict:
                     {"source": readme.relative_to(root).as_posix(), "target": raw, "status": status}
                 )
     totals["unresolved_readme_links"] = sum(x["status"] != "OK" for x in links)
+    examples = _example_inventory(root)
+    totals["example_directories"] = len(examples)
+    totals["unclassified_examples"] = sum(not x["classification_recognized"] for x in examples)
     return {
-        "schema": "oh-goon.template-ux-a-inventory/v1",
+        "schema": "oh-goon.template-ux-a-inventory/v2",
+        "source_revision": _source_revision(root),
         "basis": "canonical shipped template stores / compile snapshots",
         "limitation": "lexical occurrence counts are authoring measurements, not semantic parsing",
         "metrics": dict(sorted(totals.items())),
         "packages": sorted(records, key=lambda p: (p["kind"], p["key"])),
+        "examples": examples,
         "readme_links": sorted(links, key=lambda p: (p["source"], p["target"])),
     }
 
@@ -112,7 +190,13 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(data["metrics"], sort_keys=True))
-    return 0 if data["packages"] and data["metrics"].get("unresolved_readme_links") == 0 else 2
+    return (
+        0
+        if data["packages"]
+        and data["metrics"].get("unresolved_readme_links") == 0
+        and data["metrics"].get("unclassified_examples") == 0
+        else 2
+    )
 
 
 if __name__ == "__main__":

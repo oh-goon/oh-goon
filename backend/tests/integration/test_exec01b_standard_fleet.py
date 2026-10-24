@@ -213,18 +213,21 @@ def test_cli_explicit_standard_local_wait_runs_and_prints_terminal_tape(
         registration.locations.add(repo.parent)
     finally:
         registration.shutdown(wait_for_runs=True)
-    result = main(
-        [
-            "plan",
-            "run",
-            str(repo / "goon.yml"),
-            "--repository-id",
-            repository_id(repo),
-            "--standard-local",
-            "--wait",
-            "--json",
-        ]
+    import yaml
+
+    configuration = tmp_path / "run.yml"
+    configuration.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "repository-goon"},
+                "target": {"repository_id": repository_id(repo)},
+            }
+        )
     )
+    assert main(["lock", str(configuration)]) == 0
+    capsys.readouterr()
+    result = main(["run", str(configuration), "--json"])
     captured = capsys.readouterr()
     assert result == 0
     payload = json.loads(captured.out.strip())
@@ -242,9 +245,12 @@ def test_local_cli_rejects_background_invocation_before_runtime(
 ):
     from oh_goon.cli import main
 
-    repo = _repo(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "oh_goon.cli._build_application_runtime",
+        lambda **kw: pytest.fail("unsupported background launch reached runtime"),
+    )
     with pytest.raises(SystemExit) as failed:
-        main(["plan", "run", str(repo / "goon.yml"), "--all-repositories", "--no-wait"])
+        main(["run", str(tmp_path / "run.yml"), "--no-wait"])
     assert failed.value.code == 2
 
 

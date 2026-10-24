@@ -35,7 +35,7 @@ Repository-owned `goon.yml` is irrelevant to Lineup membership. The Lineup may c
 
 ## Preview is the same Enforcer boundary
 
-`shared-plan preview` resolves the selected Shared Plan `plan.yml` once and applies that exact immutable Plan to each selected Team through `FleetPlanService.preview_resolved()`, which calls the canonical read-only plan preview directly.
+The Shared Plan preview service resolves the selected Shared Plan `plan.yml` once and applies that exact immutable Plan to each selected Team through `FleetPlanService.preview_resolved()`, which calls the canonical read-only plan preview directly.
 
 That means preview checks the same declared admission and repository requirements that Game Start will use. Preview is read-only and never starts a FleetRun.
 
@@ -60,11 +60,12 @@ oh-goon lineup save backend \
 
 oh-goon lineup inspect backend
 
-oh-goon shared-plan preview python-quality --lineup backend
-oh-goon shared-plan run python-quality --lineup backend
 ```
 
-For one-off selections, use repeated `--team` instead. `--team` and `--lineup` are intentionally mutually exclusive so the effective selection is obvious.
+The browser/API consumes the saved Lineup plus one explicit Shared Plan under
+the original reviewed-identity and freshness contract. Normal CLI execution
+uses one selected `run.yml` and registered repository ID; it does not turn a
+Lineup into an implicit fleet iterator or a second launch route.
 
 ## Sources of truth
 

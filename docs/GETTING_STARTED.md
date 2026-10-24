@@ -63,40 +63,36 @@ For a built release, use that same release binary: `oh-goon local-state check`, 
 
 For checks you want to repeat across repositories, save a normal `plan.yml` as a Shared Plan rather than copying execution definitions into every repository. Creating from a shipped Plan template is explicit, and the saved Plan survives restarts and disposable DB resets.
 
-```bash
-oh-goon shared-plan from-template security/trivy-audit nightly-security
-oh-goon shared-plan run nightly-security --all-teams
-```
+Shared Plan editing and multi-repository selection remain explicit UI/service
+operations. Normal CLI setup selects a registered target in one `run.yml`; it
+never infers a fleet from an empty target or merges a target's repository Goon.
 
-`--all-teams` means every current managed Git Team. The selected Team IDs are fixed for that run and their repository-owned `goon.yml` files are not read as pipeline sources.
-
-## Agentic Run results
-
-For ordinary explicitly selected local Plan execution, the CLI provides
-`plan run --standard-local --wait --json`. It uses the existing Fleet lifecycle
-on the local host and does not claim a sandbox. Agent runs additionally require
-explicit repository/Skill roots and an allowed acceptance profile; see
-[Agent Skills](AGENT_SKILLS.md) for the current bounded capabilities.
-
-An enrolled deployment can also request one JSON result from the existing Fleet
-Run owner, without a separate result parser or executor:
+## Select and run a workflow
 
 ```bash
-oh-goon plan run plan.yml --repository-id REPOSITORY_ID \
-  --fleet-run-id ENROLLED_RUN_ID --json
+oh-goon templates list --kind plan
+oh-goon templates init python/quality --output ./workflow
+# Edit workflow/run.yml with the registered repository ID and desired inputs.
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml --json
 ```
 
-Use `--wait` for the original terminal outcome in the JSON response; transient
-progress is written to stderr. This command **does not enroll a Run**: the
-Run must already be authorized by the original deployment Enforcer.
-The JSON result does not certify native containment or release gates. This
-deployment-enrollment requirement is specific to the deployment path above;
-`--standard-local --wait` selects the separate local execution profile in the
-same Fleet lifecycle.
+The CLI waits for the original terminal outcome. Inspection/validation do not
+execute work or prove native availability. A valid lock freezes the selected
+identity; fresh admission still owns permissions and source freshness. Agent
+workflows additionally select their relevant groups in that same config; see
+[run configuration](development/TEMPLATE_INPUT_INSPECTION.md) and
+[Agent Skills](AGENT_SKILLS.md).
+
+Internal APP/release and enrolled deployment flows use their original
+owner-controlled frontdoors; the ordinary selection file does not grant their
+privileged custody or turn a Run result into a certification claim.
 
 ## Inspect an admitted Fleet Run (RUN-2)
 
-After a `plan run --json` returns the enrolled `fleet_run_id`, query the
+After a `run run.yml --json` returns the `fleet_run_id`, query the
 existing journal/Game Tape owners without re-running the Plan:
 
 ```bash

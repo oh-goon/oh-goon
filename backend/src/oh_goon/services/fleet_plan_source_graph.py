@@ -9,6 +9,8 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import (
     CompiledExecutionTemplate,
     CompiledGoonImportStep,
+    ExtensionPlanStep,
+    PlanStep,
     PreCommitPlanStep,
 )
 from oh_goon.core.path_authority import ContainedPathSpace, canonical_path, navigation_path
@@ -104,6 +106,47 @@ class FleetPlanSourceGraph:
 
         walk(self.root)
         return tuple(found)
+
+    def validate_agent_selection(
+        self, *, native_selected: bool, require_review_phases: bool | None = None
+    ) -> None:
+        """Refuse source/selection conflicts before registry acquisition or model capture."""
+        from oh_goon.core.agent_review_plan import validate_agent_phase_steps
+        from oh_goon.core.models.fleet_plan import AgentPlanStep
+
+        steps: dict[str, PlanStep] = {}
+        owners: dict[str, str] = {}
+        agent_steps: list[AgentPlanStep] = []
+
+        def walk(node: FleetPlanSourceNode, lineage: str, inherited: str | None) -> None:
+            for step in node.compiled.steps:
+                identifier = f"{lineage}.{step.step_id}" if lineage else step.step_id
+                if isinstance(step, CompiledGoonImportStep):
+                    if inherited is not None and step.phase is not None:
+                        raise FleetPlanInvalid(
+                            "Agent phases overlap; label an import or its children, not both"
+                        )
+                    walk(self.goon(node.path, step), identifier, step.phase or inherited)
+                else:
+                    steps[identifier] = step
+                    if inherited is not None:
+                        owners[identifier] = inherited
+                    if isinstance(step, AgentPlanStep):
+                        agent_steps.append(step)
+
+        walk(self.root, "", None)
+        if not agent_steps:
+            raise FleetPlanInvalid("Agent selection requires authored Agent Steps")
+        if any((step.harness == "native") != native_selected for step in agent_steps):
+            raise FleetPlanInvalid(
+                "Selected native/provider agent differs from the authored harness"
+            )
+        if require_review_phases is False and owners:
+            raise FleetPlanInvalid(
+                "Authored bounded repair phases require the repair selection group"
+            )
+        if require_review_phases:
+            validate_agent_phase_steps(steps, owners)
 
     def node(self, path: Path) -> FleetPlanSourceNode:
         node = self._nodes.get(canonical_path(path))
@@ -217,8 +260,8 @@ def _visit_source(
         )
 
 
-def _record_runtime_requirement(step, build: _SourceGraphBuild) -> None:
-    if getattr(step, "kind", None) == "extension":
+def _record_runtime_requirement(step: PlanStep, build: _SourceGraphBuild) -> None:
+    if isinstance(step, ExtensionPlanStep):
         name = step.extension
         if name not in build.seen_extensions:
             build.seen_extensions.add(name)

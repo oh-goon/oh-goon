@@ -2,14 +2,17 @@
 
 Verifies that one Deployment reaches the exact generation and immutable image produced by the preceding set-image Goon.
 
-## Use this Goon
+**Status:** runnable with prerequisites. **Effects:** Reads rollout state for an exact expected generation and image.
 
-```sh
-oh-goon templates show kubernetes/rollout-verify --kind goon
-oh-goon plan inputs templates/goons/kubernetes/rollout-verify/goon.yml
-```
+**Prerequisites:** Exact producer generation/image inputs, API target and declared host token/CA bindings.
 
-Use `goons: [kubernetes/rollout-verify]` in a Plan to keep the Goon defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed values, renamed inputs or producer references; route shared names explicitly with `pass:`/`with:`. A Composite Goon declares which child inputs it exposes. The [authoring guide](../../../README.md) shows values files, explicit local sources and how to append Steps to your own Atomic Goon.
+**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+
+**Expected outputs:** Actual rollout verification; unavailable API cannot establish readiness.
+
+**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
+
+**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
 
 Select the exact API hostname, namespace, Deployment and container. Supply the declared token and CA certificate through host-backed environment authority. Image updates require a digest-qualified image; rollout verification consumes the exact expected generation and image. Inspect the Run for the actual mutation/verification result.
 

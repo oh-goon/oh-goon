@@ -47,3 +47,28 @@ symlink alias rejection and summary/read identity convergence.
 See [template input resolution and transport](TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md)
 for how a selected Plan moves from catalog visibility into production admission.
 Catalog ordering never creates execution authority.
+
+## Complete source census
+
+The existing `oh-goon-template-ux-a-inventory` diagnostic enumerates every Plan
+and Goon through these same stores and every current `examples/` directory.
+Run it from the exact initialized checkout and keep its report outside source:
+
+```sh
+uv run --offline --frozen --no-sync --project backend oh-goon-template-ux-a-inventory \
+  --root . --output /tmp/oh-goon-template-inventory.json
+```
+
+The versioned report includes the observed Git commit, tracked-worktree change
+state, source-byte digests, category classification, compiled direct imports,
+requirements, declared capabilities and outputs, README presence and example
+classification. Counts come from the detected membership, not a frozen count
+allowlist. New/unclassified examples make census coverage incomplete. Example
+README classifications describe their proof scope; they do not decide
+executable behavior or native readiness. The census reads each package source
+once and projects its canonical compiled snapshot.
+
+A commit label alone does not describe uncommitted edits. File digests identify
+the observed source cut; this diagnostic is not an atomic admission snapshot,
+Run receipt, external-service probe or usability trial. Historical UX evaluations
+retain their original counts and conditions.

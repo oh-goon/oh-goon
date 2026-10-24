@@ -164,7 +164,7 @@ class FleetExtensionStore:
         if not destination.is_dir():
             raise FleetExtensionInvalid(
                 f"Extension {declaration.name} revision {declaration.revision} is not imported; "
-                "run 'oh-goon plan prepare <plan.yml> --extensions <catalog.toml>' first"
+                "prepare the original managed runtime through FleetPlanService.prepare before locking"
             )
         return self._validate_checkout(destination, declaration, source, extension_id)
 
@@ -175,7 +175,7 @@ class FleetExtensionStore:
             if not environment_path.is_dir():
                 raise FleetExtensionInvalid(
                     f"Managed extension runtime is not prepared for {extension_id}; "
-                    "run 'oh-goon plan prepare <plan.yml> --extensions <catalog.toml>'"
+                    "prepare the original managed runtime through FleetPlanService.prepare before locking"
                 )
             native_uv = capture_native_uv_authority()
             result = _check_environment(

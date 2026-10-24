@@ -1,0 +1,12 @@
+version: 1
+source: {kind: catalog-plan, name: agents/native-review}
+target: {repository_id: REPOSITORY_ID}
+inputs:
+  repo: local:my-project
+  skill: cookbook/codebase-finding-derivation
+agent:
+  implementation: pi
+  profile: isolated-managed
+  acceptance: agentic-review
+  repository_root: /approved/repositories
+  skill_root: .

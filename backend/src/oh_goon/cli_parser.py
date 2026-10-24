@@ -139,31 +139,8 @@ def _add_storage_commands(
 def _add_direct_repository_commands(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    lock = subparsers.add_parser(
-        "lock", help="Generate deterministic goon.lock for one resolved plan.yml or goon.yml"
-    )
-    lock.add_argument("plan", type=Path, help="Plan/Goon entrypoint to resolve")
-    lock.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
-    lock.add_argument("--inputs-file", type=Path)
-    lock.add_argument("--agent-repository-root", type=Path)
-    lock.add_argument("--agent-skill-root", type=Path)
-    lock.add_argument("--allow-agent-acceptance", action="append")
-    lock.add_argument("--agent-model-profile")
-    lock.add_argument("--agent-providers-file", type=Path)
-    from oh_goon.cli_ai import add_native_plan_arguments
-
-    add_native_plan_arguments(lock)
-    lock.add_argument(
-        "--update-skills",
-        action="store_true",
-        help="Resolve declared Skill branches/tags again and replace their locked commits",
-    )
-    lock.add_argument(
-        "--output", type=Path, help="Output path; defaults to goon.lock beside the entrypoint"
-    )
-
     run = subparsers.add_parser(
-        "run", help="Run one canonical operation directly on one repository"
+        "operation", help="Run one native repository operation with its own operation identity"
     )
     run.add_argument(
         "action",
@@ -247,20 +224,6 @@ def _add_shared_plan_commands(
         "--expected-revision",
         help="Exact SHA-256 from shared-plan list --json when replacing an existing Shared Plan",
     )
-    preview = commands.add_parser(
-        "preview", help="Run the read-only Enforcer preview for one shared Plan and explicit Teams"
-    )
-    preview.add_argument("plan_key")
-    _add_shared_plan_repository_selection(preview)
-    preview.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
-    preview.add_argument("--json", action="store_true", dest="as_json")
-    run = commands.add_parser("run", help="Run one Shared Plan on explicitly selected League Teams")
-    run.add_argument("plan_key")
-    _add_shared_plan_repository_selection(run)
-    run.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
-    run.add_argument("--fleet-run-id")
-    run.add_argument("--priority", type=SchedulingPriority, default=SchedulingPriority.NORMAL)
-    run.add_argument("--json", action="store_true", dest="as_json")
 
 
 def _add_shared_plan_repository_selection(parser: argparse.ArgumentParser) -> None:
@@ -303,17 +266,7 @@ def _add_team_commands(
         "validate", help="Resolve the repository-root goon.yml without executing it"
     )
     validate.add_argument("repository", type=Path, nargs="?", default=Path())
-    validate.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
     validate.add_argument("--json", action="store_true", dest="as_json")
-    run = commands.add_parser(
-        "run",
-        help="Run exactly one Team through its repository-root goon.yml and wait for completion",
-    )
-    run.add_argument("repository", type=Path, nargs="?", default=Path())
-    run.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
-    run.add_argument("--fleet-run-id")
-    run.add_argument("--priority", type=SchedulingPriority, default=SchedulingPriority.NORMAL)
-    run.add_argument("--json", action="store_true", dest="as_json")
 
 
 def _add_enforcer_commands(
@@ -329,7 +282,6 @@ def _add_enforcer_commands(
         help="Inspect one Team through the same repository-root goon.yml admission used by CI/CD",
     )
     enforcer_run.add_argument("repository", type=Path, nargs="?", default=Path.cwd())
-    enforcer_run.add_argument("--input", action="append", dest="plan_inputs", metavar="NAME=VALUE")
     enforcer_run.add_argument("--json", action="store_true", dest="as_json")
     enforcer_compare = enforcer_subparsers.add_parser(
         "compare",
@@ -370,6 +322,52 @@ def _add_developer_observation_commands(
 def _add_developer_certification_commands(
     commands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
+    for name in ("_lock-plan", "_run-plan"):
+        command = commands.add_parser(name, help=argparse.SUPPRESS)
+        command.add_argument("plan", type=Path)
+        command.set_defaults(
+            plan_inputs=None,
+            inputs_file=None,
+            extensions=None,
+            agent_repository_root=None,
+            agent_skill_root=None,
+            allow_agent_acceptance=None,
+            native_agent=None,
+            native_workspace=None,
+            native_profile=None,
+            agent_model_profile=None,
+            agent_providers_file=None,
+            repair_attempts=None,
+            review_passes=None,
+            repair_write_root=None,
+            repair_timeout=None,
+            repair_step_timeout=None,
+            all_repositories=False,
+            priority=SchedulingPriority.NORMAL,
+            update_skills=False,
+        )
+        if name == "_lock-plan":
+            command.add_argument("--output", type=Path, required=True)
+        else:
+            command.add_argument(
+                "--repository-id", action="append", dest="repository_ids", required=True
+            )
+            command.add_argument("--fleet-run-id")
+            command.add_argument("--lock-file", type=Path, required=True)
+            command.add_argument("--wait", action=argparse.BooleanOptionalAction, default=True)
+            command.add_argument("--repair-handoff", action="store_true")
+            command.add_argument("--json", action="store_true", dest="as_json")
+            profile = command.add_mutually_exclusive_group()
+            profile.add_argument(
+                "--standard-local",
+                action="store_const",
+                const=True,
+                default=None,
+                dest="standard_local",
+            )
+            profile.add_argument(
+                "--strict", action="store_const", const=False, dest="standard_local"
+            )
     for name in (
         "bootstrap-certification",
         "preflight-certification-database",

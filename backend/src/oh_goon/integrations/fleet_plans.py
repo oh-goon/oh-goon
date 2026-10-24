@@ -207,6 +207,7 @@ class FleetPlanRunner:
             if target.agent_deliveries
             else None,
             repair_context=target.agent_repair,
+            execution_target=target,
             execution_limits=target.agent_repair.limits
             if target.agent_repair is not None
             else None,

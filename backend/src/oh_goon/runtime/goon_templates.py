@@ -117,6 +117,7 @@ class GoonTemplateStore:
             sha256=snapshot.sha256,
             compiled=compiled,
             step_positions=snapshot.step_positions,
+            document=snapshot.document,
             value_positions=snapshot.value_positions,
         )
 

@@ -29,7 +29,7 @@ from oh_goon.core.models.caller_input_file import (
     ScheduledCallerFileReceipt,
 )
 from oh_goon.core.models.execution_identity import ExecutionIdentity
-from oh_goon.core.models.execution_lock_models import ExecutionLock
+from oh_goon.core.models.execution_lock_models import ExecutionLock, LockedExternalArtifact
 from oh_goon.core.models.fleet_plan import (
     MAX_AGENT_TASK_CHARS,
     ManagedExtension,
@@ -61,6 +61,7 @@ from oh_goon.core.models.schedule import (
 )
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
+from oh_goon.core.path_authority import navigation_path
 from oh_goon.core.product_identity import new_fleet_run_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import FleetRunSource
@@ -93,6 +94,7 @@ from oh_goon.services.fleet_plan_resolution_context import (
     AgentConnectionSelection,
 )
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.schedules import ScheduleService
 
@@ -500,9 +502,21 @@ class FleetPlanService:
         extensions_path: Path | None = None,
         inputs: dict[str, PlanInputValue] | None = None,
         output: Path | None = None,
+        external_artifacts: tuple[tuple[str, bytes], ...] = (),
+        caller_input_file: CallerInputFileIdentity | None = None,
+        source_graph: FleetPlanSourceGraph | None = None,
+        repository: Path | None = None,
     ) -> ExecutionLock:
         return _generate_execution_lock(
-            self._resolver, plan_path, extensions_path=extensions_path, inputs=inputs, output=output
+            self._resolver,
+            plan_path,
+            extensions_path=extensions_path,
+            inputs=inputs,
+            output=output,
+            external_artifacts=external_artifacts,
+            caller_input_file=caller_input_file,
+            source_graph=source_graph,
+            repository=repository,
         )
 
     def resolve_locked(
@@ -512,14 +526,21 @@ class FleetPlanService:
         extensions_path: Path | None,
         inputs: dict[str, PlanInputValue] | None,
         lock_path: Path | None = None,
+        external_artifacts: tuple[tuple[str, bytes], ...] = (),
+        source_graph: FleetPlanSourceGraph | None = None,
+        repository: Path | None = None,
     ) -> tuple[ResolvedFleetPlan, str, str]:
-        return _resolve_locked_execution(
+        plan, source_sha256, lock = _resolve_locked_execution(
             self._resolver,
             plan_path,
             extensions_path=extensions_path,
             inputs=inputs,
             lock_path=lock_path,
+            external_artifacts=external_artifacts,
+            source_graph=source_graph,
+            repository=repository,
         )
+        return plan, source_sha256, lock.digest
 
     def prepare_execution_target(
         self,
@@ -533,6 +554,10 @@ class FleetPlanService:
         lock_path: Path | None = None,
         caller_input_file: CallerInputFileIdentity | None = None,
         caller_input_origins: Mapping[str, PlanCallerOrigin] | None = None,
+        external_artifacts: tuple[tuple[str, bytes], ...] = (),
+        repository_goon: bool = False,
+        source_graph: FleetPlanSourceGraph | None = None,
+        repository: Path | None = None,
     ) -> FleetPlanTarget:
         """Authoritative execution-entry boundary: resolve once, verify, then freeze target."""
         return prepare_execution_target(
@@ -546,6 +571,10 @@ class FleetPlanService:
             lock_path=lock_path,
             caller_input_file=caller_input_file,
             caller_input_origins=caller_input_origins,
+            external_artifacts=external_artifacts,
+            repository_goon=repository_goon,
+            source_graph=source_graph,
+            repository=repository,
         )
 
     def prepare_reviewed_execution_target(
@@ -677,11 +706,39 @@ class FleetPlanService:
         agent_connection: AgentConnectionSelection | None = None,
         native_agent: ResolvedNativeAgent | None = None,
         native_workspace: Path | None = None,
+        external_artifacts: tuple[tuple[str, bytes], ...] = (),
+        repository_goon: bool = False,
+        source_graph: FleetPlanSourceGraph | None = None,
+        repository: Path | None = None,
     ) -> FleetRunState:
         # RUN-7: Python/service ingress must not bypass the same original
         # enrolled-Run pre-resolution cut as CLI/HTTP. This checks membership
         # only; the Fleet lifecycle still owns final admission and revocation.
         self.require_plan_ingress_preparation(fleet_run_id)
+        if repository is not None:
+            from oh_goon.core.product_identity import repository_id as identify_context_repository
+
+            if all_repositories or repository_ids != {identify_context_repository(repository)}:
+                raise FleetPlanInvalid("Resolution repository differs from selected Run scope")
+            if native_workspace is not None and repository.resolve() != native_workspace.resolve():
+                raise FleetPlanInvalid(
+                    "Native workspace differs from selected resolution repository"
+                )
+        if source_graph is not None:
+            _selected_source_graph(self._resolver, plan_path, source_graph=source_graph)
+        if repository_goon:
+            from oh_goon.core.product_identity import repository_id as identify_source_repository
+
+            if (
+                plan_path.name != "goon.yml"
+                or all_repositories
+                or repository_ids != {identify_source_repository(plan_path.parent)}
+            ):
+                raise FleetPlanInvalid(
+                    "Repository Goon source requires the exact selected repository root goon.yml"
+                )
+        if caller_input_file is not None:
+            require_caller_file_fresh(caller_input_file)
         if native_workspace is not None and native_agent is None:
             raise FleetPlanInvalid("A native workspace requires its frozen native selection")
         agent_selected = bool(
@@ -713,7 +770,6 @@ class FleetPlanService:
                 or agent_repository_root is None
                 or agent_skill_root is None
                 or not allowed_agent_acceptance
-                or caller_input_file is not None
                 or all_repositories
                 or repository_ids is None
                 or len(repository_ids) != 1
@@ -736,8 +792,10 @@ class FleetPlanService:
                     extensions_path=extensions_path,
                     connection=agent_connection,
                     locked_skills=lock.skill_sources,
+                    require_review_phases=False,
+                    source_graph=source_graph,
                     native_agent=native_agent,
-                    repository=native_workspace,
+                    repository=native_workspace if native_agent is not None else repository,
                     git_service=self._git_service if native_agent is not None else None,
                 )
             else:
@@ -750,6 +808,7 @@ class FleetPlanService:
                     extensions_path=extensions_path,
                     handoff=agent_handoff,
                     locked_skills=lock.skill_sources,
+                    source_graph=source_graph,
                 )
             from oh_goon.core.agent_review_plan import agent_review_phases
 
@@ -791,8 +850,18 @@ class FleetPlanService:
                 raise FleetPlanInvalid(
                     "frozen Agent repository differs from selected Fleet repository"
                 )
-            verify_execution_lock(build_execution_lock(plan), lock)
-            target = self._agent_target(plan, handoff, source_sha256, owner)
+            verify_execution_lock(
+                build_execution_lock(plan, external_artifacts=external_artifacts), lock
+            )
+            target = self._agent_target(
+                plan,
+                handoff,
+                source_sha256,
+                owner,
+                caller_input_file=caller_input_file,
+                repository_goon=repository_goon,
+                lock_artifacts=lock.external,
+            )
         else:
             target = self.prepare_execution_target(
                 plan_path,
@@ -804,6 +873,10 @@ class FleetPlanService:
                 lock_path=lock_path,
                 caller_input_file=caller_input_file,
                 caller_input_origins=caller_input_origins,
+                external_artifacts=external_artifacts,
+                repository_goon=repository_goon,
+                source_graph=source_graph,
+                repository=repository,
             )
         if agent_selected and target.plan.configuration is not None and caller_input_origins:
             target = target.model_copy(
@@ -817,6 +890,8 @@ class FleetPlanService:
                     )
                 }
             )
+        if caller_input_file is not None:
+            require_caller_file_fresh(caller_input_file)
         invocation_source = target.source
         return self._runs.start_prepared_plan(
             target,
@@ -842,9 +917,20 @@ class FleetPlanService:
         owner: str,
         *,
         repair: AgentRepairContext | None = None,
+        caller_input_file: CallerInputFileIdentity | None = None,
+        repository_goon: bool = False,
+        lock_artifacts: tuple[LockedExternalArtifact, ...] = (),
     ) -> FleetPlanTarget:
         if self._content_store is None:
             raise FleetPlanInvalid("frozen Agent delivery requires an available content store")
+        if caller_input_file is not None and plan.configuration is not None:
+            plan = plan.model_copy(
+                update={
+                    "configuration": plan.configuration.with_caller_origins(
+                        {}, caller_file_sha256=caller_input_file.sha256
+                    )
+                }
+            )
         agents = [step for step in plan.steps if isinstance(step, ResolvedLocalSearchAgentStep)]
         deliveries = (
             handoff if isinstance(handoff, dict) else {agent.step_id: handoff for agent in agents}
@@ -865,10 +951,16 @@ class FleetPlanService:
             return FleetPlanTarget(
                 kind="fleet_plan",
                 plan=plan,
-                source=PlanFileSource(sha256=source_sha256),
-                identity=ExecutionIdentity(digest=build_execution_lock(plan).digest),
+                source=(TeamGoonSource if repository_goon else PlanFileSource)(
+                    sha256=source_sha256
+                ),
+                identity=ExecutionIdentity(
+                    digest=build_execution_lock(plan, external_identities=lock_artifacts).digest
+                ),
+                lock_artifacts=lock_artifacts,
                 agent_deliveries=tuple(references),
                 agent_repair=repair,
+                caller_input_file=caller_input_file,
             )
         except Exception as error:
             for reference in references:
@@ -899,6 +991,11 @@ class FleetPlanService:
         agent_connection: AgentConnection | None = None,
         native_agent: ResolvedNativeAgent | None = None,
         native_workspace: Path | None = None,
+        caller_input_file: CallerInputFileIdentity | None = None,
+        external_artifacts: tuple[tuple[str, bytes], ...] = (),
+        repository_goon: bool = False,
+        source_graph: FleetPlanSourceGraph | None = None,
+        repository: Path | None = None,
     ) -> AgentRepairResult:
         """Bounded caller-authorized repair, using only original separately admitted Runs.
 
@@ -906,10 +1003,37 @@ class FleetPlanService:
         only by this frozen budget and unchanged original Plan/Skill configuration.
         No execution lock is rewritten and no independent runner/journal is created.
         """
+        selected_repository = repository
         repair_id = fleet_run_id or new_fleet_run_id()
         if native_workspace is not None and native_agent is None:
             raise FleetPlanInvalid("A native workspace requires its frozen native selection")
         self.require_plan_ingress_preparation(repair_id)
+        if selected_repository is not None:
+            from oh_goon.core.product_identity import repository_id as identify_context_repository
+
+            if identify_context_repository(selected_repository) != repository_id:
+                raise FleetPlanInvalid("Resolution repository differs from selected repair scope")
+            if (
+                native_workspace is not None
+                and selected_repository.resolve() != native_workspace.resolve()
+            ):
+                raise FleetPlanInvalid(
+                    "Native workspace differs from selected resolution repository"
+                )
+        if source_graph is not None:
+            _selected_source_graph(self._resolver, plan_path, source_graph=source_graph)
+        if repository_goon:
+            from oh_goon.core.product_identity import repository_id as identify_source_repository
+
+            if (
+                plan_path.name != "goon.yml"
+                or identify_source_repository(plan_path.parent) != repository_id
+            ):
+                raise FleetPlanInvalid(
+                    "Repository Goon repair requires the exact selected repository root goon.yml"
+                )
+        if caller_input_file is not None:
+            require_caller_file_fresh(caller_input_file)
         if not self._standard_local_fleet or self._content_store is None:
             raise FleetPlanInvalid(
                 "bounded Agent repair requires explicit standard-local execution"
@@ -988,8 +1112,10 @@ class FleetPlanService:
             if agent_connection is not None
             else None,
             locked_skills=lock.skill_sources,
+            require_review_phases=review_write_roots is not None,
+            source_graph=source_graph,
             native_agent=native_agent,
-            repository=native_workspace,
+            repository=native_workspace if native_agent is not None else selected_repository,
             git_service=self._git_service if native_agent is not None else None,
         )
         target_handoff: FrozenAgentStepHandoff | dict[str, FrozenAgentStepHandoff]
@@ -1006,6 +1132,7 @@ class FleetPlanService:
                     capture_options=capture_options,
                     passes=budget.max_attempts,
                     write_roots=review_write_roots,
+                    lock_artifacts=lock.external,
                 )
                 target_handoff = handoffs
             else:
@@ -1018,6 +1145,7 @@ class FleetPlanService:
                     extensions_path=extensions_path,
                     cancel_requested=capture_options["cancel_requested"],
                     locked_skills=lock.skill_sources,
+                    source_graph=source_graph,
                 )
                 target_handoff = single_handoff
         except OperationCancelledError:
@@ -1040,7 +1168,9 @@ class FleetPlanService:
         if identify_repository(repository) != repository_id:
             raise FleetPlanInvalid("repair capture differs from selected Fleet repository")
         steps = validate_agent_repair_plan(plan, single_handoff) if campaign is None else None
-        verify_execution_lock(build_execution_lock(plan), lock)
+        verify_execution_lock(
+            build_execution_lock(plan, external_artifacts=external_artifacts), lock
+        )
         maximum_runs = (
             budget.max_attempts if campaign is None else 4 * (budget.max_attempts - 1) + 2
         )
@@ -1083,8 +1213,17 @@ class FleetPlanService:
                     }
                 )
                 try:
+                    if caller_input_file is not None:
+                        require_caller_file_fresh(caller_input_file)
                     target = self._agent_target(
-                        plan, target_handoff, source_sha, repository_id, repair=repair_context
+                        plan,
+                        target_handoff,
+                        source_sha,
+                        repository_id,
+                        repair=repair_context,
+                        caller_input_file=caller_input_file,
+                        repository_goon=repository_goon,
+                        lock_artifacts=lock.external,
                     )
                 except (OSError, FleetPlanInvalid) as exc:
                     return result(RepairStop.EXECUTION_UNRESOLVED, str(exc))
@@ -1114,6 +1253,7 @@ class FleetPlanService:
                         fleet_run_id=selected_run_id,
                         expected_repository_instance_ids=instances,
                         requested_priority=requested_priority,
+                        source=FleetRunSource.CICD if repository_goon else FleetRunSource.MANUAL,
                     )
                 except Exception as exc:
                     try:
@@ -1316,6 +1456,11 @@ class FleetPlanService:
         inputs: dict[str, PlanInputValue] | None,
         caller_input_file: CallerInputFileIdentity | None,
         caller_input_origins: Mapping[str, PlanCallerOrigin] | None = None,
+        external_artifacts: tuple[tuple[str, bytes], ...] = (),
+        lock_path: Path | None = None,
+        repository_goon: bool = False,
+        source_graph: FleetPlanSourceGraph | None = None,
+        repository: Path | None = None,
     ) -> FleetPlanTarget:
         """Freeze caller-selected values once; future occurrences own no caller file.
 
@@ -1330,6 +1475,11 @@ class FleetPlanService:
             inputs=inputs,
             caller_input_file=caller_input_file,
             caller_input_origins=caller_input_origins,
+            external_artifacts=external_artifacts,
+            lock_path=lock_path,
+            repository_goon=repository_goon,
+            source_graph=source_graph,
+            repository=repository,
         )
         if caller_input_file is None:
             return target
@@ -1361,14 +1511,29 @@ class FleetPlanService:
         inputs: dict[str, PlanInputValue] | None = None,
         caller_input_file: CallerInputFileIdentity | None = None,
         caller_input_origins: Mapping[str, PlanCallerOrigin] | None = None,
+        external_artifacts: tuple[tuple[str, bytes], ...] = (),
+        lock_path: Path | None = None,
+        repository_goon: bool = False,
+        source_graph: FleetPlanSourceGraph | None = None,
+        repository: Path | None = None,
     ) -> ScheduleDefinition:
         """Resolve once, then persist one Schedule target set for the exact Plan."""
+        if repository is not None:
+            from oh_goon.core.product_identity import repository_id as identify_context_repository
+
+            if repository_ids != {identify_context_repository(repository)}:
+                raise FleetPlanInvalid("Resolution repository differs from selected Schedule scope")
         target = self._prepare_scheduled_target(
             plan_path,
             extensions_path=extensions_path,
             inputs=inputs,
             caller_input_file=caller_input_file,
             caller_input_origins=caller_input_origins,
+            external_artifacts=external_artifacts,
+            lock_path=lock_path,
+            repository_goon=repository_goon,
+            source_graph=source_graph,
+            repository=repository,
         )
         repository_instance_ids = self.repository_instance_ids_for_target(
             target, repository_ids=repository_ids
@@ -1396,15 +1561,30 @@ class FleetPlanService:
         inputs: dict[str, PlanInputValue] | None = None,
         caller_input_file: CallerInputFileIdentity | None = None,
         caller_input_origins: Mapping[str, PlanCallerOrigin] | None = None,
+        external_artifacts: tuple[tuple[str, bytes], ...] = (),
+        lock_path: Path | None = None,
+        repository_goon: bool = False,
+        source_graph: FleetPlanSourceGraph | None = None,
+        repository: Path | None = None,
     ) -> ScheduleDefinition:
         """CAS an existing Schedule target set onto a newly resolved immutable Plan."""
         current = self._schedules.definition(schedule_id)
+        if repository is not None:
+            from oh_goon.core.product_identity import repository_id as identify_context_repository
+
+            if repository_ids != {identify_context_repository(repository)}:
+                raise FleetPlanInvalid("Resolution repository differs from selected Schedule scope")
         target = self._prepare_scheduled_target(
             plan_path,
             extensions_path=extensions_path,
             inputs=inputs,
             caller_input_file=caller_input_file,
             caller_input_origins=caller_input_origins,
+            external_artifacts=external_artifacts,
+            lock_path=lock_path,
+            repository_goon=repository_goon,
+            source_graph=source_graph,
+            repository=repository,
         )
         repository_instance_ids = self.repository_instance_ids_for_target(
             target, repository_ids=repository_ids
@@ -1428,6 +1608,22 @@ class FleetPlanService:
         )
 
 
+def _selected_source_graph(
+    resolver: FleetPlanResolver,
+    plan_path: Path,
+    *,
+    source_graph: FleetPlanSourceGraph | None,
+    root_expected_name: str | None = None,
+) -> FleetPlanSourceGraph:
+    if source_graph is None:
+        return resolver.analyze_source(plan_path, root_expected_name=root_expected_name)
+    if source_graph.root.path != navigation_path(plan_path):
+        raise FleetPlanInvalid("Captured source graph belongs to a different selected source")
+    if root_expected_name is not None and source_graph.root.compiled.name != root_expected_name:
+        raise FleetPlanInvalid("Captured source graph differs from the selected root identity")
+    return source_graph
+
+
 def _generate_execution_lock(
     resolver: FleetPlanResolver,
     plan_path: Path,
@@ -1435,11 +1631,21 @@ def _generate_execution_lock(
     extensions_path: Path | None,
     inputs: dict[str, PlanInputValue] | None,
     output: Path | None,
+    external_artifacts: tuple[tuple[str, bytes], ...] = (),
+    caller_input_file: CallerInputFileIdentity | None = None,
+    source_graph: FleetPlanSourceGraph | None = None,
+    repository: Path | None = None,
 ) -> ExecutionLock:
-    graph = resolver.analyze_source(plan_path)
-    plan = resolver.resolve_source_graph(graph, extensions_path=extensions_path, inputs=inputs)
-    lock = build_execution_lock(plan)
+    if caller_input_file is not None:
+        require_caller_file_fresh(caller_input_file)
+    graph = _selected_source_graph(resolver, plan_path, source_graph=source_graph)
+    plan = resolver.resolve_source_graph(
+        graph, extensions_path=extensions_path, inputs=inputs, repository=repository
+    )
+    lock = build_execution_lock(plan, external_artifacts=external_artifacts)
     destination = output or (plan_path.parent / LOCK_FILE_NAME)
+    if caller_input_file is not None:
+        require_caller_file_fresh(caller_input_file)
     try:
         write_execution_lock(destination, lock)
     except OSError as exc:
@@ -1455,15 +1661,22 @@ def _resolve_locked_execution(
     inputs: dict[str, PlanInputValue] | None,
     root_expected_name: str | None = None,
     lock_path: Path | None = None,
-) -> tuple[ResolvedFleetPlan, str, str]:
-    graph = resolver.analyze_source(plan_path, root_expected_name=root_expected_name)
-    plan = resolver.resolve_source_graph(graph, extensions_path=extensions_path, inputs=inputs)
+    external_artifacts: tuple[tuple[str, bytes], ...] = (),
+    source_graph: FleetPlanSourceGraph | None = None,
+    repository: Path | None = None,
+) -> tuple[ResolvedFleetPlan, str, ExecutionLock]:
+    graph = _selected_source_graph(
+        resolver, plan_path, source_graph=source_graph, root_expected_name=root_expected_name
+    )
+    plan = resolver.resolve_source_graph(
+        graph, extensions_path=extensions_path, inputs=inputs, repository=repository
+    )
     actual = load_execution_lock(lock_path or (plan_path.parent / LOCK_FILE_NAME))
-    expected = build_execution_lock(plan)
+    expected = build_execution_lock(plan, external_artifacts=external_artifacts)
     verify_execution_lock(expected, actual)
     if graph.root.source_sha256 is None:
         raise FleetPlanInvalid("Fleet plan source fingerprint is unavailable")
-    return plan, graph.root.source_sha256, actual.digest
+    return plan, graph.root.source_sha256, actual
 
 
 def prepare_reviewed_execution_target(
@@ -1512,17 +1725,29 @@ def prepare_execution_target(
     lock_path: Path | None = None,
     caller_input_file: CallerInputFileIdentity | None = None,
     caller_input_origins: Mapping[str, PlanCallerOrigin] | None = None,
+    external_artifacts: tuple[tuple[str, bytes], ...] = (),
+    repository_goon: bool = False,
+    source_graph: FleetPlanSourceGraph | None = None,
+    repository: Path | None = None,
 ) -> FleetPlanTarget:
     """Resolve and verify one locked source into the only admissible Plan target shape."""
+    if repository_goon and (
+        plan_path.name != "goon.yml"
+        or (source is not None and not isinstance(source, TeamGoonSource))
+    ):
+        raise FleetPlanInvalid("Repository Goon source requires its exact root goon.yml authority")
     if caller_input_file is not None:
         require_caller_file_fresh(caller_input_file)
-    plan, source_sha256, execution_digest = _resolve_locked_execution(
+    plan, source_sha256, verified_lock = _resolve_locked_execution(
         resolver,
         plan_path,
         extensions_path=extensions_path,
         inputs=inputs,
         root_expected_name=root_expected_name,
         lock_path=lock_path,
+        external_artifacts=external_artifacts,
+        source_graph=source_graph,
+        repository=repository,
     )
     if source is not None and source.sha256 != source_sha256:
         raise FleetPlanInvalid(
@@ -1543,8 +1768,10 @@ def prepare_execution_target(
     return FleetPlanTarget(
         kind="fleet_plan",
         plan=plan,
-        source=source or PlanFileSource(sha256=source_sha256),
-        identity=ExecutionIdentity(digest=execution_digest),
+        source=source
+        or (TeamGoonSource if repository_goon else PlanFileSource)(sha256=source_sha256),
+        identity=ExecutionIdentity(digest=verified_lock.digest),
+        lock_artifacts=verified_lock.external,
         caller_input_file=caller_input_file,
     )
 

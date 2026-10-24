@@ -2,14 +2,17 @@
 
 Commit one immutable OCI digest reference to exactly one apps/v1 Deployment container, then explicitly verify that exact committed Deployment generation reaches readiness. Mutation and readiness remain two separate steps and two separate canonical facts.
 
-## Use this Goon
+**Status:** runnable with prerequisites. **Effects:** Mutates one container image then verifies that exact resulting generation/image.
 
-```sh
-oh-goon templates show kubernetes/release --kind goon
-oh-goon plan inputs templates/goons/kubernetes/release/goon.yml
-```
+**Prerequisites:** A digest-qualified image, exact target and declared host token/CA bindings.
 
-Use `goons: [kubernetes/release]` in a Plan to keep the Goon defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed values, renamed inputs or producer references; route shared names explicitly with `pass:`/`with:`. A Composite Goon declares which child inputs it exposes. The [authoring guide](../../../README.md) shows values files, explicit local sources and how to append Steps to your own Atomic Goon.
+**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+
+**Expected outputs:** Set-image resource/generation/image outputs and subsequent native rollout result.
+
+**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
+
+**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
 
 Select the exact API hostname, namespace, Deployment and container. Supply the declared token and CA certificate through host-backed environment authority. Image updates require a digest-qualified image; rollout verification consumes the exact expected generation and image. Inspect the Run for the actual mutation/verification result.
 

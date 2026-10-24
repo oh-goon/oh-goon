@@ -196,22 +196,63 @@ def main(
     """
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not getattr(args, "native_agent", None) and (
-        getattr(args, "native_workspace", None) is not None
-        or getattr(args, "native_profile", None) is not None
-    ):
-        parser.error("--native-workspace and --native-profile require --native-agent")
     if fleet_provisioner is not None:
         from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
         if type(fleet_provisioner) is not FleetPreworkProvisioner:
             raise TrustProtocolError("original deployment FleetPreworkProvisioner required")
-        if args.command != "plan" or args.plan_command != "run":
-            raise TrustProtocolError("Fleet deployment handoff is only valid for plan run")
-        # Cheap original-owner enrollment fence, before Plan reads, runtime
-        # construction, storage/lease mutation, or any pre-runtime commands.
+        if args.command != "run" and not (
+            args.command == "dev" and args.dev_command == "_run-plan"
+        ):
+            raise TrustProtocolError(
+                "Fleet deployment handoff is only valid for a selected run or internal certification run"
+            )
+        # Enrollment precedes all config/source reads and runtime mutation.
         fleet_provisioner.require_enrolled_identity(args.fleet_run_id)
 
+    if args.command == "dev" and args.dev_command in {"_lock-plan", "_run-plan"}:
+        from oh_goon.core.errors import FleetPlanInvalid
+        from oh_goon.core.template_identity import TemplateClassification, template_classification
+        from oh_goon.runtime.plan_templates import PlanTemplateStore
+        from oh_goon.runtime.template_discovery import template_package
+
+        store = PlanTemplateStore()
+        selected = args.plan.resolve()
+        relative = selected.relative_to(store.root) if selected.is_relative_to(store.root) else None
+        if relative is None or len(relative.parts) != 3 or relative.name != "plan.yml":
+            raise FleetPlanInvalid(
+                "Internal certification ingress requires its exact shipped internal Plan"
+            )
+        key = "/".join(relative.parts[:2])
+        if (
+            template_classification(key, kind="Plan")
+            is not TemplateClassification.INTERNAL_SELF_HOSTING
+        ):
+            raise FleetPlanInvalid("Internal certification ingress requires an internal Plan")
+        _, directory = template_package(store.root, key, source_name="plan.yml", kind="Plan")
+        if selected != directory / "plan.yml":
+            raise FleetPlanInvalid("Internal certification ingress requires its canonical source")
+        if args.dev_command == "_lock-plan":
+            args.command = "lock"
+        else:
+            args.command, args.plan_command = "plan", "run"
+
+    if args.command == "config":
+        from oh_goon.cli_configuration import run_config_command
+
+        return run_config_command(args)
+
+    if hasattr(args, "configuration"):
+        from oh_goon.cli_configuration import prepare_configuration
+        from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
+
+        try:
+            prepare_configuration(args)
+        except (FleetDomainError, OSError, UnicodeError, ValueError) as exc:
+            print_safe_plan_diagnostic(exc, as_json=bool(getattr(args, "as_json", False)))
+            return 2
+        if args.command == "run":
+            args.command, args.plan_command = "plan", "run"
     standard_local = None
     if args.command == "plan" and args.plan_command == "run":
         from oh_goon._application_foundation import standard_local_profile
@@ -245,34 +286,15 @@ def main(
 
         return run_service_command(args)
 
-    # Pure authoring commands share the original FleetPlanResolver and do not
-    # need a database, journal, executor, or physical native admission.  Runtime
-    # submission still passes through the one FleetPlanService owner below.
     if args.command == "plan":
-        if getattr(args, "plan_command", None) == "inputs":
-            from oh_goon.cli_plan_definition_commands import _inputs_pre_runtime
-
-            return _inputs_pre_runtime(args)
-        if getattr(args, "plan_command", None) == "validate":
-            from oh_goon.cli_plan_definition_commands import _validate_pre_runtime
-
-            return _validate_pre_runtime(args)
-        if getattr(args, "plan_command", None) == "explain":
-            from oh_goon.cli_plan_definition_commands import _explain_pre_runtime
-
-            return _explain_pre_runtime(args)
-        if getattr(args, "plan_command", None) == "diff":
+        if args.plan_command == "diff":
             from oh_goon.cli_plan_definition_commands import _diff_pre_runtime
 
             return _diff_pre_runtime(args)
-        if getattr(args, "plan_command", None) == "check":
+        if args.plan_command == "check":
             from oh_goon.cli_plan_definition_commands import _check_pre_runtime
 
             return _check_pre_runtime(args)
-        if getattr(args, "plan_command", None) == "preview":
-            from oh_goon.cli_plan_definition_commands import _preview_pre_runtime
-
-            return _preview_pre_runtime(args)
 
     # `oh-goon lock` writes only its explicit goon.lock through the original
     # FleetPlanService lock writer. It must not construct the app/Fleet database.

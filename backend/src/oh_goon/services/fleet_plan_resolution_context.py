@@ -37,6 +37,8 @@ class AgentCaptureOptions(TypedDict):
     native_agent: NotRequired[ResolvedNativeAgent | None]
     repository: NotRequired[Path | None]
     git_service: NotRequired[GitService | None]
+    require_review_phases: NotRequired[bool | None]
+    source_graph: NotRequired[FleetPlanSourceGraph | None]
 
 
 @dataclass(frozen=True)

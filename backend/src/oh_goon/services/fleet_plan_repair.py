@@ -22,6 +22,7 @@ from oh_goon.core.models.agent_review import (
     review_wire_record,
 )
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+from oh_goon.core.models.execution_lock_models import LockedExternalArtifact
 from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
 from oh_goon.core.models.fleet_plan import (
     PLAN_TIMEOUT_RETURN_CODE,
@@ -343,6 +344,7 @@ class AgentReviewRepairCampaign:
         capture_options: AgentCaptureOptions,
         passes: int,
         write_roots: tuple[str, ...],
+        lock_artifacts: tuple[LockedExternalArtifact, ...] = (),
     ) -> None:
         self.original = plan
         self.handoffs = handoffs
@@ -352,6 +354,7 @@ class AgentReviewRepairCampaign:
             **capture_options,
             "locked_skills": plan.skill_sources,
         }
+        self.capture_options.pop("source_graph", None)
         self.passes = passes
         self.write_roots = validate_write_roots(write_roots)
         self.phases = agent_review_phases(plan)
@@ -366,7 +369,7 @@ class AgentReviewRepairCampaign:
         self.adjudication: AgentAdjudicationRecord | None = None
         self.history = {self.candidate_identity}
         self.finding_history: set[tuple[tuple[str, str], ...]] = set()
-        self.original_digest = build_execution_lock(plan).digest
+        self.original_digest = build_execution_lock(plan, external_identities=lock_artifacts).digest
         self._validate_apply()
         # Prove each projection before any phase effects, including native argv
         # bounds and references that must stay inside their owning phase Run.

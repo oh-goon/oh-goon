@@ -21,8 +21,8 @@ from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
 PLAN = "templates/plans/oh-goon/app-certification/plan.yml"
 ARGS = [
-    "plan",
-    "run",
+    "dev",
+    "_run-plan",
     PLAN,
     "--repository-id",
     "repo-a",
@@ -98,7 +98,12 @@ def test_exact_canonical_cli_handoff_and_original_reobservation(
         [*ARGS[:6], "relative/lock.goon.lock", *ARGS[7:]],
         [*ARGS[:6], "/elsewhere/not-app.goon.lock", *ARGS[7:]],
         [*ARGS[:4], "--other", *ARGS[5:]],
-        ["plan", "run", "templates/plans/oh-goon/prepare-release/plan.yml", *ARGS[3:]],
+        [
+            "dev",
+            "_run-plan",
+            "templates/plans/oh-goon/prepare-release/plan.yml",
+            *ARGS[3:],
+        ],
     ],
 )
 def test_mutated_cli_grammar_never_reaches_app(

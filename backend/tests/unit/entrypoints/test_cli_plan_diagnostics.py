@@ -73,14 +73,6 @@ def _args(command, **kwargs):
 
 def test_plan_diagnostic_cli_human_paths(capsys):
     runtime = SimpleNamespace(plans=Plans())
-    assert run_plan_command(runtime, _args("validate", plan="plan.yml")) == 0
-    assert "Resolved steps: 1" in capsys.readouterr().out
-    assert run_plan_command(runtime, _args("explain", plan="plan.yml")) == 0
-    explain_output = capsys.readouterr().out
-    assert "included" in explain_output
-    assert "Values:" in explain_output
-    assert "<host:TOKEN:redacted>" in explain_output
-    assert "host-value-redacted=true" in explain_output
     assert run_plan_command(runtime, _args("check", root=".")) == 0
     assert "Plan contracts: valid" in capsys.readouterr().out
     assert run_plan_command(runtime, _args("diff", before="a.yml", after="b.yml")) == 0
@@ -107,9 +99,19 @@ def test_plan_run_completed_attention_required_is_nonzero(monkeypatch, capsys):
         lambda runtime, fleet_run_id, *, admitted_run: detail,
     )
     args = build_parser().parse_args(
-        ["plan", "run", "plan.yml", "--repository-id", "selected-repository", "--wait"]
+        [
+            "dev",
+            "_run-plan",
+            "plan.yml",
+            "--repository-id",
+            "selected-repository",
+            "--wait",
+            "--lock-file",
+            "goon.lock",
+        ]
     )
 
+    args.command, args.plan_command = "plan", "run"
     assert run_plan_command(runtime, args) == 1
     output = capsys.readouterr().out
     assert "Execution status: COMPLETED" in output

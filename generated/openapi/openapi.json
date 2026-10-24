@@ -6690,6 +6690,14 @@
             "title": "Kind",
             "type": "string"
           },
+          "lock_artifacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LockedExternalArtifact"
+            },
+            "title": "Lock Artifacts",
+            "type": "array"
+          },
           "plan": {
             "$ref": "#/components/schemas/ResolvedFleetPlan"
           },
@@ -14499,6 +14507,28 @@
           "revision"
         ],
         "title": "LocationsResponse",
+        "type": "object"
+      },
+      "LockedExternalArtifact": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "digest"
+        ],
+        "title": "LockedExternalArtifact",
         "type": "object"
       },
       "LockedSkillSource": {
