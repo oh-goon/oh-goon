@@ -16,13 +16,6 @@ from oh_goon.repository_tooling.dependency_locks import dependency_lock_issues
 from oh_goon.repository_tooling import startup_environment
 
 
-def test_release_build_runs_repository_check_before_wheel_build() -> None:
-    root = Path(__file__).resolve().parents[2]
-    script = (root / "scripts/release/build_release.sh").read_text(encoding="utf-8")
-    assert "make check" in script
-    assert script.index("make check") < script.index("uv build --wheel")
-
-
 def test_release_build_does_not_gate_on_startup_diagnostics() -> None:
     root = Path(__file__).resolve().parents[2]
     script = (root / "scripts/release/build_release.sh").read_text(encoding="utf-8")

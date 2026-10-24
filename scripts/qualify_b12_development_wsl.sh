@@ -450,7 +450,6 @@ run_ring() {
           if [[ -f .checkpoint/P1B27_GATE_P1P2B2B1_SOURCE.sha256 ]]; then
             required_modules+=(--require-module test_p1b27_gate_p1p2b2b1_mount_fixture)
             if [[ -f .checkpoint/P1B27_GATE_P1P2B2B2_SOURCE.sha256 ]]; then
-              required_modules+=(--require-module test_p1b27_gate_p1p2b2b2_canonical_root)
               if [[ -f .checkpoint/P1B27_GATE_P1P2B2B3_SOURCE.sha256 ]]; then
                 required_modules+=(--require-module test_p1p2b2b3_original_holder_claim_consistency)
               fi
@@ -753,7 +752,6 @@ for (( iteration=1; iteration<=repeats; iteration++ )); do
           if [[ -f .checkpoint/P1B27_GATE_P1P2B2B1_SOURCE.sha256 ]]; then
             observer_tests+=(tests/unit/runtime/test_p1b27_gate_p1p2b2b1_mount_fixture.py)
             if [[ -f .checkpoint/P1B27_GATE_P1P2B2B2_SOURCE.sha256 ]]; then
-              observer_tests+=(tests/unit/runtime/test_p1b27_gate_p1p2b2b2_canonical_root.py)
               if [[ -f .checkpoint/P1B27_GATE_P1P2B2B3_SOURCE.sha256 ]]; then
                 observer_tests+=(tests/unit/runtime/test_p1p2b2b3_original_holder_claim_consistency.py)
               fi

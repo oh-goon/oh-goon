@@ -23,11 +23,11 @@ from oh_goon.repository_tooling._self_certification_plan_evidence import (
 from oh_goon.repository_tooling._self_certification_plan_units import (
     _source_units,
     _verification_config_identity,
-    shard_plan,
 )
 from oh_goon.repository_tooling._self_certification_plan_units import (
     scripts_non_certification_shards as scripts_non_certification_shards,
 )
+from oh_goon.repository_tooling._self_certification_plan_units import shard_plan as shard_plan
 from oh_goon.repository_tooling._self_certification_transition import (
     execute_artifact_transition as execute_artifact_transition,
 )

@@ -1,11 +1,111 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from oh_goon.repository_tooling.self_certification_artifacts import (
+    verify_fresh_source_zip,
+)
 from oh_goon.repository_tooling.release import package_slim
+
+
+@pytest.fixture
+def fresh_source_archive(tmp_path: Path) -> tuple[Path, Path, str, str]:
+    root = tmp_path / "source"
+    files = {
+        "VERSION": "1.2.3\n",
+        "README.md": "# Canonical archived content\n",
+        "backend/pyproject.toml": '[project]\nname="demo"\nversion="1.2.3"\n',
+        "backend/uv.lock": 'version=1\nrequires-python=">=3.12"\npackage=[]\n',
+    }
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    identity = package_slim.canonical_source_identity(root)
+    archive = tmp_path / "oh-goon-1.2.3.zip"
+    digest = package_slim.package_slim(archive, root=root)
+    return root, archive, digest, identity
+
+
+def test_fresh_source_archive_retains_real_source_identity_and_committed_lock_bytes(
+    tmp_path: Path, fresh_source_archive: tuple[Path, Path, str, str]
+) -> None:
+    root, archive, digest, identity = fresh_source_archive
+    receipt = verify_fresh_source_zip(
+        root, tmp_path / "evidence", archive, digest, identity, "fixture-seal"
+    )
+    evidence = json.loads(receipt.read_text(encoding="utf-8"))
+    assert evidence["status"] == "PASS"
+    assert evidence["archive_source_identity"] == identity
+    assert evidence["source_zip_sha256"] == digest
+    assert (
+        evidence["dependency_scope"]["backend_lock_sha256"]
+        == hashlib.sha256((root / "backend/uv.lock").read_bytes()).hexdigest()
+    )
+    with zipfile.ZipFile(archive) as native:
+        assert native.testzip() is None
+        assert (
+            native.read("oh-goon-1.2.3/backend/uv.lock")
+            == (root / "backend/uv.lock").read_bytes()
+        )
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    [
+        ("archive-bytes", "source ZIP changed"),
+        ("sidecar", "checksum sidecar"),
+        ("payload", "payload identity differs"),
+        ("missing-lock", "dependency authorities are missing"),
+        ("crc", "source ZIP integrity failed"),
+    ],
+)
+def test_fresh_source_archive_rejects_byte_identity_lock_and_crc_tampering(
+    tmp_path: Path,
+    fresh_source_archive: tuple[Path, Path, str, str],
+    tamper: str,
+    message: str,
+) -> None:
+    root, archive, digest, identity = fresh_source_archive
+    sidecar = archive.with_name(archive.name + ".sha256")
+    if tamper == "archive-bytes":
+        with archive.open("ab") as stream:
+            stream.write(b"unadmitted appended bytes")
+    elif tamper == "sidecar":
+        sidecar.write_text("0" * 64 + "  " + archive.name + "\n", encoding="utf-8")
+    else:
+        with zipfile.ZipFile(archive) as native:
+            members = [(info, native.read(info)) for info in native.infolist()]
+        with zipfile.ZipFile(archive, "w") as modified:
+            for info, data in members:
+                if tamper == "missing-lock" and info.filename.endswith(
+                    "/backend/uv.lock"
+                ):
+                    continue
+                if tamper == "payload" and info.filename.endswith("/README.md"):
+                    data = b"Changed archived source\n"
+                if tamper == "crc":
+                    info.compress_type = zipfile.ZIP_STORED
+                modified.writestr(info, data)
+        if tamper == "crc":
+            # Corrupt a stored member while leaving the native ZIP CRC unchanged.
+            marker = (root / "README.md").read_bytes()
+            payload = bytearray(archive.read_bytes())
+            assert payload.count(marker) == 1
+            payload[payload.index(marker)] ^= 1
+            archive.write_bytes(payload)
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        sidecar.write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match=message):
+        verify_fresh_source_zip(
+            root, tmp_path / "evidence", archive, digest, identity, "fixture-seal"
+        )
 
 
 @pytest.mark.parametrize(

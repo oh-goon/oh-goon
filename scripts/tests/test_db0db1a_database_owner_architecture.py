@@ -109,15 +109,10 @@ def test_clean_source_keeps_current_database_architecture_active(
     mutation: str,
     diagnostic: str,
 ) -> None:
-    from tests.factories.x0_architecture import copy_x0_architecture_sources
+    from tests.factories.database_architecture import copy_database_architecture_sources
 
-    from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
-        check_x0_single_execution_path,
-    )
-
-    package = copy_x0_architecture_sources(tmp_path)
-    assert not (tmp_path / ".checkpoint").exists()
-    assert check_x0_single_execution_path(tmp_path) == []
+    package = copy_database_architecture_sources(tmp_path)
+    assert check_canonical_database_owner(tmp_path) == []
     database = package / "runtime/database.py"
     if mutation == "second-writer":
         (package / "services/second_writer.py").write_text(
@@ -136,5 +131,5 @@ def test_clean_source_keeps_current_database_architecture_active(
         database.write_text(original.replace(before, "None"))
     assert any(
         diagnostic in issue.message
-        for issue in check_x0_single_execution_path(tmp_path)
+        for issue in check_canonical_database_owner(tmp_path)
     )

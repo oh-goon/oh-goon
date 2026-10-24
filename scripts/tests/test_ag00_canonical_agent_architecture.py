@@ -10,7 +10,6 @@ import pytest
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     _check_agent_workload_canonical_owner,
-    check_x0_single_execution_path,
 )
 
 
@@ -43,10 +42,6 @@ def _check(root: Path) -> list[str]:
             root, root / "backend/src/oh_goon"
         )
     ]
-
-
-def test_full_existing_architecture_gate_integrates_agent_census() -> None:
-    assert check_x0_single_execution_path() == []
 
 
 @pytest.mark.parametrize(

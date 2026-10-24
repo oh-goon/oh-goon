@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
-from pathlib import Path
 
 import pytest
 
@@ -14,9 +13,6 @@ from oh_goon.core.ports.physical_observation import (
 )
 from oh_goon.integrations import linux_physical_observer as kernel
 from oh_goon.repository_tooling import local_lace_physical_preflight as cli
-from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
-    check_x0_single_execution_path,
-)
 from tests.unit.core.test_enforcer_lace_trust import authenticator
 from tests.unit.runtime.test_b22_original_physical_sampling import mount_descriptor, seeded
 
@@ -135,50 +131,3 @@ def test_shared_identity_bound_to_every_state_detail_and_order_without_promoting
         snapshot.components[0][1].state = "UNKNOWN"
     assert not hasattr(snapshot, "physical_absence_proven")
     assert not hasattr(snapshot, "effect_permission")
-
-
-def test_no_second_kernel_reader_and_b25_wsl_module_is_required():
-    root = Path(__file__).resolve().parents[4]
-    assert check_x0_single_execution_path(root) == []
-    script = (root / "scripts/qualify_b12_development_wsl.sh").read_text()
-    assert "embedded='.checkpoint/B25_SOURCE.sha256'" in script
-    assert "required_modules+=(--require-module test_b25_shared_snapshot_parity)" in script
-    assert "observer_tests+=(tests/unit/runtime/test_b25_shared_snapshot_parity.py)" in script
-
-
-def test_x0_guards_shared_identity_projection_against_cloned_or_forged_identity(tmp_path):
-    root = Path(__file__).resolve().parents[4]
-    for relative in (
-        "backend/src/oh_goon/core/ports/physical_observation.py",
-        "backend/src/oh_goon/core/ports/original_mount_intent.py",
-        "backend/src/oh_goon/integrations/linux_physical_observer.py",
-        "backend/src/oh_goon/repository_tooling/local_lace_physical_preflight.py",
-        "backend/src/oh_goon/runtime/enforcer_lace_original_physical_sampling.py",
-        "backend/src/oh_goon/runtime/enforcer_lace_fleet_resource_owner.py",
-        "backend/pyproject.toml",
-    ):
-        dest = tmp_path / relative
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if (root / relative).exists():
-            dest.write_bytes((root / relative).read_bytes())
-        else:
-            dest.write_text("B25 test source marker")
-    from tests.factories.x0_architecture import copy_x0_architecture_sources
-
-    copy_x0_architecture_sources(tmp_path)
-    assert check_x0_single_execution_path(tmp_path) == []
-    cli_source = (
-        tmp_path / "backend/src/oh_goon/repository_tooling/local_lace_physical_preflight.py"
-    )
-    original = cli_source.read_text()
-    assert '"kernel_snapshot_identity": snapshot.identity' in original
-    cli_source.write_text(
-        original.replace(
-            '"kernel_snapshot_identity": snapshot.identity',
-            '"kernel_snapshot_identity": "sha256:" + "f" * 64',
-        )
-    )
-    assert any(
-        "B25 shared snapshot identity" in issue.message
-        for issue in check_x0_single_execution_path(tmp_path)
-    )

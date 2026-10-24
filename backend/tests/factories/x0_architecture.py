@@ -4,11 +4,21 @@ from __future__ import annotations
 
 import ast
 import tokenize
+from collections.abc import Mapping
 from io import StringIO
 from pathlib import Path
 from shutil import copyfile, copytree, ignore_patterns
 
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
+
+
+def write_x0_rule_sources(destination: Path, sources: Mapping[str, str]) -> Path:
+    """Materialize only the explicit inputs of one architecture rule."""
+    for relative, source in sources.items():
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, encoding="utf-8")
+    return destination / "backend/src/oh_goon"
 
 
 def replace_python_syntax(source: str, old: str, new: str, *, last: bool = False) -> str:

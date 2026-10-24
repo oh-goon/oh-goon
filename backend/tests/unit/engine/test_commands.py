@@ -117,7 +117,6 @@ def test_run_command_passes_only_explicit_file_descriptors() -> None:
     assert result.stdout == "sealed"
 
 
-@pytest.mark.slow
 @pytest.mark.process
 def test_run_command_terminates_process_group_on_cancellation() -> None:
     cancellation_checks = 0
@@ -206,7 +205,6 @@ def test_run_command_streams_output_without_changing_final_result() -> None:
     assert "".join(text for stream, text in observed if stream == "stderr") == "err\n"
 
 
-@pytest.mark.slow
 @pytest.mark.process
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
 def test_run_command_cleans_descendant_that_keeps_output_pipe_open(tmp_path: Path) -> None:

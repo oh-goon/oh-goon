@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
 from oh_goon.core.ports.physical_observation import PhysicalKernelFact, PhysicalKernelSnapshot
 from oh_goon.integrations import linux_physical_observer
-from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
-    check_x0_single_execution_path,
-)
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
 from tests.unit.core.test_enforcer_lace_trust import authenticator
 from tests.unit.runtime.test_b12d2b_authenticated_orphan_inventory import observed, record, subject
@@ -104,37 +100,3 @@ def test_ambiguous_or_missing_signed_roster_rejects_before_kernel_read(
     assert scans == []
     assert journal.verify("run-one", auth=authenticator()) == events
     conn.close()
-
-
-def test_roster_cannot_be_replaced_with_diagnostic_scope_or_second_owner(tmp_path):
-    root = Path(__file__).resolve().parents[4]
-    assert check_x0_single_execution_path(root) == []
-    script = (root / "scripts/qualify_b12_development_wsl.sh").read_text()
-    assert "embedded='.checkpoint/B26_SOURCE.sha256'" in script
-    assert "required_modules+=(--require-module test_b26_original_native_roster)" in script
-    assert "observer_tests+=(tests/unit/runtime/test_b26_original_native_roster.py)" in script
-    paths = (
-        "backend/src/oh_goon/runtime/enforcer_lace_original_physical_sampling.py",
-        "backend/src/oh_goon/core/ports/physical_observation.py",
-        "backend/src/oh_goon/runtime/enforcer_lace_fleet_resource_owner.py",
-        "backend/src/oh_goon/core/ports/original_mount_intent.py",
-        "backend/src/oh_goon/repository_tooling/local_lace_physical_preflight.py",
-        "backend/src/oh_goon/integrations/linux_physical_observer.py",
-        "backend/pyproject.toml",
-    )
-    for p in paths:
-        target = tmp_path / p
-        target.parent.mkdir(parents=True, exist_ok=True)
-        source = root / p
-        target.write_bytes(source.read_bytes() if source.is_file() else b"test source marker")
-    from tests.factories.x0_architecture import copy_x0_architecture_sources
-
-    copy_x0_architecture_sources(tmp_path)
-    assert check_x0_single_execution_path(tmp_path) == []
-    binder = tmp_path / paths[0]
-    source = binder.read_text()
-    assert "observed_processes=native_processes" in source
-    binder.write_text(source.replace("        observed_processes=native_processes,\n", ""))
-    assert any(
-        "B26 native roster" in issue.message for issue in check_x0_single_execution_path(tmp_path)
-    )

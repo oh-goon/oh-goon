@@ -120,7 +120,16 @@ def test_pull_request_checks_have_read_only_uncredentialed_execution() -> None:
 
 def _make_commands(targets: list[str], roots: str | None = None) -> list[list[str]]:
     environment = os.environ.copy()
-    environment.pop("BACKEND_CHECK_TEST_ROOTS", None)
+    for name in (
+        "BACKEND_CHECK_TEST_ROOTS",
+        "CHECK_PYTEST_MARKER",
+        "TOOLING_TEST_MARKER",
+        "TOOLING_COMPLETE_TEST_MARKER",
+        "MAKEFLAGS",
+        "MFLAGS",
+        "MAKEOVERRIDES",
+    ):
+        environment.pop(name, None)
     if roots is not None:
         environment["BACKEND_CHECK_TEST_ROOTS"] = roots
     result = subprocess.run(
@@ -187,11 +196,53 @@ def test_hosted_backend_roots_partition_the_complete_suite_without_nested_select
     assert not any(root in checks["env"]["PYTEST_ADDOPTS"] for root in roots.split())
 
     # Without an explicit hosted partition, pytest retains its native testpaths.
-    assert _pytest_commands("backend-check") == [["-m", "not certification"]]
+    assert _pytest_commands("backend-check") == [
+        ["-m", "not certification and not slow"]
+    ]
     backend = _pytest_commands("backend-check", roots)
-    assert backend == [["-m", "not certification", *roots.split()]]
+    assert backend == [["-m", "not certification and not slow", *roots.split()]]
     integration = _pytest_commands("test-integration")
     assert integration == [
+        ["-m", "not certification and not slow", "tests/integration"],
+        [
+            "-c",
+            "backend/pyproject.toml",
+            "-m",
+            "not certification and not slow",
+            "tests/integration",
+        ],
+    ]
+    pytest_config = tomllib.loads((ROOT / "backend/pyproject.toml").read_text())
+    testpaths = pytest_config["tool"]["pytest"]["ini_options"]["testpaths"]
+    admitted_roots = [*backend[0][2:], integration[0][-1]]
+    assert sorted(admitted_roots) == sorted(testpaths)
+    assert len(admitted_roots) == len(set(admitted_roots))
+
+
+def test_routine_tooling_keeps_process_and_scale_coverage_while_deferring_exhaustive_cases() -> (
+    None
+):
+    commands = _make_commands(["tooling-check"])
+    batches = [
+        command
+        for command in commands
+        if any(word.endswith("/oh-goon-test-batches") for word in command)
+    ]
+    assert len(batches) == 1
+    assert (
+        batches[0][batches[0].index("--marker") + 1] == "not certification and not slow"
+    )
+
+
+def test_complete_release_check_executes_each_native_surface_once() -> None:
+    commands = _make_commands(["release-check"])
+    python = [
+        command[command.index("pytest") + 1 :]
+        for command in commands
+        if "pytest" in command
+    ]
+    assert python == [
+        ["-m", "not certification", "tests/unit", "tests/dependency_complete"],
         ["-m", "not certification", "tests/integration"],
         [
             "-c",
@@ -201,8 +252,41 @@ def test_hosted_backend_roots_partition_the_complete_suite_without_nested_select
             "tests/integration",
         ],
     ]
-    pytest_config = tomllib.loads((ROOT / "backend/pyproject.toml").read_text())
-    testpaths = pytest_config["tool"]["pytest"]["ini_options"]["testpaths"]
-    admitted_roots = [*backend[0][2:], integration[0][-1]]
-    assert sorted(admitted_roots) == sorted(testpaths)
-    assert len(admitted_roots) == len(set(admitted_roots))
+    batches = [
+        command
+        for command in commands
+        if any(word.endswith("/oh-goon-test-batches") for word in command)
+    ]
+    assert len(batches) == 1
+    assert batches[0][batches[0].index("--marker") + 1] == "not certification"
+    assert sum(command[-3:] == ["npm", "run", "check"] for command in commands) == 1
+
+
+def test_complete_release_verification_is_explicit_and_uses_the_selected_source() -> (
+    None
+):
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/release-validation.yml").read_text()
+    )
+    assert workflow["on"] == {
+        "workflow_dispatch": None,
+        "release": {"types": ["published"]},
+    }
+    assert workflow["permissions"] == {"contents": "read"}
+    assert len(workflow["jobs"]) == 1
+    job = next(iter(workflow["jobs"].values()))
+    assert "continue-on-error" not in job
+    assert all(
+        "continue-on-error" not in step and "if" not in step for step in job["steps"]
+    )
+    checkout = next(
+        step
+        for step in job["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    )
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    assert checkout["with"]["persist-credentials"] is False
+    assert [step["run"] for step in job["steps"] if "run" in step][-2:] == [
+        "make init",
+        "make release-check",
+    ]

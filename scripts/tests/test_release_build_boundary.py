@@ -173,10 +173,12 @@ def test_release_build_owns_fresh_ui_and_cleans_failed_outputs(
     assert observed.index("make:release-locks-check") < observed.index("uv:sync")
     if action == "assemble":
         assert "make:generate" not in observed
-        assert "make:check" not in observed
+        assert "make:release-check" not in observed
     else:
-        assert observed.count("make:generate") == observed.count("make:check") == 1
-        assert observed.index("make:generate") < observed.index("make:check")
+        assert (
+            observed.count("make:generate") == observed.count("make:release-check") == 1
+        )
+        assert observed.index("make:generate") < observed.index("make:release-check")
     assert result.returncode == frontend_exit, result.stdout + result.stderr
     release = tmp_path / "generated/release"
     if frontend_exit:
@@ -187,7 +189,9 @@ def test_release_build_owns_fresh_ui_and_cleans_failed_outputs(
         assert (release / "static/index.html").read_text() == "fresh UI\n"
         assert (release / "dist/wheel-ui-proof").read_text() == "fresh UI\n"
         if action != "assemble":
-            assert observed.index("make:check") < observed.index("make:frontend-build")
+            assert observed.index("make:release-check") < observed.index(
+                "make:frontend-build"
+            )
         assert observed.index("make:frontend-build") < observed.index("uv:build")
 
 

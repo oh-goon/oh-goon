@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import tomllib
@@ -55,20 +56,6 @@ def test_frontend_coverage_policy_is_unchanged_by_backend_maturity_phase() -> No
     }
 
 
-def test_backend_coverage_pytest_roots_have_unique_test_module_basenames() -> None:
-    roots = (ROOT / "backend/tests", ROOT / "scripts/tests")
-    modules: dict[str, list[str]] = {}
-    for test_root in roots:
-        for path in test_root.rglob("test_*.py"):
-            modules.setdefault(path.name, []).append(path.relative_to(ROOT).as_posix())
-
-    collisions = {name: paths for name, paths in modules.items() if len(paths) > 1}
-    assert collisions == {}, (
-        "coverage-python collects backend/tests and scripts/tests in one pytest process; "
-        f"duplicate test module basenames are import-identity collisions: {collisions}"
-    )
-
-
 def test_normal_coverage_paths_collect_json_without_printing_the_per_file_table() -> (
     None
 ):
@@ -108,9 +95,20 @@ def test_explicit_coverage_checks_and_floor_authoring_use_complete_native_covera
 
 
 def test_ordinary_backend_gate_measures_correctness_without_coverage_targets() -> None:
+    environment = os.environ.copy()
+    for name in (
+        "BACKEND_CHECK_TEST_ROOTS",
+        "CHECK_PYTEST_MARKER",
+        "TOOLING_COMPLETE_TEST_MARKER",
+        "MAKEFLAGS",
+        "MFLAGS",
+        "MAKEOVERRIDES",
+    ):
+        environment.pop(name, None)
     result = subprocess.run(
         ["make", "--no-print-directory", "--dry-run", "backend-check"],
         cwd=ROOT,
+        env=environment,
         check=True,
         capture_output=True,
         text=True,
@@ -119,6 +117,6 @@ def test_ordinary_backend_gate_measures_correctness_without_coverage_targets() -
     commands = [shlex.split(line) for line in result.stdout.splitlines()]
     tests = [argv for argv in commands if "pytest" in argv]
     assert len(tests) == 1
-    assert tests[0][tests[0].index("-m") + 1] == "not certification"
+    assert tests[0][tests[0].index("-m") + 1] == "not certification and not slow"
     assert not any(arg.startswith("--cov") for arg in tests[0])
     assert not any("check" in argv and "--area" in argv for argv in commands)

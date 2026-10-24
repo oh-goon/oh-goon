@@ -57,6 +57,7 @@ noncanonical_make_target_classes:
   - python-static-sanity
   - release-accept
   - release-locks-check
+  - release-check
   - ruff-repair
   - repository-understanding-exam
   - repository-understanding-test-batch

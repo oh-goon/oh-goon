@@ -226,6 +226,12 @@ unrelated output or broaden testing to hide a failure.
 | Backend-internal behavior | `make backend-check`; regenerate only for an API change |
 | Documentation only | owning documentation checks; no regeneration unless its contract changed |
 
+Routine CI keeps meaningful process and scale regressions. Mark only exhaustive
+variants with bounded ordinary counterparts as `slow`; keep them in complete
+`make release-check` verification. Remove obsolete filename/private-name/prose
+assertions, and require a valid baseline for every mutation regression. See
+`docs/development/TEST_QUALITY.md` and `docs/CI_CD_CONTRACT.md`.
+
 Use existing ownership and these triggers; do not add another impact manifest,
 graph, quality gate, or change-classification framework. Responsibility and
 naming rules are in `docs/RESPONSIBILITY_COMPLEXITY_REFACTORING.md`: retain

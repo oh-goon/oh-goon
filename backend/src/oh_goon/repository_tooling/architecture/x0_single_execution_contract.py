@@ -19,6 +19,29 @@ CONTROL_DIRS = ("services", "runtime", "integrations", "core", "api")
 CONTROL_FILES = ("_application_services.py", "cli.py", "container_entrypoint.py")
 
 
+def _call_target(call: ast.Call, tree: ast.AST) -> str:
+    """Resolve an explicit imported call without depending on local aliases."""
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name.split(".")[0]] = (
+                    alias.name if alias.asname else alias.name.split(".")[0]
+                )
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = node.module + "." + alias.name
+
+    def qualified(node: ast.expr) -> str:
+        if isinstance(node, ast.Name):
+            return aliases.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            return qualified(node.value) + "." + node.attr
+        return ""
+
+    return qualified(call.func)
+
+
 def _module_reference(tree: ast.AST) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import) and any(
@@ -48,7 +71,7 @@ def _module_reference(tree: ast.AST) -> bool:
     return False
 
 
-def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
+def _check_diagnostic_observer_ownership(root: Path = ROOT) -> list[Violation]:
     package = root / "backend/src/oh_goon"
     preflight = package / "repository_tooling/local_lace_physical_preflight.py"
     pyproject = root / "backend/pyproject.toml"
@@ -79,11 +102,16 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
         "oh_goon.integrations.linux_physical_observer",
     }
 
+    def control_authority(module: str) -> bool:
+        return any(
+            module == "oh_goon." + owner or module.startswith("oh_goon." + owner + ".")
+            for owner in CONTROL_DIRS
+        )
+
     def forbidden_cli_import(node: ast.AST) -> bool:
         if isinstance(node, ast.Import):
             return any(
-                alias.name.startswith(tuple("oh_goon." + owner + "." for owner in CONTROL_DIRS))
-                and alias.name not in permitted_shared
+                control_authority(alias.name) and alias.name not in permitted_shared
                 for alias in node.names
             )
         if isinstance(node, ast.ImportFrom):
@@ -92,7 +120,7 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
                 return False
             if module == "oh_goon.integrations":
                 return any(alias.name != "linux_physical_observer" for alias in node.names)
-            return module.startswith(tuple("oh_goon." + owner + "." for owner in CONTROL_DIRS))
+            return control_authority(module)
         return False
 
     if any(forbidden_cli_import(node) for node in ast.walk(tree)):
@@ -116,6 +144,30 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
                     "X0 authority import/dispatch of operator-scoped physical preflight forbidden",
                 )
             )
+    return issues
+
+
+def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Violation]:
+    """Inspect the original sampler, shared port and diagnostic projection only."""
+    package = root / "backend/src/oh_goon"
+    preflight = package / "repository_tooling/local_lace_physical_preflight.py"
+    issues: list[Violation] = []
+    missing = [
+        package / relative
+        for relative in (
+            "repository_tooling/local_lace_physical_preflight.py",
+            "integrations/linux_physical_observer.py",
+            "core/ports/physical_observation.py",
+            "core/ports/original_mount_intent.py",
+            "runtime/enforcer_lace_original_physical_sampling.py",
+            "runtime/enforcer_lace_fleet_resource_owner.py",
+        )
+        if not (package / relative).is_file()
+    ]
+    if missing:
+        return [
+            Violation(path, "X0 original physical observation owner missing") for path in missing
+        ]
     shared = package / "integrations/linux_physical_observer.py"
     contract = package / "core/ports/physical_observation.py"
     if shared.is_file() or contract.is_file():
@@ -131,43 +183,16 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
             except (OSError, SyntaxError):
                 issues.append(Violation(shared, "X0 shared observation owner unreadable"))
             else:
-                expected = {
-                    "_read_regular",
-                    "_birth",
-                    "_command",
-                    "_cgroup",
-                    "_cgroup_subtree",
-                    "_process",
-                    "_mounts",
-                    "_network",
-                    "_mount_field",
-                    "_tracked_namespace_inventory",
-                    "_namespace_fd_holders",
-                    "_visible_foreign_mount_targets",
-                    "_visible_mount_fd_holders",
-                    "observe_kernel",
-                }
-                functions = {
+                functions = [
                     n.name
                     for n in shared_tree.body
                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                }
-                if not expected <= functions:
+                ]
+                if functions.count("observe_kernel") != 1:
                     issues.append(
                         Violation(
                             shared,
-                            "X0 single shared Linux kernel implementation missing required primitives",
-                        )
-                    )
-                cli_functions = {
-                    n.name
-                    for n in cli_tree.body
-                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                }
-                if cli_functions - {"parse_scope", "_network", "observe", "main"}:
-                    issues.append(
-                        Violation(
-                            preflight, "X0 second physical kernel observer/parser in diagnostic"
+                            "X0 shared Linux observation must have one public kernel entrypoint",
                         )
                     )
                 if any(
@@ -200,10 +225,8 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
                     )
                 if not any(
                     isinstance(n, ast.Call)
-                    and isinstance(n.func, ast.Attribute)
-                    and n.func.attr == "observe_kernel"
-                    and isinstance(n.func.value, ast.Name)
-                    and n.func.value.id == "linux"
+                    and _call_target(n, cli_tree)
+                    == "oh_goon.integrations.linux_physical_observer.observe_kernel"
                     for n in ast.walk(cli_tree)
                 ):
                     issues.append(
@@ -213,10 +236,8 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
                     )
                 if any(
                     isinstance(n, ast.Call)
-                    and isinstance(n.func, ast.Attribute)
-                    and n.func.attr in ("scandir", "readlink", "open", "fstat")
-                    and isinstance(n.func.value, ast.Name)
-                    and n.func.value.id == "os"
+                    and _call_target(n, cli_tree)
+                    in ("os.scandir", "os.readlink", "os.open", "os.fstat")
                     for n in ast.walk(cli_tree)
                 ):
                     issues.append(
@@ -232,6 +253,7 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
             owner_tree = ast.parse(original_owner.read_text(encoding="utf-8"))
         except (OSError, SyntaxError):
             issues.append(Violation(sampler, "X0 original-owner physical sampling not inspectable"))
+            return issues
         else:
             owner_methods = [
                 n
@@ -244,10 +266,8 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
                     n
                     for n in ast.walk(owner_methods[0])
                     if isinstance(n, ast.Call)
-                    and isinstance(n.func, ast.Attribute)
-                    and n.func.attr == "observe_kernel"
-                    and isinstance(n.func.value, ast.Name)
-                    and n.func.value.id == "linux_physical_observer"
+                    and _call_target(n, owner_tree)
+                    == "oh_goon.integrations.linux_physical_observer.observe_kernel"
                 ]
                 if len(owner_methods) == 1
                 else []
@@ -360,10 +380,7 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
                 n
                 for call in sample_returns
                 for n in ast.walk(call)
-                if isinstance(n, ast.Attribute)
-                and n.attr == "envelope"
-                and isinstance(n.value, ast.Name)
-                and n.value.id == "before"
+                if isinstance(n, ast.Attribute) and n.attr == "envelope"
             ]
             if (
                 len(envelope_constructors) != 1
@@ -383,21 +400,37 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
         port_tree = ast.parse(contract.read_text(encoding="utf-8"))
         cli_tree = ast.parse(preflight.read_text(encoding="utf-8"))
 
-        def has_attr(tree, owner: str, attr: str) -> bool:
-            return any(
-                isinstance(n, ast.Attribute)
-                and n.attr == attr
-                and isinstance(n.value, ast.Name)
-                and n.value.id == owner
-                for n in ast.walk(tree)
+        snapshot_bindings = {
+            target.id
+            for node in ast.walk(cli_tree)
+            if isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and _call_target(node.value, cli_tree)
+            == "oh_goon.integrations.linux_physical_observer.observe_kernel"
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        identities = {
+            node.name: [
+                member
+                for member in node.body
+                if isinstance(member, ast.FunctionDef) and member.name == "identity"
+            ]
+            for node in port_tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name in ("OriginalRunPhysicalEnvelope", "PhysicalKernelSnapshot")
+        }
+        if (
+            set(identities) != {"OriginalRunPhysicalEnvelope", "PhysicalKernelSnapshot"}
+            or any(len(methods) != 1 for methods in identities.values())
+            or not any(
+                isinstance(node, ast.Attribute)
+                and node.attr == "identity"
+                and isinstance(node.value, ast.Name)
+                and node.value.id in snapshot_bindings
+                for node in ast.walk(cli_tree)
             )
-
-        identity_methods = [
-            n
-            for n in ast.walk(port_tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "identity"
-        ]
-        if len(identity_methods) != 2 or not has_attr(cli_tree, "snapshot", "identity"):
+        ):
             issues.append(
                 Violation(
                     contract,
@@ -469,6 +502,13 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
             )
     except (OSError, SyntaxError):
         issues.append(Violation(sampler, "X0 B26 native roster owner not inspectable"))
+    return issues
+
+
+def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
+    package = root / "backend/src/oh_goon"
+    issues = _check_diagnostic_observer_ownership(root)
+    issues.extend(_check_original_physical_observation_ownership(root))
     issues.extend(_check_co_r3u1_native_custody_fail_before_effect(package))
     issues.extend(_check_co_r3u2a_original_egress_custody(package))
     issues.extend(_check_co_r3u2b1_original_launch_effect_cuts(package))
@@ -493,12 +533,11 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
     issues.extend(_check_p1b27b2b3b2b2_fd_handoff(package))
     issues.extend(_check_p1b27b2b3b2b3b_fd_argv_boundary(package))
     issues.extend(_check_p1p2b1_causal_kernel_ledger(package))
-    issues.extend(_check_p1p2b2a_effectful_source_provenance(root))
     issues.extend(_check_p3a_original_sample_rounds(package))
     issues.extend(_check_p3b1_original_convergence_assessment(package))
     issues.extend(_check_p3b2a_complete_postcleanup_roster(package))
     issues.extend(_check_p3b2b_original_native_lifecycle(root))
-    issues.extend(_check_p1p2b2b2_canonical_runtime_root(root))
+    issues.extend(_check_runtime_root_ownership(package))
     from oh_goon.repository_tooling.architecture.canonical_database_owner_contract import (
         check_canonical_database_owner,
     )
@@ -2268,7 +2307,11 @@ def _check_p1b27b2b3b2b3b_fd_argv_boundary(package: Path) -> list[Violation]:
 
 
 def _check_p1p2b1_causal_kernel_ledger(package: Path) -> list[Violation]:
-    """X0: original positive mount claims stay Run-bound and non-authorizing."""
+    """The original owner transports the public causal identity and journal event.
+
+    Signed-ledger validation, two-cut races and journal semantics are exercised
+    through the runtime; local variable names and parser spellings are not policy.
+    """
     sampler = package / "runtime/enforcer_lace_original_physical_sampling.py"
     port = package / "core/ports/physical_observation.py"
     owner = package / "runtime/enforcer_lace_fleet_resource_owner.py"
@@ -2276,233 +2319,121 @@ def _check_p1p2b1_causal_kernel_ledger(package: Path) -> list[Violation]:
         source = ast.parse(sampler.read_text(encoding="utf-8"))
         typed = ast.parse(port.read_text(encoding="utf-8"))
         fleet = ast.parse(owner.read_text(encoding="utf-8"))
-        methods = [
-            n
-            for n in ast.walk(source)
-            if isinstance(n, ast.FunctionDef)
-            and n.name == "require_original_sample_kernel_identity"
+        guards = [
+            node
+            for node in source.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "require_original_sample_kernel_identity"
         ]
-        sample_classes = [
-            n
-            for n in typed.body
-            if isinstance(n, ast.ClassDef) and n.name == "OriginalRecoveryPhysicalSample"
+        classes = [
+            node
+            for node in typed.body
+            if isinstance(node, ast.ClassDef) and node.name == "OriginalRecoveryPhysicalSample"
         ]
-        if len(methods) != 1 or len(sample_classes) != 1:
+        if len(guards) != 1 or len(classes) != 1:
             raise ValueError("one original sampler/typed sample required")
-        guard = ast.unparse(methods[0])
-        for required in (
-            "binding.envelope.declared_mount_targets",
-            "visible_targets=",
-            "ambiguous_target_mounts=",
-            "target_mount_ids=",
-            "re.findall",
-            "len(rows) != 1",
-            "len(set(mount_ids)) != expected",
-            "raise CausalJournalError",
-        ):
-            if required not in guard:
-                raise ValueError(f"original mount ledger positive guard removed: {required}")
-        candidates = [
-            n
-            for n in sample_classes[0].body
-            if isinstance(n, ast.FunctionDef) and n.name == "causal_observation_identity"
+        identities = [
+            node
+            for node in classes[0].body
+            if isinstance(node, ast.FunctionDef) and node.name == "causal_observation_identity"
         ]
-        if len(candidates) != 1:
+        if len(identities) != 1:
             raise ValueError("Run-bound physical candidate identity missing")
-        candidate = ast.unparse(candidates[0])
-        for required in (
-            "self.envelope.identity",
-            "asdict(self.scope)",
-            "self.facts.identity",
-            "self.mount_intent_identity",
-            "self.classification",
-            "self.effect_permission",
-            "oh-goon/b27/original-physical-candidate/v1",
+        returns = [node for node in ast.walk(identities[0]) if isinstance(node, ast.Return)]
+        returned = returns[0].value if len(returns) == 1 else None
+        if (
+            not isinstance(returned, ast.Call)
+            or _call_target(returned, typed) != "oh_goon.core.enforcer_lace_trust.digest"
+            or len(returned.args) != 2
+            or returned.keywords
+            or not isinstance(returned.args[0], ast.Constant)
+            or returned.args[0].value != "oh-goon/b27/original-physical-candidate/v1"
         ):
-            if required not in candidate:
-                raise ValueError(f"candidate identity loses causal binding: {required}")
-        original = [
-            n
-            for n in ast.walk(fleet)
-            if isinstance(n, ast.FunctionDef) and n.name == "sample_recovery_physical_unqualified"
+            raise ValueError("candidate identity loses its public digest domain")
+        payload = returned.args[1]
+        if (
+            not isinstance(payload, ast.Call)
+            or _call_target(payload, typed) != "oh_goon.core.enforcer_lace_trust.canonical_bytes"
+            or len(payload.args) != 1
+            or payload.keywords
+            or not isinstance(payload.args[0], ast.Dict)
+        ):
+            raise ValueError("returned candidate identity requires the canonical public payload")
+        values = {
+            key.value: value
+            for key, value in zip(payload.args[0].keys, payload.args[0].values, strict=True)
+            if isinstance(key, ast.Constant)
+        }
+        for key, fields in (
+            ("envelope_identity", {"envelope", "identity"}),
+            ("scope", {"scope"}),
+            ("kernel_snapshot_identity", {"facts", "identity"}),
+            ("mount_intent_identity", {"mount_intent_identity"}),
+            ("classification", {"classification"}),
+            ("effect_permission", {"effect_permission"}),
+        ):
+            if key not in values or not fields <= {
+                node.attr for node in ast.walk(values[key]) if isinstance(node, ast.Attribute)
+            }:
+                raise ValueError(f"candidate identity loses causal binding: {key}")
+        methods = [
+            node
+            for node in ast.walk(fleet)
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "sample_recovery_physical_unqualified"
         ]
-        if len(original) != 1:
+        if len(methods) != 1:
             raise ValueError("original Fleet sampling owner missing")
-        flow = ast.unparse(original[0])
-        for required in (
-            "require_original_sample_kernel_identity(before, facts)",
-            "after = validate_cut(connection)",
-            "if before != after:",
-            "OriginalRecoveryPhysicalSample(",
-            "journal._append_locked(self.run_id, 'RESOURCE_PHYSICAL_SAMPLE_RECORDED', payload)",
-            "mutate(record_cut)",
+        if (
+            sum(
+                _call_target(node, fleet)
+                == "oh_goon.runtime.enforcer_lace_original_physical_sampling.require_original_sample_kernel_identity"
+                for node in ast.walk(methods[0])
+                if isinstance(node, ast.Call)
+            )
+            != 1
         ):
-            if required not in flow:
-                raise ValueError(f"original sample lost two-cut validation: {required}")
+            raise ValueError("original sample must consume one kernel identity validation")
+        if (
+            sum(
+                any(
+                    isinstance(arg, ast.Constant)
+                    and arg.value == "RESOURCE_PHYSICAL_SAMPLE_RECORDED"
+                    for arg in node.args
+                )
+                for node in ast.walk(methods[0])
+                if isinstance(node, ast.Call)
+            )
+            != 1
+        ):
+            raise ValueError("original owner must transport exactly one physical sample event")
     except (OSError, SyntaxError, ValueError) as exc:
-        return [Violation(sampler, f"X0 P1P2B1 original causal kernel ledger drift: {exc}")]
+        return [Violation(sampler, f"X0 original causal kernel ledger drift: {exc}")]
     return []
 
 
-def _check_p1p2b2a_effectful_source_provenance(root: Path) -> list[Violation]:
-    """X0: original pinned FD identity and the two mounted kernel objects."""
-    witness = root / "backend/tests/native/test_p1b27b2b3b2b3a_effectful_mount.py"
+def _check_runtime_root_ownership(package: Path) -> list[Violation]:
+    """The production capture and verifier retain native snapshot authority."""
+    owner = package / "integrations/_fleet_plan_runtime_root.py"
     try:
-        tree = ast.parse(witness.read_text(encoding="utf-8"))
-        nodes = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
-        pin = ast.unparse(nodes["_pinned_kernel_mount_identity"])
-        shared = ast.unparse(nodes["_original_effectful_fd_mount_command"])
-        case = nodes["test_original_fd_bind_argv_is_consumed_by_real_bubblewrap"]
-        case_text = ast.unparse(case)
-        for token in (
-            "lease.verify_kernel_custody()",
-            "lease.pins",
-            "os.fstat(source.fd)",
-            "source.device",
-            "source.inode",
-            "source.fd",
+        tree = ast.parse(owner.read_text(encoding="utf-8"))
+        functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+        capture = functions["capture_runtime_root"]
+        verify = functions["verify_runtime_root"]
+        if not any(
+            _call_target(node, tree) == "oh_goon.integrations.content_snapshot.snapshot_identity"
+            for node in ast.walk(capture)
+            if isinstance(node, ast.Call)
         ):
-            if token not in pin:
-                raise ValueError(f"original kernel pin witness removed {token}")
-        for token in (
-            "OriginalBindSourceLease.pin_prepared(request)",
-            "backend._command(",
-            "_pinned_kernel_mount_identity(lease",
-            "pinned_home",
-            "pinned_workspace",
-            "atomic.rewind_for_bubblewrap()",
-            "_require_original_native_fd_handoff(",
+            raise ValueError("runtime capture must bind the native snapshot identity")
+        if not any(
+            _call_target(node, tree) == "oh_goon.integrations.content_snapshot.verify_snapshot"
+            for node in ast.walk(verify)
+            if isinstance(node, ast.Call)
         ):
-            if token not in shared:
-                raise ValueError(f"original FD mount launch removed {token}")
-        for token in (
-            "_original_effectful_fd_mount_command(",
-            "run_command(*argv,",
-            "result.returncode == 0",
-        ):
-            if token not in case_text:
-                raise ValueError(f"original mounted-source execution removed {token}")
-        literals = [
-            n.value
-            for n in ast.walk(case)
-            if isinstance(n, ast.Constant) and isinstance(n.value, str) and "stat -Lc" in n.value
-        ]
-        if len(literals) != 1 or literals[0].count("stat -Lc '%d:%i'") != 2:
-            raise ValueError("two original FD-bind mounted identities required")
-        for token in (
-            'stat -Lc \'%d:%i\' /home/fleet)" = "$4"',
-            'stat -Lc \'%d:%i\' /workspace)" = "$5"',
-            "sealed-FD-data-v1",
-            "/tmp/oh-goon-fd-proof",
-            "/proc/self/mountinfo",
-        ):
-            if token not in literals[0]:
-                raise ValueError(f"original mounted object check removed {token}")
+            raise ValueError("runtime verification must use the native snapshot verifier")
     except (OSError, SyntaxError, ValueError, KeyError) as exc:
-        return [Violation(witness, f"X0 P1P2B2A physical source provenance drift: {exc}")]
-    return []
-
-
-def _check_p1p2b2b1_effectful_root_scaffold(root: Path) -> list[Violation]:
-    """X0: never replace the original sparse-root mount scaffold with host /."""
-    witness = root / "backend/tests/native/test_p1b27b2b3b2b3a_effectful_mount.py"
-    try:
-        source = witness.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        nodes = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
-        names = (
-            "_prepared_effectful_runtime_root",
-            "test_effectful_fixture_has_original_mount_scaffold",
-            "test_original_fd_bind_argv_is_consumed_by_real_bubblewrap",
-        )
-        if not all(name in nodes for name in names):
-            raise ValueError("effectful fixture scaffold or native test missing")
-        helper = ast.unparse(nodes[names[0]])
-        test = ast.unparse(nodes[names[2]])
-        for token in (
-            "_create_mount_scaffold(",
-            "PurePosixPath('/tmp/oh-goon-fd-proof')",
-            "files.update(_dynamic_dependencies(",
-            "shutil.copy2(",
-        ):
-            if token not in helper:
-                raise ValueError(f"original runtime scaffold preparation missing {token}")
-        for token in (
-            "_prepared_effectful_runtime_root(",
-            "OriginalBindSourceLease.pin_prepared(request)",
-            "backend._command(",
-            "run_command(*argv,",
-            "result.returncode == 0",
-        ):
-            if token not in test:
-                raise ValueError(f"original native witness path missing {token}")
-        if (
-            "request.attempt.runtime_root.root = Path('/')" in test
-            or "monkeypatch.setattr(owner, '_prepare_mounts'" in test
-        ):
-            raise ValueError("host root shortcut or replaced mount builder reintroduced")
-    except (OSError, SyntaxError, ValueError) as exc:
-        return [Violation(witness, f"X0 P1P2B2B1 native scaffold drift: {exc}")]
-    return []
-
-
-def _check_p1p2b2b2_canonical_runtime_root(root: Path) -> list[Violation]:
-    """X0: every mechanical witness shares the one frozen production root."""
-    witness = root / "backend/tests/native/test_p1b27b2b3b2b3a_effectful_mount.py"
-    owner = root / "backend/src/oh_goon/integrations/_fleet_plan_runtime_root.py"
-    try:
-        tree = ast.parse(witness.read_text(encoding="utf-8"))
-        nodes = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
-        prepare = ast.unparse(nodes["_prepared_effectful_runtime_root"])
-        shared = ast.unparse(nodes["_original_effectful_fd_mount_command"])
-        native = ast.unparse(nodes["test_original_fd_bind_argv_is_consumed_by_real_bubblewrap"])
-        for fragment in (
-            "HostToolBinding(",
-            "snapshot_host_path(",
-            "capture_runtime_root(",
-            "verify_runtime_root(runtime)",
-            "('sh', 'cat', 'stat', 'awk', 'sleep')",
-            "runtime_inspector=",
-            "network_enabled=False",
-        ):
-            if fragment not in prepare:
-                raise ValueError(f"canonical runtime capture missing {fragment}")
-        for fragment in (
-            "_prepared_effectful_runtime_root(",
-            "request.attempt.runtime_root = runtime",
-            "request.attempt.host_tools = tools",
-            "verify_runtime_root(request.attempt.runtime_root)",
-            "OriginalBindSourceLease.pin_prepared(request)",
-            "backend._command(",
-            "_require_original_native_fd_handoff(",
-        ):
-            if fragment not in shared:
-                raise ValueError(f"canonical native launch missing {fragment}")
-        if (
-            "_original_effectful_fd_mount_command(" not in native
-            or "run_command(*argv," not in native
-        ):
-            raise ValueError("original witness must use shared native mount launch")
-        for illegal in (
-            "shutil.copy2(",
-            "_create_mount_scaffold(",
-            "_dynamic_dependencies(",
-            "Path('/')",
-            "monkeypatch.setattr(",
-            "lambda _: None",
-            "capture_not_canonical_root(",
-        ):
-            if any(illegal in source for source in (prepare, shared, native)):
-                raise ValueError(f"noncanonical fixture preparation/bypass: {illegal}")
-        production = owner.read_text(encoding="utf-8")
-        if (
-            "def capture_runtime_root(" not in production
-            or "identity = snapshot_identity(destination" not in production
-            or "def verify_runtime_root(" not in production
-        ):
-            raise ValueError("original production runtime snapshot ownership changed")
-    except (OSError, SyntaxError, ValueError, KeyError) as exc:
-        return [Violation(witness, f"X0 P1P2B2B2 canonical runtime-root drift: {exc}")]
+        return [Violation(owner, f"X0 canonical runtime-root ownership drift: {exc}")]
     return []
 
 

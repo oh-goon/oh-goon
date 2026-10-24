@@ -21,7 +21,11 @@ Reusable test-review methods live in agentsCookbook: [coverage design review](ht
 - Prefer the narrowest reliable proof of a realistic defect. Preserve distinct cancellation, source-identity, authority, persistence and recovery cases when they observe different failures.
 - Keep real state isolated: database, process, filesystem, environment and admitted identities must not leak between cases. See [test setup isolation](TEST_SETUP_ISOLATION_QA.md).
 - Private helper names, current filenames, exact documentation wording and test-the-test assertions are not contracts. A static check is justified when package ownership, a public protocol or an important absence property is itself the governed boundary.
+- Native pytest collection owns test discovery and import identity. Do not substitute a global basename rule for the native collector; operational path/lock/protocol identities remain behavior contracts.
 - Removing an obsolete or duplicate assertion is valid when stronger proof still protects the behavior. Do not replace a deleted prose assertion with new wording assertions.
+- Every mutation test starts from a valid baseline and proves its specific defect is rejected. A pre-existing unrelated failure is not negative coverage.
+- Use small real source/archive fixtures for policy and transition tests. Keep one composition proof for a production corpus; do not copy and reparse the whole checkout for every local mutation.
+- `slow` identifies an exhaustive corpus variant with a bounded ordinary counterpart. Unique process, cancellation, permission, identity and concurrency regressions stay in routine CI even when slow. Raw timing, test count and line coverage do not decide this classification. `make release-check` restores all portable exhaustive variants.
 - A skip, timeout, unavailable dependency or interrupted native/browser run remains unverified. Retain the observed failure and explain its tested source and environment; later isolated success does not erase a combined-run failure.
 - Tests exercise code; coverage measures which code ran; native qualification observes supported hosts; certification belongs to the product's explicit certification owner. Cookbook review results do not substitute for any of these outcomes.
 
