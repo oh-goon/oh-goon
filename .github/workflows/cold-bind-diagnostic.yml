@@ -1,0 +1,81 @@
+name: Matched cold bind diagnostic
+
+"on":
+  push:
+    branches: [codex/cold-bind-profile-v10]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cold-bind-profile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  profile:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: "3.12"
+      OH_GOON_PROFILE_BASE: bd3b60a2f7151e62c0df1f7625ce608e57d24d93
+      OH_GOON_PROFILE_CANDIDATE: 061e236915b39cfeffe0040f5f85de8445efb625
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24.19.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e
+        with:
+          version: "0.12.5"
+          enable-cache: false
+      - name: Select disposable hosted environment
+        run: |
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep strace
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Materialize committed locks once
+        run: make init
+      - name: Profile both validator versions on this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          bench_root="$RUNNER_TEMP/cold-bind-profile"
+          bench_target="backend/src/oh_goon/integrations/fleet_plan_bubblewrap_isolation.py"
+          mkdir -p "$bench_root"
+          git show "$OH_GOON_PROFILE_BASE:$bench_target" > "$bench_root/base.py"
+          git show "$OH_GOON_PROFILE_CANDIDATE:$bench_target" > "$bench_root/candidate.py"
+          trap 'cp "$bench_root/candidate.py" "$bench_target"' EXIT
+          uname -r
+          stat -f -c %T /usr
+          for bench_variant in base candidate; do
+            cp "$bench_root/$bench_variant.py" "$bench_target"
+            sync
+            printf '3\n' | sudo tee /proc/sys/vm/drop_caches > /dev/null
+            if ! uv run --offline --frozen --no-sync --project backend strace -c -e trace=stat,lstat,newfstatat,statx,fstat -o "$bench_root/$bench_variant-syscalls.txt" backend/.venv/bin/python -m cProfile -o "$bench_root/$bench_variant.prof" -m pytest -c backend/pyproject.toml -o addopts= -q backend/tests/unit/entrypoints/test_cli_ai.py::test_native_bubblewrap_preflight_retains_canonical_git_root --durations=1 > "$bench_root/$bench_variant.log" 2>&1; then
+              cat "$bench_root/$bench_variant.log"
+              exit 1
+            fi
+            cat "$bench_root/$bench_variant.log"
+            cat "$bench_root/$bench_variant-syscalls.txt"
+          done
+          uv run --offline --frozen --no-sync --project backend python - <<'PY'
+          import hashlib, json, os, pstats, sys, sysconfig
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "cold-bind-profile"
+          result = {"base": os.environ["OH_GOON_PROFILE_BASE"], "candidate": os.environ["OH_GOON_PROFILE_CANDIDATE"], "python": sys.version, "have_dirent_dtype": sysconfig.get_config_var("HAVE_DIRENT_D_TYPE"), "same_host": True, "cold_guest_caches_before_each": True, "samples": {}}
+          for variant in ("base", "candidate"):
+              stats = pstats.Stats(str(root / (variant + ".prof")))
+              methods = {}
+              for (file, line, name), values in stats.stats.items():
+                  if name in {"_require_standard_bind_structure", "_validate_standard_request", "test_native_bubblewrap_preflight_retains_canonical_git_root"} or "posix.DirEntry" in name or "posix.stat" in name or "posix.lstat" in name:
+                      methods[file + ":" + name] = {"calls": values[1], "self_seconds": values[2], "cumulative_seconds": values[3]}
+              result["samples"][variant] = {"source_sha256": hashlib.sha256((root / (variant + ".py")).read_bytes()).hexdigest(), "methods": methods, "syscalls": (root / (variant + "-syscalls.txt")).read_text(), "pytest": (root / (variant + ".log")).read_text()}
+          print("OH_GOON_MATCHED_PROFILE_JSON=" + json.dumps(result, sort_keys=True))
+          PY
