@@ -634,3 +634,194 @@ def test_host_terminal_preserves_bytes_resize_and_restores_after_failure(
     finally:
         os.close(slave)
         os.close(master)
+
+
+@pytest.mark.parametrize("state", ["success", "failed", "cancelled", "interrupt", "crash"])
+def test_ai_always_emits_one_durable_handoff_reference_at_admission(
+    native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str], state: str
+) -> None:
+    if state == "failed":
+        native_cli.detail.outcome = FleetRunOutcome.FAILED
+    elif state == "cancelled":
+        native_cli.detail.outcome = FleetRunOutcome.CANCELLED
+        native_cli.detail.run.status = FleetRunStatus.CANCELLED
+    elif state == "interrupt":
+        native_cli.runtime.runs.wait_for_terminal.side_effect = [
+            KeyboardInterrupt(),
+            native_cli.detail,
+        ]
+    elif state == "crash":
+        native_cli.runtime.runs.wait_for_terminal.side_effect = RuntimeError("controller stopped")
+    if state == "crash":
+        with pytest.raises(RuntimeError, match="controller stopped"):
+            main(native_cli.argv)
+    else:
+        assert (
+            main(native_cli.argv)
+            == {"success": 0, "failed": 1, "cancelled": 1, "interrupt": 130}[state]
+        )
+    lines = capsys.readouterr().err.splitlines()
+    references = [
+        line.removeprefix("Durable Run handoff argv: ")
+        for line in lines
+        if line.startswith("Durable Run handoff argv: ")
+    ]
+    assert len(references) == 1
+    assert json.loads(references[0]) == ["oh-goon", "plan", "handoff", "native-run", "--json"]
+
+
+def test_ai_explicit_prior_handoff_is_data_for_a_fresh_native_run(
+    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon import cli_plan_run_readback
+
+    prior = object()
+    native_cli.runtime.runs.get = Mock(return_value=prior)
+    projection = Mock(
+        return_value={
+            "fleet_run_id": "prior-run",
+            "outcome": "FAILED",
+            "remaining_work": "Unverified",
+        }
+    )
+    monkeypatch.setattr(cli_plan_run_readback, "run_handoff_projection", projection)
+    assert main([*native_cli.argv, "--handoff-from", "prior-run"]) == 0
+    native_cli.runtime.runs.get.assert_called_once_with("prior-run")
+    projection.assert_called_once_with(prior)
+    call = native_cli.runtime.plans.run_native_agent.call_args.kwargs
+    assert json.loads(call["prior_context"])["outcome"] == "FAILED"
+    assert call["task"] == "repair the defect"
+    assert call["selected"].definition.executable == str(native_cli.executable)
+    native_cli.runtime.runs.cancel.assert_not_called()
+
+
+def test_ai_oversize_prior_handoff_rejects_before_new_admission_or_catalog_mutation(
+    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    native_cli.runtime.runs.get = Mock(return_value=object())
+    monkeypatch.setattr(
+        "oh_goon.cli_plan_run_readback.run_handoff_projection", lambda _: {"summary": "x" * 65536}
+    )
+    assert main([*native_cli.argv, "--handoff-from", "prior-run"]) == 2
+    native_cli.runtime.plans.run_native_agent.assert_not_called()
+    native_cli.runtime.locations.add.assert_not_called()
+    assert "65536 bytes" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "prior",
+    [
+        "[]",
+        "not JSON",
+        '{"summary":"' + "x" * 65536 + '"}',
+    ],
+    ids=["non-object", "invalid-json", "oversize"],
+)
+def test_native_service_rejects_invalid_prior_context_before_fresh_source_or_run(
+    native_cli: SimpleNamespace, prior: str
+) -> None:
+    from oh_goon.core.errors import FleetPlanInvalid
+    from oh_goon.services.fleet_plans import FleetPlanService
+
+    runs, resolver = Mock(), Mock()
+    service = FleetPlanService(
+        resolver, runs, Mock(), Mock(), Mock(), content_store=Mock(), standard_local_fleet=True
+    )
+    with pytest.raises(FleetPlanInvalid, match="Prior Run handoff"):
+        service.run_native_agent(
+            selected=Mock(),
+            workspace=native_cli.workspace,
+            skill=None,
+            task="New task",
+            prior_context=prior,
+        )
+    assert runs.mock_calls == [] and resolver.mock_calls == []
+
+
+def test_native_prior_context_is_bound_before_new_plan_lock_and_admission(
+    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedLocalSearchAgentStep
+    from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
+    from oh_goon.services.fleet_plans import FleetPlanService
+
+    selected, _, _ = cli_ai.resolve_native_cli_selection(
+        agent="pi",
+        profile="isolated",
+        workspace=native_cli.workspace,
+        config_file=native_cli.config,
+    )
+    step = ResolvedLocalSearchAgentStep(
+        step_id="native-agent",
+        argv=("python",),
+        delivery_sha256="a" * 64,
+        handoff_identity="fresh-handoff",
+        source_step_id="native-agent",
+        harness="native",
+        native_agent=selected,
+    )
+    original = ResolvedFleetPlan.create(
+        name="native",
+        description="",
+        execution=MaintenanceExecutionPolicy(),
+        steps=(step,),
+        native_agent=selected,
+    )
+    resolver, runs = Mock(), Mock()
+    resolver.resolve_frozen_agents.return_value = (original, (), "b" * 64)
+    service = FleetPlanService(
+        resolver, runs, Mock(), Mock(), Mock(), content_store=Mock(), standard_local_fleet=True
+    )
+    monkeypatch.setattr(service, "require_plan_ingress_preparation", Mock())
+    monkeypatch.setattr(service, "_prepare_native_agent", Mock(return_value=selected))
+    target = Mock()
+    monkeypatch.setattr(service, "_agent_target", target)
+    lock = Mock()
+    monkeypatch.setattr("oh_goon.services.fleet_plans.write_execution_lock", lock)
+    service.run_native_agent(
+        selected=selected,
+        workspace=native_cli.workspace,
+        skill=None,
+        task="New task",
+        prior_context=json.dumps({"fleet_run_id": "prior-run", "outcome": "FAILED"}),
+    )
+    resolved = target.call_args.args[0]
+    assert resolved.plan_id != original.plan_id
+    assert resolved.native_agent is selected
+    context = json.loads(resolved.steps[0].review_context)
+    assert context["authority"] == "UNTRUSTED_PRIOR_RUN_CONTEXT"
+    assert context["prior_run_handoff"]["outcome"] == "FAILED"
+    assert context["permission_authority"].startswith("NONE")
+    from oh_goon.core.execution_lock_identity import build_execution_lock, verify_execution_lock
+
+    verify_execution_lock(build_execution_lock(resolved), lock.call_args.args[1])
+    assert lock.call_args.args[1].digest != build_execution_lock(original).digest
+    resolver.resolve_frozen_agents.assert_called_once()
+    runs.start_prepared_plan.assert_called_once()
+    assert step.review_context is None
+
+
+def test_native_prior_json_recursion_error_is_typed_before_source_or_run(
+    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.core.errors import FleetPlanInvalid
+    from oh_goon.services.fleet_plans import FleetPlanService
+
+    runs, resolver = Mock(), Mock()
+    service = FleetPlanService(
+        resolver, runs, Mock(), Mock(), Mock(), content_store=Mock(), standard_local_fleet=True
+    )
+    monkeypatch.setattr(
+        "oh_goon.services.fleet_plans.json.loads",
+        Mock(side_effect=RecursionError("private parser detail")),
+    )
+    with pytest.raises(FleetPlanInvalid, match="Prior Run handoff") as rejected:
+        service.run_native_agent(
+            selected=Mock(),
+            workspace=native_cli.workspace,
+            skill=None,
+            task="New task",
+            prior_context="{}",
+        )
+    assert "private parser detail" not in str(rejected.value)
+    assert runs.mock_calls == [] and resolver.mock_calls == []

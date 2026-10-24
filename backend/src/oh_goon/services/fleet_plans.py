@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shlex
 import time
 from collections.abc import Callable, Mapping
@@ -95,6 +96,37 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.schedules import ScheduleService
 
+
+def _native_prior_context(value: str | None) -> str | None:
+    """Explicit prior memory is untrusted data, never admission or permission."""
+    if value is None:
+        return None
+    if type(value) is not str:
+        raise FleetPlanInvalid("Prior Run handoff must be UTF-8 JSON text")
+    try:
+        if len(value.encode("utf-8")) > 65536:
+            raise ValueError("oversize")
+        prior = json.loads(value)
+        if not isinstance(prior, dict):
+            raise ValueError("not an object")
+        context = json.dumps(
+            {
+                "authority": "UNTRUSTED_PRIOR_RUN_CONTEXT",
+                "permission_authority": "NONE; fresh source capture and phase admission required",
+                "prior_run_handoff": prior,
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        if len(context.encode("utf-8")) > 65536:
+            raise ValueError("oversize")
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        raise FleetPlanInvalid(
+            "Prior Run handoff must be a complete UTF-8 JSON object within 65536 bytes"
+        ) from None
+    return context
+
+
 if TYPE_CHECKING:
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
     from oh_goon.integrations.fleet_content_store import FleetContentStore
@@ -142,6 +174,7 @@ class FleetPlanService:
         verification: tuple[tuple[str, ...], ...] = (),
         role: str = "report",
         fleet_run_id: str | None = None,
+        prior_context: str | None = None,
     ) -> FleetRunState:
         """Author one ordinary native-workload Plan and admit it through Fleet.
 
@@ -164,6 +197,7 @@ class FleetPlanService:
             task.encode("utf-8")
         except UnicodeError:
             raise FleetPlanInvalid("Native task must be valid UTF-8") from None
+        context = _native_prior_context(prior_context)
         self.require_plan_ingress_preparation(fleet_run_id)
         workspace = workspace.resolve(strict=True)
         if role not in {"report", "review"}:
@@ -246,6 +280,24 @@ class FleetPlanService:
                 repository=workspace,
                 git_service=self._git_service,
             )
+            if context is not None:
+                plan = ResolvedFleetPlan.create(
+                    name=plan.name,
+                    description=plan.description,
+                    execution=plan.execution,
+                    steps=tuple(
+                        step.model_copy(update={"review_context": context})
+                        if isinstance(step, ResolvedLocalSearchAgentStep)
+                        else step
+                        for step in plan.steps
+                    ),
+                    requirements=plan.requirements,
+                    imports=plan.imports,
+                    step_sources=plan.step_sources,
+                    skill_sources=plan.skill_sources,
+                    configuration=plan.configuration,
+                    native_agent=plan.native_agent,
+                )
             write_execution_lock(root / LOCK_FILE_NAME, build_execution_lock(plan))
             target = self._agent_target(plan, deliveries, source_sha, repository_id(workspace))
             return self._runs.start_prepared_plan(

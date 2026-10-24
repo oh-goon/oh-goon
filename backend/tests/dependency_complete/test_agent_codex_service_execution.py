@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import time
 import tomllib
@@ -20,13 +21,22 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
+from oh_goon.core.models.fleet_plan_values import HostEnvironmentPart, ResolvedEnvironmentBinding
 from oh_goon.core.path_layouts import AttemptPathLayout
+from oh_goon.core.ports.diagnostics import DiagnosticEmitter
+from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.engine.command import CommandCancelledError, CommandResult, run_command
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
 from oh_goon.integrations import agent_codex_service_execution as execution
 from oh_goon.integrations.agent_codex_service import NativeCodexCleanupIncomplete
-from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, _StepProcess
+from oh_goon.integrations.fleet_plan_step_execution import (
+    StepRuntime,
+    _StepProcess,
+    _with_output_observer,
+)
+from oh_goon.runtime.diagnostics import DiagnosticRouter, JsonlDiagnosticSink
 
 
 def execute_fixture(
@@ -34,6 +44,10 @@ def execute_fixture(
     monkeypatch: pytest.MonkeyPatch,
     *,
     fault: str | None = None,
+    output_observer: StepOutputObserver | None = None,
+    diagnostics: DiagnosticEmitter | None = None,
+    notifications: list[dict[str, Any]] | None = None,
+    protect_host_secret: bool = False,
 ) -> tuple[
     Callable[[], execution.CodexServiceExecution],
     list[object],
@@ -85,6 +99,8 @@ def execute_fixture(
     )
 
     def command_owner(*argv: str, **kwargs: Any) -> CommandResult:
+        if kwargs.get("stream_output") is not None:
+            kwargs["stream_output"]("stderr", "RAW_SYNTHETIC_PRIVATE_PROTOCOL\n")
         environment = kwargs["env"]
         assert all(environment.get(name) == value for name, value in native_environment.items())
         assert not inherited_control.keys() & environment.keys()
@@ -174,9 +190,12 @@ def execute_fixture(
             assert thread == "owned-thread"
             events.append("mcp_gate")
             if fault == "mcp":
-                raise AgentProviderError(
-                    "Native Codex protected execution requires an empty MCP catalog"
-                )
+                try:
+                    raise ValueError("RAW_SYNTHETIC_PRIVATE_ERROR_CHAIN")
+                except ValueError as error:
+                    raise AgentProviderError(
+                        "Native Codex protected execution requires an empty MCP catalog"
+                    ) from error
 
         async def feature_flags(self, thread: str) -> dict[str, bool]:
             assert thread == "owned-thread"
@@ -185,19 +204,46 @@ def execute_fixture(
 
         async def command_exec(self, *_args: object, **_kwargs: Any) -> dict[str, Any]:
             events.append("sandbox_qualification")
-            return {"exitCode": 1 if fault == "qualification" else 0}
+            if fault == "qualification_missing":
+                return {}
+            return {
+                "exitCode": {
+                    "qualification": 1,
+                    "qualification_boolean": False,
+                    "qualification_float": 0.0,
+                    "qualification_null": None,
+                    "qualification_array": [],
+                }.get(fault or "", 0)
+            }
 
         async def start_turn(self, thread: str, task: str, **_kwargs: Any) -> dict[str, Any]:
             assert thread == "owned-thread" and task == "Captured task"
             events.append("model_turn")
-            return {"turn": {"id": "owned-turn"}}
+            if fault == "turn_missing":
+                return {}
+            return {
+                "turn": {
+                    "turn_null": None,
+                    "turn_array": [],
+                    "turn_identifier_missing": {},
+                    "turn_identifier_null": {"id": None},
+                    "turn_identifier_boolean": {"id": False},
+                    "turn_identifier_blank": {"id": " "},
+                    "turn_identifier_oversized": {"id": "t" * 257},
+                    "turn_identifier_control": {"id": "PRIVATE\nTURN"},
+                }.get(fault or "", {"id": "owned-turn"})
+            }
 
         async def next_notification(self, thread: str) -> dict[str, Any]:
             assert thread == "owned-thread"
+            if notifications is not None and notifications:
+                return notifications.pop(0)
             if fault == "cancel":
                 cancelled.set()
                 await asyncio.sleep(0.01)
                 return {"method": "item/agentMessage/delta", "params": {"threadId": thread}}
+            if notifications is not None:
+                raise AssertionError("native fixture notification script was exhausted")
             self._message += 1
             if self._message == 1:
                 return {
@@ -228,6 +274,31 @@ def execute_fixture(
         command_runner=command_owner,
         git_command_runner=command_owner,
         managed_runtime=None,
+    )
+    process = _with_output_observer(
+        process,
+        ResolvedLocalSearchAgentStep(
+            step_id="native-service",
+            argv=("python",),
+            delivery_sha256="0" * 64,
+            handoff_identity="original-frozen-handoff",
+            source_step_id="native-service",
+            harness="native",
+            native_agent=selected,
+            environment=(
+                ResolvedEnvironmentBinding(
+                    name="ADMITTED_SECRET",
+                    parts=(HostEnvironmentPart(name="NODE_REPL_AUTH_TOKEN"),),
+                ),
+            )
+            if protect_host_secret
+            else (),
+        ),
+        3,
+        output_observer,
+        diagnostics,
+        "original-fleet-run",
+        "original-repository",
     )
     runtime = StepRuntime(
         git=GitService(), extensions=None, tools=None, cancel_requested=cancelled.is_set
@@ -269,6 +340,75 @@ def test_service_turn_success_retains_actual_owned_daemon_cancellation_receipt(
     assert events.index("mcp_gate") < events.index("model_turn")
     assert events.index("sandbox_qualification") < events.index("model_turn")
     assert events.index("disconnect") < events.index("process_closed")
+
+
+@pytest.mark.parametrize("observer_fails", [False, True])
+def test_safe_service_failure_reaches_original_stream_only_after_process_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observer_fails: bool
+) -> None:
+    received: list[tuple[str, int, str, str]] = []
+
+    def observe(step: str, attempt: int, stream: str, text: str) -> None:
+        assert len(physical) == 1
+        assert physical[0].supervisor.final_process_group_quiescent is True
+        received.append((step, attempt, stream, text))
+        if observer_fails:
+            raise RuntimeError("synthetic live-output observer failure")
+
+    invoke, events, physical = execute_fixture(
+        tmp_path, monkeypatch, fault="mcp", output_observer=observe
+    )
+    with pytest.raises(
+        execution.CodexServiceExecutionFailure, match="empty MCP catalog"
+    ) as failure:
+        invoke()
+    assert "model_turn" not in events
+    assert received == [
+        (
+            "native-service",
+            3,
+            "stderr",
+            "Native Codex protected execution requires an empty MCP catalog\n",
+        )
+    ]
+    assert failure.value.outcome.supervisor is physical[0].supervisor
+    assert failure.value.outcome.physical_execution_id == physical[0].physical_execution_id
+    assert failure.value.outcome.returncode != 0
+
+
+def test_safe_service_failure_survives_runtime_shutdown_without_live_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "passive-diagnostics" / "diagnostics.jsonl"
+    router = DiagnosticRouter((JsonlDiagnosticSink(path),))
+    invoke, events, physical = execute_fixture(
+        tmp_path, monkeypatch, fault="mcp", diagnostics=router
+    )
+    with pytest.raises(execution.CodexServiceExecutionFailure) as failure:
+        invoke()
+    assert "model_turn" not in events
+    assert failure.value.outcome.supervisor is physical[0].supervisor
+    assert physical[0].supervisor.final_process_group_quiescent is True
+    del router, invoke
+    # Independent readback needs no live store, service or native private files.
+    retained = [json.loads(line) for line in path.read_text().splitlines()]
+    assert len(retained) == 1
+    event = retained[0]
+    assert event["fleet_run_id"] == "original-fleet-run"
+    assert event["repository_id"] == "original-repository"
+    assert event["step_id"] == "native-service"
+    assert event["operation"] == "native_failure_attempt_3"
+    assert event["exception_type"] == "AgentProviderError"
+    assert "empty MCP catalog" in event["message"]
+    assert "require_no_mcp_servers" in event["traceback"]
+    journal_context = "\n".join(item.summary for item in failure.value.safe_diagnostics)
+    assert event["message"] in journal_context
+    assert event["traceback"] in journal_context
+    assert "not a model claim or authority" in journal_context
+    assert "RAW_SYNTHETIC_PRIVATE" not in journal_context
+    assert "RAW_SYNTHETIC_PRIVATE" not in json.dumps(retained)
+    assert "SYNTHETIC_NATIVE_PROVIDER_SECRET" not in json.dumps(retained)
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_unqualified_native_cli_version_blocks_before_daemon_and_model_submission(
@@ -317,6 +457,59 @@ def test_missing_terminal_or_cleanup_proof_cannot_be_reported_as_success(
     assert isinstance(
         physical[0], CommandResult if fault == "normal_daemon_exit" else CommandCancelledError
     )
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "qualification_missing",
+        "qualification_boolean",
+        "qualification_float",
+        "qualification_null",
+        "qualification_array",
+    ],
+)
+def test_malformed_sandbox_qualification_never_starts_model_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault=fault)
+    with pytest.raises(execution.CodexServiceExecutionFailure, match="qualification") as failure:
+        invoke()
+    assert "sandbox_qualification" in events and "model_turn" not in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    assert failure.value.outcome.returncode != 0
+    assert failure.value.outcome.supervisor is physical[0].supervisor
+    assert failure.value.outcome.physical_execution_id == physical[0].physical_execution_id
+    assert physical[0].supervisor.final_process_group_quiescent is True
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "turn_missing",
+        "turn_null",
+        "turn_array",
+        "turn_identifier_missing",
+        "turn_identifier_null",
+        "turn_identifier_boolean",
+        "turn_identifier_blank",
+        "turn_identifier_oversized",
+        "turn_identifier_control",
+    ],
+)
+def test_malformed_turn_acceptance_is_a_safe_failure_with_actual_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault=fault)
+    with pytest.raises(execution.CodexServiceExecutionFailure, match="owned turn") as failure:
+        invoke()
+    assert "model_turn" in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    assert failure.value.outcome.returncode != 0
+    assert "PRIVATE" not in failure.value.outcome.stderr
+    assert failure.value.outcome.supervisor is physical[0].supervisor
+    assert failure.value.outcome.physical_execution_id == physical[0].physical_execution_id
+    assert physical[0].supervisor.final_process_group_quiescent is True
 
 
 def test_dead_service_before_readiness_never_submits_model_work(
@@ -392,3 +585,196 @@ def test_service_policy_keeps_review_git_and_control_roots_protected(tmp_path: P
     assert native["shell_environment_policy"]["inherit"] == "none"
     assert native["shell_environment_policy"]["include_only"] == ["PATH", "TMPDIR"]
     assert argv[-3:] == ("app-server", "--listen", "unix://" + str(socket))
+
+
+def _visible_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "method": "item/completed",
+        "params": {"threadId": "owned-thread", "turnId": "owned-turn", "item": item},
+    }
+
+
+def _visible_terminal(*, failed: bool = False) -> dict[str, Any]:
+    return {
+        "method": "turn/completed",
+        "params": {
+            "threadId": "owned-thread",
+            "turn": {
+                "id": "owned-turn",
+                "status": "failed" if failed else "completed",
+                "error": {"message": "RAW_PRIVATE_RPC_ERROR"} if failed else None,
+            },
+        },
+    }
+
+
+def test_completed_visible_items_retain_actions_results_and_exclude_reasoning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = [
+        _visible_item({"type": "agentMessage", "text": "I will inspect the targeted failure."}),
+        _visible_item({"type": "reasoning", "text": "PRIVATE_REASONING_CANARY"}),
+        _visible_item(
+            {
+                "type": "commandExecution",
+                "command": "pytest tests/test_target.py",
+                "exitCode": 0,
+                "aggregatedOutput": "1 passed in 0.10s",
+                "cwd": "PRIVATE_CWD_CANARY",
+                "commandActions": [{"private": "PRIVATE_ACTION_METADATA"}],
+            }
+        ),
+        _visible_item({"type": "agentMessage", "text": "The targeted command completed."}),
+        _visible_terminal(),
+    ]
+    invoke, _, _ = execute_fixture(tmp_path, monkeypatch, notifications=script)
+    result = invoke()
+    retained = "\n".join(item.summary for item in result.protocol.observations)
+    assert "inspect the targeted failure" in retained
+    assert "pytest tests/test_target.py" in retained
+    assert "exitCode: 0" in retained
+    assert "1 passed in 0.10s" in retained
+    assert "PRIVATE_REASONING_CANARY" not in retained
+    assert "PRIVATE_CWD_CANARY" not in retained
+    assert "PRIVATE_ACTION_METADATA" not in retained
+    assert len(retained) <= 28000
+
+
+def test_tool_stacktrace_survives_model_error_with_original_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = [
+        _visible_item(
+            {
+                "type": "commandExecution",
+                "command": "pytest tests/test_target.py",
+                "exitCode": 1,
+                "aggregatedOutput": "Traceback (most recent call last):\n  File target.py, line 7\nAssertionError: expected 2, got 1",
+            }
+        ),
+        _visible_terminal(failed=True),
+    ]
+    invoke, _, physical = execute_fixture(tmp_path, monkeypatch, notifications=script)
+    with pytest.raises(execution.CodexServiceExecutionFailure) as failure:
+        invoke()
+    retained = "\n".join(item.summary for item in failure.value.safe_diagnostics)
+    assert "pytest tests/test_target.py" in retained
+    assert "Traceback (most recent call last)" in retained
+    assert "AssertionError: expected 2, got 1" in retained
+    assert "exitCode: 1" in retained
+    assert "RAW_PRIVATE_RPC_ERROR" not in retained
+    assert failure.value.native_event_count == 2
+    assert failure.value.outcome.supervisor is physical[0].supervisor
+    assert physical[0].supervisor.final_process_group_quiescent is True
+
+
+def test_native_visible_text_redacts_complete_secrets_before_clipping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected = "SYNTHETIC_PARENT_CONTROL_SECRET"
+    raw = "x" * 1840 + protected + "y" * 4100 + "\npassword=synthetic-visible-secret"
+    script = [
+        _visible_item(
+            {
+                "type": "commandExecution",
+                "command": "cat public-output.txt",
+                "exitCode": 0,
+                "aggregatedOutput": raw,
+            }
+        ),
+        _visible_terminal(),
+    ]
+    invoke, _, _ = execute_fixture(
+        tmp_path, monkeypatch, notifications=script, protect_host_secret=True
+    )
+    result = invoke()
+    retained = "\n".join(item.summary for item in result.protocol.observations)
+    assert protected not in retained
+    assert "SYNTHETIC_PARENT" not in retained
+    assert "synthetic-visible-secret" not in retained
+    assert "visible characters omitted" in retained
+    assert "***" in retained
+    assert "password=[REDACTED]" in retained
+    assert all(len(item.summary) <= 4000 for item in result.protocol.observations)
+
+
+def test_missing_optional_command_output_is_explicit_and_shared_budget_is_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = [
+        _visible_item({"type": "commandExecution", "command": "pytest"}),
+        *(
+            _visible_item({"type": "agentMessage", "text": "visible message " + "x" * 5000})
+            for _ in range(12)
+        ),
+        _visible_terminal(),
+    ]
+    invoke, _, _ = execute_fixture(tmp_path, monkeypatch, notifications=script)
+    result = invoke()
+    retained = "\n".join(item.summary for item in result.protocol.observations)
+    assert "exitCode: unavailable" in retained
+    assert "aggregatedOutput:\nunavailable" in retained
+    assert sum(len(item.summary) for item in result.protocol.observations) <= 28000
+    assert len(result.protocol.observations) <= 127
+    assert result.protocol.omitted_observations > 0
+
+
+def test_cancelled_service_preserves_visible_output_without_fabricating_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "passive-diagnostics" / "diagnostics.jsonl"
+    script = [
+        _visible_item(
+            {
+                "type": "commandExecution",
+                "command": "pytest tests/test_target.py",
+                "exitCode": 1,
+                "aggregatedOutput": "Traceback: target.py:7\nAssertionError: visible-before-cancel password=cancel-secret",
+            }
+        )
+    ]
+    invoke, _, physical = execute_fixture(
+        tmp_path,
+        monkeypatch,
+        fault="cancel",
+        notifications=script,
+        diagnostics=DiagnosticRouter((JsonlDiagnosticSink(path),)),
+    )
+    with pytest.raises(execution.CodexServiceExecutionCancelled) as cancelled:
+        invoke()
+    assert cancelled.value.__cause__ is physical[0]
+    assert cancelled.value.outcome.supervisor is physical[0].supervisor
+    assert physical[0].supervisor.final_process_group_quiescent is True
+    assert cancelled.value.native_observations == ()
+    context = "\n".join(item.summary for item in cancelled.value.safe_diagnostics)
+    assert "visible-before-cancel" in context
+    assert "cancel-secret" not in context
+    del invoke
+    retained = [json.loads(line) for line in path.read_text().splitlines()]
+    visible = [item for item in retained if item["source"] == "native_visible_claim"]
+    assert len(visible) == 1
+    assert visible[0]["fleet_run_id"] == "original-fleet-run"
+    assert visible[0]["step_id"] == "native-service"
+    assert visible[0]["operation"] == "visible_native_claim_attempt_3"
+    assert visible[0]["execution_affected"] is False
+    assert "AssertionError: visible-before-cancel" in visible[0]["message"]
+    assert "cancel-secret" not in path.read_text()
+    assert "RAW_SYNTHETIC_PRIVATE" not in path.read_text()
+
+
+def test_visible_diagnostic_sink_failure_does_not_change_native_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class BrokenSink:
+        def write(self, event: object) -> None:
+            raise OSError("supporting diagnostic storage unavailable")
+
+    invoke, _, physical = execute_fixture(
+        tmp_path, monkeypatch, diagnostics=DiagnosticRouter((BrokenSink(),))
+    )
+    result = invoke()
+    assert result.outcome.returncode == 0
+    assert result.protocol.final_text == "Native final report"
+    assert result.outcome.supervisor is physical[0].supervisor
+    assert physical[0].supervisor.final_process_group_quiescent is True
+    assert "DIAGNOSTIC_SINK_FAILED" in capsys.readouterr().err

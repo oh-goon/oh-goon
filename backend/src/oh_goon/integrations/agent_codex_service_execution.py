@@ -11,16 +11,19 @@ import asyncio
 import json
 import sys
 import time
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event, Thread
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
+from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
 from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNativeAgent
 from oh_goon.core.models.fleet_observation import (
     AgentHarnessObservation,
+    NativeAgentObservation,
     NativeServiceExecutionEvidence,
 )
 from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, PLAN_TIMEOUT_RETURN_CODE
@@ -31,6 +34,7 @@ from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
 from oh_goon.integrations.agent_codex_service import CodexServiceClient
 from oh_goon.integrations.agent_native_execution import NativeAgentEvents
 from oh_goon.integrations.fleet_plan_process_isolation import native_runtime_read_only_mounts
+from oh_goon.integrations.fleet_plan_step_output_observation import StepDiagnosticObserver
 
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, _StepProcess
@@ -69,12 +73,84 @@ _DISABLED_FEATURES = frozenset(
 )
 
 
+# Reserve one 4,000-character event for the original Step's final handoff claim.
+_MAX_VISIBLE_EVENTS = 127
+_MAX_VISIBLE_CHARS = 28_000
+
+
+def _bounded_visible_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    template = "\n[{omitted:010d} visible characters omitted]\n"
+    marker_size = len(template.format(omitted=0))
+    kept = max(0, limit - marker_size)
+    head = (kept + 1) // 2
+    tail = kept // 2
+    marker = template.format(omitted=len(text) - kept)
+    return text[:head] + marker + (text[-tail:] if tail else "")
+
+
+@dataclass(slots=True)
+class _VisibleNativeTranscript:
+    """Bounded user-visible native claims; never reasoning or raw RPC."""
+
+    redact: Callable[[str], str]
+    observe: Callable[[AgentHarnessObservation], None] | None = None
+    observations: list[AgentHarnessObservation] = field(default_factory=list)
+    event_count: int = 0
+    omitted: int = 0
+    retained_chars: int = 0
+
+    def retain(self, kind: Literal["agent", "tool", "context"], text: str) -> None:
+        remaining = min(4000, _MAX_VISIBLE_CHARS - self.retained_chars)
+        if len(self.observations) >= _MAX_VISIBLE_EVENTS or remaining < 256:
+            self.omitted += 1
+            return
+        # Redact the complete selected text before any clipping, including
+        # credentials whose bytes straddle the presentation bound.
+        safe = self.redact(text)
+        summary = _bounded_visible_text(safe, remaining)
+        claim = AgentHarnessObservation(kind=kind, summary=summary)
+        self.observations.append(claim)
+        self.retained_chars += len(summary)
+        if self.observe is not None:
+            self.observe(claim)
+
+    def snapshot(self, final: str = "", *, settled: bool = False) -> NativeAgentEvents:
+        return NativeAgentEvents(
+            tuple(self.observations), final, settled, not settled, self.event_count, self.omitted
+        )
+
+
 class CodexServiceExecutionFailure(AgentProviderError):
     """Safe failed action with the original physical owner receipt intact."""
 
-    def __init__(self, outcome: StepOutcome) -> None:
+    def __init__(
+        self,
+        outcome: StepOutcome,
+        safe_diagnostics: tuple[AgentHarnessObservation, ...] = (),
+        *,
+        native_event_count: int = 0,
+        omitted_observations: int = 0,
+    ) -> None:
         super().__init__(outcome.stderr)
         self.outcome = outcome
+        self.safe_diagnostics = safe_diagnostics
+        self.native_event_count = native_event_count
+        self.omitted_observations = omitted_observations
+
+
+class CodexServiceExecutionCancelled(OperationCancelledError):
+    """Original cancellation with already-redacted native context and receipt."""
+
+    def __init__(self, failure: CodexServiceExecutionFailure) -> None:
+        super().__init__(failure.outcome.stderr)
+        self.outcome = failure.outcome
+        self.safe_diagnostics = failure.safe_diagnostics
+        self.native_event_count = failure.native_event_count
+        self.omitted_observations = failure.omitted_observations
+        # The original native Step alone binds claims to admitted source/input.
+        self.native_observations: tuple[NativeAgentObservation, ...] = ()
 
 
 def _execution_failure(
@@ -83,7 +159,34 @@ def _execution_failure(
     argv: tuple[str, ...],
     *,
     returncode: int = PLAN_CONTRACT_RETURN_CODE,
+    diagnostic_output: StepDiagnosticObserver | None = None,
+    exception: BaseException | None = None,
+    visible: NativeAgentEvents | None = None,
 ) -> CodexServiceExecutionFailure:
+    event = diagnostic_output(message, exception) if diagnostic_output is not None else None
+    diagnostic = (
+        event.message + "\n" + (event.traceback or "Owner traceback unavailable")
+        if event is not None
+        else redact_diagnostic_text(message) + "\nOwner traceback unavailable"
+    )
+    label = "Controller failure diagnostic (not a model claim or authority): "
+    # DiagnosticEvent already bounds/redacts these exact facts. Transport the
+    # same facts into existing journal context observations, not a second log.
+    chunks = [
+        *(visible.observations if visible is not None else ()),
+        *(
+            AgentHarnessObservation(
+                kind="context", summary=label + diagnostic[index : index + 3800]
+            )
+            for index in range(0, len(diagnostic), 3800)
+        ),
+    ]
+    omitted = visible.omitted_observations if visible is not None else 0
+    retained_chars = sum(len(item.summary) for item in chunks)
+    while len(chunks) > _MAX_VISIBLE_EVENTS or retained_chars > _MAX_VISIBLE_CHARS:
+        removed = chunks.pop(0)
+        retained_chars -= len(removed.summary)
+        omitted += 1
     return CodexServiceExecutionFailure(
         StepOutcome(
             argv=physical.argv if isinstance(physical, CommandResult) else argv,
@@ -94,7 +197,10 @@ def _execution_failure(
             runtime_authority=physical.runtime_authority,
             physical_execution_id=physical.physical_execution_id,
             standard_isolation=physical.standard_isolation,
-        )
+        ),
+        safe_diagnostics=tuple(chunks),
+        native_event_count=visible.event_count if visible is not None else 0,
+        omitted_observations=omitted,
     )
 
 
@@ -171,10 +277,8 @@ async def _turn(
     runtime: StepRuntime,
     deadline: float,
     worker: Thread,
+    visible: _VisibleNativeTranscript,
 ) -> NativeAgentEvents:
-    observations: list[AgentHarnessObservation] = []
-    count = 0
-    omitted = 0
     final = ""
     while True:
         if runtime.cancel_requested is not None and runtime.cancel_requested():
@@ -188,7 +292,7 @@ async def _turn(
                 message = await client.next_notification(thread)
         except TimeoutError:
             continue
-        count += 1
+        visible.event_count += 1
         params = message.get("params", {})
         if not isinstance(params, dict):
             raise AgentProviderError("Codex service returned invalid scoped progress")
@@ -205,27 +309,36 @@ async def _turn(
                 if not isinstance(text, str) or len(text.encode("utf-8")) > 65536:
                     raise AgentProviderError("Codex service final text exceeds its bound")
                 final = text
-            if kind in {"agentMessage", "commandExecution", "contextCompaction"}:
-                if len(observations) >= 128:
-                    omitted += 1
-                    continue
-                observations.append(
-                    AgentHarnessObservation(
-                        kind="context"
-                        if kind == "contextCompaction"
-                        else "agent"
-                        if kind == "agentMessage"
-                        else "tool",
-                        summary="Native Codex completed " + str(kind),
-                    )
+                visible.retain("agent", "Untrusted native visible agent message:\n" + text)
+            elif kind == "commandExecution":
+                # Codex 0.163 public CommandExecutionThreadItem fields only.
+                # Do not retain cwd, process IDs, commandActions, RPC metadata,
+                # unrelated item types, reasoning, or ambient configuration.
+                command = item.get("command")
+                output = item.get("aggregatedOutput")
+                exit_code = item.get("exitCode")
+                command_text = command if isinstance(command, str) else "unavailable"
+                output_text = output if isinstance(output, str) else "unavailable"
+                exit_text = str(exit_code) if type(exit_code) is int else "unavailable"
+                visible.retain(
+                    "tool",
+                    "Untrusted native command action/result (not verification authority):\n"
+                    + "command: "
+                    + command_text
+                    + "\nexitCode: "
+                    + exit_text
+                    + "\naggregatedOutput:\n"
+                    + output_text,
                 )
+            elif kind == "contextCompaction":
+                visible.retain("context", "Native Codex reported context compaction")
         if method == "turn/completed":
             terminal = params.get("turn")
             if not isinstance(terminal, dict) or terminal.get("id") != turn:
                 raise AgentProviderError("Codex service terminal evidence changed the owned turn")
             if terminal.get("status") != "completed" or terminal.get("error") is not None:
                 raise AgentProviderError("Codex service turn did not complete successfully")
-            return NativeAgentEvents(tuple(observations), final, True, False, count, omitted)
+            return visible.snapshot(final, settled=True)
 
 
 def execute_codex_service_run(
@@ -298,6 +411,9 @@ def execute_codex_service_run(
             ("CODEX_INTERNAL_", "CODEX_APP_", "CODEX_EXEC_SERVER_", "NODE_REPL_")
         )
     }
+    visible = _VisibleNativeTranscript(
+        process.redact_visible_output or redact_diagnostic_text, process.visible_output
+    )
     environment["TMPDIR"] = str(scratch)
     environment["CODEX_HOME"] = connection.home
     version = process.command_runner(
@@ -314,7 +430,13 @@ def execute_codex_service_run(
         or version.stdout.strip() != "codex-cli 0.163.0"
         or not version.supervisor.final_process_group_quiescent
     ):
-        raise _execution_failure("Codex service version has not been qualified", version, argv)
+        raise _execution_failure(
+            "Codex service version has not been qualified",
+            version,
+            argv,
+            diagnostic_output=process.diagnostic_output,
+            visible=visible.snapshot(),
+        )
 
     def serve() -> None:
         try:
@@ -391,7 +513,8 @@ def execute_codex_service_run(
                 permissions=profile,
                 timeout_seconds=min(5, max(0.001, deadline - time.monotonic())),
             )
-            if qualification.get("exitCode") != 0:
+            qualification_exit_code = qualification.get("exitCode")
+            if type(qualification_exit_code) is not int or qualification_exit_code != 0:
                 raise AgentProviderError("Codex service native sandbox qualification failed")
             turn = await client.start_turn(
                 thread,
@@ -399,10 +522,16 @@ def execute_codex_service_run(
                 permissions=profile,
                 effort=connection.reasoning_effort,
             )
-            turn_id = turn.get("turn", {}).get("id")
-            if not isinstance(turn_id, str) or not turn_id:
+            started_turn = turn.get("turn")
+            turn_id = started_turn.get("id") if isinstance(started_turn, dict) else None
+            if (
+                type(turn_id) is not str
+                or not turn_id.strip()
+                or len(turn_id) > 256
+                or not turn_id.isprintable()
+            ):
                 raise AgentProviderError("Codex service did not identify its owned turn")
-            return await _turn(client, thread, turn_id, runtime, deadline, worker)
+            return await _turn(client, thread, turn_id, runtime, deadline, worker, visible)
 
     try:
 
@@ -431,9 +560,23 @@ def execute_codex_service_run(
             raise physical
         raise FleetPlanInvalid("Codex service process evidence is missing")
     if not physical.supervisor.final_process_group_quiescent:
-        raise _execution_failure("Codex service process cleanup remains unverified", physical, argv)
+        raise _execution_failure(
+            "Codex service process cleanup remains unverified",
+            physical,
+            argv,
+            diagnostic_output=process.diagnostic_output,
+            visible=visible.snapshot(),
+        )
     if runtime.cancel_requested is not None and runtime.cancel_requested():
-        raise OperationCancelledError("Codex service Run was cancelled") from (
+        cancelled = _execution_failure(
+            "Codex service Run was cancelled",
+            physical,
+            argv,
+            diagnostic_output=process.diagnostic_output,
+            visible=visible.snapshot(),
+            exception=primary,
+        )
+        raise CodexServiceExecutionCancelled(cancelled) from (
             physical if isinstance(physical, BaseException) else None
         )
     if isinstance(primary, (AgentProviderError, OperationDeadlineExpired)):
@@ -444,12 +587,19 @@ def execute_codex_service_run(
             returncode=PLAN_TIMEOUT_RETURN_CODE
             if isinstance(primary, OperationDeadlineExpired)
             else PLAN_CONTRACT_RETURN_CODE,
+            diagnostic_output=process.diagnostic_output,
+            visible=visible.snapshot(),
+            exception=primary,
         ) from None
     if primary is not None:
         raise primary
     if protocol is None or not isinstance(physical, CommandCancelledError):
         raise _execution_failure(
-            "Codex service lacks terminal turn and owned shutdown evidence", physical, argv
+            "Codex service lacks terminal turn and owned shutdown evidence",
+            physical,
+            argv,
+            diagnostic_output=process.diagnostic_output,
+            visible=visible.snapshot(),
         )
     # The native turn result and the daemon's requested shutdown are distinct.
     # Keep the ACTUAL cancelled-daemon receipt, without synthesizing a command

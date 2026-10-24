@@ -139,6 +139,7 @@ noncanonical_make_target_classes:
   internal-generated:
   - api-schema
   - api-types
+  - assemble-release
   - backend-install
   - build-release
   - candidate-convergence-preflight

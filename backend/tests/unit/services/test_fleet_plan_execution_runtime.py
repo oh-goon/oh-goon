@@ -24,7 +24,10 @@ from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecution
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
-from oh_goon.integrations.fleet_plan_step_output_observation import observed_command_runner
+from oh_goon.integrations.fleet_plan_step_output_observation import (
+    observed_command_runner,
+    observed_step_diagnostic,
+)
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from tests.factories.fleet_plan_executor import PhysicalFleetPlanExecutorHarness
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
@@ -463,3 +466,37 @@ def test_codex_service_direct_run_rejects_native_state_overlap_before_source_cap
         assert runtime.runs.history().items == ()
     finally:
         runtime.shutdown(wait_for_runs=True)
+
+
+def test_safe_control_diagnostic_retains_redacted_evidence_when_live_observer_fails(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    from oh_goon.core.models.diagnostic import DiagnosticEvent
+    from oh_goon.runtime.diagnostics import DiagnosticRouter, JsonlDiagnosticSink
+
+    path = tmp_path / "passive" / "diagnostics.jsonl"
+    step = ResolvedCommandStep(step_id="repair", argv=("native",))
+
+    def broken_observer(*args: object) -> None:
+        raise OSError("synthetic live-output unavailable")
+
+    observer = observed_step_diagnostic(
+        step=step,
+        attempt_number=2,
+        observer=broken_observer,
+        diagnostics=DiagnosticRouter((JsonlDiagnosticSink(path),)),
+        host_environment={},
+        fleet_run_id="run-authority",
+        repository_id="repo-authority",
+    )
+    observer("Native execution failed Bearer synthetic-secret /home/example/private/config")
+    events = [
+        DiagnosticEvent.model_validate(json.loads(line)) for line in path.read_text().splitlines()
+    ]
+    assert len(events) == 2
+    assert events[0].operation == "native_failure_attempt_2"
+    assert events[1].operation == "control_diagnostic"
+    assert "synthetic-secret" not in path.read_text()
+    assert "/home/example" not in path.read_text()

@@ -8,18 +8,13 @@ from typing import TYPE_CHECKING
 from oh_goon.core.errors import FleetExtensionInvalid, FleetPlanInvalid
 from oh_goon.core.fleet_plan_git import resolve_git_step
 from oh_goon.core.fleet_plan_values import PipelineValueCompiler
-from oh_goon.core.models.agent_providers import ResolvedNativeAgent
+from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.fleet_plan import (
     AgentPlanStep,
     AgentResultRole,
     CommandPlanStep,
     ExtensionPlanStep,
     GitPlanStep,
-    KubernetesRolloutVerifyPlanStep,
-    KubernetesSetImagePlanStep,
-    OciBuildPlanStep,
-    OciPublishPlanStep,
-    OciTagAssertPlanStep,
     PlanStep,
     PreCommitPlanStep,
     ResolvedCommandStep,
@@ -27,10 +22,17 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedLocalSearchAgentStep,
     ResolvedPlanStep,
 )
+from oh_goon.core.models.fleet_plan_kubernetes_steps import (
+    KubernetesRolloutVerifyPlanStep,
+    KubernetesSetImagePlanStep,
+)
 from oh_goon.core.models.fleet_plan_observation_steps import (
     DependencyInventoryPlanStep,
     ResolvedDependencyInventoryStep,
 )
+from oh_goon.core.models.fleet_plan_oci_steps import OciBuildPlanStep, OciPublishPlanStep
+from oh_goon.core.models.fleet_plan_oci_tag_steps import OciTagAssertPlanStep
+from oh_goon.core.models.fleet_plan_values import ResolvedEnvironmentBinding
 from oh_goon.core.path_authority import repository_relative_parts
 from oh_goon.engine.project import read_pyproject
 from oh_goon.services.fleet_plan_capability_compilation import compile_step_capabilities
@@ -113,7 +115,7 @@ def resolve_plan_step(
             owner_source_sha256=context.source_graph.node(plan_base / "goon.yml").source_sha256,
         )
         connection = context.agent_connection if step.harness.startswith("provider-") else None
-        if step.harness.startswith("provider-") and callable(connection):
+        if callable(connection):
             connection = connection()
         resolved = resolve_delivered_local_search_agent_step(
             handoff, connection=connection, native_agent=context.native_agent, role=step.role
@@ -246,7 +248,10 @@ def resolve_extension_step(
     )
 
 
-def compiled_environment(step: PlanStep, compiler: PipelineValueCompiler):
+def compiled_environment(
+    step: CommandPlanStep | GitPlanStep | DependencyInventoryPlanStep | ExtensionPlanStep,
+    compiler: PipelineValueCompiler,
+) -> tuple[ResolvedEnvironmentBinding, ...]:
     return compiler.compile_imports(env_names=step.imports.env)
 
 
@@ -290,7 +295,7 @@ def require_agent_step_handoff(
 def resolve_delivered_local_search_agent_step(
     handoff: "FrozenAgentStepHandoff",
     *,
-    connection=None,
+    connection: AgentConnection | None = None,
     native_agent: ResolvedNativeAgent | None = None,
     role: AgentResultRole = "report",
 ) -> ResolvedLocalSearchAgentStep:
@@ -382,8 +387,6 @@ def resolve_delivered_local_search_agent_step(
         if not term or len(term) > 200 or any(ord(ch) < 32 for ch in term):
             raise FleetPlanInvalid("resolved Agent search query must be bounded printable text")
     elif handoff.harness.startswith("provider-"):
-        from oh_goon.core.models.agent_providers import AgentConnection
-
         if (
             not isinstance(connection, AgentConnection)
             or requested.recipients not in ((connection.provider_name,), ("configured_model",))
@@ -399,15 +402,17 @@ def resolve_delivered_local_search_agent_step(
             or not handoff.task.strip()
         ):
             raise FleetPlanInvalid("model Agent requires selected local Ollama recipient and model")
-    return ResolvedLocalSearchAgentStep(
-        step_id=handoff.step_id,
-        argv=("python",),
-        success_codes=(0,),
-        timeout_seconds=handoff.timeout_seconds,
-        delivery_sha256=hashlib.sha256(handoff.encode_prework_delivery()).hexdigest(),
-        handoff_identity=handoff.handoff_identity,
-        source_step_id=handoff.step_id,
-        harness=handoff.harness,
-        model=requested.model,
-        connection=connection if handoff.harness.startswith("provider-") else None,
+    return ResolvedLocalSearchAgentStep.model_validate(
+        {
+            "step_id": handoff.step_id,
+            "argv": ("python",),
+            "success_codes": (0,),
+            "timeout_seconds": handoff.timeout_seconds,
+            "delivery_sha256": hashlib.sha256(handoff.encode_prework_delivery()).hexdigest(),
+            "handoff_identity": handoff.handoff_identity,
+            "source_step_id": handoff.step_id,
+            "harness": handoff.harness,
+            "model": requested.model,
+            "connection": connection if handoff.harness.startswith("provider-") else None,
+        }
     )

@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+release_action="${1:-build}"
+if [[ "$#" -gt 1 || ( "$release_action" != build && "$release_action" != assemble ) ]]; then
+  echo "usage: build_release.sh [build|assemble]" >&2
+  exit 2
+fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "$ROOT"
 export SOURCE_DATE_EPOCH=1580601600
@@ -32,8 +37,10 @@ cd "$ROOT"
 backend/.venv/bin/oh-goon-release-version check
 make frontend-install
 
-make generate
-make check
+if [[ "$release_action" == build ]]; then
+  make generate
+  make check
+fi
 make frontend-build
 
 clear_release_outputs

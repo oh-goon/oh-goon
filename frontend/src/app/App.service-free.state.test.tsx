@@ -102,20 +102,12 @@ describe("service-free app state and refresh authority", () => {
   });
 
   it("keeps the newest fleet refresh when an older read finishes later", async () => {
-    let releaseDiscovery!: () => void;
-    const discovery = new Promise<void>((resolve) => { releaseDiscovery = resolve; });
-    const overview = InMemoryApiClient.prototype.fleetRunOverview;
-    vi.spyOn(InMemoryApiClient.prototype, "fleetRunOverview").mockImplementation(async function (this: InMemoryApiClient) {
-      await discovery;
-      return overview.call(this);
-    });
+    const releaseDiscovery = deferRuntimeDiscovery();
     const fixture = renderServiceFreeApp({ fleet: fleetSnapshot("initial", 2) });
     fireEvent.click(await screen.findByRole("button", { name: "Repositories" }));
     await screen.findByRole("heading", { name: "Repositories" });
     await waitFor(() => expect(readyValue()).toBe("2"));
-    // Initial runtime discovery invalidates the seeded Fleet once. Settle that
-    // read graph before the two explicitly controlled operator refreshes.
-    await act(async () => { releaseDiscovery(); });
+    await settleRuntimeDiscovery(fixture.client, releaseDiscovery, fleetSnapshot("initial", 2));
     const baselineReads = fixture.client.state.fleetReads;
     fixture.client.setCommittedFleetSnapshot(fleetSnapshot("new", 9));
     const olderRead = fixture.client.deferFleetRead(fleetSnapshot("old", 3));
@@ -160,24 +152,62 @@ describe("service-free app state and refresh authority", () => {
   });
 
   it("keeps previously confirmed fleet data usable when refresh fails", async () => {
+    const releaseDiscovery = deferRuntimeDiscovery();
     const fixture = renderServiceFreeApp({ fleet: fleetSnapshot("stable", 4) });
     fireEvent.click(await screen.findByRole("button", { name: "Repositories" }));
     await screen.findByRole("heading", { name: "Repositories" });
     await waitFor(() => expect(readyValue()).toBe("4"));
+    await settleRuntimeDiscovery(fixture.client, releaseDiscovery, fleetSnapshot("stable", 4));
     const failedRead = fixture.client.deferFleetFailure("temporary fixture failure");
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-      await failedRead.started;
-    });
+    await startFleetRefresh(screen.getByRole("button", { name: "Refresh" }), failedRead);
     expect(await releaseRenderedFleetRead(failedRead)).toBe("released");
 
     expect(await screen.findByText("Showing previously loaded data")).toBeTruthy();
     expect(readyValue()).toBe("4");
   });
+
+  it("supersedes an operator refresh when initial runtime discovery arrives later", async () => {
+    const releaseDiscovery = deferRuntimeDiscovery();
+    const fixture = renderServiceFreeApp({ fleet: fleetSnapshot("stable", 4) });
+    fireEvent.click(await screen.findByRole("button", { name: "Repositories" }));
+    await screen.findByRole("heading", { name: "Repositories" });
+    await waitFor(() => expect(readyValue()).toBe("4"));
+    const failedRead = fixture.client.deferFleetFailure("superseded fixture failure");
+    await startFleetRefresh(screen.getByRole("button", { name: "Refresh" }), failedRead);
+
+    const discoveredRead = fixture.client.deferFleetRead(fleetSnapshot("discovered", 7));
+    await act(async () => { releaseDiscovery(); });
+    await discoveredRead.started;
+    expect(await failedRead.settled).toBe("aborted");
+    expect(await releaseRenderedFleetRead(failedRead)).toBe("aborted");
+    expect(await releaseRenderedFleetRead(discoveredRead)).toBe("released");
+    await waitFor(() => expect(readyValue()).toBe("7"));
+    expect(screen.queryByText("Showing previously loaded data")).toBeNull();
+  });
 });
 
 
+
+function deferRuntimeDiscovery(): () => void {
+  let release!: () => void;
+  const discovery = new Promise<void>((resolve) => { release = resolve; });
+  const overview = InMemoryApiClient.prototype.fleetRunOverview;
+  vi.spyOn(InMemoryApiClient.prototype, "fleetRunOverview").mockImplementation(async function (this: InMemoryApiClient) {
+    await discovery;
+    return overview.call(this);
+  });
+  return release;
+}
+
+async function settleRuntimeDiscovery(client: InMemoryApiClient, release: () => void, snapshot: FleetSnapshot): Promise<void> {
+  // Seeded Fleet rendering precedes runtime discovery. Consume its one initial
+  // invalidation explicitly before an independent operator-refresh scenario.
+  const initialRefresh = client.deferFleetRead(snapshot);
+  await act(async () => { release(); });
+  await initialRefresh.started;
+  expect(await releaseRenderedFleetRead(initialRefresh)).toBe("released");
+}
 
 async function startFleetRefresh(refresh: HTMLElement, read: DeferredFleetRead): Promise<void> {
   await act(async () => {

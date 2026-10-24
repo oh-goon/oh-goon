@@ -36,7 +36,7 @@ def test_required_checks_run_for_ready_pull_requests_main_and_merge_groups() -> 
         "push": {"branches": ["main"]},
         "merge_group": None,
     }
-    assert set(workflow["jobs"]) == {"checks", "draft-feedback"}
+    assert set(workflow["jobs"]) == {"checks", "draft-feedback", "release"}
     checks = workflow["jobs"]["checks"]
     assert checks["name"] == (
         "${{ github.event_name == 'pull_request' && github.event.pull_request.draft "
@@ -54,7 +54,6 @@ def test_required_checks_run_for_ready_pull_requests_main_and_merge_groups() -> 
         "architecture",
         "check-generated",
         "test-integration",
-        "build-release",
     }
     assert "continue-on-error" not in checks
     for step in checks["steps"]:
@@ -63,6 +62,41 @@ def test_required_checks_run_for_ready_pull_requests_main_and_merge_groups() -> 
     commands = [step["run"] for step in checks["steps"] if "run" in step]
     assert "make init" in commands
     assert commands[-1] == 'make "${{ matrix.target }}"'
+
+
+def test_release_assembles_only_after_all_six_checks_for_the_same_source() -> None:
+    jobs = _workflow()["jobs"]
+    checks, release = jobs["checks"], jobs["release"]
+    assert release["needs"] == "checks"
+    assert release["if"] == checks["if"]
+    assert release["name"] == (
+        "${{ github.event_name == 'pull_request' && github.event.pull_request.draft "
+        "&& 'release-pending-review' || 'build-release' }}"
+    )
+    assert "strategy" not in release
+    assert "continue-on-error" not in release
+    assert all(
+        "if" not in step and "continue-on-error" not in step
+        for step in release["steps"]
+    )
+    assert [step["run"] for step in release["steps"] if "run" in step] == [
+        "make init",
+        "make assemble-release",
+    ]
+    assert set(checks["strategy"]["matrix"]["target"]) | {"build-release"} == {
+        "backend-check",
+        "frontend-check",
+        "tooling-check",
+        "architecture",
+        "check-generated",
+        "test-integration",
+        "build-release",
+    }
+    # Native GitHub needs/checkout authority replaces no source or test resolver.
+    assert "always()" not in release["if"]
+    assert not any(
+        "download-artifact" in step.get("uses", "") for step in release["steps"]
+    )
 
 
 def test_pull_request_checks_have_read_only_uncredentialed_execution() -> None:
@@ -79,6 +113,7 @@ def test_pull_request_checks_have_read_only_uncredentialed_execution() -> None:
             for step in job["steps"]
             if step.get("uses", "").startswith("actions/checkout@")
         )
+        assert checkout["with"]["ref"] == "${{ github.sha }}"
         assert checkout["with"]["persist-credentials"] is False
         assert checkout["with"]["fetch-depth"] == 0
 
@@ -119,7 +154,7 @@ def _pytest_commands(target: str, roots: str | None = None) -> list[list[str]]:
 def test_draft_feedback_uses_separate_names_and_only_cheap_native_checks() -> None:
     jobs = _workflow()["jobs"]
     draft = jobs["draft-feedback"]
-    required_names = jobs["checks"]["strategy"]["matrix"]["target"]
+    required_names = [*jobs["checks"]["strategy"]["matrix"]["target"], "build-release"]
     assert draft["name"] not in required_names
     assert "full-checks-pending-review" not in required_names
     assert draft["if"] == (

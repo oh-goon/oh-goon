@@ -37,7 +37,74 @@ a nonzero exit status and a bounded tail of transient stderr; JSON stdout remain
 valid Run detail. When transient stderr is absent, the diagnostic reports recorded
 failed Step exits and bounded native failure claims, including Pi stop reasons.
 These claims do not replace verification results. Producer stdout is not dumped
-by the failure diagnostic.
+by the failure diagnostic. Safe Codex service controller failures also enter the
+existing private diagnostic JSONL, independently of live-output capture. The
+record includes Run, repository, Step and attempt identities plus bounded,
+redacted control frames. It excludes native exception chains, source lines,
+locals and raw protocol bodies. The diagnostic sink rotates at 5 MB with three
+backups; it is supporting debug evidence, not completion or recovery authority.
+Completed user-visible Codex messages and command actions/results also enter this
+sink incrementally as explicitly untrusted claims. Only the public command,
+exit-code and aggregated-output fields are selected; reasoning items and raw RPC
+bodies are excluded. Complete selected text is redacted before clipping. Retained
+service text shares a 28,000-character/127-event budget, reserving one bounded
+final handoff event; missing output and omissions remain explicit.
+
+A completed or failed service conversation can retain these bounded claims in
+the original Step journal observation. Cancellation, controller interruption or
+unknown cleanup can occur before that Step result exists. Their canonical Run
+handoff remains available, but must report journal transcript data as unavailable.
+The supporting private diagnostic log may retain earlier visible output after
+shutdown; rotation or storage failure can make it unavailable. No transcript,
+reasoning history or completed cleanup is reconstructed from that log.
+
+Keep exported handoffs, session inputs and stack traces in private storage outside
+the source checkout. The root Git ignores cover accidental Run evidence bundles,
+handoff JSON and diagnostic logs; they do not redact contents or protect a file
+that is already tracked. Review an export before sharing it, even after redaction.
+
+After a session ends, use the same Oh-Goon state root and exact Run ID:
+
+```sh
+oh-goon plan handoff FLEET_RUN_ID --json
+oh-goon plan outputs FLEET_RUN_ID --json
+oh-goon plan events FLEET_RUN_ID --after 0 --json
+oh-goon local-state diagnostics-path
+```
+
+The first three commands read original durable Run/Game Tape facts, including
+recorded source/Step identities, verification outcomes and incomplete cleanup.
+The last prints the existing diagnostics path; read its bounded JSONL records
+for matching Run/repository/Step IDs. `plan logs` remains transient and may be
+unavailable after shutdown. A fresh agent session receives this recorded context
+as untrusted data and requires its own phase admission. Codex retains ownership
+of native context compaction and continuation; diagnostic readback neither
+compacts a session nor grants earlier write permissions.
+
+Every admitted native Run prints its durable `plan handoff` argv reference immediately,
+so success, failure, cancellation and an interrupted controller retain the same Run
+anchor. The existing journal records canonical Step status, exit, source admission
+and available native observations. Visible native final summaries are retained as
+redacted untrusted claims up to 4,000 characters, with explicit omission notices;
+unavailable summaries and controller diagnostics are labelled separately. Native
+claims never upgrade a failed or unrun independent verification check.
+The reusable handoff view bounds source admissions, Steps and claim excerpts and
+reports every projection omission. Full recorded facts remain in the original
+Run events and Game Tape; transient raw output may be unavailable.
+
+To seed a fresh session explicitly from one Run:
+
+```sh
+oh-goon ai --agent codex --profile SERVICE_PROFILE --workspace REPOSITORY \
+  --handoff-from FLEET_RUN_ID --prompt "Continue the remaining verified task" --headless
+```
+
+The selected prior handoff enters the existing resolved Step context as
+`UNTRUSTED_PRIOR_RUN_CONTEXT`. It grants no permissions. The new Run captures
+current source and resolves fresh admission and native execution authority.
+The complete context must fit the existing 65,536-byte phase context bound;
+oversize context rejects before new admission instead of silently clipping.
+No prior Run or ambient conversation is selected automatically.
 
 ### Use an existing Codex sign-in
 
@@ -281,8 +348,13 @@ no source members and may remain as native-owned setup artifacts; the capture
 walk permits only that empty-directory metadata. It rejects any entry inside
 before opening content. Oh-Goon never deletes or reclassifies native stores to
 make a later capture pass. Use native-owned state outside the
-captured repository. The child receives the selected home and original owner's
-provider environment while parent conversation,
+captured repository. If a repository commits native configuration, prepare a
+separately declared public-source export without reading or materializing those
+files. Record the exact exclusions and bind evidence to that exported scope. Do
+not expose the original Git object database: read-only Git can still reveal an
+excluded file from history. Transfer only reviewed changes back onto the original
+tree, preserving its native files. The child receives the selected home and
+original owner's provider environment while parent conversation,
 tool IPC and version overrides are removed. Native tools receive only the explicit
 PATH/TMPDIR environment. Login/config failures remain native failures.
 
@@ -295,6 +367,19 @@ every readable tool root. No native file contents are inspected. A disposable
 canary verifies native private/read-only denial and allowed scratch output; this
 preflight never attempts mutations against real repository files. Unsupported or
 inconclusive capability checks fail before model submission, without fallback.
+
+Native homes with configured MCP registrations are currently unsupported, including
+registrations disabled by native configuration. This profile makes no MCP-startup
+isolation claim. In Codex 0.163.0, the
+[status collector](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/codex-mcp/src/mcp/mod.rs)
+can eagerly start configured servers, so status discovery is not a names-only
+preflight. An empty `mcp_servers={}` override retains lower-layer registrations
+under native [table merging](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/merge.rs).
+Synthetic installed probes confirmed that per-thread named disables prevent that
+server from starting and report terminal `disabled` status with empty catalogs.
+They do not establish a safe generic discovery/suppression path. Oh-Goon keeps the
+fail-closed inventory gate, never edits native configuration to pass it, and does
+not treat missing tools or unknown runtime status as proof of MCP exclusion.
 
 The selected native profile denies the filesystem by default, grants only public
 runtime/frozen context and the admitted workspace, denies the private endpoint and

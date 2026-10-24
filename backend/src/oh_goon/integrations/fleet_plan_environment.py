@@ -122,11 +122,15 @@ def step_host_environment_names(step: ResolvedPlanStep) -> tuple[str, ...]:
     credentials = getattr(step, "credentials", None)
     credential_names = getattr(credentials, "host_environment_names", ())
     names.extend(credential_names)
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.connection is not None:
-        provider = step.connection.provider
-        if provider.api_key_env is not None:
-            names.append(provider.api_key_env)
-        names.extend(provider.headers_from_env.values())
+    if isinstance(step, ResolvedLocalSearchAgentStep):
+        connection = step.connection
+        if step.native_agent is not None:
+            connection = step.native_agent.connection
+        if connection is not None:
+            provider = connection.provider
+            if provider.api_key_env is not None:
+                names.append(provider.api_key_env)
+            names.extend(provider.headers_from_env.values())
     return tuple(dict.fromkeys(names))
 
 

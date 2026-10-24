@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import argparse
 import json
+from typing import Any
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_plan_summary import configuration_summary
 from oh_goon.core.errors import FleetDomainError
+from oh_goon.core.models.game_tape import GameTape, GameTapeStepExecution
+from oh_goon.core.models.run import FleetRunDetail
 
 
 def _print_json(value: object) -> None:
@@ -146,9 +149,9 @@ def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     # All output/artifact/evidence objects come verbatim from the same Game Tape
     # projection. Raw process output is transient and stays with plan logs.
     tape = runtime.runs.get(args.fleet_run_id).game_tape
-    repositories = []
+    repositories: list[dict[str, Any]] = []
     for repo in tape.repositories:
-        steps = []
+        steps: list[dict[str, Any]] = []
         for step in repo.steps:
             steps.append(
                 {
@@ -185,13 +188,15 @@ def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         _print_json(result)
     else:
         print(f"Fleet Run ID: {tape.fleet_run_id}")
-        for repo in repositories:
-            print(f"Repository: {repo['repository']['name']} ({repo['repository_execution_id']})")
-            for step in repo["steps"]:
+        for repository_output in repositories:
+            print(
+                f"Repository: {repository_output['repository']['name']} ({repository_output['repository_execution_id']})"
+            )
+            for step_output in repository_output["steps"]:
                 print(
-                    f"  {step['step_id']} ({step['step_execution_id']}): "
-                    f"{len(step['outputs'])} published outputs, "
-                    f"{len(step['artifacts'])} artifacts"
+                    f"  {step_output['step_id']} ({step_output['step_execution_id']}): "
+                    f"{len(step_output['outputs'])} published outputs, "
+                    f"{len(step_output['artifacts'])} artifacts"
                 )
         print("Evidence metadata only; raw output uses 'plan logs' when available.")
     return 0
@@ -229,18 +234,83 @@ def _readback_references(fleet_run_id: str) -> dict[str, dict[str, object]]:
     return views
 
 
-def _handoff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
-    """Transport terminal-navigation facts from ONE canonical Fleet read cut.
+_MAX_HANDOFF_STEPS = 32
 
-    No CLI-side terminal classification, diagnosis, prioritization, or replay.
-    The bounded issue focus and safe next action already belong to Game Tape.
-    Absence of focus or why_not is reported as absent, never filled from logs.
-    """
-    detail = runtime.runs.get(args.fleet_run_id)
+
+def _handoff_claim_excerpt(summary: str) -> dict[str, object]:
+    """Preserve visible leading context and trailing cause within one display bound."""
+    if len(summary) <= 512:
+        return {"summary": summary, "omitted_summary_characters": 0}
+    marker = "\n[... summary characters omitted ...]\n"
+    retained = 512 - len(marker)
+    head = (retained + 1) // 2
+    tail = retained // 2
+    return {
+        "summary": summary[:head] + marker + summary[-tail:],
+        "omitted_summary_characters": len(summary) - retained,
+    }
+
+
+def _handoff_step(step: GameTapeStepExecution, repository_execution_id: str) -> dict[str, Any]:
+    observations = step.native_agent_observations
+    return {
+        "repository_execution_id": repository_execution_id,
+        "step_execution_id": step.step_execution_id,
+        "step_id": step.step_id,
+        "kind": step.kind,
+        "status": step.status.value,
+        "exit_code": step.exit_code,
+        "reason": step.reason,
+        "native_claims": [
+            {
+                "authority": item.authority,
+                "agent": item.agent,
+                "profile": item.profile,
+                "input_identity": item.input_identity,
+                "source_identity": item.source_identity,
+                "occurrence": item.occurrence,
+                "role": item.role,
+                "settled_claim": item.settled,
+                "failed_claim": item.failed,
+                "events": [
+                    {
+                        "kind": event.kind,
+                        **_handoff_claim_excerpt(event.summary),
+                    }
+                    for event in item.events[-2:]
+                ],
+                "omitted_events": max(0, len(item.events) - 2) + item.omitted_observations,
+            }
+            for item in observations[-1:]
+        ],
+        "omitted_native_observations": max(0, len(observations) - 1),
+        "native_claim_availability": "recorded" if observations else "unavailable",
+        "verification_authority": "Canonical Step status/exit only; native claims do not establish verification success",
+    }
+
+
+def _handoff_steps(tape: GameTape) -> dict[str, Any]:
+    count = sum(len(repository.steps) for repository in tape.repositories)
+    rows: list[dict[str, Any]] = []
+    for repository in tape.repositories:
+        for step in repository.steps:
+            if len(rows) == _MAX_HANDOFF_STEPS:
+                break
+            rows.append(_handoff_step(step, repository.repository_execution_id))
+    return {
+        "steps": rows,
+        "omitted_steps": max(0, count - len(rows)),
+        "scope": "bounded original projection; omissions and absent claims do not establish completion",
+    }
+
+
+def run_handoff_projection(detail: FleetRunDetail) -> dict[str, Any]:
+    """Project ONE supplied canonical read cut; retain uncertainty and omission facts."""
     tape = detail.game_tape
-    result = {
+    return {
         "schema": "oh-goon.plan-run-handoff/v1",
         "fleet_run_id": detail.run.fleet_run_id,
+        "journal_revision": detail.journal_revision,
         "plan_id": tape.plan_id,
         "status": detail.run.status.value,
         "outcome": detail.outcome.value,
@@ -258,7 +328,37 @@ def _handoff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         # permission.  The Fleet Run ID remains one argv element even if the
         # caller chooses a shell-sensitive literal ID.
         "readback": _readback_references(detail.run.fleet_run_id),
+        "source_admissions": [
+            {
+                "repository_id": item.repository_id,
+                "admission_id": item.admission_id,
+                "source_authority_id": item.source_authority.authority_id,
+                "source_subject_instance_id": item.source_authority.subject_instance_id,
+                "source_snapshot": item.source_authority.source_snapshot.model_dump(mode="json"),
+            }
+            for item in detail.repository_admissions[:8]
+        ],
+        "omitted_source_admissions": max(0, len(detail.repository_admissions) - 8),
+        "source_admission_availability": "recorded"
+        if detail.repository_admissions
+        else "unavailable",
+        "recorded_steps": _handoff_steps(tape),
+        "supporting_diagnostics": {
+            "path_readback_argv": ["oh-goon", "local-state", "diagnostics-path"],
+            "correlate_fleet_run_id": detail.run.fleet_run_id,
+            "availability": "not_checked; bounded rotation or storage failure may remove supporting output",
+            "authority": "supporting controller diagnostics; no Run outcome, permission or cleanup authority",
+        },
+        "native_payload_retention": "Only recorded native observations are projected; cancelled/interrupted work without a Step result has unavailable journal payload. Supporting diagnostics may retain earlier visible output.",
+        "record_authority": "Original journal/Game Tape facts; native summaries remain untrusted claims",
+        "remaining_work": "Not independently inferred; inspect canonical Step statuses, why_not and explicitly unverified claims",
     }
+
+
+def _handoff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
+    """Read the original Run once; render its reusable non-authorizing handoff."""
+    detail = runtime.runs.get(args.fleet_run_id)
+    result = run_handoff_projection(detail)
     if args.as_json:
         _print_json(result)
     else:
@@ -267,14 +367,14 @@ def _handoff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         print(f"Status: {result['status']} | Outcome: {result['outcome']}")
         print(f"Game Tape status: {result['game_tape_status']}")
         print(
-            f"Issues: {tape.issue_count} (displayed: {len(tape.issue_focus)}, "
-            f"hidden: {tape.hidden_issue_count})"
+            f"Issues: {result['issue_count']} (displayed: {len(result['issue_focus'])}, "
+            f"hidden: {result['hidden_issue_count']})"
         )
-        for focus in tape.issue_focus:
-            identity = focus.step_execution_id or focus.repository_execution_id or "run"
-            print(f"  {focus.scope}: {identity} | {focus.code or 'no code'}")
-        if tape.why_not is not None:
-            print(f"Original guidance: {tape.why_not.safe_next_action}")
+        for focus in result["issue_focus"]:
+            identity = focus["step_execution_id"] or focus["repository_execution_id"] or "run"
+            print(f"  {focus['scope']}: {identity} | {focus['code'] or 'no code'}")
+        if result["why_not"] is not None:
+            print(f"Original guidance: {result['why_not']['safe_next_action']}")
         print(
             "Inspect exact evidence using the structured readback argv references "
             "from --json; raw logs may be unavailable."
