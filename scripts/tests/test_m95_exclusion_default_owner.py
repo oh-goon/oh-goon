@@ -9,6 +9,7 @@ import pytest
 from oh_goon import cli_parser
 from oh_goon.api.schemas.repositories import ExcludeRepositoryRequest
 from oh_goon.core import engine_policy_defaults as exclusion_policy
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.runtime.exclusions import ensure_exclusion_schema, write_exclusion
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,48 +18,69 @@ OWNER_PATH = ROOT / "backend/src/oh_goon/core/engine_policy_defaults.py"
 
 def test_owner_mutation_flows_through_cli_api_and_persistence(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
         exclusion_policy, "DEFAULT_EXCLUSION_REASON", "Owner-defined exclusion"
     )
 
-    args = cli_parser.build_parser().parse_args(["exclude", "/tmp/example"])
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / ".git").mkdir()
+    instance = repository_subject_instance_id(repository)
+    args = cli_parser.build_parser().parse_args(
+        ["exclude", str(repository), "--expected-repository-instance-id", instance]
+    )
     assert args.reason == "Owner-defined exclusion"
+    assert args.expected_repository_instance_id == instance
 
     request = ExcludeRepositoryRequest(
-        repository="/tmp/example",
-        expected_repository_instance_id="instance-1",
+        repository=str(repository),
+        expected_repository_instance_id=instance,
     )
     assert request.reason == "Owner-defined exclusion"
 
     connection = sqlite3.connect(":memory:")
     ensure_exclusion_schema(connection)
-    record = write_exclusion(connection, "/tmp/example", "")
+    record = write_exclusion(connection, str(repository), "")
     assert record["reason"] == "Owner-defined exclusion"
 
 
 def test_explicit_reason_narrows_without_redeciding_default(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
         exclusion_policy, "DEFAULT_EXCLUSION_REASON", "Owner-defined exclusion"
     )
 
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / ".git").mkdir()
+    instance = repository_subject_instance_id(repository)
     args = cli_parser.build_parser().parse_args(
-        ["exclude", "/tmp/example", "--reason", "maintenance"]
+        [
+            "exclude",
+            str(repository),
+            "--reason",
+            "maintenance",
+            "--expected-repository-instance-id",
+            instance,
+        ]
     )
     assert args.reason == "maintenance"
+    assert args.expected_repository_instance_id == instance
 
     request = ExcludeRepositoryRequest(
-        repository="/tmp/example",
-        expected_repository_instance_id="instance-1",
+        repository=str(repository),
+        expected_repository_instance_id=instance,
         reason="maintenance",
     )
     assert request.reason == "maintenance"
 
     connection = sqlite3.connect(":memory:")
     ensure_exclusion_schema(connection)
-    record = write_exclusion(connection, "/tmp/example", "  maintenance  ")
+    record = write_exclusion(connection, str(repository), "  maintenance  ")
     assert record["reason"] == "maintenance"
 
 

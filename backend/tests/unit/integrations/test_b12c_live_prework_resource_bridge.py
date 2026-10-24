@@ -50,6 +50,7 @@ def _request(tmp_path: Path):
         local_resource_intent=None,
         termination_requested=None,
         read_only_workspace=None,
+        agent_source_mount=None,
     )
 
 
