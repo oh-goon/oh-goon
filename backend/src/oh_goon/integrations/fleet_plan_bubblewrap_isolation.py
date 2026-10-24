@@ -8,10 +8,11 @@ import subprocess
 import tempfile
 from collections import OrderedDict
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from itertools import islice
 from pathlib import Path, PurePosixPath
-from threading import Lock
+from threading import Condition, Lock
 from typing import Literal
 
 from oh_goon.core.errors import CapabilityUnavailable, FleetPlanInvalid
@@ -1394,7 +1395,31 @@ def _require_standard_bind_structure(
     """
     pending = [root]
     inspected = 0
+    active = 0
+    failure: BaseException | None = None
+    condition = Condition()
     synthetic = {Path("/dev") / name for name in ("null", "zero", "random", "urandom", "tty")}
+
+    def inspect_entry() -> bool:
+        nonlocal inspected
+        with condition:
+            if failure is not None:
+                return False
+            inspected += 1
+            if inspected > 1_000_000:
+                raise FleetPlanInvalid("Standard sandbox bind exceeds its physical entry budget")
+            return True
+
+    def enqueue(path: Path) -> None:
+        with condition:
+            if failure is not None:
+                return
+            # Preserve the original 4096 waiting nodes plus one current node.
+            # Both workers share this bound and the single physical entry budget.
+            if len(pending) + active >= 4097:
+                raise FleetPlanInvalid("Standard sandbox bind exceeds its pending-directory budget")
+            pending.append(path)
+            condition.notify()
 
     def require_symlink_target(path: Path) -> None:
         # The kernel can establish an ordinary target's fresh type/inode
@@ -1433,12 +1458,10 @@ def _require_standard_bind_structure(
                 f"{path} -> {target}"
             )
 
-    while pending:
-        path = pending.pop()
+    def inspect_node(path: Path) -> None:
         metadata = path.lstat()
-        inspected += 1
-        if inspected > 1_000_000:
-            raise FleetPlanInvalid("Standard sandbox bind exceeds its physical entry budget")
+        if not inspect_entry():
+            return
         if (metadata.st_dev, metadata.st_ino) in private_file_identities:
             raise FleetPlanInvalid("Native bind exposes a private application file alias")
         if writable and (
@@ -1453,11 +1476,8 @@ def _require_standard_bind_structure(
         elif stat.S_ISDIR(metadata.st_mode):
             with os.scandir(path) as entries:
                 for entry in entries:
-                    inspected += 1
-                    if inspected > 1_000_000:
-                        raise FleetPlanInvalid(
-                            "Standard sandbox bind exceeds its physical entry budget"
-                        )
+                    if not inspect_entry():
+                        return
                     # Directory hints only queue nodes for fresh lstat above.
                     # Every other entry uses fresh pathname metadata now;
                     # unknown-type predicates can populate a DirEntry cache
@@ -1483,11 +1503,8 @@ def _require_standard_bind_structure(
                             # Check a link immediately from its fresh pathname
                             # metadata instead of queueing a duplicate lstat.
                             # Retain the same inspected-entry budget accounting.
-                            inspected += 1
-                            if inspected > 1_000_000:
-                                raise FleetPlanInvalid(
-                                    "Standard sandbox bind exceeds its physical entry budget"
-                                )
+                            if not inspect_entry():
+                                return
                             if writable:
                                 raise FleetPlanInvalid(
                                     "Scoped native write roots cannot expose symlinks or hardlinked files"
@@ -1502,10 +1519,49 @@ def _require_standard_bind_structure(
                             raise FleetPlanInvalid(
                                 "Standard sandbox bind exposes a host IPC/special object"
                             )
-                    if len(pending) >= 4096:
-                        raise FleetPlanInvalid(
-                            "Standard sandbox bind exceeds its pending-directory budget"
-                        )
-                    pending.append(Path(entry.path))
+                    enqueue(Path(entry.path))
         elif not stat.S_ISREG(metadata.st_mode):
             raise FleetPlanInvalid("Standard sandbox bind exposes a host IPC/special object")
+
+    def stop(exc: BaseException) -> None:
+        nonlocal failure
+        with condition:
+            if failure is None:
+                failure = exc
+            condition.notify_all()
+
+    def worker() -> None:
+        nonlocal active
+        while True:
+            with condition:
+                while not pending and active and failure is None:
+                    condition.wait()
+                if failure is not None or not pending:
+                    return
+                path = pending.pop()
+                active += 1
+            try:
+                inspect_node(path)
+            except BaseException as exc:
+                stop(exc)
+            finally:
+                with condition:
+                    active -= 1
+                    condition.notify_all()
+
+    if system_runtime_roots:
+        # Overlap only host-runtime directory I/O. Every worker immediately
+        # validates fresh pathname metadata; no metadata is prefetched or cached.
+        # Shutdown closes all iterators and joins both workers before any launch.
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="oh-goon-bind-check") as pool:
+            try:
+                workers = [pool.submit(worker) for _ in range(2)]
+                for result in workers:
+                    result.result()
+            except BaseException as exc:
+                stop(exc)
+                raise
+    else:
+        worker()
+    if failure is not None:
+        raise failure
