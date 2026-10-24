@@ -1411,6 +1411,20 @@ def _require_standard_bind_structure(
                 "Scoped native write roots cannot expose symlinks or hardlinked files"
             )
         if stat.S_ISLNK(metadata.st_mode):
+            # The kernel can establish an ordinary target's fresh type/inode
+            # without resolving every path prefix again in Python. Special
+            # targets still need the canonical path for visibility exceptions.
+            # Preserve the original resolution/error path for lookup failures,
+            # including chains beyond the kernel's symlink traversal limit.
+            try:
+                target_metadata = path.stat()
+            except OSError:
+                target_metadata = None
+            if target_metadata is not None:
+                if (target_metadata.st_dev, target_metadata.st_ino) in private_file_identities:
+                    raise FleetPlanInvalid("Native bind exposes a private application file alias")
+                if stat.S_ISREG(target_metadata.st_mode) or stat.S_ISDIR(target_metadata.st_mode):
+                    continue
             try:
                 target = path.resolve(strict=True)
                 target_metadata = target.stat()

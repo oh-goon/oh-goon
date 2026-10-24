@@ -169,6 +169,85 @@ def test_active_database_hardlink_alias_is_refused_before_native_process_birth(
     assert database.path.read_bytes() == original
 
 
+@pytest.mark.parametrize("target_kind", ["file", "directory", "missing"])
+def test_public_or_dangling_symlink_is_accepted_without_exposing_private_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_kind: str
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    target = tmp_path / "public-target"
+    if target_kind == "file":
+        target.write_text("public input")
+    elif target_kind == "directory":
+        target.mkdir()
+        (target / "input").write_text("public input")
+    (workspace / "public-link").symlink_to(target, target_is_directory=target_kind == "directory")
+    calls: list[tuple[str, ...]] = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    backend.require_standard_available(_request(backend, workspace, read_only_workspace=True))
+    assert len(calls) == 1 and calls[0][-1] == "/bin/true"
+
+
+@pytest.mark.parametrize("private_target", [False, True])
+def test_long_symlink_chain_preserves_public_access_and_private_inode_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, private_target: bool
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    target = tmp_path / "target"
+    target.write_text("target input")
+    if private_target:
+        backend.bind_application_state(private_paths=(target,), read_only_paths=())
+    chain = tmp_path / "public-links"
+    chain.mkdir()
+    destination = target
+    # A kernel stat cannot follow this many links; complete link resolution
+    # must still preserve the same public/private target decision.
+    for index in range(64):
+        link = chain / f"link-{index}"
+        link.symlink_to(destination)
+        destination = link
+    (workspace / "chain").symlink_to(destination)
+    calls: list[tuple[str, ...]] = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    request = _request(backend, workspace, read_only_workspace=True)
+    if private_target:
+        with pytest.raises(FleetPlanInvalid, match="private application file alias"):
+            backend.require_standard_available(request)
+        assert not calls
+    else:
+        backend.require_standard_available(request)
+        assert len(calls) == 1 and calls[0][-1] == "/bin/true"
+    assert target.read_text() == "target input"
+
+
+def test_cyclic_symlink_fails_before_native_process_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    (workspace / "first").symlink_to("second")
+    (workspace / "second").symlink_to("first")
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("cyclic link reached launcher")
+    )
+    with pytest.raises((OSError, RuntimeError), match="(?i)(loop|too many levels)"):
+        backend.require_standard_available(_request(backend, workspace, read_only_workspace=True))
+
+
 @pytest.mark.process
 def test_native_public_hardlinks_remain_usable_in_all_approved_input_surfaces(
     tmp_path: Path,
@@ -1612,6 +1691,37 @@ def test_standard_setup_rechecks_changed_mounts_before_each_native_launch(
         )
     assert len(calls) == (0 if launch == "preflight" else 1)
     assert private.read_text() == "private application state"
+
+
+def test_retargeted_public_symlink_to_fifo_is_rejected_before_workload_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    public = tmp_path / "public-input"
+    public.write_text("public input")
+    endpoint = tmp_path / "private-endpoint"
+    os.mkfifo(endpoint)
+    link = workspace / "input"
+    link.symlink_to(public)
+    calls: list[tuple[str, ...]] = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        link.unlink()
+        link.symlink_to(endpoint)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    with pytest.raises(FleetPlanInvalid, match="IPC/special"):
+        backend.execute(
+            _request(backend, workspace, read_only_workspace=True),
+            timeout=1,
+            cancel_requested=None,
+        )
+    assert len(calls) == 1 and calls[0][-1] == "/bin/true"
+    assert public.read_text() == "public input"
 
 
 @pytest.mark.process
