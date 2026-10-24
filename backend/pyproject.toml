@@ -181,7 +181,7 @@ testpaths = ["tests/unit", "tests/dependency_complete", "tests/integration"]
 pythonpath = ["."]
 addopts = "-q --strict-markers --strict-config"
 markers = [
-  "slow: intentionally slower behavioral tests excluded from the inner development gate",
+  "slow: exhaustive full-corpus checks with bounded regression counterparts; run by complete/release verification",
   "process: real child-process lifecycle tests excluded from the inner development gate",
   "scale: intentionally large-count concurrency/scale regression tests",
   "certification: opt-in native model, privileged custody, or certification probes owned by explicit acceptance targets",

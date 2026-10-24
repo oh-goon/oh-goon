@@ -18,6 +18,10 @@ TOOLING_TEST_RESUME_CONTEXT = --resume-context "node=$$(node --version 2>/dev/nu
 PYTEST_RESUME ?= --resume
 # Empty preserves pytest's native testpaths; hosted CI partitions these with test-integration.
 BACKEND_CHECK_TEST_ROOTS ?=
+# Native pytest marker expressions: routine checks retain meaningful process/scale
+# regressions; only exhaustive variants with bounded counterparts are deferred.
+CHECK_PYTEST_MARKER ?= not certification and not slow
+TOOLING_COMPLETE_TEST_MARKER ?= not certification
 QUALIFY_EVIDENCE_DIR ?= ../OH_GOON_NATIVE_EVIDENCE
 A1_KERNEL_EVIDENCE_DIR ?= ../OH_GOON_A1L_KERNEL_EVIDENCE
 REPOSITORY_STATE_KEY = $(shell printf '%s' "$(CURDIR)" | sha256sum | cut -c1-16)
@@ -31,6 +35,8 @@ CERTIFICATION_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_
 
 
 .PHONY: a1-native-kernel-custody-test backend-python-capability-check python-static-sanity ruff-repair phase-evidence-convergence-check native-qualification-boundary-check candidate-convergence-preflight pre-commit pre-commit-acquire help init verify diagnostic-dependency-check backend-lock-check backend-package-build-check source-transport-clean sync venv-clean strict-executor-setup certification-preflight certification-database-preflight repository-understanding-test-batch repository-understanding-tests-batched certification-state-reset logs test-log certify-log diagnostics-log local-state-prelaunch-check local-state-reset storage-status storage-prune acceptance-release acceptance-browser-container acceptance-container acceptance-product acceptance-scale local-runtime-verification strict-local-runtime-acceptance release-locks-check release-version-set release-source-clean release-source-package-artifact frontend-install backend-dependencies-check frontend-functional-certification template-startability-certification frontend-lock start local-state-check local-state-path diagnostics-path local-state-reset dev release-accept docker-prepare docker-up docker-up-opensuse docker-down docker-accept docker-accept-opensuse lint i18n-check format format-check typecheck architecture goon-compile api-schema api-types goon-tool-authority contracts generate check-generated test test-python test-tooling test-tooling-complete test-frontend frontend-typecheck frontend-architecture frontend-build test-integration test-sqlite-real-usage test-real-lifecycle test-real-world test-real-world-parallel coverage-python coverage-report test-sqlite-coverage test-journal-coverage quality-check quality-raise check check-backend check-tooling check-frontend backend-check tooling-check frontend-check build-release assemble-release scout-load-probe scout-http-load-probe scout-network-certification scout-proxy-certification scout-overhead-certification scout-crash-restart-certification scout-failure-isolation-certification scout-corruption-recovery-certification scout-retention-checkpoint-certification diagnostic-system-check cli-install diagnostic-startup-check frontend-lock-check browser-setup browser-localhost-transport-preflight browser-preflight browser-harness-preflight browser-system-deps browser-runtime-preflight browser-targeted-certification browser-required-certification browser-test browser-check-system-chromium certification-explain repository-understanding-exam prepare-release certify test-execution-fast test-python-core-diagnostic test-python-dependency-complete test-python-complete verify-p0 verify-p1 verify-local init-doctor goon-static-admission backend-install theme-contrast test-python-profile tool-session-qualification tool-session-qualification-status recovery-status recovery-checkpoint recovery-resume qualify-native-wsl frontend-schedule-plan-input-regression
+
+.PHONY: release-check
 
 .DEFAULT:
 	@case " $(MAKECMDGOALS) " in \
@@ -139,6 +145,7 @@ help:
 	  '  make check            Fast inner development feedback' \
 	  '  make build-release    Build validated locked release artifacts' \
 	  '  make assemble-release Assemble locked artifacts after caller-owned checks' \
+	  '  make release-check    Run the complete portable regression suite' \
 	  '  make docker-up        Run locked Ubuntu container locally' \
 	  '  make docker-up-opensuse Run locked openSUSE container locally' \
 	  '  make recovery-status RECOVERY_STORE=<durable> [RECOVERY_FORMAT=json|markdown] Verify and print committed source + continuation authority' \
@@ -553,7 +560,7 @@ a1-native-kernel-custody-test:
 # Certification-marked recursive tests remain owned by APP certification.
 # OH_GOON_OPAQUE_TOOLS: bash dd git node uv
 test-tooling-complete:
-	@$(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --granularity files --batch-size 2 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker 'not certification'
+	@$(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --granularity files --batch-size 2 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker "$(TOOLING_COMPLETE_TEST_MARKER)"
 
 test-frontend:
 	cd frontend && npm run test
@@ -568,8 +575,8 @@ frontend-build:
 	cd frontend && npm run build
 
 test-integration:
-	@$(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- sh -c 'cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "not certification" tests/integration'
-	@$(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- backend/.venv/bin/oh-goon-qualification-exec pytest -c backend/pyproject.toml -m "not certification" tests/integration
+	@$(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- sh -c 'cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "$(CHECK_PYTEST_MARKER)" tests/integration'
+	@$(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- backend/.venv/bin/oh-goon-qualification-exec pytest -c backend/pyproject.toml -m "$(CHECK_PYTEST_MARKER)" tests/integration
 
 # Compact production-shaped SQLite lifetime gate. This deliberately crosses the
 # worker/wait/restart boundary and complements component/fault-matrix coverage.
@@ -742,7 +749,7 @@ check-backend:
 	cd backend && uv run --offline --frozen --no-sync --group quality ruff check src tests
 	cd backend && uv run --offline --frozen --no-sync --group quality ruff format --check src tests
 	uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet guard
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "not certification" $(BACKEND_CHECK_TEST_ROOTS)
+	cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "$(CHECK_PYTEST_MARKER)" $(BACKEND_CHECK_TEST_ROOTS)
 
 backend-check: check-backend
 
@@ -750,7 +757,7 @@ check-tooling:
 	@$(RUN_STEP) 'TOOLING QUALITY [1/4]' 'Owner: ruff | lint' -- uv run --offline --frozen --no-sync --group quality --project backend ruff check scripts tests/integration
 	@$(RUN_STEP) 'TOOLING QUALITY [2/4]' 'Owner: ruff | format check' -- uv run --offline --frozen --no-sync --group quality --project backend ruff format --check scripts tests/integration
 	@$(RUN_STEP) 'TOOLING QUALITY [3/4]' 'Owner: mypy | type check' -- uv run --offline --frozen --no-sync --group quality --project backend mypy --config-file backend/pyproject.toml scripts/tests tests/integration
-	@$(RUN_STEP) 'TOOLING QUALITY [4/4]' 'Owner: Oh-Goon | bounded tooling tests' -- $(MAKE) test-tooling
+	@$(RUN_STEP) 'TOOLING QUALITY [4/4]' 'Owner: Oh-Goon | bounded tooling tests' -- $(MAKE) test-tooling-complete TOOLING_COMPLETE_TEST_MARKER="$(CHECK_PYTEST_MARKER)"
 
 tooling-check: check-tooling
 
@@ -775,6 +782,10 @@ build-release:
 # Local validated release builds retain the complete build-release journey.
 assemble-release:
 	bash scripts/release/build_release.sh assemble
+
+# Exhaustive portable regression is a release action, separate from APP/native qualification.
+release-check:
+	$(MAKE) backend-check tooling-check test-integration frontend-check architecture check-generated BACKEND_CHECK_TEST_ROOTS="tests/unit tests/dependency_complete" CHECK_PYTEST_MARKER="not certification"
 
 acceptance-release:
 	$(MAKE) repository-understanding-exam

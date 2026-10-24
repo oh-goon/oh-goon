@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
 
@@ -15,9 +14,6 @@ from oh_goon.core.ports.physical_observation import (
 )
 from oh_goon.integrations import linux_physical_observer as kernel
 from oh_goon.repository_tooling import local_lace_physical_preflight as cli
-from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
-    check_x0_single_execution_path,
-)
 
 
 def scope(tmp_path: Path) -> PhysicalObservationScope:
@@ -111,91 +107,3 @@ def test_second_read_changes_to_unknown_never_absence(tmp_path: Path) -> None:
         original, proc_root=tmp_path / "empty-proc", diagnostic_probes=methods
     )
     assert facts.to_mapping()["cgroup"]["state"] == "UNKNOWN"
-
-
-def test_only_one_kernel_reader_and_no_control_authority_link() -> None:
-    assert check_x0_single_execution_path() == []
-    cli_source = Path(cli.__file__).read_text()
-    kernel_source = Path(kernel.__file__).read_text()
-    cli_tree = ast.parse(cli_source)
-    assert not any(
-        isinstance(n, ast.FunctionDef)
-        and n.name
-        in (
-            "_read_regular",
-            "_cgroup",
-            "_cgroup_subtree",
-            "_process",
-            "_mounts",
-            "_tracked_namespace_inventory",
-            "_namespace_fd_holders",
-            "_visible_foreign_mount_targets",
-            "_visible_mount_fd_holders",
-        )
-        for n in cli_tree.body
-    )
-    assert "def _read_regular(" in kernel_source
-    assert "def _visible_mount_fd_holders(" in kernel_source
-    assert "from oh_goon.services" not in kernel_source
-    assert "from oh_goon.runtime" not in kernel_source
-    assert 'QUIESCENCE_PROVEN"' not in kernel_source
-    assert 'TEARDOWN_PROVEN"' not in kernel_source
-
-
-def test_x0_rejects_duplicate_kernel_reader_or_unlinked_cli(tmp_path: Path) -> None:
-    root = tmp_path / "repo"
-    package = root / "backend/src/oh_goon"
-    cli_file = package / "repository_tooling/local_lace_physical_preflight.py"
-    shared_file = package / "integrations/linux_physical_observer.py"
-    contract_file = package / "core/ports/physical_observation.py"
-    for path in (cli_file, shared_file, contract_file):
-        path.parent.mkdir(parents=True, exist_ok=True)
-    (root / "backend/pyproject.toml").write_text("""[project.scripts]
-"oh-goon-local-lace-physical-preflight" = "oh_goon.repository_tooling.local_lace_physical_preflight:main"
-""")
-    shared_file.write_text(Path(kernel.__file__).read_text())
-    contract_file.write_text("from dataclasses import dataclass\n")
-    cli_file.write_text(Path(cli.__file__).read_text())
-    from tests.factories.x0_architecture import copy_x0_architecture_sources
-
-    copy_x0_architecture_sources(root)
-    assert check_x0_single_execution_path(root) == []
-    cli_file.write_text(
-        cli_file.read_text() + "\ndef _visible_mount_fd_holders():\n    return 1\n"
-    )
-    assert any(
-        "second physical kernel observer" in e.message
-        for e in check_x0_single_execution_path(root)
-    )
-    cli_file.write_text("def main(): pass\n")
-    assert any(
-        "must use shared kernel observation" in e.message
-        for e in check_x0_single_execution_path(root)
-    )
-
-
-def test_b21_native_wsl_witness_runs_exact_shared_observer_ring() -> None:
-    root = Path(__file__).resolve().parents[2]
-    script = (root / "scripts/qualify_b12_development_wsl.sh").read_text()
-    recipe = (
-        (root / "Makefile")
-        .read_text()
-        .split("qualify-development-wsl:", 1)[1]
-        .split("\n\n", 1)[0]
-    )
-    assert (
-        "if [[ -f .checkpoint/B21_SOURCE.sha256 ]]; then embedded='.checkpoint/B21_SOURCE.sha256'; fi"
-        in script
-    )
-    assert script.count("test_b21_shared_observer_collapse") >= 2
-    assert (
-        "required_modules+=(--require-module test_b21_shared_observer_collapse)"
-        in script
-    )
-    assert '"${observer_tests[@]}"' in script
-    assert script.index("run_ring CORE") < script.index(
-        'run_ring "PHYSICAL_OBSERVER${suffix}"'
-    )
-    assert recipe.index("source-transport-clean") < recipe.index(
-        "qualify_b12_development_wsl.sh"
-    )

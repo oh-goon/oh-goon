@@ -326,7 +326,6 @@ def check_qualification_environment_contract(root: Path = ROOT) -> list[Violatio
             ("P1B27_GATE_P1P2B2A", "test_p1b27_gate_p1p2b2a_native_kernel_provenance"),
             ("P1B27_GATE_P1P2B2B", "test_p1b27_gate_p1p2b2b_original_journal_sample"),
             ("P1B27_GATE_P1P2B2B1", "test_p1b27_gate_p1p2b2b1_mount_fixture"),
-            ("P1B27_GATE_P1P2B2B2", "test_p1b27_gate_p1p2b2b2_canonical_root"),
             ("P1B27_GATE_P3A", "test_p3a_original_sample_rounds"),
             ("P1B27_GATE_P3B1", "test_p3b1_original_convergence_assessment"),
             ("P1B27_GATE_P3B2A", "test_p3b2a_complete_postcleanup_roster"),

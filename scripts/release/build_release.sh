@@ -39,7 +39,7 @@ make frontend-install
 
 if [[ "$release_action" == build ]]; then
   make generate
-  make check
+  make release-check
 fi
 make frontend-build
 

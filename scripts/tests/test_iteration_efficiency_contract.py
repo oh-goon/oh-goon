@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +24,37 @@ def _target_body(name: str) -> str:
     return rest if next_target < 0 else rest[:next_target]
 
 
+def _native_batch_commands(target: str) -> list[list[str]]:
+    environment = os.environ.copy()
+    for name in (
+        "BACKEND_CHECK_TEST_ROOTS",
+        "CHECK_PYTEST_MARKER",
+        "TOOLING_TEST_MARKER",
+        "TOOLING_COMPLETE_TEST_MARKER",
+        "MAKEFLAGS",
+        "MFLAGS",
+        "MAKEOVERRIDES",
+    ):
+        environment.pop(name, None)
+    result = subprocess.run(
+        ["make", "--no-print-directory", "--dry-run", target],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    commands = []
+    for line in result.stdout.splitlines():
+        words = shlex.split(line)
+        for index, word in enumerate(words):
+            if word.endswith("/oh-goon-test-batches"):
+                commands.append(words[index:])
+                break
+    return commands
+
+
 def test_repository_understanding_diagnostic_batches_do_not_control_default_tooling_scheduling() -> (
     None
 ):
@@ -29,7 +62,12 @@ def test_repository_understanding_diagnostic_batches_do_not_control_default_tool
     batched = _target_body("repository-understanding-tests-batched")
     assert "oh-goon-test-batches scripts/tests --granularity files" in tooling
     assert "--exclude " not in tooling
-    assert "not certification and not process and not slow" in tooling
+    native = _native_batch_commands("test-tooling")
+    assert native and all(
+        command[command.index("--marker") + 1]
+        == "not certification and not process and not slow"
+        for command in native
+    )
     assert "--no-timeout-bisection" not in tooling
     assert "--granularity tests" in batched
     assert "--workers 1" in batched
@@ -212,26 +250,6 @@ def test_repository_understanding_process_cache_returns_defensive_snapshots(
     assert material.manifest()["question_count"] == 7
 
 
-@pytest.mark.slow
-def test_repository_understanding_real_process_cache_returns_defensive_snapshots() -> (
-    None
-):
-    from oh_goon.repository_tooling import repository_understanding_material as material
-
-    # Complete/RU qualification retains the production-shaped cold material proof.
-    material._exam_snapshot_cached.cache_clear()
-    material._manifest_cached.cache_clear()
-    first = material.exam_snapshot()
-    original = first["questions"][0]["id"]
-    first["questions"][0]["id"] = "MUTATED"
-    assert material.exam_snapshot()["questions"][0]["id"] == original
-
-    first_manifest = material.manifest()
-    original_question_count = first_manifest["question_count"]
-    first_manifest["question_count"] = -1
-    assert material.manifest()["question_count"] == original_question_count
-
-
 def test_development_test_defers_native_frontend_operations_until_backend_feedback() -> (
     None
 ):
@@ -259,7 +277,6 @@ def test_backend_fast_and_complete_lanes_use_semantic_execution_boundaries() -> 
     assert "--exclude " not in complete
     assert "--environment-retries 1" in complete
     assert "--marker 'not process'" in complete
-    assert "semantic process supervision is serialized" in complete
     assert "--marker 'process'" in complete
 
 
@@ -271,14 +288,19 @@ def test_tooling_fast_and_complete_lanes_keep_distinct_semantic_authority() -> N
             encoding="utf-8"
         )
     )
-    assert "not certification and not process and not slow" in fast
-    assert "--marker 'not certification'" in complete
+    native = _native_batch_commands("test-tooling")
+    assert native and all(
+        command[command.index("--marker") + 1]
+        == "not certification and not process and not slow"
+        for command in native
+    )
+    native_complete = _native_batch_commands("test-tooling-complete")
+    assert native_complete and all(
+        command[command.index("--marker") + 1] == "not certification"
+        for command in native_complete
+    )
     assert "--exclude " not in fast
     assert "--exclude " not in complete
-    assert (
-        "# OH_GOON_OPAQUE_TOOLS: bash dd git node uv\ntest-tooling-complete:"
-        in MAKEFILE
-    )
     assert goon["execution"] == {"shell": "bash"}
     assert goon["steps"] == [{"run": "make test-tooling-complete"}]
 

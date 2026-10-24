@@ -141,8 +141,15 @@ def test_init_has_no_storage_admission_before_native_uv_and_doctor_is_separate()
 
 
 @pytest.mark.parametrize("failure", ("", "backend", "cross-owner"))
+@pytest.mark.parametrize(
+    ("marker_override", "expected_marker"),
+    (
+        (None, "not certification and not slow"),
+        ("not certification", "not certification"),
+    ),
+)
 def test_integration_gate_runs_both_owners_and_preserves_failures(
-    tmp_path: Path, failure: str
+    tmp_path: Path, failure: str, marker_override: str | None, expected_marker: str
 ) -> None:
     shutil.copyfile(ROOT / "Makefile", tmp_path / "Makefile")
     scripts = tmp_path / "scripts"
@@ -164,10 +171,15 @@ def test_integration_gate_runs_both_owners_and_preserves_failures(
     executable.chmod(0o755)
     calls = tmp_path / "calls.jsonl"
     environment = dict(os.environ)
+    for name in ("CHECK_PYTEST_MARKER", "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
+        environment.pop(name, None)
     environment["OH_GOON_INTEGRATION_CALLS"] = str(calls)
     environment["OH_GOON_INTEGRATION_FAILURE"] = failure
+    command = ["make", "test-integration"]
+    if marker_override is not None:
+        command.append(f"CHECK_PYTEST_MARKER={marker_override}")
     result = subprocess.run(
-        ("make", "test-integration"),
+        command,
         cwd=tmp_path,
         env=environment,
         check=False,
@@ -178,7 +190,7 @@ def test_integration_gate_runs_both_owners_and_preserves_failures(
     expected = [
         {
             "owner": "backend",
-            "argv": ["pytest", "-m", "not certification", "tests/integration"],
+            "argv": ["pytest", "-m", expected_marker, "tests/integration"],
         }
     ]
     if failure != "backend":
@@ -190,7 +202,7 @@ def test_integration_gate_runs_both_owners_and_preserves_failures(
                     "-c",
                     "backend/pyproject.toml",
                     "-m",
-                    "not certification",
+                    expected_marker,
                     "tests/integration",
                 ],
             }

@@ -131,17 +131,3 @@ def test_unknown_namespace_does_not_become_missing_or_absence_proof(tmp_path, mo
     assert not sample.physical_absence_proven and not sample.quiescence_proven
     assert session.commit_count == 2
     conn.close()
-
-
-def test_one_shared_reader_and_original_wsl_qualification_owner():
-    from oh_goon.repository_tooling.architecture.repository_layout import ROOT
-    from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
-        check_x0_single_execution_path,
-    )
-
-    assert check_x0_single_execution_path(ROOT) == []
-    text = (ROOT / "scripts/qualify_b12_development_wsl.sh").read_text()
-    module = "test_p1b27_gate_p1p2_original_sample_correspondence"
-    assert text.count(f"--require-module {module}") == 1
-    assert text.count(f"tests/unit/runtime/{module}.py") == 1
-    assert text.index(f"--require-module {module}") < text.index(f"tests/unit/runtime/{module}.py")

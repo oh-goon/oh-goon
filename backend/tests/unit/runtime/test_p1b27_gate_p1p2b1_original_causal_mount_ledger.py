@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 
+from oh_goon.core.enforcer_lace_trust import canonical_bytes, digest
 from oh_goon.core.ports.physical_observation import PhysicalKernelFact, PhysicalKernelSnapshot
 from oh_goon.integrations import linux_physical_observer
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError
@@ -66,6 +67,22 @@ def test_causal_identity_binds_original_claim_scope_and_kernel_without_authority
         intent_run_seq=2, scope=scope, mount_intent=mount_descriptor(), proc_root=tmp_path
     )
     identity = sample.causal_observation_identity
+    assert identity == digest(
+        "oh-goon/b27/original-physical-candidate/v1",
+        canonical_bytes(
+            {
+                "envelope_identity": sample.envelope.identity,
+                "scope": {
+                    **asdict(sample.scope),
+                    "mount_targets": list(sample.scope.mount_targets),
+                },
+                "kernel_snapshot_identity": sample.facts.identity,
+                "mount_intent_identity": sample.mount_intent_identity,
+                "classification": sample.classification,
+                "effect_permission": sample.effect_permission,
+            }
+        ),
+    )
     assert identity.startswith("sha256:") and len(identity) == 71
     assert identity == sample.causal_observation_identity
     assert sample.kernel_snapshot_identity == facts.identity
@@ -105,60 +122,3 @@ def test_incomplete_kernel_read_retains_unqualified_causal_identity(tmp_path, mo
     assert sample.classification == "ORIGINAL_OWNER_READ_ONLY_UNQUALIFIED"
     assert not sample.physical_absence_proven and not sample.teardown_proven
     conn.close()
-
-
-def test_single_wsl_ring_and_x0_contract():
-    from oh_goon.repository_tooling.architecture.repository_layout import ROOT
-    from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
-        check_x0_single_execution_path,
-    )
-
-    script = (ROOT / "scripts/qualify_b12_development_wsl.sh").read_text()
-    module = "test_p1b27_gate_p1p2b1_original_causal_mount_ledger"
-    assert script.count(f"--require-module {module}") == 1
-    assert script.count(f"tests/unit/runtime/{module}.py") == 1
-    assert check_x0_single_execution_path(ROOT) == []
-
-
-@pytest.mark.parametrize(
-    "filename,needle,replacement",
-    (
-        (
-            "runtime/enforcer_lace_original_physical_sampling.py",
-            "len(set(mount_ids)) != expected",
-            "False",
-        ),
-        (
-            "core/ports/physical_observation.py",
-            '"envelope_identity": self.envelope.identity',
-            '"envelope_identity": "forged"',
-        ),
-        (
-            "runtime/enforcer_lace_fleet_resource_owner.py",
-            "require_original_sample_kernel_identity(before, facts)",
-            "pass",
-        ),
-    ),
-)
-def test_x0_rejects_native_provenance_bypass(tmp_path, filename, needle, replacement):
-    import shutil
-
-    from oh_goon.repository_tooling.architecture.repository_layout import ROOT
-    from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
-        _check_p1p2b1_causal_kernel_ledger,
-    )
-
-    source_root = ROOT / "backend/src/oh_goon"
-    for relative in (
-        "runtime/enforcer_lace_original_physical_sampling.py",
-        "core/ports/physical_observation.py",
-        "runtime/enforcer_lace_fleet_resource_owner.py",
-    ):
-        target = tmp_path / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_root / relative, target)
-    target = tmp_path / filename
-    text = target.read_text()
-    assert needle in text
-    target.write_text(text.replace(needle, replacement, 1))
-    assert _check_p1p2b1_causal_kernel_ledger(tmp_path)

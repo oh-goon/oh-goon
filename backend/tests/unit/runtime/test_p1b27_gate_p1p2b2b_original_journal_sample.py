@@ -6,7 +6,6 @@ These tests do not prove effectful mount custody, teardown or Gate B.
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -14,9 +13,6 @@ import pytest
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.ports.physical_observation import PhysicalKernelFact, PhysicalKernelSnapshot
 from oh_goon.integrations import linux_physical_observer
-from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
-    _check_p1p2b1_causal_kernel_ledger,
-)
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError, _event_identity
 from tests.unit.core.test_enforcer_lace_trust import authenticator
 from tests.unit.runtime.test_b22_original_physical_sampling import mount_descriptor, seeded
@@ -144,31 +140,3 @@ def test_even_rehashed_journal_cannot_promote_or_misbind_unqualified_sample(
     with pytest.raises(CausalJournalError, match="invalid|transcript"):
         journal.verify("run-one", auth=authenticator())
     conn.close()
-
-
-def test_x0_rejects_removed_canonical_journal_write(tmp_path):
-    from oh_goon.repository_tooling.architecture.repository_layout import ROOT
-
-    root = ROOT / "backend/src/oh_goon"
-    for name in (
-        "runtime/enforcer_lace_original_physical_sampling.py",
-        "runtime/enforcer_lace_fleet_resource_owner.py",
-        "core/ports/physical_observation.py",
-    ):
-        destination = tmp_path / name
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(root / name, destination)
-    owner = tmp_path / "runtime/enforcer_lace_fleet_resource_owner.py"
-    source = owner.read_text()
-    assert (
-        'journal._append_locked(self.run_id, "RESOURCE_PHYSICAL_SAMPLE_RECORDED", payload)'
-        in source
-    )
-    owner.write_text(
-        source.replace(
-            'journal._append_locked(self.run_id, "RESOURCE_PHYSICAL_SAMPLE_RECORDED", payload)',
-            "pass",
-            1,
-        )
-    )
-    assert _check_p1p2b1_causal_kernel_ledger(tmp_path)

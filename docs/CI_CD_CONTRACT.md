@@ -9,7 +9,7 @@ This document is the short product-level contract for local CI/CD execution. The
 The repository's [required-checks workflow](../.github/workflows/ci.yml) runs on
 pull-request updates and draft/readiness transitions, pushes to `main`, and
 merge-queue groups. Ready pull requests, `main` and merge-queue groups run all
-seven full checks. Six parallel matrix jobs materialize the committed uv/npm
+seven routine checks. Six parallel matrix jobs materialize the committed uv/npm
 locks through `make init`, then invoke `backend-check`, `frontend-check`,
 `tooling-check`, `architecture`, `check-generated` or `test-integration`.
 The integration target executes both backend and cross-owner integration tests.
@@ -23,7 +23,7 @@ materialization, check version coherence, build fresh frontend assets, build the
 wheel and verify its contents. Assembly consumes the committed generated
 contracts already checked by `check-generated`; it does not regenerate source
 or rerun the completed test suites. Local `make build-release` retains its full
-`generate` → `check` → assembly journey. `assemble-release` is an explicit
+`generate` → `release-check` → assembly journey. `assemble-release` is an explicit
 artifact assembly action; its caller owns validation scheduling, and it grants
 no APP certificate or release promotion. Unknown release actions reject before
 cleanup or native work. Make and native tools retain dependency/build/result
@@ -48,7 +48,7 @@ workflow run.
 
 Draft pull requests run only the nonrequired `draft-feedback` job: locked setup,
 lint, format, architecture and lock checks, without pytest suites. Mark a draft
-ready for review to launch all seven full checks for its current commit; later
+ready for review to launch all seven routine checks for its current commit; later
 ready-PR pushes also run all seven. Returning to draft starts cheap feedback and
 cancels superseded runs through the existing concurrency policy. Focused tests
 remain the local iteration loop; draft feedback is not test or merge completion.
@@ -65,17 +65,18 @@ Never conditionally skip a required check under its ordinary name:
 A new draft commit does not report the seven full checks; repository settings must require those
 exact names. Workflow scheduling does not install or prove those settings.
 
-Full required jobs have no path filters or allowed failures. Full Git history supplies
+Routine required jobs have no path filters or allowed failures. Full Git history supplies
 the PR-base quality-floor comparison. Hosted `backend-check` selects unit and
 dependency-complete tests through Make's `BACKEND_CHECK_TEST_ROOTS`; the required
 `test-integration` job owns backend and cross-owner integration tests. Together
-they cover the entire ordinary backend suite once. Local `make backend-check`
+they cover the bounded ordinary backend suite once, selecting `not certification
+and not slow`. Local `make backend-check`
 retains pytest's complete default testpaths. Make passes the selected roots
 directly in pytest's argv rather than `PYTEST_ADDOPTS`, so nested pytest processes
 do not inherit an unrelated test-root selection. Both hosted pytest jobs stop at
 their first failure and report the 40 slowest setup/call/teardown durations above
 50 ms. A successful run
-covers every ordinary test; no successful test receipts are reused across changed
+covers the selected ordinary tests; no successful test receipts are reused across changed
 source. Publish coherent changes after focused checks so superseded full runs can
 be cancelled by the workflow's existing concurrency policy. Ubuntu 26.04 supplies the
 native Bubblewrap overlay features used by the selected agent tests. Each matrix
@@ -86,6 +87,33 @@ receive repository secrets. Installed-agent,
 live-account, browser, and privileged certification remain explicit qualification;
 portable checks exclude the existing `certification` marker. Workflow files are
 authored source and participate in canonical source/archive identity.
+
+## Fast feedback and complete release verification
+
+Use focused owner tests while editing. Draft feedback stays inexpensive. Routine
+ready-PR/main checks include meaningful `process` and `scale` regressions, including
+physical timeout, cancellation, permission and truthful-result boundaries. A slow
+wall-clock result alone is not a reason to exclude a test.
+
+The `slow` marker is reserved for exhaustive full-corpus variants whose ordinary
+regression behavior has a bounded counterpart. Routine backend/integration checks
+and `tooling-check` select `not certification and not slow`; the local
+`test-tooling` inner loop additionally omits real process tests. Redundant or
+prose/private-name assertions are removed rather than preserved as release gates.
+
+`make release-check` runs the complete portable suite, including `slow`, through
+the same existing check owners. Backend unit/dependency-complete, backend
+integration, cross-owner integration and tooling membership remain disjoint.
+Privileged custody, live accounts and installed-model `certification` still need
+explicit qualification and are never silently admitted by a release command.
+
+Local `make build-release` performs this complete check before artifact assembly.
+The [complete release workflow](../.github/workflows/release-validation.yml) also
+runs it on the exact selected commit when dispatched manually or when a release
+is published. The published-release event records post-publication verification;
+pre-publication verification is supplied by the local release-build journey.
+Routine PR artifact assembly continues to wait for the seven-check dependency
+chain without repeating completed suites or claiming APP certification.
 
 ## Why this exists
 

@@ -35,6 +35,13 @@ Product/service integration             tests/integration/services/
 
 These remain backend-owned because they do not require another top-level repository owner. Tests that genuinely cross backend/generated/frontend or backend/repository-tooling boundaries belong in root `../tests/integration/`.
 
+Routine merge checks include meaningful process and concurrency regressions.
+Exhaustive `slow` variants require a bounded ordinary counterpart and run through
+`make release-check`; the fast local loop additionally excludes real process and
+scale work. Test duration alone does not decide which contracts are required.
+Repository-tooling tests, including source seals and archive transitions, live in
+root `scripts/tests/` and use small real source trees.
+
 ## Optional native qualification
 
 Ordinary backend and integration checks run repository-correctness tests without
