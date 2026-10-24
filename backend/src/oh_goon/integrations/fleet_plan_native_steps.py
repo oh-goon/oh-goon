@@ -64,7 +64,10 @@ from oh_goon.integrations.agent_review_execution import (
     accept_agent_phase_output,
     agent_phase_output_contract,
 )
-from oh_goon.integrations.fleet_plan_process_isolation import StandardReadOnlyMount
+from oh_goon.integrations.fleet_plan_process_isolation import (
+    StandardReadOnlyMount,
+    native_runtime_read_only_mounts,
+)
 from oh_goon.integrations.fleet_plan_secret_redaction import redact_host_secret_text
 from oh_goon.integrations.hashmarks.agent_tools import PreparedAgentEvidence, task_evidence_prompt
 
@@ -635,6 +638,7 @@ def execute_native_agent_step(
         elif selected.profile.codex_login is not None:
             scratch = control / "scratch"
             scratch.mkdir()
+            runtime_mounts = native_runtime_read_only_mounts(repository, selected)
             invocation = codex_login_command(
                 selected,
                 instructions=prompt_file,
@@ -645,6 +649,8 @@ def execute_native_agent_step(
                     materialized.root,
                     control,
                     *_codex_runtime_roots(selected),
+                    *(mount.source for mount in runtime_mounts),
+                    *(Path(mount.target) for mount in runtime_mounts),
                 ),
             )
             try:

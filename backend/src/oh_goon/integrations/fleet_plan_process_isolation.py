@@ -389,12 +389,7 @@ def native_runtime_read_only_mounts(
             continue
         if not any(root.is_relative_to(parent) for parent in selected):
             selected.append(root)
-    mounts = [StandardReadOnlyMount(root, PurePosixPath(root)) for root in selected]
-    for prefix in (sys.prefix, sys.base_prefix):
-        native_prefix = Path(prefix)
-        canonical_prefix = native_prefix.resolve(strict=True)
-        if native_prefix != canonical_prefix and canonical_prefix in selected:
-            mounts.append(StandardReadOnlyMount(canonical_prefix, PurePosixPath(native_prefix)))
+    native_prefixes = [Path(sys.prefix), Path(sys.base_prefix)]
     base = Path(sys.base_prefix).resolve(strict=True)
     native_base_executable = getattr(sys, "_base_executable", None)
     if not isinstance(native_base_executable, str) or not native_base_executable:
@@ -405,8 +400,14 @@ def native_runtime_read_only_mounts(
         suffix = executable.relative_to(base).parts
         if suffix and native_executable.parts[-len(suffix) :] == suffix:
             native_prefix = native_executable.parents[len(suffix) - 1]
-            if native_prefix != base and base in selected:
-                mounts.append(StandardReadOnlyMount(base, PurePosixPath(native_prefix)))
+            native_prefixes.append(native_prefix)
+    mounts = [StandardReadOnlyMount(root, PurePosixPath(root)) for root in selected]
+    for native_prefix in dict.fromkeys(native_prefixes):
+        canonical_prefix = native_prefix.resolve(strict=True)
+        if native_prefix != canonical_prefix and (
+            any(canonical_prefix.is_relative_to(root) for root in (*selected, *public))
+        ):
+            mounts.append(StandardReadOnlyMount(canonical_prefix, PurePosixPath(native_prefix)))
     return tuple(dict.fromkeys(mounts))
 
 

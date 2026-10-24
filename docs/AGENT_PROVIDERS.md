@@ -167,8 +167,11 @@ config and exec rules are ignored for this invocation, the project is untrusted,
 hooks, plugins, Apps, web search and native delegation are disabled. Native tools
 use Codex's restricted filesystem policy: platform binaries and selected runtime
 inputs are readable, the working repository and execution scratch are writable,
-and tool networking is disabled. The authentication home and every native tool
-root must be separate filesystem trees: neither may contain the other, including
+and tool networking is disabled. Hashmarks follow-up commands retain the loaded
+Python runtime's canonical paths and lexical aliases from the existing runtime
+mount owner, executing the original interpreter without a system-Python fallback.
+The authentication home and every native tool root must be separate filesystem
+trees: neither may contain the other, including
 through symlink aliases. The home cannot be part of the captured workspace.
 Select a complete public Codex installation in that separate tree, retaining its
 native distribution layout and companion programs such as `codex-code-mode-host`.

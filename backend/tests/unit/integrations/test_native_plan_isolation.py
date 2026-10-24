@@ -439,6 +439,77 @@ def test_loaded_python_runtime_preserves_native_venv_interpreter_alias(tmp_path:
 
 
 @pytest.mark.process
+def test_public_python_runtime_keeps_distinct_native_prefix_aliases_readonly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = shutil.which("bwrap")
+    public_python = Path("/usr/bin/python3")
+    if executable is None or not public_python.is_file():
+        if os.environ.get("OH_GOON_REQUIRE_NATIVE_ISOLATION") == "1":
+            pytest.fail("required native bwrap and public Python are not installed")
+        pytest.skip("native bwrap or public Python is not installed")
+    observed = subprocess.run(
+        (
+            str(public_python),
+            "-I",
+            "-c",
+            "import json,sys; print(json.dumps([sys.base_prefix,sys._base_executable]))",
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    base_prefix, base_executable = map(Path, json.loads(observed.stdout))
+    canonical_base = base_prefix.resolve(strict=True)
+    interpreter_suffix = base_executable.resolve(strict=True).relative_to(canonical_base)
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    backend = BubblewrapProcessIsolation(executable)
+    selected = _selection(backend)
+    runner = native_profile_command_runner(
+        repository, selected, backend, RepositoryWorkspaceAuthority.pin_repository_subject
+    )
+    try:
+        runner("/usr/bin/true", timeout=15)
+    except FleetPlanInvalid as exc:
+        if os.environ.get("OH_GOON_REQUIRE_NATIVE_ISOLATION") == "1":
+            pytest.fail(str(exc))
+        pytest.skip(f"native namespace unavailable: {exc}")
+
+    prefix_alias = tmp_path / "python-prefix-alias"
+    interpreter_alias = tmp_path / "python-interpreter-alias"
+    for alias in (prefix_alias, interpreter_alias):
+        alias.symlink_to(canonical_base, target_is_directory=True)
+    native_interpreter = interpreter_alias / interpreter_suffix
+    monkeypatch.setattr(sys, "base_prefix", str(prefix_alias))
+    monkeypatch.setattr(sys, "_base_executable", str(native_interpreter))
+    mounts = native_runtime_read_only_mounts(repository, selected)
+    for alias in (prefix_alias, interpreter_alias):
+        assert StandardReadOnlyMount(canonical_base, PurePosixPath(alias)) in mounts
+    runner = native_profile_command_runner(
+        repository, selected, backend, RepositoryWorkspaceAuthority.pin_repository_subject
+    )
+    result = runner(
+        str(native_interpreter),
+        "-I",
+        "-c",
+        "import encodings,os,sys; "
+        f"assert all(os.statvfs(root).f_flag & os.ST_RDONLY for root in {(str(prefix_alias), str(interpreter_alias))!r}); "
+        "print(sys.executable)",
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(native_interpreter)
+    assert result.standard_isolation is not None
+    canonical_interpreter = base_executable.resolve(strict=True)
+    canonical_result = runner(
+        str(canonical_interpreter), "-I", "-c", "import sys; print(sys.executable)", timeout=15
+    )
+    assert canonical_result.returncode == 0, canonical_result.stderr
+    assert canonical_result.stdout.strip() == str(canonical_interpreter)
+
+
+@pytest.mark.process
 def test_timed_out_verification_keeps_partial_output_elapsed_and_physical_cleanup(
     tmp_path: Path,
 ) -> None:

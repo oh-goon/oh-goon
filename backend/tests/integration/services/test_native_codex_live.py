@@ -110,7 +110,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         "(start, end) tuples, combining overlapping or immediately adjacent ranges. "
         "Handle empty, unsorted, contained, duplicate and negative ranges without modifying "
         "the input list. Inputs have start <= end. Keep the public function and use only "
-        "the Python standard library. Change ranges.py only. Independent verification "
+        "the Python standard library. Before editing, execute the exact repository_tools.list "
+        "Hashmarks command from the supplied instructions. Change ranges.py only. Independent verification "
         "runs after your coding Step."
     )
     selected = ResolvedNativeAgent(
@@ -127,9 +128,10 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     native_diagnostics: dict[str, Any] = {}
     native_occurrences: list[str] = []
     verification_launch_count = 0
+    hashmarks_followup_succeeded = False
 
     def command_runner(*argv: str, **kwargs: Any) -> CommandResult:
-        nonlocal verification_launch_count
+        nonlocal verification_launch_count, hashmarks_followup_succeeded
         if argv[0] == str(program):
             assert not native_occurrences, "The live coding Step must launch Codex once"
             prompt = kwargs["input_data"]
@@ -166,9 +168,29 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                 if not line.strip():
                     continue
                 item = json.loads(line).get("item")
-                if not isinstance(item, dict) or len(item_facts) >= 32:
+                if not isinstance(item, dict):
                     continue
                 item_type = item.get("type")
+                if (
+                    item_type == "command_execution"
+                    and item.get("exit_code") == 0
+                    and "oh_goon.integrations.hashmarks.agent_tools" in item.get("command", "")
+                ):
+                    for output_line in item.get("aggregated_output", "").splitlines():
+                        try:
+                            followup = json.loads(output_line)
+                        except ValueError:
+                            continue
+                        if isinstance(followup, dict) and (
+                            followup.get("producer") == "Hashmarks"
+                            and followup.get("capture_identity")
+                            == payload["identity"]["candidate_identity"]
+                            and followup.get("producer_implementation_identity")
+                            == require_loaded_hashmarks_runtime()
+                        ):
+                            hashmarks_followup_succeeded = True
+                if len(item_facts) >= 32:
+                    continue
                 fact: dict[str, str | int] = {
                     "type": item_type
                     if item_type
@@ -217,6 +239,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         )
         detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=210)
         assert native_facts == [(0, True, False)]
+        assert hashmarks_followup_succeeded
         assert verification_launch_count == 1
         outcome = detail.outcome
         assert outcome is FleetRunOutcome.SUCCESS
