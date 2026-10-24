@@ -18,7 +18,7 @@ jobs:
     env:
       UV_PYTHON: "3.12"
       OH_GOON_PROFILE_BASE: bd3b60a2f7151e62c0df1f7625ce608e57d24d93
-      OH_GOON_PROFILE_CANDIDATE: 061e236915b39cfeffe0040f5f85de8445efb625
+      OH_GOON_PROFILE_CANDIDATE: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -56,7 +56,7 @@ jobs:
           uname -r
           stat -f -c %T /usr
           bench_sample=0
-          for bench_variant in candidate base base candidate; do
+          for bench_variant in base candidate candidate base; do
             bench_sample=$((bench_sample + 1))
             cp "$bench_root/$bench_variant.py" "$bench_target"
             sync
@@ -72,7 +72,7 @@ jobs:
           from pathlib import Path
           root = Path(os.environ["RUNNER_TEMP"]) / "cold-bind-profile"
           samples = []
-          for index, variant in enumerate(("candidate", "base", "base", "candidate"), 1):
+          for index, variant in enumerate(("base", "candidate", "candidate", "base"), 1):
               log = (root / f"{index}-{variant}.log").read_text()
               match = re.search(r"(\d+\.\d+)s call\s+.*test_native_bubblewrap_preflight_retains_canonical_git_root", log)
               if match is None:
