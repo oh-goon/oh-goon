@@ -37,11 +37,11 @@ jobs:
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
+          sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep strace
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Materialize committed locks once
         run: make init
-      - name: Time both versions in reversed order without instrumentation
+      - name: Attribute one cold baseline preflight to native filesystem work
         shell: bash
         run: |
           set -euo pipefail
@@ -50,34 +50,29 @@ jobs:
           bench_root="$RUNNER_TEMP/cold-bind-profile"
           bench_target="backend/src/oh_goon/integrations/fleet_plan_bubblewrap_isolation.py"
           mkdir -p "$bench_root"
-          git show "$OH_GOON_PROFILE_BASE:$bench_target" > "$bench_root/base.py"
-          git show "$OH_GOON_PROFILE_CANDIDATE:$bench_target" > "$bench_root/candidate.py"
-          trap 'cp "$bench_root/candidate.py" "$bench_target"' EXIT
-          uname -r
-          stat -f -c %T /usr
-          bench_sample=0
-          for bench_variant in base candidate candidate base; do
-            bench_sample=$((bench_sample + 1))
-            cp "$bench_root/$bench_variant.py" "$bench_target"
-            sync
-            printf '3\n' | sudo tee /proc/sys/vm/drop_caches > /dev/null
-            if ! uv run --offline --frozen --no-sync --project backend python -m pytest -c backend/pyproject.toml -o addopts= -q backend/tests/unit/entrypoints/test_cli_ai.py::test_native_bubblewrap_preflight_retains_canonical_git_root --durations=1 > "$bench_root/$bench_sample-$bench_variant.log" 2>&1; then
-              cat "$bench_root/$bench_sample-$bench_variant.log"
-              exit 1
-            fi
-            cat "$bench_root/$bench_sample-$bench_variant.log"
-          done
-          uv run --offline --frozen --no-sync --project backend python - <<'PY'
-          import hashlib, json, os, platform, re, sys
-          from pathlib import Path
-          root = Path(os.environ["RUNNER_TEMP"]) / "cold-bind-profile"
+          cp "$bench_target" "$bench_root/restore.py"
+          trap 'cp "$bench_root/restore.py" "$bench_target"' EXIT
+          git show "$OH_GOON_PROFILE_BASE:$bench_target" > "$bench_target"
+          cat > "$bench_root/observe.py" <<'PY'
+          import json, resource, time
+          import pytest
+          from oh_goon.integrations import fleet_plan_bubblewrap_isolation as module
+          native = module._require_standard_bind_structure
           samples = []
-          for index, variant in enumerate(("base", "candidate", "candidate", "base"), 1):
-              log = (root / f"{index}-{variant}.log").read_text()
-              match = re.search(r"(\d+\.\d+)s call\s+.*test_native_bubblewrap_preflight_retains_canonical_git_root", log)
-              if match is None:
-                  raise RuntimeError(f"Missing native test duration in sample {index}")
-              samples.append({"index": index, "variant": variant, "source_sha256": hashlib.sha256((root / (variant + ".py")).read_bytes()).hexdigest(), "seconds": float(match.group(1)), "pytest": log})
-          result = {"base": os.environ["OH_GOON_PROFILE_BASE"], "candidate": os.environ["OH_GOON_PROFILE_CANDIDATE"], "python": sys.version, "kernel": platform.release(), "same_host": True, "cold_guest_caches_before_each": True, "instrumented": False, "hypervisor_cache_controlled": False, "samples": samples}
-          print("OH_GOON_MATCHED_TIMING_JSON=" + json.dumps(result, sort_keys=True))
+          def observed(root, **kwargs):
+              before = resource.getrusage(resource.RUSAGE_SELF)
+              started = time.perf_counter()
+              try:
+                  return native(root, **kwargs)
+              finally:
+                  after = resource.getrusage(resource.RUSAGE_SELF)
+                  samples.append({"root": str(root), "elapsed": time.perf_counter() - started, "user_cpu": after.ru_utime - before.ru_utime, "system_cpu": after.ru_stime - before.ru_stime, "input_blocks": after.ru_inblock - before.ru_inblock, "voluntary_switches": after.ru_nvcsw - before.ru_nvcsw})
+          module._require_standard_bind_structure = observed
+          result = pytest.main(["-c", "backend/pyproject.toml", "-o", "addopts=", "-q", "backend/tests/unit/entrypoints/test_cli_ai.py::test_native_bubblewrap_preflight_retains_canonical_git_root", "--durations=1"])
+          print("OH_GOON_NATIVE_WALK_ATTRIBUTION=" + json.dumps({"samples": samples, "exit": result}, sort_keys=True))
+          raise SystemExit(result)
           PY
+          sync
+          printf '3\n' | sudo tee /proc/sys/vm/drop_caches > /dev/null
+          uv run --offline --frozen --no-sync --project backend strace -c -w -e trace=stat,lstat,newfstatat,statx,fstat,getdents64,openat,close,read -o "$bench_root/native-summary.txt" backend/.venv/bin/python "$bench_root/observe.py"
+          cat "$bench_root/native-summary.txt"
