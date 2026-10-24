@@ -1,0 +1,14 @@
+version: 1
+inputs:
+  repo: {type: repository_reference}
+  goal: {default: canonical-architecture-clean}
+  acceptance: {type: acceptance_profile, default: agentic-review}
+  skill: {type: skill_reference}
+steps:
+- uses: agent
+  harness: native
+  role: review
+  task: ${{ inputs.goal }}
+  requested_effects:
+    repository_access: read_only
+    recipients: [codex]

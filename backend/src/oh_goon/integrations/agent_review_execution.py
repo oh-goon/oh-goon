@@ -99,8 +99,10 @@ def agent_phase_output_contract(step: ResolvedLocalSearchAgentStep) -> str:
 
     contracts = {
         "review": (
-            'Return one JSON object with schema="oh-goon.agent-review/v1", the exact identity fields, '
-            "verdict (FINDING, CLEAN, LEAVE_ALONE, INSUFFICIENT_EVIDENCE), summary, reviewed_paths and findings array. "
+            'Return one JSON object with schema="oh-goon.agent-review/v1" and top-level '
+            "reviewer, candidate_identity, scope_identity and skill_identity fields copied exactly from the supplied identity. "
+            "Do not wrap these fields in an identity object. "
+            "Also include verdict (FINDING, CLEAN, LEAVE_ALONE, INSUFFICIENT_EVIDENCE), summary, reviewed_paths and findings array. "
             "For CLEAN or FINDING, explicitly assert complete review with reviewed_paths="
             '{"complete_scope":"<exact scope_identity>"}, or list every supplied repo/ member exactly once. '
             "This asserts that the entire captured scope was reviewed; bounded evidence does not reduce it. "
@@ -121,8 +123,9 @@ def agent_phase_output_contract(step: ResolvedLocalSearchAgentStep) -> str:
             "Decide a coherent repair queue within the supplied write roots; no title-based deduplication."
         ),
         "proposal": (
-            'Return one JSON object with schema="agent-patch-batch-v1", candidate_identity, summary, '
-            "operations [{action (create, update or delete), path (repo/...), source_sha256, replacement}]. "
+            "Return one JSON object with only these root keys: schema, candidate_identity, summary, operations and regressions. "
+            'Use schema="agent-patch-batch-v1". Do not include reviewer, scope_identity, skill_identity or an identity wrapper. '
+            "operations contains [{action (create, update or delete), path (repo/...), source_sha256, replacement}]. "
             "Also include regressions [{queue_id, path, expectation}], referencing a created or updated test path "
             "for every admitted queue entry. Supply behavioral regression coverage for each reproduced defect. "
             "create requires null source_sha256; delete requires null replacement. "

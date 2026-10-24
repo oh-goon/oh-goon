@@ -99,7 +99,10 @@ class AgentRepairResult:
 
     @property
     def test_passed(self) -> bool:
-        return self.stop_reason is AgentRepairStopReason.TEST_PASSED
+        return self.stop_reason in (
+            AgentRepairStopReason.TEST_PASSED,
+            AgentRepairStopReason.CONVERGED,
+        )
 
     @property
     def converged(self) -> bool:

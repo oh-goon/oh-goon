@@ -1,5 +1,6 @@
 """Local synthetic Skills and source for native review/repair contract tests."""
 
+import json
 from pathlib import Path
 from shutil import copytree
 
@@ -66,7 +67,11 @@ def agent_review_case(
             ("repair", "provider-proposal", "proposal"),
         ):
             source = native_templates / "agents" / name / "goon.yml"
-            recipients = "[configured_model]" if native_agent.connection is not None else "[]"
+            recipients = (
+                "[configured_model]"
+                if native_agent.connection is not None
+                else json.dumps(native_agent.disclosure_recipients)
+            )
             source.write_text(
                 source.read_text()
                 .replace(f"harness: {harness}", f"harness: native\n  role: {role}")

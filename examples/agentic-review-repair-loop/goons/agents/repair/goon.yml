@@ -1,0 +1,18 @@
+version: 1
+inputs:
+  repo: {type: repository_reference}
+  goal: {default: canonical-architecture-clean}
+  acceptance: {type: acceptance_profile, default: agentic-review}
+  repair_skill: {type: skill_reference, default: local:skills/repair}
+steps:
+- id: propose
+  uses: agent
+  harness: native
+  role: proposal
+  task: ${{ inputs.goal }}
+  requested_effects:
+    repository_access: read_only
+    recipients: [codex]
+- run: >-
+    oh-goon agent apply --proposal '${{ steps.propose.outputs.proposal }}'
+    --write-root @admitted --expected-candidate-identity @candidate

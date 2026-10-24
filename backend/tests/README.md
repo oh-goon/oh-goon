@@ -95,10 +95,21 @@ uv run --offline --frozen --no-sync --project backend pytest -q -m certification
 ```
 
 Select one node when iterating on one defect. The public runtime must remain
-outside native stores. These cases establish neither real-account sign-in/refresh
-nor cross-Run continuation, WSL2/container compatibility or full repair campaigns.
-The owned Run's capability gates refuse ambient MCP/extension tool access and
-unsupported versions before its first model turn.
+outside native stores. The same service Run module includes complete bounded
+campaign cases: CLEAN, one or multiple independent defects repaired with real
+native read-only tools and fresh re-review, and interrupted proposal with no apply.
+An additional configured-MCP campaign completes the repair while the original
+thread's native MCP RPC refuses the exact registered server/tool identity and
+real native Code Mode attempts MCP access in every reasoning phase. Native
+threadless discovery may initialize that server; workload tools remain disabled,
+no MCP tool call reaches it, and its native configuration/private canary remain
+unchanged.
+They retain the original native
+batch apply, regression, verification, linked Runs and process cleanup. These cases
+establish neither real-account sign-in/refresh nor cross-Run native session adoption
+or WSL2/container compatibility.
+The owned Run's capability gates exclude ambient MCP/extension tool access and
+refuse unproven exclusion or unsupported versions before its first model turn.
 
 The installed Codex context probe drives the real executable through the original
 Run and an independent verification Step. A bounded local Responses fixture
@@ -202,18 +213,15 @@ qualification for the new native-service/private-store contract, and has not bee
 rerun for that contract. Missing explicit selections still skip this optional
 baseline; a selected coding failure still fails the test.
 
-Native-service acceptance remains TODO in the
-[owning adapter design](../../docs/AGENT_PROVIDERS.md#native-service-adapter-design).
-Use an explicitly selected, qualified endpoint and dedicated owned session;
-native services retain authentication, configuration and token refresh. Readiness
-must come from supported non-secret native protocol facts, without file reads,
-token export, forced-refresh/account-server helpers or broad configuration APIs.
-A cached authenticated response alone does not establish refresh or persistence;
-if native lifecycle events cannot establish those facts, record them as
-unverified. Service identity, private-store/tool denial, continuation and lifecycle
-qualification must precede a new service-based coding Run with independent
-verification. No native-service adapter or live-account refresh qualification is
-implemented by this withdrawal.
+The [implemented native-service adapter](../../docs/AGENT_PROVIDERS.md#native-service-adapter-design)
+uses a dedicated owned process/session and has the separate synthetic installed
+qualification above. Native services retain authentication, configuration and
+token refresh. Real-account lifecycle qualification must use supported non-secret
+native protocol facts, without file reads, token export, forced-refresh/account-server
+helpers or broad configuration APIs. A cached authenticated response alone does
+not establish refresh or persistence; if native lifecycle events cannot establish
+those facts, record them as unverified. The withdrawn refresh helper grants no
+live-account lifecycle qualification.
 
 ## Shared test support
 

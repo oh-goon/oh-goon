@@ -585,6 +585,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                 assert result.stop_reason.value == expected, (
                     "\n".join(chunk.text for chunk in output.chunks) if output else str(result)
                 )
+                assert result.test_passed is (expected == "converged")
                 phases = [detail.run.target.agent_repair.phase for detail in result.attempts]
                 assert phases == expected_phases
                 assert len(observed) == calls

@@ -7,6 +7,7 @@ from oh_goon.core.agent_review_plan import agent_review_phases
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.models.agent_providers import (
+    CodexServiceConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
     ResolvedNativeAgent,
@@ -18,9 +19,18 @@ from oh_goon.core.models.agent_review import (
     accept_review,
     review_scope,
 )
-from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_observation import (
+    NativeAgentObservation,
+    NativeServiceExecutionEvidence,
+)
+from oh_goon.core.models.fleet_plan import (
+    ResolvedCommandStep,
+    ResolvedFleetPlan,
+    ResolvedLocalSearchAgentStep,
+)
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
+    FailedPlanStepExecution,
     FleetPlanResult,
     PlanEgressEvidence,
     PlanExecutionSupervisorEvidence,
@@ -28,20 +38,33 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanOutputEvidence,
     PlanStandardIsolationEvidence,
     PlanStepAttemptEvidence,
+    SkippedPlanStepExecution,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
+from oh_goon.core.models.goon_plan_source import PlanFileSource
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.run import CompletedFleetRun, FleetRunDetail, FleetRunProgress
+from oh_goon.core.models.run import (
+    CancelledFleetRun,
+    CompletedFleetRun,
+    FailedFleetRun,
+    FleetRunDetail,
+    FleetRunFailure,
+    FleetRunProgress,
+)
 from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, fleet_repository_scope
+from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
 from oh_goon.core.time import utc_now
-from oh_goon.core.vocabulary import FleetRunStatus, OperationAction
+from oh_goon.core.vocabulary import FleetRunFailureStage, FleetRunStatus, OperationAction, Verdict
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
 from oh_goon.integrations.agent_review_execution import accept_agent_phase_output
 from oh_goon.services.fleet_plan_repair import AgentReviewRepairCampaign, completed_phase_steps
 from tests.factories.agent_review import agent_review_case
 from tests.factories.capabilities import capability_snapshot
-from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+from tests.factories.fleet_plan_targets import (
+    structural_execution_identity,
+    structural_fleet_plan_target,
+)
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.run_admission import repository_admissions_for
 from tests.factories.shipped_templates import PLAN_TEMPLATES
@@ -285,6 +308,185 @@ def test_native_workspace_mismatch_rejects_before_source_bytes(tmp_path, monkeyp
     with pytest.raises(FleetPlanInvalid, match="explicit native workspace"):
         resolver.resolve_frozen_agents(path, **{**options, "repository": other})
     read.assert_not_called()
+
+
+def test_codex_service_campaign_retains_read_only_reasoning_and_native_apply(tmp_path):
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="owned-service",
+        definition=NativeAgentDefinition(executable="/native/codex"),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(tmp_path / "native-home"), model="gpt-6.1-sol", reasoning_effort="low"
+            )
+        ),
+        executable_sha256="a" * 64,
+    )
+    resolver, path, _, options = agent_review_case(tmp_path, native_agent=selected)
+    plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    campaign = AgentReviewRepairCampaign(
+        plan,
+        handoffs,
+        resolver=resolver,
+        plan_path=path,
+        capture_options=options,
+        passes=2,
+        write_roots=("code.txt", "regression.txt"),
+    )
+    assert {handoff.requested_effects.repository_access for handoff in handoffs.values()} == {
+        "read_only"
+    }
+    assert {step.role for step in plan.steps if step.kind == "agent"} == {
+        "review",
+        "adjudication",
+        "proposal",
+    }
+    assert all(step.native_agent == selected for step in campaign.plan.steps)
+    campaign.phase = "repair"
+    proposal, apply = campaign._select_phase().steps
+    assert proposal.role == "proposal" and proposal.native_agent == selected
+    assert isinstance(apply, ResolvedCommandStep)
+    assert apply.argv.count("--write-root") == 2
+    assert "code.txt" in apply.argv and "regression.txt" in apply.argv
+    assert "@admitted" not in apply.argv and "@candidate" not in apply.argv
+    assert campaign.candidate_identity in apply.argv
+    for phase in ("regression", "verification"):
+        campaign.phase = phase
+        projected = campaign._select_phase()
+        assert all(step.kind == "command" for step in projected.steps)
+        assert projected.native_agent == selected
+    campaign._recapture(require_unchanged=True)
+
+
+@pytest.mark.parametrize(
+    "returncode,cancelled,expected_stop",
+    [(2, False, "review_incomplete"), (124, False, "timed_out"), (2, True, "cancelled")],
+)
+def test_service_daemon_shutdown_preserves_failed_preflight_timeout_and_caller_cancellation(
+    tmp_path, returncode, cancelled, expected_stop
+):
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="owned-service",
+        definition=NativeAgentDefinition(executable="/native/codex"),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(tmp_path / "native-home"), model="gpt-6.1-sol", reasoning_effort="low"
+            )
+        ),
+        executable_sha256="a" * 64,
+    )
+    resolver, path, repository, options = agent_review_case(tmp_path, native_agent=selected)
+    plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
+    campaign = AgentReviewRepairCampaign(
+        plan,
+        handoffs,
+        resolver=resolver,
+        plan_path=path,
+        capture_options=options,
+        passes=2,
+        write_roots=("code.txt",),
+    )
+    plan = campaign.plan
+    target = FleetPlanTarget(
+        kind="fleet_plan",
+        plan=plan,
+        source=PlanFileSource(sha256="0" * 64),
+        identity=structural_execution_identity(plan),
+        agent_deliveries=tuple(
+            AgentStepDeliveryReference(
+                step_id=step.step_id,
+                handoff_identity=step.handoff_identity,
+                delivery_sha256=step.delivery_sha256,
+                reference_id="original-" + step.step_id,
+            )
+            for step in plan.steps
+        ),
+    )
+    output = PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
+    first, *remaining = plan.steps
+    attempt = PlanStepAttemptEvidence(
+        attempt=1,
+        returncode=returncode,
+        stdout_evidence=output,
+        stderr_evidence=output,
+        repository_state_before="source",
+        repository_state_after="source",
+        egress=PlanEgressEvidence(mode="none"),
+        supervisor=PlanExecutionSupervisorEvidence(
+            process_group_cleanup_requested=True,
+            cleanup_reason="cancel",
+            final_process_group_quiescent=True,
+            forced_termination=False,
+        ),
+    )
+    failed = FailedPlanStepExecution(
+        step_id=first.step_id,
+        kind="agent",
+        returncode=returncode,
+        stdout_evidence=output,
+        stderr_evidence=output,
+        repository_state_before="source",
+        repository_state_after="source",
+        attempts=(attempt,),
+    )
+    skipped = tuple(
+        SkippedPlanStepExecution(
+            step_id=step.step_id,
+            kind="agent",
+            reason="Prior phase Step failed",
+            stdout_evidence=output,
+            stderr_evidence=output,
+            repository_state_before="source",
+            repository_state_after="source",
+        )
+        for step in remaining
+    )
+    identity = RepositoryIdentity(path=repository)
+    report = make_operation_report(
+        identity,
+        OperationAction.EXECUTE_PLAN,
+        target=target,
+        verdict=Verdict.FAILED,
+        returncode=returncode,
+        evidence=FleetPlanOperationEvidence(
+            kind="FLEET_PLAN",
+            plan=FleetPlanResult(plan_id=plan.plan_id, steps=(failed, *skipped)),
+        ),
+    )
+    now = utc_now()
+    fields = dict(
+        fleet_run_id="fleet-test",
+        target=target,
+        capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+        repository_scope=fleet_repository_scope(None),
+        targets=(identity,),
+        accepted_at=now,
+        started_at=now,
+        finished_at=now,
+        progress=FleetRunProgress(total=1, succeeded=0, failed=1, needs_attention=1),
+    )
+    run = (
+        CancelledFleetRun(**fields, status=FleetRunStatus.CANCELLED, cancel_requested_at=now)
+        if cancelled
+        else FailedFleetRun(
+            **fields,
+            status=FleetRunStatus.FAILED,
+            failure=FleetRunFailure.from_exception(
+                FleetPlanInvalid("Native capability preflight failed"),
+                stage=FleetRunFailureStage.EXECUTION,
+            ),
+        )
+    )
+    detail = FleetRunDetail(
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+        operations=(report,),
+        repository_admissions=repository_admissions_for(target, (identity,)),
+    )
+    assert campaign.advance(detail).value == expected_stop
+    assert campaign.phase == "review"
+    assert (repository / "code.txt").read_text() == "broken\n"
 
 
 @pytest.mark.parametrize("attack", ["legacy", "missing_workspace", "missing_git_scope"])
@@ -662,29 +864,97 @@ def test_review_context_retains_source_and_original_skill_for_adjudication(tmp_p
 
 
 @pytest.mark.parametrize(
-    "quiescent,cleanup",
+    "quiescent,cleanup,shutdown",
     [
-        (None, None),
-        (False, None),
-        (True, None),
-        (True, "not_recorded"),
-        (True, "unverified"),
-        (True, "verified"),
+        (None, None, None),
+        (False, None, None),
+        (True, None, None),
+        (True, "not_recorded", None),
+        (True, "unverified", None),
+        (True, "verified", None),
+        (True, None, "qualified"),
+        (False, None, "qualified"),
+        (True, "unverified", "qualified"),
+        (True, None, "missing_execution"),
+        (True, None, "wrong_profile"),
+        (True, None, "wrong_implementation"),
+        (True, None, "wrong_occurrence"),
+        (True, None, "wrong_role"),
+        (True, None, "wrong_kind"),
+        (True, None, "unsettled"),
+        (True, None, "failed"),
+        (True, None, "write"),
+        (True, None, "timeout"),
     ],
 )
-def test_structured_phase_requires_affirmative_boundary_cleanup(tmp_path, quiescent, cleanup):
+def test_structured_phase_requires_affirmative_boundary_cleanup(
+    tmp_path, quiescent, cleanup, shutdown
+):
+    expected = ResolvedCommandStep(step_id="review", argv=("true",))
+    observations = ()
+    if shutdown is not None:
+        selected = ResolvedNativeAgent(
+            agent="codex",
+            profile_name="owned-service",
+            definition=NativeAgentDefinition(executable="/native/codex"),
+            profile=NativeAgentProfile(
+                codex_service=CodexServiceConnection(
+                    home="/private/native", model="gpt-6.1-sol", reasoning_effort="low"
+                )
+            ),
+            executable_sha256="a" * 64,
+        )
+        expected = ResolvedLocalSearchAgentStep(
+            step_id="review",
+            argv=("python",),
+            harness="native",
+            role="review",
+            delivery_sha256="b" * 64,
+            handoff_identity="handoff",
+            source_step_id="review",
+            native_agent=selected,
+        )
+        execution = NativeServiceExecutionEvidence(
+            configuration_id="original-service-configuration",
+            permission_profile_id="original-native-profile",
+            native_version="0.163.0",
+            repository_access="write" if shutdown == "write" else "read_only",
+            disabled_features=(),
+        )
+        observations = (
+            NativeAgentObservation(
+                agent="codex",
+                implementation_identity="codex:sha256:"
+                + ("c" if shutdown == "wrong_implementation" else "a") * 64,
+                profile="other" if shutdown == "wrong_profile" else selected.profile_name,
+                input_identity="original-input",
+                occurrence="other" if shutdown == "wrong_occurrence" else "review",
+                source_identity="original-source",
+                role="proposal" if shutdown == "wrong_role" else "review",
+                events=(),
+                native_event_count=1,
+                settled=shutdown != "unsettled",
+                failed=shutdown == "failed",
+                execution=None if shutdown == "missing_execution" else execution,
+            ),
+        )
     plan = ResolvedFleetPlan.create(
         name="protected-phase",
         description="",
         requirements=(),
         execution=MaintenanceExecutionPolicy(),
-        steps=(ResolvedCommandStep(step_id="review", argv=("true",)),),
+        steps=(expected,),
+        native_agent=selected if shutdown is not None else None,
     )
     output = PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
     supervisor = PlanExecutionSupervisorEvidence.model_validate(
         {
             "process_group_cleanup_requested": True,
-            "cleanup_reason": "output_cleanup",
+            "cleanup_reason": "output_cleanup"
+            if shutdown is None
+            else "timeout"
+            if shutdown == "timeout"
+            else "cancel",
             **(
                 {"final_process_group_quiescent": quiescent, "forced_termination": True}
                 if quiescent is not None
@@ -725,14 +995,32 @@ def test_structured_phase_requires_affirmative_boundary_cleanup(tmp_path, quiesc
     )
     step = CompletedPlanStepExecution(
         step_id="review",
-        kind="command",
+        kind="agent" if shutdown is not None and shutdown != "wrong_kind" else "command",
         stdout_evidence=output,
         stderr_evidence=output,
         repository_state_before="source",
         repository_state_after="source",
         attempts=(attempt,),
+        observations=observations,
     )
-    target = structural_fleet_plan_target(plan)
+    target = (
+        FleetPlanTarget(
+            kind="fleet_plan",
+            plan=plan,
+            source=PlanFileSource(sha256="0" * 64),
+            identity=structural_execution_identity(plan),
+            agent_deliveries=(
+                AgentStepDeliveryReference(
+                    step_id="review",
+                    handoff_identity="handoff",
+                    delivery_sha256="b" * 64,
+                    reference_id="original-delivery",
+                ),
+            ),
+        )
+        if shutdown is not None
+        else structural_fleet_plan_target(plan)
+    )
     repository = RepositoryIdentity(path=tmp_path)
     report = make_operation_report(
         repository,
@@ -762,7 +1050,7 @@ def test_structured_phase_requires_affirmative_boundary_cleanup(tmp_path, quiesc
         operations=(report,),
         repository_admissions=repository_admissions_for(target, (repository,)),
     )
-    if quiescent is True and cleanup in (None, "verified"):
+    if quiescent is True and cleanup in (None, "verified") and shutdown in (None, "qualified"):
         assert completed_phase_steps(detail, plan) == (step,)
     else:
         with pytest.raises(FleetPlanInvalid, match="complete successful native attempt evidence"):

@@ -382,6 +382,27 @@ def _handoff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     return 0
 
 
+def _campaign(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
+    result = runtime.runs.agent_campaign(args.fleet_run_id)
+    if args.as_json:
+        _print_json(result)
+    else:
+        print(f"Campaign: {result['campaign_id']}")
+        print(f"Result: {result['result']}")
+        for run in result["runs"]:
+            print(
+                f"  {run['phase']} pass {run['review_pass']}: "
+                f"{run['fleet_run_id']} | {run['status']} / {run['outcome']}"
+            )
+        print(f"Reviews: {len(result['reviews'])} | Findings: {len(result['findings'])}")
+        for reason in result["incomplete_reasons"]:
+            print(f"Incomplete: {reason}")
+        print(
+            "Use --json for source-bound findings, adjudications and native verification results."
+        )
+    return 0
+
+
 _READ_COMMANDS = {
     "status": _status,
     "events": _events,
@@ -390,6 +411,7 @@ _READ_COMMANDS = {
     "steps": _steps,
     "outputs": _outputs,
     "handoff": _handoff,
+    "campaign": _campaign,
 }
 
 
