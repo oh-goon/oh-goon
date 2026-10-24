@@ -265,7 +265,7 @@ questions:
     misconception_id: semantic_invariant_violation
   evidence_expectations:
   - docs/development/APP_CERTIFICATION.md:5-37
-  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/plan.yml:1-6
   - templates/plans/oh-goon/app-certification/README.md:1-14
   - scripts/tests/test_app_certification_contract.py:53-86
 
@@ -379,6 +379,7 @@ questions:
     misconception_id: semantic_invariant_violation
   evidence_expectations:
   - docs/development/APP_CERTIFICATION.md:1-35
-  - templates/plans/oh-goon/app-certification/plan.yml:1-8
+  - templates/plans/oh-goon/app-certification/plan.yml:1-6
+  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:237-249
   - templates/plans/oh-goon/app-certification/README.md:1-14
   - backend/src/oh_goon/repository_tooling/architecture/_structural_authority_workflow.py:150-180

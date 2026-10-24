@@ -1,4 +1,3 @@
-version: 1
 inputs:
   kubernetes_api_hostname:
     type: hostname
@@ -13,10 +12,8 @@ inputs:
     type: kubernetes_name
     description: Named Deployment container to update or verify
   expected_generation:
-    type: string
     description: Exact Deployment generation returned by the preceding update
   expected_image:
-    type: string
     description: Exact image reference returned by the preceding update
 env:
   KUBERNETES_TOKEN:

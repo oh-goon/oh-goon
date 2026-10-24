@@ -10,7 +10,7 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import yaml
 
@@ -33,9 +33,10 @@ def initialize_run_configuration(
     key: str,
     output: Path,
     *,
+    kind: Literal["plan", "goon"],
     reviewers: Sequence[tuple[str, str]] = (),
 ) -> Path:
-    """Author one selection, optionally a normal Composite; never admit effects."""
+    """Author one selection and necessary Plan intent; never admit effects."""
     import tempfile
 
     from oh_goon.core.models.agent_providers import DEFAULT_NATIVE_AGENT_PROFILE
@@ -47,6 +48,8 @@ def initialize_run_configuration(
         replace_prepared_file,
     )
 
+    if kind not in {"plan", "goon"}:
+        raise FleetPlanInvalid("Template kind must be plan or goon")
     selected = output.expanduser().absolute()
     if ".." in output.parts:
         raise FleetPlanInvalid("Output cannot contain parent-directory traversal")
@@ -55,74 +58,19 @@ def initialize_run_configuration(
             raise FleetPlanInvalid("Output cannot contain symlink components")
     if selected.exists():
         raise FleetPlanInvalid("Output already exists; choose a fresh destination")
-    if template_classification(key, kind="Plan") is TemplateClassification.INTERNAL_SELF_HOSTING:
-        raise FleetPlanInvalid("Internal Plans use their owning Make/certification command")
+    label = "Plan" if kind == "plan" else "Goon"
+    if template_classification(key, kind=label) is TemplateClassification.INTERNAL_SELF_HOSTING:
+        raise FleetPlanInvalid("Internal templates use their owning Make/certification command")
     if reviewers and key != "agents/agentic-review-repair-loop":
         raise FleetPlanInvalid("Reviewer authoring requires agents/agentic-review-repair-loop")
-    source = PlanTemplateStore().source(key)
     goons = _FrozenGoonSources(GoonTemplateStore())
+    source = PlanTemplateStore().source(key) if kind == "plan" else goons.source(key)
     resolver = FleetPlanResolver(goon_templates=goons)
-    graph = resolver.analyze_source(source.path, compiled_overrides={source.path: source.compiled})
-    interface = inspect_projected_inputs(graph)
-    payload: dict[str, Any] = {
-        "version": 1,
-        "source": {"kind": "catalog-plan", "name": key},
-        "target": {"repository_id": "REPOSITORY_ID"},
-    }
-    required = {
-        item.definition.name: f"REQUIRED_{item.definition.name}"
-        for item in interface
-        if item.definition.required and item.definition.default is None
-    }
-    agent_steps = [
-        step
-        for owner, identifier in graph.agent_step_sources()
-        for step in graph.node(owner).compiled.steps
-        if isinstance(step, AgentPlanStep) and step.step_id == identifier
-    ]
-    phases: set[str] = set()
-
-    def collect_phases(owner: Path) -> None:
-        for step in graph.node(owner).compiled.steps:
-            if isinstance(step, CompiledGoonImportStep):
-                if step.phase is not None:
-                    phases.add(step.phase)
-                collect_phases(graph.goon(owner, step).path)
-
-    collect_phases(graph.root.path)
-    if graph.has_agent_source_contract():
-        required.pop("acceptance", None)
-        acceptance = next(
-            (item.definition.default for item in interface if item.definition.name == "acceptance"),
-            None,
-        )
-        selection = (
-            {"implementation": "pi", "profile": DEFAULT_NATIVE_AGENT_PROFILE}
-            if any(step.harness == "native" for step in agent_steps)
-            else {"model_profile": "REQUIRED_MODEL_PROFILE"}
-        )
-        payload["agent"] = {
-            **selection,
-            "acceptance": acceptance or "REQUIRED_ACCEPTANCE",
-            "repository_root": "/approved/repositories",
-            "skill_root": ".",
-        }
-    if required:
-        payload["inputs"] = required
-    if "repair" in phases:
-        payload["repair"] = {
-            "review_passes": 5,
-            "write_roots": ["REQUIRED_WRITE_ROOT"],
-            "timeout_seconds": 1800,
-            "step_timeout_seconds": 300,
-        }
     files: dict[str, str] = {}
     if reviewers:
         files = _reviewer_workflow_files(goons, reviewers)
-        payload["source"] = {"kind": "file-plan", "path": "plan.yml"}
-    rendered = "# Select the registered target and replace REQUIRED values before validation.\n"
-    rendered += f"# Selected Plan source SHA-256: {source.sha256} (provenance, not a lock).\n"
-    files["run.yml"] = rendered + yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
+    elif kind == "goon":
+        files["plan.yml"] = yaml.safe_dump({"goons": [key]}, sort_keys=False)
     # Staging is generator-owned execution scratch, independent of the chosen
     # output path. Publication pins native directories before its first write.
     with tempfile.TemporaryDirectory(prefix="oh-goon-workflow-") as temporary:
@@ -132,8 +80,77 @@ def initialize_run_configuration(
             destination.parent.mkdir(parents=True, exist_ok=True)
             with prepared_text_file(destination, content) as prepared:
                 replace_prepared_file(prepared, destination)
-        if reviewers:
+        graph = (
             resolver.analyze_source(staging / "plan.yml")
+            if files
+            else resolver.analyze_source(
+                source.path, compiled_overrides={source.path: source.compiled}
+            )
+        )
+        interface = inspect_projected_inputs(graph)
+        payload: dict[str, Any] = {
+            "version": 1,
+            "source": {"kind": "file-plan", "path": "plan.yml"}
+            if files
+            else {"kind": "catalog-plan", "name": key},
+            "target": {"repository_id": "REPOSITORY_ID"},
+        }
+        required = {
+            item.definition.name: f"REQUIRED_{item.definition.name}"
+            for item in interface
+            if item.definition.required and item.definition.default is None
+        }
+        agent_steps = [
+            step
+            for owner, identifier in graph.agent_step_sources()
+            for step in graph.node(owner).compiled.steps
+            if isinstance(step, AgentPlanStep) and step.step_id == identifier
+        ]
+        phases: set[str] = set()
+
+        def collect_phases(owner: Path) -> None:
+            for step in graph.node(owner).compiled.steps:
+                if isinstance(step, CompiledGoonImportStep):
+                    if step.phase is not None:
+                        phases.add(step.phase)
+                    collect_phases(graph.goon(owner, step).path)
+
+        collect_phases(graph.root.path)
+        if graph.has_agent_source_contract():
+            required.pop("acceptance", None)
+            acceptance = next(
+                (
+                    item.definition.default
+                    for item in interface
+                    if item.definition.name == "acceptance"
+                ),
+                None,
+            )
+            selection = (
+                {"implementation": "pi", "profile": DEFAULT_NATIVE_AGENT_PROFILE}
+                if any(step.harness == "native" for step in agent_steps)
+                else {"model_profile": "REQUIRED_MODEL_PROFILE"}
+            )
+            payload["agent"] = {
+                **selection,
+                "acceptance": acceptance or "REQUIRED_ACCEPTANCE",
+                "repository_root": "/approved/repositories",
+                "skill_root": ".",
+            }
+        if required:
+            payload["inputs"] = required
+        if "repair" in phases:
+            payload["repair"] = {
+                "review_passes": 5,
+                "write_roots": ["REQUIRED_WRITE_ROOT"],
+                "timeout_seconds": 1800,
+                "step_timeout_seconds": 300,
+            }
+        rendered = "# Select the registered target and replace REQUIRED values before validation.\n"
+        rendered += (
+            f"# Selected {label} source SHA-256: {source.sha256} (provenance, not a lock).\n"
+        )
+        files["run.yml"] = rendered + yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
         publish_new_text_tree(selected, files, commit_last="run.yml")
     return selected / "run.yml"
 
@@ -142,8 +159,6 @@ def _reviewer_workflow_files(
     goons: _FrozenGoonSources, reviewers: Sequence[tuple[str, str]]
 ) -> dict[str, str]:
     """Replace authoring review edges; the original Composite owns all other phases."""
-    from oh_goon.integrations.fleet_plan_compilation import parse_goon_template
-
     source = goons.source("agents/agentic-review-repair-loop")
     original = source.document.payload
     edges = original["goons"]
@@ -162,12 +177,7 @@ def _reviewer_workflow_files(
         selected.append({**prototype, "as": alias, "with": {"skill": reference}})
     composite = {**original, "goons": selected + [e for e in edges if e.get("phase") != "review"]}
     content = yaml.safe_dump(composite, sort_keys=False, allow_unicode=True)
-    parse_goon_template(
-        content, source="authored reviewer Composite", expected_name="review-repair"
-    )
     plan = {
-        "version": 1,
-        "execution": {"purpose": "verification"},
         "goons": [{"import": "agents/review-repair", "from": "goons"}],
     }
     return {

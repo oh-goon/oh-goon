@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
+from oh_goon.integrations.fleet_plan_compilation import parse_plan_template
 from oh_goon.repository_tooling import native_command
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -237,7 +239,9 @@ def test_lean_certification_consumes_native_init_without_reacquisition() -> None
     plan = (ROOT / "templates/plans/oh-goon/app-certification/plan.yml").read_text(
         encoding="utf-8"
     )
-    assert "purpose: verification" in plan
+    compiled = parse_plan_template(plan)
+    assert compiled.execution is not None
+    assert compiled.execution.purpose is ExecutionPurpose.VERIFICATION
     assert "dependency-materialize" not in plan
     assert "make init" not in plan
     assert not (ROOT / "templates/goons/oh-goon/dependency-materialize").exists()

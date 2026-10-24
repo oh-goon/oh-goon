@@ -9,6 +9,11 @@ from typing import Any
 import pytest
 import yaml
 
+from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
+from oh_goon.integrations.fleet_plan_compilation import (
+    compile_plan_document,
+    parse_fleet_yaml_document,
+)
 from oh_goon.repository_tooling import repository_understanding_exam as exam_module
 from oh_goon.repository_tooling import repository_understanding_material as material
 from oh_goon.repository_tooling.repository_understanding_graph import EXPECTED_EDGES
@@ -1125,7 +1130,11 @@ def test_shipped_repository_understanding_plan_still_uses_one_exam_material_goon
     None
 ):
     goon = yaml.safe_load(GOON.read_text(encoding="utf-8"))
-    plan = yaml.safe_load(PLAN.read_text(encoding="utf-8"))
+    document = parse_fleet_yaml_document(
+        PLAN.read_text(encoding="utf-8"), source=str(PLAN)
+    )
+    plan = document.payload
+    compiled = compile_plan_document(document, source=str(PLAN))
     step = goon["steps"][0]
     assert step["run"].startswith(
         "uv run --offline --frozen --no-sync --project backend "
@@ -1140,7 +1149,8 @@ def test_shipped_repository_understanding_plan_still_uses_one_exam_material_goon
         }
     ]
     assert "inputs" not in plan
-    assert plan["execution"] == {"purpose": "verification"}
+    assert compiled.execution is not None
+    assert compiled.execution.purpose is ExecutionPurpose.VERIFICATION
     assert plan["goons"] == ["oh-goon/repository-exam"]
 
 

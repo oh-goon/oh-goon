@@ -1,12 +1,9 @@
-version: 1
 inputs:
   project:
-    type: string
     non_empty: true
     default: .
     description: Repository-relative directory containing pyproject.toml and uv.lock
   dependency_group:
-    type: string
     non_empty: true
     default: dev
     description: Locked uv dependency group containing the selected tools

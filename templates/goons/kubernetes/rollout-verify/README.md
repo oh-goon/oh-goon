@@ -6,13 +6,21 @@ Verifies that one Deployment reaches the exact generation and immutable image pr
 
 **Prerequisites:** Exact producer generation/image inputs, API target and declared host token/CA bindings.
 
-**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+```sh
+oh-goon templates init kubernetes/rollout-verify --kind goon --output ./workflow
+```
+
+Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+
+This typed operation requires strict CI/CD execution. Add the explicit policy to the generated `workflow/plan.yml`:
+
+```yaml
+execution: {purpose: cicd}
+```
+
+Configure the admitted strict executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md). For a full build/publish/deploy workflow, use the [release-deploy Plan](../../../plans/oci/release-deploy/README.md).
 
 **Expected outputs:** Actual rollout verification; unavailable API cannot establish readiness.
-
-**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
-
-**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
 
 Select the exact API hostname, namespace, Deployment and container. Supply the declared token and CA certificate through host-backed environment authority. Image updates require a digest-qualified image; rollout verification consumes the exact expected generation and image. Inspect the Run for the actual mutation/verification result.
 

@@ -42,6 +42,12 @@ def test_typed_violations_keep_original_codes_without_value_echo(
     assert diagnostic["code"] == code
     assert all(name in diagnostic["inputs"] for name in names)
     assert diagnostic["execution"] == "not_started_by_diagnostic"
+    action = diagnostic["safe_next_action"].casefold()
+    assert action
+    assert all(
+        command not in action
+        for command in ("run.yml", "config inspect", "config validate", "plan inputs")
+    )
     assert report["proof"]["admission"] == "not-started"
     assert "PRIVATE_TOKEN_SENTINEL" not in raw
     assert not config.with_name("goon.lock").exists()

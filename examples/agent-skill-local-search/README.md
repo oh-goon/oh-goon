@@ -15,6 +15,8 @@ command. Preparation does not execute a command. The original Step executor
 owns execution, timeouts, cancellation, and output; Fleet owns Run admission
 and durable results when that Step is run through Fleet.
 
+[`plan.yml`](plan.yml) imports the project-owned Goon with `from: ./goons`. Its three unique public inputs project from that Goon; the Plan does not repeat their schema.
+
 The related functional tests construct isolated source fixtures and exercise
 this same preparation/Step boundary:
 

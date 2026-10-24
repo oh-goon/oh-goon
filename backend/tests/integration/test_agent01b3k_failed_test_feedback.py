@@ -91,7 +91,7 @@ def test_original_fleet_failed_test_feedback_into_conditional_followup(tmp_path,
     run: "probe-fail"
     on_failure: continue
     outputs:
-      - {name: diagnostic, path: diagnostic.txt, max_bytes: 128}
+      diagnostic: {path: diagnostic.txt, max_bytes: 128}
   - id: review
     run: "rg --fixed-strings ${{ steps.test.outputs.diagnostic }} code.txt"
     when: {kind: step_status, step_id: test, statuses: [FAILED]}

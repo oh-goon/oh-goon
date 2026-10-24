@@ -76,6 +76,15 @@ def test_inspection_accepted_reports_source_identity_but_never_lock_or_run():
             "UNKNOWN_INPUT",
             ["nonexistent"],
         ),
+        (
+            FleetPlanInputRejected(
+                "PRIVATE_SSH_KEY secret",
+                diagnostic_code="MISSING_REQUIRED_INPUT",
+                input_names=("skill",),
+            ),
+            "MISSING_REQUIRED_INPUT",
+            ["skill"],
+        ),
         (FleetPlanInvalid("PRIVATE_SSH_KEY secret /tmp/secret"), "PLAN_RESOLUTION_REJECTED", []),
     ],
 )
@@ -97,6 +106,12 @@ def test_inspection_rejection_is_exact_t4_safe_projection(failure, code, names):
     assert body["diagnostic"]["schema"] == "oh-goon.plan-validation-diagnostic/v1"
     assert body["diagnostic"]["code"] == code
     assert body["diagnostic"]["inputs"] == names
+    action = body["diagnostic"]["safe_next_action"].casefold()
+    assert action
+    assert all(
+        command not in action
+        for command in ("run.yml", "config inspect", "config validate", "plan inputs")
+    )
     assert "PRIVATE_SSH_KEY" not in response.text and "/tmp/secret" not in response.text
     service.run.assert_not_called()
 

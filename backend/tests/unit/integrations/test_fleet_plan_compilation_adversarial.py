@@ -32,19 +32,17 @@ def test_loaders_wrap_io_and_catalog_validation_errors(tmp_path: Path) -> None:
 
 def test_goon_top_level_authoring_rejects_ambiguous_or_redundant_forms() -> None:
     invalid = [
-        "version: 1\nname: x\ndescription: x\n",
-        "version: 1\nname: x\ndescription: x\nsteps: []\ngoons: [python/ruff]\n",
-        "version: 1\nname: x\ndescription: x\nrequirements: []\nsteps: [{run: echo hi}]\n",
-        "version: 1\nname: x\ndescription: x\nrequirements: x\nsteps: [{run: echo hi}]\n",
-        "version: 1\nname: x\ndescription: x\nunknown: 1\nsteps: [{run: echo hi}]\n",
-        "version: 1\nname: x\ndescription: x\ninputs: [a]\nsteps: [{run: echo hi}]\n",
-        "version: 1\nname: x\ndescription: x\ninputs: {}\ngoons: [python/ruff]\n",
-        "version: 1\nname: x\ndescription: x\ninputs: []\ngoons: [python/ruff]\n",
-        "version: 1\nname: x\ndescription: x\ninputs: [a, '']\ngoons: [python/ruff]\n",
-        "version: 1\nname: x\ndescription: x\nuv: {group: dev}\ngoons: [python/ruff]\n",
-        "version: 1\nname: x\ndescription: x\n"
-        "requirements: [{kind: path, path: pyproject.toml}]\n"
-        "goons: [python/ruff]\n",
+        "version: 1\n",
+        "version: 1\nsteps: []\ngoons: [python/ruff]\n",
+        "version: 1\nrequirements: []\nsteps: [{run: echo hi}]\n",
+        "version: 1\nrequirements: x\nsteps: [{run: echo hi}]\n",
+        "version: 1\nunknown: 1\nsteps: [{run: echo hi}]\n",
+        "version: 1\ninputs: [a]\nsteps: [{run: echo hi}]\n",
+        "version: 1\ninputs: {}\ngoons: [python/ruff]\n",
+        "version: 1\ninputs: []\ngoons: [python/ruff]\n",
+        "version: 1\ninputs: [a, '']\ngoons: [python/ruff]\n",
+        "version: 1\nuv: {group: dev}\ngoons: [python/ruff]\n",
+        "version: 1\nrequirements: [{kind: path, path: pyproject.toml}]\ngoons: [python/ruff]\n",
     ]
     for text in invalid:
         with pytest.raises(FleetPlanInvalid):

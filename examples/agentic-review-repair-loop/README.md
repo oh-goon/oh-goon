@@ -9,7 +9,7 @@ Run four ordered pinned agentsCookbook reviews, adjudication, proposal, scoped n
 Initialize a new workflow using the shipped Plan:
 
 ```sh
-oh-goon templates init agents/agentic-review-repair-loop --output ./workflow
+oh-goon templates init agents/agentic-review-repair-loop --kind plan --output ./workflow
 ```
 
 Copy this example’s `.goonskills.yml` and `skills/` tree into the workflow. Edit `workflow/run.yml` using [the complete provider selection](run.yml): set the exact target ID, repository reference/root, configured `agent.model_profile`, executable check paths and bounded `repair` group. Do not copy provider endpoints, keys or native settings into this file. `.goonskills.yml` declares the cookbook source once; `goon.lock` owns the captured commit. The local adjudication/repair Skills are product fixtures, not a review catalog.
@@ -30,7 +30,7 @@ Read the returned Run IDs with `oh-goon plan steps RUN_ID` and `oh-goon plan tap
 To choose a different reviewer roster, initialize a fresh workflow with explicit ordered authoring choices:
 
 ```sh
-oh-goon templates init agents/agentic-review-repair-loop --output ./custom-workflow \
+oh-goon templates init agents/agentic-review-repair-loop --kind plan --output ./custom-workflow \
   --review authority=cookbook/single-source-of-truth-review \
   --review consumers=cookbook/canonical-consumer-contract-review
 ```

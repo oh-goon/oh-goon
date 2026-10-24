@@ -6,13 +6,9 @@ Publishes one OCI image archive from a previously published Goon workspace to th
 
 **Prerequisites:** A valid typed `source_workspace` from an earlier producer; destination registry access with declared `OCI_REGISTRY_USERNAME`/`OCI_REGISTRY_PASSWORD` host bindings.
 
-**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+**Use:** compose this Goon after an image producer and bind its published workspace; start with the [build-and-publish Plan](../../../plans/oci/publish-image/README.md). [`goon.yml`](goon.yml) owns the typed inputs and outputs.
 
 **Expected outputs:** `OCI_DIGEST` and `OCI_REFERENCE`.
-
-**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
-
-**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
 
 ## Registry identity and caller input ownership
 

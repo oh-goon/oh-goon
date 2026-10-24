@@ -9,7 +9,7 @@ Run a typed read-only review using the existing `agents/native-review` Plan and 
 Initialize a separate workflow, then copy the included `.goonskills.yml` into it:
 
 ```sh
-oh-goon templates init agents/native-review --output ./workflow
+oh-goon templates init agents/native-review --kind plan --output ./workflow
 ```
 
 Edit `workflow/run.yml` using [the complete selection](run.yml). Set the real `target.repository_id`, `inputs.repo`, approved `agent.repository_root` and selected implementation/profile. Keep `agent.skill_root: .` and the registry beside `run.yml`. The registry owns the Git source/ref/directories once; do not copy these facts into the run selection:

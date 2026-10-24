@@ -2,16 +2,14 @@
 
 Run the project's explicitly selected verification executable.
 
-**Status:** runnable with prerequisites. **Effects:** Runs the declared model/tool/native phase with its declared repository access and disclosure recipient.
+**Status:** runnable with prerequisites. **Effects:** Executes the selected repository script; that script owns its commands and effects.
 
-**Prerequisites:** Explicit repository/Skill source roots, a permitted acceptance profile and the configured provider/native agent required by this Goon. Project check scripts must exist when selected; effectful work still needs fresh original admission.
+**Prerequisites:** An executable verification script in the registered repository, with its native tools available.
 
-**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+```sh
+oh-goon templates init agents/verification --kind goon --output ./workflow
+```
 
-**Expected outputs:** Typed Agent records, proposal data or native project check results, according to the selected phase. Agent claims do not become verification truth.
+Set `target.repository_id` and `inputs.verification_command: scripts/verification` in `workflow/run.yml`, then [inspect, validate, lock and run](../../../README.md#first-local-python-run). The path is repository-relative; the Goon invokes `./scripts/verification` as one executable. Put arguments or multiple checks in the project script or a project-owned Goon.
 
-**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
-
-**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
-
-Required input: `verification_command`, a canonical repository-relative path such as `scripts/verification`. The Goon executes `./scripts/verification`; make the script executable. Native tools own check semantics and exit codes. For arguments or several checks, select a project-owned Goon instead. No universal test command is assumed.
+**Result:** Native exit status, stdout and stderr determine the Step result. [verification inputs and Step](goon.yml) remain the machine contract. Model or Skill configuration is unnecessary for this script-only phase.

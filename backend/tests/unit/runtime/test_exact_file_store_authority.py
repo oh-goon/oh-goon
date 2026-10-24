@@ -45,10 +45,10 @@ def test_revision_proof_accepts_only_unfenced_create_or_exact_match() -> None:
 
 def test_shared_plan_fenced_read_uses_store_revision_authority(tmp_path: Path) -> None:
     store = SharedPlanFileStore(tmp_path / "plans")
-    original = store.write("python-quality", "name: python-quality\ngoons: []\n")
+    original = store.write("python-quality", "goons: [python/test]\n")
     store.write(
         "python-quality",
-        "name: python-quality\ngoons: [python/test]\n",
+        "goons: [python/ruff]\n",
         expected_revision=original.sha256,
     )
 

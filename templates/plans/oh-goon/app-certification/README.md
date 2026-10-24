@@ -10,8 +10,6 @@ Canonical final APP verification for one exact initialized repository revision.
 make certify
 ```
 
-**What to edit / settings owner:** repository owners maintain [`plan.yml`](plan.yml), its imported Goons and the Make lifecycle. This package is not a general user configuration example.
-
 Checks execution/security, architecture, catalog startability, frontend functionality and local runtime start/probe/stop. Catalog startability stops before workload Steps. Broader diagnostics, native qualification and artifact certification remain separate owners.
 
 **Outputs and failures:** native checks, Run/Step evidence and Game Tape preserve their actual results. A failed, unavailable or interrupted check stays unverified. No model statement or diagnostic result substitutes for canonical certification.

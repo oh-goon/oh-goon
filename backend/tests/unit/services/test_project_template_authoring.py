@@ -26,11 +26,8 @@ def package(root: Path, key: str, content: str) -> Path:
 
 
 def leaf(value="default"):
-    return f"""version: 1
-inputs:
-  value:
-    type: string
-    default: {value}
+    return f"""inputs:
+  value: {value}
 steps:
 - run: echo ${{{{ inputs.value }}}}
 """
@@ -38,7 +35,7 @@ steps:
 
 def test_plain_plan_import_exposes_composite_interface_and_preserves_defaults(tmp_path):
     path = tmp_path / "plan.yml"
-    path.write_text("version: 1\ngoons:\n- python/quality\n")
+    path.write_text("goons:\n- python/quality\n")
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     inspected = {item.definition.name: item for item in resolver.inspect_inputs(path)}
     assert set(inspected) == {"project", "dependency_group", "typechecker"}
@@ -55,8 +52,7 @@ def test_plain_plan_import_exposes_composite_interface_and_preserves_defaults(tm
 def test_fixed_import_value_is_not_an_automatic_cli_input(tmp_path):
     package(tmp_path / "goons", "general/check", leaf())
     path = tmp_path / "plan.yml"
-    path.write_text("""version: 1
-goons:
+    path.write_text("""goons:
 - import: general/check
   from: goons
   with: {value: fixed}
@@ -73,8 +69,7 @@ def test_shared_inputs_keep_independent_defaults_until_explicitly_routed(tmp_pat
     package(tmp_path / "goons", "general/first", leaf("first-default"))
     package(tmp_path / "goons", "general/second", leaf("second-default"))
     path = tmp_path / "plan.yml"
-    path.write_text("""version: 1
-goons:
+    path.write_text("""goons:
 - import: general/first
   from: goons
 - import: general/second
@@ -103,14 +98,13 @@ def test_plan_does_not_expose_private_composite_inputs(tmp_path):
     package(
         tmp_path / "goons",
         "general/bundle",
-        """version: 1
-goons:
+        """goons:
 - import: general/leaf
   from: ../..
 """,
     )
     path = tmp_path / "plan.yml"
-    path.write_text("version: 1\ngoons:\n- import: general/bundle\n  from: goons\n")
+    path.write_text("goons:\n- import: general/bundle\n  from: goons\n")
     resolver = FleetPlanResolver()
     assert resolver.inspect_inputs(path) == ()
     assert resolver.resolve(path).steps[0].argv[-1] == "default"
@@ -122,8 +116,7 @@ def test_local_and_shipped_same_key_are_distinct_ordered_sources(tmp_path):
     package(tmp_path / "shipped", "general/check", leaf("shipped"))
     local = package(tmp_path / "goons", "general/check", leaf("local"))
     path = tmp_path / "plan.yml"
-    path.write_text("""version: 1
-goons:
+    path.write_text("""goons:
 - import: general/check
   as: shipped
 - import: general/check
@@ -148,16 +141,14 @@ def test_nested_local_import_reuses_one_source_observation(tmp_path, monkeypatch
     package(
         tmp_path / "goons",
         "general/bundle",
-        """version: 1
-inputs: [value]
+        """inputs: [value]
 goons:
 - import: general/check
   from: ../..
 """,
     )
     path = tmp_path / "plan.yml"
-    path.write_text("""version: 1
-inputs: [value]
+    path.write_text("""inputs: [value]
 goons:
 - import: general/bundle
   from: goons
@@ -183,7 +174,7 @@ goons:
 @pytest.mark.parametrize("source", ["../outside", "/tmp", "${{ inputs.root }}"])
 def test_local_source_escape_or_dynamic_selection_fails(tmp_path, source):
     path = tmp_path / "plan.yml"
-    path.write_text(f"version: 1\ngoons:\n- import: general/check\n  from: {source}\n")
+    path.write_text(f"goons:\n- import: general/check\n  from: {source}\n")
     with pytest.raises(FleetPlanInvalid):
         FleetPlanResolver().resolve(path)
 
@@ -195,14 +186,14 @@ def test_local_symlink_escape_and_cycle_fail(tmp_path):
     root.mkdir()
     (root / "goons").symlink_to(outside, target_is_directory=True)
     path = root / "plan.yml"
-    path.write_text("version: 1\ngoons:\n- import: general/check\n  from: goons\n")
+    path.write_text("goons:\n- import: general/check\n  from: goons\n")
     with pytest.raises(FleetPlanInvalid, match="escapes"):
         FleetPlanResolver().resolve(path)
     (root / "goons").unlink()
     package(
         root / "goons",
         "general/check",
-        "version: 1\ngoons:\n- import: general/check\n  from: ../..\n",
+        "goons:\n- import: general/check\n  from: ../..\n",
     )
     with pytest.raises(FleetPlanInvalid, match="cycle"):
         FleetPlanResolver().resolve(path)
@@ -214,8 +205,7 @@ def test_local_symlink_escape_and_cycle_fail(tmp_path):
 def test_plan_explicit_fanout_and_renaming_preserve_input_owner(tmp_path, reference):
     package(tmp_path / "goons", "general/check", leaf())
     path = tmp_path / "plan.yml"
-    path.write_text("""version: 1
-goons:
+    path.write_text("""goons:
 - import: general/check
   from: goons
   as: first
@@ -243,7 +233,6 @@ goons:
 def test_reordering_aliased_imports_preserves_independent_caller_values(tmp_path):
     path = tmp_path / "plan.yml"
     document = {
-        "version": 1,
         "goons": [
             {
                 "import": "python/typecheck",
@@ -292,7 +281,7 @@ def test_consumer_before_producer_fails_with_ordering_guidance(tmp_path, resourc
                 "with": {"source_workspace": "${{ goons.builder.workspace }}"},
             },
         ]
-    document = {"version": 1, "goons": imports}
+    document = {"goons": imports}
     path.write_text(yaml.safe_dump(document, sort_keys=False))
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     values = {
@@ -322,10 +311,9 @@ def test_consumer_before_producer_fails_with_ordering_guidance(tmp_path, resourc
 
 def test_uv_inputs_bind_environment_working_directory_reports_and_requirements(tmp_path):
     path = tmp_path / "goon.yml"
-    path.write_text("""version: 1
-inputs:
-  project: {type: string, non_empty: true, default: .}
-  group: {type: string, default: dev}
+    path.write_text("""inputs:
+  project: {non_empty: true, default: .}
+  group: dev
 uv:
   project: ${{ inputs.project }}
   group: ${{ inputs.group }}
@@ -348,9 +336,8 @@ steps:
 @pytest.mark.parametrize("output", ["/tmp/report.xml", "../report.xml", "reports//junit.xml"])
 def test_uv_report_binding_rejects_invalid_path_before_project_prefix(tmp_path, output):
     path = tmp_path / "goon.yml"
-    path.write_text("""version: 1
-inputs:
-  report: {type: string}
+    path.write_text("""inputs:
+  report:
 uv: {project: backend, group: dev}
 steps:
 - run: uv run pytest

@@ -45,7 +45,7 @@ def _feedback_case(
     run: "failing-probe"
     on_failure: continue
     outputs:
-      - {{name: diagnostic, path: fail.txt, max_bytes: {bound_bytes}}}
+      diagnostic: {{path: fail.txt, max_bytes: {bound_bytes}}}
 """,
         1,
     )

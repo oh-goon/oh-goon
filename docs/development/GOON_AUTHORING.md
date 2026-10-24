@@ -11,7 +11,6 @@ An Atomic Goon owns ordered `steps:`. A Composite Goon owns ordered `goons:`. It
 ## Normal Python Goon
 
 ```yaml
-version: 1
 uv:
   project: backend
   group: dev
@@ -126,6 +125,13 @@ steps:
 
 Ambient host environment is not implicit pipeline state.
 
+Environment and output declarations use mappings keyed by their public names.
+Step workspace selection uses `workspace: {from: repository}` or the explicit
+producer form, and locked uv selection belongs at Goon level. Resolved-model
+`workspace.source`, per-Step `uv`, list-form env/outputs, and `git.action` are
+not alternate authoring spellings. Typed Git Steps use `operation` and their
+operation arguments directly.
+
 ## Native command ownership
 
 A Goon invokes native tools; it does not reproduce their semantics in YAML, shell, Make, or helper code. Package managers, Docker/BuildKit, Kubernetes, Git, test/lint/type tools, and platform commands remain semantic owners of the operations they expose. Add only the Oh-Goon-specific inputs, isolation, executable/environment authority, sequencing, and evidence required by the Step. See [Native tool authority](NATIVE_TOOL_AUTHORITY.md).
@@ -146,16 +152,15 @@ templates/goons/<category>/<name>/
 └── README.md
 ```
 
-Shipped packages omit `name:` and `description:` from YAML. The package path
-owns the exact logical identity, such as `python/test`, and `README.md` owns
-the human description. The general Goon compiler accepts optional readable
-metadata, but that does not change the shipped catalog's omission policy or
-introduce another package lookup identity.
+Plan and Goon YAML reject top-level `name:` and `description:`. The package
+path owns the exact logical identity, such as `python/test`, and `README.md`
+owns the human description. A saved Plan uses its explicit local key;
+repository-root Goons keep repository and source provenance. Version 1 is the
+default, so normal authoring omits `version: 1`.
 
 A Composite Goon is simply:
 
 ```yaml
-version: 1
 goons:
 - python/ruff
 - python/typecheck
@@ -216,7 +221,6 @@ for phase contracts and caller limits.
 A plain Plan import uses the Goon's defaults and automatically exposes its unambiguous public inputs to caller values:
 
 ```yaml
-version: 1
 goons:
 - python/quality
 ```
@@ -238,7 +242,6 @@ For shipped catalog changes, run the template/parser/resolver tests before broad
 A Composite Goon exposes the names it wants callers to see. Unique names project their child contracts without repeated forwarding:
 
 ```yaml
-version: 1
 inputs:
 - base_registry_hostname
 - containerfile
@@ -338,7 +341,6 @@ Prefer readable constraints and visible defaults:
 ```yaml
 inputs:
   image_name:
-    type: string
     starts_with: my-image-storage/
   platform:
     type: choice
@@ -351,7 +353,7 @@ inputs:
     default: 5m
 ```
 
-An input with neither `default` nor `optional: true` is required. Do not author `required: true`, `non_empty: true`, and `not_null: true` ceremony for ordinary values. Small domain types such as `semver`, `duration`, `kubernetes_name`, `kubernetes_deployment_name`, `oci_repository`, and `oci_reference` exist only where they replace repeated domain validation without creating a new validation language. Kubernetes namespace/container values use a single DNS label (`kubernetes_name`), while Deployment resource names permit DNS subdomains (`kubernetes_deployment_name`). Generation and image values produced by upstream Kubernetes Steps remain structural output bindings: compile-time typing must not pretend those runtime-produced bytes are present at admission.
+Inputs default to `type: string`. Declare `type` when another type adds a constraint, and use `min`/`max` for integer bounds. An input with neither `default` nor `optional: true` is required. `required`, inner `name`, `input_type`, `minimum`, and `maximum` are resolved-model fields and are rejected in authoring. Use `non_empty: true` when whitespace-only strings are invalid; keep constraints that express real workload requirements. A scalar definition is a default with its native YAML type: `retries: 2` defines an integer default, and `verbose: false` defines a boolean default. Small domain types such as `semver`, `duration`, `kubernetes_name`, `kubernetes_deployment_name`, `oci_repository`, and `oci_reference` exist only where they replace repeated domain validation without creating a new validation language. Kubernetes namespace/container values use a single DNS label (`kubernetes_name`), while Deployment resource names permit DNS subdomains (`kubernetes_deployment_name`). Generation and image values produced by upstream Kubernetes Steps remain structural output bindings: compile-time typing must not pretend those runtime-produced bytes are present at admission.
 
 ## Resolution is declarative; computation is code
 

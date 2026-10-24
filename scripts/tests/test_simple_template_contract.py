@@ -25,12 +25,7 @@ def test_simple_contract_consumes_production_compiler_for_universal_goon_semanti
     package = goons / "python" / "bad"
     package.mkdir(parents=True)
     (package / "goon.yml").write_text(
-        "version: 1\n"
-        "name: bad\n"
-        "description: invalid authoring\n"
-        "steps:\n"
-        "- uses: command\n"
-        "  argv: [python, -c, print(1)]\n",
+        "version: 1\nsteps:\n- uses: command\n  argv: [python, -c, print(1)]\n",
         encoding="utf-8",
     )
 
@@ -72,8 +67,8 @@ def test_simple_contract_rejects_redundant_shipped_goon_metadata(
     ]
 
     assert len(messages) == 1
-    assert "package path owns machine identity" in messages[0]
-    assert "README.md owns human description" in messages[0]
+    assert "unsupported fields: description, name" in messages[0]
+    assert "human description belongs in README.md" in messages[0]
 
 
 def test_simple_contract_rejects_incidental_virtualenv_entrypoint_authority(

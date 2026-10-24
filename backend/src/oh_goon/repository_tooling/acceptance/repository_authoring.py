@@ -13,12 +13,10 @@ from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.execution_lock_persistence import render_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
-PROBE_GOON = """version: 1
-inputs:
+PROBE_GOON = """inputs:
   version:
     type: semver
   image_name:
-    type: string
     starts_with: my-image-storage/
   platform:
     type: choice
@@ -35,8 +33,7 @@ steps:
 - run: bash verify_values.sh "${{ inputs.version }}" "${{ inputs.image_name }}" "${{ inputs.platform }}" "${{ inputs.timeout }}" "${{ inputs.revision }}"
 """
 
-PLAN = """version: 1
-goons:
+PLAN = """goons:
 - import: general/authoring-probe
   with:
     version:
@@ -70,7 +67,7 @@ def _package(root: Path) -> None:
     directory = root / "general" / "authoring-probe"
     directory.mkdir(parents=True)
     (directory / "goon.yml").write_text(PROBE_GOON, encoding="utf-8")
-    (directory / "README.md").write_text("# authoring-probe\n", encoding="utf-8")
+    (directory / "README.md").write_text("# general/authoring-probe\n", encoding="utf-8")
 
 
 def _git_repository(repository: Path) -> str:

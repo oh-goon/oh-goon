@@ -1,4 +1,3 @@
-version: 1
 goons:
 - import: python/release-metadata
   pass:

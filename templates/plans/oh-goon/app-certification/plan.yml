@@ -1,6 +1,3 @@
-version: 1
-execution:
-  purpose: verification
 goons:
 - oh-goon/backend-p0
 - oh-goon/architecture

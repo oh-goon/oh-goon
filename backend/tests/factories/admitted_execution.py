@@ -52,8 +52,7 @@ from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
 from tests.factories.runtime_authority import authorized_command_result
 
-DEFAULT_ADMITTED_PLAN = """version: 1
-execution: {purpose: cicd}
+DEFAULT_ADMITTED_PLAN = """execution: {purpose: cicd}
 steps:
   - id: check
     run: "true"

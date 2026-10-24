@@ -6,27 +6,17 @@ Build one OCI archive, publish that workspace explicitly, then copy the archive 
 
 **Prerequisites:** A compatible isolated builder, selected base-pull registry and separate destination publication registry with declared host credentials.
 
-**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+```sh
+oh-goon templates init oci/publish-image --kind plan --output ./workflow
+```
+
+The [oci/publish-image Plan](../../../plans/oci/publish-image/README.md) supplies the surrounding policy and ordered work. Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** `OCI_DIGEST` and `OCI_REFERENCE`; the base registry is not inferred as the destination.
-
-**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
-
-**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
-
-## Contract
-
-- Canonical identity: `oci/publish-image`.
-- Repository identity is enforced by the CI/CD execution target; this Goon adds only capability-specific requirements.
-- Inputs: `base_registry_hostname`, `publish_registry_hostname`, `publish_repository`, `containerfile`, `context`, `platform`.
-- Steps: `build`, `publish`.
-- Public outputs: `OCI_DIGEST`, `OCI_REFERENCE`.
 
 ## Safety boundary
 
 Containerfile/context inputs use canonical repository-relative syntax; absolute paths, `./...`, `..` segments, and empty path segments are rejected before execution. OCI behavior uses typed builder/registry contracts rather than a Docker socket or arbitrary shell flags. Registry coordinates and credentials are explicit, TLS verification remains enabled, and publish/read operations use deterministic retry policy.
-
-Machine-readable truth is [`goon.yml`](./goon.yml). The README explains intent and safety only; it is never runtime authority.
 
 ## Registry identity and caller input ownership
 

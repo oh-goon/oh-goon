@@ -18,24 +18,21 @@ from oh_goon.repository_tooling.acceptance.uv_fixture import (
 )
 from oh_goon.repository_tooling.local_access_http import authorized_request
 
-SHARED_PLAN = """version: 1
-inputs:
+SHARED_PLAN = """inputs:
 - release_channel
 - revision
 goons:
 - python/release-metadata
 """
 
-INVALID_SHARED_PLAN = """version: 1
-inputs:
+INVALID_SHARED_PLAN = """inputs:
   revision:
     type: git_revision
 goons:
 - python/release-metadata
 """
 
-REPOSITORY_GOON_THAT_MUST_NOT_RUN = """version: 1
-steps:
+REPOSITORY_GOON_THAT_MUST_NOT_RUN = """steps:
 - run: python must_not_run.py
 """
 

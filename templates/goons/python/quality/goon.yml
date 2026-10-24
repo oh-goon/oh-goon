@@ -1,4 +1,3 @@
-version: 1
 inputs: [project, dependency_group, typechecker]
 goons:
 - import: python/ruff

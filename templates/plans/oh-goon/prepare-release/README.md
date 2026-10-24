@@ -10,8 +10,6 @@ Package the exact source authority that already produced canonical APP PASS.
 make prepare-release
 ```
 
-**What to edit / settings owner:** repository owners maintain [`plan.yml`](plan.yml), its imported Goons and the Make lifecycle. This package is not a general user configuration example.
-
 Version authoring is an earlier explicit `make release-version-set OH_GOON_RELEASE_VERSION=<x.y.z>` operation. This Plan does not restamp or normalize certified source. It retains the exact source ZIP and digest/manifest; independent artifact certification must read back those retained bytes as a fresh candidate.
 
 **Outputs and failures:** native checks, Run/Step evidence and Game Tape preserve their actual results. A failed, unavailable or interrupted check stays unverified. No model statement or diagnostic result substitutes for canonical certification.

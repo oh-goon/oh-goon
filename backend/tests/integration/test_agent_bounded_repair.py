@@ -64,7 +64,8 @@ def _repair_case(
   - id: test
     run: verify-code
     on_failure: continue
-    outputs: [{name: diagnostic, stream: stdout, max_bytes: 2048}]
+    outputs:
+      diagnostic: {stream: stdout, max_bytes: 2048}
 """,
         1,
     )
@@ -83,7 +84,8 @@ def _repair_case(
     run: verify-code
     on_failure: continue
     when: {kind: step_status, step_id: apply, statuses: [COMPLETED]}
-    outputs: [{name: diagnostic, stream: stdout, max_bytes: 2048}]
+    outputs:
+      diagnostic: {stream: stdout, max_bytes: 2048}
 """.replace("PROJECT", project)
     goon.write_text(content)
     _, initial = _lock(plan, options)

@@ -48,7 +48,10 @@ def workflow(tmp_path, monkeypatch):
     preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(repo)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
     output = tmp_path / "workflow"
-    assert main(["templates", "init", "python/quality", "--output", str(output)]) == 0
+    assert (
+        main(["templates", "init", "--kind", "plan", "python/quality", "--output", str(output)])
+        == 0
+    )
     selected = output / "run.yml"
     data = yaml.safe_load(selected.read_text())
     data["target"]["repository_id"] = RepositoryIdentity.model_validate(
@@ -61,8 +64,53 @@ def workflow(tmp_path, monkeypatch):
 def test_generation_selects_catalog_without_copy_and_refuses_overwrite(workflow, capsys):
     before = workflow.read_bytes()
     assert sorted(path.name for path in workflow.parent.iterdir()) == ["run.yml"]
-    assert main(["templates", "init", "python/quality", "--output", str(workflow.parent)]) == 2
+    assert (
+        main(
+            [
+                "templates",
+                "init",
+                "--kind",
+                "plan",
+                "python/quality",
+                "--output",
+                str(workflow.parent),
+            ]
+        )
+        == 2
+    )
     assert workflow.read_bytes() == before
+
+
+@pytest.mark.parametrize("key", ["python/typecheck", "python/quality"])
+def test_goon_initialization_creates_only_plan_intent_and_shared_run_config(workflow, key, capsys):
+    output = workflow.parent.parent / "selected-goon"
+    assert main(["templates", "init", key, "--kind", "goon", "--output", str(output)]) == 0
+    assert sorted(path.name for path in output.iterdir()) == ["plan.yml", "run.yml"]
+    assert yaml.safe_load((output / "plan.yml").read_text()) == {"goons": [key]}
+    config = output / "run.yml"
+    selected = yaml.safe_load(config.read_text())
+    assert selected["source"] == {"kind": "file-plan", "path": "plan.yml"}
+    assert "inputs" not in selected
+    selected["target"] = yaml.safe_load(workflow.read_text())["target"]
+    config.write_text(yaml.safe_dump(selected))
+    capsys.readouterr()
+    assert main(["config", "validate", str(config), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert [item["name"] for item in report["inputs"]] == [
+        "project",
+        "dependency_group",
+        "typechecker",
+    ]
+    assert any("python/typecheck" in owner for owner in report["inputs"][2]["owners"])
+    assert not (output / "goon.lock").exists()
+
+
+def test_template_initialization_requires_an_explicit_kind(tmp_path):
+    output = tmp_path / "workflow"
+    with pytest.raises(SystemExit) as refusal:
+        main(["templates", "init", "python/quality", "--output", str(output)])
+    assert refusal.value.code == 2
+    assert not output.exists()
 
 
 def test_inspection_and_validation_use_the_same_owner_report_without_runtime(
@@ -135,13 +183,25 @@ def test_generator_refuses_symlink_destination(tmp_path, capsys):
     target.mkdir()
     alias = tmp_path / "alias"
     alias.symlink_to(target, target_is_directory=True)
-    assert main(["templates", "init", "python/quality", "--output", str(alias)]) == 2
+    assert (
+        main(["templates", "init", "--kind", "plan", "python/quality", "--output", str(alias)]) == 2
+    )
     assert not list(target.iterdir())
 
 
 def test_internal_templates_use_their_owner_command(tmp_path):
     assert (
-        main(["templates", "init", "oh-goon/app-certification", "--output", str(tmp_path / "new")])
+        main(
+            [
+                "templates",
+                "init",
+                "--kind",
+                "plan",
+                "oh-goon/app-certification",
+                "--output",
+                str(tmp_path / "new"),
+            ]
+        )
         == 2
     )
     assert not (tmp_path / "new").exists()

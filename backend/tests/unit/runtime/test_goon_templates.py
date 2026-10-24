@@ -141,7 +141,7 @@ def test_goon_catalog_ignores_only_windows_zone_identifier_transport_sidecars(
         store.read("general/valid")
 
 
-def test_shipped_goon_rejects_authored_name_drift_from_package_identity(tmp_path: Path) -> None:
+def test_shipped_goon_rejects_authored_metadata(tmp_path: Path) -> None:
     _package(
         tmp_path,
         "general/valid",
@@ -151,7 +151,7 @@ steps:
 - run: 'true'
 """,
     )
-    with pytest.raises(FleetPlanInvalid, match="must match package name 'valid'"):
+    with pytest.raises(FleetPlanInvalid, match="unsupported fields: name"):
         GoonTemplateStore(tmp_path).source("general/valid")
 
 

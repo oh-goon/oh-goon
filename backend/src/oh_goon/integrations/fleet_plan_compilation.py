@@ -166,6 +166,9 @@ def _compile_goon_payload(
         "goons",
     }
     _reject_unknown_fields(payload, allowed=allowed, source=source, kind="Goon")
+    for field in ("env", "outputs"):
+        if field in payload and not isinstance(payload[field], dict):
+            raise FleetPlanInvalid(f"Invalid Goon {source}: {field} must be a mapping")
     normalized = {**payload, "name": authored_name, "description": authored_description}
     if forms[0] == "steps":
         _validate_authored_steps(normalized.get("steps"), source=source)
@@ -527,6 +530,10 @@ def _published_output_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         return {"path": value}
     if isinstance(value, dict):
+        if "name" in value:
+            raise FleetPlanInvalid(
+                "Fleet Step output names belong to the outputs mapping; remove inner name"
+            )
         return dict(value)
     raise FleetPlanInvalid("Fleet plan output declarations must be a path string or mapping")
 
@@ -534,10 +541,21 @@ def _published_output_payload(value: Any) -> dict[str, Any]:
 def _input_definition_payload(value: Any) -> dict[str, Any]:
     if value is None:
         return {"required": True}
-    if type(value) in (str, bool, int):
+    if type(value) is bool:
+        return {"input_type": "boolean", "default": value}
+    if type(value) is int:
+        return {"input_type": "integer", "default": value}
+    if type(value) is str:
         return {"default": value}
     if isinstance(value, dict):
         payload = dict(value)
+        internal = sorted(set(payload) & {"name", "input_type", "minimum", "maximum"})
+        if internal:
+            raise FleetPlanInvalid(
+                "Fleet YAML input definitions contain internal fields: "
+                + ", ".join(internal)
+                + "; use type/min/max and the outer mapping name"
+            )
         if "required" in payload:
             raise FleetPlanInvalid(
                 "Fleet YAML inputs do not author required:; omit default for required inputs or use optional: true"
@@ -673,6 +691,19 @@ def _validate_authored_steps(raw_steps: Any, *, source: str) -> None:
             raise FleetPlanInvalid(
                 f"Invalid Goon {source}: Step {index + 1} must choose top-level tools.allow; "
                 "capabilities.tools is an internal compiled field"
+            )
+        if "uv" in item:
+            raise FleetPlanInvalid(
+                f"Invalid Goon {source}: Step {index + 1} must select uv at the Atomic Goon root"
+            )
+        if "outputs" in item and not isinstance(item["outputs"], dict):
+            raise FleetPlanInvalid(
+                f"Invalid Goon {source}: Step {index + 1} outputs must be a mapping"
+            )
+        if uses == "git" and "action" in item:
+            raise FleetPlanInvalid(
+                f"Invalid Goon {source}: Step {index + 1} Git must use operation/args; "
+                "action is an internal compiled field"
             )
 
 
@@ -875,30 +906,27 @@ def _normalize_step_mapping(value: Any) -> Any:
     if isinstance(normalized.get("workspace"), dict):
         workspace = dict(normalized["workspace"])
         if "source" in workspace:
-            if "from" in workspace:
-                raise FleetPlanInvalid("Fleet workspace cannot declare both source and from")
-            # Canonical model form is already explicit; Pydantic validates the discriminated source.
-            normalized["workspace"] = workspace
+            raise FleetPlanInvalid(
+                "Fleet workspace source is an internal compiled field; "
+                "use from: repository or from: step"
+            )
+        if "from" not in workspace:
+            raise FleetPlanInvalid(
+                "Fleet workspace mapping must explicitly declare from: repository or from: step"
+            )
+        source = workspace.pop("from")
+        if source == "repository":
+            if "step" in workspace:
+                raise FleetPlanInvalid("Fleet workspace from: repository cannot declare step")
+            workspace["source"] = {"kind": "repository"}
+        elif source == "step":
+            step_id = workspace.pop("step", None)
+            if not isinstance(step_id, str) or not step_id:
+                raise FleetPlanInvalid("Fleet workspace from: step requires a non-empty step name")
+            workspace["source"] = {"kind": "step", "step_id": step_id}
         else:
-            if "from" not in workspace:
-                raise FleetPlanInvalid(
-                    "Fleet workspace mapping must explicitly declare from: repository or from: step"
-                )
-            source = workspace.pop("from")
-            if source == "repository":
-                if "step" in workspace:
-                    raise FleetPlanInvalid("Fleet workspace from: repository cannot declare step")
-                workspace["source"] = {"kind": "repository"}
-            elif source == "step":
-                step_id = workspace.pop("step", None)
-                if not isinstance(step_id, str) or not step_id:
-                    raise FleetPlanInvalid(
-                        "Fleet workspace from: step requires a non-empty step name"
-                    )
-                workspace["source"] = {"kind": "step", "step_id": step_id}
-            else:
-                raise FleetPlanInvalid("Fleet workspace from must be 'repository' or 'step'")
-            normalized["workspace"] = workspace
+            raise FleetPlanInvalid("Fleet workspace from must be 'repository' or 'step'")
+        normalized["workspace"] = workspace
     if normalized.get("kind") == "git":
         operation = normalized.pop("operation", None)
         if operation is None and "args" in normalized:

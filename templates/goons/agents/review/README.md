@@ -2,17 +2,17 @@
 
 Review one frozen candidate using a caller-selected registered Skill.
 
-**Status:** runnable with prerequisites. **Effects:** Runs the declared model/tool/native phase with its declared repository access and disclosure recipient.
+**Status:** runnable with prerequisites. **Effects:** Reads the captured repository and Skill, and sends admitted evidence to the configured provider.
 
-**Prerequisites:** Explicit repository/Skill source roots, a permitted acceptance profile and the configured provider/native agent required by this Goon. Project check scripts must exist when selected; effectful work still needs fresh original admission.
+**Prerequisites:** Captured repository/Skill sources, an admitted acceptance profile and a configured model provider.
 
-**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+```sh
+oh-goon templates init agents/review --kind goon --output ./workflow
+```
 
-**Expected outputs:** Typed Agent records, proposal data or native project check results, according to the selected phase. Agent claims do not become verification truth.
+Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
-**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
-
-**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
+**Result:** Typed findings with their original evidence and scope limits.
 
 Read-only Agent. `repo`, `skill`, `goal` and `acceptance` select the captured source and task. The invocation selects a provider profile; the Skill grants no effects. Returns a typed candidate-, scope- and Skill-bound record. Import this Goon repeatedly with different Skills and occurrence aliases.
 

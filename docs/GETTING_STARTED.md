@@ -71,7 +71,7 @@ never infers a fleet from an empty target or merges a target's repository Goon.
 
 ```bash
 oh-goon templates list --kind plan
-oh-goon templates init python/quality --output ./workflow
+oh-goon templates init python/quality --kind plan --output ./workflow
 # Edit workflow/run.yml with the registered repository ID and desired inputs.
 oh-goon config inspect ./workflow/run.yml
 oh-goon config validate ./workflow/run.yml

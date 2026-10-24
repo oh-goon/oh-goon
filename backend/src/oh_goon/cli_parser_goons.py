@@ -22,9 +22,10 @@ def add_goon_commands(
     show.add_argument("key")
     show.add_argument("--kind", choices=("plan", "goon"), required=True)
     init = template_commands.add_parser(
-        "init", help="Create one minimal run.yml selecting a shipped Plan"
+        "init", help="Create a minimal workflow selecting a shipped Plan or Goon"
     )
     init.add_argument("key")
+    init.add_argument("--kind", choices=("plan", "goon"), required=True)
     init.add_argument("--output", type=Path, required=True)
     init.add_argument(
         "--review",

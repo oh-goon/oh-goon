@@ -10,6 +10,12 @@ from pathlib import Path
 import pytest
 import yaml
 
+from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
+from oh_goon.integrations.fleet_plan_compilation import (
+    compile_plan_document,
+    parse_fleet_yaml_document,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = (ROOT / "Makefile").read_text(encoding="utf-8")
 RUN_LOGGED = (ROOT / "scripts/run_logged.sh").read_text(encoding="utf-8")
@@ -98,12 +104,14 @@ def test_release_only_reacquisition_is_not_part_of_normal_certification_prefligh
 def test_lean_certification_consumes_native_init_and_has_no_repair_or_supply_frontdoor() -> (
     None
 ):
-    plan = yaml.safe_load(
-        (ROOT / "templates/plans/oh-goon/app-certification/plan.yml").read_text(
-            encoding="utf-8"
-        )
+    path = ROOT / "templates/plans/oh-goon/app-certification/plan.yml"
+    document = parse_fleet_yaml_document(
+        path.read_text(encoding="utf-8"), source=str(path)
     )
-    assert plan["execution"] == {"purpose": "verification"}
+    compiled = compile_plan_document(document, source=str(path))
+    plan = document.payload
+    assert compiled.execution is not None
+    assert compiled.execution.purpose is ExecutionPurpose.VERIFICATION
     assert plan["goons"] == [
         "oh-goon/backend-p0",
         "oh-goon/architecture",

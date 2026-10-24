@@ -1,7 +1,5 @@
-version: 1
 inputs:
   tag:
-    type: string
     non_empty: true
     default: dev
     description: Explicit tag or project release label to inspect or prepare

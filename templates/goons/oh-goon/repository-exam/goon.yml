@@ -1,4 +1,3 @@
-version: 1
 steps:
 - id: oh-goon-repository-understanding-exam
   run: uv run --offline --frozen --no-sync --project backend oh-goon-repository-understanding-exam verify --manifest repository-understanding-certification-manifest.json

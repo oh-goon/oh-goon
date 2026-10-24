@@ -24,8 +24,7 @@ from oh_goon.repository_tooling.local_access_http import authorized_request
 
 PARALLEL_PLAN_KEY = "acceptance-parallel-shared"
 
-PARALLEL_SHARED_PLAN = """version: 1
-execution:
+PARALLEL_SHARED_PLAN = """execution:
   resources:
     cpu_millis: 500
     memory_mib: 256

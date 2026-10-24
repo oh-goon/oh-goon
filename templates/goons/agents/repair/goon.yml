@@ -1,7 +1,6 @@
-version: 1
 inputs:
   repo: {type: repository_reference}
-  goal: {default: canonical-architecture-clean}
+  goal: canonical-architecture-clean
   acceptance: {type: acceptance_profile, default: agentic-review}
   repair_skill: {type: skill_reference, default: local:skills/repair}
 steps:

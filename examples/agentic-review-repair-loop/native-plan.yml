@@ -1,6 +1,3 @@
-version: 1
-execution:
-  purpose: verification
 goons:
 - import: agents/review
   from: goons
