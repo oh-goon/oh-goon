@@ -1454,39 +1454,25 @@ def _require_standard_bind_structure(
                         raise FleetPlanInvalid(
                             "Standard sandbox bind exceeds its physical entry budget"
                         )
-                    # Hints only route nodes to the fresh lstat above; they
-                    # never establish an accepted type or inode. Unknown-type
-                    # predicates may cache metadata, so leaf decisions use a
-                    # new pathname stat rather than DirEntry's cached result.
-                    if not (entry.is_dir(follow_symlinks=False) or entry.is_symlink()):
-                        entry_metadata = os.stat(entry.path, follow_symlinks=False)
-                        kind = stat.S_IFMT(entry_metadata.st_mode)
-                        if (
-                            private_file_identities
-                            and (entry_metadata.st_dev, entry_metadata.st_ino)
-                            in private_file_identities
-                        ):
-                            raise FleetPlanInvalid(
-                                "Native bind exposes a private application file alias"
-                            )
-                        if kind == stat.S_IFREG:
-                            if writable and entry_metadata.st_nlink != 1:
-                                raise FleetPlanInvalid(
-                                    "Scoped native write roots cannot expose hardlinked files"
-                                )
-                            continue
-                        if kind not in (stat.S_IFDIR, stat.S_IFLNK):
-                            if writable and entry_metadata.st_nlink != 1:
-                                raise FleetPlanInvalid(
-                                    "Scoped native write roots cannot expose hardlinked files"
-                                )
-                            raise FleetPlanInvalid(
-                                "Standard sandbox bind exposes a host IPC/special object"
-                            )
-                    if len(pending) >= 4096:
+                    entry_metadata = entry.stat(follow_symlinks=False)
+                    mode = entry_metadata.st_mode
+                    if (entry_metadata.st_dev, entry_metadata.st_ino) in private_file_identities:
                         raise FleetPlanInvalid(
-                            "Standard sandbox bind exceeds its pending-directory budget"
+                            "Native bind exposes a private application file alias"
                         )
-                    pending.append(Path(entry.path))
+                    if stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
+                        if len(pending) >= 4096:
+                            raise FleetPlanInvalid(
+                                "Standard sandbox bind exceeds its pending-directory budget"
+                            )
+                        pending.append(Path(entry.path))
+                    elif writable and entry_metadata.st_nlink != 1:
+                        raise FleetPlanInvalid(
+                            "Scoped native write roots cannot expose hardlinked files"
+                        )
+                    elif not stat.S_ISREG(mode):
+                        raise FleetPlanInvalid(
+                            "Standard sandbox bind exposes a host IPC/special object"
+                        )
         elif not stat.S_ISREG(metadata.st_mode):
             raise FleetPlanInvalid("Standard sandbox bind exposes a host IPC/special object")

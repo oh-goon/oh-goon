@@ -82,6 +82,16 @@ be cancelled by the workflow's existing concurrency policy. Ubuntu 26.04 supplie
 native Bubblewrap overlay features used by the selected agent tests. Each matrix
 runner enables unprivileged user namespaces for the ordinary Bubblewrap tests;
 the dependent artifact assembly job does not execute those tests again.
+The backend and integration jobs qualify this repository's Python/Node/Git
+runtime with the hosted image's unused Android SDK temporarily covered by an
+empty read-only tmpfs. This is restricted to disposable GitHub-hosted runners
+and the physical `/usr/local/lib/android/sdk` directory; a symlink or existing
+mount is rejected. The native Bubblewrap view must confirm the same empty,
+read-only mount before Make runs. All exposed paths still receive full fresh
+validation, and product runtime selection is unchanged. The same shell normally
+unmounts its owned overlay on success, failure or handled cancellation; cleanup
+failure fails a passing check and preserves an earlier check failure. Forced VM
+termination remains GitHub's resource lifecycle, not verified shell cleanup.
 Hosted runners use read-only tokens and do not retain checkout credentials or
 receive repository secrets. Installed-agent,
 live-account, browser, and privileged certification remain explicit qualification;
