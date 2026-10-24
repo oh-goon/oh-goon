@@ -9,6 +9,8 @@ import shutil
 import socket
 import tempfile
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
@@ -63,6 +65,27 @@ def _request(
             **changes,
         }
     )
+
+
+def _observe_directory_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    directory: Path,
+    transform: Callable[[os.DirEntry[str]], Any],
+) -> list[Any]:
+    native_scandir = os.scandir
+    opened: list[Any] = []
+
+    @contextmanager
+    def scandir(path: Any) -> Iterator[Any]:
+        with native_scandir(path) as entries:
+            if isinstance(path, int) or Path(path) != directory:
+                yield entries
+                return
+            opened.append(entries)
+            yield (transform(entry) for entry in entries)
+
+    monkeypatch.setattr(module.os, "scandir", scandir)
+    return opened
 
 
 def _native_exec_ack(argv: tuple[str, ...], returncode: int = 0) -> None:
@@ -246,6 +269,184 @@ def test_cyclic_symlink_fails_before_native_process_creation(
     )
     with pytest.raises((OSError, RuntimeError), match="(?i)(loop|too many levels)"):
         backend.require_standard_available(_request(backend, workspace, read_only_workspace=True))
+
+
+@pytest.mark.parametrize("original_kind", ["directory", "symlink"])
+@pytest.mark.parametrize("replacement", ["public-file", "fifo", "private-hardlink"])
+def test_stale_directory_entry_hint_cannot_authorize_its_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    original_kind: str,
+    replacement: str,
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    public = tmp_path / "public-input"
+    public.write_text("public input")
+    private = tmp_path / "private.sqlite"
+    private.write_text("private journal")
+    backend.bind_application_state(private_paths=(private,), read_only_paths=())
+    selected = workspace / "selected"
+    if original_kind == "directory":
+        selected.mkdir()
+    else:
+        selected.symlink_to(public)
+    replaced = False
+
+    def replace_entry(entry: os.DirEntry[str]) -> os.DirEntry[str]:
+        nonlocal replaced
+        if Path(entry.path) == selected and not replaced:
+            replaced = True
+            if original_kind == "directory":
+                selected.rmdir()
+            else:
+                selected.unlink()
+            if replacement == "public-file":
+                selected.write_text("replacement public input")
+            elif replacement == "fifo":
+                os.mkfifo(selected)
+            else:
+                os.link(private, selected)
+        return entry
+
+    _observe_directory_entries(monkeypatch, workspace, replace_entry)
+    calls: list[tuple[str, ...]] = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    request = _request(backend, workspace, read_only_workspace=True)
+    if replacement == "public-file":
+        backend.require_standard_available(request)
+        assert len(calls) == 1 and calls[0][-1] == "/bin/true"
+        assert selected.read_text() == "replacement public input"
+    else:
+        with pytest.raises(FleetPlanInvalid, match="IPC/special|private application file alias"):
+            backend.require_standard_available(request)
+        assert not calls
+    assert replaced
+    assert private.read_text() == "private journal"
+
+
+@pytest.mark.parametrize("replacement", ["directory", "symlink"])
+def test_stale_regular_entry_is_reclassified_before_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    selected = workspace / "selected"
+    selected.write_text("public input")
+    endpoint = tmp_path / "host-endpoint"
+    os.mkfifo(endpoint)
+    replaced = False
+
+    def replace_entry(entry: os.DirEntry[str]) -> os.DirEntry[str]:
+        nonlocal replaced
+        if Path(entry.path) == selected and not replaced:
+            replaced = True
+            selected.unlink()
+            if replacement == "directory":
+                selected.mkdir()
+                os.mkfifo(selected / "endpoint")
+            else:
+                selected.symlink_to(endpoint)
+        return entry
+
+    _observe_directory_entries(monkeypatch, workspace, replace_entry)
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("new host endpoint reached launcher")
+    )
+    with pytest.raises(FleetPlanInvalid, match="IPC/special"):
+        backend.require_standard_available(_request(backend, workspace, read_only_workspace=True))
+    assert replaced
+
+
+@pytest.mark.parametrize("replacement", ["fifo", "private-hardlink"])
+def test_cached_directory_entry_metadata_cannot_authorize_a_replaced_leaf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    selected = workspace / "selected"
+    selected.write_text("public input")
+    private = tmp_path / "private.sqlite"
+    private.write_text("private journal")
+    backend.bind_application_state(private_paths=(private,), read_only_paths=())
+    replaced = False
+
+    class UnknownTypeEntry:
+        def __init__(self, entry: os.DirEntry[str]) -> None:
+            self.entry = entry
+            self.name = entry.name
+            self.path = entry.path
+
+        def prime_hint_metadata(self) -> None:
+            nonlocal replaced
+            if not replaced:
+                # DT_UNKNOWN predicates can fill the native DirEntry stat cache.
+                self.entry.stat(follow_symlinks=False)
+                selected.unlink()
+                if replacement == "fifo":
+                    os.mkfifo(selected)
+                else:
+                    os.link(private, selected)
+                replaced = True
+
+        def is_dir(self, *, follow_symlinks: bool = True) -> bool:
+            self.prime_hint_metadata()
+            return self.entry.is_dir(follow_symlinks=follow_symlinks)
+
+        def is_file(self, *, follow_symlinks: bool = True) -> bool:
+            self.prime_hint_metadata()
+            return self.entry.is_file(follow_symlinks=follow_symlinks)
+
+        def is_symlink(self) -> bool:
+            self.prime_hint_metadata()
+            return self.entry.is_symlink()
+
+        def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
+            return self.entry.stat(follow_symlinks=follow_symlinks)
+
+    def wrap_entry(entry: os.DirEntry[str]) -> Any:
+        return UnknownTypeEntry(entry) if Path(entry.path) == selected else entry
+
+    _observe_directory_entries(monkeypatch, workspace, wrap_entry)
+    monkeypatch.setattr(
+        module,
+        "run_command",
+        lambda *a, **kw: pytest.fail("cached public metadata reached launcher"),
+    )
+    with pytest.raises(FleetPlanInvalid, match="IPC/special|private application file alias"):
+        backend.require_standard_available(_request(backend, workspace, read_only_workspace=True))
+    assert replaced
+    assert private.read_text() == "private journal"
+
+
+def test_directory_iteration_error_closes_native_iterator_before_return(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    (workspace / "first").write_text("public input")
+    (workspace / "second").write_text("unconsumed public input")
+
+    def fail_iteration(entry: os.DirEntry[str]) -> Any:
+        raise PermissionError("synthetic directory iteration denial")
+
+    opened = _observe_directory_entries(monkeypatch, workspace, fail_iteration)
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("incomplete traversal reached launcher")
+    )
+    with pytest.raises(PermissionError, match="synthetic directory iteration denial"):
+        backend.require_standard_available(_request(backend, workspace, read_only_workspace=True))
+    assert opened
+    assert all(list(entries) == [] for entries in opened)
 
 
 @pytest.mark.process
