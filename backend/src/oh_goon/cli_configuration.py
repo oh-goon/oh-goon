@@ -1,0 +1,157 @@
+"""Thin CLI translation for the single run.yml selection contract."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from typing import Any
+
+from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
+from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
+from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
+from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.scheduling import SchedulingPriority
+from oh_goon.runtime.goon_templates import GoonTemplateStore
+from oh_goon.runtime.league_folders import LeagueFolderStore
+from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from oh_goon.services.repository_discovery import RepositoryDiscoveryService
+from oh_goon.services.run_configuration import load_run_configuration, normalize_run_configuration
+from oh_goon.services.run_configuration_inspection import inspect_run_configuration
+
+
+def prepare_configuration(args: argparse.Namespace) -> None:
+    """Capture the selected file once, then transport its existing invocation facts."""
+    snapshot = load_run_configuration(args.configuration)
+    repositories = tuple(
+        RepositoryIdentity.model_validate({"path": path})
+        for path in RepositoryDiscoveryService().git_roots(
+            LeagueFolderStore().list(), require_pyproject=False
+        )
+    )
+    selected = normalize_run_configuration(snapshot, repositories)
+    args._run_configuration = selected
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
+    graph = resolver.analyze_source(selected.plan_path)
+    agent = snapshot.selection.agent
+    repair = snapshot.selection.repair
+    if graph.has_agent_source_contract():
+        graph.validate_agent_selection(
+            native_selected=agent is not None and agent.implementation is not None,
+            require_review_phases=repair is not None,
+        )
+    if agent is not None and not graph.has_agent_source_contract():
+        raise FleetPlanInvalid("Agent selection requires an authored Agent source contract")
+    args._source_graph = graph
+    args._selected_inputs = selected.inputs
+    args._caller_input_file_snapshot = snapshot
+    args._caller_input_origins = dict.fromkeys(selected.inputs, "caller_file")
+    if repair is None and args.command == "run" and args.authorize_repair:
+        raise FleetPlanInvalid(
+            "--authorize-repair requires an explicit repair selection in run.yml"
+        )
+    if repair is not None and args.command == "run" and not args.authorize_repair:
+        raise FleetPlanInvalid(
+            "Bounded repair needs fresh per-Run authorization: run run.yml --authorize-repair"
+        )
+    defaults: dict[str, Any] = {
+        "plan": selected.plan_path,
+        "plan_inputs": None,
+        "inputs_file": None,
+        "extensions": None,
+        "repository_ids": [selected.repository.repository_id],
+        "all_repositories": False,
+        "fleet_run_id": getattr(args, "fleet_run_id", None),
+        "priority": SchedulingPriority.NORMAL,
+        "lock_file": snapshot.lock_path,
+        "output": snapshot.lock_path,
+        "standard_local": False
+        if isinstance(graph.root.compiled.execution, CicdExecutionPolicy)
+        else None,
+        "wait": True,
+        "agent_repository_root": snapshot.agent_repository_root(),
+        "agent_skill_root": snapshot.agent_skill_root(),
+        "allow_agent_acceptance": [agent.acceptance] if agent is not None else [],
+        "agent_model_profile": agent.model_profile if agent is not None else None,
+        "agent_providers_file": None,
+        "native_agent": agent.implementation if agent is not None else None,
+        "native_profile": agent.profile if agent is not None else None,
+        "native_workspace": selected.repository.path
+        if agent is not None and agent.implementation
+        else None,
+        "repair_attempts": None,
+        "review_passes": repair.review_passes if repair else None,
+        "repair_write_root": list(repair.write_roots) if repair else None,
+        "repair_timeout": repair.timeout_seconds if repair else None,
+        "repair_step_timeout": repair.step_timeout_seconds if repair else None,
+        "repair_handoff": False,
+    }
+    for name, value in defaults.items():
+        setattr(args, name, value)
+
+
+def run_config_command(args: argparse.Namespace) -> int:
+    try:
+        prepare_configuration(args)
+        resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
+        report = inspect_run_configuration(
+            args._run_configuration, resolver, source_graph=args._source_graph
+        )
+    except (FleetDomainError, OSError, UnicodeError, ValueError) as exc:
+        print_safe_plan_diagnostic(exc, as_json=args.as_json)
+        return 2
+    if args.as_json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    else:
+        print(
+            f"Configuration: {report['configuration']['path']} ({report['configuration']['sha256']})"
+        )
+        print(f"Source: {report['source']['selection']}\n  {report['source']['path']}")
+        print(f"Target: {report['target']['name']} ({report['target']['repository_id']})")
+        print(f"Status: {report['status']}")
+        print("Inputs:")
+        for item in report["inputs"]:
+            contract = item["contract"]
+            owners = ", ".join(" → ".join(path) for path in item["owners"]) or "root source"
+            print(
+                f"  {item['name']} = {item['value']!r} | {contract['input_type']} | origin={item['origin']}"
+            )
+            if item["value_state"] != "defined":
+                print(f"    value: {item['value_state']}")
+            print(f"    owner: {owners}")
+            limits = {
+                name: contract[name]
+                for name in ("choices", "minimum", "maximum", "pattern", "non_empty")
+                if contract.get(name) is not None
+                and (name in {"minimum", "maximum"} or bool(contract[name]))
+            }
+            if limits:
+                print(f"    constraints: {limits}")
+        if report["unrouted_inputs"]:
+            print(f"Shared names requiring explicit Plan routing: {report['unrouted_inputs']}")
+        print("Ordered Goons:")
+        for item in report["occurrences"]:
+            phase = f" | phase={item['phase']}" if item["phase"] else ""
+            print(f"  {' → '.join(item['occurrence'])}: {item['goon']}{phase}")
+            for binding in item["bindings"]:
+                print(f"    {binding['name']}: {binding['origin']}")
+                if binding.get("skill") is not None:
+                    print(f"      Skill: {binding['skill']}")
+            for requirement in item["requirements"]:
+                print(f"    requires: {requirement}")
+        print("Steps and declared capabilities:")
+        for step in report["steps"]:
+            print(f"  {step['id']}: {step['kind']} | {step['proof']} | {step['capabilities']}")
+            for kind in ("workspace", "artifacts", "outputs", "requested_effects"):
+                if step[kind]:
+                    print(f"    {kind}: {step[kind]}")
+        for group in ("agent", "repair"):
+            if report[group] is not None:
+                print(f"{group}: {report[group]}")
+        print(f"Skill pin records: {report['skills']}")
+        if report["diagnostic"] is not None:
+            issue = report["diagnostic"]
+            print(f"Unresolved: {issue['code']} | {issue['safe_next_action']}")
+        print("Proof:")
+        for name, state in report["proof"].items():
+            print(f"  {name}: {state}")
+    return 2 if args.config_command == "validate" and report["status"] != "inputs-valid" else 0

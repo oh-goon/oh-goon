@@ -45,14 +45,10 @@ repo-b
 repo-c
 ```
 
-`plan run` therefore retains explicit multi-repository scope:
-
-```bash
-uv run --locked --project backend oh-goon plan run plan.yml --repository-id repo-a --repository-id repo-b
-uv run --locked --project backend oh-goon plan run plan.yml --all-repositories
-```
-
-This is not a Schedule and must not be reimplemented through the scheduler.
+Shared Plan UI/service operations retain explicit multi-repository scope. Normal
+CLI execution selects one registered target in `run.yml` and uses `oh-goon run
+run.yml`. Neither an empty target nor a Schedule implies an all-repository Run.
+Shared Runs remain owned by Fleet and are not reimplemented through the scheduler.
 
 ## Repository Schedules
 
@@ -68,14 +64,16 @@ normal admission / Enforcer / Fleet Run
 Game Tape
 ```
 
-The current CLI deliberately requires one repository:
+Create Schedules through the existing UI/API owner, or select the same `run.yml`
+with the original Schedule CLI:
 
-```bash
-uv run --locked --project backend oh-goon plan schedule plan.yml \
-  --schedule-id nightly-security \
-  --repository-id catalog-api \
-  --interval-minutes 1440
+```sh
+oh-goon plan schedule ./workflow/run.yml --schedule-id nightly-security --interval-minutes 1440
 ```
+
+`plan reschedule` selects the replacement config explicitly. The selected target,
+reviewed Plan identity and wall-clock interval remain Schedule-owned; ordinary
+`oh-goon run run.yml` does not create or mutate a Schedule.
 
 A Schedule is active or paused and uses an interval trigger. A newly created Schedule waits one full interval before becoming due; later recurrence is anchored to the previous terminal execution's `finished_at`. Starting the Oh-Goon process is not a trigger.
 

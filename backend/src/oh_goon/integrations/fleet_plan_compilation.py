@@ -5,7 +5,7 @@ import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import yaml
 from pydantic import ValidationError
@@ -358,7 +358,7 @@ def _compile_goon_imports(
                         f"{authored_alias!r} at occurrences {authored_aliases[authored_alias]} and {index}"
                     )
                 authored_aliases[authored_alias] = index
-            raw_key = item.get("import")
+            raw_key = cast(str, item.get("import"))
             source_root = item.get("from")
             if "from" in item and (
                 not isinstance(source_root, str)
@@ -678,7 +678,7 @@ def _validate_authored_steps(raw_steps: Any, *, source: str) -> None:
 
 def _normalize_steps(raw_steps: list[Any]) -> tuple[list[Any], list[dict[str, Any]]]:
     explicit_ids = {
-        item.get("step_id")
+        str(item["step_id"])
         for item in raw_steps
         if isinstance(item, dict) and isinstance(item.get("step_id"), str) and item.get("step_id")
     }

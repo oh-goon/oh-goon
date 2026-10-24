@@ -34,10 +34,11 @@ This does not weaken strict admission: a `goon.yml` may require `pyproject.toml`
 ## Foreground CLI
 
 ```bash
-oh-goon team run /path/to/team
+oh-goon run /path/to/workflow/run.yml
 ```
 
-is intentionally attached. It resolves the Team's current `goon.yml`, starts one durable FleetRun, waits for that run to become terminal in the local Journal, prints the final status and returns a non-zero exit code unless the run completed successfully.
+selects `source: {kind: repository-goon}` and the explicit registered target.
+It is intentionally attached. It resolves the Team's current `goon.yml`, starts one durable FleetRun, waits for that run to become terminal in the local Journal, prints the final status and returns a non-zero exit code unless the run completed successfully.
 
 The CLI does not start a second executor or interpret stdout to decide success. It observes the canonical FleetRun terminal state.
 
@@ -53,14 +54,11 @@ The plan is resolved again when the user presses Run. A prior League scan is pre
 
 A foreground Team command does not rescan the whole League. The requested path is resolved against the saved League roots and bound to the same Git-root Team identity used by League discovery, then only that Team's root `goon.yml` is inspected. Incidental ancestor directory names never hide the Team; targeted lookup and League discovery must agree on Git-root semantics.
 
-This makes the common terminal flow work from anywhere inside a repository:
-
-```bash
-oh-goon team validate
-oh-goon team run
-```
-
-Both commands default to the current directory. An explicit path may still be supplied. The resulting FleetRun always uses the canonical Git-root repository identity, never the caller's subdirectory as a separate Team.
+Normal CLI execution supplies a `run.yml` whose source is
+`{kind: repository-goon}` and whose target is the registered repository ID.
+It does not infer execution scope from the current directory or a path alias.
+Read-only `team validate` may still inspect an explicit path or current directory.
+The resulting Run uses the canonical Git-root identity.
 
 ## Foreground interruption and local serialization
 

@@ -62,7 +62,6 @@ def check_co_r01_roadmap_integrity(root: Path = ROOT) -> list[Violation]:
         if (root / "docs/architecture/OH_GOON_FORWARD_TODO.md").exists():
             issues.append(Violation(path, "CO-R01 second authoritative TODO forbidden"))
         return issues
-    issues: list[Violation] = []
     for checkpoint in ("CO-R0 + CO-R1", "CO-R2b", "CO-R2a", "CO-R2c", "CO-R3", "CO-R4"):
         pattern = rf"(?m)^- \[[ x]\] \*\*{re.escape(checkpoint)}(?:\s+—|\s+\()"
         if len(re.findall(pattern, content)) != 1:

@@ -20,7 +20,8 @@ from oh_goon.core.models.fleet_plan_isolation import (
     IsolationBackendCapabilities,
     isolation_requirements,
 )
-from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent, TrustedLocalRunScope
+from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
+from oh_goon.core.models.lace_trusted_local import TrustedLocalRunScope as TrustedLocalRunScope
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import ExplicitRepositoryScope, StrictFleetExecutionAdmission
 from oh_goon.core.models.target import FleetPlanTarget

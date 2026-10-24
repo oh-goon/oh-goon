@@ -195,6 +195,7 @@ def test_current_draft_evidence_accounts_for_every_current_plan_source() -> None
     assert len(keys) == len(set(keys))
     assert set(keys) == set(PLAN_TEMPLATES.keys())
     for row in drafts:
+        assert isinstance(row["key"], str)
         assert row["source_sha256"] == PLAN_TEMPLATES.source(row["key"]).sha256
     assert (
         actual["ux_d_final_exit_gate"] == "BLOCKED_PENDING_PAIRED_AND_NATIVE_EVIDENCE"

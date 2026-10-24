@@ -192,25 +192,23 @@ Machine-readable preview output is available with:
 uv run --locked --project backend oh-goon enforcer run /path/to/team --json
 ```
 
-Plan syntax/composition is validated through the same Python resolver used by execution:
+Normal CLI setup selects one versioned `run.yml` and registered repository ID:
 
 ```bash
-uv run --locked --project backend oh-goon plan validate fleet-plan.yml
-uv run --locked --project backend oh-goon plan check plans/
+oh-goon templates init python/quality --output ./workflow
+# Edit workflow/run.yml before continuing.
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
 ```
 
-`plan run` does not trust those earlier commands as a lease or certificate. It resolves/admit-checks the actual requested run again.
-
-Fleet Plan target scope is also explicit:
-
-```bash
-uv run --locked --project backend oh-goon plan run fleet-plan.yml --repository-id <id>
-uv run --locked --project backend oh-goon plan run fleet-plan.yml --all-repositories
-```
-
-`plan run` is the Shared Run path and keeps explicit multi-repository scope. `--all-repositories` is an explicit operator decision, never the meaning of an empty argument list.
-
-`plan schedule` and `plan reschedule` are different: they require exactly one `--repository-id`. A repository Schedule may not use `--all-repositories`; cross-repository execution belongs to Shared Runs. A Schedule selects one resolved Plan and does not contain executable scheduler steps.
+The compiler and typed binder retain source/contract authority. `plan check`
+and `plan diff` remain source-authoring diagnostics. Execution verifies the
+selected identity and performs fresh admission; an earlier inspection is not
+a lease or certificate. Shared Plan and Schedule UI/service APIs retain their
+own explicit reviewed target and source identities. The config cannot select
+an implicit fleet, define scheduler Steps, or grant stored permission.
 
 Strict CI/CD backend authority is also explicit. `FleetExecutorPool` selects and reserves one exact executor/backend before `RUN_ADMITTED`; the admitted backend/configuration evidence is then consumed by `FleetPlanRunExecutor.prepare_strict_run()` and revalidated before launch. Strict preparation never performs a second backend search, while direct plans use the separate `prepare_direct_run()` path and cannot consume isolation evidence. Missing admitted evidence, changed configuration, or unavailable exact placement fails closed instead of selecting a currently suitable fallback.
 The durable admission shape is equally explicit: `RUN_ADMITTED.execution` is either `kind: direct` or `kind: strict`. The strict variant contains one `placement` fact whose backend evidence and executor-capacity reservation were selected together before admission, plus optional placement-loss re-admission lineage. Execution revalidates and later releases that same placement; backend/capacity are never carried as sibling authority fields or paired again downstream.
@@ -222,7 +220,7 @@ Goon source scope is independent of repository target scope and has exactly two 
 
 Both modes converge only *after* source resolution on the same Fleet Plan, FleetRun, executor, Journal, and Enforcer boundaries. Source provenance remains one fact and repository execution scope remains another; a shared source is never copied into per-repository source facts.
 
-Effectful direct maintenance is explicit too: `oh-goon run <action> <repository>` requires the repository argument; only read-only inspection commands may use a convenience current-directory default.
+Effectful direct maintenance is explicit too: `oh-goon operation <action> <repository>` requires the repository argument; only read-only inspection commands may use a convenience current-directory default.
 
 Normal `run:` Steps do not author `timeout_seconds`; the backend owns their command deadline. Typed capabilities may expose an explicit deadline only when that deadline is part of the capability boundary. GitLab migration preserves this rule: a normal command source timeout is representable only when it matches Oh Goon's backend command default, while typed source operations must map to their typed deadline semantics. Unsupported timeout semantics block migration instead of being silently dropped or clamped.
 
@@ -289,12 +287,12 @@ execution:
   trust_repository_code: false
 ```
 
-Use `oh-goon plan run ... --strict` with the configured strict executor/deployment authority.
+Use the original strict/deployment owner with its configured executor authority.
+Normal run selection cannot manufacture deployment custody or bypass strict admission.
 For additional isolation around trusted code, omit `trust_repository_code` or set it to `true`.
 A strict Plan cannot run through the ordinary local profile. Missing strict prerequisites fail
-before workload; the command never falls back to host execution. `--standard-local` remains
-an explicit spelling of the ordinary profile. Deployment integrations select strict admission
-when they supply their provisioner. `--no-wait` is available only for deployed strict execution.
+before workload; the command never falls back to host execution. Deployment integrations select strict admission when they supply their original
+provisioner; their owner retains asynchronous execution semantics.
 
 Within strict CI/CD, repository code is trusted by default and CPU, memory, and PID caps are unspecified.
 There are no hidden static CPU/RAM/PID defaults. Omitted caps inherit the capacity available from the
@@ -346,7 +344,7 @@ The exact frozen repository snapshot is validated again before strict run resour
 
 There is no magical cache stage and no automatic cache inheritance.
 
-`plan prepare` is the explicit runtime-acquisition command for pinned built-in/extension runtimes. During a strict run, host tools, runtime roots, read-only inputs, managed runtimes, and imported host values are frozen before effects.
+The existing runtime-preparation service owns acquisition of pinned built-in/extension runtimes. During a strict run, host tools, runtime roots, read-only inputs, managed runtimes, and imported host values are frozen before effects.
 
 For the local Bubblewrap backend, that frozen runtime root also owns the mount scaffold for every later bind destination. Attempt-private `/etc/{passwd,group,nsswitch.conf,hosts}`, frozen `/toolchain/bin/<tool>` files, and `/managed/<index>` directories therefore have deterministic pre-created mountpoints before the runtime root is mounted read-only at `/`. Bubblewrap never gains permission to create paths inside the immutable runtime root during process launch; a missing mountpoint is a runtime-root construction defect and fails certification rather than being repaired by weakening the read-only root.
 
@@ -492,4 +490,4 @@ For strict CI/CD, a host tool is admitted by logical name through one operator-o
 
 ### Shared-Plan Lineups and preview
 
-A Shared Plan may use either an explicit one-off Team selection or one saved local Lineup. The selectors are mutually exclusive and both resolve to explicit current repository IDs before execution. A Lineup remembers Team roots only; it never merges repository `goon.yml` files, queues work, or stores run state. `shared-plan preview` resolves the selected Shared Plan `plan.yml` once and checks every selected Team through the canonical read-only FleetPlan/Enforcer preview boundary. Preview returns the canonical execution-lock digest for the reviewed source plus inputs; Game Start still resolves and admits again through the normal FleetRun path and uses that digest only as a fail-closed equality fence against semantic drift. It is not a reusable admission receipt.
+A Shared Plan may use either an explicit one-off Team selection or one saved local Lineup. The selectors are mutually exclusive and both resolve to explicit current repository IDs before execution. A Lineup remembers Team roots only; it never merges repository `goon.yml` files, queues work, or stores run state. The Shared Plan preview service resolves the selected Shared Plan `plan.yml` once and checks every selected Team through the canonical read-only FleetPlan/Enforcer preview boundary. Preview returns the canonical execution-lock digest for the reviewed source plus inputs; Game Start still resolves and admits again through the normal FleetRun path and uses that digest only as a fail-closed equality fence against semantic drift. It is not a reusable admission receipt.

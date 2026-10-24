@@ -155,16 +155,16 @@ def check_canonical_database_owner(root: Path) -> list[Violation]:
     if fleet.is_file():
         source = fleet.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(fleet))
-        methods = [
+        admission_methods = [
             node
             for node in ast.walk(tree)
             if isinstance(node, ast.FunctionDef)
             and node.name == "publish_atomic_fleet_prework_ingress"
         ]
         if (
-            len(methods) != 1
+            len(admission_methods) != 1
             or "operational_journal._database.require_atomic_write_cut(connection)"
-            not in ast.unparse(methods[0])
+            not in ast.unparse(admission_methods[0])
         ):
             findings.append(
                 Violation(

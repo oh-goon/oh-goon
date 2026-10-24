@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Protocol
 
 from oh_goon.core.errors import FleetExtensionInvalid, FleetPlanInvalid
 from oh_goon.core.file_digest import sha256_file
@@ -21,6 +22,17 @@ from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, from_comm
 from oh_goon.integrations.fleet_plan_environment import git_execution_environment
 
 
+class _StepCommandRunner(Protocol):
+    def __call__(
+        self,
+        *args: str,
+        timeout: float | None = 10.0,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> CommandResult: ...
+
+
 def execute_pre_commit(
     repository: Path,
     step: ResolvedPreCommitStep,
@@ -28,7 +40,7 @@ def execute_pre_commit(
     cancel_requested: Callable[[], bool] | None,
     *,
     environment: dict[str, str],
-    command_runner=run_command,
+    command_runner: _StepCommandRunner = run_command,
     executable: Path | None = None,
 ) -> StepOutcome:
     config = repository / ".pre-commit-config.yaml"
@@ -75,7 +87,7 @@ def execute_extension(
     cancel_requested: Callable[[], bool] | None,
     *,
     environment: dict[str, str],
-    command_runner=run_command,
+    command_runner: _StepCommandRunner = run_command,
     project_path: Path | None = None,
     environment_path: Path | None = None,
 ) -> StepOutcome:
@@ -105,7 +117,7 @@ def execute_git(
     cancel_requested: Callable[[], bool] | None,
     *,
     environment: dict[str, str],
-    command_runner=run_command,
+    command_runner: _StepCommandRunner = run_command,
 ) -> CommandResult:
     result = git.run(
         *step.argv,
@@ -176,10 +188,10 @@ def _run_pre_commit(
     config: Path,
     *,
     executable: Path,
-    timeout: float,
+    timeout: float | None,
     cancel_requested: Callable[[], bool] | None,
     env: dict[str, str],
-    command_runner=run_command,
+    command_runner: _StepCommandRunner = run_command,
 ) -> CommandResult:
     return command_runner(
         str(executable),

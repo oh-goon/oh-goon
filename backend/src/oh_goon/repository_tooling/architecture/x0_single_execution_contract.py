@@ -612,7 +612,7 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
             ),
         ),
     )
-    parsed: dict[Path, ast.AST] = {}
+    parsed: dict[Path, ast.Module] = {}
     for relative, klass, method, needed in required_edges:
         path = package / relative
         try:
@@ -934,7 +934,9 @@ def _check_original_resource_intent_sequence(package: Path) -> list[Violation]:
         ]
     # Authenticated original history and admitted Step meaning must be passed
     # to the ONE gate. Do not duplicate or substitute a caller-supplied flag.
-    kws = {kw.arg: kw.value for kw in direct[0].value.keywords}
+    direct_call = direct[0].value
+    assert isinstance(direct_call, ast.Call)
+    kws = {kw.arg: kw.value for kw in direct_call.keywords}
     if (
         set(kws) != {"step_id", "attempt_identity", "step_envelope", "original_events"}
         or not isinstance(kws["original_events"], ast.Name)
@@ -1497,7 +1499,11 @@ def _check_p1b27b1_native_mount_roster(package: Path) -> list[Violation]:
     # on the normal straight-line body after append_atomic_execution_mounts.
     body = methods["_prepare_mounts"].body
     calls = [n for n in body if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)]
-    called = [n.value.func.id for n in calls if isinstance(n.value.func, ast.Name)]
+    called = [
+        n.value.func.id
+        for n in calls
+        if isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
+    ]
     if (
         called.count("_require_original_native_mount_argv") != 1
         or "_append_atomic_execution_mounts" not in called
@@ -1861,11 +1867,12 @@ def _check_p1b27b2b2a_source_fd_custody(package: Path) -> list[Violation]:
         ),
         -1,
     )
+    require_statement = main[require_index] if require_index >= 0 else None
     if not (
         0 <= reserve_index < require_index < with_index
-        and isinstance(main[require_index], ast.Expr)
-        and isinstance(main[require_index].value, ast.Call)
-        and ast.unparse(main[require_index].value.func) == "require_bubblewrap_fd_binding"
+        and isinstance(require_statement, ast.Expr)
+        and isinstance(require_statement.value, ast.Call)
+        and ast.unparse(require_statement.value.func) == "require_bubblewrap_fd_binding"
     ):
         return [Violation(bwrap, "X0 original reservation must precede unconditional FD preflight")]
     source_scope = main[with_index]
@@ -2229,7 +2236,14 @@ def _check_p1b27b2b3b2b2_fd_handoff(package: Path) -> list[Violation]:
             for node in ast.walk(execute)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         ]
-        if sum(call.func.id == "_require_original_native_fd_handoff" for call in calls) != 1:
+        if (
+            sum(
+                isinstance(call.func, ast.Name)
+                and call.func.id == "_require_original_native_fd_handoff"
+                for call in calls
+            )
+            != 1
+        ):
             raise ValueError("original execution handoff check missing or duplicated")
         call_source = ast.unparse(execute)
         if (
@@ -2239,9 +2253,16 @@ def _check_p1b27b2b3b2b2_fd_handoff(package: Path) -> list[Violation]:
         ):
             raise ValueError("original run_command not bound to validated inherited FD roster")
         guard_call = next(
-            call for call in calls if call.func.id == "_require_original_native_fd_handoff"
+            call
+            for call in calls
+            if isinstance(call.func, ast.Name)
+            and call.func.id == "_require_original_native_fd_handoff"
         )
-        launch_call = next(call for call in calls if call.func.id == "run_command")
+        launch_call = next(
+            call
+            for call in calls
+            if isinstance(call.func, ast.Name) and call.func.id == "run_command"
+        )
         if guard_call.lineno >= launch_call.lineno:
             raise ValueError("original FD check must precede native launch")
         owner = next(

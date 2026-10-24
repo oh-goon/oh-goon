@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Final, Literal
 
 from oh_goon.core.product_identity import canonical_repository_path
 
-TEAM_PIPELINE_FILENAME = "goon.yml"
+TEAM_PIPELINE_FILENAME: Final[Literal["goon.yml"]] = "goon.yml"
 
 
 def team_pipeline_path(repository: Path | str) -> Path:

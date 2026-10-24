@@ -38,7 +38,7 @@ class RepositoryFileExistsRequirement(ImmutableModel):
     path: str = Field(min_length=1, max_length=240)
 
     @model_validator(mode="after")
-    def validate_source_path(self):
+    def validate_source_path(self) -> RepositoryFileExistsRequirement:
         _reject_transient_requirement_path(self.path)
         return self
 
@@ -50,7 +50,7 @@ class RepositoryFolderExistsRequirement(ImmutableModel):
     path: str = Field(min_length=1, max_length=240)
 
     @model_validator(mode="after")
-    def validate_source_path(self):
+    def validate_source_path(self) -> RepositoryFolderExistsRequirement:
         _reject_transient_requirement_path(self.path)
         return self
 
@@ -62,7 +62,7 @@ class RepositoryPathExistsRequirement(ImmutableModel):
     path: str = Field(min_length=1, max_length=240)
 
     @model_validator(mode="after")
-    def validate_source_path(self):
+    def validate_source_path(self) -> RepositoryPathExistsRequirement:
         _reject_transient_requirement_path(self.path)
         return self
 

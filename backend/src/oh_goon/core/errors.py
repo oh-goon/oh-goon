@@ -320,6 +320,21 @@ class FleetPlanInvalid(InvalidRequest):
     code = "FLEET_PLAN_INVALID"
 
 
+class RunConfigurationInvalid(FleetPlanInvalid):
+    """A safe typed selection refusal, with field locations and no caller values."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        diagnostic_code: str = "CONFIG_CHANGED",
+        fields: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.diagnostic_code = diagnostic_code
+        self.fields = fields
+
+
 class FleetPlanInputRejected(FleetPlanInvalid):
     """A canonical input owner rejected a value or contract.
 

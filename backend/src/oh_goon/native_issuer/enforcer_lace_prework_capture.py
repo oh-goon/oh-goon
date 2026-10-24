@@ -23,7 +23,7 @@ from oh_goon.core.models.run_events import RunAdmittedEvent
 from oh_goon.runtime.journal import Journal
 
 
-def _stable(event: RunAdmittedEvent) -> dict:
+def _stable(event: RunAdmittedEvent) -> dict[str, object]:
     return event.model_dump(mode="python", exclude={"generated_at"}, exclude_computed_fields=True)
 
 

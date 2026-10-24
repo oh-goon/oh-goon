@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from oh_goon.core.source_tree_policy import LIVE_CHECKOUT_PROTECTED_PATHS
 from oh_goon.repository_tooling.source_layout import (
@@ -87,7 +87,7 @@ def clean(*, root: Path | None = None) -> tuple[str, ...]:
 
     candidates = sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True)
     for path in candidates:
-        relative_path = path.relative_to(root)
+        relative_path = PurePosixPath(path.relative_to(root).as_posix())
         if any(
             relative_path == protected or protected in relative_path.parents
             for protected in LIVE_CHECKOUT_PROTECTED_PATHS

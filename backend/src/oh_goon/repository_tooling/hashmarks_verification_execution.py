@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
+from typing import TypeVar
 
 from oh_goon.integrations.hashmarks.verification_selection import (
     VerifiedHashmarksVerificationSelection,
@@ -16,6 +17,8 @@ from oh_goon.runtime.execution.shard_models import (
     ShardExecutionReport,
     ShardWork,
 )
+
+_Member = TypeVar("_Member")
 
 _RECEIPT_SCHEMA = "oh-goon.hashmarks-verification-execution-receipt.v4"
 _GROUPING_POLICY_SCHEMA = "oh-goon.verification-execution-grouping-policy.v1"
@@ -42,7 +45,7 @@ class VerificationExecutionGroupingPolicy:
             }
         )
 
-    def group(self, members: tuple[object, ...]) -> tuple[tuple[object, ...], ...]:
+    def group(self, members: tuple[_Member, ...]) -> tuple[tuple[_Member, ...], ...]:
         """Partition in admitted order without selecting, dropping, duplicating, or reordering."""
 
         if not members:

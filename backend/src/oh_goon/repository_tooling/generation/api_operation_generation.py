@@ -58,9 +58,12 @@ def _json_schema(content: Any, *, owner: str) -> dict[str, Any] | None:
     media = content.get("application/json")
     if media is None:
         return None
-    if not isinstance(media, dict) or not isinstance(media.get("schema"), dict):
+    if not isinstance(media, dict):
         raise ValueError(f"{owner} application/json must declare a schema")
-    return media["schema"]
+    schema = media.get("schema")
+    if not isinstance(schema, dict):
+        raise ValueError(f"{owner} application/json must declare a schema")
+    return schema
 
 
 def _extract_parameters(operation_id: str, raw_parameters: list[Any]) -> tuple[ApiParameter, ...]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypedDict
 
 from oh_goon.core.errors import FleetPlanInvalid, StateConflict
 from oh_goon.core.fleet_plan_output_refs import step_output_reference
@@ -8,12 +9,14 @@ from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
     ResolvedFleetPlan,
     ResolvedLocalSearchAgentStep,
+    ResolvedPlanStep,
     ResolvedPreCommitStep,
     StepStatusCondition,
     step_runtime_strings,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
     FleetPlanPreview,
+    PlanImportApplicabilityEvidence,
     PlanImportPreview,
     PlanPreviewDisposition,
     PlanSnapshotEvidence,
@@ -133,7 +136,9 @@ def require_repository_plan_admission_current(
         raise StateConflict("Fleet repository/Plan admission became stale after RUN_ADMITTED")
 
 
-def _preview_step(repository: Path, step, imported_reason: str | None) -> PlanStepPreview:
+def _preview_step(
+    repository: Path, step: ResolvedPlanStep, imported_reason: str | None
+) -> PlanStepPreview:
     policy = _step_policy_preview(step)
     if imported_reason is not None:
         return PlanStepPreview(
@@ -189,7 +194,17 @@ def _preview_step(repository: Path, step, imported_reason: str | None) -> PlanSt
     )
 
 
-def _step_policy_preview(step) -> dict[str, object]:
+class _PolicyPreview(TypedDict):
+    timeout_seconds: float | None
+    workspace_source: str
+    workspace_publish: bool
+    cache_source: str
+    cache_publish: bool
+    cache_retain: bool
+    egress_mode: str
+
+
+def _step_policy_preview(step: ResolvedPlanStep) -> _PolicyPreview:
     workspace = getattr(step, "workspace", None)
     cache = getattr(step, "cache", None)
     capabilities = getattr(step, "capabilities", None)
@@ -206,7 +221,7 @@ def _step_policy_preview(step) -> dict[str, object]:
     }
 
 
-def _source_label(source) -> str:
+def _source_label(source: object) -> str:
     kind = str(getattr(source, "kind", "repository"))
     step_id = getattr(source, "step_id", None)
     if step_id:
@@ -223,7 +238,7 @@ def _source_label(source) -> str:
 
 def _import_previews(
     plan: ResolvedFleetPlan,
-    applicability,
+    applicability: tuple[PlanImportApplicabilityEvidence, ...],
 ) -> tuple[PlanImportPreview, ...]:
     decisions = {item.import_id: item for item in applicability}
     return tuple(

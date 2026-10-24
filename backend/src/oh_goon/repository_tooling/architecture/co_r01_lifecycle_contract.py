@@ -139,7 +139,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     if issues:
         return issues
 
-    def require(relative: str, condition: bool, message: str) -> None:
+    def require(relative: str | Path, condition: bool, message: str) -> None:
         if not condition:
             issues.append(Violation(root / relative, "CO-R01 " + message))
 
@@ -186,11 +186,11 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         "scheduled child must bind in original Journal RUN_ADMITTED transaction before publication",
     )
     store = _method(sources[_SCHEDULE_STORE], "ScheduleExecutionStore", "bind_admitted_child_in")
-    writes = _calls(store, "self._update") if store else []
+    co_r2a_writes = _calls(store, "self._update") if store else []
     nested = _calls(store, "self._database.transaction") if store else []
     require(
         _SCHEDULE_STORE,
-        store is not None and len(writes) == 1 and not nested,
+        store is not None and len(co_r2a_writes) == 1 and not nested,
         "scheduled child binding must use supplied Fleet transaction, never a second cut",
     )
     fleet = _method(sources[_FLEET], "FleetRunControlPlane", "_start_intent")
@@ -202,8 +202,8 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         else False,
         "scheduled occurrence identity must enter original Fleet lifecycle",
     )
-    lifecycle = _method(sources[_LIFECYCLE], "FleetRunLifecycle", "admit")
-    sub_intents = _calls(lifecycle, "FleetRunAdmissionIntent") if lifecycle else []
+    co_r2a_lifecycle = _method(sources[_LIFECYCLE], "FleetRunLifecycle", "admit")
+    sub_intents = _calls(co_r2a_lifecycle, "FleetRunAdmissionIntent") if co_r2a_lifecycle else []
     require(
         _LIFECYCLE,
         len(sub_intents) == 2
@@ -282,29 +282,29 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         verify = _calls(workspace, "verify_clean_source_snapshot")
         renamed = _calls(workspace, "staging.replace")
         ready = _calls(workspace, "self._write_state")
-        writes = _write_transaction(workspace)
+        write_transactions = _write_transaction(workspace)
         require(
             _WORKSPACE,
             len(verify) >= 2
             and len(renamed) == 1
             and len(ready) == 1
-            and len(writes) == 1
+            and len(write_transactions) == 1
             and verify[0].lineno < renamed[0].lineno < ready[0].lineno
-            and _inside(writes[0], renamed[0])
-            and _inside(writes[0], ready[0])
-            if verify and renamed and ready and writes
+            and _inside(write_transactions[0], renamed[0])
+            and _inside(write_transactions[0], ready[0])
+            if verify and renamed and ready and write_transactions
             else False,
             "workspace READY must retain staged verification and original write-cut publication; "
             "postcommit cleanup is still CO-R2b work",
         )
 
-    owner = "RepositoryWorkspaceAuthority"
-    implementation = _method(sources[_WORKSPACE], owner, "materialize_worktree")
-    recovery = _method(sources[_WORKSPACE], owner, "reconcile_worktree")
-    locked_recovery = _method(sources[_WORKSPACE], owner, "_reconcile_worktree_locked")
-    prepare = _method(sources[_WORKSPACE], owner, "_prepare_worktree_marker")
-    receipt_lock = _method(sources[_WORKSPACE], owner, "_locked_worktree_receipt")
-    release = _method(sources[_WORKSPACE], owner, "release")
+    co_r2a_owner = "RepositoryWorkspaceAuthority"
+    implementation = _method(sources[_WORKSPACE], co_r2a_owner, "materialize_worktree")
+    recovery = _method(sources[_WORKSPACE], co_r2a_owner, "reconcile_worktree")
+    locked_recovery = _method(sources[_WORKSPACE], co_r2a_owner, "_reconcile_worktree_locked")
+    prepare = _method(sources[_WORKSPACE], co_r2a_owner, "_prepare_worktree_marker")
+    receipt_lock = _method(sources[_WORKSPACE], co_r2a_owner, "_locked_worktree_receipt")
+    release = _method(sources[_WORKSPACE], co_r2a_owner, "release")
     preparation = _calls(implementation, "self._prepare_worktree_marker") if implementation else []
     native_effects = _calls(implementation, "service.run") if implementation else []
     sqlite_ready = (
@@ -338,16 +338,18 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         "CO-R2W2 reconciliation must reject simultaneous live Git effects",
     )
     txs = _write_transaction(locked_recovery) if locked_recovery else []
-    native = _calls(locked_recovery, "self._registered_git_worktree") if locked_recovery else []
+    co_r2a_native = (
+        _calls(locked_recovery, "self._registered_git_worktree") if locked_recovery else []
+    )
     commit = _calls(locked_recovery, "self._write_state_with_checkpoint") if locked_recovery else []
     require(
         _WORKSPACE,
         len(txs) == 1
-        and len(native) == 1
+        and len(co_r2a_native) == 1
         and len(commit) == 1
-        and _inside(txs[0], native[0])
+        and _inside(txs[0], co_r2a_native[0])
         and _inside(txs[0], commit[0])
-        if txs and native and commit
+        if txs and co_r2a_native and commit
         else False,
         "CO-R2W2 native Git reproof and READY commit must share original write cut",
     )
@@ -367,21 +369,21 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     else:
         require(_WORKSPACE, False, "CO-R2W2 original release owner missing")
 
-    owner = "RepositoryWorkspaceAuthority"
-    retired = _method(sources[_WORKSPACE], owner, "retire_worktree")
-    preflight = _method(sources[_WORKSPACE], owner, "_worktree_retirement_preflight")
-    replay = _method(sources[_WORKSPACE], owner, "reconcile_worktree_retirement")
-    committed = _method(sources[_WORKSPACE], owner, "_reconcile_retirement_locked")
-    release = _method(sources[_WORKSPACE], owner, "release")
+    co_r2a_owner = "RepositoryWorkspaceAuthority"
+    retired = _method(sources[_WORKSPACE], co_r2a_owner, "retire_worktree")
+    preflight = _method(sources[_WORKSPACE], co_r2a_owner, "_worktree_retirement_preflight")
+    replay = _method(sources[_WORKSPACE], co_r2a_owner, "reconcile_worktree_retirement")
+    committed = _method(sources[_WORKSPACE], co_r2a_owner, "_reconcile_retirement_locked")
+    release = _method(sources[_WORKSPACE], co_r2a_owner, "release")
     preparation = _calls(retired, "self._prepare_retirement_marker") if retired else []
-    native = _calls(retired, "service.run") if retired else []
+    co_r2a_native = _calls(retired, "service.run") if retired else []
     publication = _calls(retired, "self._reconcile_retirement_locked") if retired else []
     require(
         _WORKSPACE,
         retired is not None
-        and len(preparation) == len(native) == len(publication) == 1
-        and preparation[0].lineno < native[0].lineno < publication[0].lineno
-        if preparation and native and publication
+        and len(preparation) == len(co_r2a_native) == len(publication) == 1
+        and preparation[0].lineno < co_r2a_native[0].lineno < publication[0].lineno
+        if preparation and co_r2a_native and publication
         else False,
         "CO-R2W3 Git removal must be receipted before native effect and original SQLite decision",
     )
@@ -458,10 +460,10 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # CO-R2c: the existing acceptance owner must sample time after the last
     # durable row/lineage read and use it for BOTH expiry and accepted receipt.
     # This is a structural guard, not a second expiry decision authority.
-    owner = "ExecutionEvidenceAcceptanceAuthority"
-    accept = _method(sources[_EVIDENCE], owner, "accept")
-    durable = _method(sources[_EVIDENCE], owner, "_validate_durable_rows")
-    load = _method(sources[_EVIDENCE], owner, "_load_durable_rows")
+    co_r2c_owner = "ExecutionEvidenceAcceptanceAuthority"
+    accept = _method(sources[_EVIDENCE], co_r2c_owner, "accept")
+    durable = _method(sources[_EVIDENCE], co_r2c_owner, "_validate_durable_rows")
+    load = _method(sources[_EVIDENCE], co_r2c_owner, "_load_durable_rows")
     write_cuts = _write_transaction(accept) if accept else []
     reads = _calls(accept, "self._load_durable_rows") if accept else []
     validates = _calls(accept, "self._validate_durable_rows") if accept else []
@@ -519,7 +521,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         and lineage[0].lineno < clock[0].lineno < expiry_branches[0].lineno < returned[0].lineno,
         "CO-R2c durable expiry and receipt must use the one post-read write-cut clock",
     )
-    queries = (
+    expiry_query_texts = (
         [
             n.value
             for n in ast.walk(load)
@@ -530,7 +532,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     )
     require(
         _EVIDENCE,
-        any("issued_at, expires_at" in q for q in queries),
+        any("issued_at, expires_at" in q for q in expiry_query_texts),
         "CO-R2c expiry must be read from the persisted lease in the original cut",
     )
 
@@ -544,11 +546,11 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     except (OSError, SyntaxError) as exc:
         issues.append(Violation(root / _R3_TEST, f"CO-R3A native conformance unavailable: {exc}"))
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3a_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
-            core.count("tests/unit/runtime/test_co_r3_native_provider_conformance.py") == 1,
+            co_r3a_core.count("tests/unit/runtime/test_co_r3_native_provider_conformance.py") == 1,
             "CO-R3A exact real provider conformance must run in original QENV1 CORE",
         )
         request = _method(
@@ -556,13 +558,15 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             None,
             "test_original_workspace_request_has_one_durable_answer_after_process_death",
         )
-        native = _method(
+        co_r3a_native = _method(
             regression_tree,
             None,
             "test_native_git_effect_with_lost_ack_preserves_one_owner_recovery",
         )
         forbidden = _method(
-            regression_tree, None, "test_unsupported_provider_refuses_before_database_publication"
+            regression_tree,
+            None,
+            "test_unsupported_provider_refuses_before_database_publication",
         )
         replacement = _method(
             regression_tree,
@@ -583,12 +587,12 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         require(
             _R3_TEST,
             request is not None
-            and native is not None
+            and co_r3a_native is not None
             and forbidden is not None
             and replacement is not None
             and len(_calls(request, "_restart")) == 1
-            and len(_calls(native, "real_run")) == 1
-            and len(_calls(native, "restarted.reconcile_worktree_retirement")) == 1
+            and len(_calls(co_r3a_native, "real_run")) == 1
+            and len(_calls(co_r3a_native, "restarted.reconcile_worktree_retirement")) == 1
             and len(_calls(replacement, "restarted.reconcile_worktree_retirement")) == 1
             and len(_calls(forbidden, "LocalDatabase")) == 1
             and any(
@@ -626,18 +630,18 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
         body = (root / _R3B_TEST).read_text(encoding="utf-8")
-        tree = ast.parse(body)
+        co_r3b_tree = ast.parse(body)
     except (OSError, SyntaxError) as exc:
         issues.append(
             Violation(root / _R3B_TEST, f"CO-R3B original-owner conformance unavailable: {exc}")
         )
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3b_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3b_core.count(name) == 1
                 for name in (
                     "tests/unit/runtime/test_co_r3b_original_failure_cuts.py",
                     "../scripts/tests/test_co_r3b_original_failure_architecture.py",
@@ -648,7 +652,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         child = next(
             (
                 node.value.value
-                for node in tree.body
+                for node in co_r3b_tree.body
                 if isinstance(node, ast.Assign)
                 and any(isinstance(t, ast.Name) and t.id == "_CHILD" for t in node.targets)
                 and isinstance(node.value, ast.Constant)
@@ -674,12 +678,12 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             "test_original_acceptance_after_real_process_death_or_expiry",
             "test_original_backup_crash_never_admits_an_unacknowledged_candidate",
         )
-        witness = _method(tree, None, "_die")
+        co_r3b_witness = _method(co_r3b_tree, None, "_die")
         require(
             _R3B_TEST,
-            all(_method(tree, None, n) is not None for n in required_tests)
-            and witness is not None
-            and bool(_calls(witness, "subprocess.run"))
+            all(_method(co_r3b_tree, None, n) is not None for n in required_tests)
+            and co_r3b_witness is not None
+            and bool(_calls(co_r3b_witness, "subprocess.run"))
             and {
                 "_fixture",
                 "_admit",
@@ -698,21 +702,21 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # writer negative control, because group quiescence is not LACE custody.
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
-        witness = (root / _R3C_TEST).read_text(encoding="utf-8")
-        owner = (root / _PROCESS_GROUP_OWNER).read_text(encoding="utf-8")
-        tree = ast.parse(witness)
-        owner_tree = ast.parse(owner)
+        co_r3c_witness = (root / _R3C_TEST).read_text(encoding="utf-8")
+        co_r3c_owner = (root / _PROCESS_GROUP_OWNER).read_text(encoding="utf-8")
+        co_r3c_tree = ast.parse(co_r3c_witness)
+        owner_tree = ast.parse(co_r3c_owner)
     except (OSError, SyntaxError) as exc:
         issues.append(
             Violation(root / _R3C_TEST, f"CO-R3C original quiescence witness unavailable: {exc}")
         )
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3c_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3c_core.count(name) == 1
                 for name in (
                     "tests/unit/runtime/test_co_r3c_trust_writer_quiescence.py",
                     "../scripts/tests/test_co_r3c_original_quiescence_architecture.py",
@@ -726,18 +730,18 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             _PROCESS_GROUP_OWNER,
             scanner is not None
             and probe is not None
-            and owner.count("incomplete = True") == 3
-            and "return False if inspected and not incomplete else None" in owner
+            and co_r3c_owner.count("incomplete = True") == 3
+            and "return False if inspected and not incomplete else None" in co_r3c_owner
             and bool(_calls(probe, "os.killpg")),
             "CO-R3C incomplete Linux proc scan must fall back to original kernel probe",
         )
         owned = _method(
-            tree, None, "test_real_trust_termination_quiesces_uncooperative_owned_writer"
+            co_r3c_tree, None, "test_real_trust_termination_quiesces_uncooperative_owned_writer"
         )
         escaped = _method(
-            tree, None, "test_escaped_writer_disproves_process_group_as_independent_absence"
+            co_r3c_tree, None, "test_escaped_writer_disproves_process_group_as_independent_absence"
         )
-        partial = _method(tree, None, "test_partial_proc_inventory_never_asserts_absent")
+        partial = _method(co_r3c_tree, None, "test_partial_proc_inventory_never_asserts_absent")
         require(
             _R3C_TEST,
             bool(owned and escaped and partial) and len(_calls(owned, "run_command")) == 1
@@ -750,29 +754,29 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             escaped is not None
             and len(_calls(escaped, "run_command")) == 1
             and len(_calls(escaped, "os.killpg")) == 1
-            and "start_new_session=True" in witness
-            and "marker.stat().st_size > before" in witness,
+            and "start_new_session=True" in co_r3c_witness
+            and "marker.stat().st_size > before" in co_r3c_witness,
             "CO-R3C escaped writer must remain a witnessed negative control and be cleaned up",
         )
     # CO-R3D: negative cgroup physical-evidence test of the ORIGINAL attempt
     # resource owner. These checks never authorize independent LACE absence.
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
-        owner = (root / _CGROUP_OWNER).read_text(encoding="utf-8")
-        witness = (root / _R3D_TEST).read_text(encoding="utf-8")
-        tree = ast.parse(owner)
-        ast.parse(witness)
+        co_r3d_owner = (root / _CGROUP_OWNER).read_text(encoding="utf-8")
+        co_r3d_witness = (root / _R3D_TEST).read_text(encoding="utf-8")
+        co_r3d_tree = ast.parse(co_r3d_owner)
+        ast.parse(co_r3d_witness)
     except (OSError, SyntaxError) as exc:
         issues.append(
             Violation(root / _R3D_TEST, f"CO-R3D original cgroup witness unavailable: {exc}")
         )
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3d_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3d_core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3d_original_cgroup_quiescence.py",
                     "../scripts/tests/test_co_r3d_original_cgroup_architecture.py",
@@ -780,11 +784,11 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             ),
             "CO-R3D must remain in original QENV1 CORE",
         )
-        lease_open = _method(tree, "CgroupV2AttemptLease", "open")
-        lease_close = _method(tree, "CgroupV2AttemptLease", "close")
-        wait = _method(tree, None, "_wait_for_cgroup_empty")
-        original = _method(tree, None, "_exact_cgroup_identity")
-        required = _method(tree, None, "_require_original_cgroup")
+        lease_open = _method(co_r3d_tree, "CgroupV2AttemptLease", "open")
+        lease_close = _method(co_r3d_tree, "CgroupV2AttemptLease", "close")
+        wait = _method(co_r3d_tree, None, "_wait_for_cgroup_empty")
+        original = _method(co_r3d_tree, None, "_exact_cgroup_identity")
+        required = _method(co_r3d_tree, None, "_require_original_cgroup")
         close_ops = (
             "_kill_cgroup",
             "_wait_for_cgroup_empty",
@@ -804,11 +808,13 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             and len(calls) == len(close_ops)
             and all(node is not None for node in calls)
             and all(
-                left.lineno < right.lineno for left, right in zip(calls, calls[1:], strict=False)
+                left is not None and right is not None and left.lineno < right.lineno
+                for left, right in zip(calls, calls[1:], strict=False)
             )
             and lease_open is not None
             and len(_calls(lease_open, "_remove_cgroup")) == 1
             and len(_calls(lease_close, "_require_original_cgroup")) >= 2
+            and calls[1] is not None
             and any(k.arg == "expected_identity" for k in calls[1].keywords)
             and "self.cgroup_identity" in ast.unparse(lease_close),
             "CO-R3D original close must pin, kill, prove, remove, then publish",
@@ -835,17 +841,18 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                     and len(_calls(wait, "_bound_cgroup_directory")) == 1
                 )
             )
-            and "Fleet original cgroup observations disagree" in owner
+            and "Fleet original cgroup observations disagree" in co_r3d_owner
             and len(_calls(required, "_exact_cgroup_identity")) == 1,
             "CO-R3D may not infer emptiness from missing or substituted kernel files",
         )
         require(
             _R3D_TEST,
-            "test_original_owner_never_publishes_completion_if_native_remove_fails" in witness
+            "test_original_owner_never_publishes_completion_if_native_remove_fails"
+            in co_r3d_witness
             and "test_missing_replaced_and_symlink_cgroup_cannot_supply_original_identity"
-            in witness
+            in co_r3d_witness
             and "test_real_kernel_style_empty_cgroup_requires_both_original_observations"
-            in witness,
+            in co_r3d_witness,
             "CO-R3D negative physical-evidence regressions must remain present",
         )
     # CO-R3E: preserve the original non-LACE orphan owner and its durable
@@ -853,21 +860,21 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # physical fact or authorize writer-bearing workspace retirement.
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
-        owner = (root / _CGROUP_OWNER).read_text(encoding="utf-8")
-        witness = (root / _R3E_TEST).read_text(encoding="utf-8")
-        tree = ast.parse(owner)
-        ast.parse(witness)
+        co_r3e_owner = (root / _CGROUP_OWNER).read_text(encoding="utf-8")
+        co_r3e_witness = (root / _R3E_TEST).read_text(encoding="utf-8")
+        co_r3e_tree = ast.parse(co_r3e_owner)
+        ast.parse(co_r3e_witness)
     except (OSError, SyntaxError) as exc:
         issues.append(
             Violation(root / _R3E_TEST, f"CO-R3E original recovery witness unavailable: {exc}")
         )
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3e_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3e_core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3e_durable_cgroup_recovery.py",
                     "../scripts/tests/test_co_r3e_original_recovery_architecture.py",
@@ -875,15 +882,8 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             ),
             "CO-R3E must run inside original QENV1 CORE",
         )
-        write = _method(tree, None, "_write_resource_lease")
-        reconcile = _method(tree, None, "_reconcile_stale_cgroups")
-        actions = (
-            "_require_original_cgroup",
-            "_kill_cgroup",
-            "_wait_for_cgroup_empty",
-            "_remove_cgroup",
-        )
-        calls = [next(iter(_calls(reconcile, name)), None) for name in actions] if reconcile else []
+        write = _method(co_r3e_tree, None, "_write_resource_lease")
+        reconcile = _method(co_r3e_tree, None, "_reconcile_stale_cgroups")
         require(
             _CGROUP_OWNER,
             reconcile is not None
@@ -897,24 +897,24 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
                     "remove_file_durably",
                 )
             )
-            and '"lace_intent" in payload' in owner
-            and "Fleet LACE-owned cgroup requires original journal recovery" in owner,
+            and '"lace_intent" in payload' in co_r3e_owner
+            and "Fleet LACE-owned cgroup requires original journal recovery" in co_r3e_owner,
             "CO-R3T supersedes CO-R3E PID-scavenge with identity-checked quarantine",
         )
         require(
             _CGROUP_OWNER,
             write is not None
             and len(_calls(write, "_require_original_cgroup")) == 1
-            and '"cgroup_dev": lease.cgroup_identity[0]' in owner
-            and '"cgroup_ino": lease.cgroup_identity[1]' in owner
-            and "type(device) is not int" in owner
-            and "type(inode) is not int" in owner,
+            and '"cgroup_dev": lease.cgroup_identity[0]' in co_r3e_owner
+            and '"cgroup_ino": lease.cgroup_identity[1]' in co_r3e_owner
+            and "type(device) is not int" in co_r3e_owner
+            and "type(inode) is not int" in co_r3e_owner,
             "CO-R3E durable original kernel identity cannot be stripped or weakened",
         )
         require(
             _R3E_TEST,
             all(
-                name in witness
+                name in co_r3e_witness
                 for name in (
                     "test_foreign_replacement_cannot_be_killed_or_removed",
                     "test_old_or_unpinned_orphan_fails_before_native_effect",
@@ -930,19 +930,19 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
         owner_tree = ast.parse((root / _CGROUP_OWNER).read_text(encoding="utf-8"))
-        witness = ast.parse((root / _R3F_TEST).read_text(encoding="utf-8"))
+        co_r3f_witness = ast.parse((root / _R3F_TEST).read_text(encoding="utf-8"))
         ast.parse((root / _R3F_GUARD).read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         issues.append(
             Violation(root / _R3F_TEST, f"CO-R3F original kernel-handle witness unavailable: {exc}")
         )
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3f_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3f_core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3f_cgroup_native_handle.py",
                     "../scripts/tests/test_co_r3f_handle_architecture.py",
@@ -953,7 +953,10 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         kill = _method(owner_tree, None, "_kill_cgroup")
         close = _method(owner_tree, "CgroupV2AttemptLease", "close")
         active_owners = (close,)
-        bound_calls = [next(iter(_calls(method, "_kill_cgroup")), None) for method in active_owners]
+        bound_calls = [
+            next(iter(_calls(method, "_kill_cgroup")), None) if method is not None else None
+            for method in active_owners
+        ]
         require(
             _CGROUP_OWNER,
             kill is not None
@@ -983,7 +986,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             and "O_NOFOLLOW" in ast.unparse(kill),
             "CO-R3F native kill must use original opened directory identity, not a new path",
         )
-        names = {node.name for node in witness.body if isinstance(node, ast.FunctionDef)}
+        names = {node.name for node in co_r3f_witness.body if isinstance(node, ast.FunctionDef)}
         require(
             _R3F_TEST,
             {
@@ -998,19 +1001,19 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # native directory handles. Linux rmdir is still not identity-conditional.
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
-        owner = (root / _CGROUP_OWNER).read_text(encoding="utf-8")
-        tree = ast.parse(owner)
-        witness = ast.parse((root / _R3G_TEST).read_text(encoding="utf-8"))
+        co_r3g_owner = (root / _CGROUP_OWNER).read_text(encoding="utf-8")
+        co_r3g_tree = ast.parse(co_r3g_owner)
+        co_r3g_witness = ast.parse((root / _R3G_TEST).read_text(encoding="utf-8"))
         ast.parse((root / _R3G_GUARD).read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         issues.append(Violation(root / _R3G_TEST, f"CO-R3G witness missing: {exc}"))
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3g_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3g_core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3g_bound_observation_removal.py",
                     "../scripts/tests/test_co_r3g_bound_observation_architecture.py",
@@ -1018,10 +1021,10 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             ),
             "CO-R3G must remain enrolled in original QENV1 CORE",
         )
-        wait = _method(tree, None, "_wait_for_cgroup_empty")
-        read = _method(tree, None, "_read_bound_cgroup_control")
-        remove = _method(tree, None, "_remove_cgroup")
-        close = _method(tree, "CgroupV2AttemptLease", "close")
+        wait = _method(co_r3g_tree, None, "_wait_for_cgroup_empty")
+        read = _method(co_r3g_tree, None, "_read_bound_cgroup_control")
+        remove = _method(co_r3g_tree, None, "_remove_cgroup")
+        close = _method(co_r3g_tree, "CgroupV2AttemptLease", "close")
         check_methods = (close,)
         require(
             _CGROUP_OWNER,
@@ -1056,7 +1059,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             ),
             "CO-R3G original removal must transport identity and use pinned parent handle",
         )
-        names = {node.name for node in witness.body if isinstance(node, ast.FunctionDef)}
+        names = {node.name for node in co_r3g_witness.body if isinstance(node, ast.FunctionDef)}
         require(
             _R3G_TEST,
             {
@@ -1075,20 +1078,20 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # fence cannot make Linux rmdir identity-conditional; physical LACE is open.
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
-        tree = ast.parse((root / _CGROUP_OWNER).read_text(encoding="utf-8"))
-        witness = ast.parse((root / _R3H_TEST).read_text(encoding="utf-8"))
+        co_r3h_tree = ast.parse((root / _CGROUP_OWNER).read_text(encoding="utf-8"))
+        co_r3h_witness = ast.parse((root / _R3H_TEST).read_text(encoding="utf-8"))
         ast.parse((root / _R3H_GUARD).read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         issues.append(
             Violation(root / _R3H_TEST, f"CO-R3H original inode evidence unavailable: {exc}")
         )
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3h_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3h_core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3h_original_inode_retirement.py",
                     "../scripts/tests/test_co_r3h_inode_retirement_architecture.py",
@@ -1096,7 +1099,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             ),
             "CO-R3H inode retirement witnesses must run in original CORE",
         )
-        remove = _method(tree, None, "_remove_cgroup")
+        remove = _method(co_r3h_tree, None, "_remove_cgroup")
         rmdirs = _calls(remove, "os.rmdir") if remove else []
         fstats = (
             [
@@ -1127,7 +1130,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             else False,
             "CO-R3H must positively verify original inode unlink after native removal",
         )
-        names = {node.name for node in witness.body if isinstance(node, ast.FunctionDef)}
+        names = {node.name for node in co_r3h_witness.body if isinstance(node, ast.FunctionDef)}
         require(
             _R3H_TEST,
             {
@@ -1143,19 +1146,19 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
         reaper = ast.parse((root / _R3I_REAPER).read_text(encoding="utf-8"))
-        witness = ast.parse((root / _R3I_TEST).read_text(encoding="utf-8"))
+        co_r3i_witness = ast.parse((root / _R3I_TEST).read_text(encoding="utf-8"))
         ast.parse((root / _R3I_GUARD).read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         issues.append(
             Violation(root / _R3I_REAPER, f"CO-R3I native LACE custody edge unavailable: {exc}")
         )
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3i_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3i_core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3i_original_lace_cgroup_custody.py",
                     "../scripts/tests/test_co_r3i_original_lace_custody_architecture.py",
@@ -1186,7 +1189,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             and not _calls(action, "os.rmdir"),
             "CO-R3I native LACE cleanup must retain original identity-bound cgroup effect",
         )
-        names = {node.name for node in witness.body if isinstance(node, ast.FunctionDef)}
+        names = {node.name for node in co_r3i_witness.body if isinstance(node, ast.FunctionDef)}
         require(
             _R3I_TEST,
             {
@@ -1202,20 +1205,20 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # exclusive kernel-enforced parent custody or identity-conditional deletion.
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
-        tree = ast.parse((root / _CGROUP_OWNER).read_text(encoding="utf-8"))
-        witness = ast.parse((root / _R3J_TEST).read_text(encoding="utf-8"))
+        co_r3j_tree = ast.parse((root / _CGROUP_OWNER).read_text(encoding="utf-8"))
+        co_r3j_witness = ast.parse((root / _R3J_TEST).read_text(encoding="utf-8"))
         ast.parse((root / _R3J_GUARD).read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         issues.append(
             Violation(root / _R3J_TEST, f"CO-R3J parent lineage boundary unavailable: {exc}")
         )
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3j_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3j_core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3j_original_parent_lineage.py",
                     "../scripts/tests/test_co_r3j_parent_lineage_architecture.py",
@@ -1223,8 +1226,8 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             ),
             "CO-R3J must run inside original QENV1 CORE",
         )
-        removal = _method(tree, None, "_remove_cgroup")
-        parent_guard = _method(tree, None, "_require_original_cgroup_parent")
+        removal = _method(co_r3j_tree, None, "_remove_cgroup")
+        parent_guard = _method(co_r3j_tree, None, "_require_original_cgroup_parent")
         guard_calls = _calls(removal, "_require_original_cgroup_parent") if removal else []
         require(
             _CGROUP_OWNER,
@@ -1240,7 +1243,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             and guard_calls[-1].lineno > _calls(removal, "os.rmdir")[0].lineno,
             "CO-R3J original removal must pin parent and fence pre/post native cut",
         )
-        names = {node.name for node in witness.body if isinstance(node, ast.FunctionDef)}
+        names = {node.name for node in co_r3j_witness.body if isinstance(node, ast.FunctionDef)}
         require(
             _R3J_TEST,
             {
@@ -1257,20 +1260,20 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # original-owner safety contract, not independently enforced parent custody.
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
-        tree = ast.parse((root / _CGROUP_OWNER).read_text(encoding="utf-8"))
-        witness = ast.parse((root / _R3K_TEST).read_text(encoding="utf-8"))
+        co_r3k_tree = ast.parse((root / _CGROUP_OWNER).read_text(encoding="utf-8"))
+        co_r3k_witness = ast.parse((root / _R3K_TEST).read_text(encoding="utf-8"))
         ast.parse((root / _R3K_GUARD).read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         issues.append(
             Violation(root / _R3K_TEST, f"CO-R3K prework owner boundary unavailable: {exc}")
         )
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3k_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3k_core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3k_prework_identity_rollback.py",
                     "../scripts/tests/test_co_r3k_prework_architecture.py",
@@ -1278,8 +1281,8 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             ),
             "CO-R3K original CORE prework witnesses must be enrolled once",
         )
-        opening = _method(tree, "CgroupV2AttemptLease", "open")
-        applying = _method(tree, None, "_apply_resource_limits")
+        opening = _method(co_r3k_tree, "CgroupV2AttemptLease", "open")
+        applying = _method(co_r3k_tree, None, "_apply_resource_limits")
         if opening is not None:
             identity = _calls(opening, "_exact_cgroup_identity")
             persist = _calls(opening, "_write_resource_lease")
@@ -1318,7 +1321,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             and not _calls(applying, "_write_limit"),
             "CO-R3K original controller effects must be directory-handle-bound",
         )
-        names = {node.name for node in witness.body if isinstance(node, ast.FunctionDef)}
+        names = {node.name for node in co_r3k_witness.body if isinstance(node, ast.FunctionDef)}
         require(
             _R3K_TEST,
             {
@@ -1335,19 +1338,19 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # No independent parent custody or physical LACE writer absence is asserted.
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
-        owner = ast.unparse(ast.parse((root / _CGROUP_OWNER).read_text(encoding="utf-8")))
+        co_r3l_owner = ast.unparse(ast.parse((root / _CGROUP_OWNER).read_text(encoding="utf-8")))
         launcher = (root / _R3L_LAUNCHER).read_text(encoding="utf-8")
-        witness = ast.parse((root / _R3L_TEST).read_text(encoding="utf-8"))
+        co_r3l_witness = ast.parse((root / _R3L_TEST).read_text(encoding="utf-8"))
         ast.parse((root / _R3L_GUARD).read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         issues.append(Violation(root / _R3L_TEST, f"CO-R3L bound attachment missing: {exc}"))
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3l_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3l_core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3l_bound_nested_attachment.py",
                     "../scripts/tests/test_co_r3l_bound_attachment_architecture.py",
@@ -1358,7 +1361,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         require(
             _CGROUP_OWNER,
             all(
-                token in owner
+                token in co_r3l_owner
                 for token in (
                     "nested_identity: tuple[int, int] | None",
                     "monitor_identity: tuple[int, int] | None",
@@ -1391,7 +1394,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             and launcher.count("move_process(monitor_root,") == 2,
             "CO-R3L nested launcher may not discard transported identity",
         )
-        names = {node.name for node in witness.body if isinstance(node, ast.FunctionDef)}
+        names = {node.name for node in co_r3l_witness.body if isinstance(node, ast.FunctionDef)}
         require(
             _R3L_TEST,
             {
@@ -1408,9 +1411,9 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # kernel inode from a pathname after crash. Pending records quarantine.
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
-        owner_source = (root / _CGROUP_OWNER).read_text(encoding="utf-8")
-        owner = ast.parse(owner_source)
-        witness = ast.parse((root / _R3M_TEST).read_text(encoding="utf-8"))
+        co_r3m_owner_source = (root / _CGROUP_OWNER).read_text(encoding="utf-8")
+        co_r3m_owner = ast.parse(co_r3m_owner_source)
+        co_r3m_witness = ast.parse((root / _R3M_TEST).read_text(encoding="utf-8"))
         ast.parse((root / _R3M_GUARD).read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         issues.append(
@@ -1419,12 +1422,12 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             )
         )
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3m_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
             all(
-                core.count(name) == 1
+                co_r3m_core.count(name) == 1
                 for name in (
                     "tests/unit/integrations/test_co_r3m_pending_cgroup_allocation.py",
                     "../scripts/tests/test_co_r3m_pending_allocation_architecture.py",
@@ -1432,10 +1435,10 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             ),
             "CO-R3M original CORE pending allocation witnesses must be enrolled once",
         )
-        opening = _method(owner, "CgroupV2AttemptLease", "open")
-        pending = _method(owner, None, "_write_pending_resource_lease")
-        publishing = _method(owner, None, "_write_resource_lease")
-        recovery = _method(owner, None, "_reconcile_stale_cgroups")
+        opening = _method(co_r3m_owner, "CgroupV2AttemptLease", "open")
+        pending = _method(co_r3m_owner, None, "_write_pending_resource_lease")
+        publishing = _method(co_r3m_owner, None, "_write_resource_lease")
+        recovery = _method(co_r3m_owner, None, "_reconcile_stale_cgroups")
         if opening is None:
             require(_CGROUP_OWNER, False, "CO-R3M original allocation owner absent")
         else:
@@ -1471,7 +1474,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             and "if phase != 'identity_bound'" in ast.unparse(recovery),
             "CO-R3M unresolved allocation cannot be scavenged by PID/name",
         )
-        names = {node.name for node in witness.body if isinstance(node, ast.FunctionDef)}
+        names = {node.name for node in co_r3m_witness.body if isinstance(node, ast.FunctionDef)}
         require(
             _R3M_TEST,
             {
@@ -1488,18 +1491,18 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
         native_text = (root / _R3N_TEST).read_text(encoding="utf-8")
-        witness = ast.parse(native_text)
-        native_text = ast.unparse(witness)
+        co_r3n_witness = ast.parse(native_text)
+        native_text = ast.unparse(co_r3n_witness)
         ast.parse((root / _R3N_GUARD).read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         issues.append(Violation(root / _R3N_TEST, f"CO-R3N native witness unavailable: {exc}"))
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# AG-02B1", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3n_core = core_parts[1].split("\n# AG-02B1", 1)[0] if len(core_parts) == 2 else ""
         require(
             _R3_QUALIFIER,
-            core.count("../scripts/tests/test_co_r3n_native_cgroup_qualification.py") == 1
-            and core.count('"${r3n_native_tests[@]}"') == 1
+            co_r3n_core.count("../scripts/tests/test_co_r3n_native_cgroup_qualification.py") == 1
+            and co_r3n_core.count('"${r3n_native_tests[@]}"') == 1
             and shell.count(
                 "r3n_native_tests+=(tests/native/test_co_r3n_native_cgroup_v2_witness.py)"
             )
@@ -1515,7 +1518,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             ),
             "CO-R3N must remain opt-in, honest and enrolled exactly once in original CORE",
         )
-        names = {node.name for node in witness.body if isinstance(node, ast.FunctionDef)}
+        names = {node.name for node in co_r3n_witness.body if isinstance(node, ast.FunctionDef)}
         require(
             _R3N_TEST,
             {
@@ -1537,7 +1540,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             "CO-R3N missing original native effect and fail-closed pending crash proofs",
         )
         original_teardown = _method(
-            witness, None, "test_real_cgroup_v2_original_process_attachment_and_teardown"
+            co_r3n_witness, None, "test_real_cgroup_v2_original_process_attachment_and_teardown"
         )
         require(
             _R3N_TEST,
@@ -1549,18 +1552,22 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     try:
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
         witness_text = (root / _R3N_TEST).read_text(encoding="utf-8")
-        witness = ast.parse(witness_text)
+        co_r3o_witness = ast.parse(witness_text)
         ast.parse((root / _R3O_GUARD).read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         issues.append(Violation(root / _R3O_GUARD, f"CO-R3O original witness unavailable: {exc}"))
     else:
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3o_core = (
+            core_parts[1].split("\n# Do not promote REQUESTED", 1)[0]
+            if len(core_parts) == 2
+            else ""
+        )
         require(
             _R3_QUALIFIER,
             (
-                core.count("../scripts/tests/test_co_r3o_native_witness_contract.py") == 1
-                and core.count('"${r3n_native_tests[@]}"') == 1
+                co_r3o_core.count("../scripts/tests/test_co_r3o_native_witness_contract.py") == 1
+                and co_r3o_core.count('"${r3n_native_tests[@]}"') == 1
                 and shell.count("--require-module test_co_r3n_native_cgroup_v2_witness") == 1
                 and shell.count("R3O_NATIVE_STATUS.txt") == 4
                 and "status=NOT_PROVEN" in shell
@@ -1575,7 +1582,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             ),
             "CO-R3O native evidence must be CORE-supervised, completed and fail-closed",
         )
-        names = {node.name for node in witness.body if isinstance(node, ast.FunctionDef)}
+        names = {node.name for node in co_r3o_witness.body if isinstance(node, ast.FunctionDef)}
         require(
             _R3N_TEST,
             {
@@ -1598,8 +1605,8 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # CO-R3P: original physical resource reservation must consult the SAME
     # durable signer epoch and original signed Run lineage at its write cut.
     try:
-        lifecycle = sources[_LIFECYCLE]
-        method = _method(lifecycle, "FleetRunLifecycle", "require_execution_authority_in")
+        co_r3p_lifecycle = sources[_LIFECYCLE]
+        method = _method(co_r3p_lifecycle, "FleetRunLifecycle", "require_execution_authority_in")
         guard = ast.parse((root / _R3P_GUARD).read_text(encoding="utf-8"))
         tests = ast.parse((root / _R3P_TEST).read_text(encoding="utf-8"))
         shell = (root / _R3_QUALIFIER).read_text(encoding="utf-8")
@@ -1608,7 +1615,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             Violation(root / _R3P_GUARD, f"CO-R3P original effect fence unavailable: {exc}")
         )
     else:
-        calls = (
+        called_names = (
             []
             if method is None
             else [_name(call.func) for call in ast.walk(method) if isinstance(call, ast.Call)]
@@ -1616,12 +1623,12 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         require(
             _LIFECYCLE,
             method is not None
-            and calls.count("SignerTrustEpochAuthority") >= 2
+            and called_names.count("SignerTrustEpochAuthority") >= 2
             and "SignerTrustEpochAuthority(connection).require_in" in ast.unparse(method)
-            and "require_original_admitted_signer_epoch_in" in calls
-            and "binding.configured.require_unchanged" in calls
-            and "self._fleet_provisioner.resolve" in calls
-            and "deployment_signer_policy_snapshot" in calls
+            and "require_original_admitted_signer_epoch_in" in called_names
+            and "binding.configured.require_unchanged" in called_names
+            and "self._fleet_provisioner.resolve" in called_names
+            and "deployment_signer_policy_snapshot" in called_names
             and "current != expected" in ast.unparse(method),
             "CO-R3P original live physical-effect cut must reprove signed and durable signer epoch",
         )
@@ -1649,12 +1656,19 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             >= 2,
             "CO-R3P architecture mutations must remain active",
         )
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3p_core = (
+            core_parts[1].split("\n# Do not promote REQUESTED", 1)[0]
+            if len(core_parts) == 2
+            else ""
+        )
         require(
             _R3_QUALIFIER,
-            core.count("tests/unit/services/test_co_r3p_original_fleet_effect_revocation.py") == 1
-            and core.count("../scripts/tests/test_co_r3p_original_effect_epoch_architecture.py")
+            co_r3p_core.count("tests/unit/services/test_co_r3p_original_fleet_effect_revocation.py")
+            == 1
+            and co_r3p_core.count(
+                "../scripts/tests/test_co_r3p_original_effect_epoch_architecture.py"
+            )
             == 1
             and shell.count(
                 "if [[ -f .checkpoint/CO_R3P_SOURCE.sha256 ]]; then embedded='.checkpoint/CO_R3P_SOURCE.sha256'; fi"
@@ -1665,10 +1679,10 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
     # CO-R3Q: the SAME original live signer/lease/intent authority must be
     # rechecked at BOTH post-reservation native-effect handoff boundaries.
     source = root / "backend/src/oh_goon/integrations/fleet_plan_bubblewrap_isolation.py"
-    owner_source = root / "backend/src/oh_goon/runtime/enforcer_lace_fleet_resource_owner.py"
+    co_r3q_owner_source = root / "backend/src/oh_goon/runtime/enforcer_lace_fleet_resource_owner.py"
     try:
         backend_tree = ast.parse(source.read_text(encoding="utf-8"))
-        owner_tree = ast.parse(owner_source.read_text(encoding="utf-8"))
+        owner_tree = ast.parse(co_r3q_owner_source.read_text(encoding="utf-8"))
         owner_method = _method(
             owner_tree, "OriginalFleetLocalLaceReservation", "require_effect_authority"
         )
@@ -1700,7 +1714,7 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         )
         owner_text = "" if owner_method is None else ast.unparse(owner_method)
         require(
-            owner_source,
+            co_r3q_owner_source,
             owner_method is not None
             and "self.validate_authority_in(connection)" in owner_text
             and owner_text.count("self.validate_authority_in(connection)") == 2
@@ -1733,12 +1747,16 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
             >= 1,
             "CO-R3Q X0 negative mutation guard missing",
         )
-        core = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
-        core = core[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core) == 2 else ""
+        core_parts = shell.split("run_ring CORE " + chr(92) + chr(10), 1)
+        co_r3q_core = (
+            core_parts[1].split("\n# Do not promote REQUESTED", 1)[0]
+            if len(core_parts) == 2
+            else ""
+        )
         require(
             root / _R3_QUALIFIER,
-            core.count("tests/unit/services/test_co_r3q_effect_revalidation.py") == 1
-            and core.count("../scripts/tests/test_co_r3q_effect_architecture.py") == 1
+            co_r3q_core.count("tests/unit/services/test_co_r3q_effect_revalidation.py") == 1
+            and co_r3q_core.count("../scripts/tests/test_co_r3q_effect_architecture.py") == 1
             and shell.count(
                 "if [[ -f .checkpoint/CO_R3Q_SOURCE.sha256 ]]; then embedded='.checkpoint/CO_R3Q_SOURCE.sha256'; fi"
             )
@@ -1755,15 +1773,15 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
 
 
 def check_co_r3r_visibility(root: Path = ROOT) -> list[Violation]:
-    owner = root / "backend/src/oh_goon/integrations/linux_physical_observer.py"
+    co_r3r_owner = root / "backend/src/oh_goon/integrations/linux_physical_observer.py"
     test = root / "scripts/tests/test_co_r3r_visible_holder_race.py"
-    native = root / "backend/tests/native/test_co_r3r_real_visible_holder.py"
+    co_r3r_native = root / "backend/tests/native/test_co_r3r_real_visible_holder.py"
     guard = root / "scripts/tests/test_co_r3r_observer_architecture.py"
     shell = root / _R3_QUALIFIER
     issues: list[Violation] = []
     try:
-        tree = ast.parse(owner.read_text(encoding="utf-8"))
-        method = _method(tree, None, "_visible_foreign_mount_targets")
+        co_r3r_tree = ast.parse(co_r3r_owner.read_text(encoding="utf-8"))
+        method = _method(co_r3r_tree, None, "_visible_foreign_mount_targets")
         source = "" if method is None else ast.unparse(method)
         census = (
             [
@@ -1779,11 +1797,15 @@ def check_co_r3r_visibility(root: Path = ROOT) -> list[Violation]:
             else []
         )
         tests = ast.parse(test.read_text(encoding="utf-8"))
-        native_tests = ast.parse(native.read_text(encoding="utf-8"))
+        native_tests = ast.parse(co_r3r_native.read_text(encoding="utf-8"))
         guard_tests = ast.parse(guard.read_text(encoding="utf-8"))
         selection = shell.read_text(encoding="utf-8")
     except (OSError, SyntaxError) as exc:
-        return [Violation(owner, f"CO-R3R original observer/qualification evidence missing: {exc}")]
+        return [
+            Violation(
+                co_r3r_owner, f"CO-R3R original observer/qualification evidence missing: {exc}"
+            )
+        ]
     if (
         len(census) < 2
         or source.count("final_pids") < 2
@@ -1794,7 +1816,8 @@ def check_co_r3r_visibility(root: Path = ROOT) -> list[Violation]:
     ):
         issues.append(
             Violation(
-                owner, "CO-R3R original foreign mount scan must reject a changed final PID roster"
+                co_r3r_owner,
+                "CO-R3R original foreign mount scan must reject a changed final PID roster",
             )
         )
     names = {n.name for n in tests.body if isinstance(n, ast.FunctionDef)}
@@ -1812,19 +1835,21 @@ def check_co_r3r_visibility(root: Path = ROOT) -> list[Violation]:
         isinstance(n, ast.FunctionDef) and n.name.startswith("test_detached_session_")
         for n in native_tests.body
     ):
-        issues.append(Violation(native, "CO-R3R real-host FD holder test absent"))
+        issues.append(Violation(co_r3r_native, "CO-R3R real-host FD holder test absent"))
     if not any(
         isinstance(n, ast.FunctionDef) and n.name.startswith("test_") for n in guard_tests.body
     ):
         issues.append(Violation(guard, "CO-R3R observer mutation guard absent"))
-    core = selection.split("run_ring CORE " + chr(92) + chr(10), 1)
-    core = core[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core) == 2 else ""
+    core_parts = selection.split("run_ring CORE " + chr(92) + chr(10), 1)
+    co_r3r_core = (
+        core_parts[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core_parts) == 2 else ""
+    )
     for path in (
         "../scripts/tests/test_co_r3r_visible_holder_race.py",
         "../scripts/tests/test_co_r3r_observer_architecture.py",
         "tests/native/test_co_r3r_real_visible_holder.py",
     ):
-        if core.count(path) != 1:
+        if co_r3r_core.count(path) != 1:
             issues.append(Violation(shell, f"CO-R3R CORE witness missing or duplicated: {path}"))
     if (
         selection.count(
@@ -1838,22 +1863,24 @@ def check_co_r3r_visibility(root: Path = ROOT) -> list[Violation]:
 
 def check_co_r3s_observation(root: Path = ROOT) -> list[Violation]:
     """Keep CO-R3S handle-bound diagnostic observation and CORE evidence."""
-    owner = root / "backend/src/oh_goon/integrations/linux_physical_observer.py"
+    co_r3r_owner = root / "backend/src/oh_goon/integrations/linux_physical_observer.py"
     shell = root / _R3_QUALIFIER
     tests = root / "scripts/tests/test_co_r3s_pinned_cgroup_observation.py"
     guard = root / "scripts/tests/test_co_r3s_architecture.py"
     issues: list[Violation] = []
     try:
-        tree = ast.parse(owner.read_text(encoding="utf-8"))
-        observed = _method(tree, None, "_cgroup")
-        reader = _method(tree, None, "_read_observed_cgroup_control")
+        co_r3r_tree = ast.parse(co_r3r_owner.read_text(encoding="utf-8"))
+        observed = _method(co_r3r_tree, None, "_cgroup")
+        reader = _method(co_r3r_tree, None, "_read_observed_cgroup_control")
         test_tree = ast.parse(tests.read_text(encoding="utf-8"))
         guard_tree = ast.parse(guard.read_text(encoding="utf-8"))
         selection = shell.read_text(encoding="utf-8")
         source = "" if observed is None else ast.unparse(observed)
         control = "" if reader is None else ast.unparse(reader)
     except (OSError, SyntaxError) as exc:
-        return [Violation(owner, f"CO-R3S original cgroup observation evidence missing: {exc}")]
+        return [
+            Violation(co_r3r_owner, f"CO-R3S original cgroup observation evidence missing: {exc}")
+        ]
     if not (
         source.count("_read_observed_cgroup_control(") == 2
         and "os.fstat(directory_fd)" in source
@@ -1863,7 +1890,7 @@ def check_co_r3s_observation(root: Path = ROOT) -> list[Violation]:
     ):
         issues.append(
             Violation(
-                owner,
+                co_r3r_owner,
                 "CO-R3S original cgroup must pin directory and reverify identity after observations",
             )
         )
@@ -1877,7 +1904,8 @@ def check_co_r3s_observation(root: Path = ROOT) -> list[Violation]:
     ):
         issues.append(
             Violation(
-                owner, "CO-R3S both original kernel controls must be handle-bound and bounded"
+                co_r3r_owner,
+                "CO-R3S both original kernel controls must be handle-bound and bounded",
             )
         )
     names = {n.name for n in test_tree.body if isinstance(n, ast.FunctionDef)}
@@ -1893,15 +1921,20 @@ def check_co_r3s_observation(root: Path = ROOT) -> list[Violation]:
         isinstance(n, ast.FunctionDef) and n.name.startswith("test_") for n in guard_tree.body
     ):
         issues.append(Violation(guard, "CO-R3S X0 mutation guard missing"))
-    core = selection.split("run_ring CORE " + chr(92) + chr(10), 1)
-    core = core[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core) == 2 else ""
+    core_parts = selection.split("run_ring CORE " + chr(92) + chr(10), 1)
+    co_r3r_core = (
+        core_parts[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core_parts) == 2 else ""
+    )
     for path in (
         "../scripts/tests/test_co_r3s_pinned_cgroup_observation.py",
         "../scripts/tests/test_co_r3s_architecture.py",
     ):
-        if core.count(path) != 1:
+        if co_r3r_core.count(path) != 1:
             issues.append(
-                Violation(shell, f"CO-R3S original CORE witness missing or duplicated: {path}")
+                Violation(
+                    shell,
+                    f"CO-R3S original CORE witness missing or duplicated: {path}",
+                )
             )
     marker = "if [[ -f .checkpoint/CO_R3S_SOURCE.sha256 ]]; then embedded='.checkpoint/CO_R3S_SOURCE.sha256'; fi"
     if selection.count(marker) != 1:
@@ -1925,8 +1958,8 @@ def check_co_r3t_no_legacy_pid_scavenging(root: Path = ROOT) -> list[Violation]:
     ):
         path = root / relative
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            original = _method(tree, None, function)
+            co_r3r_tree = ast.parse(path.read_text(encoding="utf-8"))
+            original = _method(co_r3r_tree, None, function)
         except (SyntaxError, OSError):
             original = None
         if original is None:
@@ -1951,16 +1984,19 @@ def check_co_r3t_no_legacy_pid_scavenging(root: Path = ROOT) -> list[Violation]:
             )
     shell = root / _R3_QUALIFIER
     selection = shell.read_text(encoding="utf-8") if shell.is_file() else ""
-    core = selection.split("run_ring CORE " + chr(92) + chr(10), 1)
-    core = core[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core) == 2 else ""
+    core_parts = selection.split("run_ring CORE " + chr(92) + chr(10), 1)
+    co_r3r_core = (
+        core_parts[1].split("\n# Do not promote REQUESTED", 1)[0] if len(core_parts) == 2 else ""
+    )
     for name in (
         "tests/unit/integrations/test_co_r3t_legacy_orphan_fail_before_effect.py",
         "../scripts/tests/test_co_r3t_legacy_custody_architecture.py",
     ):
-        if core.count(name) != 1:
+        if co_r3r_core.count(name) != 1:
             issues.append(
                 Violation(
-                    shell, f"CO-R3T CORE required original test missing or duplicated: {name}"
+                    shell,
+                    f"CO-R3T CORE required original test missing or duplicated: {name}",
                 )
             )
     marker = "if [[ -f .checkpoint/CO_R3T_SOURCE.sha256 ]]; then embedded='.checkpoint/CO_R3T_SOURCE.sha256'; fi"

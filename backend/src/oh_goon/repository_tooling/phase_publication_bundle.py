@@ -6,11 +6,38 @@ import argparse
 import hashlib
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TypedDict
 
 SCHEMA = "oh-goon.phase-publication/v1"
 COMMIT_SCHEMA = "oh-goon.phase-publication-commit/v1"
 ROLES = ("candidate", "parent_patch", "handoff", "checksums")
+
+
+class ArtifactMetadata(TypedDict):
+    name: str
+    sha256: str
+    bytes: int
+
+
+class PublicationManifest(TypedDict):
+    schema: str
+    phase: str
+    parent: str
+    state: str
+    artifacts: dict[str, ArtifactMetadata]
+
+
+class PublicationCommit(PublicationManifest):
+    manifest: ArtifactMetadata
+
+
+class PublicationDiscovery(TypedDict):
+    phase: str
+    parent: str
+    directory: str
+    commit: str
 
 
 def digest(path: Path) -> str:
@@ -21,12 +48,12 @@ def digest(path: Path) -> str:
     return h.hexdigest()
 
 
-def canonical_bytes(data: dict) -> bytes:
+def canonical_bytes(data: Mapping[str, object]) -> bytes:
     return (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
-def build(directory: Path, phase: str, parent: str, names: dict[str, str]) -> dict:
-    artifacts = {}
+def build(directory: Path, phase: str, parent: str, names: dict[str, str]) -> PublicationManifest:
+    artifacts: dict[str, ArtifactMetadata] = {}
     for role in ROLES:
         path = directory / names[role]
         if not path.is_file():
@@ -51,7 +78,7 @@ def _artifact_issues(directory: Path, role: str, meta: object) -> list[str]:
     path = directory / meta.get("name", "")
     if not path.is_file():
         return [f"missing persisted artifact: {role}"]
-    issues = []
+    issues: list[str] = []
     if path.stat().st_size != meta.get("bytes"):
         issues.append(f"byte-size mismatch: {role}")
     if digest(path) != meta.get("sha256"):
@@ -59,8 +86,8 @@ def _artifact_issues(directory: Path, role: str, meta: object) -> list[str]:
     return issues
 
 
-def verify(directory: Path, manifest: dict) -> list[str]:
-    issues = []
+def verify(directory: Path, manifest: PublicationManifest) -> list[str]:
+    issues: list[str] = []
     checks = (
         (manifest.get("schema") != SCHEMA, "unsupported schema"),
         (manifest.get("state") != "staged", "manifest is not staged"),
@@ -75,7 +102,9 @@ def verify(directory: Path, manifest: dict) -> list[str]:
     return issues
 
 
-def build_commit(directory: Path, manifest_path: Path, manifest: dict) -> dict:
+def build_commit(
+    directory: Path, manifest_path: Path, manifest: PublicationManifest
+) -> PublicationCommit:
     issues = verify(directory, manifest)
     if issues:
         raise ValueError("; ".join(issues))
@@ -96,14 +125,16 @@ def build_commit(directory: Path, manifest_path: Path, manifest: dict) -> dict:
     }
 
 
-def _load_bound_manifest(directory: Path, meta: object) -> tuple[dict | None, list[str]]:
+def _load_bound_manifest(
+    directory: Path, meta: object
+) -> tuple[PublicationManifest | None, list[str]]:
     if not isinstance(meta, dict):
         return None, ["commit manifest binding is missing"]
     path = directory / meta.get("name", "")
     if not path.is_file():
         return None, ["committed manifest is missing"]
     raw = path.read_bytes()
-    issues = []
+    issues: list[str] = []
     if len(raw) != meta.get("bytes"):
         issues.append("committed manifest byte-size mismatch")
     if hashlib.sha256(raw).hexdigest() != meta.get("sha256"):
@@ -114,8 +145,8 @@ def _load_bound_manifest(directory: Path, meta: object) -> tuple[dict | None, li
         return None, issues + ["committed manifest is invalid JSON"]
 
 
-def verify_commit(directory: Path, commit: dict) -> list[str]:
-    issues = []
+def verify_commit(directory: Path, commit: PublicationCommit) -> list[str]:
+    issues: list[str] = []
     checks = (
         (commit.get("schema") != COMMIT_SCHEMA, "unsupported commit schema"),
         (commit.get("state") != "committed", "publication is not committed"),
@@ -140,7 +171,7 @@ def version_key(value: str) -> tuple[int, ...]:
         raise ValueError(f"invalid numeric phase version: {value}") from exc
 
 
-def _committed_candidate(directory: Path) -> tuple[str, dict] | None:
+def _committed_candidate(directory: Path) -> tuple[str, PublicationCommit] | None:
     commits = sorted(directory.glob("OH-GOON-*-AUTHORITY-COMMIT.json"))
     if not commits:
         return None
@@ -156,10 +187,10 @@ def _committed_candidate(directory: Path) -> tuple[str, dict] | None:
     return phase, record
 
 
-def discover(archive: Path) -> dict:
+def discover(archive: Path) -> PublicationDiscovery:
     if not archive.is_dir():
         raise ValueError(f"archive directory does not exist: {archive}")
-    valid: list[tuple[tuple[int, ...], Path, dict]] = []
+    valid: list[tuple[tuple[int, ...], Path, PublicationCommit]] = []
     seen: dict[str, Path] = {}
     for directory in sorted(path for path in archive.iterdir() if path.is_dir()):
         candidate = _committed_candidate(directory)
@@ -183,7 +214,7 @@ def discover(archive: Path) -> dict:
     }
 
 
-def write_create_only(path: Path, data: dict) -> None:
+def write_create_only(path: Path, data: Mapping[str, object]) -> None:
     payload = canonical_bytes(data)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     fd = os.open(path, flags, 0o644)

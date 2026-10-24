@@ -6,7 +6,9 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceStale
 from oh_goon.core.models.goon_plan_source import SharedPlanSource
+from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.schedule import ScheduleCreate
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.runtime.shared_plans import SharedPlanFileStore
 from oh_goon.services.shared_plan_schedules import SharedPlanScheduleService
 from tests.factories.fleet_plan_targets import structural_fleet_plan_target
@@ -16,24 +18,28 @@ ROOT = Path(__file__).resolve().parents[4]
 STARTER = ROOT / "templates" / "plans" / "python" / "quality" / "plan.yml"
 
 
+def _repository(tmp_path: Path) -> RepositoryIdentity:
+    path = tmp_path / "repository"
+    path.mkdir()
+    return RepositoryIdentity(path=path)
+
+
 def test_create_resolves_shared_plan_in_backend_and_freezes_exact_source(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    expected_instance = repository_subject_instance_id(repository.path)
     store = SharedPlanFileStore(tmp_path / "plans")
     document = store.write("python-quality", STARTER.read_text(encoding="utf-8"))
     resolved = scheduled_plan("quality")
-    league = SimpleNamespace(
-        repositories=Mock(
-            return_value=(
-                SimpleNamespace(repository_id="repo-a", repository_instance_id="instance-repo-a"),
-            )
-        )
-    )
+    league = SimpleNamespace(repositories=Mock(return_value=(repository,)))
     target = structural_fleet_plan_target(
         resolved,
         source=SharedPlanSource(plan_key="python-quality", sha256=document.sha256),
     )
     plans = SimpleNamespace(
         prepare_reviewed_execution_target=Mock(return_value=target),
-        repository_instance_ids_for_target=Mock(return_value={"repo-a": "instance-repo-a"}),
+        repository_instance_ids_for_target=Mock(
+            return_value={repository.repository_id: expected_instance}
+        ),
     )
     created = Mock(name="created")
     schedules = SimpleNamespace(create_prepared=Mock(return_value=created))
@@ -42,8 +48,8 @@ def test_create_resolves_shared_plan_in_backend_and_freezes_exact_source(tmp_pat
     result = service.create(
         "nightly-quality",
         name="Nightly quality",
-        repository_ids={"repo-a"},
-        expected_repository_instance_ids={"repo-a": "instance-repo-a"},
+        repository_ids={repository.repository_id},
+        expected_repository_instance_ids={repository.repository_id: expected_instance},
         plan_key="python-quality",
         expected_plan_revision=document.sha256,
         expected_plan_id="reviewed-plan-id",
@@ -64,8 +70,8 @@ def test_create_resolves_shared_plan_in_backend_and_freezes_exact_source(tmp_pat
         "nightly-quality",
         ScheduleCreate(
             name="Nightly quality",
-            repository_ids=("repo-a",),
-            repository_instance_ids={"repo-a": "instance-repo-a"},
+            repository_ids=(repository.repository_id,),
+            repository_instance_ids={repository.repository_id: expected_instance},
             target=target,
             interval_minutes=60,
         ),
@@ -73,6 +79,8 @@ def test_create_resolves_shared_plan_in_backend_and_freezes_exact_source(tmp_pat
 
 
 def test_create_rejects_repository_outside_current_league(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    expected_instance = repository_subject_instance_id(repository.path)
     store = SharedPlanFileStore(tmp_path / "plans")
     store.write("python-quality", STARTER.read_text(encoding="utf-8"))
     plans = SimpleNamespace(prepare_reviewed_execution_target=Mock())
@@ -88,8 +96,8 @@ def test_create_rejects_repository_outside_current_league(tmp_path: Path) -> Non
         service.create(
             "nightly-quality",
             name="Nightly quality",
-            repository_ids={"repo-a"},
-            expected_repository_instance_ids={"repo-a": "instance-repo-a"},
+            repository_ids={repository.repository_id},
+            expected_repository_instance_ids={repository.repository_id: expected_instance},
             plan_key="python-quality",
             expected_plan_revision=store.read("python-quality").sha256,
             expected_plan_id="reviewed-plan-id",
@@ -102,19 +110,14 @@ def test_create_rejects_repository_outside_current_league(tmp_path: Path) -> Non
 
 
 def test_create_rejects_repository_instance_changed_after_schedule_review(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
     store = SharedPlanFileStore(tmp_path / "plans")
     document = store.write("python-quality", STARTER.read_text(encoding="utf-8"))
     plans = SimpleNamespace(prepare_reviewed_execution_target=Mock())
     schedules = SimpleNamespace(create_prepared=Mock())
     service = SharedPlanScheduleService(
         store,
-        SimpleNamespace(
-            repositories=Mock(
-                return_value=(
-                    SimpleNamespace(repository_id="repo-a", repository_instance_id="instance-new"),
-                )
-            )
-        ),
+        SimpleNamespace(repositories=Mock(return_value=(repository,))),
         plans,
         schedules,
     )
@@ -123,8 +126,8 @@ def test_create_rejects_repository_instance_changed_after_schedule_review(tmp_pa
         service.create(
             "nightly-quality",
             name="Nightly quality",
-            repository_ids={"repo-a"},
-            expected_repository_instance_ids={"repo-a": "instance-reviewed"},
+            repository_ids={repository.repository_id},
+            expected_repository_instance_ids={repository.repository_id: "instance-reviewed"},
             plan_key="python-quality",
             expected_plan_revision=document.sha256,
             expected_plan_id="reviewed-plan-id",
@@ -137,6 +140,8 @@ def test_create_rejects_repository_instance_changed_after_schedule_review(tmp_pa
 
 
 def test_create_rejects_plan_changed_after_schedule_review(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    expected_instance = repository_subject_instance_id(repository.path)
     store = SharedPlanFileStore(tmp_path / "plans")
     reviewed = store.write("python-quality", STARTER.read_text(encoding="utf-8"))
     store.write(
@@ -148,15 +153,7 @@ def test_create_rejects_plan_changed_after_schedule_review(tmp_path: Path) -> No
     schedules = SimpleNamespace(create_prepared=Mock())
     service = SharedPlanScheduleService(
         store,
-        SimpleNamespace(
-            repositories=Mock(
-                return_value=(
-                    SimpleNamespace(
-                        repository_id="repo-a", repository_instance_id="instance-repo-a"
-                    ),
-                )
-            )
-        ),
+        SimpleNamespace(repositories=Mock(return_value=(repository,))),
         plans,
         schedules,
     )
@@ -165,8 +162,8 @@ def test_create_rejects_plan_changed_after_schedule_review(tmp_path: Path) -> No
         service.create(
             "nightly-quality",
             name="Nightly quality",
-            repository_ids={"repo-a"},
-            expected_repository_instance_ids={"repo-a": "instance-repo-a"},
+            repository_ids={repository.repository_id},
+            expected_repository_instance_ids={repository.repository_id: expected_instance},
             plan_key="python-quality",
             expected_plan_revision=reviewed.sha256,
             expected_plan_id="reviewed-plan-id",

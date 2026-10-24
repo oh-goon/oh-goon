@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.path_authority import (
@@ -16,7 +16,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessReq
 @dataclass(frozen=True, slots=True)
 class SandboxProcessLaunch:
     argv: tuple[str, ...]
-    cwd: Path
+    cwd: PurePosixPath
     env: dict[str, str]
 
 

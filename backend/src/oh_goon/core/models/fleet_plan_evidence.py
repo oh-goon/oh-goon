@@ -53,7 +53,7 @@ class PlanContentObjectEvidence(ImmutableModel):
     byte_count: int = Field(ge=0)
     entry_count: int = Field(ge=0)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def object_id(self) -> str:
         return f"{self.kind}-sha256-{self.sha256}"
@@ -119,7 +119,7 @@ class RequirementsRepositoryAdmissionEvidence(ImmutableModel):
     requirements_id: str = Field(min_length=1)
     requirement_count: RequirementCount
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def validation_id(self) -> str:
         return stable_id("cicd-repository-admission", repository_admission_payload(self))
@@ -188,7 +188,7 @@ class PlanExecutionInputEvidence(ImmutableModel):
             raise ValueError("Fleet host-tool authority must be unique and sorted by logical name")
         return value
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def host_toolchain_id(self) -> str:
         return stable_id(
@@ -199,7 +199,7 @@ class PlanExecutionInputEvidence(ImmutableModel):
             ],
         )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def input_id(self) -> str:
         return stable_id("plan-execution-input", execution_input_payload(self))
@@ -217,7 +217,7 @@ class PlanEgressEvidence(ImmutableModel):
     mode: Literal["none", "cidr_allowlist", "hostname_allowlist", "host_unrestricted"]
     rules: tuple[PlanEgressRuleEvidence, ...] = Field(default_factory=tuple)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def policy_id(self) -> str:
         return stable_id("plan-egress", egress_payload(self))
@@ -242,7 +242,7 @@ class PlanResourceEvidence(ImmutableModel):
     pids_peak: int | None = Field(default=None, ge=0)
     oom_kill_count: int | None = Field(default=None, ge=0)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def policy_id(self) -> str:
         return stable_id("plan-resource-policy", resource_policy_payload(self))
@@ -313,7 +313,9 @@ class PlanExecutionSupervisorEvidence(ImmutableModel):
 
     leader_exited_before_group_quiescence: bool = False
     process_group_cleanup_requested: bool = False
-    cleanup_reason: Literal["none", "timeout", "cancel", "output_cleanup", "output_limit"] = "none"
+    cleanup_reason: Literal[
+        "none", "timeout", "cancel", "authority", "output_cleanup", "output_limit"
+    ] = "none"
     final_process_group_quiescent: bool | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -400,7 +402,11 @@ class _PlanStepExecutionBase(ImmutableModel):
     def validate_timing(self) -> _PlanStepExecutionBase:
         if (self.started_at is None) != (self.finished_at is None):
             raise ValueError("Fleet plan step timing requires both start and finish")
-        if self.started_at is not None and self.finished_at < self.started_at:
+        if (
+            self.started_at is not None
+            and self.finished_at is not None
+            and self.finished_at < self.started_at
+        ):
             raise ValueError("Fleet plan step finished_at cannot precede started_at")
         return self
 

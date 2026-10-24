@@ -13,6 +13,7 @@ import os
 import stat
 import sys
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 _PRUNED = frozenset(
     {
@@ -49,7 +50,18 @@ def _metadata_target(name: str) -> str | None:
     return None
 
 
-def scan(root: Path) -> dict[str, object]:
+class TransportAudit(TypedDict):
+    schema: str
+    classification: str
+    source_members: int
+    sidecar_count: int
+    windows_sidecars: list[dict[str, str | int]]
+    unsafe_entries: list[str]
+    inventory: NotRequired[str]
+    baseline: NotRequired[str]
+
+
+def scan(root: Path) -> TransportAudit:
     root = root.resolve(strict=True)
     source: list[tuple[str, Path]] = []
     sidecars: list[dict[str, str | int]] = []

@@ -38,6 +38,7 @@ from oh_goon.engine.command import (
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations._fleet_plan_step_evidence import attempt_evidence
+from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
 from oh_goon.integrations.fleet_plan_output_limit import bounded_execution_failure_outcome
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import PhysicalFleetPlanExecutorHarness
@@ -395,3 +396,31 @@ def test_bounded_failure_preserves_actual_cleanup_uncertainty(failure: str) -> N
     assert evidence.supervisor.cleanup_reason == failure
     assert evidence.supervisor.final_process_group_quiescent is False
     assert evidence.supervisor.forced_termination is True
+
+
+def test_authority_revocation_cleanup_survives_attempt_evidence_roundtrip() -> None:
+    step = ResolvedCommandStep(step_id="revoked", argv=("true",))
+    outcome = StepOutcome(
+        argv=step.argv,
+        returncode=1,
+        supervisor=CommandSupervisorReceipt(
+            process_group_cleanup_requested=True,
+            cleanup_reason="authority",
+            forced_termination=True,
+            final_process_group_quiescent=True,
+        ),
+    )
+    evidence = attempt_evidence(
+        step=step,
+        attempt=1,
+        outcome=outcome,
+        repository_state_before="before",
+        repository_state_after="after",
+        worktree_files_after=(),
+    )
+    retained = type(evidence).model_validate_json(
+        evidence.model_dump_json(exclude_computed_fields=True)
+    )
+    assert retained.supervisor is not None
+    assert retained.supervisor.cleanup_reason == "authority"
+    assert retained.supervisor.final_process_group_quiescent is True

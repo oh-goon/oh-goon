@@ -40,7 +40,20 @@ from oh_goon.integrations.fleet_content_store_lifecycle import (
 )
 
 if TYPE_CHECKING:
-    from oh_goon.integrations.fleet_content_store_lifecycle import FleetContentLease
+    from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
+    from oh_goon.integrations.fleet_content_crash_reconciliation import (
+        FleetContentCrashReconciliationResult,
+    )
+    from oh_goon.integrations.fleet_content_maintenance import FleetContentMaintenancePolicy
+    from oh_goon.integrations.fleet_content_retention import (
+        FleetContentRemovalLimits,
+        FleetContentRetentionBudget,
+        FleetContentRetentionResult,
+    )
+    from oh_goon.integrations.fleet_content_store_lifecycle import (
+        FleetContentLease,
+        StagingPruneResult,
+    )
 
 
 from oh_goon.integrations.content_snapshot import (
@@ -468,18 +481,18 @@ class FleetContentStore:
 
         return garbage_collect(self.root, self._layout, self._lock_path)
 
-    def prune_orphan_staging(self):
+    def prune_orphan_staging(self) -> StagingPruneResult:
         """Reclaim only staging with positive dead-creator birth evidence."""
 
         return prune_orphan_staging(self._layout, self._lock_path)
 
     def prune_to_retention_budget(
         self,
-        budget,
+        budget: FleetContentRetentionBudget,
         *,
         now_ns: int | None = None,
-        limits=None,
-    ):
+        limits: FleetContentRemovalLimits | None = None,
+    ) -> FleetContentRetentionResult:
         """Retain reusable unreachable content until explicit byte/count pressure requires eviction."""
 
         from oh_goon.integrations.fleet_content_retention import prune_to_retention_budget
@@ -493,14 +506,16 @@ class FleetContentStore:
             limits=limits,
         )
 
-    def reconcile_interrupted_maintenance(self):
+    def reconcile_interrupted_maintenance(self) -> FleetContentCrashReconciliationResult:
         from oh_goon.integrations.fleet_content_crash_reconciliation import (
             reconcile_interrupted_maintenance,
         )
 
         return reconcile_interrupted_maintenance(self.root, self._layout, self._lock_path)
 
-    def maintain_retained_content(self, policy=None, *, now_ns: int | None = None):
+    def maintain_retained_content(
+        self, policy: FleetContentMaintenancePolicy | None = None, *, now_ns: int | None = None
+    ) -> FleetContentMaintenanceReceipt:
         from oh_goon.integrations.fleet_content_maintenance import run_content_maintenance
 
         return run_content_maintenance(self, policy, now_ns=now_ns)

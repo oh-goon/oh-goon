@@ -47,8 +47,8 @@ class CommandCenterService:
                     spec=spec,
                     successful=successful,
                     not_run=not_run,
-                    attention_repository_ids=sorted(attention_ids),
-                    stale_repository_ids=sorted(stale_ids),
+                    attention_repository_ids=tuple(sorted(attention_ids)),
+                    stale_repository_ids=tuple(sorted(stale_ids)),
                     latest_run_id=latest.run.fleet_run_id if latest else None,
                     latest_outcome=fleet_run_outcome(latest.run) if latest else None,
                 )
@@ -63,5 +63,5 @@ class CommandCenterService:
                 )
                 for entry in included
             },
-            recipes=rows,
+            recipes=tuple(rows),
         )

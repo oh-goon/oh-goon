@@ -10,6 +10,7 @@ import tempfile
 import zipfile
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
+from typing import Protocol
 
 from oh_goon.core.file_digest import sha256_file, update_digest_from_file
 from oh_goon.core.source_transport_metadata import is_disposable_source_transport_artifact_name
@@ -348,8 +349,12 @@ def archive_source_identity(archive_path: Path) -> str:
     return "sha256:" + hasher.hexdigest()
 
 
+class _DigestSink(Protocol):
+    def update(self, data: bytes, /) -> object: ...
+
+
 def _update_digest_from_archive_member(
-    hasher: object, archive: zipfile.ZipFile, info: zipfile.ZipInfo
+    hasher: _DigestSink, archive: zipfile.ZipFile, info: zipfile.ZipInfo
 ) -> None:
     with archive.open(info, "r") as member:
         while chunk := member.read(1024 * 1024):

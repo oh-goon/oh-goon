@@ -34,7 +34,7 @@ steps:
     (skill_root / "review" / "SKILL.md").write_text("# Review\n")
     (skill_root / "review" / "references").mkdir()
     (skill_root / "review" / "references" / "guide.md").write_text("a reference\n")
-    registry = tmp_path / ".goonskills.yml"
+    registry = skill_root / ".goonskills.yml"
     registry.write_text("local: {review: review}\n")
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(tmp_path / "goons"))
     _, sha = resolver.input_definitions_with_source(plan)
@@ -159,62 +159,20 @@ def test_bad_registry_does_not_change_normal_plan_resolution(tmp_path):
         resolver.resolve(plan, inputs=values)
 
 
-def test_existing_plan_inputs_cli_automatically_uses_goonskills_without_runtime(
-    tmp_path, capsys, monkeypatch
-):
-    """No extra skill CLI or parallel resolver; CLI keeps original source projection."""
-    import json
+def test_source_closure_service_uses_only_selected_skill_root_registry(tmp_path, monkeypatch):
+    from oh_goon.application import ApplicationRuntime
 
-    from oh_goon import cli
-    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+    resolver, plan, registry, values, options = fixture(tmp_path)
 
-    plan = tmp_path / "goon.yml"
-    plan.write_text("""inputs:
-  repo: {type: repository_reference}
-  skill: {type: skill_reference}
-  acceptance: {type: acceptance_profile}
-steps:
-- uses: agent
-  harness: opencode
-  task: Review repository
-""")
-    (tmp_path / ".goonskills.yml").write_text("local: {team/review: team/review}\n")
-    repo = tmp_path / "repos" / "my-project"
-    repo.mkdir(parents=True)
-    (repo / "main.py").write_text("print(1)\n")
-    skill = tmp_path / "skills" / "team" / "review"
-    skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text("# Review\n")
-    _, sha = FleetPlanResolver().input_definitions_with_source(plan)
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("source capture cannot create ApplicationRuntime or Run state")
 
-    def no_runtime(*args, **kwargs):
-        raise AssertionError("source-closure must not construct runtime")
-
-    monkeypatch.setattr(cli, "_build_application_runtime", no_runtime)
-    args = [
-        "plan",
-        "inputs",
-        str(plan),
-        "--source-closure",
-        "--expect-sha256",
-        sha,
-        "--repository-root",
-        str(tmp_path / "repos"),
-        "--skill-root",
-        str(tmp_path / "skills"),
-        "--allow-acceptance",
-        "review",
-        "--input",
-        "repo=local:my-project",
-        "--input",
-        "skill=team/review",
-        "--input",
-        "acceptance=review",
-    ]
-    assert cli.main(args) == 0
-    report = json.loads(capsys.readouterr().out)
-    assert report["authored_skill_reference"] == "team/review"
-    assert report["skill"]["reference"] == "local:team/review"
+    monkeypatch.setattr(ApplicationRuntime, "build", forbidden)
+    report = resolver.explain_agent_sources(plan, inputs=values, **options)
+    assert report["authored_skill_reference"] == values["skill"]
+    assert report["skill"]["reference"].startswith("local:")
     assert report["original_enforcer_admission"] == "NOT_ATTEMPTED"
-    assert cli.main(args + ["--skill-alias", "team/review=local:team/review"]) == 2
-    assert "cannot be mixed" in capsys.readouterr().out
+    with pytest.raises(FleetPlanInvalid, match="cannot be mixed"):
+        resolver.explain_agent_sources(
+            plan, inputs=values, skill_aliases={"other": "local:other"}, **options
+        )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import cast, overload
 
 from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid
 from oh_goon.core.fleet_plan_output_refs import (
@@ -22,7 +23,12 @@ from oh_goon.core.models.fleet_plan_composition import (
     PlanStepInclusion,
     validate_domain_input_value,
 )
-from oh_goon.core.models.fleet_plan_step_contract import StepPlanCacheSource, StepWorkspaceSource
+from oh_goon.core.models.fleet_plan_step_contract import (
+    PlanStepCache,
+    PlanStepWorkspace,
+    StepPlanCacheSource,
+    StepWorkspaceSource,
+)
 
 _INPUT_PATTERN = re.compile(r"\$\{\{\s*inputs\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}")
 
@@ -185,11 +191,21 @@ def _inclusion_reason(
 def render_step(step: PlanStep, values: dict[str, PlanInputValue]) -> PlanStep:
     payload = _render_value(step.model_dump(mode="python"), values)
     if isinstance(step, CommandPlanStep):
-        payload["argv"] = tuple(str(value) for value in payload["argv"])
+        payload["argv"] = tuple(str(value) for value in cast(tuple[object, ...], payload["argv"]))
     return type(step).model_validate(payload)
 
 
-def _render_value(value, inputs: dict[str, PlanInputValue]):
+@overload
+def _render_value(
+    value: dict[str, object], inputs: dict[str, PlanInputValue]
+) -> dict[str, object]: ...
+
+
+@overload
+def _render_value(value: object, inputs: dict[str, PlanInputValue]) -> object: ...
+
+
+def _render_value(value: object, inputs: dict[str, PlanInputValue]) -> object:
     if isinstance(value, str):
         direct = input_reference(value)
         if direct is not None:
@@ -240,8 +256,10 @@ def qualify_step_dependencies(
         preserved_step_ids=preserved_step_ids,
     )
     qualified_step = type(step).model_validate(payload)
-    workspace_source = getattr(getattr(qualified_step, "workspace", None), "source", None)
+    workspace: PlanStepWorkspace | None = getattr(qualified_step, "workspace", None)
+    workspace_source = getattr(workspace, "source", None)
     if isinstance(workspace_source, StepWorkspaceSource):
+        assert workspace is not None
         if workspace_source.step_id in goon_aliases:
             raise FleetPlanInvalid(
                 f"Fleet workspace cannot target template step {workspace_source.step_id!r}; "
@@ -252,14 +270,12 @@ def qualify_step_dependencies(
                 update={"step_id": _qualified_step_id(prefix, workspace_source.step_id)}
             )
             qualified_step = qualified_step.model_copy(
-                update={
-                    "workspace": qualified_step.workspace.model_copy(
-                        update={"source": qualified_source}
-                    )
-                }
+                update={"workspace": workspace.model_copy(update={"source": qualified_source})}
             )
-    cache_source = getattr(getattr(qualified_step, "cache", None), "source", None)
+    cache: PlanStepCache | None = getattr(qualified_step, "cache", None)
+    cache_source = getattr(cache, "source", None)
     if isinstance(cache_source, StepPlanCacheSource):
+        assert cache is not None
         if cache_source.step_id in goon_aliases:
             raise FleetPlanInvalid(
                 f"Fleet cache cannot target template step {cache_source.step_id!r}; "
@@ -269,9 +285,7 @@ def qualify_step_dependencies(
             update={"step_id": _qualified_step_id(prefix, cache_source.step_id)}
         )
         qualified_step = qualified_step.model_copy(
-            update={
-                "cache": qualified_step.cache.model_copy(update={"source": qualified_cache_source})
-            }
+            update={"cache": cache.model_copy(update={"source": qualified_cache_source})}
         )
     condition = getattr(qualified_step, "when", None)
     if not isinstance(condition, StepStatusCondition):
@@ -287,13 +301,43 @@ def qualify_step_dependencies(
     return qualified_step.model_copy(update={"when": qualified})
 
 
+@overload
 def resolve_output_references(
-    value,
+    value: dict[str, object],
     *,
     prefix: str,
     goon_aliases: dict[str, dict[str, str]],
     preserved_step_ids: frozenset[str] = frozenset(),
-):
+) -> dict[str, object]: ...
+
+
+@overload
+def resolve_output_references(
+    value: str,
+    *,
+    prefix: str,
+    goon_aliases: dict[str, dict[str, str]],
+    preserved_step_ids: frozenset[str] = frozenset(),
+) -> str: ...
+
+
+@overload
+def resolve_output_references(
+    value: object,
+    *,
+    prefix: str,
+    goon_aliases: dict[str, dict[str, str]],
+    preserved_step_ids: frozenset[str] = frozenset(),
+) -> object: ...
+
+
+def resolve_output_references(
+    value: object,
+    *,
+    prefix: str,
+    goon_aliases: dict[str, dict[str, str]],
+    preserved_step_ids: frozenset[str] = frozenset(),
+) -> object:
     if isinstance(value, str):
         return _resolve_output_reference(
             value,

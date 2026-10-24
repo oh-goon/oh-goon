@@ -170,6 +170,7 @@ def test_supervisor_shutdown_does_not_cancel_pending_future() -> None:
 class _CancellableRunner:
     def __init__(self) -> None:
         self.entered = Event()
+        self.observe_cancellation = Event()
 
     def run(
         self,
@@ -181,12 +182,15 @@ class _CancellableRunner:
     ) -> OperationExecution:
         assert cancel_requested is not None
         self.entered.set()
-        for _ in range(1_000):
-            if cancel_requested():
-                from oh_goon.engine.errors import OperationCancelledError
+        # The test releases this only after the durable cancellation request returns.
+        # The timeout guards a broken harness; polling duration is not Run authority.
+        assert self.observe_cancellation.wait(timeout=30), (
+            "shutdown runner barrier was not released"
+        )
+        if cancel_requested():
+            from oh_goon.engine.errors import OperationCancelledError
 
-                raise OperationCancelledError("shutdown cancellation observed")
-            Event().wait(0.001)
+            raise OperationCancelledError("shutdown cancellation observed")
         raise RuntimeError("shutdown cancellation was not observed")
 
 
@@ -209,12 +213,15 @@ def test_quiesced_manager_cancels_active_run_and_releases_lease(tmp_path: Path) 
     runner = _CancellableRunner()
     _, manager, _, execution = fleet_stack(state, runner)
 
-    started = manager.start(OperationAction.INIT)
-    assert runner.entered.wait(timeout=1)
+    try:
+        started = manager.start(OperationAction.INIT)
+        assert runner.entered.wait(timeout=1)
 
-    manager.quiesce()
-    manager.cancel_active_for_shutdown()
-    manager.shutdown(wait=True)
+        manager.quiesce()
+        manager.cancel_active_for_shutdown()
+    finally:
+        runner.observe_cancellation.set()
+        manager.shutdown(wait=True)
 
     assert manager.get(started.fleet_run_id).run.status is FleetRunStatus.CANCELLED
     replacement = execution.reserve_direct_with(
@@ -340,7 +347,7 @@ def test_cli_direct_quarantine_is_a_clean_domain_failure(tmp_path: Path, capsys)
 
     runtime = SimpleNamespace(operations=OperationStub())
     args = SimpleNamespace(
-        command="run",
+        command="operation",
         repository=tmp_path / "repo",
         action=OperationAction.UPDATE.value,
         as_json=False,

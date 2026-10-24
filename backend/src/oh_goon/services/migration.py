@@ -33,7 +33,7 @@ class MigrationService:
         ]
         candidates.sort(key=lambda item: item.repository.name.casefold())
         return AdoptUvPreview(
-            repositories=candidates,
+            repositories=tuple(candidates),
             discovered=len(candidates),
             already_uv=sum(item.readiness is MigrationReadiness.ALREADY_UV for item in candidates),
             safe_automatic=sum(

@@ -18,9 +18,10 @@ import platform
 import re
 import sys
 import tomllib
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NotRequired, TypedDict
 
 ROOT = Path(__file__).resolve().parents[4]
 PYPROJECT = ROOT / "backend/pyproject.toml"
@@ -31,6 +32,27 @@ SCHEMA = "oh-goon.hosted-dependency-capability/v2"
 REQUIRED_HOST_CAPABILITIES = ("cryptography", "pytest")
 _REPOSITORY_IMPORT_SHADOW_ROOTS = (ROOT / "backend" / "src", ROOT / "scripts")
 _STREAM_CHUNK_BYTES = 1024 * 1024
+
+
+class HostCapabilityReport(TypedDict):
+    schema: str
+    authority: str
+    native_authority: bool
+    dependency_complete_authority: bool
+    uv_artifact_cache_evaluated: bool
+    result: str
+    interpreter: str
+    python_version: str
+    requires_python: str
+    python_status: str
+    dependency_intent_sha256: str
+    required_host_capabilities: list[str]
+    declared_python_dependencies: list[str]
+    evaluated_python_dependencies: list[str]
+    excluded_python_dependencies: list[str]
+    packages: list[dict[str, object]]
+    blockers: list[str]
+    identity: NotRequired[str]
 
 
 def _sha256_file(path: Path) -> str:
@@ -196,7 +218,7 @@ def _default_import_probe(distribution: str, import_name: str) -> None:
         # This PEP 561 distribution contains type data rather than an importable
         # runtime module. Native package metadata owns its installed location.
         stubs = importlib.metadata.distribution(distribution).locate_file("yaml-stubs/__init__.pyi")
-        if not stubs.is_file():
+        if not Path(str(stubs)).is_file():
             raise HostedCapabilityError("PyYAML type stubs are not materialized")
         return
     module = importlib.import_module(import_name)
@@ -221,7 +243,10 @@ def _default_import_probe(distribution: str, import_name: str) -> None:
             )
         from cryptography import x509
         from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+            Ed25519PublicKey,
+        )
         from cryptography.x509.oid import NameOID
 
         key = Ed25519PrivateKey.from_private_bytes(b"\x01" * 32)
@@ -235,6 +260,8 @@ def _default_import_probe(distribution: str, import_name: str) -> None:
             serialization.PublicFormat.SubjectPublicKeyInfo,
         )
         loaded_public_key = serialization.load_pem_public_key(public_pem)
+        if not isinstance(loaded_public_key, Ed25519PublicKey):
+            raise HostedCapabilityError("cryptography did not retain the Ed25519 public key type")
         loaded_public_key.verify(signature, message)
 
         name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "oh-goon-host-capability")])
@@ -256,7 +283,7 @@ def _default_import_probe(distribution: str, import_name: str) -> None:
             )
 
 
-def _canonical_identity(payload: dict[str, object]) -> str:
+def _canonical_identity(payload: Mapping[str, object]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
@@ -306,7 +333,7 @@ def build_capability(
     import_probe: ImportProbe = _default_import_probe,
     interpreter: str | None = None,
     python_version: str | None = None,
-) -> dict[str, object]:
+) -> HostCapabilityReport:
     declared_requirements, requirements, requires_python, native_only = _project_contract(pyproject)
     packages: list[dict[str, object]] = []
     blockers: list[str] = []
@@ -332,7 +359,7 @@ def build_capability(
         if blocker is not None:
             blockers.append(blocker)
 
-    base: dict[str, object] = {
+    base: HostCapabilityReport = {
         "schema": SCHEMA,
         "authority": "diagnostic-only",
         "native_authority": False,
@@ -393,7 +420,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _write_atomic(path: Path, payload: dict[str, object]) -> None:
+def _write_atomic(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:

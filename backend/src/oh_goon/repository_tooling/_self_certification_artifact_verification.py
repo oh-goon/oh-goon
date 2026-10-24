@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import tomllib
 import zipfile
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from oh_goon.repository_tooling.release.package_slim import archive_source_identity, package_slim
@@ -137,7 +138,7 @@ def verify_cumulative_patch_replay_impl(
     patch_path: Path,
     parent_input: Path,
     artifact_dir: Path,
-    package_slim_fn=package_slim,
+    package_slim_fn: Callable[..., str] = package_slim,
 ) -> Path:
     if patch_evidence.get("artifact_sha256") != _sha256_file(patch_path):
         raise RuntimeError("cumulative patch changed before replay")

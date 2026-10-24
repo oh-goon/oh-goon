@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import ssl
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, NoReturn
 
 from oh_goon.core.models.agent_providers import (
     AgentMessage,
@@ -135,7 +135,7 @@ def _request(
         body["max_output_tokens"] = selected.max_output_tokens
         path = "/responses"
     else:
-        ordinary = []
+        ordinary: list[dict[str, str]] = []
         system = []
         for message in wire_messages:
             if message["role"] == "system":
@@ -160,7 +160,7 @@ def _request(
     return selected.provider.base_url + path, body
 
 
-def _unique_pairs(pairs):
+def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result = {}
     for name, value in pairs:
         if name in result:
@@ -169,7 +169,7 @@ def _unique_pairs(pairs):
     return result
 
 
-def _nonfinite(value):
+def _nonfinite(value: str) -> NoReturn:
     raise ValueError("nonfinite JSON value")
 
 

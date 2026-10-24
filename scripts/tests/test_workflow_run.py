@@ -189,14 +189,15 @@ def test_run_has_backend_context_then_one_bootstrap_sequence_then_one_plan_run(
     assert workflow_run.run_app() == 0
     assert calls[0] == ["league", "add-folder", str(tmp_path)]
     assert calls[1] == [
-        "lock",
+        "dev",
+        "_lock-plan",
         workflow_run.APP_PLAN,
         "--output",
         "/state/locks/app-certification.goon.lock",
     ]
     assert len(streamed) == 1
     cli = str(Path(os.path.abspath(sys.executable)).parent / "oh-goon")
-    assert streamed[0][:4] == [cli, "plan", "run", workflow_run.APP_PLAN]
+    assert streamed[0][:4] == [cli, "dev", "_run-plan", workflow_run.APP_PLAN]
     assert "--repository-id" in streamed[0]
     assert (
         streamed[0][streamed[0].index("--lock-file") + 1]
@@ -238,9 +239,9 @@ def test_self_verify_selects_fast_plan_through_same_plan_run(
 
     assert workflow_run.run_self_verify() == 0
     assert calls[0] == ["league", "add-folder", str(tmp_path)]
-    assert calls[1][0:2] == ["lock", workflow_run.SELF_VERIFY_PLAN]
+    assert calls[1][0:3] == ["dev", "_lock-plan", workflow_run.SELF_VERIFY_PLAN]
     assert len(streamed) == 1
-    assert streamed[0][1:4] == ["plan", "run", workflow_run.SELF_VERIFY_PLAN]
+    assert streamed[0][1:4] == ["dev", "_run-plan", workflow_run.SELF_VERIFY_PLAN]
     assert not any("dependency_supply_reference=" in item for item in streamed[0])
 
 

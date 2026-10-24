@@ -140,7 +140,7 @@ def _parse_makefile(path: Path) -> tuple[dict[str, str], dict[str, _Target]]:
                 for token in rest.replace("|", " ").split()
                 if token and not token.startswith("#")
             )
-            _merge_target(targets, current, prerequisites)
+            _merge_target(targets, match.group("target"), prerequisites)
     return variables, targets
 
 

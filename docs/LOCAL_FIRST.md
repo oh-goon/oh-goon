@@ -79,10 +79,11 @@ Starting and browsing the local app does not require network access. Network aut
 
 The normal CI/CD action is one click from the League map: **Run team**. Only a Team whose exact repository-root `goon.yml` is structurally configured gets that action. Pressing it does not execute the scan result; the effectful boundary resolves the current `goon.yml` again and admits exactly that Team through the same FleetRun lifecycle used by history, cancellation, Enforcer receipts and recovery.
 
-The command-line equivalent is:
+The CLI selects the registered repository in `run.yml` with
+`source: {kind: repository-goon}`:
 
 ```bash
-oh-goon team run /path/to/team
+oh-goon run /path/to/workflow/run.yml
 ```
 
 The local CLI stays attached until the durable FleetRun is terminal. This is intentionally different from the browser API, which is asynchronous because the local app process remains alive and watches the same run. There is no second local-run state machine.
@@ -100,13 +101,14 @@ Shared Run     -> oh-goon plans/<key>/plan.yml
 
 When a Shared Plan is chosen, repository `goon.yml` files are omitted completely for that Shared Run. They are not read by execution target selection, resolved, validated, merged, inherited, executed, or used as fallback. Therefore a selected Git Team may participate even when its own `goon.yml` is missing or invalid.
 
-The browser **Plans** page is the single saved-Plan authoring surface. Shared Runs select one saved Plan plus current League Teams and start the same canonical FleetRun path; Schedules also consume saved Plans rather than authoring them. CLI parity is provided by `oh-goon shared-plan list|save|run`. See [`development/SHARED_PLANS.md`](development/SHARED_PLANS.md).
+The browser **Plans** page is the single saved-Plan authoring surface. Shared Runs select one saved Plan plus current League Teams and start the same canonical FleetRun path; Schedules also consume saved Plans rather than authoring them. Shared Plan editing remains available through the existing UI/service owner.
+Normal CLI selection uses the single `run.yml` contract. See [`development/SHARED_PLANS.md`](development/SHARED_PLANS.md).
 
 ## Reusable Lineups
 
 For repeated Shared Runs, save a **Lineup** instead of re-selecting the same Teams each time. A Lineup remembers only exact managed Team roots and survives restarts/operational DB resets as local configuration. It does not auto-run anything and it does not inspect or inherit repository `goon.yml` files.
 
-The browser requests the read-only Shared Plan preview automatically whenever the selected Plan or repositories change; `Run` remains disabled until the latest exact selection is accepted. CLI users can request the same check with `oh-goon shared-plan preview <plan> --lineup <lineup>`. A moved or removed saved repository is shown as unavailable and must be fixed explicitly; oh-goon never silently substitutes another repository.
+The browser requests the read-only Shared Plan preview automatically whenever the selected Plan or repositories change; `Run` remains disabled until the latest exact selection is accepted. Normal CLI users inspect their explicit selection with `oh-goon config inspect run.yml`. A moved or removed saved repository is shown as unavailable and must be fixed explicitly; oh-goon never silently substitutes another repository.
 
 
 ## Container persistence boundary

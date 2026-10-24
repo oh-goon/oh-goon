@@ -32,7 +32,7 @@ def _path_labels(values: list[str]) -> tuple[tuple[str, str], ...]:
 
 
 def _banner(label: str, detail: str = "", *, stderr: bool = False) -> None:
-    command = ("sh", str(_COMMAND_BANNER), label, detail)
+    command: tuple[str, ...] = ("sh", str(_COMMAND_BANNER), label, detail)
     if stderr:
         command = (*command, "stderr")
     subprocess.check_call(command)

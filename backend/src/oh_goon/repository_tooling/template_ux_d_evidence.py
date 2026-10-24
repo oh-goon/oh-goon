@@ -10,6 +10,7 @@ import argparse
 import json
 import re
 from pathlib import Path, PurePosixPath
+from typing import NotRequired, TypedDict
 from zipfile import ZipFile
 
 from oh_goon.integrations.fleet_plan_compilation import parse_plan_template
@@ -27,6 +28,33 @@ GUIDES = (
     "docs/templates/TEMPLATE_UX_D_EVALUATION.md",
 )
 _LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
+
+
+class ArchiveClosure(TypedDict):
+    status: str
+    guide_members_present: int
+    guide_members_expected: int
+    missing_guides: list[str]
+    unsafe_names: list[str]
+
+
+class TemplateEvidence(TypedDict):
+    schema: str
+    status: str
+    authority: str
+    execution_permission: str
+    save_permission: str
+    catalog: dict[str, str | int | None]
+    plan_drafts: list[dict[str, object]]
+    guide_links: list[dict[str, str]]
+    missing_or_bad_guide_links: list[dict[str, str]]
+    evaluation: dict[str, str | int]
+    gate_a: str
+    gate_b: str
+    app_pass: str
+    release: str
+    ux_d_final_exit_gate: str
+    source_archive_closure: NotRequired[ArchiveClosure]
 
 
 def guide_links(root: Path) -> list[dict[str, str]]:
@@ -55,7 +83,7 @@ def guide_links(root: Path) -> list[dict[str, str]]:
     return sorted(results, key=lambda item: (item["source"], item["target"]))
 
 
-def source_archive_closure(path: Path) -> dict:
+def source_archive_closure(path: Path) -> ArchiveClosure:
     """Check whether a standalone source archive actually includes UX guides.
 
     This is a packaging presence audit, not release/source trust verification.
@@ -89,7 +117,7 @@ def source_archive_closure(path: Path) -> dict:
     }
 
 
-def collect(root: Path) -> dict:
+def collect(root: Path) -> TemplateEvidence:
     """Deterministic complete catalog and no-op authoring evaluation."""
     root = root.resolve()
     plans = PlanTemplateStore(root / "templates/plans")
@@ -97,7 +125,7 @@ def collect(root: Path) -> dict:
     inventory = collect_catalog(root)
     plan_keys = plans.keys()
     goon_keys = goons.keys()
-    results = []
+    results: list[dict[str, object]] = []
     for key in plan_keys:
         source = plans.source(key)
         try:

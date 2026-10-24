@@ -4,6 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import ValidationError
 
@@ -109,7 +110,7 @@ class FleetExecutorCapacityReservations:
         execution: CicdExecutionPolicy,
         target_count: int,
         pool_id: str,
-        placement_policy: str,
+        placement_policy: Literal["priority_rendezvous_fifo_v2"],
         placement_rank: int,
         executor_priority: int,
     ) -> PlanExecutorCapacityEvidence:
@@ -369,7 +370,7 @@ def _create_capacity_evidence(
     requested: int,
     admitted: int,
     pool_id: str,
-    placement_policy: str,
+    placement_policy: Literal["priority_rendezvous_fifo_v2"],
     placement_rank: int,
     executor_priority: int,
 ) -> PlanExecutorCapacityEvidence:

@@ -59,15 +59,19 @@ from oh_goon.repository_tooling.repository_understanding_lifecycle import (
 )
 from oh_goon.repository_tooling.repository_understanding_policy import (
     ASSERTION_RELATIONS,
-    CANDIDATE_CONFIDENCE_STATES,
     CANDIDATE_EPISTEMIC_STATES,
     CLAIM_STATES,
-    DIMENSION_NORMALIZATION_POLICY_VERSION,
     QUALIFICATION_POLICY_VERSION,
     QUESTION_STATES,
     REFERENCE_STATES,
     SCORING_POLICY_VERSION,
     qualification_policy_manifest,
+)
+from oh_goon.repository_tooling.repository_understanding_policy import (
+    CANDIDATE_CONFIDENCE_STATES as CANDIDATE_CONFIDENCE_STATES,
+)
+from oh_goon.repository_tooling.repository_understanding_policy import (
+    DIMENSION_NORMALIZATION_POLICY_VERSION as DIMENSION_NORMALIZATION_POLICY_VERSION,
 )
 from oh_goon.repository_tooling.repository_understanding_policy import (
     DIMENSION_WEIGHTS as DIMENSION_WEIGHTS,

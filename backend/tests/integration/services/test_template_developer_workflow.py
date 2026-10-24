@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli import main
@@ -60,8 +61,6 @@ def test_native_project_configuration_reports_and_extensions(
     path.write_text(
         source.replace("version: 1\n", "version: 1\nexecution: {purpose: verification}\n", 1)
     )
-    values = tmp_path / "values.yml"
-    values.write_text(f"inputs:\n  project: '{project}'\n  typechecker: pyright\n")
     local = tmp_path / "goons/general/project-check"
     local.mkdir(parents=True)
     (local / "README.md").write_text("# general/project-check\n\nCompile the selected project.\n")
@@ -80,38 +79,28 @@ steps:
   from: ./goons
 """)
     checker = "ty" if project == "." else "pyright"
-    flags = ["--inputs-file", "values.yml", "--input", f"typechecker={checker}"]
-    assert main(["lock", str(path), *flags]) == 0
+    from oh_goon.runtime.league_folders import LeagueFolderStore
+
+    LeagueFolderStore().replace((tmp_path / "repositories",))
+    selection = tmp_path / "run.yml"
+    selection.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "file-plan", "path": "plan.yml"},
+                "target": {"repository_id": repository_id(repository)},
+                "inputs": {"project": project, "typechecker": checker},
+            }
+        )
+    )
+    assert main(["lock", str(selection)]) == 0
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(tmp_path / "repositories")
-        if project == ".":
-            capsys.readouterr()
-            assert (
-                main(
-                    [
-                        "plan",
-                        "run",
-                        str(path),
-                        *flags,
-                        "--repository-id",
-                        repository_id(repository),
-                        "--standard-local",
-                        "--wait",
-                        "--json",
-                    ]
-                )
-                == 0
-            )
-            receipt = json.loads(capsys.readouterr().out)
-            result = runtime.runs.get(receipt["fleet_run_id"])
-        else:
-            started = runtime.plans.run(
-                path,
-                repository_ids={repository_id(repository)},
-                inputs={"project": project, "typechecker": checker},
-            )
-            result = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=60)
+        capsys.readouterr()
+        assert main(["run", str(selection), "--json"]) == 0
+        receipt = json.loads(capsys.readouterr().out)
+        result = runtime.runs.get(receipt["fleet_run_id"])
         steps = result.operations[0].evidence.plan.steps
         assert all(step.status == "COMPLETED" and step.returncode == 0 for step in steps), result
         assert (target / "junit.xml").is_file()
@@ -123,13 +112,11 @@ steps:
         assert result.game_tape.status.value == "PASSED"
         # A real failed test must remain a failure through the same admitted path.
         (target / "tests/test_workload.py").write_text("def test_failure():\n    assert False\n")
-        assert main(["lock", str(path), *flags]) == 0
-        started = runtime.plans.run(
-            path,
-            repository_ids={repository_id(repository)},
-            inputs={"project": project, "typechecker": checker},
-        )
-        failed = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=60)
+        assert main(["lock", str(selection)]) == 0
+        capsys.readouterr()
+        assert main(["run", str(selection), "--json"]) == 1
+        failed_receipt = json.loads(capsys.readouterr().out)
+        failed = runtime.runs.get(failed_receipt["fleet_run_id"])
         pytest_step = next(
             step
             for step in failed.operations[0].evidence.plan.steps
@@ -187,13 +174,34 @@ steps:
     path.write_text(
         "version: 1\nexecution: {purpose: verification}\ngoons:\n- import: general/wait\n  from: goons\n"
     )
-    assert main(["lock", str(path)]) == 0
+    from oh_goon.runtime.league_folders import LeagueFolderStore
+    from oh_goon.services.run_configuration import load_run_configuration
+
+    LeagueFolderStore().replace((tmp_path / "repositories",))
+    selection = tmp_path / "run.yml"
+    selection.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "file-plan", "path": "plan.yml"},
+                "target": {"repository_id": repository_id(repository)},
+            }
+        )
+    )
+    assert main(["lock", str(selection)]) == 0
+    captured = load_run_configuration(selection)
     runtime = ApplicationRuntime.build(standard_local=True)
     started = None
     try:
         runtime.locations.add(tmp_path / "repositories")
         with os.fdopen(os.open(ready, os.O_RDWR | os.O_NONBLOCK), "rb", buffering=0) as channel:
-            started = runtime.plans.run(path, repository_ids={repository_id(repository)})
+            started = runtime.plans.run(
+                path,
+                repository_ids={repository_id(repository)},
+                lock_path=captured.lock_path,
+                caller_input_file=captured.authority(),
+                external_artifacts=captured.external_artifacts(),
+            )
             assert select.select([channel], [], [], 15)[0], runtime.runs.get(started.fleet_run_id)
             process_id = int(channel.read(100))
             runtime.runs.cancel(started.fleet_run_id)

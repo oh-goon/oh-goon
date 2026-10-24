@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Callable, Protocol, cast
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.original_native_custody import OriginalNativeCustodyRequirement
@@ -40,8 +41,14 @@ from oh_goon.integrations.fleet_plan_local_lace_orphan_inventory import (
 )
 
 
+class _NativeCleanupOwner(Protocol):
+    def execute_native_cleanup(
+        self, ticket: LocalLaceCleanupTicket, native_action: Callable[[], NativeCleanupResult]
+    ) -> NativeCleanupResult: ...
+
+
 def cleanup_local_orphan(
-    owner: object,
+    owner: _NativeCleanupOwner,
     ticket: LocalLaceCleanupTicket,
     subject: LocalLaceOrphanSubject,
     inventory: LocalLaceOrphanInventory,
@@ -74,6 +81,7 @@ def cleanup_local_orphan(
         or inventory.cgroup_device is None
     ):
         raise FleetPlanInvalid("original observed empty orphan required for native recovery")
+    original_identity = (inventory.cgroup_device, inventory.cgroup_inode)
     # Take BOTH original native allocator locks, never an alternative lock plane.
     with ExitStack() as locks:
         locks.enter_context(_resource_lock(cgroup_lock))
@@ -115,15 +123,17 @@ def cleanup_local_orphan(
                     resource_inode=inventory.cgroup_inode,
                 ),
             )
+            assert (
+                subject.observation is not None
+            )  # the matching observed-present inventory proves it
             cgroup = Path(subject.observation["cgroup_path"])
             record = _matching_record(
                 cgroup_state_dir, kind="cgroup", subject=subject, resource_name=cgroup.name
             )
             # An alive predecessor must never be killed by takeover cleanup.
             # PID reuse is uncertain, NOT proof the old owner is absent.
-            if _process_identity(record["pid"]) is not None:
+            if _process_identity(cast(int, record["pid"])) is not None:
                 raise FleetPlanInvalid("predecessor PID still present or reused")
-            original_identity = (inventory.cgroup_device, inventory.cgroup_inode)
 
             def empty() -> None:
                 # Same native cgroup owner and the SAME opened directory identity
@@ -137,9 +147,9 @@ def cleanup_local_orphan(
             empty()
             network_kind = subject.observation.get("network_kind")
             if network_kind == "host-netns":
+                from oh_goon.engine.command import run_command
                 from oh_goon.integrations._fleet_plan_restricted_egress import (
                     _control_environment,
-                    run_command,
                 )
 
                 namespace = subject.observation["network_namespace"]

@@ -8,6 +8,7 @@ from pathlib import Path
 from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.capability import CapabilityTargetKind
+from oh_goon.core.operation_economics import OperationEconomicsReceipt
 from oh_goon.core.vocabulary import CommandSafety, OperationAction
 from oh_goon.repository_tooling import certification_bootstrap_protocol
 from oh_goon.services.capability_developer import (
@@ -29,7 +30,7 @@ def _print_developer_activity(message: str) -> None:
     print("OH-GOON ACTIVITY: " + message, flush=True)
 
 
-def _print_operation_economics(receipt) -> None:
+def _print_operation_economics(receipt: OperationEconomicsReceipt) -> None:
     print(
         "OH_GOON_OPERATION_ECONOMICS=" + json.dumps(receipt.as_dict(), sort_keys=True),
         flush=True,

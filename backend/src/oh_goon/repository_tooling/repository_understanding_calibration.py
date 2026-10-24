@@ -414,6 +414,8 @@ def load_question_audit(
                     raise ValueError(
                         f"{qid} CALIBRATED has insufficient empirical calibration evidence"
                     )
+                if not isinstance(evidence, dict) or not isinstance(calibrated, str):
+                    raise ValueError(f"{qid} CALIBRATED requires retained promotion evidence")
                 review_evidence = _retained_promotion_review(
                     path,
                     evidence,

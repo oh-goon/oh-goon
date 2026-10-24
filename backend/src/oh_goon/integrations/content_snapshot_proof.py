@@ -5,9 +5,14 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
+
+
+class _Hash(Protocol):
+    def update(self, data: bytes) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +70,7 @@ def snapshot_metadata_fingerprint(path: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
-def _fingerprint_entry(digest, path: Path, *, relative: str) -> None:
+def _fingerprint_entry(digest: _Hash, path: Path, *, relative: str) -> None:
     observed = path.lstat()
     mode = observed.st_mode
     if stat.S_ISLNK(mode):

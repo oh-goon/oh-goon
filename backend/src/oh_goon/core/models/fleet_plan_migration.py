@@ -28,7 +28,7 @@ class GitLabGoonMigration(ImmutableModel):
     components: tuple[GitLabResolvedComponent, ...] = Field(default_factory=tuple)
     issues: tuple[GitLabImportIssue, ...] = Field(default_factory=tuple)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def ready(self) -> bool:
         return not self.issues

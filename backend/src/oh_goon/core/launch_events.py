@@ -325,7 +325,7 @@ def _validate_process_payload(
         raise ValueError(f"{name} birth identity pid must match payload pid")
 
 
-def _json_compatible(value):
+def _json_compatible(value: object) -> object:
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, StrEnum):

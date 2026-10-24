@@ -5,14 +5,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, cast
 
-from yaml.nodes import MappingNode, ScalarNode, SequenceNode
+from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import CompiledExecutionTemplate
 from oh_goon.core.template_identity import catalog_template_name
 from oh_goon.integrations.fleet_plan_compilation import (
+    ParsedFleetYamlDocument,
     compile_goon_document,
     compile_plan_document,
     parse_fleet_yaml_document,
@@ -36,6 +37,7 @@ class FleetPlanSourceSnapshot:
     sha256: str
     compiled: CompiledExecutionTemplate
     step_positions: Mapping[str, FleetPlanStepPosition]
+    document: ParsedFleetYamlDocument
     value_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
 
 
@@ -68,6 +70,7 @@ def read_fleet_plan_source(
         sha256=hashlib.sha256(raw).hexdigest(),
         compiled=compiled,
         step_positions=MappingProxyType(_step_positions(document.root, compiled)),
+        document=document,
         value_positions=MappingProxyType(_value_positions(document.root, compiled)),
     )
 
@@ -154,8 +157,8 @@ def _step_positions(
     return positions
 
 
-def _mapping_value(node: MappingNode, key: str):
+def _mapping_value(node: MappingNode, key: str) -> Node | None:
     for key_node, value_node in node.value:
         if isinstance(key_node, ScalarNode) and key_node.value == key:
-            return value_node
+            return cast(Node, value_node)
     return None

@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
@@ -107,7 +108,7 @@ def run_probe(
     )
 
 
-def _projection_ms(project) -> float:
+def _projection_ms(project: Callable[[], object]) -> float:
     started = perf_counter()
     project()
     return _milliseconds_since(started)
@@ -117,7 +118,7 @@ def _probe_store(
     *,
     snapshot: ScoutEvidenceSnapshot,
     window: ScoutWindow,
-    now,
+    now: datetime,
     concurrent_users: int,
     revision_cycles: int,
     changed_repositories_per_cycle: int,
@@ -170,7 +171,7 @@ def _apply_revision_churn(
     store: ScoutObservationStore,
     snapshot: ScoutEvidenceSnapshot,
     window: ScoutWindow,
-    now,
+    now: datetime,
     revision_cycles: int,
     changed_count: int,
 ) -> tuple[int, tuple[float, ...]]:
@@ -226,7 +227,7 @@ def _concurrent_cached_reads(
 
 
 def build_scout_load_snapshot(
-    *, repositories: int, steps_per_repository: int, now, journal_revision: int = 1
+    *, repositories: int, steps_per_repository: int, now: datetime, journal_revision: int = 1
 ) -> ScoutEvidenceSnapshot:
     runs = tuple(
         RepositoryRunObservation(

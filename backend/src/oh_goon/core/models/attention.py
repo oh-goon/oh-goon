@@ -35,13 +35,13 @@ class AttentionGroup(ImmutableModel):
             raise ValueError("Attention group semantics must match repository items")
         return self
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def can_auto_fix(self) -> bool:
         auto_actions = {item.auto_fix_action for item in self.repositories if item.can_auto_fix}
         return len(auto_actions) == 1 and all(item.can_auto_fix for item in self.repositories)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def auto_fix_action(self) -> AutoFixAction | None:
         if not self.can_auto_fix:
@@ -53,7 +53,7 @@ class FleetAttention(ImmutableModel):
     healthy: int = Field(default=0, ge=0)
     groups: tuple[AttentionGroup, ...] = Field(default_factory=tuple)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def action_required(self) -> int:
         return sum(len(group.repositories) for group in self.groups)

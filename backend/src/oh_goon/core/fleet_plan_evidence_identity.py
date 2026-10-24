@@ -1,13 +1,23 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.fleet_plan_evidence import (
+        PlanEgressEvidence,
+        PlanExecutionInputEvidence,
+        PlanResourceEvidence,
+        RequirementsRepositoryAdmissionEvidence,
+    )
 
 
-def repository_admission_payload(evidence: Any) -> dict[str, object]:
+def repository_admission_payload(
+    evidence: RequirementsRepositoryAdmissionEvidence,
+) -> dict[str, object]:
     return evidence.model_dump(mode="json", exclude={"validation_id"}, exclude_computed_fields=True)
 
 
-def execution_input_payload(evidence: Any) -> dict[str, object]:
+def execution_input_payload(evidence: PlanExecutionInputEvidence) -> dict[str, object]:
     return {
         "repository_id": evidence.repository_id,
         "source_authority_id": evidence.source_authority_id,
@@ -47,7 +57,7 @@ def execution_input_payload(evidence: Any) -> dict[str, object]:
     }
 
 
-def egress_payload(evidence: Any) -> dict[str, object]:
+def egress_payload(evidence: PlanEgressEvidence) -> dict[str, object]:
     return {
         "mode": evidence.mode,
         "rules": [
@@ -56,7 +66,7 @@ def egress_payload(evidence: Any) -> dict[str, object]:
     }
 
 
-def resource_policy_payload(evidence: Any) -> dict[str, object]:
+def resource_policy_payload(evidence: PlanResourceEvidence) -> dict[str, object]:
     return {
         "cpu_millis": evidence.cpu_millis,
         "memory_bytes": evidence.memory_bytes,

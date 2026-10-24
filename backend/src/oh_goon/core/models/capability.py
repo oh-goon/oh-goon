@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import cast
 
 from pydantic import Field
 
@@ -62,7 +63,7 @@ def capability_target_kind(target: object | None) -> CapabilityTargetKind:
         "fleet_plan": CapabilityTargetKind.FLEET_PLAN,
     }
     try:
-        return mapping[kind]
+        return mapping[cast(str, kind)]
     except KeyError as exc:
         raise TypeError(f"Unknown operation target kind: {kind!r}") from exc
 

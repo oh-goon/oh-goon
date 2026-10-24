@@ -88,10 +88,13 @@ def issue_observed_captured_run_source(
     admitted, revision = _read_original_admission(journal, run_id, prework=prework)
     selected = tuple(item.repository_id for item in admitted.repository_admissions)
     captured = {target.repository_id: target.path for target in admitted.targets}
+    target = admitted.target
+    if not isinstance(target, FleetPlanTarget):
+        raise TrustProtocolError("durable Run source selection requires a Fleet Plan target")
     if (
         set(captured) != set(selected)
         or len(captured) != len(admitted.targets)
-        or admitted.target.plan.plan_id != admitted.repository_admissions[0].plan_id
+        or target.plan.plan_id != admitted.repository_admissions[0].plan_id
     ):
         raise TrustProtocolError("durable Run repository scope differs from admitted Plan")
     evidence = issue_observed_run_repository_source_identity(

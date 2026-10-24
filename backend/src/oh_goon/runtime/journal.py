@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from oh_goon.core.errors import InvalidRunTransition, JournalConflict
 from oh_goon.core.models.fleet import OperationState
@@ -34,7 +35,7 @@ from oh_goon.core.models.run_events import (
     StorageMaintenanceRecordedEvent,
 )
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
-from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
@@ -49,6 +50,8 @@ from oh_goon.runtime.journal_admission_validation import (
     _require_valid_rerun,
 )
 from oh_goon.runtime.journal_execution_lifecycle import (
+    LifecycleRootFields,
+    ReconciliationRootFields,
     _execution_lifecycle_event,
     _execution_lifecycle_identity,
     _execution_lifecycle_payload,
@@ -61,6 +64,9 @@ from oh_goon.runtime.journal_facts import (
 )
 from oh_goon.runtime.journal_store import JournalFactStore
 from oh_goon.runtime.journal_view import JournalReadView
+
+if TYPE_CHECKING:
+    from oh_goon.integrations.fleet_plan_step_execution import StepLifecycleObserver
 
 
 def _admitted_event(
@@ -77,7 +83,7 @@ def _admitted_event(
         target=intent.target,
         capability=intent.capability,
         repository_scope=repository_scope,
-        targets=targets,
+        targets=tuple(targets),
         execution=intent.execution,
         repository_admissions=intent.repository_admissions,
         application_launch=intent.application_launch,
@@ -170,7 +176,7 @@ class Journal:
 
     def execution_lifecycle_observer(
         self, fleet_run_id: str, repository_id: str, operation_id: str
-    ):
+    ) -> StepLifecycleObserver:
         """Bind one runner callback to the exact durable run/repository attempt identity."""
 
         def observe(
@@ -225,7 +231,7 @@ class Journal:
         """Append one live lifecycle fact inside a caller-owned write transaction."""
         view = self._facts.read_view(connection)
         events = view.run_events(fleet_run_id).events
-        common = dict(
+        common: LifecycleRootFields = dict(
             sequence=len(events) + 1,
             fleet_run_id=fleet_run_id,
             repository_id=repository_id,
@@ -474,6 +480,7 @@ class Journal:
                 or len(repository_scope.repository_ids) != 1
             ):
                 raise JournalConflict("Scheduled admission requires one exact repository child")
+            assert isinstance(intent.target, FleetPlanTarget)
             ScheduleExecutionStore(self._database).bind_admitted_child_in(
                 connection,
                 schedule_run_id=intent.schedule_run_id,
@@ -513,7 +520,7 @@ class Journal:
         """Persist controller-recovery lifecycle in the same canonical run journal."""
         view = self._facts.read_view(connection)
         events = list(view.run_events(fleet_run_id).events)
-        common = dict(sequence=len(events) + 1, fleet_run_id=fleet_run_id)
+        common: ReconciliationRootFields = dict(sequence=len(events) + 1, fleet_run_id=fleet_run_id)
         try:
             candidate = reconciliation_lifecycle_event(event_type, common, operation_ids, reason)
         except ValueError as exc:

@@ -15,6 +15,7 @@ import stat
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import TracebackType
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.ports.original_mount_intent import require_unshadowed_agent_mount_targets
@@ -262,7 +263,7 @@ class OriginalBindSourceLease:
                 and getattr(request, "agent_source_mount", None) is None
             ):
                 raise FleetPlanInvalid("Kernel fs-verity Agent source mount required")
-            if getattr(request, "agent_source_mount", None) is not None:
+            if request.agent_source_mount is not None:
                 # Reuse the original signed descriptor's namespace rule at
                 # the actual FD pinning cut. No native bind can overlay Agent
                 # source after its read-only parent bind was admitted.
@@ -465,5 +466,10 @@ class OriginalBindSourceLease:
     def __enter__(self) -> OriginalBindSourceLease:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.close()

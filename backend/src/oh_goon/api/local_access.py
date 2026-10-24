@@ -8,6 +8,7 @@ from hmac import compare_digest
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
 
 from oh_goon.api.errors import ApiErrorResponse
 from oh_goon.core import local_access_protocol
@@ -49,7 +50,7 @@ def configured_local_access_token() -> str:
 class LocalAccessMiddleware(BaseHTTPMiddleware):
     """Require one process-local capability for every domain API request."""
 
-    def __init__(self, app, *, token: str) -> None:
+    def __init__(self, app: ASGIApp, *, token: str) -> None:
         super().__init__(app)
         self._token = token
 

@@ -181,24 +181,24 @@ class FleetPlanStepSequence:
         observer = self._runtime.lifecycle_observer
         if observer is None or record.outcome.physical_execution_id is None or not record.attempts:
             return
-        common = {
-            "attempt_number": len(record.attempts),
-            "physical_execution_id": record.outcome.physical_execution_id,
-        }
+        attempt_number = len(record.attempts)
+        physical_execution_id = record.outcome.physical_execution_id
         if record.output_evidence:
             observer(
                 step.step_id,
                 len(self._results),
                 "OUTPUT_FINALIZED",
                 output_count=len(record.output_evidence),
-                **common,
+                attempt_number=attempt_number,
+                physical_execution_id=physical_execution_id,
             )
         elif record.outcome.returncode != 0:
             observer(
                 step.step_id,
                 len(self._results),
                 "OUTPUT_ABANDONED",
-                **common,
+                attempt_number=attempt_number,
+                physical_execution_id=physical_execution_id,
             )
 
     def _record_cancelled_lifecycle(self, step: ResolvedPlanStep) -> None:

@@ -18,7 +18,10 @@ from oh_goon.core.effect_attempts import (
 )
 from oh_goon.core.errors import StateConflict
 from oh_goon.core.models.capability import CapabilitySnapshot
-from oh_goon.core.models.effect_attempt import RepositoryEffectAttempt
+from oh_goon.core.models.effect_attempt import (
+    ClaimedRepositoryEffectAttempt,
+    RepositoryEffectAttempt,
+)
 from oh_goon.core.models.effect_origin import (
     DirectEffectOrigin,
     FleetEffectOrigin,
@@ -78,7 +81,7 @@ class RepositoryEffectAttemptStore:
         baseline: RepositoryStateFingerprint,
         effect_boundary: EffectBoundaryKind,
         operation_id: str | None = None,
-    ) -> RepositoryEffectAttempt:
+    ) -> ClaimedRepositoryEffectAttempt:
         return _begin_attempt_in(
             connection,
             repository,
@@ -101,7 +104,7 @@ class RepositoryEffectAttemptStore:
         target: OperationTarget | None,
         baseline: RepositoryStateFingerprint,
         effect_boundary: EffectBoundaryKind,
-    ) -> RepositoryEffectAttempt:
+    ) -> ClaimedRepositoryEffectAttempt:
         try:
             validate_repository_attempt_operation_id(
                 fleet_run_id, repository_id(repository), operation_id
@@ -258,7 +261,7 @@ def _begin_attempt_in(
     baseline: RepositoryStateFingerprint,
     effect_boundary: EffectBoundaryKind,
     operation_id: str | None,
-) -> RepositoryEffectAttempt:
+) -> ClaimedRepositoryEffectAttempt:
     attempt = begin_effect_attempt(
         repository,
         capability,

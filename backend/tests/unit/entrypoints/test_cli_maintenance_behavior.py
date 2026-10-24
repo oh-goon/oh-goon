@@ -277,3 +277,29 @@ def test_recovery_invariants_clean_and_unknown_dispatch(capsys: pytest.CaptureFi
         cli_runtime_recovery.run_recovery_command(runtime, ns(command="dev", dev_command="mystery"))
         is None
     )
+
+
+def test_unknown_effect_quarantine_reports_without_assuming_reconciliation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from oh_goon.core.models.effect_origin import DirectEffectOrigin
+    from oh_goon.core.models.recovery import OutcomeUnknownRepositoryEffectQuarantine
+    from oh_goon.core.models.repository import RepositoryIdentity
+    from oh_goon.core.vocabulary import EffectAttemptOwner, EffectAttemptStatus, OperationAction
+    from tests.factories.capabilities import capability_snapshot
+    from tests.factories.repository_state import baseline_for
+
+    item = OutcomeUnknownRepositoryEffectQuarantine(
+        operation_id="unknown-effect",
+        repository=RepositoryIdentity(path=tmp_path),
+        capability=capability_snapshot(OperationAction.UPDATE),
+        baseline=baseline_for(tmp_path),
+        origin=DirectEffectOrigin(kind=EffectAttemptOwner.DIRECT),
+        status=EffectAttemptStatus.OUTCOME_UNKNOWN,
+        record_version=1,
+        note="Interrupted",
+    )
+    assert cli_runtime_recovery._list_effect_quarantines(_status(quarantines=[item])) == 2
+    output = capsys.readouterr().out
+    assert "unknown-effect" in output and "OUTCOME_UNKNOWN" in output
+    assert "reconciliation=" not in output

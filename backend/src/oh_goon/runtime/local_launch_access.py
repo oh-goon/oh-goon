@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oh_goon.runtime.local_launch_state import LocalLaunchEventStore
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,7 +105,7 @@ class LocalLaunchAccessStore:
             target.unlink()
         return True
 
-    def prune_terminal(self, event_store) -> LocalLaunchAccessPruneResult:
+    def prune_terminal(self, event_store: LocalLaunchEventStore) -> LocalLaunchAccessPruneResult:
         """Remove only capabilities whose exact launch generation is durably terminal.
 
         Launch state remains the lifecycle authority. Missing/invalid records, unknown

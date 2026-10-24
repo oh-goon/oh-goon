@@ -111,10 +111,10 @@ def _candidate(
     reason: str | None = None,
 ) -> MigrationCandidate:
     return MigrationCandidate(
-        repository=RepositoryIdentity(name=repository.name, path=repository),
+        repository=RepositoryIdentity.model_validate({"name": repository.name, "path": repository}),
         repository_instance_id=repository_instance_id(repository),
         source=source,
         readiness=readiness,
-        reasons=[reason] if reason else [],
-        source_files=files,
+        reasons=(reason,) if reason else (),
+        source_files=tuple(files),
     )

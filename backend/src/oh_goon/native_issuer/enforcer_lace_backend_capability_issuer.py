@@ -9,6 +9,7 @@ No caller-supplied capability mapping, fallback backend, or second selector exis
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -24,7 +25,10 @@ from oh_goon.core.enforcer_lace_trust import (
     digest,
 )
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.execution_environment import ResolvedExecutionEnvironment
 from oh_goon.core.models.fleet_plan_isolation import IsolationBackendCapabilities
+from oh_goon.core.models.run_admission import StrictFleetExecutionAdmission
+from oh_goon.core.models.run_events import RunAdmittedEvent
 from oh_goon.integrations.fleet_plan_process_isolation import isolation_backend_evidence
 from oh_goon.native_issuer import enforcer_lace_execution_environment_issuer as environment_owner
 from oh_goon.native_issuer.enforcer_lace_prework_capture import PreworkRunCapture
@@ -41,7 +45,7 @@ def _observe(
     *,
     control_state_root: Path | None,
     prework: PreworkRunCapture | None = None,
-):
+) -> tuple[RunAdmittedEvent, int, Path, tuple[object, ...], ResolvedExecutionEnvironment, str]:
     """Use the M161 native inventory/placement owner; observe manifest, not policy input."""
     observed = environment_owner._observe(
         journal,
@@ -50,6 +54,8 @@ def _observe(
         prework=prework,
     )
     admitted, revision, path, file_identity, environment = observed
+    # The environment owner admits this observation only for strict placement.
+    placement = cast(StrictFleetExecutionAdmission, admitted.execution)
     try:
         inventory = configured_executor_pool(control_state_root=control_state_root)
         if inventory is None:
@@ -67,7 +73,7 @@ def _observe(
         if not isinstance(statement, IsolationBackendCapabilities):
             raise TrustProtocolError("backend capability statement is not native")
         if (
-            isolation_backend_evidence(backend) != admitted.execution.placement.isolation_backend
+            isolation_backend_evidence(backend) != placement.placement.isolation_backend
             or backend.configuration_identity() != environment.backend_configuration_identity
         ):
             raise TrustProtocolError("backend capability owner differs from durable placement")

@@ -1,42 +1,41 @@
 # python/release-metadata
 
-Calculate and expose release metadata through the project-owned metadata command.
+Calculate and expose release metadata through the project’s own command.
 
-## Before you run
+**Status:** runnable with prerequisites. **Effects:** Writes metadata files; the project command owns its effects.
 
-The selected locked project/group must provide the commands used by the chosen Goons. The project supplies `release-metadata`; choose its channel and revision explicitly.
+**Prerequisites:** A committed Python project and uv lock. The locked group must also provide the project-owned `release-metadata` command; select the intended Git revision and channel.
 
-## Use this Plan
+**What to edit:** initialize a workflow, then set the registered target and relevant caller choices in `workflow/run.yml`. The illustrative addresses, revision and digest below must identify your real workload before execution. The [first-run guide](../../../README.md) explains repository registration and prepared CLI use.
+
+**Settings owner:** [`plan.yml`](plan.yml) owns ordered imports; imported Goons own input types/defaults, Steps, effects and outputs. `run.yml` selects values. Native project tools keep their own configuration.
 
 ```sh
-oh-goon templates show python/release-metadata --kind plan
-oh-goon plan inputs templates/plans/python/release-metadata/plan.yml
+oh-goon templates init python/release-metadata --output ./workflow
 ```
 
-Copy with `oh-goon templates show python/release-metadata --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
-
-No registry, image, chart, secret, or ambient CI value belongs to this Plan.
-
-## Configure a copy
-
-Save these choices as `values.yml`. Omitted optional inputs keep their Goon defaults; native project configuration still owns test and lint policy.
+Edit the generated `workflow/run.yml`; this shows one explicit selection:
 
 ```yaml
+version: 1
+source: {kind: catalog-plan, name: python/release-metadata}
+target: {repository_id: REPOSITORY_ID}
 inputs:
+  project: .
+  dependency_group: dev
   release_channel: production
   revision: abc1234
 ```
 
-Validate and lock the same selection:
-
 ```sh
-oh-goon plan validate plan.yml --inputs-file values.yml
-oh-goon lock plan.yml --inputs-file values.yml
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
 ```
 
-Use the same file and any explicit `--input` overrides when running. An override also needs a matching refreshed lock. Inspect the returned Run with `plan status`, `plan steps` and `plan outputs`.
+**Expected outputs:** `project_version` and `release_version` outputs. Calculation does not stamp a new version into source.
 
+**Failures:** invalid inputs fail before work. Inspection/validation do not prove installed tools, reachable services or successful effects. Native failures remain failed Steps with their exit status and logs. A changed source or execution selection requires a new lock.
 
-## Project release policy
-
-The project owns its release-metadata and packaging commands. Metadata outputs describe candidate values; this Plan does not change the committed project version. Adapt the project command when your release policy needs different behavior.
+**Customize:** change caller values in `run.yml`. For structural changes, create a project Plan with ordinary ordered `goons:` imports and select it with `source: {kind: file-plan, path: plan.yml}`; see [Plan authoring](../../README.md). Keep secrets in declared execution environment bindings.

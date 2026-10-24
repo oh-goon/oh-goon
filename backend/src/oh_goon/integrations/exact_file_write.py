@@ -224,16 +224,21 @@ def _fsync_directory(directory: Path) -> None:
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     descriptor = os.open(directory, flags)
     try:
-        try:
-            os.fsync(descriptor)
-        except OSError as exc:
-            unsupported = {errno.EINVAL, errno.ENOTSUP}
-            if hasattr(errno, "EOPNOTSUPP"):
-                unsupported.add(errno.EOPNOTSUPP)
-            if exc.errno not in unsupported:
-                raise
+        _fsync_directory_descriptor(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _fsync_directory_descriptor(descriptor: int) -> None:
+    """Use native directory durability for a caller-owned pinned descriptor."""
+    try:
+        os.fsync(descriptor)
+    except OSError as exc:
+        unsupported = {errno.EINVAL, errno.ENOTSUP}
+        if hasattr(errno, "EOPNOTSUPP"):
+            unsupported.add(errno.EOPNOTSUPP)
+        if exc.errno not in unsupported:
+            raise
 
 
 @contextmanager
@@ -274,3 +279,110 @@ def _release_lock(stream: BinaryIO) -> None:
         msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
         return
     fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def publish_new_text_tree(target: Path, files: dict[str, str], *, commit_last: str) -> None:
+    """Exclusively publish an authored tree through pinned native directories.
+
+    The final file is a completion marker. Partial failure retains the incomplete
+    output and never removes user data; only descriptor-owned temporaries are removed.
+    """
+    import secrets
+    from contextlib import ExitStack
+    from pathlib import PurePosixPath
+
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        raise OSError(
+            "Safe workflow initialization requires native directory-relative file operations"
+        )
+    if commit_last not in files:
+        raise ValueError("The authored tree requires its completion file")
+    for relative in files:
+        parsed = PurePosixPath(relative)
+        if (
+            parsed.is_absolute()
+            or str(parsed) != relative
+            or any(p in {".", ".."} for p in parsed.parts)
+        ):
+            raise ValueError("Authored tree files require canonical relative paths")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    with ExitStack() as owned:
+        root = os.open(target.anchor, flags)
+        owned.callback(os.close, root)
+        lineage: list[tuple[int, str, int]] = []
+        created_directories: list[int] = []
+
+        def require_current() -> None:
+            for parent, name, child in lineage:
+                actual = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                expected = os.fstat(child)
+                if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
+                    raise OSError("Authoring output directory changed before publication")
+
+        def open_directory(parent: int, name: str, *, exclusive: bool = False) -> int:
+            require_current()
+            created = False
+            if exclusive:
+                os.mkdir(name, dir_fd=parent)
+                _fsync_directory_descriptor(parent)
+                created = True
+            try:
+                child = os.open(name, flags, dir_fd=parent)
+            except FileNotFoundError:
+                os.mkdir(name, dir_fd=parent)
+                _fsync_directory_descriptor(parent)
+                created = True
+                child = os.open(name, flags, dir_fd=parent)
+            owned.callback(os.close, child)
+            lineage.append((parent, name, child))
+            if created:
+                created_directories.append(child)
+            return child
+
+        parent = root
+        for component in target.parts[1:-1]:
+            parent = open_directory(parent, component)
+        output = open_directory(parent, target.name, exclusive=True)
+        directories: dict[tuple[str, ...], int] = {(): output}
+        for relative in (*sorted(set(files) - {commit_last}), commit_last):
+            parts = PurePosixPath(relative).parts
+            for index in range(1, len(parts)):
+                prefix = parts[:index]
+                if prefix not in directories:
+                    directories[prefix] = open_directory(directories[prefix[:-1]], prefix[-1])
+            directory = directories[parts[:-1]]
+            require_current()
+            temporary = ".oh-goon-authoring-" + secrets.token_hex(16)
+            descriptor = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=directory,
+            )
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+                    stream.write(files[relative])
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                require_current()
+                if relative == commit_last:
+                    # A durable marker must never outrun the companion directory
+                    # entries. Flush newly created descendants before ancestors.
+                    for created_directory in reversed(created_directories):
+                        _fsync_directory_descriptor(created_directory)
+                    _fsync_directory_descriptor(parent)
+                    require_current()
+                os.link(
+                    temporary,
+                    parts[-1],
+                    src_dir_fd=directory,
+                    dst_dir_fd=directory,
+                    follow_symlinks=False,
+                )
+                _fsync_directory_descriptor(directory)
+            finally:
+                try:
+                    os.unlink(temporary, dir_fd=directory)
+                except FileNotFoundError:
+                    pass
+        require_current()

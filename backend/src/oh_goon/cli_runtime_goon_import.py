@@ -44,7 +44,7 @@ def import_gitlab(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     return 0
 
 
-def _named_values(items, *, label: str) -> dict[str, str]:
+def _named_values(items: list[str] | None, *, label: str) -> dict[str, str]:
     values: dict[str, str] = {}
     for item in items or ():
         if "=" not in item:

@@ -24,6 +24,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanStepExecution,
     PublishedPlanOutputEvidence,
 )
+from oh_goon.core.models.fleet_plan_step_primitives import StepCondition
 from oh_goon.core.path_authority import RepositoryPathSpace, repository_relative_parts
 
 _OUTPUT_REFERENCE = re.compile(
@@ -63,7 +64,7 @@ def condition_skip_reason(
     raise FleetPlanInvalid(f"Unsupported Fleet plan condition: {type(condition).__name__}")
 
 
-def validate_condition_path(repository: Path, condition) -> None:
+def validate_condition_path(repository: Path, condition: StepCondition | None) -> None:
     if isinstance(condition, (PathExistsCondition, PathMissingCondition)):
         repository_relative_path(repository, condition.path, kind="condition")
 
@@ -224,7 +225,7 @@ def bind_step_outputs(
             lambda match: output_value(match.group(1), match.group(2)), value
         )
 
-    updates = {}
+    updates: dict[str, object] = {}
     if isinstance(step, ResolvedLocalSearchAgentStep) and step.feedback_reference is not None:
         value = bind(step.feedback_reference)
         if not value.strip() or len(value.encode("utf-8")) > 2048:

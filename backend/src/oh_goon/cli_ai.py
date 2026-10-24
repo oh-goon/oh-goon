@@ -77,20 +77,6 @@ def add_ai_command(
     )
 
 
-def add_native_plan_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--native-agent",
-        choices=("opencode", "pi", "codex"),
-        help="Native implementation for authored native Agent Steps",
-    )
-    parser.add_argument(
-        "--native-profile", help="Native execution profile; defaults to isolated-managed"
-    )
-    parser.add_argument(
-        "--native-workspace", type=Path, help="Exact Git workspace selected by the native profile"
-    )
-
-
 def _task(args: argparse.Namespace) -> str:
     data: bytes
     if args.prompt is not None:
@@ -187,7 +173,7 @@ def native_plan_selection(
     """One native selection for lock, Plan execution and bounded repair ingress."""
     if args.native_workspace is None or getattr(args, "agent_model_profile", None):
         raise AgentProviderError(
-            "Native selection requires --native-workspace and retains native model settings"
+            "Native selection requires an explicit registered repository workspace and retains native model settings"
         )
     workspace = args.native_workspace.expanduser().resolve(strict=True)
     args.native_workspace = workspace

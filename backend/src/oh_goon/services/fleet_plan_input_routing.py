@@ -18,6 +18,7 @@ from oh_goon.core.fleet_plan_output_refs import (
     step_output_reference,
 )
 from oh_goon.core.models.fleet_plan import CompiledGoonImportStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_composition import PlanInputSource
 from oh_goon.core.models.fleet_plan_diagnostics import PlanValueResolutionEntry
 from oh_goon.integrations.fleet_plan_compilation import qualified_step_id
 from oh_goon.services.fleet_plan_input_inspection import inspect_projected_inputs
@@ -34,7 +35,9 @@ class CallerFileRoutingOrigin:
     names: frozenset[str]
 
 
-def _binding_origin(value: object, sources: tuple[object, ...], prefix: str) -> dict[str, object]:
+def _binding_origin(
+    value: object, sources: tuple[PlanInputSource, ...], prefix: str
+) -> dict[str, object]:
     """Only structural descriptors; never publish literals or resolved secret values."""
     if sources:
         return {"kind": "external_source", "source_kinds": [source.kind for source in sources]}

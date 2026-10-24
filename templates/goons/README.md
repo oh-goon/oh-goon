@@ -46,4 +46,4 @@ distinct without inventing duplicate Make/npm prerequisite graphs.
 
 ## Start and customize
 
-Use the [local Python journey](../README.md) to run, configure and extend an existing Plan. `oh-goon templates list --kind goon` lists the actual catalog. Atomic Goons own typed input descriptions; CLI overrides one selected values file. Local `from:` imports use the same package shape and compiler.
+Use the [local Python journey](../README.md) to run, configure and extend an existing Plan. `oh-goon templates list --kind goon` lists the actual catalog. Atomic Goons own typed input descriptions; one selected `run.yml` supplies caller choices. Local `from:` imports use the same package shape and compiler.

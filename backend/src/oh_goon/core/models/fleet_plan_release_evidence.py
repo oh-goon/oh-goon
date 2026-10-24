@@ -27,7 +27,7 @@ class OciPublishReleaseEvidence(ImmutableModel):
             raise ValueError("OCI release evidence reference must match registry/repository/digest")
         return self
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def release_id(self) -> str:
         return stable_id(
@@ -77,7 +77,7 @@ class KubernetesSetImageReleaseEvidence(ImmutableModel):
                 )
         return self
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def release_id(self) -> str:
         return stable_id(
@@ -161,7 +161,7 @@ class KubernetesRolloutVerificationEvidence(ImmutableModel):
             raise ValueError("Progress-deadline evidence requires the canonical Kubernetes reason")
         return self
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def verification_id(self) -> str:
         return stable_id(

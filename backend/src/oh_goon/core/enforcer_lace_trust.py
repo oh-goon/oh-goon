@@ -11,7 +11,7 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 PROTOCOL_VERSION = "enforcer-lace-authority/v1"
 DIGEST_PREFIX = "sha256:"
@@ -146,7 +146,7 @@ class AdmittedRunContract:
 
     @property
     def fields(self) -> dict[str, Any]:
-        return json.loads(self.encoded)
+        return cast(dict[str, Any], json.loads(self.encoded))
 
     def verify(self) -> None:
         if AdmittedRunContract.freeze(self.fields) != self:
@@ -161,7 +161,7 @@ class AuthenticatedReceipt:
     mac_hex: str
 
     def fields(self) -> dict[str, Any]:
-        return json.loads(self.payload)
+        return cast(dict[str, Any], json.loads(self.payload))
 
 
 class ReceiptAuthenticator:
@@ -193,7 +193,7 @@ class ReceiptAuthenticator:
         ):
             raise TrustProtocolError("wrong receipt domain or trusted key identity")
         try:
-            decoded = json.loads(receipt.payload)
+            decoded: dict[str, Any] = json.loads(receipt.payload)
         except (ValueError, UnicodeDecodeError) as exc:
             raise TrustProtocolError("receipt has invalid encoding") from exc
         if canonical_bytes(decoded) != receipt.payload:

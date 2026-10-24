@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oh_goon.application import ApplicationRuntime
+
 from oh_goon._application_foundation import RuntimeFoundation
 from oh_goon.integrations.gitlab_ci_component import GitLabComponentFetcher
 from oh_goon.integrations.gitlab_ci_goon import GitLabCiGoonMigrator
@@ -130,7 +135,7 @@ def _build_schedule_services(
     return schedules, ScheduleScheduler(schedules.tick, diagnostics=foundation.diagnostics)
 
 
-def build_product_services(foundation: RuntimeFoundation):
+def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
     """Compose product services from the already-proven runtime foundation."""
     filesystem = FilesystemService()
     locations = LocationService(foundation.state)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations.fleet_content_store_lifecycle import (
@@ -101,9 +102,9 @@ def _parse_lifecycle(path: Path, payload: dict[str, object]) -> FleetContentObje
         schema = str(payload["schema"])
         object_id = str(payload["object_id"])
         state = str(payload["state"])
-        byte_count = int(payload["byte_count"])
-        created_at_ns = int(payload["created_at_ns"])
-        last_used_at_ns = int(payload["last_used_at_ns"])
+        byte_count = int(cast(int | str | float, payload["byte_count"]))
+        created_at_ns = int(cast(int | str | float, payload["created_at_ns"]))
+        last_used_at_ns = int(cast(int | str | float, payload["last_used_at_ns"]))
     except (KeyError, TypeError, ValueError) as exc:
         raise FleetPlanInvalid(f"Fleet content lifecycle metadata is invalid: {path.name}") from exc
     if schema != OBJECT_LIFECYCLE_SCHEMA or not is_object_id(object_id):

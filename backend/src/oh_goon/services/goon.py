@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from oh_goon.core.errors import StateConflict
+from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.models.fleet_plan_evidence import FleetPlanPreview
 from oh_goon.core.models.fleet_plan_migration import GitLabGoonMigration
 from oh_goon.core.models.goon_plan_source import TeamGoonSource
-from oh_goon.core.models.league import LeagueTeam
+from oh_goon.core.models.league import ConfiguredTeamPipeline, LeagueTeam
 from oh_goon.core.models.run import FleetRunState
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.team_pipeline import team_pipeline_path
@@ -41,13 +43,13 @@ class GoonService:
         self,
         repository: Path,
         *,
-        inputs: dict[str, str] | None = None,
+        inputs: Mapping[str, PlanInputValue] | None = None,
     ) -> GoonInspection:
         team = self._league.configured_team(repository)
         preview = self._plans.preview(
             team_pipeline_path(team.repository.path),
             team.repository.path,
-            inputs=inputs,
+            inputs=dict(inputs) if inputs is not None else None,
         )
         return GoonInspection(team=team, preview=preview)
 
@@ -57,7 +59,7 @@ class GoonService:
         *,
         expected_pipeline_sha256: str,
         expected_repository_instance_id: str | None = None,
-        inputs: dict[str, str] | None = None,
+        inputs: Mapping[str, PlanInputValue] | None = None,
         fleet_run_id: str | None = None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
     ) -> FleetRunState:
@@ -66,6 +68,7 @@ class GoonService:
         # first read. This membership fence is not final issuer authorization.
         self._plans.require_plan_ingress_preparation(fleet_run_id)
         team = self._league.configured_team(repository)
+        assert isinstance(team.pipeline, ConfiguredTeamPipeline)
         if (
             expected_repository_instance_id is not None
             and team.repository_instance_id != expected_repository_instance_id
@@ -78,7 +81,7 @@ class GoonService:
             repository_ids={team.repository.repository_id},
             fleet_run_id=fleet_run_id,
             requested_priority=requested_priority,
-            inputs=inputs,
+            inputs=dict(inputs) if inputs is not None else None,
             source=TeamGoonSource(sha256=team.pipeline.sha256),
         )
 

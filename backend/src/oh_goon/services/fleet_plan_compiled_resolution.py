@@ -285,11 +285,15 @@ def child_goon_bindings(
             origins[item.name] = f"workspace:{workspace_goon}"
             referenced_workspaces.add(producer)
             continue
-        explicit[item.name] = resolve_output_references(
-            item.value,
-            prefix=prefix,
-            goon_aliases=goon_aliases,
-            preserved_step_ids=external_step_ids,
+        explicit[item.name] = (
+            resolve_output_references(
+                item.value,
+                prefix=prefix,
+                goon_aliases=goon_aliases,
+                preserved_step_ids=external_step_ids,
+            )
+            if isinstance(item.value, str)
+            else item.value
         )
         origins[item.name] = "bound"
     inputs = bind_inputs(child, explicit, context=str(child_path))

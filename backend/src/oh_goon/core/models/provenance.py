@@ -24,7 +24,7 @@ class RepositoryStateFingerprint(StrictProvenanceModel):
     pyproject_sha256: str | None = None
     uv_lock_sha256: str | None = None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def state_id(self) -> str:
         return stable_id(

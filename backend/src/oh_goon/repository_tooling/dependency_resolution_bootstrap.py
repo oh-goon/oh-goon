@@ -12,8 +12,9 @@ import argparse
 import hashlib
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-if __package__:
+if TYPE_CHECKING or __package__:
     from ._dependency_lock_portability import backend_lock_portability_issues
     from ._dependency_resolution_primitives import DependencyResolutionError
 else:  # stdlib-only source execution before the project environment exists

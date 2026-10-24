@@ -29,12 +29,12 @@ class SharedPlanSummary(ImmutableModel):
     byte_count: int = Field(ge=1)
     last_run: SharedPlanLastRun | None = None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def shared_plan_id(self) -> str:
         return stable_id("shared-plan", {"plan_key": self.plan_key})
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def changed_since_last_run(self) -> bool:
         return self.last_run is not None and self.last_run.source_sha256 != self.sha256

@@ -52,7 +52,7 @@ def validated_value_compiler(
 
 
 def render_pipeline_step(step: PlanStep, compiler: PipelineValueCompiler) -> PlanStep:
-    def render(value):
+    def render(value: object) -> object:
         if isinstance(value, str):
             return compiler.render_authoring_text(value)
         if isinstance(value, tuple):

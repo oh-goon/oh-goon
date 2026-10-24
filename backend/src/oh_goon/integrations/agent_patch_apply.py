@@ -162,7 +162,7 @@ def apply_selected_proposal(
 MAX_BATCH_BYTES = 65536
 
 
-def parse_batch_proposal(text: str, *, candidate_identity: str) -> dict[str, Any]:
+def parse_batch_proposal(text: str, *, candidate_identity: object) -> dict[str, Any]:
     """A proposal is source-bound data; allowed write roots come only from the caller."""
     if (
         not isinstance(candidate_identity, str)

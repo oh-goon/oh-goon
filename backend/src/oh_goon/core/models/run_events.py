@@ -125,44 +125,47 @@ class ProcessStartingEvent(_FleetRunEventBase):
     physical_execution_id: str = Field(min_length=1)
 
 
+# These immutable Pydantic variants intentionally retain payload inheritance and
+# isinstance ancestry while replacing the concrete wire discriminator. Mypy treats
+# fields as ordinary mutable attributes and cannot express that schema refinement.
 class ProcessStartedEvent(ProcessStartingEvent):
-    event_type: Literal[FleetRunEventType.PROCESS_STARTED]
+    event_type: Literal[FleetRunEventType.PROCESS_STARTED]  # type: ignore[assignment]
     pid: int = Field(ge=1)
     process_identity: str | None = Field(default=None, min_length=1)
 
 
 class TerminationRequestedEvent(ProcessStartedEvent):
-    event_type: Literal[FleetRunEventType.TERMINATION_REQUESTED]
+    event_type: Literal[FleetRunEventType.TERMINATION_REQUESTED]  # type: ignore[assignment]
     reason: str = Field(min_length=1)
 
 
 class ProcessStateUnknownEvent(ProcessStartedEvent):
-    event_type: Literal[FleetRunEventType.PROCESS_STATE_UNKNOWN]
+    event_type: Literal[FleetRunEventType.PROCESS_STATE_UNKNOWN]  # type: ignore[assignment]
     reason: str = Field(min_length=1)
 
 
 class OutputFinalizedEvent(ProcessStartingEvent):
-    event_type: Literal[FleetRunEventType.OUTPUT_FINALIZED]
+    event_type: Literal[FleetRunEventType.OUTPUT_FINALIZED]  # type: ignore[assignment]
     output_count: int = Field(ge=1)
 
 
 class OutputAbandonedEvent(ProcessStartingEvent):
-    event_type: Literal[FleetRunEventType.OUTPUT_ABANDONED]
+    event_type: Literal[FleetRunEventType.OUTPUT_ABANDONED]  # type: ignore[assignment]
     reason: str = Field(min_length=1)
 
 
 class OutputQuarantinedEvent(ProcessStartingEvent):
-    event_type: Literal[FleetRunEventType.OUTPUT_QUARANTINED]
+    event_type: Literal[FleetRunEventType.OUTPUT_QUARANTINED]  # type: ignore[assignment]
     reason: str = Field(min_length=1)
 
 
 class ProcessExitedEvent(ProcessStartedEvent):
-    event_type: Literal[FleetRunEventType.PROCESS_EXITED]
+    event_type: Literal[FleetRunEventType.PROCESS_EXITED]  # type: ignore[assignment]
     returncode: int
 
 
 class DescendantsQuiescentEvent(ProcessStartedEvent):
-    event_type: Literal[FleetRunEventType.DESCENDANTS_QUIESCENT]
+    event_type: Literal[FleetRunEventType.DESCENDANTS_QUIESCENT]  # type: ignore[assignment]
 
 
 class _StepTerminalEventBase(_FleetRunEventBase):

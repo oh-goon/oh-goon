@@ -186,7 +186,7 @@ def _backend_cli_commands(path: Path) -> tuple[tuple[str, ...], ...]:
                 and node.args
             ):
                 continue
-            argument = node.args[0]
+            argument: ast.AST = node.args[0]
             if isinstance(argument, ast.Name):
                 argument = assignments.get(argument.id, argument)
             command = _literal_string_prefix(argument)

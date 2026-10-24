@@ -71,14 +71,16 @@ class RepositoryDiscoveryService:
         exclusions: Mapping[str, Mapping[str, str]],
     ) -> RepositoryCatalogEntry:
         exclusion = exclusions.get(str(navigation_path(candidate)))
-        identity = RepositoryIdentity(name=candidate.name, path=candidate)
+        identity = RepositoryIdentity.model_validate({"name": candidate.name, "path": candidate})
         if exclusion is None:
             return IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=identity)
-        return ExcludedRepositoryCatalogEntry(
-            scope=FleetScope.EXCLUDED,
-            repository=identity,
-            exclusion_reason=exclusion["reason"],
-            excluded_at=exclusion["excluded_at"],
+        return ExcludedRepositoryCatalogEntry.model_validate(
+            {
+                "scope": FleetScope.EXCLUDED,
+                "repository": identity,
+                "exclusion_reason": exclusion["reason"],
+                "excluded_at": exclusion["excluded_at"],
+            }
         )
 
     def _candidates(self, location: Path, *, require_pyproject: bool) -> list[Path]:

@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 from oh_goon.integrations.canonical_goon_tool_authority import (
     load_canonical_goon_tool_authority,
@@ -20,6 +20,17 @@ REQUIREMENTS_FILE = "backend/goon-execution-requirements.json"
 _POLICY_FIELD = "workload_tool_permissions"
 
 
+class StaticAdmissionIssuePayload(TypedDict):
+    code: str
+    message: str
+    goon: NotRequired[str]
+    step_id: NotRequired[str]
+    missing_tools: NotRequired[list[str]]
+    excess_tools: NotRequired[list[str]]
+    unresolved_edges: NotRequired[list[str]]
+    authority_paths: NotRequired[list[str]]
+
+
 @dataclass(frozen=True, slots=True)
 class StaticAdmissionIssue:
     code: str
@@ -31,8 +42,8 @@ class StaticAdmissionIssue:
     unresolved_edges: tuple[str, ...] = ()
     authority_paths: tuple[str, ...] = ()
 
-    def as_payload(self) -> dict[str, object]:
-        payload: dict[str, object] = {
+    def as_payload(self) -> StaticAdmissionIssuePayload:
+        payload: StaticAdmissionIssuePayload = {
             "code": self.code,
             "message": self.message,
         }

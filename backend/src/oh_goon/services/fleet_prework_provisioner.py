@@ -267,6 +267,7 @@ class FleetPreworkProvisioner:
                 binding.contract.verify()
                 run_id = binding.contract.fields["run_id"]
             else:
+                assert isinstance(binding, FleetPolicyEnrollment)
                 run_id = binding.run_id
             if run_id in run_ids:
                 raise TrustProtocolError("duplicate enrolled Fleet Run authority")
@@ -363,7 +364,7 @@ class FleetPreworkProvisioner:
             for item in self.enrolled
             if (
                 item.contract.fields["run_id"]
-                if type(item) is FleetPreworkComposition
+                if isinstance(item, FleetPreworkComposition)
                 else item.run_id
             )
             == run_id
@@ -428,6 +429,7 @@ class FleetPreworkProvisioner:
                     "Fleet Run contract differs from native executor authority"
                 )
         else:
+            assert isinstance(binding, FleetPolicyEnrollment)
             binding.deployment_policy.read()
             binding.configured.require_unchanged(binding.current)
         # The independent verifier owns the public file validation. The signer

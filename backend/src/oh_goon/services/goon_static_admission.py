@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 
+from oh_goon.core.models.fleet_plan import (
+    CompiledExecutionTemplate,
+    CompiledGoonImportStep,
+    PlanStep,
+)
 from oh_goon.integrations.canonical_goon_tool_authority import (
     load_canonical_goon_tool_authority,
 )
@@ -16,8 +21,13 @@ from oh_goon.services.canonical_goon_tool_projection import (
 )
 from oh_goon.services.goon_execution_requirements import REQUIREMENTS_FILE as REQUIREMENTS_FILE
 from oh_goon.services.goon_execution_requirements import (
-    SCHEMA,
-    StaticAdmissionIssue,
+    SCHEMA as SCHEMA,
+)
+from oh_goon.services.goon_execution_requirements import (
+    StaticAdmissionIssue as StaticAdmissionIssue,
+)
+from oh_goon.services.goon_execution_requirements import (
+    StaticAdmissionIssuePayload,
     load_goon_execution_requirements,
     validate_goon_execution_requirements,
     workload_tool_permissions,
@@ -25,6 +35,20 @@ from oh_goon.services.goon_execution_requirements import (
 from oh_goon.services.goon_execution_requirements import (
     canonical_step_required_tools as canonical_step_required_tools,
 )
+
+
+class CanonicalGoonAdmissionPayload(TypedDict):
+    schema: str
+    status: Literal["PASS", "FAIL"]
+    goon_count: int
+    step_count: int
+    requirements_identity: str | None
+    execution_authority_identity: str | None
+    authority_closure_count: int
+    authority_closures_proven: int
+    unresolved_execution_edge_count: int
+    package_executable_authority_count: int
+    issues: list[StaticAdmissionIssuePayload]
 
 
 def _catalog_keys(store: GoonTemplateStore, issues: list[StaticAdmissionIssue]) -> tuple[str, ...]:
@@ -41,7 +65,7 @@ def _catalog_keys(store: GoonTemplateStore, issues: list[StaticAdmissionIssue]) 
 
 
 def _validate_compiled_step(
-    *, key: str, actual: object, keys: tuple[str, ...]
+    *, key: str, actual: PlanStep, keys: tuple[str, ...]
 ) -> list[StaticAdmissionIssue]:
     issues: list[StaticAdmissionIssue] = []
     actual_kind = str(actual.kind)
@@ -78,8 +102,8 @@ def _compile_catalog(
     store: GoonTemplateStore,
     keys: tuple[str, ...],
     issues: list[StaticAdmissionIssue],
-) -> tuple[dict[str, object], int]:
-    compiled_by_key: dict[str, object] = {}
+) -> tuple[dict[str, CompiledExecutionTemplate], int]:
+    compiled_by_key: dict[str, CompiledExecutionTemplate] = {}
     step_count = 0
     for key in keys:
         try:
@@ -101,10 +125,12 @@ def _compile_catalog(
     return compiled_by_key, step_count
 
 
-def _validate_import_cycles(compiled_by_key: dict[str, object]) -> list[StaticAdmissionIssue]:
+def _validate_import_cycles(
+    compiled_by_key: dict[str, CompiledExecutionTemplate],
+) -> list[StaticAdmissionIssue]:
     graph = {
         key: tuple(
-            str(step.goon) for step in compiled.steps if getattr(step, "kind", None) == "goon"
+            str(step.goon) for step in compiled.steps if isinstance(step, CompiledGoonImportStep)
         )
         for key, compiled in compiled_by_key.items()
     }
@@ -137,7 +163,7 @@ def _validate_import_cycles(compiled_by_key: dict[str, object]) -> list[StaticAd
     return issues
 
 
-def _requirements_failure(exc: ValueError) -> dict[str, object]:
+def _requirements_failure(exc: ValueError) -> CanonicalGoonAdmissionPayload:
     return {
         "schema": SCHEMA,
         "status": "FAIL",
@@ -158,7 +184,7 @@ def _requirements_failure(exc: ValueError) -> dict[str, object]:
     }
 
 
-def _tool_authority_failure(exc: Exception) -> dict[str, object]:
+def _tool_authority_failure(exc: Exception) -> CanonicalGoonAdmissionPayload:
     return {
         "schema": SCHEMA,
         "status": "FAIL",
@@ -318,7 +344,7 @@ def _tool_projection_issues(
 
 
 def _authority_closure_metrics(
-    compiled_by_key: dict[str, object],
+    compiled_by_key: dict[str, CompiledExecutionTemplate],
     workloads: WorkloadExecutionRequirements,
 ) -> tuple[int, int, int]:
     total = 0
@@ -348,7 +374,7 @@ def _package_executable_authority_count(
     )
 
 
-def compile_canonical_goons(root: Path) -> dict[str, object]:
+def compile_canonical_goons(root: Path) -> CanonicalGoonAdmissionPayload:
     """Statically validate every shipped canonical Goon without executing a workload."""
     root = root.resolve()
     try:

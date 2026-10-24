@@ -17,7 +17,10 @@ TRACKED_METRICS = {"python": ("lines", "branches")}
 
 
 def _load_json(path: Path) -> dict[str, object]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    value: object = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{path.name} must contain a JSON object")
+    return value
 
 
 def _python_metrics() -> dict[str, float]:

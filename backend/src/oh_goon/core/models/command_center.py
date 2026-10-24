@@ -16,17 +16,17 @@ class RecipeFleetStatus(ImmutableModel):
     latest_run_id: str | None = None
     latest_outcome: FleetRunOutcome | None = None
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def needs_attention(self) -> int:
         return len(self.attention_repository_ids)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def stale(self) -> int:
         return len(self.stale_repository_ids)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def repositories(self) -> int:
         return self.successful + self.needs_attention + self.stale + self.not_run

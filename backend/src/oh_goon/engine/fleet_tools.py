@@ -16,7 +16,7 @@ from oh_goon.core.path_authority import (
 )
 from oh_goon.core.path_layouts import ManagedPreparationPathLayout
 from oh_goon.core.product_identity import stable_id
-from oh_goon.engine.command import run_command
+from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.native_uv_environment import NativeUvAuthority, capture_native_uv_authority
 from oh_goon.integrations.exact_file_write import (
     ExactPublicationDurabilityError,
@@ -68,17 +68,18 @@ class FleetToolStore:
             lock_sha256 = sha256_file(lockfile)
         except OSError as exc:
             raise FleetPlanInvalid(
-                f"Pinned pre-commit runtime is not prepared; run 'oh-goon plan prepare <plan.yml>': {exc}"
+                f"Pinned pre-commit runtime is not prepared; prepare the original managed runtime "
+                f"through FleetPlanService.prepare before locking: {exc}"
             ) from exc
         expected = _project_text(requirement).encode("utf-8")
         if pyproject_bytes != expected:
             raise FleetPlanInvalid(
-                "Prepared pre-commit runtime metadata changed; run plan prepare again"
+                "Prepared pre-commit runtime metadata changed; prepare the original managed runtime through FleetPlanService.prepare before locking"
             )
         executable = self.command_path(runtime_id, "pre-commit")
         if not executable.is_file():
             raise FleetPlanInvalid(
-                "Prepared pre-commit executable is missing; run plan prepare again"
+                "Prepared pre-commit executable is missing; prepare the original managed runtime through FleetPlanService.prepare before locking"
             )
         return ManagedToolRuntime(
             runtime_id=runtime_id,
@@ -116,7 +117,7 @@ class FleetToolStore:
             )
             if check.returncode != 0:
                 raise FleetPlanInvalid(
-                    "Prepared pre-commit runtime is stale or incomplete; run plan prepare again"
+                    "Prepared pre-commit runtime is stale or incomplete; prepare the original managed runtime through FleetPlanService.prepare before locking"
                 )
             executable = self.command_path(runtime_id, "pre-commit")
             if not executable.is_file():
@@ -196,7 +197,7 @@ def _check_environment(
     path_authority: StrictHostPathAuthority | None,
     preparation: ManagedPreparationPathLayout,
     native_uv: NativeUvAuthority,
-):
+) -> CommandResult:
     return run_command(
         _uv_executable(path_authority),
         "sync",
@@ -217,7 +218,7 @@ def _sync_environment(
     path_authority: StrictHostPathAuthority | None,
     preparation: ManagedPreparationPathLayout,
     native_uv: NativeUvAuthority,
-):
+) -> CommandResult:
     return run_command(
         _uv_executable(path_authority),
         "sync",

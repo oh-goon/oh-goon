@@ -992,12 +992,16 @@ def _check_native_command_policy(root: Path) -> list[Violation]:
             and node.args
         ):
             continue
-        key = node.args[0]
-        if isinstance(key, ast.Constant) and key.value in forbidden_popped:
+        popped_key = node.args[0]
+        if (
+            isinstance(popped_key, ast.Constant)
+            and isinstance(popped_key.value, str)
+            and popped_key.value in forbidden_popped
+        ):
             violations.append(
                 Violation(
                     native,
-                    f"certification must inherit operator/native environment instead of removing {key.value}",
+                    f"certification must inherit operator/native environment instead of removing {popped_key.value}",
                 )
             )
     for token in ("source ~/.bashrc", ". ~/.bashrc"):

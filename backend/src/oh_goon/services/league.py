@@ -37,7 +37,7 @@ class LeagueService:
         """Return current managed Git Team identities without inspecting repository goon.yml files."""
         captured = view or self._state.read_view()
         return tuple(
-            RepositoryIdentity(path=repository)
+            RepositoryIdentity.model_validate({"path": repository})
             for repository in self._discovery.git_roots(captured.locations, require_pyproject=False)
         )
 
@@ -46,7 +46,7 @@ class LeagueService:
         repositories = tuple(item.path for item in self.repositories(captured))
         teams = tuple(
             LeagueTeam(
-                repository=RepositoryIdentity(path=repository),
+                repository=RepositoryIdentity.model_validate({"path": repository}),
                 repository_instance_id=repository_subject_instance_id(repository),
                 pipeline=_inspect_team_pipeline(repository),
             )
@@ -75,7 +75,7 @@ class LeagueService:
         root = self._discovery.containing_git_root(captured.locations, requested)
         if root is None:
             raise LeagueTeamNotManaged("Path is not a Git team inside a configured League folder")
-        return RepositoryIdentity(path=root)
+        return RepositoryIdentity.model_validate({"path": root})
 
     def resolve_repositories(
         self, repositories: tuple[Path, ...]

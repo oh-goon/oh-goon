@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TypeVar
+
 from oh_goon.core.vocabulary import GameTapeStatus
 from oh_goon.scout.aggregation import (
     build_step_peer_index,
@@ -260,15 +262,18 @@ def project_scout_goon_leaders(
     )
 
 
+T = TypeVar("T")
+
+
 def _detail_slice(
-    items: tuple,
+    items: tuple[T, ...],
     *,
     active_section: ScoutDetailSection,
     page_section: ScoutDetailSection | None,
     page_offset: int,
     page_limit: int,
     default_limit: int,
-) -> tuple:
+) -> tuple[T, ...]:
     offset = page_offset if page_section == active_section else 0
     limit = page_limit if page_section == active_section else default_limit
     return items[offset : offset + limit]

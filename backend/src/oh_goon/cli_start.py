@@ -3,14 +3,17 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+from types import ModuleType
 
 from oh_goon.api.local_access import ensure_local_access_token
 from oh_goon.api.ui import built_ui_available
 from oh_goon.cli_local_state import check_local_state_for_startup
 from oh_goon.core.errors import LeaguePreferencesInvalid
+from oh_goon.core.launch_manifest import LaunchIntent
 from oh_goon.runtime.league_folders import LeagueFolderStore
 from oh_goon.runtime.local_launch_access import LocalLaunchAccessStore
 from oh_goon.runtime.local_launch_binding import LocalLaunchBindingStore
+from oh_goon.runtime.local_launch_context import LocalLaunchRuntimeContext
 from oh_goon.runtime.local_launch_owner import (
     BACKEND_GENERATION,
     BACKEND_SERVICE,
@@ -20,6 +23,7 @@ from oh_goon.runtime.local_launch_owner import (
 from oh_goon.runtime.local_launch_plan import built_local_plan
 from oh_goon.runtime.local_launch_reuse import (
     LocalLaunchReuseAction,
+    LocalLaunchReuseDecision,
     assess_local_launch_reuse,
 )
 from oh_goon.runtime.local_launch_state import LocalLaunchEventStore
@@ -29,7 +33,7 @@ LOCAL_APP_HOST = "127.0.0.1"
 LOCAL_APP_PORT = 8787
 
 
-def _render_reuse_decision(*, workspace: Path, decision) -> int | None:
+def _render_reuse_decision(*, workspace: Path, decision: LocalLaunchReuseDecision) -> int | None:
     if decision.action is LocalLaunchReuseAction.CONFLICT:
         print("OH-GOON LAUNCH CONFLICT")
         print(f"Workspace: {workspace}")
@@ -88,7 +92,7 @@ def run_start_command(args: argparse.Namespace) -> int | None:
     return _run_local_server(owner, launch_context, uvicorn)
 
 
-def _load_league_folders() -> tuple[LeagueFolderStore, list] | None:
+def _load_league_folders() -> tuple[LeagueFolderStore, tuple[Path, ...]] | None:
     if not built_ui_available():
         print("The bundled oh-goon UI is not present in this source checkout/install.")
         print("For contributor development use: make dev")
@@ -104,7 +108,15 @@ def _load_league_folders() -> tuple[LeagueFolderStore, list] | None:
     return folders, saved
 
 
-def _create_local_launch(*, intent, workspace: Path, events, bindings, folders, saved):
+def _create_local_launch(
+    *,
+    intent: LaunchIntent,
+    workspace: Path,
+    events: LocalLaunchEventStore,
+    bindings: LocalLaunchBindingStore,
+    folders: LeagueFolderStore,
+    saved: tuple[Path, ...],
+) -> tuple[LocalLaunchOwner, LocalLaunchRuntimeContext]:
     owner = LocalLaunchOwner.create(
         intent=intent,
         workspace=workspace,
@@ -128,7 +140,9 @@ def _create_local_launch(*, intent, workspace: Path, events, bindings, folders, 
     return owner, launch_context
 
 
-def _run_local_server(owner, launch_context, uvicorn) -> int:
+def _run_local_server(
+    owner: LocalLaunchOwner, launch_context: LocalLaunchRuntimeContext, uvicorn: ModuleType
+) -> int:
     plan = built_local_plan(host=LOCAL_APP_HOST, port=LOCAL_APP_PORT)
     token = LocalLaunchAccessStore.configured().token(
         launch_id=owner.identity.launch_id,

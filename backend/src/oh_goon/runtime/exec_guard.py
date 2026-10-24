@@ -18,11 +18,14 @@ import ctypes
 import os
 import signal
 import sys
+from typing import TYPE_CHECKING
 
-if __package__:
+if TYPE_CHECKING or __package__:
     from oh_goon.runtime import exec_guard_protocol
 else:  # Direct `python -S path/to/exec_guard.py` launch used by the command owner.
-    import exec_guard_protocol
+    import importlib
+
+    exec_guard_protocol = importlib.import_module("exec_guard_protocol")
 
 
 def _set_parent_death_signal(*, expected_parent_pid: int | None) -> None:

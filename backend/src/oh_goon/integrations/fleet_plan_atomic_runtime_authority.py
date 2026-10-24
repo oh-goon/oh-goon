@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+from types import TracebackType
 
 from oh_goon.core.errors import ExecutionAuthorityDivergence
 from oh_goon.core.models.execution_authority_economics import (
@@ -111,7 +112,12 @@ class AtomicRuntimeAuthorityLease:
     def __enter__(self) -> AtomicRuntimeAuthorityLease:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.close()
 
 

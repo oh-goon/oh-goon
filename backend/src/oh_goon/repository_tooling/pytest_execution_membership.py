@@ -16,7 +16,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, TypedDict
 
 from oh_goon.repository_tooling.pytest_member_identity import pytest_member_identity
 
@@ -349,11 +349,19 @@ class PytestExecutionMembershipContext:
     root_attempt: int
 
 
+class PytestReceiptOptions(TypedDict, total=False):
+    receipt_directory: Path | None
+    receipt_suite_identity: str | None
+    receipt_execution_plan_identity: str | None
+    receipt_run_identity: str | None
+    receipt_attempt_identity: str | None
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedPytestAttempt:
     members: tuple[str, ...]
     reused_prefix: str
-    receipt_kwargs: dict[str, object]
+    receipt_kwargs: PytestReceiptOptions
 
 
 class PytestExecutionMembershipSession:
@@ -404,7 +412,7 @@ class PytestExecutionMembershipSession:
             f"BATCH RECOVERY MEMBERSHIP: reusing {reused} current-run completed members\n",
         )
 
-    def _receipt_kwargs(self, members: tuple[str, ...]) -> dict[str, object]:
+    def _receipt_kwargs(self, members: tuple[str, ...]) -> PytestReceiptOptions:
         context = self.context
         if self._store is None:
             return {}

@@ -60,7 +60,9 @@ type RepositoryCatalogEntry = Annotated[
     Field(discriminator="scope"),
 ]
 
-_REPOSITORY_CATALOG_ENTRY_ADAPTER = TypeAdapter(RepositoryCatalogEntry)
+_REPOSITORY_CATALOG_ENTRY_ADAPTER: TypeAdapter[RepositoryCatalogEntry] = TypeAdapter(
+    RepositoryCatalogEntry
+)
 
 
 def parse_repository_catalog_entry(value: object) -> RepositoryCatalogEntry:

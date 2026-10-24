@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.fleet_plan import CompiledExecutionTemplate, CompiledGoonImportStep
+from oh_goon.core.models.fleet_plan import (
+    CompiledExecutionTemplate,
+    CompiledGoonImportStep,
+    PlanStep,
+)
 
 _SCHEMA = 1
 _AUTHORITY_FILE = "canonical_goon_tool_authority.json"
@@ -68,7 +72,7 @@ def apply_canonical_goon_tool_authority(
     template_authority = authority_map.get(template_key)
     if template_authority is None:
         return compiled
-    steps = []
+    steps: list[PlanStep] = []
     seen: set[str] = set()
     for step in compiled.steps:
         if isinstance(step, CompiledGoonImportStep):

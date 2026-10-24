@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
 from collections.abc import Callable
 
 import json
@@ -43,10 +42,10 @@ def _npm_tree(
     )
 
 
-def _npm_runner(payload: str) -> Callable[..., subprocess.CompletedProcess[object]]:
+def _npm_runner(payload: str) -> Callable[..., subprocess.CompletedProcess[str]]:
     def runner(
-        command: tuple[str, ...], **kwargs: Any
-    ) -> subprocess.CompletedProcess[object]:
+        command: tuple[str, ...], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         assert command == (
             "npm",
             "ls",
@@ -97,8 +96,8 @@ def test_container_runner_uses_locked_image_and_disposable_shm_bounded_run(
     commands: list[tuple[str, ...]] = []
 
     def runner(
-        command: tuple[str, ...], **kwargs: Any
-    ) -> subprocess.CompletedProcess[object]:
+        command: tuple[str, ...], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         if command[0] == "npm":
             assert kwargs["cwd"] == tmp_path / "frontend"
             assert kwargs["check"] is False

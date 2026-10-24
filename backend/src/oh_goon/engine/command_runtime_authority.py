@@ -459,10 +459,3 @@ def _require_runtime_executable_access(path: Path, *, display_name: str) -> None
         raise PermissionError(
             errno.EACCES, f"Executable is not runnable: {display_name}", display_name
         )
-
-
-def _requires_path_lookup(executable_name: str) -> bool:
-    candidate = Path(executable_name)
-    return (
-        not candidate.is_absolute() and "/" not in executable_name and "\\" not in executable_name
-    )

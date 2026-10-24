@@ -111,7 +111,13 @@ def evaluate_watchdog(
     return _progress_health_decision(policy, elapsed, progress_idle, heartbeat_idle)
 
 
-def _yield_decision(policy, observation, elapsed, progress_idle, heartbeat_idle):
+def _yield_decision(
+    policy: RuntimeSupervisionPolicy,
+    observation: RuntimeObservation,
+    elapsed: int,
+    progress_idle: int,
+    heartbeat_idle: int | None,
+) -> WatchdogDecision | None:
     requested_at = observation.yield_requested_at
     if requested_at is None:
         return None
@@ -139,7 +145,9 @@ def _yield_decision(policy, observation, elapsed, progress_idle, heartbeat_idle)
     )
 
 
-def _progress_health_decision(policy, elapsed, progress_idle, heartbeat_idle):
+def _progress_health_decision(
+    policy: RuntimeSupervisionPolicy, elapsed: int, progress_idle: int, heartbeat_idle: int | None
+) -> WatchdogDecision:
     stalled = (
         policy.no_progress_timeout_seconds is not None
         and elapsed >= policy.progress_start_grace_seconds
@@ -179,7 +187,13 @@ def _progress_health_decision(policy, elapsed, progress_idle, heartbeat_idle):
     )
 
 
-def _heartbeat_failure(policy, observation, elapsed, progress_idle, heartbeat_idle):
+def _heartbeat_failure(
+    policy: RuntimeSupervisionPolicy,
+    observation: RuntimeObservation,
+    elapsed: int,
+    progress_idle: int,
+    heartbeat_idle: int | None,
+) -> WatchdogDecision | None:
     if observation.last_heartbeat_at is None and elapsed >= policy.heartbeat_timeout_seconds:
         return _decision(
             policy,
@@ -205,7 +219,16 @@ def _heartbeat_failure(policy, observation, elapsed, progress_idle, heartbeat_id
     return None
 
 
-def _decision(policy, disposition, elapsed, idle, heartbeat_idle, terminate, output_fenced, reason):
+def _decision(
+    policy: RuntimeSupervisionPolicy,
+    disposition: WatchdogDisposition,
+    elapsed: int,
+    idle: int,
+    heartbeat_idle: int | None,
+    terminate: bool,
+    output_fenced: bool,
+    reason: str,
+) -> WatchdogDecision:
     return WatchdogDecision(
         disposition=disposition,
         policy_revision=policy.policy_revision,

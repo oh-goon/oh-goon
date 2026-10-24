@@ -4,7 +4,7 @@
 During a Shared Run, what happens to each selected repository's root `goon.yml`, and which source owns executable intent for that run?
 
 ## Q57
-For `plan run`, what does `--all-repositories` mean and what must an omitted repository selector never mean?
+For a selected `run.yml`, which field owns the explicit registered target and what must an omitted repository selector never mean?
 
 ## Q58
 Do `oh-goon team validate` and `oh-goon enforcer run` apply a separate local quality baseline? Explain which source and preview/admission owner they use.
@@ -19,7 +19,7 @@ If retained content is physically deduplicated by a content hash, does knowing a
 Evidence-selection challenge: During a Shared Run, what happens to each selected repository's root `goon.yml`, and which source owns executable intent for that run? Identify the strongest repository evidence for the answer and explain why a plausible nearby source would be supporting evidence rather than the semantic owner.
 
 ## Q194
-Negative-boundary challenge: For `plan run`, what does `--all-repositories` mean and what must an omitted repository selector never mean? Then state one plausible implementation or inference that would violate the ownership/authority boundary, and explain why it is forbidden.
+Negative-boundary challenge: For a selected `run.yml`, which field owns the explicit registered target and what must an omitted repository selector never mean? Then state one plausible implementation or inference that would violate the ownership/authority boundary, and explain why it is forbidden.
 
 ## Q195
 Change-impact challenge: Do `oh-goon team validate` and `oh-goon enforcer run` apply a separate local quality baseline? Explain which source and preview/admission owner they use. If the governing fact changed, identify the smallest authoritative surface that must change, one verification surface that must move with it, and one adjacent surface that should remain untouched.

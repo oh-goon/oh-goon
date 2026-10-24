@@ -36,11 +36,8 @@ def _validated_graded_at(value: Any) -> str:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as error:
         raise ValueError("graded_at_utc must be an ISO-8601 timestamp") from error
-    if (
-        parsed.tzinfo is None
-        or parsed.utcoffset() is None
-        or parsed.utcoffset().total_seconds() != 0
-    ):
+    offset = parsed.utcoffset()
+    if parsed.tzinfo is None or offset is None or offset.total_seconds() != 0:
         raise ValueError("graded_at_utc must be UTC")
     return text
 

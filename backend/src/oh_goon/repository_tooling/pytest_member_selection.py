@@ -49,7 +49,10 @@ def read_native_collection(path: Path) -> dict[str, Any]:
         raw = stream.read(16 * 1024 * 1024 + 1)
     if len(raw) > 16 * 1024 * 1024:
         raise ValueError("Native pytest collection exceeds the evidence byte budget")
-    return json.loads(raw)
+    payload: object = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("Native pytest collection must contain a JSON object")
+    return payload
 
 
 def write_native_collection(path: Path, payload: dict[str, Any]) -> None:

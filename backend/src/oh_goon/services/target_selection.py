@@ -91,7 +91,7 @@ class FleetTargetSelector:
         requested = set(repository_scope.repository_ids)
         by_id = {entry.repository.repository_id: entry for entry in selected}
         for location in state.locations:
-            repository = RepositoryIdentity(path=location)
+            repository = RepositoryIdentity.model_validate({"path": location})
             if repository.repository_id not in requested:
                 continue
             if str(navigation_path(repository.path)) in state.exclusions:

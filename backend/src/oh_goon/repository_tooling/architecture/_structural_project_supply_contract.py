@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import TypeGuard
 
 from oh_goon.repository_tooling.architecture.common import Violation, python_ast
 
@@ -49,7 +50,7 @@ def _native_execution_observer(tree: ast.Module) -> ast.FunctionDef | None:
     return owners[0] if len(owners) == 1 else None
 
 
-def _is_native_process_attempt(node: ast.AST) -> bool:
+def _is_native_process_attempt(node: ast.AST) -> TypeGuard[ast.Call]:
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
@@ -333,7 +334,7 @@ def _executable_nodes(function: _FUNCTION) -> tuple[ast.AST, ...]:
     """Return executable nodes without treating uncalled nested definitions as evidence."""
 
     nodes: list[ast.AST] = []
-    pending = list(reversed(function.body))
+    pending: list[ast.AST] = list(reversed(function.body))
     while pending:
         node = pending.pop()
         nodes.append(node)
@@ -457,9 +458,9 @@ def _run_service_live_output_method(
                 *,
                 seen: frozenset[tuple[str, str]] = frozenset(),
                 owner: str,
-                imported_names=imported_names,
-                functions=functions,
-                methods=methods,
+                imported_names: set[str] = imported_names,
+                functions: dict[str, _FUNCTION] = functions,
+                methods: dict[str, _FUNCTION] = methods,
             ) -> bool:
                 key = (owner, function.name)
                 if key in seen:

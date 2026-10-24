@@ -72,8 +72,10 @@ def load_unit_evidence(
         / (execution_unit_id.removeprefix("sha256:") + ".json")
     )
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
         return None
     expected = {
         "source_identity": source_identity,
@@ -148,8 +150,10 @@ def load_source_seal(
 ) -> dict[str, object] | None:
     path = evidence_root(root, source_identity, verification_config_identity) / "source-seal.json"
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
         return None
     if payload.get("state") != "SEALED":
         return None
@@ -264,8 +268,10 @@ def _load_package_build_evidence(
         / "package-source-zip.json"
     )
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
         return None
     expected = {
         "source_identity": source_identity,
@@ -347,8 +353,10 @@ def _load_package_identity_evidence(
         / "package-source-identity.json"
     )
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
         return None
     expected = {
         "source_identity": source_identity,

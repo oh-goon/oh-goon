@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypedDict
 
 from pydantic import Field
 
@@ -192,3 +192,10 @@ def relative_diagnostic_path(path: Path, root: Path) -> str:
     except FleetPlanInvalid:
         return str(candidate)
     return str(value) or "."
+
+
+class SelfPlanDescriptor(TypedDict):
+    command: str
+    plan: str
+    execution_authority: str
+    pipeline: list[str]

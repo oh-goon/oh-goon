@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import statistics
+import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -46,7 +47,7 @@ class ScoutCrashRestartResult:
     blocked_outbound_attempts: int
 
 
-def _crash_server(process) -> None:
+def _crash_server(process: subprocess.Popen[bytes]) -> None:
     os.kill(process.pid, signal.SIGKILL)
     process.wait(timeout=10)
     if process.returncode != -signal.SIGKILL:

@@ -8,8 +8,9 @@ import sqlite3
 import stat
 import tempfile
 from contextlib import ExitStack, contextmanager
+from datetime import datetime
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator, TypedDict, cast
 
 from oh_goon.core.errors import (
     CandidateCheckpointNotFound,
@@ -90,6 +91,37 @@ _ALLOWED_TRANSITIONS: dict[WorkspaceLifecycleState, frozenset[WorkspaceLifecycle
 }
 
 
+class _WorktreeReceipt(TypedDict):
+    owner: str
+    kind: str
+    workspace_id: str
+    base_revision: str | None
+    state_version: int
+    source_repository: str
+    source_device: int
+    source_inode: int
+    sha256: str
+    byte_count: int
+    entry_count: int
+
+
+class _RetirementReceipt(TypedDict):
+    owner: str
+    kind: str
+    workspace_id: str
+    state_version: int
+    base_revision: str | None
+    common_path: str
+    common_device: int
+    common_inode: int
+    destination_device: int
+    destination_inode: int
+    git_marker_sha256: str
+    checkpoint_sha256: str
+    checkpoint_byte_count: int
+    checkpoint_entry_count: int
+
+
 class RepositoryWorkspaceAuthority:
     """Single durable owner of workspace identity, lifecycle state, and host path layout.
 
@@ -105,7 +137,7 @@ class RepositoryWorkspaceAuthority:
 
     @staticmethod
     @contextmanager
-    def pin_repository_subject(repository: Path):
+    def pin_repository_subject(repository: Path) -> Iterator[Callable[[], None]]:
         """Hold native root/Git handles across authorized edits without freezing directory ctime.
 
         Directory entries may change during an apply. Open handles prevent inode reuse
@@ -128,7 +160,7 @@ class RepositoryWorkspaceAuthority:
                 initial = os.fstat(fd)
                 pinned.append((path, fd, initial))
 
-            def require_current():
+            def require_current() -> None:
                 for path, fd, initial in pinned:
                     current = path.lstat()
                     held = os.fstat(fd)
@@ -833,7 +865,9 @@ class RepositoryWorkspaceAuthority:
         finally:
             os.close(descriptor)
 
-    def _read_worktree_marker(self, workspace: WorkspaceRef, state: WorkspaceState) -> dict:
+    def _read_worktree_marker(
+        self, workspace: WorkspaceRef, state: WorkspaceState
+    ) -> _WorktreeReceipt:
         marker = self._worktree_marker_for_id(workspace.workspace_id)
         if marker.is_symlink() or not marker.is_file():
             raise WorkspaceStateStale("Missing original worktree publication receipt")
@@ -863,7 +897,7 @@ class RepositoryWorkspaceAuthority:
             raise WorkspaceStateStale("Worktree source repository identity changed")
         if not isinstance(payload.get("sha256"), str) or len(payload["sha256"]) != 64:
             raise WorkspaceStateStale("Worktree source identity receipt invalid")
-        return payload
+        return cast(_WorktreeReceipt, payload)
 
     @staticmethod
     def _registered_git_worktree(
@@ -1068,7 +1102,7 @@ class RepositoryWorkspaceAuthority:
 
     def _worktree_retirement_preflight(
         self, workspace: WorkspaceRef, *, expected_state_version: int, git: GitService
-    ) -> dict:
+    ) -> _RetirementReceipt:
         if (
             workspace.kind is not WorkspaceKind.WORKTREE
             or self.reference(workspace.workspace_id) != workspace
@@ -1178,7 +1212,7 @@ class RepositoryWorkspaceAuthority:
                 "checkpoint_entry_count": identity.entry_count,
             }
 
-    def _prepare_retirement_marker(self, workspace_id: str, payload: dict) -> int:
+    def _prepare_retirement_marker(self, workspace_id: str, payload: _RetirementReceipt) -> int:
         marker = self._worktree_retirement_marker_for_id(workspace_id)
         descriptor = os.open(
             marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
@@ -1197,7 +1231,9 @@ class RepositoryWorkspaceAuthority:
             raise
         return descriptor
 
-    def _read_retirement_marker(self, workspace: WorkspaceRef, state: WorkspaceState) -> dict:
+    def _read_retirement_marker(
+        self, workspace: WorkspaceRef, state: WorkspaceState
+    ) -> _RetirementReceipt:
         marker = self._worktree_retirement_marker_for_id(workspace.workspace_id)
         info = marker.lstat()
         if (
@@ -1235,7 +1271,7 @@ class RepositoryWorkspaceAuthority:
             payload.get("common_inode"),
         ):
             raise WorkspaceStateStale("Native Git retirement common directory identity changed")
-        return payload
+        return cast(_RetirementReceipt, payload)
 
     def _clear_retirement_marker(self, workspace_id: str) -> None:
         marker = self._worktree_retirement_marker_for_id(workspace_id)
@@ -1680,12 +1716,12 @@ class RepositoryWorkspaceAuthority:
             if renamed:
                 # The commit outcome must be read, not inferred from an exception.
                 try:
-                    durable = self.state(workspace_id)
+                    durable_state = self.state(workspace_id)
                 except BaseException as exc:
                     raise WorkspaceStateStale(
                         f"Workspace release commit is unknown; quarantine retained: {workspace_id}"
                     ) from exc
-                if durable.lifecycle_state is not WorkspaceLifecycleState.RELEASED:
+                if durable_state.lifecycle_state is not WorkspaceLifecycleState.RELEASED:
                     self._restore_release_quarantine(workspace_id)
                     self._clear_release_receipt(workspace_id)
             raise
@@ -1881,19 +1917,21 @@ class RepositoryWorkspaceAuthority:
         changed_paths: tuple[str, ...],
         attempt_id: str | None,
         assignment_id: str | None,
-        created_at,
+        created_at: datetime,
     ) -> CandidateCheckpoint:
-        checkpoint = CandidateCheckpoint(
-            checkpoint_id=new_checkpoint_id(),
-            workspace_id=workspace_id,
-            parent_checkpoint_id=parent_checkpoint_id,
-            source_sha256=identity.sha256,
-            byte_count=identity.byte_count,
-            entry_count=identity.entry_count,
-            changed_paths=changed_paths,
-            attempt_id=attempt_id,
-            assignment_id=assignment_id,
-            created_at=created_at,
+        checkpoint = CandidateCheckpoint.model_validate(
+            {
+                "checkpoint_id": new_checkpoint_id(),
+                "workspace_id": workspace_id,
+                "parent_checkpoint_id": parent_checkpoint_id,
+                "source_sha256": identity.sha256,
+                "byte_count": identity.byte_count,
+                "entry_count": identity.entry_count,
+                "changed_paths": changed_paths,
+                "attempt_id": attempt_id,
+                "assignment_id": assignment_id,
+                "created_at": created_at,
+            }
         )
         connection.execute(
             """
@@ -2058,17 +2096,19 @@ def _workspace_state(row: sqlite3.Row) -> WorkspaceState:
 
 
 def _candidate_checkpoint(row: sqlite3.Row) -> CandidateCheckpoint:
-    return CandidateCheckpoint(
-        checkpoint_id=row["checkpoint_id"],
-        workspace_id=row["workspace_id"],
-        parent_checkpoint_id=row["parent_checkpoint_id"],
-        source_sha256=row["sha256"],
-        byte_count=int(row["byte_count"]),
-        entry_count=int(row["entry_count"]),
-        changed_paths=tuple(json.loads(row["changed_paths_json"])),
-        attempt_id=row["attempt_id"],
-        assignment_id=row["assignment_id"],
-        created_at=row["created_at"],
+    return CandidateCheckpoint.model_validate(
+        {
+            "checkpoint_id": row["checkpoint_id"],
+            "workspace_id": row["workspace_id"],
+            "parent_checkpoint_id": row["parent_checkpoint_id"],
+            "source_sha256": row["sha256"],
+            "byte_count": int(row["byte_count"]),
+            "entry_count": int(row["entry_count"]),
+            "changed_paths": tuple(json.loads(row["changed_paths_json"])),
+            "attempt_id": row["attempt_id"],
+            "assignment_id": row["assignment_id"],
+            "created_at": row["created_at"],
+        }
     )
 
 

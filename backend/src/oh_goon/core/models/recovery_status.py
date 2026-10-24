@@ -12,7 +12,7 @@ class RecoveryStatus(ImmutableModel):
     repair_plan: RepairPlan
     runtime_safety: AssessedRuntimeSafetyProof
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def invariants(self) -> InvariantAudit:
         return runtime_safety_audit(self.runtime_safety)

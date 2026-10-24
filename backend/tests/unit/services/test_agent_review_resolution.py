@@ -1055,3 +1055,61 @@ def test_structured_phase_requires_affirmative_boundary_cleanup(
     else:
         with pytest.raises(FleetPlanInvalid, match="complete successful native attempt evidence"):
             completed_phase_steps(detail, plan)
+
+
+def test_catalog_plan_captures_registry_from_explicit_skill_root(tmp_path):
+    from oh_goon.runtime.plan_templates import PlanTemplateStore
+
+    resolver, _, _, options = agent_review_case(tmp_path)
+    catalog = PlanTemplateStore().source("agents/agentic-review-repair-loop")
+    plan, deliveries, source_sha = resolver.resolve_frozen_agents(
+        catalog.path, require_review_phases=True, **options
+    )
+    assert source_sha == catalog.sha256
+    assert len(deliveries) == 6
+    assert len(agent_review_phases(plan)["review"]) == 4
+    assert all(item.source.authored_skill_reference for item in deliveries.values())
+    assert not (catalog.path.parent / ".goonskills.yml").exists()
+
+
+@pytest.mark.parametrize("mode", ["missing-repair", "wrong-harness", "incomplete-phases"])
+def test_authored_selection_conflicts_reject_before_registry_or_source_capture(
+    tmp_path, monkeypatch, mode
+):
+    import oh_goon.services.agent_skill_registry as registry
+    from oh_goon.runtime.plan_templates import PlanTemplateStore
+
+    resolver, path, _, options = agent_review_case(tmp_path)
+
+    def acquired(*args, **kwargs):
+        pytest.fail("invalid source selection reached Skill acquisition")
+
+    monkeypatch.setattr(registry, "original_skill_aliases", acquired)
+    if mode == "missing-repair":
+        require_phases = False
+    elif mode == "wrong-harness":
+        path = PlanTemplateStore().source("agents/native-review").path
+        require_phases = None
+    else:
+        path.write_text(
+            "version: 1\ngoons:\n- import: agents/review\n"
+            "  phase: review\n  with: {skill: local:skills/single-source-of-truth-review}\n"
+        )
+        require_phases = True
+    with pytest.raises(FleetPlanInvalid):
+        resolver.resolve_frozen_agents(path, require_review_phases=require_phases, **options)
+
+
+def test_frozen_capture_reuses_the_exact_preflight_graph_without_rediscovery(tmp_path, monkeypatch):
+    resolver, path, _, options = agent_review_case(tmp_path)
+    graph = resolver.analyze_source(path)
+    monkeypatch.setattr(
+        resolver, "analyze_source", lambda *a, **k: pytest.fail("preflight graph was rediscovered")
+    )
+    plan, handoffs, _ = resolver.resolve_frozen_agents(path, source_graph=graph, **options)
+    assert len(agent_review_phases(plan)["review"]) == 4
+    assert len(handoffs) == 6
+    with pytest.raises(FleetPlanInvalid, match="differs from the selected Plan"):
+        resolver.resolve_frozen_agents(
+            tmp_path / "different-plan.yml", source_graph=graph, **options
+        )

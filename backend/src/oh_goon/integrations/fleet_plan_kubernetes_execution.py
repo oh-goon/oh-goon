@@ -118,7 +118,7 @@ def _execute_with_private_config(
     )
 
 
-def _cleanup_error(config) -> OSError | None:
+def _cleanup_error(config: KubernetesPrivateConfig) -> OSError | None:
     try:
         cleanup_kubernetes_private_config(config)
     except OSError as exc:
@@ -126,7 +126,7 @@ def _cleanup_error(config) -> OSError | None:
     return None
 
 
-def _cleanup_with_note(config, error: BaseException) -> None:
+def _cleanup_with_note(config: KubernetesPrivateConfig, error: BaseException) -> None:
     cleanup_error = _cleanup_error(config)
     if cleanup_error is not None:
         error.add_note(f"Private Kubernetes credential cleanup also failed: {cleanup_error}")

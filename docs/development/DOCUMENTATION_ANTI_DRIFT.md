@@ -20,6 +20,11 @@ The documentation must prevent future work from reconstructing a superseded mech
 
 - The valid path is the simplest path.
 - Resolve once, transport once, execute once, report once.
+- Normal CLI workflows select one captured `run.yml` and use `config inspect`,
+  `config validate`, `lock` and `run`. Do not restore Plan-path/input-file/agent
+  flag assembly, compatibility readers or conversion routes. Plans/Goons retain
+  executable meaning, the original binder retains types/defaults, provider and
+  native agents retain settings, and fresh admission retains effect permission.
 - `make init` is the single normal local dependency-materialization boundary.
 - `make certify` consumes initialized authority; it does not recreate environments, choose another interpreter, rerun `uv`/`npm` materialization, or reacquire already-present locked dependencies merely to prove APP behavior.
 - APP/self verification does not manufacture or inherit strict release/CI executor authority. The outer certification frontdoor must strip `OH_GOON_EXECUTORS_FILE`, certification cgroup overrides, and certification systemd-delegation markers before static admission or any APP bootstrap/orchestration work; inner bootstrap repeats that stripping as defense-in-depth. No APP layer **or APP Goon** may discover, validate, materialize, export, or require strict executor/cgroup authority for a verification Plan that does not consume strict placement. The APP local-runtime Goon is functional start/auth-proxy/stop verification only; strict repository-Goon/cancel/crash/restart acceptance remains a separate explicit owner.

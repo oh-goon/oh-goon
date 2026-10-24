@@ -30,14 +30,14 @@ class GameTapeTeamComposition(ImmutableModel):
     observed_peak_concurrency: int = Field(ge=0)
     overlapping_repository_execution_ids: tuple[str, ...] = Field(default_factory=tuple)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def duration_ms(self) -> int | None:
         if self.started_at is None or self.finished_at is None:
             return None
         return max(0, int((self.finished_at - self.started_at).total_seconds() * 1000))
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def overlap_observed(self) -> bool:
         return bool(self.overlapping_repository_execution_ids)

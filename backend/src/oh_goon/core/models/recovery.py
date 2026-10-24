@@ -74,7 +74,7 @@ class InvariantAudit(ImmutableModel):
     journal_revision: int | None = Field(default=None, ge=0)
     findings: tuple[InvariantFinding, ...] = Field(default_factory=tuple)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def healthy(self) -> bool:
         return not any(item.severity is InvariantSeverity.ERROR for item in self.findings)
@@ -91,17 +91,17 @@ class _RepositoryEffectQuarantineBase(ImmutableModel):
     status: EffectAttemptStatus
     record_version: int = Field(ge=0)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def action(self) -> OperationAction:
         return self.capability.action
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def safety(self) -> CommandSafety:
         return self.capability.safety
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def source(self) -> EffectAttemptOwner:
         return self.origin.kind

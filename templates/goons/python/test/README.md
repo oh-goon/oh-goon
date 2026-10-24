@@ -2,20 +2,25 @@
 
 Run pytest with native project discovery and policy, and produce a JUnit report.
 
+**Status:** runnable with prerequisites. **Effects:** Executes the project’s pytest workload and writes a test report.
+
+**Prerequisites:** The selected locked group must supply pytest; native pytest configuration owns discovery and coverage policy.
+
+**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+
+**Expected outputs:** `junit.xml` in the selected project, retained as evidence.
+
+**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
+
+**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
+
 ## Before you run
 
 The selected locked group provides `pytest`, plus the plugins required by your own pytest configuration. Coverage is optional; install pytest-cov and configure its source and threshold in the project when needed.
 
 ## Configure and compose
 
-Inspect the current contract and copy the source when authoring your own capability:
-
-```sh
-oh-goon templates show python/test --kind goon
-oh-goon plan inputs templates/goons/python/test/goon.yml
-```
-
-`project` selects the repository-relative uv project directory; `dependency_group` selects its locked tools. Commands run from that project by default, so native configuration, tests and report paths follow the same selection. Defaults are `.` and `dev`. Use one caller values file and explicit CLI overrides as shown in the [template guide](../../../README.md#change-values-without-editing-the-goon).
+`project` selects the repository-relative uv project directory; `dependency_group` selects its locked tools. Commands run from that project by default, so native configuration, tests and report paths follow the same selection. Defaults are `.` and `dev`. Set the caller choices in `run.yml` as shown in the [template guide](../../../README.md#change-values-without-editing-the-goon).
 
 Add `python/test` to a Plan’s ordered `goons:` list with a plain import to keep its defaults. Unique public inputs are available to caller values automatically. Use `with:` for fixed choices or dataflow; use `pass:` when shared names need explicit recipients. Refresh the lock with the same values before running.
 

@@ -141,6 +141,7 @@ def test_deployment_key_signs_exact_native_claim_for_public_only_verifier(tmp_pa
         "symlink_directory",
         "relative_directory",
         "malformed_policy",
+        "malformed_state",
         "weak_policy_mode",
         "wrong_owner_claim",
         "wrong_field_claim",
@@ -205,6 +206,8 @@ def test_custody_rejects_unsafe_issuance(tmp_path, attack):
         directory = Path("relative/signers")
     elif attack == "malformed_policy":
         (directory / "signers.json").write_bytes(b"not JSON")
+    elif attack == "malformed_state":
+        policy["issuers"][FIELD]["state"] = []
     elif attack == "weak_policy_mode":
         (directory / "signers.json").chmod(0o644)
     elif attack == "noncanonical_policy":
@@ -275,6 +278,7 @@ def test_custody_rejects_unsafe_issuance(tmp_path, attack):
         "duplicate_issuer",
         "duplicate_public_root",
         "traversal",
+        "malformed_state",
     }:
         _write_policy(directory, policy)
     with pytest.raises(TrustProtocolError):

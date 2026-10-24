@@ -34,11 +34,13 @@ def _no_op_import_probe(_distribution: str, _import_name: str) -> None:
 
 
 def _payload() -> dict[str, object]:
-    return capability.build_capability(
-        version_reader=_versions(),
-        import_probe=_no_op_import_probe,
-        interpreter=str(Path(sys.executable).resolve()),
-        python_version="3.13.5",
+    return dict(
+        capability.build_capability(
+            version_reader=_versions(),
+            import_probe=_no_op_import_probe,
+            interpreter=str(Path(sys.executable).resolve()),
+            python_version="3.13.5",
+        )
     )
 
 

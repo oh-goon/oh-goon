@@ -25,6 +25,45 @@ def _plan(root: Path) -> dict[str, Any]:
     return cast(dict[str, Any], self_certification_plan(root))
 
 
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "source-seal.json",
+        "package-source-zip.json",
+        "package-source-identity.json",
+        "units/execution.json",
+    ],
+)
+def test_artifact_evidence_rejects_nonobject_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filename: str
+) -> None:
+    from oh_goon.repository_tooling import _self_certification_plan_evidence as evidence
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    root = tmp_path / "repo"
+    root.mkdir()
+    directory = evidence.evidence_root(root, "source", "verification")
+    directory.mkdir(parents=True)
+    path = directory / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[]", encoding="utf-8")
+    if filename == "units/execution.json":
+        observed = evidence.load_unit_evidence(
+            root, "source", "verification", "execution"
+        )
+    elif filename == "source-seal.json":
+        observed = evidence.load_source_seal(root, "source", "verification", "plan", [])
+    elif filename == "package-source-zip.json":
+        observed = evidence._load_package_build_evidence(
+            root, "source", "verification", "seal"
+        )
+    else:
+        observed = evidence._load_package_identity_evidence(
+            root, "source", "verification", "seal", {"evidence_identity": "build"}
+        )
+    assert observed is None
+
+
 @pytest.fixture
 def archive_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from oh_goon.repository_tooling import self_certification_artifacts
@@ -428,8 +467,6 @@ def test_source_seal_is_not_source_identity_and_toolchain_drift_invalidates_proo
 def test_resume_reports_prior_pass_as_invalidated_when_toolchain_identity_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, archive_checkout: Path
 ) -> None:
-    from oh_goon.repository_tooling import _self_certification_plan_units as units
-
     root = archive_checkout
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     first = _plan(root)
@@ -440,16 +477,10 @@ def test_resume_reports_prior_pass_as_invalidated_when_toolchain_identity_change
         root, first["source_identity"], first["verification_config_identity"], static
     )
 
-    original = units._toolchain_identity
-    monkeypatch.setattr(
-        units,
-        "_toolchain_identity",
-        lambda current_root, unit: (
-            "sha256:" + "f" * 64
-            if unit["unit"] == "goon-static-admission"
-            else original(current_root, unit)
-        ),
-    )
+    executable = root / "backend/.venv/bin/oh-goon-goon-compile"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o755)
     resumed = _plan(root)
     changed = next(
         unit for unit in resumed["all_units"] if unit["unit"] == "goon-static-admission"

@@ -78,7 +78,7 @@ def _version_not_future(
     value: Any, *, label: str, source_version: str, allow_legacy: bool = False
 ) -> str:
     if allow_legacy and value == "PRE_LIFECYCLE":
-        return value
+        return "PRE_LIFECYCLE"
     if not isinstance(value, str) or _VERSION.fullmatch(value) is None:
         raise ValueError(f"{label} must be a canonical numeric version")
     current = tuple(int(part) for part in source_version.split("."))
@@ -405,7 +405,7 @@ def authorize_question_transition(
     to_state = request.get("to_state")
     if from_state != current["state"]:
         raise ValueError("question lifecycle transition from_state does not match current bank")
-    if (from_state, to_state) not in LEGAL_TRANSITIONS:
+    if not isinstance(to_state, str) or (from_state, to_state) not in LEGAL_TRANSITIONS:
         raise ValueError(f"illegal question lifecycle transition: {from_state} -> {to_state}")
 
     evidence: dict[str, Any] = {}

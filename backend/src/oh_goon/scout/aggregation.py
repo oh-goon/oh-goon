@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from statistics import median
+from typing import TypeVar
 
 from oh_goon.core.execution_observability import RepositoryRunObservation
 from oh_goon.core.vocabulary import GameTapeStatus
@@ -29,6 +30,8 @@ from oh_goon.scout.policy import (
     SCOUT_PEER_MIN_EXECUTIONS,
     SCOUT_PEER_MIN_REPOSITORIES,
 )
+
+K = TypeVar("K", bound=Hashable)
 
 _UNSUCCESSFUL_STATUSES = frozenset(
     {
@@ -526,7 +529,7 @@ def _is_step_peer(
 
 
 def _peer_repository_medians(
-    by_repo: dict[object, tuple[ScoutStepObservation, ...]],
+    by_repo: Mapping[str, tuple[ScoutStepObservation, ...]],
     value: Callable[[ScoutStepObservation], float | int | None],
 ) -> list[float]:
     result: list[float] = []
@@ -539,7 +542,7 @@ def _peer_repository_medians(
 
 def _peer_sample_floor(
     cohort: tuple[ScoutStepObservation, ...],
-    by_repo: dict[object, tuple[ScoutStepObservation, ...]],
+    by_repo: Mapping[str, tuple[ScoutStepObservation, ...]],
     metric: str,
 ) -> bool:
     if metric == "cpu":
@@ -636,8 +639,10 @@ def trend(
     return tuple(points)
 
 
-def group_steps(items: Iterable[ScoutStepObservation], *, key):
-    grouped: dict[object, list[ScoutStepObservation]] = defaultdict(list)
+def group_steps(
+    items: Iterable[ScoutStepObservation], *, key: Callable[[ScoutStepObservation], K]
+) -> dict[K, tuple[ScoutStepObservation, ...]]:
+    grouped: dict[K, list[ScoutStepObservation]] = defaultdict(list)
     for item in items:
         grouped[key(item)].append(item)
     return {group_key: tuple(group) for group_key, group in grouped.items()}

@@ -33,6 +33,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     MissingPlanArtifact,
     RequirementsRepositoryAdmissionEvidence,
 )
+from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_step_primitives import StepRetryPolicy
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FleetRunDetail
@@ -55,6 +56,7 @@ def enforcer_run_receipt(detail: FleetRunDetail) -> EnforcerRunReceipt:
         raise FleetPlanInvalid("Strict CI/CD run detail is missing strict executor admission")
 
     plan = target.plan
+    assert isinstance(plan.execution, CicdExecutionPolicy)
     capacity = execution.placement.executor_capacity
     reports = {report.repository.repository_id: report for report in detail.operations}
     return EnforcerRunReceipt(

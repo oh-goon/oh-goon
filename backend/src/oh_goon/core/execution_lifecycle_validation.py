@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import TypedDict
 
 from oh_goon.core.errors import InvalidRunTransition
 from oh_goon.core.models.run import CancellingFleetRun, FleetRunState, RunningFleetRun
@@ -29,12 +30,34 @@ from oh_goon.core.product_identity import (
     validate_repository_attempt_operation_id,
 )
 
+type StepTerminalLifecycleEvent = (
+    StepSucceededEvent | StepFailedEvent | StepSkippedEvent | StepCancelledEvent
+)
+type StepLifecycleEvent = (
+    StepReachedEvent
+    | StepStartedEvent
+    | StepAttemptCreatedEvent
+    | ProcessStartingEvent
+    | StepTerminalLifecycleEvent
+)
+type ExecutionLifecycleEvent = RepositoryStartedEvent | StepLifecycleEvent
+
+
+class _PhysicalState(TypedDict):
+    starting: ProcessStartingEvent | None
+    started: ProcessStartedEvent | None
+    unknown: ProcessStateUnknownEvent | None
+    termination: TerminationRequestedEvent | None
+    exited: ProcessExitedEvent | None
+    quiescent: DescendantsQuiescentEvent | None
+
+
 _STEP_TERMINAL = (StepSucceededEvent, StepFailedEvent, StepSkippedEvent, StepCancelledEvent)
 _OUTPUT = (OutputFinalizedEvent, OutputAbandonedEvent, OutputQuarantinedEvent)
 
 
 def validate_execution_lifecycle(
-    state: FleetRunState, event: FleetRunEvent, history: Sequence[FleetRunEvent]
+    state: FleetRunState, event: ExecutionLifecycleEvent, history: Sequence[FleetRunEvent]
 ) -> None:
     attempt = _attempt_scope(state, event, history)
     if isinstance(event, RepositoryStartedEvent):
@@ -47,7 +70,9 @@ def validate_execution_lifecycle(
     _validate_step(event, step)
 
 
-def _attempt_scope(state, event, history):
+def _attempt_scope(
+    state: FleetRunState, event: ExecutionLifecycleEvent, history: Sequence[FleetRunEvent]
+) -> list[FleetRunEvent]:
     if not isinstance(state, (RunningFleetRun, CancellingFleetRun)):
         raise InvalidRunTransition(
             f"Cannot apply {event.event_type.value} from {state.status.value}"
@@ -70,7 +95,7 @@ def _attempt_scope(state, event, history):
     ]
 
 
-def _validate_step(event, step):
+def _validate_step(event: StepLifecycleEvent, step: Sequence[FleetRunEvent]) -> None:
     if isinstance(event, StepReachedEvent):
         if any(isinstance(x, StepReachedEvent) for x in step):
             raise InvalidRunTransition(
@@ -92,7 +117,7 @@ def _validate_step(event, step):
         raise InvalidRunTransition("Step cannot start more than once per repository attempt")
 
 
-def _settlement(event, step):
+def _settlement(event: StepTerminalLifecycleEvent, step: Sequence[FleetRunEvent]) -> None:
     if any(isinstance(x, _STEP_TERMINAL) for x in step):
         raise InvalidRunTransition("Step cannot settle more than once per repository attempt")
     unquiet = [
@@ -111,7 +136,7 @@ def _settlement(event, step):
         )
 
 
-def _attempt_created(event, step):
+def _attempt_created(event: StepAttemptCreatedEvent, step: Sequence[FleetRunEvent]) -> None:
     if not any(isinstance(x, StepStartedEvent) for x in step):
         raise InvalidRunTransition("STEP_ATTEMPT_CREATED requires matching STEP_STARTED")
     if event.step_attempt_id != fleet_step_attempt_id(
@@ -124,7 +149,7 @@ def _attempt_created(event, step):
         raise InvalidRunTransition("STEP_ATTEMPT_CREATED attempt_number must advance contiguously")
 
 
-def _physical(event, step):
+def _physical(event: ProcessStartingEvent, step: Sequence[FleetRunEvent]) -> None:
     attempt = next(
         (
             x
@@ -159,7 +184,7 @@ def _physical(event, step):
     _settle_physical(event, state)
 
 
-def _settle_physical(event, state):
+def _settle_physical(event: ProcessStartingEvent, state: _PhysicalState) -> None:
     if isinstance(event, ProcessStateUnknownEvent):
         return _unknown(event, state)
     if isinstance(event, ProcessExitedEvent):
@@ -168,7 +193,7 @@ def _settle_physical(event, state):
         return _quiescent(event, state)
 
 
-def _physical_state(items):
+def _physical_state(items: Sequence[ProcessStartingEvent]) -> _PhysicalState:
     return {
         "starting": next((x for x in items if type(x) is ProcessStartingEvent), None),
         "started": next((x for x in items if type(x) is ProcessStartedEvent), None),
@@ -179,21 +204,25 @@ def _physical_state(items):
     }
 
 
-def _starting(items):
+def _starting(items: Sequence[ProcessStartingEvent]) -> None:
     if items:
         raise InvalidRunTransition(
             "Physical execution start preparation cannot be recorded more than once"
         )
 
 
-def _started(st):
+def _started(st: _PhysicalState) -> None:
     if st["starting"] is None:
         raise InvalidRunTransition("PROCESS_STARTED requires matching PROCESS_STARTING")
     if st["started"] is not None or st["exited"] is not None or st["quiescent"] is not None:
         raise InvalidRunTransition("Physical execution cannot start more than once")
 
 
-def _output(event, items, st):
+def _output(
+    event: OutputFinalizedEvent | OutputAbandonedEvent | OutputQuarantinedEvent,
+    items: Sequence[ProcessStartingEvent],
+    st: _PhysicalState,
+) -> None:
     if any(isinstance(x, _OUTPUT) for x in items):
         raise InvalidRunTransition(
             "Physical execution output disposition cannot be recorded more than once"
@@ -214,7 +243,7 @@ def _output(event, items, st):
         )
 
 
-def _unknown(event, st):
+def _unknown(event: ProcessStateUnknownEvent, st: _PhysicalState) -> None:
     if st["started"] is None:
         raise InvalidRunTransition("PROCESS_STATE_UNKNOWN requires matching PROCESS_STARTED")
     if st["unknown"] is not None or st["exited"] is not None or st["quiescent"] is not None:
@@ -228,7 +257,7 @@ def _unknown(event, st):
     )
 
 
-def _exit(event, st):
+def _exit(event: ProcessExitedEvent, st: _PhysicalState) -> None:
     if st["started"] is None:
         raise InvalidRunTransition("PROCESS_EXITED requires matching PROCESS_STARTED")
     if st["exited"] is not None:
@@ -238,7 +267,7 @@ def _exit(event, st):
     )
 
 
-def _quiescent(event, st):
+def _quiescent(event: DescendantsQuiescentEvent, st: _PhysicalState) -> None:
     if st["exited"] is None:
         raise InvalidRunTransition("DESCENDANTS_QUIESCENT requires matching PROCESS_EXITED")
     if st["quiescent"] is not None:
@@ -248,12 +277,12 @@ def _quiescent(event, st):
     _same(event, st["exited"], "DESCENDANTS_QUIESCENT process identity must match PROCESS_EXITED")
 
 
-def _same(event, owner, message):
+def _same(event: ProcessStartedEvent, owner: ProcessStartedEvent, message: str) -> None:
     if event.pid != owner.pid or event.process_identity != owner.process_identity:
         raise InvalidRunTransition(message)
 
 
-def _termination_requested(event, st):
+def _termination_requested(event: TerminationRequestedEvent, st: _PhysicalState) -> None:
     if st["started"] is None:
         raise InvalidRunTransition("TERMINATION_REQUESTED requires matching PROCESS_STARTED")
     if st.get("termination") is not None:

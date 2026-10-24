@@ -24,6 +24,8 @@ from oh_goon.core.enforcer_lace_trust import (
 )
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_tool_requirements import required_runtime_tool_names
+from oh_goon.core.models.run_events import RunAdmittedEvent
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.path_authority import StrictHostPathAuthority
 from oh_goon.integrations import content_snapshot
 from oh_goon.integrations.fleet_plan_repository_scope import admitted_active_plan
@@ -35,7 +37,9 @@ TOOL_FIELD = "native_tool_identity"
 TOOL_DOMAIN = "oh-goon/fleet-run-native-execution-tools/v1"
 
 
-def _admitted_tools(journal: Journal, run_id: str, *, prework: PreworkRunCapture | None = None):
+def _admitted_tools(
+    journal: Journal, run_id: str, *, prework: PreworkRunCapture | None = None
+) -> tuple[RunAdmittedEvent, int, tuple[str, ...]]:
     admitted, revision = _read_original_admission(journal, run_id, prework=prework)
     selected = tuple(item.repository_id for item in admitted.repository_admissions)
     if (
@@ -45,14 +49,16 @@ def _admitted_tools(journal: Journal, run_id: str, *, prework: PreworkRunCapture
         or len(admitted.targets) != len(selected)
     ):
         raise TrustProtocolError("durable Run tool scope differs from selected repositories")
-    if admitted.target.plan.native_agent is not None:
+    target = admitted.target
+    if not isinstance(target, FleetPlanTarget):
+        raise TrustProtocolError("durable Run tool selection requires a Fleet Plan target")
+    if target.plan.native_agent is not None:
         raise TrustProtocolError(
             "Native Agent executable authority is unsupported by the host-tool issuer"
         )
     try:
         plans = tuple(
-            admitted_active_plan(admitted.target.plan, item)
-            for item in admitted.repository_admissions
+            admitted_active_plan(target.plan, item) for item in admitted.repository_admissions
         )
         names = tuple(
             sorted({tool for plan in plans for tool in required_runtime_tool_names(plan)})

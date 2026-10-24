@@ -6,6 +6,7 @@ from oh_goon.core.models.explanation import (
     DetachedGitPositionEvidence,
     ExplanationEvidence,
     GitEvidence,
+    GitPositionEvidence,
     GitRemoteComparisonUnavailableEvidence,
     GitRemoteEvidence,
     GitRemoteLookupUnavailableEvidence,
@@ -25,6 +26,7 @@ from oh_goon.core.models.explanation import (
 from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.operation import (
     ComparedGitRemote,
+    GitPosition,
     GitRemoteComparisonUnavailable,
     GitRemoteLookupUnavailable,
     GitRemoteObservation,
@@ -105,7 +107,7 @@ def _from_code(
         can_auto_fix=semantics.auto_fix_action is not None,
         auto_fix_action=semantics.auto_fix_action,
         evidence=evidence or ExplanationEvidence(),
-        system_actions=actions or [],
+        system_actions=tuple(actions or ()),
     )
 
 
@@ -159,7 +161,7 @@ def _remote_evidence(remote: GitRemoteObservation) -> GitRemoteEvidence:
     )
 
 
-def _position_evidence(position):
+def _position_evidence(position: GitPosition) -> GitPositionEvidence:
     if position.state == "named":
         return NamedGitPositionEvidence(state="named", branch=position.branch)
     if position.state == "detached":

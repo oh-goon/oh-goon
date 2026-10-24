@@ -36,6 +36,7 @@ def test_current_shipped_catalog_compiles_and_accounts_for_every_package() -> No
     assert actual["metrics"]["unresolved_readme_links"] == 0
     assert all(len(x["root_source_sha256"]) == 64 for x in actual["packages"])
     assert all(x["readme_present"] for x in actual["packages"])
+    assert all(x["readiness"] == "not-executed" for x in actual["packages"])
 
 
 @pytest.mark.parametrize(
@@ -54,19 +55,3 @@ def test_invalid_authoring_shaped_data_rejected_by_original_compiler(kind, yaml_
     compiler = compile_plan_document if kind == "plan" else compile_goon_document
     with pytest.raises(FleetPlanInvalid):
         compiler(parsed, source="ux-a-negative")
-
-
-def test_authoring_inventory_is_readonly_not_an_authority_owner():
-    code = (ROOT / "backend/src/oh_goon/repository_tooling/template_ux_a_inventory.py").read_text()
-    assert "GoonTemplateStore" in code and "PlanTemplateStore" in code
-    assert "store.source(key)" in code
-    for forbidden in (
-        "FleetRunLifecycle",
-        "FleetPlanResolver(",
-        "start_run(",
-        "RUN_STARTED",
-        "os.system",
-        "subprocess.run",
-        "yaml.safe_load",
-    ):
-        assert forbidden not in code

@@ -12,7 +12,7 @@ from dataclasses import replace
 from itertools import islice
 from pathlib import Path, PurePosixPath
 from threading import Lock
-from typing import Literal
+from typing import Literal, cast
 
 from oh_goon.core.errors import CapabilityUnavailable, FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
@@ -28,6 +28,7 @@ from oh_goon.core.models.fleet_plan_isolation import (
 )
 from oh_goon.core.path_authority import HostSandboxPathMapping, map_host_text_to_sandbox
 from oh_goon.core.path_layouts import SANDBOX_PATHS, AttemptPathLayout
+from oh_goon.core.ports.local_lace_allocation import LocalLaceAllocationRecorder
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentProof
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.source_tree_policy import LIVE_CHECKOUT_PROTECTED_PATHS, is_transient_source_path
@@ -56,7 +57,10 @@ from oh_goon.integrations._fleet_plan_restricted_egress import (
     require_restricted_egress_host,
 )
 from oh_goon.integrations._fleet_plan_runtime_root import verify_runtime_root
-from oh_goon.integrations._fleet_plan_sandbox_launch import sandbox_process_launch
+from oh_goon.integrations._fleet_plan_sandbox_launch import (
+    SandboxProcessLaunch,
+    sandbox_process_launch,
+)
 from oh_goon.integrations.content_snapshot import verify_snapshot
 from oh_goon.integrations.fleet_plan_atomic_runtime_authority import (
     AtomicRuntimeAuthorityLease,
@@ -844,6 +848,7 @@ class BubblewrapProcessIsolation:
             if self.require_local_resource_intent:
                 # One original Fleet owner, one signed intent. Revalidation is
                 # not a new admission or permission minted from a local scan.
+                assert request.local_resource_intent is not None and proof is not None
                 request.local_resource_intent.require_effect_authority(proof)
 
         termination_requested = request.termination_requested
@@ -877,6 +882,7 @@ class BubblewrapProcessIsolation:
                 request.attempt.egress,
             )
             if self.require_local_resource_intent:
+                assert proof is not None
                 binding = lace_resource_binding(proof)
                 resource_lease.lace_intent = binding
                 if network_lease is not None:
@@ -893,8 +899,12 @@ class BubblewrapProcessIsolation:
                     observed = observe_local_allocation(
                         resource_lease, network_lease, request, proof=proof
                     )
-                    request.local_resource_intent.observe(proof, observed)
+                    assert proof is not None
+                    cast(LocalLaceAllocationRecorder, request.local_resource_intent).observe(
+                        proof, observed
+                    )
                 if request.attempt.nested_strict_execution:
+                    assert resource_lease.nested_delegation is not None
                     mount_source_lease.pin_dynamic_cgroup(resource_lease.nested_delegation)
                 mount_source_lease.verify_kernel_custody()
                 launch = sandbox_process_launch(request)
@@ -956,7 +966,7 @@ class BubblewrapProcessIsolation:
         self,
         request: IsolatedProcessRequest,
         *,
-        launch,
+        launch: SandboxProcessLaunch,
         atomic_authority: AtomicRuntimeAuthorityLease,
         network_prefix: tuple[str, ...],
         nested_cgroup_root: Path | None = None,
@@ -1109,8 +1119,8 @@ def _prepare_mounts(
     if not any(binding.sandbox_path == SANDBOX_PATHS.cache for binding in attempt.sandbox_bindings):
         args.extend(("--bind", str(attempt.paths.cache), str(SANDBOX_PATHS.cache)))
     args.extend(("--bind", str(attempt.paths.config), str(SANDBOX_PATHS.config)))
-    if getattr(request, "agent_source_mount", None) is not None:
-        mount = getattr(request, "agent_source_mount", None)
+    if request.agent_source_mount is not None:
+        mount = request.agent_source_mount
         # Physical entry still refuses this path; once native custody is
         # qualified, it must be the SAME source/target/mode as signed intent.
         args.extend(("--ro-bind", mount.source, mount.target))
@@ -1162,7 +1172,7 @@ def _require_original_native_mount_argv(
         ("--ro-bind-data", str(f.descriptor), str(f.sandbox_path))
         for f in atomic_authority.bubblewrap_bindings
     ]
-    if getattr(request, "agent_source_mount", None) is not None:
+    if request.agent_source_mount is not None:
         # A sealed --ro-bind-data is still an overlay: it must not shadow
         # any path below (or enclosing) the signed Agent source. Reuse the
         # original mount-descriptor rule rather than inventing another rule.
@@ -1472,25 +1482,39 @@ def _require_standard_bind_structure(
                         raise FleetPlanInvalid(
                             "Standard sandbox bind exceeds its physical entry budget"
                         )
-                    entry_metadata = entry.stat(follow_symlinks=False)
-                    mode = entry_metadata.st_mode
-                    if (entry_metadata.st_dev, entry_metadata.st_ino) in private_file_identities:
-                        raise FleetPlanInvalid(
-                            "Native bind exposes a private application file alias"
-                        )
-                    if stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
-                        if len(pending) >= 4096:
+                    # Hints only route nodes to the fresh lstat above; they
+                    # never establish an accepted type or inode. Unknown-type
+                    # predicates may cache metadata, so leaf decisions use a
+                    # new pathname stat rather than DirEntry's cached result.
+                    if not (entry.is_dir(follow_symlinks=False) or entry.is_symlink()):
+                        entry_metadata = os.stat(entry.path, follow_symlinks=False)
+                        kind = stat.S_IFMT(entry_metadata.st_mode)
+                        if (
+                            private_file_identities
+                            and (entry_metadata.st_dev, entry_metadata.st_ino)
+                            in private_file_identities
+                        ):
                             raise FleetPlanInvalid(
-                                "Standard sandbox bind exceeds its pending-directory budget"
+                                "Native bind exposes a private application file alias"
                             )
-                        pending.append(Path(entry.path))
-                    elif writable and entry_metadata.st_nlink != 1:
+                        if kind == stat.S_IFREG:
+                            if writable and entry_metadata.st_nlink != 1:
+                                raise FleetPlanInvalid(
+                                    "Scoped native write roots cannot expose hardlinked files"
+                                )
+                            continue
+                        if kind not in (stat.S_IFDIR, stat.S_IFLNK):
+                            if writable and entry_metadata.st_nlink != 1:
+                                raise FleetPlanInvalid(
+                                    "Scoped native write roots cannot expose hardlinked files"
+                                )
+                            raise FleetPlanInvalid(
+                                "Standard sandbox bind exposes a host IPC/special object"
+                            )
+                    if len(pending) >= 4096:
                         raise FleetPlanInvalid(
-                            "Scoped native write roots cannot expose hardlinked files"
+                            "Standard sandbox bind exceeds its pending-directory budget"
                         )
-                    elif not stat.S_ISREG(mode):
-                        raise FleetPlanInvalid(
-                            "Standard sandbox bind exposes a host IPC/special object"
-                        )
+                    pending.append(Path(entry.path))
         elif not stat.S_ISREG(metadata.st_mode):
             raise FleetPlanInvalid("Standard sandbox bind exposes a host IPC/special object")

@@ -312,9 +312,9 @@ def supervise(
         "release_authority": "NONE",
     }
     temporary = directory / f".{name}.json.tmp"
-    with temporary.open("x", encoding="utf-8") as stream:
-        json.dump(result, stream, sort_keys=True, indent=2)
-        stream.write("\n")
+    with temporary.open("x", encoding="utf-8") as receipt_stream:
+        json.dump(result, receipt_stream, sort_keys=True, indent=2)
+        receipt_stream.write("\n")
     temporary.replace(receipt)
     return result
 
@@ -343,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(
         "RING_VERDICT="
-        + result["verdict"]
+        + str(result["verdict"])
         + " RING_RECEIPT="
         + str(args.evidence / f"{args.name}.json"),
         flush=True,

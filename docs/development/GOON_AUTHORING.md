@@ -408,6 +408,9 @@ checks must not be merged merely because native commands share prerequisites.
 
 Follow [the template developer journey](../../templates/README.md). Import a project package with its exact `category/name` plus `from: ./goons`; that source stays inside the root authoring workspace and never shadows shipped imports. Plans expose unique unbound direct inputs automatically; Composite Goons declare their public interface. Both support explicit recipient `pass:`/`with:` bindings.
 
-`--input` overrides the same name in one `--inputs-file`; `lock`, validation and execution share that collector and canonical binder. Inputs do not alter package selection. A changed execution choice requires an explicitly refreshed lock.
+Put caller scalar values in the selected `run.yml` under `inputs`. `config validate`,
+`lock` and `run` transport that one selection to the canonical Goon binder; there
+is no values-file overlay or input-flag precedence. Inputs do not alter package
+selection. A changed execution choice requires an explicitly refreshed lock.
 
 For reusable Python Goons, reference declared inputs from `uv.project` and `uv.group`. Commands default to that project working directory. Native tools own their project configuration, including discovery and coverage policy. Output/artifact paths in uv Goons are authored relative to the command working directory and resolved before execution.

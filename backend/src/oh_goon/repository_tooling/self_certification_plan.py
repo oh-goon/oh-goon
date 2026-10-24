@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypedDict, cast
 
 from oh_goon.repository_tooling import _self_certification_plan_units as plan_units
 from oh_goon.repository_tooling._self_certification_artifact_projection import (
+    ArtifactProjection,
     artifact_plan_projection,
 )
 from oh_goon.repository_tooling._self_certification_plan_evidence import (
@@ -19,6 +21,9 @@ from oh_goon.repository_tooling._self_certification_plan_evidence import (
 )
 from oh_goon.repository_tooling._self_certification_plan_evidence import (
     record_unit_pass as record_unit_pass,
+)
+from oh_goon.repository_tooling._self_certification_plan_units import (
+    ShardPlan as ShardPlan,
 )
 from oh_goon.repository_tooling._self_certification_plan_units import (
     _source_units,
@@ -37,6 +42,27 @@ from oh_goon.repository_tooling._self_certification_transition import (
 from oh_goon.repository_tooling.release.package_slim import (
     canonical_source_identity,
 )
+
+
+class PlanSummary(TypedDict):
+    summary: dict[str, int]
+    next_unit: dict[str, object] | None
+    pending: list[dict[str, object]]
+    blocked: list[dict[str, object]]
+
+
+class SelfCertificationPlan(ArtifactProjection, PlanSummary):
+    plan: str
+    plan_identity: str
+    source_identity: str
+    verification_config_identity: str
+    package_config_identity: str
+    resume_evidence: dict[str, object]
+    inherited_closure_contracts: dict[str, list[str]]
+    source_verification_status: str
+    source_gates: list[dict[str, object]]
+    all_units: list[dict[str, object]]
+    surfaces: list[ShardPlan]
 
 
 def _apply_source_evidence(
@@ -71,7 +97,9 @@ def _apply_source_evidence(
         if evidence is not None:
             unit["status"] = "PASS"
             continue
-        requirements = [str(item) for item in unit.get("requires", [])]
+        # Source-unit specifications own the list of dependency names before this
+        # heterogeneous public unit projection gains evidence fields.
+        requirements = cast(list[str], unit.get("requires", []))
         unit["status"] = (
             "BLOCKED"
             if any(source_evidence.get(required) is None for required in requirements)
@@ -80,7 +108,7 @@ def _apply_source_evidence(
     return source_units, all(unit["status"] == "PASS" for unit in source_units)
 
 
-def _plan_summary(all_units: list[dict[str, object]]) -> dict[str, object]:
+def _plan_summary(all_units: list[dict[str, object]]) -> PlanSummary:
     pending = [unit for unit in all_units if unit["status"] == "PENDING"]
     blocked = [unit for unit in all_units if unit["status"] == "BLOCKED"]
     return {
@@ -96,7 +124,7 @@ def _plan_summary(all_units: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
-def self_certification_plan(root: Path) -> dict[str, object]:
+def self_certification_plan(root: Path) -> SelfCertificationPlan:
     root = root.resolve()
     shard_payload = shard_plan(root)
     source_identity = canonical_source_identity(root)
@@ -122,7 +150,7 @@ def self_certification_plan(root: Path) -> dict[str, object]:
         source_units=source_units,
         all_source_pass=all_source_pass,
     )
-    all_units = [*source_units, *artifact_projection.pop("units")]
+    all_units = [*source_units, *artifact_projection["units"]]
     return {
         "plan": plan_units.PLAN_NAME,
         "plan_identity": plan_identity,
@@ -136,7 +164,12 @@ def self_certification_plan(root: Path) -> dict[str, object]:
         },
         "source_verification_status": "PASS" if all_source_pass else "INCOMPLETE",
         "source_gates": _source_gate_payload(source_units),
-        **artifact_projection,
+        "checkpoint_state": artifact_projection["checkpoint_state"],
+        "status": artifact_projection["status"],
+        "source_seal": artifact_projection["source_seal"],
+        "required_inputs": artifact_projection["required_inputs"],
+        "artifact_status": artifact_projection["artifact_status"],
+        "artifact": artifact_projection["artifact"],
         "all_units": all_units,
         "surfaces": [shard_payload],
     }

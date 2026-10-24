@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from typing import Literal, cast
+
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.operation import (
     BlockedOperationOutcome,
     MissingToolVersion,
+    OperationExecution,
     OperationReport,
     ReadinessOperationEvidence,
     ReadyUvTool,
@@ -22,7 +25,7 @@ from oh_goon.engine.project import policy_snapshot
 from oh_goon.engine.reporting import execution, provenance
 
 
-def run(context: OperationContext):
+def run(context: OperationContext) -> OperationExecution:
     started = utc_now()
     policy = policy_snapshot(context.attempt.repository.path)
     checks, python, tools, before_observation = readiness(
@@ -80,7 +83,11 @@ def run(context: OperationContext):
         outcome=(
             BlockedOperationOutcome(state="blocked", reason_code=reason)
             if blocked
-            else SuccessfulOperationOutcome(state="successful", verdict=verdict, reason_code=reason)
+            else SuccessfulOperationOutcome(
+                state="successful",
+                verdict=cast(Literal[Verdict.READY, Verdict.UPDATED, Verdict.UNCHANGED], verdict),
+                reason_code=reason,
+            )
         ),
         evidence=ReadinessOperationEvidence(
             kind="READINESS", readiness=checks, tools=tools, python=python, policy=policy

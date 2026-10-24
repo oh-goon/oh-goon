@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 
 from oh_goon.core.game_tape_identity import repository_execution_id
 from oh_goon.core.game_tape_lifecycle import run_status
@@ -10,6 +10,7 @@ from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
+    FleetRunEvent,
     OutputAbandonedEvent,
     OutputFinalizedEvent,
     OutputQuarantinedEvent,
@@ -67,7 +68,8 @@ class _PendingEvent:
 def _live_lifecycle_events(detail: FleetRunDetail) -> list[_PendingEvent]:
     repositories = {item.repository_id: item for item in detail.run.targets}
     events = []
-    for event in detail.lifecycle_events:
+    for raw_event in detail.lifecycle_events:
+        event = cast(FleetRunEvent, raw_event)
         repository = repositories.get(getattr(event, "repository_id", ""))
         if repository is None:
             continue
@@ -77,7 +79,9 @@ def _live_lifecycle_events(detail: FleetRunDetail) -> list[_PendingEvent]:
     return events
 
 
-def _live_event(detail, event, repository):
+def _live_event(
+    detail: FleetRunDetail, event: FleetRunEvent, repository: RepositoryIdentity
+) -> _PendingEvent | None:
     execution_id = repository_execution_id(detail.run.fleet_run_id, repository.repository_id)
     index = detail.run.targets.index(repository)
     if isinstance(event, RepositoryStartedEvent):
@@ -116,7 +120,12 @@ def _live_event(detail, event, repository):
     return None
 
 
-def _step_lifecycle_event(event, repository, index, execution_id):
+def _step_lifecycle_event(
+    event: StepReachedEvent | StepStartedEvent | StepAttemptCreatedEvent,
+    repository: RepositoryIdentity,
+    index: int,
+    execution_id: str,
+) -> _PendingEvent:
     if isinstance(event, StepAttemptCreatedEvent):
         return _step_pending(
             event.sequence,
@@ -158,7 +167,12 @@ def _step_lifecycle_event(event, repository, index, execution_id):
     )
 
 
-def _step_terminal_event(event, repository, index, execution_id):
+def _step_terminal_event(
+    event: StepSucceededEvent | StepFailedEvent | StepSkippedEvent | StepCancelledEvent,
+    repository: RepositoryIdentity,
+    index: int,
+    execution_id: str,
+) -> _PendingEvent:
     types = {
         FleetRunEventType.STEP_SUCCEEDED: GameTapeEventType.STEP_PASSED,
         FleetRunEventType.STEP_FAILED: GameTapeEventType.STEP_FAILED,
@@ -193,7 +207,9 @@ def _step_terminal_event(event, repository, index, execution_id):
     )
 
 
-def _physical_lifecycle_event(event, repository, index, execution_id):
+def _physical_lifecycle_event(
+    event: ProcessStartingEvent, repository: RepositoryIdentity, index: int, execution_id: str
+) -> _PendingEvent:
     types = {
         FleetRunEventType.PROCESS_STARTING: GameTapeEventType.PROCESS_STARTING,
         FleetRunEventType.PROCESS_STARTED: GameTapeEventType.PROCESS_STARTED,
@@ -245,12 +261,13 @@ def _physical_lifecycle_event(event, repository, index, execution_id):
 
 def _run_events(detail: FleetRunDetail) -> list[_PendingEvent]:
     events = []
-    for event in detail.lifecycle_events:
+    for raw_event in detail.lifecycle_events:
+        event = cast(FleetRunEvent, raw_event)
         events.extend(_run_event(detail, event))
     return events
 
 
-def _run_event(detail, event):
+def _run_event(detail: FleetRunDetail, event: FleetRunEvent) -> list[_PendingEvent]:
     if isinstance(event, RunAdmittedEvent):
         admitted = [
             _PendingEvent(

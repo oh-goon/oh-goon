@@ -138,8 +138,8 @@ def test_original_in_process_app_transport_keeps_one_owner_and_canonical_identit
     def delegated_plan(argv, *, fleet_provisioner):
         assert fleet_provisioner is owner
         assert argv == [
-            "plan",
-            "run",
+            "dev",
+            "_run-plan",
             workflow.APP_PLAN,
             "--repository-id",
             "repo-example",
@@ -160,8 +160,8 @@ def test_original_in_process_app_transport_keeps_one_owner_and_canonical_identit
         events.append("original-workflow")
         status, message = deployment_plan_run(
             [
-                "plan",
-                "run",
+                "dev",
+                "_run-plan",
                 workflow.APP_PLAN,
                 "--repository-id",
                 "repo-example",

@@ -5,9 +5,16 @@ from types import SimpleNamespace
 
 import oh_goon.cli_runtime_plans as plans
 from oh_goon.cli_parser import build_parser
+from oh_goon.cli_plan_summary import resolved_plan_summary
 from oh_goon.cli_runtime_plans import run_plan_command
-from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan import (
+    MissingConfigPolicy,
+    ResolvedCommandStep,
+    ResolvedFleetPlan,
+    ResolvedPreCommitStep,
+)
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
+from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 
 
@@ -73,14 +80,6 @@ def _args(command, **kwargs):
 
 def test_plan_diagnostic_cli_human_paths(capsys):
     runtime = SimpleNamespace(plans=Plans())
-    assert run_plan_command(runtime, _args("validate", plan="plan.yml")) == 0
-    assert "Resolved steps: 1" in capsys.readouterr().out
-    assert run_plan_command(runtime, _args("explain", plan="plan.yml")) == 0
-    explain_output = capsys.readouterr().out
-    assert "included" in explain_output
-    assert "Values:" in explain_output
-    assert "<host:TOKEN:redacted>" in explain_output
-    assert "host-value-redacted=true" in explain_output
     assert run_plan_command(runtime, _args("check", root=".")) == 0
     assert "Plan contracts: valid" in capsys.readouterr().out
     assert run_plan_command(runtime, _args("diff", before="a.yml", after="b.yml")) == 0
@@ -107,10 +106,48 @@ def test_plan_run_completed_attention_required_is_nonzero(monkeypatch, capsys):
         lambda runtime, fleet_run_id, *, admitted_run: detail,
     )
     args = build_parser().parse_args(
-        ["plan", "run", "plan.yml", "--repository-id", "selected-repository", "--wait"]
+        [
+            "dev",
+            "_run-plan",
+            "plan.yml",
+            "--repository-id",
+            "selected-repository",
+            "--wait",
+            "--lock-file",
+            "goon.lock",
+        ]
     )
 
+    args.command, args.plan_command = "plan", "run"
     assert run_plan_command(runtime, args) == 1
     output = capsys.readouterr().out
     assert "Execution status: COMPLETED" in output
     assert "Outcome: ATTENTION_REQUIRED" in output
+
+
+def test_resolved_plan_summary_supports_native_precommit_and_stream_outputs() -> None:
+    plan = ResolvedFleetPlan.create(
+        name="native-summary",
+        description="",
+        execution=VerificationExecutionPolicy(),
+        steps=(
+            ResolvedPreCommitStep(
+                step_id="hooks",
+                if_missing=MissingConfigPolicy.SKIP,
+                timeout_seconds=30,
+                runtime_id="managed-hooks",
+                runtime_pyproject_sha256="a" * 64,
+                runtime_uv_lock_sha256="b" * 64,
+            ),
+            ResolvedCommandStep(
+                step_id="diagnostics",
+                argv=("verify",),
+                timeout_seconds=30,
+                outputs=(PlanStreamOutput(name="diagnostic", stream="stderr", max_bytes=100),),
+            ),
+        ),
+    )
+    output = "\n".join(resolved_plan_summary(plan))
+    assert "pre_commit: if_missing=skip" in output
+    assert "runtime_id=managed-hooks" in output
+    assert "outputs=diagnostic=stderr(100B)" in output

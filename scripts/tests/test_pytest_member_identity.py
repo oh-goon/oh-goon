@@ -14,6 +14,17 @@ from oh_goon.repository_tooling.pytest_member_identity import pytest_member_iden
 from oh_goon.repository_tooling.test_batch_receipts import MemberReceiptStore
 
 
+def test_corrupt_receipt_cannot_be_reused(tmp_path: Path) -> None:
+    store = MemberReceiptStore(tmp_path, suite_identity="sha256:" + "a" * 64)
+    member = "tests/test_example.py::test_behavior"
+    path = store.record(member, outcome="PYTEST_MEMBER_PASSED")
+    assert store.reusable(member)
+
+    path.write_text("[]", encoding="utf-8")
+
+    assert not store.reusable(member)
+
+
 @pytest.mark.parametrize(
     "member",
     (

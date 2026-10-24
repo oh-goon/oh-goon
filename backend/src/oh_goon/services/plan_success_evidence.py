@@ -36,7 +36,7 @@ def has_exact_plan_success(
         return False
 
     expected = runtime.plans.prepare_execution_target(plan, lock_path=lock_path)
-    repository = RepositoryIdentity(path=source_root)
+    repository = RepositoryIdentity.model_validate({"path": source_root})
     if repository.repository_id != repository_id:
         return False
     current_admission = repository_plan_admission_evidence(repository, expected.plan)

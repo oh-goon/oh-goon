@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from statistics import median
 from typing import Literal
@@ -307,7 +308,7 @@ def _cohort_outliers(
 
 
 def _repository_metric_stats(
-    by_repo: dict[object, tuple[ScoutStepObservation, ...]], *, metric: Literal["cpu", "memory"]
+    by_repo: Mapping[str, tuple[ScoutStepObservation, ...]], *, metric: Literal["cpu", "memory"]
 ) -> dict[str, _RepositoryMetricStats]:
     result: dict[str, _RepositoryMetricStats] = {}
     for repository_id, items in by_repo.items():
@@ -583,7 +584,7 @@ def _median_repository_cpu(items: tuple[ScoutStepObservation, ...]) -> float:
 def finding_counts(
     findings: tuple[ScoutFinding, ...], repository_rows: tuple[ScoutRankingRow, ...]
 ) -> tuple[ScoutFindingCount, ...]:
-    counts = defaultdict(int)
+    counts: defaultdict[ScoutFindingCategory, int] = defaultdict(int)
     for finding in findings:
         counts[finding.category] += 1
     heavy_count = sum(1 for row in repository_rows if (row.total_cpu_seconds or 0) > 0)

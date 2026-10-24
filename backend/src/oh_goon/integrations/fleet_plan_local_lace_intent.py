@@ -51,7 +51,7 @@ def require_original_agent_source_mount_authority(request: IsolatedProcessReques
     stage_absolute = Path(os.path.abspath(stage))
     stage_resolved = Path(os.path.realpath(stage))
 
-    def deny_stage_path(value: object, *, label: str) -> None:
+    def deny_stage_path(value: str | os.PathLike[str] | None, *, label: str) -> None:
         if value is None:
             return
         path = Path(os.path.abspath(value))

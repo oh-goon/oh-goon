@@ -2,26 +2,35 @@
 
 Observe repository dependency manifests without installing dependencies.
 
-## Before you run
+**Status:** runnable with prerequisites. **Effects:** Reads supported manifests and records dependency evidence.
 
-The selected locked project/group must provide the commands used by the chosen Goons.
+**Prerequisites:** An explicitly registered repository containing the manifests to observe. This Goon uses `dependency_inventory`; it needs no Python dependency-group installation.
 
-## Use this Plan
+**What to edit:** initialize a workflow, then set the registered target and relevant caller choices in `workflow/run.yml`. The illustrative addresses, revision and digest below must identify your real workload before execution. The [first-run guide](../../../README.md) explains repository registration and prepared CLI use.
 
-```sh
-oh-goon templates show python/dependency-inventory --kind plan
-oh-goon plan inputs templates/plans/python/dependency-inventory/plan.yml
-```
-
-Copy with `oh-goon templates show python/dependency-inventory --kind plan > plan.yml`. Select caller inputs with one `--inputs-file` and optional `--input` overrides, then validate and lock that exact selection. The [developer journey](../../../README.md) shows the complete local Python flow; the [CI/CD guide](../../../../docs/CI_CD_CONTRACT.md) owns configured isolated execution. Append a Goon to the ordered list to extend this Plan; executable Steps stay in the Goon.
-
-Inspection Plan that selects the canonical `python/dependency-inventory` Goon. Use it through the existing Shared Run or Schedule paths to refresh dependency evidence for an explicit repository population.
-
-The Plan only observes. Fleet filtering and later maintenance execution remain separate user actions; a dependency query never silently starts this Plan or any mutation.
-
-## Validate your copy
+**Settings owner:** [`plan.yml`](plan.yml) owns ordered imports; imported Goons own input types/defaults, Steps, effects and outputs. `run.yml` selects values. Native project tools keep their own configuration.
 
 ```sh
-oh-goon plan validate plan.yml
-oh-goon lock plan.yml
+oh-goon templates init python/dependency-inventory --output ./workflow
 ```
+
+Edit the generated `workflow/run.yml`; this shows one explicit selection:
+
+```yaml
+version: 1
+source: {kind: catalog-plan, name: python/dependency-inventory}
+target: {repository_id: REPOSITORY_ID}
+```
+
+```sh
+oh-goon config inspect ./workflow/run.yml
+oh-goon config validate ./workflow/run.yml
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
+```
+
+**Expected outputs:** Repository dependency inventory evidence. Observation does not authorize maintenance or start another Run.
+
+**Failures:** invalid inputs fail before work. Inspection/validation do not prove installed tools, reachable services or successful effects. Native failures remain failed Steps with their exit status and logs. A changed source or execution selection requires a new lock.
+
+**Customize:** change caller values in `run.yml`. For structural changes, create a project Plan with ordinary ordered `goons:` imports and select it with `source: {kind: file-plan, path: plan.yml}`; see [Plan authoring](../../README.md). Keep secrets in declared execution environment bindings.

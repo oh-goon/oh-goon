@@ -14,7 +14,7 @@ import re
 import stat
 import subprocess
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Literal, Mapping, cast
 
 from oh_goon.core.ports.physical_observation import (
     ORIGINAL_KERNEL_COMPONENTS,
@@ -307,7 +307,7 @@ def _network(
                     x.get("ifname") == scope.host_veth
                     or (
                         type(x.get("ifname")) is str
-                        and x["ifname"].startswith(scope.host_veth + "@")
+                        and x["ifname"].startswith(cast(str, scope.host_veth) + "@")
                     )
                 )
                 for x in links
@@ -1032,5 +1032,13 @@ def observe_kernel(
             or type(value["detail"]) is not str
         ):
             raise ValueError("invalid physical kernel fact")
-        facts.append((name, PhysicalKernelFact(value["state"], value["detail"])))
+        facts.append(
+            (
+                name,
+                PhysicalKernelFact(
+                    cast(Literal["PRESENT", "NOT_OBSERVED", "UNKNOWN"], value["state"]),
+                    value["detail"],
+                ),
+            )
+        )
     return PhysicalKernelSnapshot(tuple(facts))
