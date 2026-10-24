@@ -226,6 +226,11 @@ def test_codex_login_uses_original_run_and_independent_verification(
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     home = tmp_path / "native-auth"
     home.mkdir()
+    python_alias = tmp_path / "python-runtime-alias"
+    python_base = Path(sys.base_prefix).resolve()
+    python_alias.symlink_to(python_base, target_is_directory=True)
+    interpreter_suffix = Path(sys._base_executable).resolve().relative_to(python_base)
+    monkeypatch.setattr(sys, "_base_executable", str(python_alias / interpreter_suffix))
     os.mkfifo(home / "auth.json")
     (tmp_path / "bin").mkdir()
     executable = tmp_path / "bin" / "native-codex"
@@ -240,6 +245,7 @@ def test_codex_login_uses_original_run_and_independent_verification(
         "assert config['model_provider']=='openai'\n"
         "assert config['approval_policy']=='never'\n"
         "assert not config['permissions']['oh_goon']['network']['enabled']\n"
+        f"assert config['permissions']['oh_goon']['filesystem'][{str(python_alias)!r}] == 'read'\n"
         "assert '--ignore-user-config' in sys.argv and '--ignore-rules' in sys.argv\n"
         "prompt=json.loads(sys.stdin.read())\n"
         "assert json.loads(pathlib.Path(config['model_instructions_file']).read_text())==prompt\n"
