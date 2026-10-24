@@ -3,11 +3,13 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -61,7 +63,236 @@ def test_required_checks_run_for_ready_pull_requests_main_and_merge_groups() -> 
         assert "continue-on-error" not in step
     commands = [step["run"] for step in checks["steps"] if "run" in step]
     assert "make init" in commands
-    assert commands[-1] == 'make "${{ matrix.target }}"'
+
+
+_SDK_SHIM = r"""set -euo pipefail
+case "${0##*/}" in
+  sudo)
+    case "$1" in
+      mount)
+        echo mount >> "$SDK_EVENTS"
+        if [ "${SIM_MOUNT_STATUS:-0}" = 0 ] || [ "${SIM_PARTIAL_MOUNT:-0}" = 1 ]; then
+          printf '%s\n' "${@: -2:1}" > "$SDK_MARKER"
+        fi
+        exit "${SIM_MOUNT_STATUS:-0}"
+        ;;
+      umount)
+        echo umount >> "$SDK_EVENTS"
+        if [ "${SIM_CLEANUP_STATUS:-0}" = 0 ]; then /bin/rm -f -- "$SDK_MARKER"; fi
+        exit "${SIM_CLEANUP_STATUS:-0}"
+        ;;
+      *) exit 99 ;;
+    esac
+    ;;
+  mountpoint)
+    if [ "${SIM_PREEXISTING_MOUNT:-0}" = 1 ]; then exit 0; else exit 1; fi
+    ;;
+  findmnt)
+    requested_source= columns=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -S) shift; requested_source=$1 ;;
+        -o|--output) shift; columns=$1 ;;
+      esac
+      shift
+    done
+    if [ -n "$requested_source" ]; then
+      if [ "${SIM_LOST_OWNER:-0}" = 0 ] && [ -f "$SDK_MARKER" ] &&
+          [ "$(< "$SDK_MARKER")" = "$requested_source" ]; then exit 0; fi
+      exit 1
+    fi
+    if [ "$columns" = SOURCE ]; then
+      if [ "${SIM_FOREIGN_TOP:-0}" = 1 ]; then
+        echo foreign-top-source
+      elif [ "${SIM_LOST_OWNER:-0}" = 1 ] || [ ! -f "$SDK_MARKER" ]; then
+        echo parent-filesystem-source
+      else
+        printf '%s\n' "$(< "$SDK_MARKER")"
+      fi
+      exit 0
+    fi
+    echo 'owned-sdk tmpfs ro,nodev,nosuid,noexec'
+    ;;
+  bwrap)
+    echo view >> "$SDK_EVENTS"
+    exit "${SIM_VIEW_STATUS:-0}"
+    ;;
+  make)
+    printf 'make:%s\n' "$*" >> "$SDK_EVENTS"
+    if [ "${SIM_TERM:-0}" = 1 ]; then kill -TERM "$SDK_WORKFLOW_PID"; fi
+    exit "${SIM_CHECK_STATUS:-0}"
+    ;;
+  *) exit 99 ;;
+esac
+"""
+
+
+def _run_required_check(
+    tmp_path: Path, target: str, overrides: dict[str, str] | None = None
+) -> tuple[subprocess.CompletedProcess[str], list[str], bool]:
+    """Execute native Bash while every privileged/tool effect is simulated."""
+    bash = shutil.which("bash", path=os.defpath)
+    if bash is None:
+        pytest.skip("native Bash is unavailable")
+    options = overrides or {}
+    sdk = tmp_path / "sdk"
+    if options.get("SIM_SDK_PRESENT", "1") == "1":
+        if options.get("SIM_SDK_KIND") == "file":
+            sdk.write_text("unrelated host file")
+        elif options.get("SIM_SDK_KIND") == "symlink":
+            target_directory = tmp_path / "unrelated-host-directory"
+            target_directory.mkdir()
+            sdk.symlink_to(target_directory, target_is_directory=True)
+        else:
+            sdk.mkdir()
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    for command in ("sudo", "mountpoint", "findmnt", "bwrap", "make"):
+        executable = commands / command
+        executable.write_text(f"#!{bash}\n" + _SDK_SHIM)
+        executable.chmod(0o755)
+    events, marker = tmp_path / "events", tmp_path / "mounted-owner"
+    steps = _workflow()["jobs"]["checks"]["steps"]
+    script = [step["run"] for step in steps if "run" in step][-1]
+    script = script.replace("${{ matrix.target }}", target).replace(
+        "/usr/local/lib/android/sdk", str(sdk)
+    )
+    # Keep cancellation bound to our child even if a missing trap lets it exec Make.
+    script = "export SDK_WORKFLOW_PID=$$\n" + script
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-c", script],
+        cwd=tmp_path,
+        env={
+            "PATH": str(commands) + os.pathsep + os.defpath,
+            "RUNNER_ENVIRONMENT": "github-hosted",
+            "GITHUB_RUN_ID": "synthetic-owned-run",
+            "SDK_EVENTS": str(events),
+            "SDK_MARKER": str(marker),
+            **options,
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    return (
+        result,
+        events.read_text().splitlines() if events.exists() else [],
+        marker.exists(),
+    )
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "target",
+    [
+        "backend-check",
+        "frontend-check",
+        "tooling-check",
+        "architecture",
+        "check-generated",
+        "test-integration",
+    ],
+)
+@pytest.mark.parametrize("check_status", [0, 17])
+def test_required_check_executes_exact_matrix_target_and_preserves_its_status(
+    tmp_path: Path, target: str, check_status: int
+) -> None:
+    result, events, mounted = _run_required_check(
+        tmp_path, target, {"SIM_CHECK_STATUS": str(check_status)}
+    )
+    assert result.returncode == check_status, result.stderr
+    expected = [f"make:{target}"]
+    if target in {"backend-check", "test-integration"}:
+        expected = ["mount", "view", *expected, "umount"]
+    assert events == expected
+    assert not mounted
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "options,expected_status,expected_events,retained_mount",
+    [
+        ({"RUNNER_ENVIRONMENT": "self-hosted"}, 1, [], False),
+        ({"SIM_PREEXISTING_MOUNT": "1"}, 1, [], False),
+        ({"SIM_SDK_KIND": "symlink"}, 1, [], False),
+        ({"SIM_SDK_KIND": "file"}, 1, [], False),
+        ({}, 0, ["mount", "view", "make:backend-check", "umount"], False),
+        (
+            {"SIM_CHECK_STATUS": "17"},
+            17,
+            ["mount", "view", "make:backend-check", "umount"],
+            False,
+        ),
+        (
+            {"SIM_CLEANUP_STATUS": "1"},
+            1,
+            ["mount", "view", "make:backend-check", "umount"],
+            True,
+        ),
+        (
+            {"SIM_CHECK_STATUS": "17", "SIM_CLEANUP_STATUS": "1"},
+            17,
+            ["mount", "view", "make:backend-check", "umount"],
+            True,
+        ),
+        ({"SIM_MOUNT_STATUS": "9"}, 9, ["mount"], False),
+        (
+            {"SIM_MOUNT_STATUS": "9", "SIM_PARTIAL_MOUNT": "1"},
+            9,
+            ["mount", "umount"],
+            False,
+        ),
+        ({"SIM_VIEW_STATUS": "11"}, 11, ["mount", "view", "umount"], False),
+        (
+            {"SIM_LOST_OWNER": "1"},
+            1,
+            ["mount", "view", "make:backend-check"],
+            True,
+        ),
+        (
+            {"SIM_FOREIGN_TOP": "1"},
+            1,
+            ["mount", "view", "make:backend-check"],
+            True,
+        ),
+        ({"SIM_SDK_PRESENT": "0"}, 0, ["make:backend-check"], False),
+        (
+            {"SIM_TERM": "1"},
+            143,
+            ["mount", "view", "make:backend-check", "umount"],
+            False,
+        ),
+    ],
+    ids=[
+        "non-hosted",
+        "preexisting-mount",
+        "symlink-target",
+        "regular-file-target",
+        "success",
+        "check-failure",
+        "cleanup-failure",
+        "both-fail",
+        "mount-failure",
+        "partial-mount-failure",
+        "view-failure",
+        "missing-owner",
+        "foreign-top-mount",
+        "sdk-absent",
+        "term",
+    ],
+)
+def test_sdk_overlay_lifecycle_preserves_outcome_and_cleans_only_owned_mounts(
+    tmp_path: Path,
+    options: dict[str, str],
+    expected_status: int,
+    expected_events: list[str],
+    retained_mount: bool,
+) -> None:
+    result, events, mounted = _run_required_check(tmp_path, "backend-check", options)
+    assert result.returncode == expected_status, result.stderr
+    assert events == expected_events
+    assert mounted is retained_mount
 
 
 def test_release_assembles_only_after_all_six_checks_for_the_same_source() -> None:
