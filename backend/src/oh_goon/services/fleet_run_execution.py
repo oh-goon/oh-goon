@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oh_goon.services.fleet_local_lace_takeover import OriginalLocalLaceTakeoverCoordinator
+
 from oh_goon.core.capability_registry import resolve_bound_capability_intent
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry
@@ -69,7 +75,11 @@ class FleetRunExecution:
             return self._lifecycle.finish_detail(session, terminal, failure)
 
     def resume_local_lace_takeover(
-        self, ticket: ExecutionTicket, coordinator, *, intent_run_seq: int
+        self,
+        ticket: ExecutionTicket,
+        coordinator: OriginalLocalLaceTakeoverCoordinator,
+        *,
+        intent_run_seq: int,
     ) -> tuple[int, int]:
         """Explicit production-worker recovery; never scheduled from app startup.
 
@@ -119,7 +129,9 @@ class FleetRunExecution:
             operation="seal_run",
         )
 
-    def _observe_live_output(self, observe, *, fleet_run_id: str, operation: str) -> None:
+    def _observe_live_output(
+        self, observe: Callable[[], object], *, fleet_run_id: str, operation: str
+    ) -> None:
         """Game Tape availability must never control the Fleet execution lifecycle."""
         try:
             observe()
@@ -161,6 +173,7 @@ class FleetRunExecution:
             if session.cancel_requested():
                 return FleetRunTerminalIntent.CANCEL, None
             execution = authority.execution
+            max_parallel: int | None
             if isinstance(execution, StrictFleetExecutionAdmission):
                 parallel_safe = execution.placement.executor_capacity.admitted_parallelism > 1
                 max_parallel = execution.placement.executor_capacity.admitted_parallelism

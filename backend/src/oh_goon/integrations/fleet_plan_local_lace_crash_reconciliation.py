@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 from pathlib import Path
+from typing import cast
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.ports.local_lace_crash_reconciliation import LocalLaceCrashObservation
@@ -93,7 +94,7 @@ def observe_native_crash(
                 or network["table"] != observation["nft_table"]
             ):
                 return LocalLaceCrashObservation(subject.subject_identity, "UNRESOLVED")
-            current_birth = _process_identity(record["pid"])
+            current_birth = _process_identity(cast(int, record["pid"]))
             if current_birth is not None and current_birth != record["process_identity"]:
                 return LocalLaceCrashObservation(subject.subject_identity, "UNRESOLVED")
             metadata = cgroup.stat()
@@ -124,14 +125,14 @@ def observe_native_crash(
             if (
                 any(x.get("name") == namespace for x in namespaces)
                 or any(
-                    x.get("ifname") == veth
-                    or (type(x.get("ifname")) is str and x["ifname"].startswith(veth + "@"))
+                    (ifname := x.get("ifname")) == veth
+                    or (isinstance(ifname, str) and ifname.startswith(veth + "@"))
                     for x in links
                 )
                 or any(
-                    type(x.get("table")) is dict
-                    and x["table"].get("family") == "inet"
-                    and x["table"].get("name") == table
+                    isinstance(native_table := x.get("table"), dict)
+                    and native_table.get("family") == "inet"
+                    and native_table.get("name") == table
                     for x in tables
                 )
             ):

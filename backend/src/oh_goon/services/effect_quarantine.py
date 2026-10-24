@@ -1,21 +1,35 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import TypedDict
 
 from oh_goon.core.errors import RepositoryEffectQuarantined
+from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.effect_attempt import (
     IndeterminateRepositoryEffectAttempt,
     OutcomeUnknownRepositoryEffectAttempt,
     PartiallyAppliedRepositoryEffectAttempt,
     RepositoryEffectAttempt,
 )
+from oh_goon.core.models.effect_origin import RepositoryEffectOrigin
+from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.models.recovery import (
     IndeterminateRepositoryEffectQuarantine,
     OutcomeUnknownRepositoryEffectQuarantine,
     PartiallyAppliedRepositoryEffectQuarantine,
     RepositoryEffectQuarantine,
 )
+from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.vocabulary import CommandSafety
+
+
+class _QuarantineFields(TypedDict):
+    operation_id: str
+    repository: RepositoryIdentity
+    capability: CapabilitySnapshot
+    baseline: RepositoryStateFingerprint
+    origin: RepositoryEffectOrigin
+    record_version: int
 
 
 def effect_quarantines(
@@ -52,7 +66,7 @@ def require_effects_allowed_for_repositories(
 def _quarantine_for(
     attempt: RepositoryEffectAttempt,
 ) -> RepositoryEffectQuarantine | None:
-    common = {
+    common: _QuarantineFields = {
         "operation_id": attempt.operation_id,
         "repository": attempt.repository,
         "capability": attempt.capability,

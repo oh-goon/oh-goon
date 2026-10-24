@@ -84,7 +84,9 @@ def _cache_evidence_paths(state_home: Path) -> Path:
     return state_home / "oh-goon" / "pytest-member-receipts"
 
 
-def _inventory_paths(environment: dict[str, str]):
+def _inventory_paths(
+    environment: dict[str, str],
+) -> tuple[Path, ApplicationStatePathLayout, Path, Path, Path, Path, Path, Path, Path]:
     database = database_path_for_environment(environment)
     app = ApplicationStatePathLayout.from_database(database)
     state_home = _state_home(environment)

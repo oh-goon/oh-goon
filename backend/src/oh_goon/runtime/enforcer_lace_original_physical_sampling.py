@@ -8,9 +8,11 @@ No operator-selected diagnostic CLI is used by Fleet.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from typing import Any
 
-from oh_goon.core.enforcer_lace_trust import canonical_bytes, digest
+from oh_goon.core.enforcer_lace_trust import ReceiptAuthenticator, canonical_bytes, digest
 from oh_goon.core.ports.original_mount_intent import OriginalMountIntentDescriptor
 from oh_goon.core.ports.physical_observation import (
     ORIGINAL_KERNEL_COMPONENTS,
@@ -45,9 +47,9 @@ def require_original_physical_sampling_in(
     intent_run_seq: int,
     epoch: int,
     lease_identity: str,
-    auth,
-    executor_generation: int,
-    issuer_key_id: str,
+    auth: ReceiptAuthenticator,
+    executor_generation: int | None,
+    issuer_key_id: str | None,
     scope: PhysicalObservationScope,
     mount_intent: OriginalMountIntentDescriptor,
 ) -> OriginalPhysicalSamplingBinding:
@@ -302,7 +304,7 @@ def require_original_sample_kernel_identity(
             raise CausalJournalError(
                 "visible mount/FD identity field missing or duplicated: " + name
             )
-        return found[0]
+        return str(found[0])
 
     kernel_target = field(tracked["detail"], "target_kernel_sha256", r"[0-9a-f]{64}")
     holder_target = field(holders["detail"], "target_kernel_sha256", r"[0-9a-f]{64}")
@@ -331,7 +333,7 @@ def require_original_sample_kernel_identity(
 
 
 def original_sample_position(
-    events: list[dict],
+    events: Sequence[dict[str, Any]],
     *,
     claim_run_seq: int,
     intent_run_seq: int,
@@ -405,7 +407,7 @@ class OriginalPhysicalConvergenceAssessment:
 
 
 def assess_original_physical_convergence_unqualified(
-    events: tuple[dict, ...],
+    events: tuple[dict[str, Any], ...],
     *,
     binding: OriginalPhysicalSamplingBinding,
 ) -> OriginalPhysicalConvergenceAssessment:

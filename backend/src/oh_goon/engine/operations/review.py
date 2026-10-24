@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.operation import (
     FailedOperationOutcome,
+    OperationExecution,
     OperationOutcome,
     OperationReport,
     ReviewOperationEvidence,
     SuccessfulOperationOutcome,
 )
+from oh_goon.core.models.policy import PolicySnapshot
+from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.product_identity import opaque_identity_token
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import GitFinalState, Verdict
@@ -17,7 +22,7 @@ from oh_goon.engine.project import policy_snapshot
 from oh_goon.engine.reporting import execution, provenance
 
 
-def run(context: OperationContext):
+def run(context: OperationContext) -> OperationExecution:
     started = utc_now()
     before_observation = context.git.observe(
         context.attempt.repository.path, context.cancel_requested
@@ -116,14 +121,14 @@ def _create_review_commit(
 
 
 def _report(
-    context,
-    started,
-    before,
-    policy,
-    stdout,
-    stderr,
+    context: OperationContext,
+    started: datetime,
+    before: RepositoryStateFingerprint,
+    policy: PolicySnapshot,
+    stdout: str,
+    stderr: str,
     outcome: OperationOutcome,
-):
+) -> OperationExecution:
     after_observation = context.git.observe(
         context.attempt.repository.path, context.cancel_requested
     )

@@ -4,11 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
-from oh_goon.repository_tooling.self_certification_artifacts import (
-    PARENT_METADATA,
+from oh_goon.repository_tooling._self_certification_artifact_verification import (
     _archive_version,
     _atomic_write,
     _sha256_file,
+)
+from oh_goon.repository_tooling.self_certification_artifacts import (
+    PARENT_METADATA,
     parent_checkpoint_spec,
 )
 

@@ -674,7 +674,7 @@ def run_self_verify() -> int:
     return rc
 
 
-def self_plan_descriptor(command: str) -> dict[str, object]:
+def self_plan_descriptor(command: str) -> certification_bootstrap_protocol.SelfPlanDescriptor:
     """Project the one canonical self-command registry; do not re-resolve Plan ownership here."""
     descriptor = SELF_PLAN_COMMANDS[command]
     return {

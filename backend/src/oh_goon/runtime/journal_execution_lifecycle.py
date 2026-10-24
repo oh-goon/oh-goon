@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TypedDict
+
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     FleetRunEvent,
@@ -24,22 +26,50 @@ from oh_goon.core.product_identity import fleet_step_attempt_id
 from oh_goon.core.vocabulary import FleetRunEventType
 
 
+class LifecycleRootFields(TypedDict):
+    sequence: int
+    fleet_run_id: str
+    repository_id: str
+    operation_id: str
+
+
+class _StepFields(LifecycleRootFields):
+    step_id: str
+    step_order: int
+
+
+class _PhysicalFields(_StepFields):
+    attempt_number: int
+    step_attempt_id: str
+    physical_execution_id: str
+
+
+class _StartedFields(_PhysicalFields):
+    pid: int
+    process_identity: str | None
+
+
+class ReconciliationRootFields(TypedDict):
+    sequence: int
+    fleet_run_id: str
+
+
 def _execution_lifecycle_event(
-    event_type,
-    common,
-    step_id,
-    step_order,
-    attempt_number,
-    physical_execution_id,
-    pid,
-    process_identity,
-    returncode,
-    termination_reason=None,
-    output_count=None,
+    event_type: FleetRunEventType,
+    common: LifecycleRootFields,
+    step_id: str | None,
+    step_order: int | None,
+    attempt_number: int | None,
+    physical_execution_id: str | None,
+    pid: int | None,
+    process_identity: str | None,
+    returncode: int | None,
+    termination_reason: str | None = None,
+    output_count: int | None = None,
 ) -> FleetRunEvent:
     if event_type is FleetRunEventType.REPOSITORY_STARTED:
         return RepositoryStartedEvent(event_type=event_type, **common)
-    step_common = {**common, "step_id": step_id or "", "step_order": step_order or 0}
+    step_common: _StepFields = {**common, "step_id": step_id or "", "step_order": step_order or 0}
     step_event = _step_event(event_type, step_common, attempt_number, returncode)
     if step_event is not None:
         return step_event
@@ -57,7 +87,12 @@ def _execution_lifecycle_event(
     )
 
 
-def _step_event(event_type, common, attempt_number, returncode):
+def _step_event(
+    event_type: FleetRunEventType,
+    common: _StepFields,
+    attempt_number: int | None,
+    returncode: int | None,
+) -> FleetRunEvent | None:
     if event_type is FleetRunEventType.STEP_REACHED:
         return StepReachedEvent(event_type=event_type, **common)
     if event_type is FleetRunEventType.STEP_STARTED:
@@ -83,7 +118,9 @@ def _step_event(event_type, common, attempt_number, returncode):
     return None
 
 
-def _step_terminal(event_type, common, returncode):
+def _step_terminal(
+    event_type: FleetRunEventType, common: _StepFields, returncode: int | None
+) -> FleetRunEvent:
     if event_type is FleetRunEventType.STEP_SUCCEEDED:
         if returncode is None:
             raise ValueError("STEP_SUCCEEDED requires returncode")
@@ -94,26 +131,26 @@ def _step_terminal(event_type, common, returncode):
         return StepFailedEvent(event_type=event_type, returncode=returncode, **common)
     if event_type is FleetRunEventType.STEP_SKIPPED:
         return StepSkippedEvent(event_type=event_type, **common)
-    return StepCancelledEvent(event_type=event_type, **common)
+    return StepCancelledEvent.model_validate({"event_type": event_type, **common})
 
 
 def _physical_event(
-    event_type,
-    root,
-    step,
-    attempt_number,
-    physical_execution_id,
-    pid,
-    process_identity,
-    returncode,
-    termination_reason,
-    output_count,
-):
+    event_type: FleetRunEventType,
+    root: LifecycleRootFields,
+    step: _StepFields,
+    attempt_number: int | None,
+    physical_execution_id: str | None,
+    pid: int | None,
+    process_identity: str | None,
+    returncode: int | None,
+    termination_reason: str | None,
+    output_count: int | None,
+) -> FleetRunEvent:
     if attempt_number is None:
         raise ValueError(f"{event_type.value} requires attempt_number")
     if physical_execution_id is None:
         raise ValueError(f"{event_type.value} requires physical_execution_id")
-    common = {
+    common: _PhysicalFields = {
         **step,
         "attempt_number": attempt_number,
         "step_attempt_id": fleet_step_attempt_id(
@@ -136,7 +173,9 @@ def _physical_event(
     )
 
 
-def _output_event(event_type, common, output_count):
+def _output_event(
+    event_type: FleetRunEventType, common: _PhysicalFields, output_count: int | None
+) -> FleetRunEvent | None:
     if event_type is FleetRunEventType.OUTPUT_FINALIZED:
         if output_count is None or output_count < 1:
             raise ValueError("OUTPUT_FINALIZED requires output_count")
@@ -154,7 +193,12 @@ def _output_event(event_type, common, output_count):
     return None
 
 
-def _started_process_event(event_type, common, returncode, termination_reason):
+def _started_process_event(
+    event_type: FleetRunEventType,
+    common: _StartedFields,
+    returncode: int | None,
+    termination_reason: str | None,
+) -> FleetRunEvent:
     if event_type is FleetRunEventType.PROCESS_STARTED:
         return ProcessStartedEvent(event_type=event_type, **common)
     if event_type is FleetRunEventType.TERMINATION_REQUESTED:
@@ -212,7 +256,12 @@ def _execution_lifecycle_payload(event: FleetRunEvent) -> dict[str, object]:
     )
 
 
-def reconciliation_lifecycle_event(event_type, common, operation_ids=(), reason=None):
+def reconciliation_lifecycle_event(
+    event_type: FleetRunEventType,
+    common: ReconciliationRootFields,
+    operation_ids: tuple[str, ...] = (),
+    reason: str | None = None,
+) -> FleetRunEvent:
     if event_type is FleetRunEventType.RECONCILIATION_REQUIRED:
         if not reason:
             raise ValueError("RECONCILIATION_REQUIRED requires a reason")

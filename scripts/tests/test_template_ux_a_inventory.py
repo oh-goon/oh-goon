@@ -68,6 +68,9 @@ def test_catalog_usage_matches_cli_inventory_and_current_package_explanations(
     assert main(["templates", "list"]) == 0
     human = capsys.readouterr().out
     for package in packages:
+        assert isinstance(package["classification"], str)
+        assert isinstance(package["kind"], str)
+        assert isinstance(package["readme_path"], str)
         expected = template_usage(TemplateClassification(package["classification"]))
         item = listed[package["kind"], package["key"]]
         assert {name: item[name] for name in expected} == expected

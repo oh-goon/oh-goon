@@ -1,9 +1,10 @@
 from pydantic import AwareDatetime, BaseModel, Field
+from pydantic.config import JsonDict
 
 from oh_goon.core import engine_policy_defaults as policy_defaults
 
 
-def _project_default_exclusion_reason(schema: dict[str, object]) -> None:
+def _project_default_exclusion_reason(schema: JsonDict) -> None:
     schema["default"] = policy_defaults.default_exclusion_reason()
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from oh_goon.core.game_tape_attempt_comparison import compare_adjacent_attempts
 from oh_goon.core.game_tape_identity import step_execution_id
@@ -13,7 +14,9 @@ from oh_goon.core.models.fleet_plan import (
 )
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepTeardownEvidence,
+    PlanArtifactEvidence,
     PlanStepExecution,
+    PublishedPlanOutputEvidence,
     SkippedPlanStepExecution,
 )
 from oh_goon.core.models.fleet_plan_step_primitives import (
@@ -222,7 +225,7 @@ def _failure_fingerprint(
     attempt = execution.attempts[-1] if execution.attempts else None
     stdout = attempt.stdout_evidence if attempt is not None else execution.stdout_evidence
     stderr = attempt.stderr_evidence if attempt is not None else execution.stderr_evidence
-    evidence_stream = None
+    evidence_stream: Literal["stdout", "stderr"] | None = None
     evidence = None
     if stderr.byte_count > 0:
         evidence_stream, evidence = "stderr", stderr
@@ -271,11 +274,13 @@ def _output_names(step: ResolvedPlanStep, execution: PlanStepExecution | None) -
     return tuple(item.name for item in execution.outputs)
 
 
-def _artifacts(execution: PlanStepExecution | None):
+def _artifacts(execution: PlanStepExecution | None) -> tuple[PlanArtifactEvidence, ...]:
     return () if execution is None else execution.artifacts
 
 
-def _published_outputs(execution: PlanStepExecution | None):
+def _published_outputs(
+    execution: PlanStepExecution | None,
+) -> tuple[PublishedPlanOutputEvidence, ...]:
     return () if execution is None else execution.outputs
 
 

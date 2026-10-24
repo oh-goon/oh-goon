@@ -8,6 +8,7 @@ import re
 import subprocess
 from collections import Counter
 from pathlib import Path
+from typing import TypedDict
 
 from oh_goon.core.template_identity import template_classification, template_usage
 from oh_goon.runtime.goon_templates import GoonTemplateStore
@@ -25,6 +26,27 @@ _EXAMPLE_CLASSIFICATIONS = frozenset(
         "configuration-example",
     }
 )
+
+
+class ExampleInventory(TypedDict):
+    name: str
+    readme_path: str
+    readme_present: bool
+    documented_classification: str
+    classification_recognized: bool
+    selection_present: bool
+    qualification: str
+
+
+class CatalogInventory(TypedDict):
+    schema: str
+    source_revision: dict[str, str | bool | None]
+    basis: str
+    limitation: str
+    metrics: dict[str, int]
+    packages: list[dict[str, object]]
+    examples: list[ExampleInventory]
+    readme_links: list[dict[str, str]]
 
 
 def _source_revision(root: Path) -> dict[str, str | bool | None]:
@@ -48,8 +70,8 @@ def _source_revision(root: Path) -> dict[str, str | bool | None]:
     }
 
 
-def _example_inventory(root: Path) -> list[dict]:
-    records = []
+def _example_inventory(root: Path) -> list[ExampleInventory]:
+    records: list[ExampleInventory] = []
     for directory in sorted((root / "examples").iterdir()):
         if not directory.is_dir():
             continue
@@ -71,10 +93,10 @@ def _example_inventory(root: Path) -> list[dict]:
     return records
 
 
-def collect(root: Path) -> dict:
+def collect(root: Path) -> CatalogInventory:
     root = root.resolve()
-    records: list[dict] = []
-    links: list[dict] = []
+    records: list[dict[str, object]] = []
+    links: list[dict[str, str]] = []
     totals: Counter[str] = Counter()
     for kind, store in (
         ("goon", GoonTemplateStore(root / "templates/goons")),
@@ -175,7 +197,7 @@ def collect(root: Path) -> dict:
         "basis": "canonical shipped template stores / compile snapshots",
         "limitation": "lexical occurrence counts are authoring measurements, not semantic parsing",
         "metrics": dict(sorted(totals.items())),
-        "packages": sorted(records, key=lambda p: (p["kind"], p["key"])),
+        "packages": sorted(records, key=lambda p: (str(p["kind"]), str(p["key"]))),
         "examples": examples,
         "readme_links": sorted(links, key=lambda p: (p["source"], p["target"])),
     }

@@ -6,8 +6,9 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-if __package__:
+if TYPE_CHECKING or __package__:
     from ._dependency_resolution_primitives import DependencyResolutionError
 else:  # direct pre-environment script execution
     from _dependency_resolution_primitives import DependencyResolutionError

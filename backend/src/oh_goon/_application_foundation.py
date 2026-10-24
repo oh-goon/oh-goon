@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.capability_registry import capability_definitions
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.ports.capability_runner import CapabilityRunner
 from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
@@ -112,7 +114,7 @@ def _build_capability_runtime(
     )
     path_authority = configuration.path_authority if configuration is not None else None
     content_store = FleetContentStore(content_store_root)
-    runners = {
+    runners: dict[CapabilityRunnerKind, CapabilityRunner] = {
         CapabilityRunnerKind.ENGINE: EngineRunner(git),
         CapabilityRunnerKind.RECIPE: UvRecipeRunner(),
         CapabilityRunnerKind.MIGRATION: MigrationRunner(git),
@@ -136,7 +138,9 @@ def _build_capability_runtime(
     return executor_pool, CapabilityExecutor(runners), content_store
 
 
-def _require_complete_runner_wiring(runners) -> None:
+def _require_complete_runner_wiring(
+    runners: Mapping[CapabilityRunnerKind, CapabilityRunner],
+) -> None:
     required = {definition.runner_kind for definition in capability_definitions()}
     configured = set(runners)
     if configured != required:

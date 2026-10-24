@@ -1,7 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from oh_goon.core.file_digest import sha256_file
-from oh_goon.core.models.operation import OperationReport, UpdateOperationEvidence
+from oh_goon.core.models.operation import (
+    OperationExecution,
+    OperationReport,
+    RepositoryValidationResult,
+    UpdateOperationEvidence,
+)
+from oh_goon.core.models.policy import PolicySnapshot
+from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import GitFinalState
 from oh_goon.engine.operation_execution_context import OperationContext
@@ -13,7 +22,7 @@ from oh_goon.engine.project import policy_snapshot
 from oh_goon.engine.reporting import execution, provenance
 
 
-def run(context: OperationContext):
+def run(context: OperationContext) -> OperationExecution:
     started = utc_now()
     before_observation = context.git.observe(
         context.attempt.repository.path, context.cancel_requested
@@ -63,15 +72,15 @@ def run(context: OperationContext):
 def _finish(
     *,
     context: OperationContext,
-    started,
-    before,
-    policy,
+    started: datetime,
+    before: RepositoryStateFingerprint,
+    policy: PolicySnapshot,
     old_lock: str | None,
     command_returncode: int,
     stdout: str,
     stderr: str,
-    validation,
-):
+    validation: RepositoryValidationResult | None,
+) -> OperationExecution:
     lock_path = context.attempt.repository.path / "uv.lock"
     current_lock = sha256_file(lock_path) if lock_path.is_file() else None
     changed = old_lock != current_lock

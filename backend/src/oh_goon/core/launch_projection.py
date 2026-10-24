@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Iterable
+from datetime import datetime
+from typing import Iterable, TypedDict, cast
 
 from oh_goon.core.launch_events import (
     LaunchEvent,
@@ -22,6 +23,13 @@ from oh_goon.core.launch_manifest import (
     ObservedFact,
 )
 from oh_goon.core.process_birth import ProcessBirthIdentity
+
+
+class _FactSource(TypedDict):
+    asserted_by: str
+    observed_at: datetime
+    owner_generation: int
+    service_generation: int | None
 
 
 def project_launch_manifest(
@@ -61,13 +69,15 @@ def project_launch_manifest(
             case LaunchEventKind.LAUNCH_OWNER_OBSERVED:
                 owner_process = _process_observation(event, service_generation=None)
             case LaunchEventKind.SERVICE_SPAWNED:
-                observed[event.service] = _spawned_observation(event)
+                observed[cast(str, event.service)] = _spawned_observation(event)
             case LaunchEventKind.SERVICE_BOUND:
                 service = _current_service(observed, event)
-                observed[event.service] = replace(service, bound_endpoint=_endpoint_fact(event))
+                observed[cast(str, event.service)] = replace(
+                    service, bound_endpoint=_endpoint_fact(event)
+                )
             case LaunchEventKind.SERVICE_STARTUP_COMPLETE:
                 service = _current_service(observed, event)
-                observed[event.service] = replace(
+                observed[cast(str, event.service)] = replace(
                     service,
                     startup=_state_fact(event, LaunchFactState.SATISFIED),
                 )
@@ -75,7 +85,7 @@ def project_launch_manifest(
                 service = _current_service(observed, event)
                 if service.state("startup") is not LaunchFactState.SATISFIED:
                     raise ValueError("service.ready requires authoritative startup completion")
-                observed[event.service] = replace(
+                observed[cast(str, event.service)] = replace(
                     service,
                     readiness=_state_fact(event, LaunchFactState.SATISFIED),
                 )
@@ -84,7 +94,7 @@ def project_launch_manifest(
                 startup = service.startup
                 if service.state("startup") is LaunchFactState.UNKNOWN:
                     startup = _state_fact(event, LaunchFactState.UNSATISFIED)
-                observed[event.service] = replace(
+                observed[cast(str, event.service)] = replace(
                     service,
                     startup=startup,
                     readiness=_state_fact(event, LaunchFactState.UNSATISFIED),
@@ -117,7 +127,7 @@ def _spawned_observation(event: LaunchEvent) -> LaunchServiceObservation:
 def _process_observation(
     event: LaunchEvent, *, service_generation: int | None
 ) -> LaunchProcessObservation:
-    common = {
+    common: _FactSource = {
         "asserted_by": event.asserted_by,
         "observed_at": event.timestamp,
         "owner_generation": event.owner_generation,
@@ -131,7 +141,7 @@ def _process_observation(
             **common,
         )
     return LaunchProcessObservation(
-        pid=ObservedFact(value=int(event.payload["pid"]), **common),
+        pid=ObservedFact(value=int(cast(int, event.payload["pid"])), **common),
         birth_identity=birth,
     )
 
@@ -149,7 +159,7 @@ def _current_service(
 
 def _endpoint_fact(event: LaunchEvent) -> LaunchEndpointObservation:
     assert event.service_generation is not None
-    common = {
+    common: _FactSource = {
         "asserted_by": event.asserted_by,
         "observed_at": event.timestamp,
         "owner_generation": event.owner_generation,
@@ -157,7 +167,7 @@ def _endpoint_fact(event: LaunchEvent) -> LaunchEndpointObservation:
     }
     return LaunchEndpointObservation(
         host=ObservedFact(value=str(event.payload["host"]), **common),
-        port=ObservedFact(value=int(event.payload["port"]), **common),
+        port=ObservedFact(value=int(cast(int, event.payload["port"])), **common),
     )
 
 

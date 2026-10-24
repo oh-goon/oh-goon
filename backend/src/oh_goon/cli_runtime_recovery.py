@@ -4,6 +4,10 @@ import argparse
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.errors import FleetDomainError
+from oh_goon.core.models.recovery import (
+    OutcomeUnknownRepositoryEffectQuarantine,
+    RepositoryEffectQuarantine,
+)
 from oh_goon.core.models.recovery_status import RecoveryStatus
 
 
@@ -43,7 +47,7 @@ def run_recovery_command(runtime: ApplicationRuntime, args: argparse.Namespace) 
             print(f"Reconciled {args.operation_id}: quarantine cleared")
             return 0
         print(f"Reconciled {args.operation_id}: {remaining.status.value}")
-        if remaining.reconciliation is not None:
+        if not isinstance(remaining, OutcomeUnknownRepositoryEffectQuarantine):
             print(f"Outcome: {remaining.reconciliation.outcome.value}")
             print(f"Reason: {remaining.reconciliation.reason}")
         return 2
@@ -75,7 +79,7 @@ def run_recovery_command(runtime: ApplicationRuntime, args: argparse.Namespace) 
     return 0 if audit.healthy else 2
 
 
-def _effect_quarantine(status: RecoveryStatus, operation_id: str):
+def _effect_quarantine(status: RecoveryStatus, operation_id: str) -> RepositoryEffectQuarantine:
     item = next(
         (item for item in status.effect_quarantines if item.operation_id == operation_id), None
     )
@@ -101,7 +105,7 @@ def _list_effect_quarantines(status: RecoveryStatus) -> int:
             f"- {item.operation_id} source={item.source.value} repository={item.repository.path} "
             f"action={item.action.value} safety={item.safety.value} status={item.status.value}"
         )
-        if item.reconciliation is not None:
+        if not isinstance(item, OutcomeUnknownRepositoryEffectQuarantine):
             print(f"  reconciliation={item.reconciliation.outcome.value}")
             print(f"  {item.reconciliation.reason}")
     return 2

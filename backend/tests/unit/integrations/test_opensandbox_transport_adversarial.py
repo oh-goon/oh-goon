@@ -7,8 +7,10 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
-from oh_goon.engine.command import CommandResult
+from oh_goon.engine.command import CommandResult, RuntimeAuthorityReceipt
+from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations import _fleet_plan_opensandbox_transport as subject
+from oh_goon.integrations.fleet_plan_runtime_authority import observed_runtime_authority_payload
 
 
 def _settings() -> SimpleNamespace:
@@ -203,3 +205,96 @@ def test_replace_tree_archive_rejects_invalid_tar_and_restores_tree(tmp_path: Pa
     subject._replace_tree_from_archive(destination, archive)
     assert (destination / "a.txt").read_text(encoding="utf-8") == "hello"
     assert archive.stat().st_size > 0
+
+
+@pytest.mark.parametrize("cancel_at", [None, "creation", "launch"])
+def test_cancel_before_remote_work_preserves_cancellation_and_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancel_at: str | None
+) -> None:
+    calls: list[str] = []
+    request = SimpleNamespace(
+        argv=("true",),
+        attempt=SimpleNamespace(
+            paths=SimpleNamespace(root=tmp_path),
+            resources=CicdResourcePolicy(max_processes=None),
+        ),
+    )
+    receipt = RuntimeAuthorityReceipt(
+        executable_path="/toolchain/bin/true",
+        executable_identity="sha256:" + "a" * 64,
+        executable_byte_count=1,
+        path_authority_identity="sha256:" + "b" * 64,
+        environment_identity="sha256:" + "c" * 64,
+    )
+    successful = CommandResult(returncode=0, stdout="", stderr="", argv=("osb",))
+
+    def create(*args: object, **kwargs: object) -> str:
+        calls.append("create")
+        return "sandbox-1"
+
+    def run(_settings: object, *args: str, **kwargs: object) -> CommandResult:
+        if args[:2] == ("file", "upload"):
+            calls.append("upload-request")
+        elif args[:2] == ("file", "download"):
+            calls.append("download-result")
+        elif "mkdir" in args:
+            calls.append("mkdir")
+        else:
+            calls.append("workload")
+        return successful
+
+    monkeypatch.setattr(subject, "_create_sandbox", create)
+    monkeypatch.setattr(subject, "_run_osb", run)
+    monkeypatch.setattr(subject, "_request_payload", lambda *a, **kw: {})
+    monkeypatch.setattr(subject, "_upload_staged_inputs", lambda *a, **kw: None)
+    monkeypatch.setattr(subject, "_download_result_archives", lambda *a, **kw: {})
+    monkeypatch.setattr(subject, "_restore_result_archives", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        subject,
+        "_read_remote_result",
+        lambda *a: {
+            "returncode": 0,
+            "runtime_authority": observed_runtime_authority_payload(receipt),
+        },
+    )
+    monkeypatch.setattr(
+        subject, "write_remote_resource_evidence", lambda *a: calls.append("evidence")
+    )
+    monkeypatch.setattr(subject, "_destroy_sandbox", lambda *a: calls.append("destroy"))
+
+    def cancelled() -> bool:
+        return cancel_at == "creation" or (cancel_at == "launch" and "upload-request" in calls)
+
+    transport = subject.OpenSandboxCliTransport()
+    if cancel_at is None:
+        result = transport.execute(
+            _settings(),
+            request,
+            expected_runtime_authority=receipt,
+            timeout=10,
+            cancel_requested=cancelled,
+        )
+        assert result.returncode == 0 and result.runtime_authority == receipt
+        assert calls == [
+            "create",
+            "mkdir",
+            "upload-request",
+            "workload",
+            "download-result",
+            "evidence",
+            "destroy",
+        ]
+    else:
+        with pytest.raises(OperationCancelledError):
+            transport.execute(
+                _settings(),
+                request,
+                expected_runtime_authority=receipt,
+                timeout=10,
+                cancel_requested=cancelled,
+            )
+        assert calls == (
+            []
+            if cancel_at == "creation"
+            else ["create", "mkdir", "upload-request", "evidence", "destroy"]
+        )

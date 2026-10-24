@@ -261,8 +261,10 @@ class MemberReceiptStore:
 
         path = self._path(member)
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload: object = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, TypeError):
+            return False
+        if not isinstance(payload, dict):
             return False
         return (
             payload.get("schema") == RECEIPT_SCHEMA

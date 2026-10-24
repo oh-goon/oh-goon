@@ -5,6 +5,51 @@ import tty
 from types import SimpleNamespace
 
 import oh_goon.cli_runtime_plans as plans
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan, ResolvedImport
+from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
+from oh_goon.core.models.run import FleetRunProgress, QueuedFleetRun
+from oh_goon.core.models.run_admission import fleet_repository_scope
+from oh_goon.core.time import utc_now
+from oh_goon.core.vocabulary import FleetRunStatus, OperationAction
+from tests.factories.capabilities import capability_snapshot
+from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+
+
+def _target(authored):
+    imports = tuple(
+        ResolvedImport(
+            import_id=f"goon-{index}",
+            name=item.name,
+            source_sha256="a" * 64,
+            step_ids=item.step_ids,
+        )
+        for index, item in enumerate(authored.imports)
+    )
+    step_ids = tuple(dict.fromkeys(step for item in imports for step in item.step_ids))
+    resolved = ResolvedFleetPlan.create(
+        name="activity",
+        description="",
+        execution=VerificationExecutionPolicy(),
+        imports=imports,
+        steps=tuple(
+            ResolvedCommandStep(step_id=step, argv=("true",), timeout_seconds=30)
+            for step in step_ids or ("placeholder",)
+        ),
+    )
+    return structural_fleet_plan_target(resolved)
+
+
+def _run_state(target):
+    return QueuedFleetRun(
+        fleet_run_id="fleet-a",
+        status=FleetRunStatus.QUEUED,
+        target=target,
+        capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+        repository_scope=fleet_repository_scope(None),
+        targets=(),
+        accepted_at=utc_now(),
+        progress=FleetRunProgress(total=0, succeeded=0, failed=0),
+    )
 
 
 class _Runs:
@@ -141,9 +186,7 @@ def test_wait_progress_surfaces_distinct_live_goon_step_activity(monkeypatch, ca
             SimpleNamespace(name="oh-goon/b", step_ids=("goon-b.step",)),
         )
     )
-    runs.get = lambda _fleet_run_id: SimpleNamespace(
-        run=SimpleNamespace(target=SimpleNamespace(plan=plan))
-    )
+    runs.get = lambda _fleet_run_id: _run_state(_target(plan))
     runtime = SimpleNamespace(runs=runs)
     times = iter((0.0, 1.0, 2.0))
     monkeypatch.setattr(plans.time, "monotonic", lambda: next(times))
@@ -176,9 +219,7 @@ def test_wait_progress_surfaces_bounded_activity_markers(monkeypatch, capsys) ->
     plan = SimpleNamespace(
         imports=(SimpleNamespace(name="oh-goon/dependency-materialize", step_ids=("goon-a.step",)),)
     )
-    runs.get = lambda _fleet_run_id: SimpleNamespace(
-        run=SimpleNamespace(target=SimpleNamespace(plan=plan))
-    )
+    runs.get = lambda _fleet_run_id: _run_state(_target(plan))
     runtime = SimpleNamespace(runs=runs)
     times = iter((0.0, 1.0, 2.0))
     monkeypatch.setattr(plans.time, "monotonic", lambda: next(times))
@@ -210,7 +251,7 @@ def test_repair_handoff_falls_back_to_durable_game_tape_step(capsys) -> None:
     )
     run = SimpleNamespace(
         fleet_run_id="fleet-a",
-        target=SimpleNamespace(plan=plan),
+        target=_target(plan),
     )
     failed = SimpleNamespace(
         status=plans.GameTapeStatus.FAILED,
@@ -257,7 +298,7 @@ def test_repair_handoff_guidance_is_invariant_to_goon_rename(capsys) -> None:
         detail = SimpleNamespace(
             run=SimpleNamespace(
                 fleet_run_id="fleet-a",
-                target=SimpleNamespace(plan=plan),
+                target=_target(plan),
             ),
             operations=(),
             game_tape=SimpleNamespace(repositories=(SimpleNamespace(steps=(failed,)),)),
@@ -287,7 +328,7 @@ def test_repair_handoff_declares_incomplete_evidence_instead_of_claiming_complet
     detail = SimpleNamespace(
         run=SimpleNamespace(
             fleet_run_id="fleet-a",
-            target=SimpleNamespace(plan=plan),
+            target=_target(plan),
         ),
         operations=(),
         game_tape=SimpleNamespace(repositories=()),
@@ -327,7 +368,7 @@ def test_repair_handoff_projects_durable_step_teardown_failure(capsys) -> None:
             ),
         ),
     )
-    run = SimpleNamespace(fleet_run_id="fleet-a", target=SimpleNamespace(plan=plan))
+    run = SimpleNamespace(fleet_run_id="fleet-a", target=_target(plan))
     execution = CompletedPlanStepExecution(
         step_id="oh-goon-dependency-materialize.make",
         kind="command",
@@ -402,7 +443,7 @@ def test_wait_progress_uses_admitted_plan_without_durable_owner_lookup(monkeypat
     plan = SimpleNamespace(
         imports=(SimpleNamespace(name="oh-goon/dependency-materialize", step_ids=("goon-a.step",)),)
     )
-    admitted = SimpleNamespace(target=SimpleNamespace(plan=plan))
+    admitted = SimpleNamespace(target=_target(plan))
     runtime = SimpleNamespace(runs=runs)
     times = iter((0.0, 1.0, 2.0))
     monkeypatch.setattr(plans.time, "monotonic", lambda: next(times))

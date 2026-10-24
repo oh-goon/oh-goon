@@ -5,6 +5,8 @@ from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
+
 from oh_goon.core.execution_observability import RepositoryRunObservation
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet_executor import FleetExecutorPlacement, PlanExecutorCapacityEvidence
@@ -62,6 +64,8 @@ def _detail(
     run_id: str = "run-scout",
     cpu_usage_usec: int | None = 2_500_000,
     memory_peak_bytes: int | None = 256 * 1024 * 1024,
+    cpu_millis: int | None = 2000,
+    memory_bytes: int | None = 512 * 1024 * 1024,
 ) -> FleetRunDetail:
     repository = RepositoryIdentity(path=tmp_path / "repo")
     plan = ResolvedFleetPlan.create(
@@ -97,8 +101,8 @@ def _detail(
         repository_state_after="after",
         egress=PlanEgressEvidence(mode="none"),
         resources=PlanResourceEvidence(
-            cpu_millis=2000,
-            memory_bytes=512 * 1024 * 1024,
+            cpu_millis=cpu_millis,
+            memory_bytes=memory_bytes,
             cpu_usage_usec=cpu_usage_usec,
             memory_peak_bytes=memory_peak_bytes,
         ),
@@ -614,3 +618,18 @@ def test_scout_keeps_stable_repository_and_plan_identity_across_renames() -> Non
     assert repository is not None and repository.repository.display_name == "new-repository-name"
     assert repository.plan_total == 1 and repository.plans[0].plan_name == "New Plan Name"
     assert plan is not None and plan.plan_name == "New Plan Name"
+
+
+@pytest.mark.parametrize(
+    "cpu_cap,memory_cap", [(None, None), (None, 512 * 1024 * 1024), (2000, None)]
+)
+def test_scout_preserves_observed_metrics_without_inventing_unknown_resource_envelopes(
+    tmp_path: Path, cpu_cap: int | None, memory_cap: int | None
+) -> None:
+    from oh_goon.scout.evidence import comparison_environment
+
+    detail = _detail(tmp_path, cpu_millis=cpu_cap, memory_bytes=memory_cap)
+    snapshot = project_scout_evidence((detail,), journal_revision=1)
+    assert snapshot.steps[0].complete_cpu_seconds == 2.5
+    assert snapshot.steps[0].complete_peak_memory_bytes == 256 * 1024 * 1024
+    assert comparison_environment(snapshot.steps[0]).resource_envelopes == ()

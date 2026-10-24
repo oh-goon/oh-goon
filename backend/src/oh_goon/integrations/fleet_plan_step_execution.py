@@ -8,14 +8,16 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, TypedDict, Unpack
 
 from oh_goon.core.agent_model_selection import (
+    LocalModelReviewDecision,
     LocalModelToolAction,
+    LocalModelToolDecision,
     append_untrusted_agent_feedback,
     frozen_local_model_observation_prompt,
     frozen_local_model_prompt,
@@ -155,6 +157,43 @@ class CommandRunner(Protocol):
     ) -> CommandResult: ...
 
 
+class _CommandRunOptions(TypedDict, total=False):
+    cwd: Path | None
+    env: Mapping[str, str] | None
+    cancel_requested: Callable[[], bool] | None
+    stream_output: CommandOutputObserver | None
+    process_observer: CommandProcessObserver | None
+    runtime_supervision: CommandRuntimeSupervision | None
+    terminal: CommandTerminal | None
+    input_data: bytes | None
+    retain_output_tail: bool
+    read_only_mounts: tuple[StandardReadOnlyMount, ...]
+    broker_directory: Path | None
+    read_only_workspace: bool
+    allowed_write_roots: tuple[Path, ...]
+    host_network: bool
+    private_configuration_directory: Path | None
+    preserve_native_executable_path: bool
+
+
+class _IsolatedExecuteOptions(TypedDict, total=False):
+    timeout: float | None
+    cancel_requested: Callable[[], bool] | None
+    stream_output: CommandOutputObserver
+    process_observer: CommandProcessObserver | None
+    runtime_supervision: CommandRuntimeSupervision
+
+
+class _ObservationFields(TypedDict):
+    task: str
+    skill_bytes: bytes
+    recipient: str
+    returncode: int
+    stdout: str
+    stderr: str
+    can_search: bool
+
+
 class StepLifecycleObserver(Protocol):
     def __call__(
         self,
@@ -248,7 +287,9 @@ def execute_direct_step(
             raise OperationDeadlineExpired("Fleet deadline expired before Step preparation")
         deadline = time.monotonic() + min(remaining, limits.step_timeout_seconds)
 
-        def bounded_runner(*args, timeout=10.0, **kwargs):
+        def bounded_runner(
+            *args: str, timeout: float | None = 10.0, **kwargs: Unpack[_CommandRunOptions]
+        ) -> CommandResult:
             cancelled = kwargs.get("cancel_requested")
             if cancelled is not None and cancelled():
                 raise OperationCancelledError("Fleet Step cancelled before native launch")
@@ -392,6 +433,7 @@ def _execute_typed_step(
             native_deadline = None
             if step.harness == "native":
                 assert step.native_agent is not None
+                assert step.timeout_seconds is not None
                 native_deadline = time.monotonic() + min(
                     step.timeout_seconds, step.native_agent.profile.timeout_seconds
                 )
@@ -551,9 +593,9 @@ def _execute_typed_step(
     except (CommandOutputLimitExceeded, subprocess.TimeoutExpired) as exc:
         return bounded_execution_failure_outcome(step, exc)
     except OSError as exc:
-        outcome = _command_launch_failure_outcome(repository, step, exc)
-        if outcome is not None:
-            return outcome
+        launch_failure = _command_launch_failure_outcome(repository, step, exc)
+        if launch_failure is not None:
+            return launch_failure
         raise
 
 
@@ -642,6 +684,7 @@ def _execute_model_agent(
         prompt = prepend_repository_evidence(prompt, repository_evidence=repository_evidence)
         prompt = append_untrusted_agent_feedback(prompt, step.feedback_value)
         model_environment = {**process.environment, "OLLAMA_HOST": "http://127.0.0.1:11434"}
+        assert step.model is not None  # canonical local-model source resolution requires it
         # Non-pulling local model existence check before model disclosure.
         check = process.command_runner(
             "ollama",
@@ -771,6 +814,7 @@ def _run_local_model_review(
     or persistence authority. All model/tool processes use the same runner,
     cancellation, attempt paths and runtime deadline.
     """
+    assert step.model is not None  # this loop is selected only for captured local-model Steps
     tool_mode = step.harness in (
         "local-model-tools",
         "local-model-files",
@@ -836,46 +880,40 @@ def _run_local_model_review(
             )
             + f"{result.stdout}\n"
         )
-        prompt_builder = (
-            frozen_local_model_tool_observation_prompt
-            if tool_mode
-            else frozen_local_model_observation_prompt
-        )
-        prompt = prompt_builder(
-            task=handoff.task,
-            skill_bytes=skill_bytes,
-            recipient=handoff.requested_effects.recipients[0],
-            **({"action": action} if tool_mode else {"query": action.query}),
-            returncode=result.returncode,
-            stdout=disclosed_stdout,
-            stderr=result.stderr,
-            can_search=ordinal < max_actions,
-            **(
-                {"history": tuple(history)}
+        observation: _ObservationFields = {
+            "task": handoff.task,
+            "skill_bytes": skill_bytes,
+            "recipient": handoff.requested_effects.recipients[0],
+            "returncode": result.returncode,
+            "stdout": disclosed_stdout,
+            "stderr": result.stderr,
+            "can_search": ordinal < max_actions,
+        }
+        if tool_mode:
+            prompt = frozen_local_model_tool_observation_prompt(
+                **observation,
+                action=action,
+                history=tuple(history)
                 if step.harness in ("local-model-skill-loop", "local-model-proposal")
-                else {}
-            ),
-            **(
-                {
-                    "allow_file": step.harness
-                    in (
-                        "local-model-files",
-                        "local-model-skill-resources",
-                        "local-model-skill-loop",
-                        "local-model-proposal",
-                    ),
-                    "allow_skill_file": step.harness
-                    in (
-                        "local-model-skill-resources",
-                        "local-model-skill-loop",
-                        "local-model-proposal",
-                    ),
-                    "allow_proposal": step.harness == "local-model-proposal",
-                }
-                if tool_mode
-                else {}
-            ),
-        )
+                else (),
+                allow_file=step.harness
+                in (
+                    "local-model-files",
+                    "local-model-skill-resources",
+                    "local-model-skill-loop",
+                    "local-model-proposal",
+                ),
+                allow_skill_file=step.harness
+                in (
+                    "local-model-skill-resources",
+                    "local-model-skill-loop",
+                    "local-model-proposal",
+                ),
+                allow_proposal=step.harness == "local-model-proposal",
+            )
+        else:
+            assert action.query is not None
+            prompt = frozen_local_model_observation_prompt(**observation, query=action.query)
         prompt = prepend_repository_evidence(prompt, repository_evidence=repository_evidence)
         prompt = append_untrusted_agent_feedback(prompt, step.feedback_value)
         if step.harness in ("local-model-skill-loop", "local-model-proposal"):
@@ -968,11 +1006,12 @@ def _run_local_model_review(
                 returncode=0,
                 stdout="".join(transcript) + f"Model evaluation: {decision.summary}\n",
             )
-        action = (
-            decision.action
-            if tool_mode
-            else LocalModelToolAction(tool="search_text", query=decision.query)
-        )
+        if tool_mode:
+            assert isinstance(decision, LocalModelToolDecision) and decision.action is not None
+            action = decision.action
+        else:
+            assert isinstance(decision, LocalModelReviewDecision)
+            action = LocalModelToolAction(tool="search_text", query=decision.query)
         if action in previous:
             raise FleetPlanInvalid("model repeated the same search instead of progressing")
     raise FleetPlanInvalid("model review exceeded the selected tool-action budget")
@@ -1397,7 +1436,7 @@ def _isolated_command_runner(
                 else None
             ),
         )
-        execute_kwargs = {
+        execute_kwargs: _IsolatedExecuteOptions = {
             "timeout": timeout,
             "cancel_requested": cancel_requested,
             "process_observer": process_observer,
@@ -1420,7 +1459,7 @@ def _isolated_command_runner(
 
 @contextmanager
 def prepare_frozen_readonly_skill_search(
-    handoff,
+    handoff: FrozenAgentStepHandoff,
     *,
     selected_query: str | None = None,
     tool_kind: Literal[
@@ -1428,7 +1467,7 @@ def prepare_frozen_readonly_skill_search(
     ] = "search_text",
     selected_path: str | None = None,
     workspace: PreparedAgentEvidence | None = None,
-):
+) -> Iterator[tuple[Path, ResolvedCommandStep]]:
     """Prepare one fixed read-only tool Step from original Resolver-captured bytes.
 
     This is PREWORK: it does not grant permission to execute. Only the original
@@ -1492,6 +1531,7 @@ def prepare_frozen_readonly_skill_search(
         )
     ):
         raise FleetPlanInvalid("Agent tool was not selected by the frozen harness")
+    query: str | None
     if handoff.harness == "local-search":
         if selected_query is not None or effects.recipients or effects.model is not None:
             raise FleetPlanInvalid(
@@ -1573,7 +1613,7 @@ def prepare_delivered_readonly_skill_search(
     *,
     expected_handoff_identity: str,
     expected_step_id: str,
-):
+) -> Iterator[tuple[Path, ResolvedCommandStep]]:
     """Consume original AG-02 immutable bytes at the existing Step preparation cut.
 
     Decoding and Step-identity matching is transport verification, **not** admission.

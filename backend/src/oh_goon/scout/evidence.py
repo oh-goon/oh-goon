@@ -9,6 +9,9 @@ from oh_goon.core.execution_observability import (
     project_repository_run_observations,
 )
 from oh_goon.core.fleet_plan_projection import atomic_goon_by_step
+from oh_goon.core.models.fleet_plan import ResolvedImport
+from oh_goon.core.models.fleet_plan_evidence import PlanStepAttemptEvidence
+from oh_goon.core.models.game_tape import GameTapeRepositoryExecution
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import GameTapeStatus
@@ -23,6 +26,10 @@ _EXECUTED_STEP_STATUSES = frozenset(
         GameTapeStatus.INTERRUPTED,
     }
 )
+
+ScoutEnvironmentKey = tuple[
+    str | None, str | None, str | None, str | None, tuple[tuple[int, int], ...]
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +53,7 @@ class ScoutStepObservation:
     complete_cpu_seconds: float | None
     observed_peak_memory_bytes: int | None
     complete_peak_memory_bytes: int | None
-    environment_key: tuple[object, ...]
+    environment_key: ScoutEnvironmentKey
     duration_seconds: float | None = None
 
 
@@ -123,7 +130,12 @@ def project_scout_evidence(
     )
 
 
-def _step_observations(detail, repository, started_at: datetime, step_goons):
+def _step_observations(
+    detail: FleetRunDetail,
+    repository: GameTapeRepositoryExecution,
+    started_at: datetime,
+    step_goons: dict[str, ResolvedImport],
+) -> list[ScoutStepObservation]:
     tape = detail.game_tape
     fingerprint = repository.fingerprint
     result: list[ScoutStepObservation] = []
@@ -170,7 +182,7 @@ def _step_observations(detail, repository, started_at: datetime, step_goons):
     return result
 
 
-def _attempt_evidence(attempts) -> _AttemptEvidence:
+def _attempt_evidence(attempts: tuple[PlanStepAttemptEvidence, ...]) -> _AttemptEvidence:
     eligible_attempts = len(attempts) if attempts else 1
     cpu_observed = 0
     memory_observed = 0
@@ -181,7 +193,8 @@ def _attempt_evidence(attempts) -> _AttemptEvidence:
         resource = attempt.resources
         if resource is None:
             continue
-        resource_envelopes.add((resource.cpu_millis, resource.memory_bytes))
+        if resource.cpu_millis is not None and resource.memory_bytes is not None:
+            resource_envelopes.add((resource.cpu_millis, resource.memory_bytes))
         if resource.cpu_usage_usec is not None:
             cpu_observed += 1
             cpu_seconds += resource.cpu_usage_usec / 1_000_000

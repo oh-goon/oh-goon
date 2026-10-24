@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
+from typing import TypeVar
 
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
 from oh_goon.core.errors import (
@@ -13,14 +14,17 @@ from oh_goon.core.errors import (
     StateConflict,
 )
 from oh_goon.core.models.capability import CapabilitySnapshot
-from oh_goon.core.models.effect_attempt import ClaimedRepositoryEffectAttempt
+from oh_goon.core.models.effect_attempt import (
+    ClaimedRepositoryEffectAttempt,
+    RepositoryEffectAttempt,
+)
 from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.models.termination import TerminationSignal
-from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
+from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest, PreparedRunnerExecution
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import EffectBoundaryKind, FleetRunEventType
@@ -34,7 +38,11 @@ from oh_goon.runtime.journal import Journal
 from oh_goon.services.capability_executor import CapabilityExecutor
 from oh_goon.services.repository_effect_fence import RepositoryEffectFence
 from oh_goon.services.repository_effect_preparation import mutate_pre_effect_attempt
-from oh_goon.services.repository_effect_settlement import RepositoryEffectSettlement
+from oh_goon.services.repository_effect_settlement import (
+    RepositoryEffectInterruptionDisposition,
+    RepositoryEffectInterruptionEvidence,
+    RepositoryEffectSettlement,
+)
 
 
 class RepositoryEffectExecution:
@@ -114,7 +122,7 @@ class RepositoryEffectExecution:
             entry.repository.repository_id,
         )
 
-        def claim(connection: sqlite3.Connection):
+        def claim(connection: sqlite3.Connection) -> ClaimedRepositoryEffectAttempt:
             if session.cancel_requested_in(connection):
                 raise OperationCancelledError(
                     "Fleet run cancellation requested before repository claim"
@@ -137,6 +145,7 @@ class RepositoryEffectExecution:
         attempt = mutate_pre_effect_attempt(session, self._attempts, operation_id, claim)
         if activity is not None:
             activity(f"Repository execution attempt claimed for {repository.name}")
+        assert isinstance(attempt, ClaimedRepositoryEffectAttempt)
         return self._execute_claimed(
             attempt=attempt,
             intent=intent,
@@ -194,7 +203,7 @@ class RepositoryEffectExecution:
                     + "; entering workload"
                 )
 
-            def start_effect(connection: sqlite3.Connection):
+            def start_effect(connection: sqlite3.Connection) -> RepositoryEffectAttempt:
                 if validate_authority_in is not None:
                     validate_authority_in(connection)
                 return self._start_effect_in(connection, attempt)
@@ -279,7 +288,7 @@ class RepositoryEffectExecution:
 
     def _start_effect_in(
         self, connection: sqlite3.Connection, attempt: ClaimedRepositoryEffectAttempt
-    ):
+    ) -> RepositoryEffectAttempt:
         """Cross EFFECT_STARTED and Fleet REPOSITORY_STARTED as one durable semantic cut."""
         started = self._attempts.start_effect_in(connection, attempt.operation_id)
         if attempt.fleet_run_id is not None:
@@ -292,7 +301,9 @@ class RepositoryEffectExecution:
             )
         return started
 
-    def _prepare(self, request: CapabilityExecutionRequest, *, session: ExecutionSession):
+    def _prepare(
+        self, request: CapabilityExecutionRequest, *, session: ExecutionSession
+    ) -> PreparedRunnerExecution:
         """Freeze execution inputs under the one repository-effect lifecycle owner."""
         self._effect_fence.verify(
             request.attempt.repository.path, request.attempt.baseline, session.cancel_requested
@@ -322,7 +333,9 @@ class RepositoryEffectExecution:
             prepared.close()
             raise
 
-    def _record_post_settlement_maintenance(self, prepared, attempt) -> None:
+    def _record_post_settlement_maintenance(
+        self, prepared: PreparedRunnerExecution, attempt: ClaimedRepositoryEffectAttempt
+    ) -> None:
         prepared.close()
         receipt = getattr(prepared, "maintenance_receipt", None)
         if receipt is None or attempt.fleet_run_id is None:
@@ -346,9 +359,9 @@ class RepositoryEffectExecution:
             "Execution ended after externally visible effects could have started "
             f"but before a canonical report was committed: {error.__class__.__name__}"
         )
-        expected = None
+        expected: RepositoryEffectInterruptionEvidence | None = None
 
-        def settle(connection):
+        def settle(connection: sqlite3.Connection) -> RepositoryEffectInterruptionDisposition:
             nonlocal expected
             expected = self._settlement.settle_interruption_evidence_in(
                 connection,
@@ -369,7 +382,12 @@ class RepositoryEffectExecution:
             return
 
 
-def _settle(session: ExecutionSession, mutate, *, close_execution: bool):
+T = TypeVar("T")
+
+
+def _settle(
+    session: ExecutionSession, mutate: Callable[[sqlite3.Connection], T], *, close_execution: bool
+) -> T:
     if close_execution:
         return session.finish(mutate)
     return session.mutate(mutate)

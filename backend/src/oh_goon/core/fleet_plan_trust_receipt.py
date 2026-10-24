@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     FailedPlanStepExecution,
     FleetPlanResult,
+    PlanStepExecution,
     PresentPlanArtifact,
     SkippedPlanStepExecution,
 )
 from oh_goon.core.models.fleet_plan_release_evidence import (
+    KubernetesRolloutVerificationEvidence,
     KubernetesRolloutVerificationOutcome,
     KubernetesSetImageReleaseEvidence,
     OciPublishReleaseEvidence,
@@ -148,7 +152,7 @@ def _final(
     failed = sum(isinstance(step, FailedPlanStepExecution) for step in plan.steps)
     completed = sum(isinstance(step, CompletedPlanStepExecution) for step in plan.steps)
     skipped = sum(isinstance(step, SkippedPlanStepExecution) for step in plan.steps)
-    state = (
+    state: Literal["nonStrict", "failed", "evidenceGap", "cleanPass"] = (
         "nonStrict"
         if plan.execution_inputs is None
         else "failed"
@@ -224,7 +228,7 @@ def _release(plan: FleetPlanResult) -> FleetPlanReleaseTrustReceipt:
         )
         for step in steps
     )
-    state = (
+    state: Literal["noRelease", "evidenceGap", "partialRelease", "released", "blocked"] = (
         "noRelease"
         if not steps
         else "evidenceGap"
@@ -246,19 +250,19 @@ def _release(plan: FleetPlanResult) -> FleetPlanReleaseTrustReceipt:
     )
 
 
-def _release_step(step) -> FleetPlanReleaseStepTrustReceipt:
+def _release_step(step: PlanStepExecution) -> FleetPlanReleaseStepTrustReceipt:
     effects = tuple(
         attempt.release_effect for attempt in step.attempts if attempt.release_effect is not None
     )
     effect = effects[0] if effects else None
-    gate_state = (
+    gate_state: Literal["RELEASED", "EVIDENCE_GAP", "BLOCKED"] = (
         "RELEASED"
         if effect is not None
         else "EVIDENCE_GAP"
         if isinstance(step, CompletedPlanStepExecution)
         else "BLOCKED"
     )
-    release = None
+    release: FleetPlanOciReleaseTrustReceipt | FleetPlanKubernetesReleaseTrustReceipt | None = None
     if isinstance(effect, OciPublishReleaseEvidence):
         release = FleetPlanOciReleaseTrustReceipt(
             release_id=effect.release_id,
@@ -293,7 +297,7 @@ def _readiness(plan: FleetPlanResult) -> FleetPlanReadinessTrustReceipt:
     failed = sum(step.state == "failed" for step in steps)
     blocked = sum(step.state == "blocked" for step in steps)
     evidence_gaps = sum(step.state == "evidenceGap" for step in steps)
-    state = (
+    state: Literal["notRequested", "evidenceGap", "partial", "failed", "blocked", "ready"] = (
         "notRequested"
         if not steps
         else "evidenceGap"
@@ -317,14 +321,14 @@ def _readiness(plan: FleetPlanResult) -> FleetPlanReadinessTrustReceipt:
     )
 
 
-def _readiness_step(step) -> FleetPlanReadinessStepTrustReceipt:
+def _readiness_step(step: PlanStepExecution) -> FleetPlanReadinessStepTrustReceipt:
     verifications = tuple(
         attempt.release_verification
         for attempt in step.attempts
         if attempt.release_verification is not None
     )
     verification = verifications[-1] if verifications else None
-    state = (
+    state: Literal["ready", "failed", "blocked", "evidenceGap"] = (
         "ready"
         if verification is not None
         and verification.outcome is KubernetesRolloutVerificationOutcome.READY
@@ -376,7 +380,7 @@ def _teardown(plan: FleetPlanResult) -> FleetPlanTeardownTrustReceipt:
     )
 
 
-def _teardown_step(step) -> FleetPlanTeardownStepTrustReceipt:
+def _teardown_step(step: PlanStepExecution) -> FleetPlanTeardownStepTrustReceipt:
     teardown = step.teardown
     if teardown is None:
         return FleetPlanTeardownStepTrustReceipt(
@@ -391,7 +395,9 @@ def _teardown_step(step) -> FleetPlanTeardownStepTrustReceipt:
     )
 
 
-def _kubernetes_target(evidence) -> str:
+def _kubernetes_target(
+    evidence: KubernetesSetImageReleaseEvidence | KubernetesRolloutVerificationEvidence,
+) -> str:
     return (
         f"{evidence.api_authority}/{evidence.namespace}/{evidence.deployment}:{evidence.container}"
     )

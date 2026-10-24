@@ -295,7 +295,10 @@ def benchmark_integrity_manifest(registry: dict[str, Any]) -> dict[str, Any]:
 def _choose_variant(family: dict[str, Any], seed: str) -> dict[str, Any]:
     digest = hashlib.sha256(f"{seed}\0{family['id']}".encode("utf-8")).digest()
     index = int.from_bytes(digest[:8], "big") % len(family["variants"])
-    return family["variants"][index]
+    variant = family["variants"][index]
+    if not isinstance(variant, dict):
+        raise ValueError("benchmark family variant must be an object")
+    return variant
 
 
 def _select_rotating(
@@ -510,6 +513,8 @@ def _validate_challenge_instance(
         if not isinstance(binding, dict):
             raise ValueError("challenge secret binding must be an object")
         challenge_id = binding.get("challenge_id")
+        if not isinstance(challenge_id, str):
+            raise ValueError("challenge secret binding requires a challenge_id")
         expected = registry_bindings.get(challenge_id)
         if expected is None:
             raise ValueError(
@@ -622,12 +627,14 @@ def adversarial_report(
     observed_ids: list[str] = []
     normalized: list[dict[str, Any]] = []
     critical_failures: list[dict[str, Any]] = []
-    role_success = Counter()
-    role_total = Counter()
+    role_success: Counter[str] = Counter()
+    role_total: Counter[str] = Counter()
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("adversarial challenge observation must be an object")
         delivery_id = row.get("delivery_id")
+        if not isinstance(delivery_id, str):
+            raise ValueError("adversarial observation requires a delivery_id")
         if delivery_id not in by_delivery or delivery_id in observed_ids:
             raise ValueError(f"unknown/duplicate adversarial delivery id: {delivery_id}")
         binding = by_delivery[delivery_id]
@@ -669,7 +676,7 @@ def adversarial_report(
             raise ValueError("false-premise observation must be an object")
         qid = row.get("question_id")
         state = row.get("premise_response")
-        if qid not in expected_false or qid in observed_false:
+        if not isinstance(qid, str) or qid not in expected_false or qid in observed_false:
             raise ValueError(f"unknown/duplicate false-premise question: {qid}")
         if state not in FALSE_PREMISE_RESPONSES:
             raise ValueError(f"{qid} has invalid false-premise response")

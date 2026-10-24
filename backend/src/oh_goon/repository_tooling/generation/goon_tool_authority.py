@@ -31,10 +31,10 @@ def render_goon_tool_authority(root: Path) -> str:
             f"{item.goon}/{item.step_id} -> {item.owner}"
         )
     if projection.permission_violations:
-        item = projection.permission_violations[0]
+        violation = projection.permission_violations[0]
         raise ValueError(
             "canonical workload need exceeds permission ceiling for "
-            f"{item.goon}/{item.step_id}: {', '.join(item.missing_tools)}"
+            f"{violation.goon}/{violation.step_id}: {', '.join(violation.missing_tools)}"
         )
     if projection.stale_permission_owners:
         raise ValueError(

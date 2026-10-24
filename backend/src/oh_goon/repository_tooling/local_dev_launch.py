@@ -8,9 +8,10 @@ from pathlib import Path
 
 from oh_goon.api.local_access import new_local_access_token
 from oh_goon.cli_local_state import check_local_state_for_startup
-from oh_goon.runtime.local_launch_plan import contributor_dev_plan
+from oh_goon.runtime.local_launch_plan import LocalLaunchPlan, contributor_dev_plan
 from oh_goon.runtime.local_launch_supervisor import (
     LocalLaunchStartupError,
+    RunningLocalLaunch,
     start_contributor_launch,
 )
 
@@ -22,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     return run(Path(args.workspace))
 
 
-def _wait_for_required_service_exit(running, plan) -> int:
+def _wait_for_required_service_exit(running: RunningLocalLaunch, plan: LocalLaunchPlan) -> int:
     while True:
         exited = None
         for service, process in zip(plan.services, running.processes, strict=True):

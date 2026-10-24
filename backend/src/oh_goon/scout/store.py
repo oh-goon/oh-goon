@@ -7,12 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from threading import Lock
 from time import perf_counter
+from typing import cast
 
 from oh_goon.core.execution_observability import RepositoryRunObservation
 from oh_goon.core.vocabulary import GameTapeStatus
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.scout.database import ScoutAnalyticalDatabase
 from oh_goon.scout.evidence import (
+    ScoutEnvironmentKey,
     ScoutEvidenceSnapshot,
     ScoutStepObservation,
 )
@@ -356,7 +358,7 @@ def _retained_snapshot(
 
 
 def _replace_observation_rows(
-    connection, *, run_ids: tuple[str, ...], snapshot: ScoutEvidenceSnapshot
+    connection: sqlite3.Connection, *, run_ids: tuple[str, ...], snapshot: ScoutEvidenceSnapshot
 ) -> None:
     for run_id in run_ids:
         connection.execute("DELETE FROM scout_step_observations WHERE run_id = ?", (run_id,))
@@ -384,7 +386,9 @@ def _replace_observation_rows(
     )
 
 
-def _prune_rows(connection, *, run_retain_after: datetime, step_retain_after: datetime) -> None:
+def _prune_rows(
+    connection: sqlite3.Connection, *, run_retain_after: datetime, step_retain_after: datetime
+) -> None:
     connection.execute(
         "DELETE FROM scout_step_observations WHERE started_at < ?",
         (step_retain_after.isoformat(),),
@@ -395,14 +399,14 @@ def _prune_rows(connection, *, run_retain_after: datetime, step_retain_after: da
     )
 
 
-def _metadata_revision_in(connection) -> int:
+def _metadata_revision_in(connection: sqlite3.Connection) -> int:
     row = connection.execute(
         "SELECT journal_revision FROM scout_metadata WHERE singleton = 1"
     ).fetchone()
     return int(row["journal_revision"]) if row is not None else 0
 
 
-def _write_metadata(connection, *, journal_revision: int) -> None:
+def _write_metadata(connection: sqlite3.Connection, *, journal_revision: int) -> None:
     connection.execute(
         """
         INSERT INTO scout_metadata(singleton, measurement_schema_version, journal_revision)
@@ -463,7 +467,7 @@ def _step_row(item: ScoutStepObservation) -> tuple[object, ...]:
     )
 
 
-def _decode_run(row) -> RepositoryRunObservation:
+def _decode_run(row: sqlite3.Row) -> RepositoryRunObservation:
     return RepositoryRunObservation(
         run_id=str(row["run_id"]),
         started_at=datetime.fromisoformat(str(row["started_at"])),
@@ -479,7 +483,7 @@ def _decode_run(row) -> RepositoryRunObservation:
     )
 
 
-def _decode_step(row) -> ScoutStepObservation:
+def _decode_step(row: sqlite3.Row) -> ScoutStepObservation:
     return ScoutStepObservation(
         run_id=str(row["run_id"]),
         started_at=datetime.fromisoformat(str(row["started_at"])),
@@ -513,7 +517,10 @@ def _decode_step(row) -> ScoutStepObservation:
         duration_seconds=(
             float(row["duration_seconds"]) if row["duration_seconds"] is not None else None
         ),
-        environment_key=_deep_tuple(json.loads(str(row["environment_key_json"]))),
+        # The sidecar's sole writer serializes ScoutStepObservation.environment_key.
+        environment_key=cast(
+            ScoutEnvironmentKey, _deep_tuple(json.loads(str(row["environment_key_json"])))
+        ),
     )
 
 

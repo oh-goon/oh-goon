@@ -10,7 +10,17 @@ import pytest
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import _run
 from oh_goon.core.errors import InvalidRequest
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
+from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+
+_PLAN = ResolvedFleetPlan.create(
+    name="submitted",
+    description="",
+    execution=VerificationExecutionPolicy(),
+    steps=(ResolvedCommandStep(step_id="verify", argv=("true",), timeout_seconds=30),),
+)
 
 
 def _args(*flags: str):
@@ -46,7 +56,7 @@ class _Plans:
         return SimpleNamespace(
             fleet_run_id="fleet-1",
             status=FleetRunStatus.QUEUED,
-            target=SimpleNamespace(plan=SimpleNamespace(plan_id="plan-sha")),
+            target=structural_fleet_plan_target(_PLAN),
         )
 
 
@@ -61,7 +71,7 @@ def test_async_run_json_is_one_admitted_owner_result(capsys):
     assert value == {
         "schema": "oh-goon.plan-run-result/v1",
         "fleet_run_id": "fleet-1",
-        "plan_id": "plan-sha",
+        "plan_id": _PLAN.plan_id,
         "status": "QUEUED",
         "outcome": None,
     }
@@ -125,7 +135,7 @@ def test_async_human_run_reports_the_admitted_run(capsys):
     assert _run(runtime, _args("--strict", "--no-wait")) == 0
     assert capsys.readouterr().out.splitlines() == [
         "Fleet Run ID: fleet-1",
-        "Plan ID: plan-sha",
+        f"Plan ID: {_PLAN.plan_id}",
         "Status: QUEUED",
     ]
 

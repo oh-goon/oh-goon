@@ -243,7 +243,7 @@ def _resolved_validation_gate_dependencies() -> dict[str, object]:
 
     from oh_goon.repository_tooling import _self_certification_plan_units as plan_units
 
-    source_units = [
+    source_units: list[dict[str, object]] = [
         {"unit": unit, "surface": plan_units.SCRIPTS_SURFACE}
         for unit in _VALIDATION_GATE_PROBE_SCRIPT_UNITS
     ]

@@ -12,6 +12,7 @@ from oh_goon.core.models.operation import (
     FailedAttentionOperationOutcome,
     FailedOperationOutcome,
     OperationExecution,
+    OperationOutcome,
     OperationReport,
     RecipeOperationEvidence,
     SuccessfulOperationOutcome,
@@ -52,7 +53,7 @@ def build_recipe_execution(
         argv=argv,
         exit_code=result.returncode,
         output=(result.stdout or result.stderr)[:MAX_PERSISTED_RECIPE_OUTPUT],
-        findings=findings,
+        findings=tuple(findings),
         structured_output=payload,
         sbom_component_count=component_count,
     )
@@ -83,9 +84,13 @@ def build_recipe_execution(
     )
 
 
-def _recipe_outcome(*, returncode: int, verdict: Verdict, reason: ReasonCode, has_findings: bool):
+def _recipe_outcome(
+    *, returncode: int, verdict: Verdict, reason: ReasonCode, has_findings: bool
+) -> OperationOutcome:
     if verdict.successful:
-        return SuccessfulOperationOutcome(state="successful", verdict=verdict, reason_code=reason)
+        return SuccessfulOperationOutcome.model_validate(
+            {"state": "successful", "verdict": verdict, "reason_code": reason}
+        )
     if verdict is Verdict.MANUAL_ACTION_REQUIRED:
         if has_findings:
             return CompletedAttentionOperationOutcome(

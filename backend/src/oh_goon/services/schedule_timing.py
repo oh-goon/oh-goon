@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from oh_goon.core.models.schedule import ScheduleDefinition
-from oh_goon.core.models.schedule_execution import ScheduleRunRecord
+from oh_goon.core.models.schedule_execution import RunningScheduleRun, ScheduleRunRecord
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import ScheduleState
 
@@ -27,7 +27,7 @@ def schedule_timing_decision(
     """Decide whether a Schedule occurrence is due without starting repository work."""
     if definition.state is not ScheduleState.ACTIVE:
         return ScheduleTimingDecision(definition.generation_id, None, False)
-    if latest is not None and not latest.status.terminal:
+    if isinstance(latest, RunningScheduleRun):
         return ScheduleTimingDecision(definition.generation_id, None, False)
 
     baseline = definition.created_at if latest is None else latest.finished_at

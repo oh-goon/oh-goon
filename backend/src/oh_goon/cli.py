@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -84,7 +86,9 @@ def _shutdown_after_completed_command(
     return None
 
 
-def _first_command_result(args, handlers) -> int | None:
+def _first_command_result(
+    args: argparse.Namespace, handlers: Sequence[Callable[[argparse.Namespace], int | None]]
+) -> int | None:
     for handler in handlers:
         result = handler(args)
         if result is not None:
@@ -92,7 +96,7 @@ def _first_command_result(args, handlers) -> int | None:
     return None
 
 
-def _run_pre_runtime_command(args) -> int | None:
+def _run_pre_runtime_command(args: argparse.Namespace) -> int | None:
     result = _first_command_result(
         args,
         (
@@ -115,7 +119,7 @@ def _run_pre_runtime_command(args) -> int | None:
     )
 
 
-def _run_serve_command(args) -> int:
+def _run_serve_command(args: argparse.Namespace) -> int:
     if check_local_state_for_startup() != 0:
         return 2
     token = ensure_local_access_token()
@@ -157,7 +161,7 @@ def _build_application_runtime(
     return None
 
 
-def _execute_stateful_command(runtime: ApplicationRuntime, args) -> int:
+def _execute_stateful_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     try:
         result = run_stateful_command(runtime, args)
     except BaseException as exc:

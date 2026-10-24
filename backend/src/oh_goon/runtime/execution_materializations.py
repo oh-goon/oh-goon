@@ -109,11 +109,13 @@ class ExecutionMaterializationAuthority:
             "producer_work_identity": producer_work_identity,
         }
         fingerprint = stable_id("execution-materialization", payload)
-        value = ExecutionMaterialization(
-            materialization_id=materialization_id,
-            created_at=created_at,
-            resolved_fingerprint=fingerprint,
-            **payload,
+        value = ExecutionMaterialization.model_validate(
+            {
+                "materialization_id": materialization_id,
+                "created_at": created_at,
+                "resolved_fingerprint": fingerprint,
+                **payload,
+            }
         )
         with self._database.transaction(write=True) as connection:
             # Rejoin the durable lease/checkpoint at the write cut.  Historical records are

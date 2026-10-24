@@ -85,7 +85,7 @@ def _http_status(
     request = urllib.request.Request(url, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status
+            return int(response.status)
     except urllib.error.HTTPError as exc:
         return exc.code
 
@@ -110,7 +110,9 @@ def _post_json_expect_error(
     try:
         urllib.request.urlopen(request, timeout=5.0)
     except urllib.error.HTTPError as exc:
-        body = json.loads(exc.read().decode("utf-8"))
+        body: object = json.loads(exc.read().decode("utf-8"))
+        if not isinstance(body, dict):
+            raise RuntimeError(f"expected a JSON error object from {url}") from exc
         if exc.code != expected_status or body.get("code") != expected_code:
             raise RuntimeError(
                 f"expected HTTP {expected_status}/{expected_code} from {url}, "
@@ -133,7 +135,7 @@ def _exchange_cookie(base_url: str, token: str) -> str:
             raise RuntimeError(
                 f"local-session exchange returned HTTP {response.status}, expected 204"
             )
-        raw_cookie = response.headers.get("Set-Cookie", "")
+        raw_cookie: str = response.headers.get("Set-Cookie", "")
     if "HttpOnly" not in raw_cookie or "SameSite=strict" not in raw_cookie:
         raise RuntimeError(
             "local-session exchange did not return the expected HttpOnly SameSite=strict cookie"
@@ -230,7 +232,8 @@ def _verify_parallel_cancel_restart(
     cancelled = _request_json(f"{frontend_base}/api/fleet/runs/{cancelled_id}", token=token)
     cancelled_run = cancelled.get("run") if isinstance(cancelled, dict) else None
     if (
-        not isinstance(cancelled_run, dict)
+        not isinstance(cancelled, dict)
+        or not isinstance(cancelled_run, dict)
         or cancelled_run.get("status") != "CANCELLED"
         or cancelled.get("outcome") != "CANCELLED"
     ):
@@ -238,7 +241,8 @@ def _verify_parallel_cancel_restart(
     success = _request_json(f"{frontend_base}/api/fleet/runs/{success_id}", token=token)
     success_run = success.get("run") if isinstance(success, dict) else None
     if (
-        not isinstance(success_run, dict)
+        not isinstance(success, dict)
+        or not isinstance(success_run, dict)
         or success_run.get("status") != "COMPLETED"
         or success.get("outcome") != "SUCCESS"
     ):
@@ -264,7 +268,8 @@ def _verify_parallel_repair_restart(
     repaired = _request_json(f"{frontend_base}/api/fleet/runs/{repaired_id}", token=token)
     repaired_run = repaired.get("run") if isinstance(repaired, dict) else None
     if (
-        not isinstance(repaired_run, dict)
+        not isinstance(repaired, dict)
+        or not isinstance(repaired_run, dict)
         or repaired_run.get("status") != "COMPLETED"
         or repaired.get("outcome") != "SUCCESS"
     ):
@@ -275,7 +280,8 @@ def _verify_parallel_stale_restart(frontend_base: str, token: str, recovered_id:
     recovered = _request_json(f"{frontend_base}/api/fleet/runs/{recovered_id}", token=token)
     recovered_run = recovered.get("run") if isinstance(recovered, dict) else None
     if (
-        not isinstance(recovered_run, dict)
+        not isinstance(recovered, dict)
+        or not isinstance(recovered_run, dict)
         or recovered_run.get("status") != "COMPLETED"
         or recovered.get("outcome") != "SUCCESS"
     ):
@@ -304,7 +310,8 @@ def _verify_primary_restart_state(
     cancelled = _request_json(f"{frontend_base}/api/fleet/runs/{cancelled_run_id}", token=token)
     cancelled_run = cancelled.get("run") if isinstance(cancelled, dict) else None
     if (
-        not isinstance(cancelled_run, dict)
+        not isinstance(cancelled, dict)
+        or not isinstance(cancelled_run, dict)
         or cancelled_run.get("status") != "CANCELLED"
         or cancelled.get("outcome") != "CANCELLED"
     ):
@@ -651,8 +658,12 @@ def accept_dev_runtime(
         issues.extend(_post_crash_cleanup_issues(interrupted_pid))
         if any("occupied" in issue for issue in issues):
             return tuple(issues)
-        if issues or _missing_runtime_identity(
-            first_run_id, cancelled_run_id, competing_run_id, interrupted_run_id
+        if (
+            issues
+            or first_run_id is None
+            or cancelled_run_id is None
+            or competing_run_id is None
+            or interrupted_run_id is None
         ):
             return tuple(issues)
 

@@ -4,7 +4,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from threading import Lock
-from typing import Literal
+from typing import Literal, cast
 
 from oh_goon.core.game_tape_policy import (
     GAME_TAPE_MAX_CHUNK_CHARS,
@@ -67,7 +67,7 @@ class GameTapeLiveOutputStore:
             return
         if stream not in {"stdout", "stderr"}:
             raise ValueError(f"Unsupported Game Tape live output stream: {stream}")
-        typed_stream: Literal["stdout", "stderr"] = stream
+        typed_stream = cast(Literal["stdout", "stderr"], stream)
         with self._lock:
             self._expire_locked()
             buffer = self._runs.get(fleet_run_id)
@@ -173,7 +173,9 @@ class GameTapeLiveOutputStore:
             retained_from = retained[0].sequence if retained else buffer.next_sequence
             chunks = tuple(item for item in retained if item.sequence > after)
             latest_activity = buffer.activities[-1][1] if buffer.activities else None
-            state = "SEALED" if buffer.expires_at is not None else "ACTIVE"
+            state: Literal["SEALED", "ACTIVE"] = (
+                "SEALED" if buffer.expires_at is not None else "ACTIVE"
+            )
             return (
                 GameTapeLiveOutputBatch(
                     fleet_run_id=fleet_run_id,

@@ -14,7 +14,7 @@ import stat
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, cast
 
 from pydantic import ValidationError
 
@@ -99,7 +99,8 @@ class NativeAgentEffectCeilings:
             raise TrustProtocolError("invalid frozen Agent policy bytes") from exc
         if NativeAgentEffectCeilings.freeze(values).encoded != self.encoded:
             raise TrustProtocolError("noncanonical frozen Agent policy")
-        return values
+        # freeze() above validates the canonical plain JSON policy map.
+        return cast(dict[str, object], values)
 
 
 _AGENT_POLICY_MAX_BYTES = 65536
@@ -326,7 +327,8 @@ class DeploymentRunContractPolicy:
             ):
                 raise TrustProtocolError("invalid external deployment Agent policy source")
             self.agent_policy_source.require_matches(self.agent_effect_policy)
-        return fields
+        # Canonical JSON and exact deployment fields were verified above.
+        return cast(dict[str, object], fields)
 
 
 def _apply_native_agent_effect_policy(
@@ -339,7 +341,8 @@ def _apply_native_agent_effect_policy(
     No grant or execution permission is created. The original journal remains
     the only semantic Enforcer owner of request-versus-limit comparison.
     """
-    steps = deployment["step_envelopes"]
+    # DeploymentRunContractPolicy.read checks this map and each envelope.
+    steps = cast(dict[str, dict[str, object]], deployment["step_envelopes"])
     agent_steps = {
         step_id for step_id, envelope in steps.items() if envelope.get("workload_kind") == "agent"
     }
@@ -503,7 +506,12 @@ def compile_native_prework_run_contract(
         step for item in admitted.repository_admissions for step in item.active_step_ids
     }
     for field in ("step_envelopes", "step_teardown_envelopes"):
-        if not active_steps or set(deployment[field]) != active_steps:
+        declared_steps = deployment[field]
+        if (
+            not isinstance(declared_steps, dict)
+            or not active_steps
+            or set(declared_steps) != active_steps
+        ):
             raise TrustProtocolError(f"deployment {field} does not match exact active Plan Steps")
     _apply_native_agent_effect_policy(
         deployment,
@@ -512,5 +520,6 @@ def compile_native_prework_run_contract(
     )
     # Detect substitution after the first observations but before publication.
     if deployment_policy.agent_policy_source is not None:
+        assert deployment_policy.agent_effect_policy is not None
         deployment_policy.agent_policy_source.require_matches(deployment_policy.agent_effect_policy)
     return AdmittedRunContract.freeze({**deployment, **first})

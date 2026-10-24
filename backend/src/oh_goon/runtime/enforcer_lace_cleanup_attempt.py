@@ -8,8 +8,10 @@ implemented by the next physical cleanup owner.
 
 from __future__ import annotations
 
+from typing import Any
+
 from oh_goon.core.enforcer_lace_trust import ReceiptAuthenticator, canonical_bytes, digest
-from oh_goon.core.ports.local_lace_cleanup import LocalLaceCleanupTicket
+from oh_goon.core.ports.local_lace_cleanup import LocalLaceCleanupTicket as LocalLaceCleanupTicket
 from oh_goon.core.ports.local_lace_orphan_inventory import LocalLaceOrphanSubject
 from oh_goon.runtime.enforcer_lace_journal import CausalJournalError, CausalRunJournal
 from oh_goon.runtime.enforcer_lace_orphan_subject import subject_in
@@ -17,7 +19,7 @@ from oh_goon.runtime.enforcer_lace_orphan_subject import subject_in
 
 def _inventory_event(
     journal: CausalRunJournal, subject: LocalLaceOrphanSubject, *, auth: ReceiptAuthenticator
-) -> dict:
+) -> dict[str, Any]:
     matches = [
         e
         for e in journal.verify(subject.run_id, auth=auth)

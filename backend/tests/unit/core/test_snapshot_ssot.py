@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from oh_goon.core.models.repository import (
     RepositoryIdentity,
 )
 from oh_goon.core.models.run import (
+    CancellingFleetRun,
     CompletedFleetRun,
     FleetRunDetail,
     FleetRunProgress,
@@ -96,6 +98,43 @@ def run_detail(report, fleet_run_id: str) -> FleetRunDetail:
         execution=DirectFleetExecutionAdmission(),
         operations=[report],
     )
+
+
+def test_snapshot_accepts_prestart_cancellation_and_preserves_known_time_fence(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    report = make_operation_report(repository, OperationAction.INIT)
+    completed = run_detail(report, "prestart-cancellation")
+    run = CancellingFleetRun(
+        status=FleetRunStatus.CANCELLING,
+        fleet_run_id=completed.run.fleet_run_id,
+        capability=completed.run.capability,
+        target=completed.run.target,
+        repository_scope=completed.run.repository_scope,
+        targets=completed.run.targets,
+        accepted_at=completed.run.accepted_at,
+        cancel_requested_at=completed.run.accepted_at,
+        progress=FleetRunProgress(total=1, succeeded=0, failed=0),
+    )
+    detail = completed.model_copy(update={"run": run, "operations": ()})
+    snapshot = build_fleet_snapshot(
+        [],
+        durable_revision=1,
+        journal_revision=1,
+        active_fleet_run=detail,
+        latest_fleet_runs=[],
+    )
+    assert snapshot.active_fleet_run is not None
+    assert snapshot.active_fleet_run.run.started_at is None
+    with pytest.raises(ValidationError, match="generated_at cannot precede"):
+        FleetSnapshot(
+            provenance=snapshot.provenance.model_copy(
+                update={"generated_at": run.accepted_at - timedelta(seconds=1)}
+            ),
+            active_fleet_run=detail,
+        )
 
 
 def test_operation_state_derives_semantic_explanation_from_report(tmp_path: Path) -> None:

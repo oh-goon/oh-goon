@@ -93,6 +93,8 @@ def complete_child_result(
             "output is bounded to protect executor memory"
         )
     if timed_out:
+        if timeout is None:
+            raise RuntimeError("Fleet runner reported a timeout without a deadline")
         raise subprocess.TimeoutExpired(exec_argv, timeout, output=stdout, stderr=stderr)
     if status is None:
         raise RuntimeError("Fleet runner lost child process status")

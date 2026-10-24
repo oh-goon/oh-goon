@@ -9,6 +9,10 @@ import sys
 import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.source_layout_policy import assert_canonical_source_layout
@@ -102,7 +106,9 @@ def _require_deployment_source_root() -> None:
         raise TrustProtocolError("deployment source root differs from imported workflow authority")
 
 
-def _require_deployment_process_owner(*, fleet_provisioner: object, fleet_run_id: str):
+def _require_deployment_process_owner(
+    *, fleet_provisioner: object, fleet_run_id: str
+) -> FleetPreworkProvisioner:
     """Single fail-before-work context check; custody remains with the original owner.
 
     Do not discover, construct, serialize or substitute a FleetPreworkProvisioner.
@@ -113,6 +119,7 @@ def _require_deployment_process_owner(*, fleet_provisioner: object, fleet_run_id
 
     if type(fleet_provisioner) is not FleetPreworkProvisioner:
         raise TrustProtocolError("original deployment FleetPreworkProvisioner required")
+    assert isinstance(fleet_provisioner, FleetPreworkProvisioner)
     fleet_provisioner.require_enrolled_identity(fleet_run_id)
     _require_deployment_source_root()
     if os.environ.get(EXECUTORS_FILE_ENV) != str(fleet_provisioner.executor_inventory_file):
@@ -213,7 +220,7 @@ def certify_deployment_run(*, fleet_provisioner: object, fleet_run_id: str) -> i
 def _deployment_context_mismatch(
     env: dict[str, str],
     *,
-    fleet_provisioner: object,
+    fleet_provisioner: FleetPreworkProvisioner,
     fleet_run_id: str,
 ) -> str | None:
     """Recheck original process custody before any League/lock bootstrap work.
@@ -270,7 +277,7 @@ def _run_deployment_plan(
     args: list[str],
     env: dict[str, str],
     *,
-    fleet_provisioner: object,
+    fleet_provisioner: FleetPreworkProvisioner,
     fleet_run_id: str,
 ) -> tuple[int, str]:
     """Transport original Fleet custody into the same process's internal command.

@@ -50,7 +50,11 @@ def validate_development_seal(payload: Mapping[str, object]) -> str:
     parent = payload.get("parent")
     candidate = payload.get("candidate")
     patch = payload.get("patch")
-    if not all(isinstance(value, Mapping) for value in (parent, candidate, patch)):
+    if (
+        not isinstance(parent, Mapping)
+        or not isinstance(candidate, Mapping)
+        or not isinstance(patch, Mapping)
+    ):
         raise ValueError("development seal requires parent, candidate, and patch mappings")
     parent_version = _required_version(parent.get("version"), field="parent.version")
     _required_sha(parent.get("source_identity"), field="parent.source_identity")

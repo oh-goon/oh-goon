@@ -23,7 +23,9 @@ def _doctor_command(runtime: ApplicationRuntime, _args: argparse.Namespace) -> i
 
 def _exclude_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     try:
-        record = runtime.repositories.exclude(str(args.repository), args.reason)
+        record = runtime.repositories.exclude(
+            str(args.repository), args.reason, args.expected_repository_instance_id
+        )
     except FleetDomainError as exc:
         print(str(exc))
         return 2
@@ -34,7 +36,9 @@ def _exclude_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> i
 
 def _include_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     try:
-        record = runtime.repositories.include(str(args.repository))
+        record = runtime.repositories.include(
+            str(args.repository), args.expected_repository_instance_id
+        )
     except FleetDomainError as exc:
         print(str(exc))
         return 2

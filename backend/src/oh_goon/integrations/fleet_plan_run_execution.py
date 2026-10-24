@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
@@ -96,7 +97,7 @@ class FleetPlanRunExecutor:
         diagnostics: DiagnosticEmitter | None = None,
         terminal: CommandTerminal | None = None,
         standard_process_isolation: ProcessIsolationBackend | None = None,
-        workspace_pin=None,
+        workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None = None,
     ) -> None:
         self._git = git
         self._extensions = extensions

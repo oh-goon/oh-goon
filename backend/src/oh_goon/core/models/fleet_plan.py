@@ -11,19 +11,29 @@ from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeA
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan_composition import (
-    GoonOutputDefinition,
-    PlanInputBinding,
-    PlanInputDefinition,
-    PlanStepInclusion,
-    validate_template_contract,
+    GoonOutputDefinition as GoonOutputDefinition,
+)
+from oh_goon.core.models.fleet_plan_composition import (
+    PlanInputBinding as PlanInputBinding,
+)
+from oh_goon.core.models.fleet_plan_composition import (
+    PlanInputDefinition as PlanInputDefinition,
+)
+from oh_goon.core.models.fleet_plan_composition import (
+    PlanStepInclusion as PlanStepInclusion,
+)
+from oh_goon.core.models.fleet_plan_composition import (
+    validate_template_contract as validate_template_contract,
 )
 from oh_goon.core.models.fleet_plan_diagnostics import PlanConfigurationEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import (
-    ExecutionPurpose,
-    PlanExecutionPolicy,
+    ExecutionPurpose as ExecutionPurpose,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import (
     ParallelRepositoryExecution as ParallelRepositoryExecution,
+)
+from oh_goon.core.models.fleet_plan_execution_policy import (
+    PlanExecutionPolicy as PlanExecutionPolicy,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import (
     RepositoryExecutionMode as RepositoryExecutionMode,
@@ -59,31 +69,49 @@ from oh_goon.core.models.fleet_plan_git import (
     GitNativeAction as GitNativeAction,
 )
 from oh_goon.core.models.fleet_plan_git import (
-    GitPlanAction,
-    GitResultContract,
+    GitPlanAction as GitPlanAction,
 )
 from oh_goon.core.models.fleet_plan_git import (
     GitPlanOperation as GitPlanOperation,
 )
+from oh_goon.core.models.fleet_plan_git import (
+    GitResultContract as GitResultContract,
+)
 from oh_goon.core.models.fleet_plan_kubernetes_steps import (
-    KubernetesRolloutVerifyPlanStep,
-    KubernetesSetImagePlanStep,
-    ResolvedKubernetesRolloutVerifyStep,
-    ResolvedKubernetesSetImageStep,
+    KubernetesRolloutVerifyPlanStep as KubernetesRolloutVerifyPlanStep,
+)
+from oh_goon.core.models.fleet_plan_kubernetes_steps import (
+    KubernetesSetImagePlanStep as KubernetesSetImagePlanStep,
+)
+from oh_goon.core.models.fleet_plan_kubernetes_steps import (
+    ResolvedKubernetesRolloutVerifyStep as ResolvedKubernetesRolloutVerifyStep,
+)
+from oh_goon.core.models.fleet_plan_kubernetes_steps import (
+    ResolvedKubernetesSetImageStep as ResolvedKubernetesSetImageStep,
 )
 from oh_goon.core.models.fleet_plan_observation_steps import (
-    DependencyInventoryPlanStep,
-    ResolvedDependencyInventoryStep,
+    DependencyInventoryPlanStep as DependencyInventoryPlanStep,
+)
+from oh_goon.core.models.fleet_plan_observation_steps import (
+    ResolvedDependencyInventoryStep as ResolvedDependencyInventoryStep,
 )
 from oh_goon.core.models.fleet_plan_oci_steps import (
-    OciBuildPlanStep,
-    OciPublishPlanStep,
-    ResolvedOciBuildStep,
-    ResolvedOciPublishStep,
+    OciBuildPlanStep as OciBuildPlanStep,
+)
+from oh_goon.core.models.fleet_plan_oci_steps import (
+    OciPublishPlanStep as OciPublishPlanStep,
+)
+from oh_goon.core.models.fleet_plan_oci_steps import (
+    ResolvedOciBuildStep as ResolvedOciBuildStep,
+)
+from oh_goon.core.models.fleet_plan_oci_steps import (
+    ResolvedOciPublishStep as ResolvedOciPublishStep,
 )
 from oh_goon.core.models.fleet_plan_oci_tag_steps import (
-    OciTagAssertPlanStep,
-    ResolvedOciTagAssertStep,
+    OciTagAssertPlanStep as OciTagAssertPlanStep,
+)
+from oh_goon.core.models.fleet_plan_oci_tag_steps import (
+    ResolvedOciTagAssertStep as ResolvedOciTagAssertStep,
 )
 from oh_goon.core.models.fleet_plan_requirements import RepositoryRequirement
 from oh_goon.core.models.fleet_plan_resources import (
@@ -99,10 +127,16 @@ from oh_goon.core.models.fleet_plan_resources import (
     ManagedToolRuntime as ManagedToolRuntime,
 )
 from oh_goon.core.models.fleet_plan_step_contract import (
-    PlanStepCache,
-    PlanStepCapabilities,
-    PlanStepWorkspace,
-    compile_simple_network_alias,
+    PlanStepCache as PlanStepCache,
+)
+from oh_goon.core.models.fleet_plan_step_contract import (
+    PlanStepCapabilities as PlanStepCapabilities,
+)
+from oh_goon.core.models.fleet_plan_step_contract import (
+    PlanStepWorkspace as PlanStepWorkspace,
+)
+from oh_goon.core.models.fleet_plan_step_contract import (
+    compile_simple_network_alias as compile_simple_network_alias,
 )
 from oh_goon.core.models.fleet_plan_step_primitives import (
     PLAN_CONTRACT_RETURN_CODE as PLAN_CONTRACT_RETURN_CODE,
@@ -117,16 +151,7 @@ from oh_goon.core.models.fleet_plan_step_primitives import (
     PLAN_TIMEOUT_RETURN_CODE as PLAN_TIMEOUT_RETURN_CODE,
 )
 from oh_goon.core.models.fleet_plan_step_primitives import (
-    MissingConfigPolicy,
-    PlanArtifactDeclaration,
-    PlanPublishedOutput,
-    PlanStreamOutput,
-    StepCondition,
-    StepFailurePolicy,
-    StepLifecycle,
-    StepRetryPolicy,
-    _validate_published_outputs,
-    _validate_success_codes,
+    MissingConfigPolicy as MissingConfigPolicy,
 )
 from oh_goon.core.models.fleet_plan_step_primitives import (
     PathExistsCondition as PathExistsCondition,
@@ -135,17 +160,46 @@ from oh_goon.core.models.fleet_plan_step_primitives import (
     PathMissingCondition as PathMissingCondition,
 )
 from oh_goon.core.models.fleet_plan_step_primitives import (
+    PlanArtifactDeclaration as PlanArtifactDeclaration,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    PlanPublishedOutput as PlanPublishedOutput,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    PlanStreamOutput as PlanStreamOutput,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    StepCondition as StepCondition,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    StepFailurePolicy as StepFailurePolicy,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    StepLifecycle as StepLifecycle,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    StepRetryPolicy as StepRetryPolicy,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
     StepStatusCondition as StepStatusCondition,
 )
+from oh_goon.core.models.fleet_plan_step_primitives import (
+    _validate_published_outputs,
+    _validate_success_codes,
+)
 from oh_goon.core.models.fleet_plan_values import (
-    PlanEnvDefinition,
-    PlanStepImports,
-    ResolvedEnvironmentBinding,
+    PlanEnvDefinition as PlanEnvDefinition,
+)
+from oh_goon.core.models.fleet_plan_values import (
+    PlanStepImports as PlanStepImports,
+)
+from oh_goon.core.models.fleet_plan_values import (
+    ResolvedEnvironmentBinding as ResolvedEnvironmentBinding,
 )
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
-FLEET_PLAN_CONTRACT_VERSION = 44
+FLEET_PLAN_CONTRACT_VERSION: Literal[44] = 44
 DEFAULT_PRE_COMMIT_REQUIREMENT = "pre-commit==4.6.2"
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 3600.0
 
@@ -440,7 +494,7 @@ class ResolvedCommandStep(CommandPlanStep):
     )
 
     @model_validator(mode="after")
-    def validate_uv_selection(self):
+    def validate_uv_selection(self) -> ResolvedCommandStep:
         if self.uv is not None and (
             "${{" in self.uv.project
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", self.uv.group) is None
@@ -458,7 +512,8 @@ class ResolvedLocalSearchAgentStep(ResolvedCommandStep):
     keeps ``kind=agent`` visible and forbids caller-supplied command arguments.
     """
 
-    kind: Literal["agent"] = "agent"
+    # Frozen Pydantic schema specialization preserves the command payload ancestry.
+    kind: Literal["agent"] = "agent"  # type: ignore[assignment]
     delivery_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     handoff_identity: str = Field(min_length=1, max_length=160)
     source_step_id: str = Field(min_length=1, max_length=80)

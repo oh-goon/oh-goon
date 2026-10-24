@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceFact, GameTapeStorage
 
 
@@ -28,7 +30,9 @@ def project_storage_maintenance(facts: tuple[FleetContentMaintenanceFact, ...]) 
     )
 
 
-def _storage_pressure(outcome: str, budget_satisfied: bool) -> str:
+def _storage_pressure(
+    outcome: str, budget_satisfied: bool
+) -> Literal["REFUSED", "UNDER_BUDGET", "OVER_BUDGET"]:
     if outcome == "REFUSED":
         return "REFUSED"
     return "UNDER_BUDGET" if budget_satisfied else "OVER_BUDGET"

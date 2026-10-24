@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from typing import Literal, cast
+
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.operation import (
     DependencyPlanCompleted,
     DependencyPlanFailed,
     FailedOperationOutcome,
+    OperationExecution,
     OperationReport,
     PlanOperationEvidence,
     SuccessfulOperationOutcome,
@@ -20,7 +23,7 @@ from oh_goon.engine.project import policy_snapshot
 from oh_goon.engine.reporting import execution, provenance
 
 
-def run(context: OperationContext):
+def run(context: OperationContext) -> OperationExecution:
     started = utc_now()
     before_observation = context.git.observe(
         context.attempt.repository.path, context.cancel_requested
@@ -60,7 +63,11 @@ def run(context: OperationContext):
         ),
         repository=context.attempt.repository,
         outcome=(
-            SuccessfulOperationOutcome(state="successful", verdict=verdict, reason_code=reason)
+            SuccessfulOperationOutcome(
+                state="successful",
+                verdict=cast(Literal[Verdict.READY, Verdict.UPDATED, Verdict.UNCHANGED], verdict),
+                reason_code=reason,
+            )
             if success
             else FailedOperationOutcome(state="failed", returncode=returncode, reason_code=reason)
         ),

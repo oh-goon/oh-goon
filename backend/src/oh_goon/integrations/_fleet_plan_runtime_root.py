@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.path_authority import require_absolute_host_path
 from oh_goon.core.path_layouts import SANDBOX_PATHS
+from oh_goon.integrations._fleet_plan_host_resources import HostToolBinding
 from oh_goon.integrations.content_snapshot import (
     SnapshotIdentity,
     snapshot_host_path,
@@ -41,7 +42,7 @@ class RuntimeRootBinding:
 
 
 def capture_runtime_root(
-    host_tools: Iterable[object],
+    host_tools: Iterable[HostToolBinding],
     managed_runtimes: Mapping[str, ManagedRuntimeSpec],
     destination: Path,
     *,
@@ -473,7 +474,7 @@ def _minimal_directories(paths: Iterable[Path]) -> tuple[Path, ...]:
 
 
 def _materialize_host_tool_runtime_support(
-    host_tools: Iterable[object],
+    host_tools: Iterable[HostToolBinding],
     destination: Path,
     *,
     cancel_requested: Callable[[], bool] | None,
@@ -505,7 +506,7 @@ def _materialize_host_tool_runtime_support(
             )
 
 
-def _runtime_file_mount_targets(host_tools: Iterable[object]) -> tuple[PurePosixPath, ...]:
+def _runtime_file_mount_targets(host_tools: Iterable[HostToolBinding]) -> tuple[PurePosixPath, ...]:
     fixed = tuple(
         SANDBOX_PATHS.etc / name for name in ("passwd", "group", "nsswitch.conf", "hosts")
     )

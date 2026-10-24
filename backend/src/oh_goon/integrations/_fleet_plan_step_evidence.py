@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
+from typing import TypedDict
 
 from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
@@ -9,6 +10,7 @@ from oh_goon.core.models.execution_authority_diagnostics import (
 from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
+from oh_goon.core.models.fleet_observation import FleetObservationEvidence
 from oh_goon.core.models.fleet_plan import (
     ResolvedExtensionStep,
     ResolvedGitStep,
@@ -47,6 +49,24 @@ from oh_goon.core.models.fleet_plan_step_contract import PlanStepEgress
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, step_succeeded
 
 
+class _StepEvidenceFields(TypedDict):
+    step_id: str
+    kind: str
+    started_at: datetime | None
+    finished_at: datetime | None
+    argv: tuple[str, ...]
+    stdout_evidence: PlanOutputEvidence
+    stderr_evidence: PlanOutputEvidence
+    duration_ms: int
+    repository_state_before: str
+    repository_state_after: str
+    worktree_files_after: tuple[str, ...]
+    attempts: tuple[PlanStepAttemptEvidence, ...]
+    artifacts: tuple[PlanArtifactEvidence, ...]
+    outputs: tuple[PublishedPlanOutputEvidence, ...]
+    observations: tuple[FleetObservationEvidence, ...]
+
+
 def step_evidence(
     *,
     step: ResolvedPlanStep,
@@ -60,7 +80,7 @@ def step_evidence(
     started_at: datetime | None = None,
     finished_at: datetime | None = None,
 ) -> PlanStepExecution:
-    common = {
+    common: _StepEvidenceFields = {
         "step_id": step.step_id,
         "kind": step.kind,
         "started_at": started_at,
@@ -179,7 +199,7 @@ def attempt_evidence(
                 final_process_group_quiescent=outcome.supervisor.final_process_group_quiescent,
                 forced_termination=outcome.supervisor.forced_termination,
                 recovery_events=tuple(
-                    PlanExecutionRecoveryEventEvidence(**event.as_dict())
+                    PlanExecutionRecoveryEventEvidence.model_validate(event.as_dict())
                     for event in outcome.supervisor.recovery_events
                 ),
             )

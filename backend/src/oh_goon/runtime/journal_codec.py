@@ -24,7 +24,7 @@ from oh_goon.runtime.journal_facts import (
 )
 
 GENESIS_HASH = "0" * 64
-_FLEET_RUN_EVENT_ADAPTER = TypeAdapter(FleetRunEvent)
+_FLEET_RUN_EVENT_ADAPTER: TypeAdapter[FleetRunEvent] = TypeAdapter(FleetRunEvent)
 _EFFECT_RECONCILIATION_ADAPTER = TypeAdapter(RepositoryEffectReconciliationEvidence)
 _EFFECT_ACKNOWLEDGEMENT_ADAPTER = TypeAdapter(RepositoryEffectAcknowledgementEvidence)
 
@@ -163,7 +163,11 @@ class JournalFactCodec:
                 if event_json is not None
                 else None
             )
-            effect = None
+            effect: (
+                RepositoryEffectReconciliationEvidence
+                | RepositoryEffectAcknowledgementEvidence
+                | None
+            ) = None
             if effect_json is not None:
                 payload = json.loads(effect_json)
                 if fact_kind is JournalFactKind.EFFECT_RECONCILIATION:

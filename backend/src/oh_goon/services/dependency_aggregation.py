@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sqlite3
 from collections import defaultdict
+from collections.abc import Collection
 from datetime import datetime
 
 from oh_goon.core.models.dependency_fleet import (
@@ -8,17 +10,16 @@ from oh_goon.core.models.dependency_fleet import (
     DependencyPackageOverview,
     DependencyVersionBucket,
 )
-from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.runtime.dependency_observations import DependencyObservationStore
 
 
 def build_dependency_overview(
     store: DependencyObservationStore,
     package: str,
-    current: dict[str, RepositoryIdentity],
+    current: Collection[str],
 ) -> DependencyPackageOverview:
     rows = [row for row in store.package_rows(package) if str(row["repository_id"]) in current]
-    by_repository: dict[str, list[object]] = defaultdict(list)
+    by_repository: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
         by_repository[str(row["repository_id"])].append(row)
     states = {

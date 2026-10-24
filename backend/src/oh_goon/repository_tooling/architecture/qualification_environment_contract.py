@@ -256,13 +256,13 @@ def check_qualification_environment_contract(root: Path = ROOT) -> list[Violatio
             )
     if (root / ".checkpoint/DB3_SOURCE.sha256").is_file():
         core = shell.split("run_ring CORE", 1)
-        required = (
+        required_db3 = (
             "tests/unit/runtime/test_db3_scout_backup_owner.py",
             "tests/unit/engine/test_commands.py",
             "../scripts/tests/test_db3_backup_owner_architecture.py",
         )
         if len(core) != 2 or any(
-            core[1].split("\n# AG-02B1", 1)[0].count(module) != 1 for module in required
+            core[1].split("\n# AG-02B1", 1)[0].count(module) != 1 for module in required_db3
         ):
             issues.append(
                 Violation(witness, "QENV1 DB3 backup/Scout/live-output tests missing from CORE")

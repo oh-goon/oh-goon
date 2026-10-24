@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Sequence
+from typing import TypedDict
+
 from oh_goon.core.effect_attempts import (
     EXTERNAL_OUTCOME_UNCERTAIN_STATUSES,
     OPERATOR_REQUIRED_EFFECT_STATUSES,
@@ -10,10 +14,12 @@ from oh_goon.core.models.effect_attempt import (
     effect_attempt_reconciliation,
 )
 from oh_goon.core.models.reconciliation import (
+    IndeterminateRepositoryReconciliation,
+    PartiallyAppliedRepositoryReconciliation,
     RepositoryEffectAcknowledgementEvidence,
     RepositoryEffectReconciliationEvidence,
 )
-from oh_goon.core.models.run import FleetRunFailure
+from oh_goon.core.models.run import FleetRunDetail, FleetRunFailure, FleetRunState
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     ProcessStartedEvent,
@@ -42,6 +48,16 @@ from oh_goon.services.repository_effect_settlement import (
     RepositoryEffectInterruptionEvidence,
     RepositoryEffectSettlement,
 )
+
+
+class _InterruptedProcessFields(TypedDict):
+    fleet_run_id: str
+    repository_id: str
+    operation_id: str
+    step_id: str | None
+    step_order: int | None
+    attempt_number: int | None
+    physical_execution_id: str
 
 
 class RepositoryEffectRecovery:
@@ -205,6 +221,10 @@ class RepositoryEffectRecovery:
         ):
             raise StateConflict(f"Effect acknowledgement command is stale: {operation_id}")
         reconciliation = _operator_reconciliation_evidence(current, view).reconciliation
+        assert isinstance(
+            reconciliation,
+            (PartiallyAppliedRepositoryReconciliation, IndeterminateRepositoryReconciliation),
+        )
         evidence = RepositoryEffectAcknowledgementEvidence(
             effect=current.identity,
             reconciliation=reconciliation,
@@ -261,7 +281,9 @@ class RepositoryEffectRecovery:
             FleetExecutorCapacityReservations.release_run_in(connection, run.fleet_run_id)
             return run.fleet_run_id
 
-    def _record_interrupted_process_uncertainty(self, connection, detail) -> None:
+    def _record_interrupted_process_uncertainty(
+        self, connection: sqlite3.Connection, detail: FleetRunDetail
+    ) -> None:
         settled = {
             later.physical_execution_id
             for later in detail.lifecycle_events
@@ -270,7 +292,7 @@ class RepositoryEffectRecovery:
         for event in detail.lifecycle_events:
             if type(event) is not ProcessStartedEvent or event.physical_execution_id in settled:
                 continue
-            common = dict(
+            common: _InterruptedProcessFields = dict(
                 fleet_run_id=detail.run.fleet_run_id,
                 repository_id=event.repository_id,
                 operation_id=event.operation_id,
@@ -290,7 +312,12 @@ class RepositoryEffectRecovery:
                 connection, event_type=FleetRunEventType.OUTPUT_QUARANTINED, **common
             )
 
-    def _terminalize_recovered_run(self, connection, run, uncertain) -> None:
+    def _terminalize_recovered_run(
+        self,
+        connection: sqlite3.Connection,
+        run: FleetRunState,
+        uncertain: Sequence[RepositoryEffectAttempt],
+    ) -> None:
         if run.status is FleetRunStatus.CANCELLING:
             self._journal.terminalize_run_in(
                 connection, run.fleet_run_id, FleetRunTerminalIntent.CANCEL

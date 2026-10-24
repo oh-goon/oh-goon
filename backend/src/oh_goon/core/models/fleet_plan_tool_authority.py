@@ -16,7 +16,7 @@ class PlanHostToolAuthorityEvidence(ImmutableModel):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     byte_count: int = Field(ge=0)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def authority_id(self) -> str:
         return stable_id(

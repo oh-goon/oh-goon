@@ -13,6 +13,7 @@ from oh_goon.core.models.execution_authority_economics import (
 )
 from oh_goon.core.path_layouts import SANDBOX_PATHS
 from oh_goon.engine.command import RuntimeAuthorityReceipt
+from oh_goon.integrations._fleet_plan_host_resources import HostToolBinding
 from oh_goon.integrations._fleet_plan_sandbox_launch import (
     SandboxProcessLaunch,
     sandbox_process_launch,
@@ -204,7 +205,7 @@ def _resolve_admitted_executable(
     request: IsolatedProcessRequest,
     value: str,
     env: Mapping[str, str],
-    cwd: Path,
+    cwd: PurePosixPath,
 ) -> tuple[PurePosixPath, _ExpectedRuntimeFile, str]:
     candidate = PurePosixPath(value)
     if candidate.is_absolute():
@@ -283,7 +284,9 @@ def _map_admitted_executable(
     )
 
 
-def _toolchain_binding(request: IsolatedProcessRequest, sandbox_path: PurePosixPath):
+def _toolchain_binding(
+    request: IsolatedProcessRequest, sandbox_path: PurePosixPath
+) -> HostToolBinding | None:
     name: str | None = None
     if sandbox_path == PurePosixPath("/bin/sh"):
         name = "sh"
@@ -435,7 +438,7 @@ def _shebang(path: Path) -> tuple[str, ...] | None:
     return parts
 
 
-def _verify_host_tool_binding(binding: object) -> None:
+def _verify_host_tool_binding(binding: HostToolBinding) -> None:
     verify_snapshot(
         binding.snapshot_path,
         binding.identity,

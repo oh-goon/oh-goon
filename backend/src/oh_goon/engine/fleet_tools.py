@@ -16,7 +16,7 @@ from oh_goon.core.path_authority import (
 )
 from oh_goon.core.path_layouts import ManagedPreparationPathLayout
 from oh_goon.core.product_identity import stable_id
-from oh_goon.engine.command import run_command
+from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.native_uv_environment import NativeUvAuthority, capture_native_uv_authority
 from oh_goon.integrations.exact_file_write import (
     ExactPublicationDurabilityError,
@@ -197,7 +197,7 @@ def _check_environment(
     path_authority: StrictHostPathAuthority | None,
     preparation: ManagedPreparationPathLayout,
     native_uv: NativeUvAuthority,
-):
+) -> CommandResult:
     return run_command(
         _uv_executable(path_authority),
         "sync",
@@ -218,7 +218,7 @@ def _sync_environment(
     path_authority: StrictHostPathAuthority | None,
     preparation: ManagedPreparationPathLayout,
     native_uv: NativeUvAuthority,
-):
+) -> CommandResult:
     return run_command(
         _uv_executable(path_authority),
         "sync",

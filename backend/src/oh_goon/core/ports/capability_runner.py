@@ -63,7 +63,8 @@ class CapabilityExecutionRequest:
 class PreparedRunnerExecution(Protocol):
     """Bound non-durable execution resources owned until runner settlement."""
 
-    execution_input_id: str | None
+    @property
+    def execution_input_id(self) -> str | None: ...
 
     def execute(self, request: CapabilityExecutionRequest) -> OperationExecution: ...
 

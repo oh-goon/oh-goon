@@ -1,9 +1,12 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from starlette.types import ExceptionHandler
 
 from oh_goon import __version__
 from oh_goon.api.correlation import RequestCorrelationMiddleware
@@ -46,7 +49,7 @@ from oh_goon.runtime.local_launch_owner import record_backend_startup_complete_f
 
 
 @asynccontextmanager
-async def _lifespan(_app: FastAPI):
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     runtime = application()
     _app.state.diagnostics = runtime.diagnostics
     runtime.start_background()
@@ -76,9 +79,13 @@ def create_app(
         return Response(status_code=204)
 
     install_local_access_exchange(app, token=access_token)
-    app.add_exception_handler(HTTPException, http_exception_handler)
-    app.add_exception_handler(FleetDomainError, domain_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    # Starlette dispatches these callbacks only for their registered exception
+    # class, while its generic registration signature cannot express that pairing.
+    app.add_exception_handler(HTTPException, cast(ExceptionHandler, http_exception_handler))
+    app.add_exception_handler(FleetDomainError, cast(ExceptionHandler, domain_exception_handler))
+    app.add_exception_handler(
+        RequestValidationError, cast(ExceptionHandler, validation_exception_handler)
+    )
     app.add_exception_handler(Exception, unexpected_exception_handler)
     app.add_middleware(RequestCorrelationMiddleware)
     app.add_middleware(LocalAccessMiddleware, token=access_token)

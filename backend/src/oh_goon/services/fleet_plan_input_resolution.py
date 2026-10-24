@@ -4,7 +4,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import yaml
 
@@ -120,7 +120,7 @@ def _resolve_source(
                 f"Fleet input {input_name!r} YAML source {source.path}#{source.key} "
                 "must resolve to a scalar"
             )
-        return True, value, f"yaml:{source.path}#{source.key}", "selected"
+        return True, cast(PlanInputValue, value), f"yaml:{source.path}#{source.key}", "selected"
 
     if isinstance(source, TomlInputSource):
         repository = _require_repository(context, input_name=input_name, source="toml")
@@ -146,7 +146,7 @@ def _resolve_source(
                 f"Fleet input {input_name!r} TOML source {source.path}#{source.key} "
                 "must resolve to a scalar"
             )
-        return True, value, f"toml:{source.path}#{source.key}", "selected"
+        return True, cast(PlanInputValue, value), f"toml:{source.path}#{source.key}", "selected"
 
     if isinstance(source, TextInputSource):
         repository = _require_repository(context, input_name=input_name, source="text")

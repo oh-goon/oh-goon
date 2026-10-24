@@ -10,8 +10,11 @@ from oh_goon.core.models.fleet_plan_migration import GitLabResolvedComponent
 
 
 class GitLabHttpResponse(Protocol):
-    status_code: int
-    text: str
+    @property
+    def status_code(self) -> int: ...
+
+    @property
+    def text(self) -> str: ...
 
 
 class GitLabComponentTransport(Protocol):

@@ -170,7 +170,7 @@ class CapabilityDefinition:
             rerun_supported=self.rerun_supported,
             parallel_safe=self.parallel_safe,
             requires_uv_project=self.requires_uv_project,
-            requirements=list(self.requirements),
+            requirements=self.requirements,
             safety=self.safety,
             recipe=self.recipe,
             user_configurable=self.user_configurable,

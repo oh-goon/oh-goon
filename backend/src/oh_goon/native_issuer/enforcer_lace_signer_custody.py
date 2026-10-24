@@ -14,6 +14,7 @@ import re
 import stat
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import TypedDict
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
@@ -37,6 +38,19 @@ from oh_goon.core.enforcer_lace_trust import (
 SIGNER_POLICY_SCHEMA = "oh-goon/deployment-issuer-signers/v1"
 _NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\Z")
 _POLICY_FILE = "signers.json"
+
+
+class _SignerConfiguration(TypedDict):
+    issuer_id: str
+    key_id: str
+    private_key_file: str
+    public_key_hex: str
+    state: str
+
+
+class _SignerPolicy(TypedDict):
+    schema: str
+    issuers: dict[str, _SignerConfiguration]
 
 
 def _secure_file(info: os.stat_result, *, directory: bool) -> None:
@@ -93,10 +107,12 @@ def _read_leaf(root_fd: int, filename: str, *, limit: int) -> tuple[bytes, tuple
             os.close(fd)
 
 
-def _policy(root_fd: int, roots: Mapping[str, tuple[str, bytes]]) -> tuple[dict, tuple[int, ...]]:
+def _policy(
+    root_fd: int, roots: Mapping[str, tuple[str, bytes]]
+) -> tuple[_SignerPolicy, tuple[int, ...]]:
     raw, stamp = _read_leaf(root_fd, _POLICY_FILE, limit=16384)
     try:
-        policy = json.loads(raw)
+        policy: object = json.loads(raw)
     except (ValueError, UnicodeDecodeError) as exc:
         raise TrustProtocolError("invalid signer policy") from exc
     if (
@@ -112,6 +128,7 @@ def _policy(root_fd: int, roots: Mapping[str, tuple[str, bytes]]) -> tuple[dict,
     identities: set[str] = set()
     public_keys: set[str] = set()
     key_ids: set[str] = set()
+    configurations: dict[str, _SignerConfiguration] = {}
     for field in sorted(AUTHORITY_FIELDS):
         config = policy["issuers"][field]
         if not isinstance(config, dict) or set(config) != {
@@ -122,21 +139,25 @@ def _policy(root_fd: int, roots: Mapping[str, tuple[str, bytes]]) -> tuple[dict,
             "state",
         }:
             raise TrustProtocolError("incomplete signer policy")
-        issuer_id = config["issuer_id"]
-        key_id = config["key_id"]
-        filename = config["private_key_file"]
-        pub_hex = config["public_key_hex"]
+        issuer_id: object = config["issuer_id"]
+        key_id: object = config["key_id"]
+        filename: object = config["private_key_file"]
+        pub_hex: object = config["public_key_hex"]
+        state: object = config["state"]
         if (
-            not all(
-                isinstance(value, str) and _NAME.fullmatch(value)
-                for value in (issuer_id, key_id, filename)
-            )
+            not isinstance(issuer_id, str)
+            or not _NAME.fullmatch(issuer_id)
+            or not isinstance(key_id, str)
+            or not _NAME.fullmatch(key_id)
+            or not isinstance(filename, str)
+            or not _NAME.fullmatch(filename)
             or filename in {".", "..", _POLICY_FILE}
             or not isinstance(pub_hex, str)
             or len(pub_hex) != 64
             or pub_hex != pub_hex.lower()
             or any(c not in "0123456789abcdef" for c in pub_hex)
-            or config["state"] not in {"active", "revoked"}
+            or not isinstance(state, str)
+            or state not in {"active", "revoked"}
         ):
             raise TrustProtocolError("invalid deployment signer identity, key or state")
         root = roots[field]
@@ -152,6 +173,13 @@ def _policy(root_fd: int, roots: Mapping[str, tuple[str, bytes]]) -> tuple[dict,
         identities.add(issuer_id)
         public_keys.add(pub_hex)
         key_ids.add(key_id)
+        configurations[field] = {
+            "issuer_id": issuer_id,
+            "key_id": key_id,
+            "private_key_file": filename,
+            "public_key_hex": pub_hex,
+            "state": state,
+        }
     if (
         not all(
             len(values) == len(AUTHORITY_FIELDS) for values in (identities, public_keys, key_ids)
@@ -161,7 +189,7 @@ def _policy(root_fd: int, roots: Mapping[str, tuple[str, bytes]]) -> tuple[dict,
         raise TrustProtocolError("signer key identities and files must be independent")
     if canonical_bytes(policy) != raw:
         raise TrustProtocolError("signer policy must use canonical encoding")
-    return policy, stamp
+    return {"schema": SIGNER_POLICY_SCHEMA, "issuers": configurations}, stamp
 
 
 def issue_with_deployment_signer(

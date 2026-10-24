@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TypedDict, cast
 
 from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail, fleet_run_outcome
 from oh_goon.core.models.schedule import ScheduleFailure, ScheduleOccurrenceRepositoryRun
@@ -21,6 +22,16 @@ from oh_goon.core.vocabulary import (
     ScheduleFailureStage,
     ScheduleRepositoryRunStatus,
 )
+
+
+class _ScheduleRunFields(TypedDict):
+    schedule_run_id: str
+    schedule_id: str
+    intent: ScheduledFleetRunIntent
+    repository_runs: tuple[ScheduleOccurrenceRepositoryRun, ...]
+    record_version: int
+    attention: tuple[ScheduleAttention, ...]
+    started_at: datetime
 
 
 def begin_schedule_run(
@@ -161,7 +172,12 @@ def settle_if_complete(
             (item.failure for item in execution.repository_runs if item.failure is not None), None
         )
         return FailedScheduleRun(
-            status=ScheduleExecutionStatus.FAILED, **common, failure=first, finished_at=finished_at
+            status=ScheduleExecutionStatus.FAILED,
+            **common,
+            # Valid terminal failed/not-started rows require failure evidence;
+            # retain model validation as the owner of malformed-row rejection.
+            failure=cast(ScheduleFailure, first),
+            finished_at=finished_at,
         )
     if ScheduleRepositoryRunStatus.ATTENTION_REQUIRED in statuses:
         return AttentionRequiredScheduleRun(
@@ -189,8 +205,11 @@ def _running_with(
 
 
 def _shared(
-    execution: ScheduleRunRecord, *, repository_runs=None, attention=None
-) -> dict[str, object]:
+    execution: ScheduleRunRecord,
+    *,
+    repository_runs: tuple[ScheduleOccurrenceRepositoryRun, ...] | None = None,
+    attention: tuple[ScheduleAttention, ...] | None = None,
+) -> _ScheduleRunFields:
     return {
         "schedule_run_id": execution.schedule_run_id,
         "schedule_id": execution.schedule_id,

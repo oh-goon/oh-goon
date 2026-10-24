@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime
 
 from oh_goon.runtime.database import LocalDatabase
@@ -54,7 +55,7 @@ def _search_params(start_at: datetime, end_at: datetime, prefix: str) -> tuple[o
     )
 
 
-def _result(row) -> ScoutSearchResult:
+def _result(row: sqlite3.Row) -> ScoutSearchResult:
     return ScoutSearchResult(
         entity_kind=row["entity_kind"],
         key=row["key"],

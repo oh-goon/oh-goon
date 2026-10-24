@@ -544,7 +544,9 @@ class SQLiteExecutionLeaseStore:
         *,
         remove_dead: bool,
     ) -> sqlite3.Row | None:
-        row = connection.execute("SELECT * FROM execution_lease WHERE singleton = 1").fetchone()
+        row: sqlite3.Row | None = connection.execute(
+            "SELECT * FROM execution_lease WHERE singleton = 1"
+        ).fetchone()
         if row is None:
             return None
         owner_pid = int(row["owner_pid"])

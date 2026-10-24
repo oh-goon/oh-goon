@@ -8,6 +8,7 @@ issues no admission, and performs no execution or journal effects.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import math
@@ -53,7 +54,7 @@ def _decode_packet_member(raw: object) -> "FrozenSourceMember":
         raise FleetPlanInvalid("AG-02B2A source member exceeds bound")
     try:
         data = base64.b64decode(encoded, validate=True)
-    except (ValueError, base64.binascii.Error) as exc:
+    except (ValueError, binascii.Error) as exc:
         raise FleetPlanInvalid("AG-02B2A invalid source member encoding") from exc
     if base64.b64encode(data).decode("ascii") != encoded:
         raise FleetPlanInvalid("AG-02B2A noncanonical source member encoding")
@@ -268,7 +269,7 @@ class FrozenAgentStepHandoff:
             }
 
         source = self.source
-        step_payload = {
+        step_payload: dict[str, object] = {
             "owner_source_sha256": self.owner_source_sha256,
             "step_id": self.step_id,
             "harness": self.harness,

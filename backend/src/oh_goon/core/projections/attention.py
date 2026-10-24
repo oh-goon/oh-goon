@@ -39,8 +39,8 @@ def build_fleet_attention(context: FleetProjectionContext) -> FleetAttention:
                 reason_code=reason_code,
                 phase=semantics.phase,
                 risk=semantics.risk,
-                repositories=sorted(items, key=lambda item: item.repository.name.lower()),
+                repositories=tuple(sorted(items, key=lambda item: item.repository.name.lower())),
             )
         )
     projected.sort(key=lambda group: (risk_order[group.risk], group.reason_code.value))
-    return FleetAttention(healthy=healthy, groups=projected)
+    return FleetAttention(healthy=healthy, groups=tuple(projected))

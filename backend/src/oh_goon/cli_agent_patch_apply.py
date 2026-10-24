@@ -5,6 +5,7 @@ Use only from an explicitly write-authorized ordinary Fleet command Step.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
@@ -15,7 +16,7 @@ from oh_goon.integrations.agent_patch_apply import (
 )
 
 
-def run_selected_proposal(args) -> int:
+def run_selected_proposal(args: argparse.Namespace) -> int:
     """Consume one explicitly authored Step request via the original oh-goon CLI."""
     try:
         if getattr(args, "write_roots", None):

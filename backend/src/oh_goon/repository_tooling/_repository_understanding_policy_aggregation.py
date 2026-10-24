@@ -29,7 +29,7 @@ class AggregateResult:
     composite: float
     critical_dimension_failures: dict[str, dict[str, float]]
     grader_confidence: float
-    gate_failures: list[dict[str, Any]]
+    gate_failures: list[str]
     qualification: str
     mental_model_min_assertions: int
 
@@ -166,7 +166,7 @@ def _score_summary(
 def _qualification(
     *,
     state: EvaluationState,
-    qualification_gate: Callable[..., tuple[list[dict[str, Any]], str]],
+    qualification_gate: Callable[..., tuple[list[str], str]],
     composite: float,
     evidence_quality: float,
     consistency_score: float,
@@ -176,7 +176,7 @@ def _qualification(
     consistency_coverage_ok: bool,
     relationship_graph: dict[str, Any],
     critical_dimensions: dict[str, dict[str, float]],
-) -> tuple[list[dict[str, Any]], str]:
+) -> tuple[list[str], str]:
     return qualification_gate(
         profile=state.profile,
         composite=composite,
@@ -203,7 +203,7 @@ def aggregate(
     questions: list[dict[str, Any]],
     exam_snapshot: dict[str, Any],
     score_graph: Callable[..., dict[str, Any]],
-    qualification_gate: Callable[..., tuple[list[dict[str, Any]], str]],
+    qualification_gate: Callable[..., tuple[list[str], str]],
 ) -> AggregateResult:
     included = [item for item in state.question_results if item["included"]]
     evidence_quality = (

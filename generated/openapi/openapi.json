@@ -17652,6 +17652,7 @@
               "none",
               "timeout",
               "cancel",
+              "authority",
               "output_cleanup",
               "output_limit"
             ],

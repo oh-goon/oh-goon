@@ -6,7 +6,10 @@ from pathlib import Path
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import CapabilityUnavailable, OperationNotFound, StateConflict
-from oh_goon.core.models.effect_attempt import RepositoryEffectAttempt
+from oh_goon.core.models.effect_attempt import (
+    ClaimedRepositoryEffectAttempt,
+    RepositoryEffectAttempt,
+)
 from oh_goon.core.models.operation import OperationExecution, OperationReport
 from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.models.target import OperationTarget
@@ -100,7 +103,7 @@ class DirectEffectAdmission:
         intent: ResolvedCapabilityIntent,
         baseline: RepositoryStateFingerprint,
         operation_id: str,
-    ):
+    ) -> ClaimedRepositoryEffectAttempt:
         committed = self._journal.read_view_from_connection(connection).operation(operation_id)
         if committed is not None:
             _require_matching_direct_identity(committed, repository, intent.action, intent.target)

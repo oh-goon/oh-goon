@@ -25,7 +25,9 @@ from oh_goon.core.enforcer_lace_trust import (
     canonical_bytes,
 )
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.execution_environment import ResolvedExecutionEnvironment
 from oh_goon.core.models.run_admission import StrictFleetExecutionAdmission
+from oh_goon.core.models.run_events import RunAdmittedEvent
 from oh_goon.core.strict_executor_authority import EXECUTORS_FILE_ENV
 from oh_goon.integrations.fleet_plan_process_isolation import isolation_backend_evidence
 from oh_goon.native_issuer.enforcer_lace_captured_run_issuer import _read_original_admission
@@ -58,7 +60,7 @@ def _inventory_snapshot() -> tuple[Path, tuple[object, ...]]:
     except OSError as exc:
         raise TrustProtocolError("executor inventory is unavailable") from exc
 
-    def identity(item):
+    def identity(item: os.stat_result) -> tuple[int, ...]:
         return (
             item.st_dev,
             item.st_ino,
@@ -80,7 +82,7 @@ def _observe(
     *,
     control_state_root: Path | None,
     prework: PreworkRunCapture | None = None,
-):
+) -> tuple[RunAdmittedEvent, int, Path, tuple[object, ...], ResolvedExecutionEnvironment]:
     admitted, revision = (
         _read_original_admission(journal, run_id)
         if prework is None

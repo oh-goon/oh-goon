@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 from oh_goon.repository_tooling._self_certification_artifact_transitions import (
     _fresh_zip_projection,
@@ -24,8 +24,42 @@ from oh_goon.repository_tooling.self_certification_artifacts import (
     retained_artifact_directory,
 )
 
-Evidence = dict[str, Any] | None
+Evidence = dict[str, object] | None
 Unit = dict[str, object]
+
+
+class PackageChain(TypedDict):
+    units: list[Unit]
+    seal: Evidence
+    seal_identity: str
+    build_evidence: Evidence
+    identity_evidence: Evidence
+    fresh_evidence: Evidence
+    source_zip_sha256: str
+
+
+class RetentionChain(TypedDict):
+    units: list[Unit]
+    parent_spec: dict[str, object]
+    parent_ready: bool
+    patch_evidence: Evidence
+    replay_evidence: Evidence
+    manifest_evidence: Evidence
+    persist_evidence: Evidence
+    readback_evidence: Evidence
+
+
+class ArtifactProjection(TypedDict):
+    checkpoint_state: str
+    status: str
+    source_seal: dict[str, object]
+    required_inputs: list[dict[str, object]]
+    artifact_status: str
+    artifact: dict[str, object]
+
+
+class ArtifactPlanProjection(ArtifactProjection):
+    units: list[Unit]
 
 
 def _artifact_status(
@@ -86,7 +120,7 @@ def _source_package_chain(
     plan_identity: str,
     source_units: list[dict[str, object]],
     all_source_pass: bool,
-) -> dict[str, object]:
+) -> PackageChain:
     seal_unit, seal, seal_identity = _seal_projection(
         root,
         source_identity,
@@ -131,7 +165,7 @@ def _retention_chain(
     source_zip_sha256: str,
     fresh_evidence: Evidence,
     seal_identity: str,
-) -> dict[str, object]:
+) -> RetentionChain:
     patch_unit, patch_evidence, parent_spec, parent_input = _patch_projection(
         root, state_dir, source_zip_sha256, fresh_evidence
     )
@@ -260,9 +294,9 @@ def _projection_payload(
     source_identity: str,
     verification_config_identity: str,
     all_source_pass: bool,
-    package_chain: dict[str, object],
-    retention_chain: dict[str, object],
-) -> dict[str, object]:
+    package_chain: PackageChain,
+    retention_chain: RetentionChain,
+) -> ArtifactProjection:
     seal = package_chain["seal"]
     parent_ready = bool(retention_chain["parent_ready"])
     fresh_evidence = package_chain["fresh_evidence"]
@@ -320,7 +354,7 @@ def artifact_plan_projection(
     plan_identity: str,
     source_units: list[dict[str, object]],
     all_source_pass: bool,
-) -> dict[str, object]:
+) -> ArtifactPlanProjection:
     """Read already-recorded artifact evidence and derive the plan projection only."""
     package_chain = _source_package_chain(
         root,

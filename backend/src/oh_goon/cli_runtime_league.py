@@ -98,11 +98,11 @@ def _shared_plan_catalog_command(runtime: ApplicationRuntime, args: argparse.Nam
                 print(f"  {plan.plan_key}: sha256={plan.sha256} {last}{changed}")
         return 0
     if command == "templates":
-        catalog = runtime.shared_plan.templates()
+        template_catalog = runtime.shared_plan.templates()
         if args.as_json:
-            print(catalog.model_dump_json(indent=2))
+            print(template_catalog.model_dump_json(indent=2))
         else:
-            for template in catalog.templates:
+            for template in template_catalog.templates:
                 print(f"  {template.template_key}")
                 print(f"    path: {template.template_path}")
                 print(f"    {template.description}")
@@ -126,15 +126,15 @@ def _shared_plan_catalog_command(runtime: ApplicationRuntime, args: argparse.Nam
                 )
         return 0
     if command == "from-template":
-        catalog = runtime.shared_plan.templates()
-        template = next(
-            (item for item in catalog.templates if item.template_key == args.template_key),
+        template_catalog = runtime.shared_plan.templates()
+        selected_template = next(
+            (item for item in template_catalog.templates if item.template_key == args.template_key),
             None,
         )
-        if template is None:
+        if selected_template is None:
             raise ValueError(f"Unknown Plan template: {args.template_key}")
         document = runtime.shared_plan.create_from_template(
-            args.template_key, template.sha256, plan_key=args.plan_key
+            args.template_key, selected_template.sha256, plan_key=args.plan_key
         )
         print(f"Saved: {document.plan_key}/plan.yml")
         print(f"SHA-256: {document.sha256}")

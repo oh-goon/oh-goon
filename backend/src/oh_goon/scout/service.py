@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 from threading import Lock
 
 from oh_goon.core.errors import InvalidRequest, OperationNotFound
@@ -339,7 +339,7 @@ def _health_from_store(store: ScoutObservationStore, *, journal_revision: int) -
     )
 
 
-def _maintain_retention(store: ScoutObservationStore, *, now) -> None:
+def _maintain_retention(store: ScoutObservationStore, *, now: datetime) -> None:
     store.prune_if_due(
         now=now,
         run_retain_after=now - timedelta(days=SCOUT_RUN_RETENTION_DAYS),

@@ -19,7 +19,7 @@ from oh_goon.core.path_authority import (
 from oh_goon.core.path_layouts import ManagedPreparationPathLayout
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary import WorktreeState
-from oh_goon.engine.command import run_command
+from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.git import GitService
 from oh_goon.engine.native_git_environment import capture_native_git_authority
 from oh_goon.engine.native_uv_environment import NativeUvAuthority, capture_native_uv_authority
@@ -304,7 +304,7 @@ def _check_environment(
     native_uv: NativeUvAuthority,
     *,
     timeout: float,
-):
+) -> CommandResult:
     return run_command(
         _uv_executable(path_authority),
         "sync",
@@ -325,7 +325,7 @@ def _sync_environment(
     path_authority: StrictHostPathAuthority | None,
     preparation: ManagedPreparationPathLayout,
     native_uv: NativeUvAuthority,
-):
+) -> CommandResult:
     return run_command(
         _uv_executable(path_authority),
         "sync",
@@ -388,7 +388,7 @@ def _canonical_source(source: str, catalog_root: Path) -> str:
         return source
     return str(
         RepositoryPathSpace.from_root(catalog_root).resolve(
-            source, label="local extension source", kind="dir", require_exists=True
+            source, label="local extension source", kind="directory", require_exists=True
         )
     )
 

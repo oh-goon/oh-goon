@@ -17,17 +17,22 @@ from oh_goon.cli_plan_inputs import plan_inputs
 from oh_goon.cli_plan_run_readback import run_plan_readback
 from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
 from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
-from oh_goon.core.models.agent_repair import AgentRepairBudget
+from oh_goon.core.models.agent_repair import AgentRepairBudget, AgentRepairResult
+from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
     FailedPlanStepTeardownEvidence,
+    PlanStepExecution,
 )
+from oh_goon.core.models.game_tape import GameTapeStepExecution
 from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
-from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail
+from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail, FleetRunState
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.projections.agent_campaign import project_agent_campaign
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.services.fleet_plan_resolution_context import AgentConnectionSelection
+from oh_goon.services.run_configuration import NormalizedRunConfiguration
 
 PlanHandler = Callable[[ApplicationRuntime, argparse.Namespace], int]
 
@@ -130,9 +135,8 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             if review:
                 review_options = dict(review_write_roots=tuple(args.repair_write_root))
                 if native is not None:
-                    review_options.update(
-                        native_agent=native, native_workspace=args.native_workspace
-                    )
+                    review_options["native_agent"] = native
+                    review_options["native_workspace"] = args.native_workspace
                 else:
                     review_options["agent_connection"] = agent_connection_from_args(args)
             elif native is not None:
@@ -176,7 +180,9 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             allowed_agent_acceptance=tuple(args.allow_agent_acceptance or ()),
             **native_options,
         )
-        plan_id = admitted.target.plan.plan_id if admitted.target is not None else None
+        plan_id = (
+            admitted.target.plan.plan_id if isinstance(admitted.target, FleetPlanTarget) else None
+        )
         if not args.wait:
             if as_json:
                 print(
@@ -261,7 +267,9 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             json.dumps(
                 _run_result(
                     fleet_run_id=admitted.fleet_run_id,
-                    plan_id=admitted.target.plan.plan_id if admitted.target is not None else None,
+                    plan_id=admitted.target.plan.plan_id
+                    if isinstance(admitted.target, FleetPlanTarget)
+                    else None,
                     status=detail.run.status.value,
                     outcome=detail.outcome.value,
                 ),
@@ -279,7 +287,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 
 
 def _selected_repair_budget(args: argparse.Namespace) -> AgentRepairBudget | None:
-    selected = getattr(args, "_run_configuration", None)
+    selected: NormalizedRunConfiguration | None = getattr(args, "_run_configuration", None)
     if selected is None or selected.snapshot.selection.repair is None:
         return None
     if not getattr(args, "authorize_repair", False):
@@ -287,8 +295,15 @@ def _selected_repair_budget(args: argparse.Namespace) -> AgentRepairBudget | Non
     return selected.snapshot.selection.repair.budget()
 
 
-def _print_agent_repair_result(result, *, as_json: bool, campaign: bool = False) -> int:
-    receipt = {
+def _print_agent_repair_result(
+    result: AgentRepairResult, *, as_json: bool, campaign: bool = False
+) -> int:
+    campaign_projection = (
+        project_agent_campaign(result.repair_id, result.attempts, invocation=result)
+        if campaign
+        else None
+    )
+    receipt: dict[str, object] = {
         "schema": "oh-goon.agent-repair-result/v1",
         "repair_id": result.repair_id,
         "stop_reason": result.stop_reason.value,
@@ -304,25 +319,29 @@ def _print_agent_repair_result(result, *, as_json: bool, campaign: bool = False)
                 "status": detail.run.status.value,
                 "outcome": detail.outcome.value,
                 "game_tape_status": detail.game_tape.status.value,
-                "execution_digest": detail.run.target.execution_digest,
+                "execution_digest": (
+                    detail.run.target.execution_digest
+                    if isinstance(detail.run.target, FleetPlanTarget)
+                    else None
+                ),
             }
             for detail in result.attempts
         ],
     }
-    if campaign:
-        receipt["campaign"] = project_agent_campaign(
-            result.repair_id, result.attempts, invocation=result
-        )
+    if campaign_projection is not None:
+        receipt["campaign"] = campaign_projection
     if as_json:
         print(json.dumps(receipt, sort_keys=True))
     else:
         print(f"Repair: {result.repair_id}")
         print(f"Stop reason: {result.stop_reason.value}")
-        if campaign:
-            print(f"Campaign result: {receipt['campaign']['result']}")
+        if campaign_projection is not None:
+            print(f"Campaign result: {campaign_projection['result']}")
             print(f"Inspect retained evidence: oh-goon plan campaign {result.repair_id} --json")
-        for attempt in receipt["attempts"]:
-            print(f"Run {attempt['fleet_run_id']}: {attempt['status']} / {attempt['outcome']}")
+        for attempt in result.attempts:
+            print(
+                f"Run {attempt.run.fleet_run_id}: {attempt.run.status.value} / {attempt.outcome.value}"
+            )
     return (
         0
         if result.test_passed or result.converged
@@ -406,10 +425,12 @@ def _format_progress_elapsed(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
-def _plan_step_owner_labels(detail) -> dict[str, tuple[int, int, str]]:
-    run = getattr(detail, "run", detail)
-    target = getattr(run, "target", None)
-    plan = target.plan if target is not None and hasattr(target, "plan") else None
+def _plan_step_owner_labels(
+    detail: FleetRunDetail | FleetRunState,
+) -> dict[str, tuple[int, int, str]]:
+    run = detail.run if isinstance(detail, FleetRunDetail) else detail
+    target = run.target
+    plan = target.plan if isinstance(target, FleetPlanTarget) else None
     if plan is None:
         return {}
     total = len(plan.imports)
@@ -510,7 +531,7 @@ def _wait_for_terminal_with_progress(
     runtime: ApplicationRuntime,
     fleet_run_id: str,
     *,
-    admitted_run=None,
+    admitted_run: FleetRunState | None = None,
 ) -> FleetRunDetail:
     """Wait for terminal ownership without polling SQLite while the worker is active."""
 
@@ -600,7 +621,7 @@ def _repair_output_tail(
     return tuple(lines), truncated
 
 
-def _game_tape_failed_step(detail: FleetRunDetail):
+def _game_tape_failed_step(detail: FleetRunDetail) -> GameTapeStepExecution | None:
     """Best durable fallback when direct operation evidence is incomplete."""
 
     try:
@@ -614,7 +635,9 @@ def _game_tape_failed_step(detail: FleetRunDetail):
     return None
 
 
-def _repair_failed_steps(detail: FleetRunDetail):
+def _repair_failed_steps(
+    detail: FleetRunDetail,
+) -> tuple[FailedPlanStepExecution | None, PlanStepExecution | None]:
     failed_step = None
     teardown_step = None
     for report in detail.operations:
@@ -638,12 +661,12 @@ def _repair_failed_steps(detail: FleetRunDetail):
     return failed_step, teardown_step
 
 
-def _repair_plan(detail: FleetRunDetail):
+def _repair_plan(detail: FleetRunDetail) -> ResolvedFleetPlan | None:
     target = detail.run.target
-    return target.plan if target is not None and hasattr(target, "plan") else None
+    return target.plan if isinstance(target, FleetPlanTarget) else None
 
 
-def _print_repair_run_header(detail: FleetRunDetail, plan) -> None:
+def _print_repair_run_header(detail: FleetRunDetail, plan: ResolvedFleetPlan | None) -> None:
     run = detail.run
     print("\nCERTIFICATION PLAN FAILED")
     print(f"Fleet Run ID: {run.fleet_run_id}")
@@ -661,7 +684,7 @@ def _print_incomplete_repair_handoff(run_id: str) -> None:
     print(f"Inspect evidence: make certification-explain OH_GOON_RUN_ID={run_id}")
 
 
-def _repair_step_owner(plan, step_id: str):
+def _repair_step_owner(plan: ResolvedFleetPlan | None, step_id: str) -> tuple[str, int | None]:
     if plan is None:
         return "unknown", None
     owner = next((item for item in plan.imports if step_id in item.step_ids), None)
@@ -674,16 +697,24 @@ def _repair_step_owner(plan, step_id: str):
     return owner.name, index
 
 
-def _repair_step_details(plan, failed_step, teardown_step, projected_step):
+def _repair_step_details(
+    plan: ResolvedFleetPlan | None,
+    failed_step: FailedPlanStepExecution | None,
+    teardown_step: PlanStepExecution | None,
+    projected_step: GameTapeStepExecution | None,
+) -> tuple[str, str, str, str, int | None, FailedPlanStepTeardownEvidence | None]:
     durable_step = failed_step if failed_step is not None else teardown_step
-    step_id = durable_step.step_id if durable_step is not None else projected_step.step_id
+    if durable_step is None:
+        assert projected_step is not None
+        step_id, argv, exit_code = (
+            projected_step.step_id,
+            projected_step.command,
+            projected_step.exit_code,
+        )
+    else:
+        step_id, argv = durable_step.step_id, durable_step.argv
+        exit_code = getattr(durable_step, "returncode", None)
     goon_name, goon_index = _repair_step_owner(plan, step_id)
-    argv = durable_step.argv if durable_step is not None else projected_step.command
-    exit_code = (
-        getattr(durable_step, "returncode", None)
-        if durable_step is not None
-        else projected_step.exit_code
-    )
     teardown_failure = (
         durable_step.teardown
         if durable_step is not None
@@ -702,9 +733,9 @@ def _print_repair_step_failure(
     goon_name: str,
     ordinal: str,
     command: str,
-    exit_code,
-    teardown_failure,
-    failed_step,
+    exit_code: int | None,
+    teardown_failure: FailedPlanStepTeardownEvidence | None,
+    failed_step: FailedPlanStepExecution | None,
 ) -> None:
     print(f"Goon: {ordinal} — {goon_name}")
     print(f"Step: {step_id}")
@@ -724,7 +755,7 @@ def _print_repair_live_output(
     *,
     run_id: str,
     step_id: str,
-    teardown_failure,
+    teardown_failure: FailedPlanStepTeardownEvidence | None,
 ) -> None:
     if teardown_failure is not None:
         return

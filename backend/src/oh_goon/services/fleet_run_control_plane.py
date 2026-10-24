@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oh_goon.services.fleet_local_lace_takeover import OriginalLocalLaceTakeoverCoordinator
+
 from datetime import datetime
 from typing import Any
 
@@ -119,7 +124,11 @@ class FleetRunControlPlane:
         )
 
     def resume_local_lace_takeover(
-        self, ticket: ExecutionTicket, coordinator, *, intent_run_seq: int
+        self,
+        ticket: ExecutionTicket,
+        coordinator: OriginalLocalLaceTakeoverCoordinator,
+        *,
+        intent_run_seq: int,
     ) -> tuple[int, int]:
         """Delegate explicit worker recovery; this does NOT mint a takeover ticket.
 

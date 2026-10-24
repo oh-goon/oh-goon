@@ -17,6 +17,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PresentPlanArtifact,
     PublishedPlanOutputEvidence,
 )
+from oh_goon.core.models.fleet_plan_step_primitives import PlanArtifactDeclaration
 from oh_goon.core.product_identity import stable_id
 from oh_goon.integrations._fleet_plan_step_dataflow import (
     collect_published_outputs,
@@ -211,7 +212,7 @@ def _published_outputs(
 
 def collect_direct_artifacts(
     repository: Path,
-    declarations,
+    declarations: tuple[PlanArtifactDeclaration, ...],
 ) -> tuple[PlanArtifactEvidence, ...]:
     """Collect direct-run artifacts; retained content is strict-only by contract."""
 
@@ -224,7 +225,7 @@ def collect_direct_artifacts(
 
 def collect_strict_artifacts(
     repository: Path,
-    declarations,
+    declarations: tuple[PlanArtifactDeclaration, ...],
     prepared_run: PreparedPlanRun,
 ) -> tuple[PlanArtifactEvidence, ...]:
     """Collect strict-run artifacts and retain explicitly declared file objects."""
@@ -248,7 +249,7 @@ def collect_strict_artifacts(
 
 def _collect_artifacts(
     repository: Path,
-    declarations,
+    declarations: tuple[PlanArtifactDeclaration, ...],
     *,
     retain_file: Callable[[Path, str], PlanRetainedContentEvidence] | None,
 ) -> tuple[PlanArtifactEvidence, ...]:

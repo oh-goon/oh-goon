@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -184,7 +184,7 @@ def _parse_component(
     }
     if re.fullmatch(r"[0-9a-fA-F]{40}", metadata.revision):
         context["sha"] = metadata.revision.lower()
-    return _interpolate_component(body, bindings, context, metadata.reference)
+    return cast(dict[str, Any], _interpolate_component(body, bindings, context, metadata.reference))
 
 
 def _component_input_bindings(

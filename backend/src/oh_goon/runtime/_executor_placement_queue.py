@@ -5,6 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from oh_goon.core.errors import (
     ExecutorAdmissionCancelled,
@@ -107,7 +108,9 @@ class ExecutorPlacementQueue:
                     ),
                 )
                 return PlacementQueueTicket(
-                    fleet_run_id=fleet_run_id, sequence=int(cursor.lastrowid)
+                    # The completed INSERT into this rowid table owns the sequence.
+                    fleet_run_id=fleet_run_id,
+                    sequence=int(cast(int, cursor.lastrowid)),
                 )
         except BaseException:
             replay = self._replay_enter(fleet_run_id, identity, requested_priority)
@@ -147,8 +150,9 @@ class ExecutorPlacementQueue:
                     int(row["sequence"]),
                 ),
             )
-            row = self._row_for_run(connection, fleet_run_id)
-            assert row is not None
+            reclaimed_row = self._row_for_run(connection, fleet_run_id)
+            assert reclaimed_row is not None
+            row = reclaimed_row
         self._reclaim_dead_in(connection, except_run_id=fleet_run_id)
         return self._ticket(row)
 
@@ -326,20 +330,22 @@ class ExecutorPlacementQueue:
         ).fetchone()
         if row is None:
             return None
-        return SchedulingEnvelope(
-            scheduling_scope_id=str(row["scheduling_scope_id"]),
-            admission_domain_id=str(row["admission_domain_id"]),
-            run_id=str(row["fleet_run_id"]),
-            requested_priority=SchedulingPriority(str(row["requested_priority"])),
-            admitted_priority=SchedulingPriority(str(row["admitted_priority"])),
-            priority_scope=PriorityScope(str(row["priority_scope"])),
-            priority_decision_reason=str(row["priority_decision_reason"]),
-            queue_seq=int(row["queue_seq"]),
-            scheduling_revision=int(row["scheduling_revision"]),
-            scheduling_policy_revision=str(row["scheduling_policy_revision"]),
-            priority_policy_revision=str(row["priority_policy_revision"]),
-            created_at=str(row["created_at"]),
-            admitted_at=str(row["admitted_at"]),
+        return SchedulingEnvelope.model_validate(
+            {
+                "scheduling_scope_id": str(row["scheduling_scope_id"]),
+                "admission_domain_id": str(row["admission_domain_id"]),
+                "run_id": str(row["fleet_run_id"]),
+                "requested_priority": SchedulingPriority(str(row["requested_priority"])),
+                "admitted_priority": SchedulingPriority(str(row["admitted_priority"])),
+                "priority_scope": PriorityScope(str(row["priority_scope"])),
+                "priority_decision_reason": str(row["priority_decision_reason"]),
+                "queue_seq": int(row["queue_seq"]),
+                "scheduling_revision": int(row["scheduling_revision"]),
+                "scheduling_policy_revision": str(row["scheduling_policy_revision"]),
+                "priority_policy_revision": str(row["priority_policy_revision"]),
+                "created_at": str(row["created_at"]),
+                "admitted_at": str(row["admitted_at"]),
+            }
         )
 
     def leave(self, ticket: PlacementQueueTicket) -> None:
@@ -386,10 +392,11 @@ class ExecutorPlacementQueue:
 
     @staticmethod
     def _row_for_run(connection: sqlite3.Connection, fleet_run_id: str) -> sqlite3.Row | None:
-        return connection.execute(
+        row: sqlite3.Row | None = connection.execute(
             "SELECT * FROM executor_placement_queue WHERE fleet_run_id = ?",
             (fleet_run_id,),
         ).fetchone()
+        return row
 
     def _require_ticket(
         self,
@@ -425,10 +432,10 @@ class ExecutorPlacementQueue:
             "priority_policy_revision": str(row["priority_policy_revision"]),
         }
         if bool(row["cancellation_requested"]):
-            return CancellationRequestedPlacementQueueEntry(
-                state="cancellation_requested", **common
+            return CancellationRequestedPlacementQueueEntry.model_validate(
+                {"state": "cancellation_requested", **common}
             )
-        return WaitingPlacementQueueEntry(state="waiting", **common)
+        return WaitingPlacementQueueEntry.model_validate({"state": "waiting", **common})
 
     @staticmethod
     def _ticket(row: sqlite3.Row) -> PlacementQueueTicket:

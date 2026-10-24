@@ -138,8 +138,14 @@ def _resumable_pass(
     identity = payload.pop("evidence_identity", None)
     if identity != _identity(payload):
         return False
-    return payload == _resume_payload(
-        plan=plan, context=context, execution_policy_identity=execution_policy_identity, shard=shard
+    return bool(
+        payload
+        == _resume_payload(
+            plan=plan,
+            context=context,
+            execution_policy_identity=execution_policy_identity,
+            shard=shard,
+        )
     )
 
 

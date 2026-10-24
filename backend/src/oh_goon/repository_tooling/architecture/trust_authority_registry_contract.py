@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
+from typing import Any
 
 from oh_goon.repository_tooling.architecture.common import Violation
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
@@ -60,6 +61,8 @@ def _assignment(tree: ast.Module, key: str) -> object:
     if len(assignments) != 1:
         raise ValueError(f"source authority constant {key} missing or duplicated")
     expr = assignments[0]
+    if expr is None:
+        raise ValueError(f"source authority constant {key} has no value")
     if (
         isinstance(expr, ast.Call)
         and isinstance(expr.func, ast.Name)
@@ -147,6 +150,16 @@ def check_trust_authority_registry(root: Path = ROOT) -> list[Violation]:
         actual_domains = _assignment(_source_tree(root, receipts["source"]), "RECEIPT_DOMAINS")
         actual_protocol = _assignment(_source_tree(root, issuer["source"]), "ISSUER_PROTOCOL")
         actual_issuer_domain = _assignment(_source_tree(root, issuer["source"]), "SIGNATURE_DOMAIN")
+        if not isinstance(actual_claims, frozenset) or not all(
+            isinstance(claim, str) for claim in actual_claims
+        ):
+            raise ValueError("AUTHORITY_FIELDS must declare a frozen set of names")
+        if not isinstance(actual_domains, frozenset) or not all(
+            isinstance(domain, str) for domain in actual_domains
+        ):
+            raise ValueError("RECEIPT_DOMAINS must declare a frozen set of names")
+        if not isinstance(actual_issuer_domain, bytes):
+            raise ValueError("SIGNATURE_DOMAIN must declare bytes")
         if set(issuer.get("claims", {})) != set(actual_claims) or any(
             state != "UNREVIEWED" for state in issuer["claims"].values()
         ):
@@ -263,7 +276,7 @@ def render_trust_census(root: Path = ROOT) -> str:
     return _render_from_registry(payload, render_custody_census(root))
 
 
-def _render_from_registry(payload: dict, custody_section: str) -> str:
+def _render_from_registry(payload: dict[str, Any], custody_section: str) -> str:
     a = payload["families"]["admission_issuer_evidence"]
     b = payload["families"]["control_plane_receipts"]
     rows = [

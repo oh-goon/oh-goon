@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -57,7 +57,22 @@ GENESIS = digest("oh-goon/run-journal-genesis/v1", b"")
 _LOCAL_RESOURCE_KEYS = frozenset({"workspace", "runtime", "network", "cgroup", "mounts"})
 
 
-def _require_digest(value: str, *, name: str) -> None:
+_T = TypeVar("_T")
+
+
+def _native_subnet_of(requested: str, admitted: str) -> bool:
+    from ipaddress import IPv4Network, IPv6Network, ip_network
+
+    child, parent = ip_network(requested), ip_network(admitted)
+    if isinstance(child, IPv4Network) and isinstance(parent, IPv4Network):
+        return child.subnet_of(parent)
+    if isinstance(child, IPv6Network) and isinstance(parent, IPv6Network):
+        return child.subnet_of(parent)
+    # Preserve the native ipaddress refusal for mixed address families.
+    raise TypeError("network versions differ")
+
+
+def _require_digest(value: object, *, name: str) -> None:
     if (
         type(value) is not str
         or not value.startswith("sha256:")
@@ -72,7 +87,7 @@ def _require_original_resource_intent_step_order(
     step_id: str,
     attempt_identity: str,
     step_envelope: object,
-    original_events: list[dict[str, Any]],
+    original_events: Sequence[dict[str, Any]],
 ) -> None:
     """One original pre-effect transition check for every workload kind.
 
@@ -108,7 +123,6 @@ def _independently_scoped_agent_effects(
     CIDR destinations/ports must be contained; named destinations must match
     by exact name/protocol with subset ports. Cross-mode upgrades fail.
     """
-    from ipaddress import ip_network
 
     from pydantic import ValidationError
 
@@ -140,25 +154,37 @@ def _independently_scoped_agent_effects(
             raise ValueError("tool outside independent limits")
         demand_egress, admitted_egress = request.capabilities.egress, ceiling.capabilities.egress
         if demand_egress.mode != "none":
+            from oh_goon.core.models.fleet_plan_step_contract import (
+                CidrAllowlistPlanEgress,
+                HostnameAllowlistPlanEgress,
+            )
+
             if demand_egress.mode != admitted_egress.mode:
                 raise ValueError("egress mode outside independent limits")
-            for rule in demand_egress.rules:
-                if demand_egress.mode == "cidr_allowlist":
+            if isinstance(demand_egress, CidrAllowlistPlanEgress):
+                assert isinstance(admitted_egress, CidrAllowlistPlanEgress)
+                for rule in demand_egress.rules:
                     accepted = any(
                         rule.protocol == allow.protocol
-                        and ip_network(rule.cidr).subnet_of(ip_network(allow.cidr))
+                        and _native_subnet_of(rule.cidr, allow.cidr)
                         and set(rule.ports).issubset(allow.ports)
                         for allow in admitted_egress.rules
                     )
-                else:
+                    if not accepted:
+                        raise ValueError("egress destination outside independent limits")
+            elif isinstance(demand_egress, HostnameAllowlistPlanEgress):
+                assert isinstance(admitted_egress, HostnameAllowlistPlanEgress)
+                for host_rule in demand_egress.rules:
                     accepted = any(
-                        rule.hostname == allow.hostname
-                        and rule.protocol == allow.protocol
-                        and set(rule.ports).issubset(allow.ports)
-                        for allow in admitted_egress.rules
+                        host_rule.hostname == host_allow.hostname
+                        and host_rule.protocol == host_allow.protocol
+                        and set(host_rule.ports).issubset(host_allow.ports)
+                        for host_allow in admitted_egress.rules
                     )
-                if not accepted:
-                    raise ValueError("egress destination outside independent limits")
+                    if not accepted:
+                        raise ValueError("egress destination outside independent limits")
+            else:
+                raise ValueError("unrestricted Agent egress is unsupported")
     except (ValueError, ValidationError, TypeError, AttributeError) as exc:
         raise CausalJournalError(
             "Agent request exceeds original independently signed effect limits"
@@ -199,7 +225,7 @@ class CausalRunJournal:
         """Explicit opt-in, never initialized by production startup in M148."""
         self.connection.executescript(SCHEMA)
 
-    def _transaction(self, action: Callable[[], Any]) -> Any:
+    def _transaction(self, action: Callable[[], _T]) -> _T:
         """DB1B2: standalone pre-live transactions are not production authority.
 
         The historical raw SQLite fixture implementation lives only under
@@ -236,9 +262,9 @@ class CausalRunJournal:
         *,
         control_epoch: int,
         lease_identity: str,
-        operational_admission: Callable[[sqlite3.Connection], Any],
+        operational_admission: Callable[[sqlite3.Connection], _T],
         before_commit: Callable[[], None] | None = None,
-    ) -> Any:
+    ) -> _T:
         """Atomically publish legacy operational authority and the causal Run cut.
 
         A single SQLite connection and BEGIN IMMEDIATE own the operational lease,
@@ -273,9 +299,9 @@ class CausalRunJournal:
         *,
         control_epoch: int,
         lease_identity: str,
-        operational_admission: Callable[[sqlite3.Connection], Any],
+        operational_admission: Callable[[sqlite3.Connection], _T],
         before_commit: Callable[[], None] | None = None,
-    ) -> Any:
+    ) -> _T:
         """M169: publish in the **original caller-owned** write transaction.
 
         Used by the Fleet execution reservation owner after it acquires the
@@ -338,7 +364,7 @@ class CausalRunJournal:
         ).fetchone()
         if row is None:
             raise CausalJournalError("unknown or unpublished Run")
-        return row
+        return cast(sqlite3.Row, row)
 
     def _check_fence(self, row: sqlite3.Row, *, epoch: int, lease_identity: str) -> None:
         if (
@@ -353,7 +379,7 @@ class CausalRunJournal:
 
     def _append_locked(self, run_id: str, kind: str, payload: dict[str, Any]) -> int:
         row = self._row(run_id)
-        seq = row[3] + 1
+        seq = cast(int, row[3]) + 1
         encoded = canonical_bytes(payload)
         identity = _event_identity(run_id, seq, kind, encoded, row[4])
         self.connection.execute(
@@ -2131,7 +2157,7 @@ class CausalRunJournal:
             if not r or any(v is None for v in r):
                 raise CausalJournalError("missing terminal receipt")
             if row[5] == "UNRESOLVED":
-                expected = {
+                expected_closure = {
                     "protocol": PROTOCOL_VERSION,
                     "run_id": run_id,
                     "contract_identity": row[0],
@@ -2144,7 +2170,7 @@ class CausalRunJournal:
             else:
                 if not events or events[-1][1] != "RUN_OUTCOME":
                     raise CausalJournalError("missing terminal Run outcome")
-                expected = {
+                expected_closure = {
                     "protocol": PROTOCOL_VERSION,
                     "run_id": run_id,
                     "contract_identity": row[0],
@@ -2153,8 +2179,10 @@ class CausalRunJournal:
                     "outcome": json.loads(events[-1][2])["outcome"],
                 }
                 domain = "terminal"
-            signed = auth.verify(AuthenticatedReceipt(r[3], r[2], r[0], r[1]), domain=domain)
-            if signed != expected:
+            verified_closure = auth.verify(
+                AuthenticatedReceipt(r[3], r[2], r[0], r[1]), domain=domain
+            )
+            if verified_closure != expected_closure:
                 raise CausalJournalError("authenticated closure and causal history disagree")
         return tuple(
             {"run_seq": n, "kind": k, "payload": json.loads(p)} for n, k, p, _, _ in events

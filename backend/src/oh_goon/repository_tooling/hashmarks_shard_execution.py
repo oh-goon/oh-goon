@@ -7,18 +7,22 @@ import json
 import os
 import platform
 import sys
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from oh_goon.integrations.hashmarks.verification_selection import (
     load_hashmarks_verification_selection,
 )
 from oh_goon.repository_tooling.hashmarks_verification_execution import (
+    HashmarksVerificationExecutionReceipt,
     VerificationExecutionGroupingPolicy,
     build_verification_execution_plan,
     build_verification_execution_receipt,
 )
 from oh_goon.runtime.execution.shards import (
     ShardExecutionContext,
+    ShardExecutionReport,
+    ShardResult,
     ShardRetryPolicy,
     execute_shard_plan,
 )
@@ -69,7 +73,7 @@ def _default_environment_identity() -> str:
     )
 
 
-def _iter_results(results):
+def _iter_results(results: Iterable[ShardResult]) -> Iterator[ShardResult]:
     for result in results:
         yield result
         yield from _iter_results(result.children)
@@ -118,7 +122,9 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _execute(args: argparse.Namespace):
+def _execute(
+    args: argparse.Namespace,
+) -> tuple[HashmarksVerificationExecutionReceipt, ShardExecutionReport]:
     selection = load_hashmarks_verification_selection(
         args.contract,
         args.envelope,
@@ -160,7 +166,9 @@ def _execute(args: argparse.Namespace):
     return build_verification_execution_receipt(selection, report), report
 
 
-def _publish_receipt(args: argparse.Namespace, receipt) -> None:
+def _publish_receipt(
+    args: argparse.Namespace, receipt: HashmarksVerificationExecutionReceipt
+) -> None:
     rendered = receipt.to_json()
     if args.report_path is not None:
         args.report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -182,7 +190,7 @@ def _publish_receipt(args: argparse.Namespace, receipt) -> None:
     print(f"Receipt: {receipt.receipt_identity}")
 
 
-def _exit_code(receipt, report) -> int:
+def _exit_code(receipt: HashmarksVerificationExecutionReceipt, report: ShardExecutionReport) -> int:
     if receipt.terminal_success:
         return 0
     blocked = {"TIMEOUT", "SUITE_TIMEOUT", "ENVIRONMENT_BLOCKED", "DEADLINE_RESERVED"}

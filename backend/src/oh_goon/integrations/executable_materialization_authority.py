@@ -116,29 +116,29 @@ def logical_step_execution_authority(
         if script is None:
             return LogicalStepExecutionAuthority()
         package_dir = _step_working_directory(root, step)
-        authority = derive_npm_run_authority(
+        npm_authority = derive_npm_run_authority(
             root,
             script,
             chain=(f"step:{step.step_id}", f"npm run {script}"),
             package_dir=package_dir,
         )
-        _require_resolved(step, authority.unresolved, f"npm run {script}")
+        _require_resolved(step, npm_authority.unresolved, f"npm run {script}")
         return LogicalStepExecutionAuthority(
             source_identities=tuple(
-                (relative, _sha256_file(root / relative)[0]) for relative in authority.sources
+                (relative, _sha256_file(root / relative)[0]) for relative in npm_authority.sources
             ),
-            package_executables=authority.package_executables,
+            package_executables=npm_authority.package_executables,
         )
     if step.argv and step.argv[0] in _SHELL_EXECUTABLES:
-        authority = derive_shell_fragment_authority(
+        shell_authority = derive_shell_fragment_authority(
             root,
             shlex.join(step.argv),
             chain=(f"step:{step.step_id}",),
             working_directory=step.working_directory,
         )
-        _require_resolved(step, authority.unresolved, "explicit shell command")
+        _require_resolved(step, shell_authority.unresolved, "explicit shell command")
         return LogicalStepExecutionAuthority(
-            materialized_executables=authority.materialized_executables,
+            materialized_executables=shell_authority.materialized_executables,
         )
     materialized = (
         materialized_executable_identity(
@@ -231,8 +231,8 @@ def verify_step_executable_materialization(
                 f"{receipt.direct_workspace_executable.relative_path}"
             )
     for package in receipt.package_executables:
-        observed = _bind_package_executable(workspace, package.authority)
-        if observed != package:
+        observed_package = _bind_package_executable(workspace, package.authority)
+        if observed_package != package:
             raise FleetPlanInvalid(
                 "Package-local executable changed after materialization binding: "
                 f"{package.authority.bin_name}"

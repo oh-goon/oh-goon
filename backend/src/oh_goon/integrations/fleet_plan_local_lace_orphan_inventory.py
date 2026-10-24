@@ -10,6 +10,7 @@ import json
 import os
 import stat
 from pathlib import Path
+from typing import cast
 
 from oh_goon.core.enforcer_lace_trust import canonical_bytes, digest
 from oh_goon.core.errors import FleetPlanInvalid
@@ -157,7 +158,7 @@ def rediscover_local_orphan(
         cgroup_state_dir, kind="cgroup", subject=subject, resource_name=cgroup.name
     )
     # A reused native owner PID is not a dead owner. It is an identity conflict.
-    live_owner_birth = _process_identity(cg_record["pid"])
+    live_owner_birth = _process_identity(cast(int, cg_record["pid"]))
     if live_owner_birth is not None and live_owner_birth != cg_record["process_identity"]:
         raise FleetPlanInvalid("original LACE native owner PID birth changed")
     cg_stat = cgroup.stat()
@@ -223,7 +224,7 @@ def rediscover_local_orphan(
         if not all(type(x) is str and x for x in (namespace, host_veth, table)):
             raise FleetPlanInvalid("original LACE network observation malformed")
         net_record = _matching_record(
-            network_state_dir, kind="network", subject=subject, resource_name=namespace
+            network_state_dir, kind="network", subject=subject, resource_name=cast(str, namespace)
         )
         if (
             net_record["pid"] != cg_record["pid"]
@@ -241,14 +242,14 @@ def rediscover_local_orphan(
         if (
             not any(item.get("name") == namespace for item in namespaces)
             or not any(
-                item.get("ifname") in (host_veth,)
-                or (type(item.get("ifname")) is str and item["ifname"].startswith(host_veth + "@"))
+                (ifname := item.get("ifname")) in (host_veth,)
+                or (isinstance(ifname, str) and ifname.startswith(cast(str, host_veth) + "@"))
                 for item in links
             )
             or not any(
-                type(item.get("table")) is dict
-                and item["table"].get("family") == "inet"
-                and item["table"].get("name") == table
+                isinstance(native_table := item.get("table"), dict)
+                and native_table.get("family") == "inet"
+                and native_table.get("name") == table
                 for item in tables
             )
         ):

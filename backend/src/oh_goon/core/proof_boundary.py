@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from oh_goon.core.models.canonical_result_semantics import (
     CanonicalAcceptedResult,
     CanonicalResultStatus,
@@ -35,7 +37,7 @@ class ProofBoundary:
         checkpoint: CandidateCheckpoint,
         proof: ExactCheckpointProof,
         *,
-        effect_kind: str,
+        effect_kind: Literal["git_commit", "git_push", "merge_request", "publish"],
         target: str,
     ) -> ProtectedEffectGrant:
         if proof.workspace_id != checkpoint.workspace_id:

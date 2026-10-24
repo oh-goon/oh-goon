@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_agent_commands(subparsers):
+def _add_agent_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Agent data operations and separately configured model connections."""
     agent = subparsers.add_parser(
         "agent", help="Agent data operations, model providers and native service preparation"
@@ -163,11 +163,13 @@ def _add_direct_repository_commands(
     )
     exclude.add_argument("repository", type=Path)
     exclude.add_argument("--reason", default=policy_defaults.default_exclusion_reason())
+    exclude.add_argument("--expected-repository-instance-id", required=True)
 
     include = subparsers.add_parser(
         "include", help="Include a previously excluded repository again"
     )
     include.add_argument("repository", type=Path)
+    include.add_argument("--expected-repository-instance-id", required=True)
     subparsers.add_parser("excluded", help="List persistently excluded repositories")
 
 

@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal, cast
 
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
@@ -40,7 +41,7 @@ class _RolloutObservation:
     updated_replicas: int
     available_replicas: int
     unavailable_replicas: int
-    progressing_status: str | None
+    progressing_status: Literal["True", "False", "Unknown"] | None
     progressing_reason: str | None
 
 
@@ -346,7 +347,9 @@ def _target_image(spec: dict[str, object], container_name: str) -> str:
     return _non_empty_string(matches[0].get("image"), "target container image")
 
 
-def _progressing_condition(value: object) -> tuple[str | None, str | None]:
+def _progressing_condition(
+    value: object,
+) -> tuple[Literal["True", "False", "Unknown"] | None, str | None]:
     if not isinstance(value, list):
         raise ValueError("Fleet Kubernetes rollout conditions must be a list")
     matches = [
@@ -364,7 +367,7 @@ def _progressing_condition(value: object) -> tuple[str | None, str | None]:
     reason = matches[0].get("reason")
     if reason is not None and (not isinstance(reason, str) or len(reason) > 120):
         raise ValueError("Fleet Kubernetes rollout Progressing reason is invalid")
-    return status, reason
+    return cast(Literal["True", "False", "Unknown"], status), reason
 
 
 def _mapping(value: object, label: str) -> dict[str, object]:

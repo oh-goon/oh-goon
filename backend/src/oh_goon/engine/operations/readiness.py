@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from oh_goon import __version__
 from oh_goon.core.models.operation import (
@@ -8,6 +9,7 @@ from oh_goon.core.models.operation import (
     ComparedGitRemote,
     GitRemoteComparisonUnavailable,
     GitRemoteLookupUnavailable,
+    GitRemoteObservation,
     GitRemoteWithoutUpstream,
     MissingToolVersion,
     MissingUvTool,
@@ -19,6 +21,7 @@ from oh_goon.core.models.operation import (
     ToolchainResult,
     ToolVersionResult,
     UnavailableToolVersion,
+    UvToolResult,
 )
 from oh_goon.core.models.policy import PolicySnapshot
 from oh_goon.core.vocabulary import (
@@ -80,7 +83,7 @@ def _remote_observation(
     repository: Path,
     git: GitService,
     cancel_requested: Cancel,
-):
+) -> GitRemoteObservation:
     remotes = git.run("remote", cwd=repository, cancel_requested=cancel_requested)
     if remotes.returncode != 0:
         return GitRemoteLookupUnavailable(state="lookup_unavailable")
@@ -117,7 +120,7 @@ def _remote_observation(
         return GitRemoteComparisonUnavailable(
             state="comparison_unavailable", remote_name=remote, upstream=upstream_name
         )
-    state = (
+    state: Literal["diverged", "ahead", "behind", "up_to_date"] = (
         "diverged"
         if ahead and behind
         else "ahead"
@@ -147,7 +150,7 @@ def _toolchain(
     )
 
 
-def _uv_project_readiness(repository: Path, cancel_requested: Cancel):
+def _uv_project_readiness(repository: Path, cancel_requested: Cancel) -> UvToolResult:
     """Let native uv apply this repository's own compatibility declaration once."""
     try:
         result = run_operation_command(

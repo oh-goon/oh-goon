@@ -7,7 +7,7 @@ successful attempt leaves physical quiescence and TEARDOWN_PROVEN unestablished.
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 from oh_goon.core.enforcer_lace_trust import ReceiptAuthenticator
 from oh_goon.core.ports.local_lace_cleanup import NativeCleanupFailure, NativeCleanupResult
@@ -26,7 +26,7 @@ def _current_ticket(
     epoch: int,
     lease_identity: str,
     auth: ReceiptAuthenticator,
-) -> list[dict]:
+) -> tuple[dict[str, Any], ...]:
     if not journal.connection.in_transaction or type(ticket) is not LocalLaceCleanupTicket:
         raise CausalJournalError("original cleanup execution transaction and exact ticket required")
     journal._check_fence(journal._row(ticket.run_id), epoch=epoch, lease_identity=lease_identity)

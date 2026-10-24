@@ -6,6 +6,7 @@ No source access, reclassification or execution is permitted here.
 from __future__ import annotations
 
 import re
+from typing import NotRequired, TypedDict
 
 from oh_goon.core.errors import FleetPlanInputRejected, RunConfigurationInvalid
 
@@ -52,7 +53,18 @@ _NEXT_ACTIONS = {
 }
 
 
-def safe_plan_diagnostic(exc: Exception) -> dict[str, object]:
+class SafePlanValidationDiagnostic(TypedDict):
+    schema: str
+    status: str
+    stage: str
+    code: str
+    inputs: list[str]
+    safe_next_action: str
+    execution: str
+    fields: NotRequired[list[str]]
+
+
+def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
     """Project a *single* received rejection without a second semantic decision."""
     fields: list[str] = []
     if isinstance(exc, RunConfigurationInvalid) and exc.diagnostic_code in _CONFIG_ACTIONS:
@@ -77,7 +89,7 @@ def safe_plan_diagnostic(exc: Exception) -> dict[str, object]:
         inputs = []
         stage = "plan_resolution"
         action = "Review the Plan/Goon source and caller input contract, then retry validation."
-    return {
+    report: SafePlanValidationDiagnostic = {
         "schema": _SCHEMA,
         "status": "rejected",
         "stage": stage,
@@ -85,5 +97,7 @@ def safe_plan_diagnostic(exc: Exception) -> dict[str, object]:
         "inputs": inputs,
         "safe_next_action": action,
         "execution": "not_started_by_diagnostic",
-        **({"fields": fields} if isinstance(exc, RunConfigurationInvalid) else {}),
     }
+    if isinstance(exc, RunConfigurationInvalid):
+        report["fields"] = fields
+    return report

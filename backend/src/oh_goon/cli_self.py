@@ -6,6 +6,7 @@ from pathlib import Path
 
 from oh_goon import __version__
 from oh_goon.repository_tooling.self_certification_plan import (
+    ShardPlan,
     self_certification_plan,
     shard_plan,
     stage_parent_source_input,
@@ -20,14 +21,14 @@ def run_self_command(args: argparse.Namespace) -> int | None:
             return 0
         if args.self_command == "setup":
             if args.parent_zip is not None:
-                payload = stage_parent_source_input(Path.cwd(), args.parent_zip)
+                staged = stage_parent_source_input(Path.cwd(), args.parent_zip)
                 print(
                     "Staged verified parent source ZIP: "
-                    f"{payload['artifact']} sha256={payload['sha256']}"
+                    f"{staged['artifact']} sha256={staged['sha256']}"
                 )
                 return 0
-            payload = self_certification_plan(Path.cwd())
-            required = payload.get("required_inputs", [])
+            setup_plan = self_certification_plan(Path.cwd())
+            required = setup_plan["required_inputs"]
             if not required:
                 print("Self-certification setup has no external inputs.")
                 return 0
@@ -38,14 +39,14 @@ def run_self_command(args: argparse.Namespace) -> int | None:
                 )
             return 0
         if args.self_command in {"verify", "certify"} and args.plan:
-            payload = self_plan_descriptor(args.self_command)
+            descriptor = self_plan_descriptor(args.self_command)
             if args.as_json:
-                print(json.dumps(payload, sort_keys=True))
+                print(json.dumps(descriptor, sort_keys=True))
             else:
                 print(f"SELF {args.self_command.upper()}")
-                print(f"Plan          {payload['plan']}")
-                print(f"Authority     {payload['execution_authority']}")
-                print("Pipeline      " + " -> ".join(payload["pipeline"]))
+                print(f"Plan          {descriptor['plan']}")
+                print(f"Authority     {descriptor['execution_authority']}")
+                print("Pipeline      " + " -> ".join(descriptor["pipeline"]))
             return 0
         if args.self_command == "verify":
             return run_self_verify()
@@ -62,7 +63,7 @@ def run_self_command(args: argparse.Namespace) -> int | None:
     return None
 
 
-def _print_shards(payload: dict[str, object]) -> None:
+def _print_shards(payload: ShardPlan) -> None:
     print("OH-GOON VALIDATION SHARDS")
     print(f"Surface: {payload['surface']}")
     print(f"Strategy: {payload['strategy']}")

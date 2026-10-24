@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from oh_goon.core.errors import FleetPlanInvalid
@@ -62,7 +63,7 @@ class PipelineValueCompiler:
         *,
         inputs: dict[str, PlanInputValue],
         env: tuple[PlanEnvDefinition, ...],
-        qualify_step,
+        qualify_step: Callable[[str], str],
     ) -> None:
         self._inputs = inputs
         self._env = {item.name: item for item in env}

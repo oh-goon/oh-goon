@@ -43,7 +43,7 @@ class FleetRunProgress(ImmutableModel):
     failed: int = Field(ge=0)
     needs_attention: int = Field(default=0, ge=0)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def completed(self) -> int:
         return self.succeeded + self.needs_attention
@@ -253,12 +253,12 @@ class FleetRunDetail(ImmutableModel):
                 )
         return self
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def outcome(self) -> FleetRunOutcome:
         return fleet_run_outcome(self.run)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def rerun_supported(self) -> bool:
         """Project current new-work rerun policy without mutating durable run identity."""
@@ -275,14 +275,14 @@ class FleetRunDetail(ImmutableModel):
         except CapabilityUnavailable:
             return False
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def game_tape(self) -> GameTape:
         from oh_goon.core.game_tape_projection import project_game_tape
 
         return project_game_tape(self)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def plan_trust_receipts(self) -> tuple[RepositoryFleetPlanTrustReceipt, ...]:
         from oh_goon.core.fleet_plan_trust_receipt import (
@@ -342,7 +342,7 @@ class FleetRunHistoryItem(ImmutableModel):
         _validate_execution_admission_run(self.execution, self.run.fleet_run_id)
         return self
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def outcome(self) -> FleetRunOutcome:
         return fleet_run_outcome(self.run)

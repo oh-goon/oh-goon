@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING, Callable, Mapping, TypeVar
 
 if TYPE_CHECKING:
     from oh_goon.runtime.database import LocalDatabase
 
 from oh_goon.core.enforcer_lace_issuer_evidence import TrustedIssuerVerifier
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError, canonical_bytes, digest
+
+_T = TypeVar("_T")
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS lace_signer_trust_epoch (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -90,7 +92,7 @@ class SignerTrustEpochAuthority:
             raise TrustProtocolError("initialize signer epoch before active admission transactions")
         self.connection.execute(SCHEMA)
 
-    def _transaction(self, action):
+    def _transaction(self, action: Callable[[], _T]) -> _T:
         """DB1B2: no standalone administrative SQLite writer in runtime."""
         raise TrustProtocolError("standalone signer transaction forbidden; use LocalDatabase owner")
 
@@ -98,7 +100,7 @@ class SignerTrustEpochAuthority:
         self,
         connection: sqlite3.Connection,
         *,
-        policy_snapshot,
+        policy_snapshot: tuple[tuple[int, int], tuple[int, ...], bytes],
         roots: Mapping[str, tuple[str, bytes]],
     ) -> SignerTrustGrant:
         """Domain participant; never starts or ends the caller's transaction."""
@@ -116,7 +118,10 @@ class SignerTrustEpochAuthority:
         return SignerTrustGrant(1, policy_id, root_id)
 
     def enroll(
-        self, *, policy_snapshot, roots: Mapping[str, tuple[str, bytes]]
+        self,
+        *,
+        policy_snapshot: tuple[tuple[int, int], tuple[int, ...], bytes],
+        roots: Mapping[str, tuple[str, bytes]],
     ) -> SignerTrustGrant:
         # Explicit pre-live compatibility; new operational code must use
         # LocalDatabase.enroll_signer_trust_atomically instead.
@@ -136,7 +141,7 @@ class SignerTrustEpochAuthority:
         connection: sqlite3.Connection,
         *,
         grant: SignerTrustGrant,
-        policy_snapshot,
+        policy_snapshot: tuple[tuple[int, int], tuple[int, ...], bytes],
         roots: Mapping[str, tuple[str, bytes]],
     ) -> None:
         if connection is not self.connection or not connection.in_transaction:
@@ -185,7 +190,7 @@ class SignerTrustEpochAuthority:
         connection: sqlite3.Connection,
         *,
         expected: SignerTrustGrant,
-        policy_snapshot,
+        policy_snapshot: tuple[tuple[int, int], tuple[int, ...], bytes],
         roots: Mapping[str, tuple[str, bytes]],
     ) -> SignerTrustGrant:
         self._require_participant_cut(connection)
@@ -209,7 +214,11 @@ class SignerTrustEpochAuthority:
         return SignerTrustGrant(expected.epoch + 1, policy_id, root_id)
 
     def rotate(
-        self, *, expected: SignerTrustGrant, policy_snapshot, roots: Mapping[str, tuple[str, bytes]]
+        self,
+        *,
+        expected: SignerTrustGrant,
+        policy_snapshot: tuple[tuple[int, int], tuple[int, ...], bytes],
+        roots: Mapping[str, tuple[str, bytes]],
     ) -> SignerTrustGrant:
         if type(expected) is not SignerTrustGrant:
             raise TrustProtocolError("captured signer trust epoch required for rotation")

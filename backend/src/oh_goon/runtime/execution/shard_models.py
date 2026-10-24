@@ -174,6 +174,7 @@ class ShardExecutionPlan:
     unproven_owner_members: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        value: str | None
         for field_name, value in (
             ("plan_identity", self.plan_identity),
             ("generation_identity", self.generation_identity),

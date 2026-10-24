@@ -4,7 +4,7 @@ import json
 import sqlite3
 from collections import defaultdict
 from statistics import median
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from oh_goon.core.errors import OperationNotFound
 from oh_goon.core.vocabulary import GameTapeStatus
@@ -136,7 +136,7 @@ def _repository_evidence(
     )
 
 
-def _step_evidence(row: sqlite3.Row, peers: Iterable[sqlite3.Row]) -> ScoutRunStepEvidence:
+def _step_evidence(row: sqlite3.Row, peers: Sequence[sqlite3.Row]) -> ScoutRunStepEvidence:
     cpu = _float_or_none(row["complete_cpu_seconds"])
     memory = _int_or_none(row["complete_peak_memory_bytes"])
     duration = _float_or_none(row["duration_seconds"])
@@ -184,9 +184,9 @@ def _difference_percent(current: float | None, typical: float | None) -> int | N
     return round(((current - typical) / typical) * 100)
 
 
-def _float_or_none(value) -> float | None:
+def _float_or_none(value: str | float | int | None) -> float | None:
     return float(value) if value is not None else None
 
 
-def _int_or_none(value) -> int | None:
+def _int_or_none(value: str | float | int | None) -> int | None:
     return int(value) if value is not None else None

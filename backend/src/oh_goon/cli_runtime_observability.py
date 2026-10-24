@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+from typing import cast
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_plan_summary import configuration_summary
 from oh_goon.core.errors import FleetDomainError
-from oh_goon.core.models.run import FailedFleetRun
+from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail
+from oh_goon.core.models.run_events import FleetRunEvent
 from oh_goon.services.plan_success_evidence import has_exact_plan_success
 
 
@@ -60,7 +62,7 @@ def _print_explain_run_detail(runtime: ApplicationRuntime, args: argparse.Namesp
     return 0
 
 
-def _print_explain_run_lifecycle(detail) -> None:
+def _print_explain_run_lifecycle(detail: FleetRunDetail) -> None:
     if isinstance(detail.run, FailedFleetRun):
         print(
             f"Failure: {detail.run.failure.code} "
@@ -68,12 +70,14 @@ def _print_explain_run_lifecycle(detail) -> None:
         )
         print(f"Failure message: {detail.run.failure.message}")
     print("Lifecycle:")
-    for event in detail.lifecycle_events:
+    for raw_event in detail.lifecycle_events:
+        # The original Journal event reader validates this detached sidecar.
+        event = cast(FleetRunEvent, raw_event)
         suffix = f" operation={event.operation_id}" if hasattr(event, "operation_id") else ""
         print(f"  {event.sequence:>3}  {event.event_type.value}{suffix}")
 
 
-def _print_explain_run_operations(detail) -> None:
+def _print_explain_run_operations(detail: FleetRunDetail) -> None:
     print("Operations:")
     if not detail.operations:
         print("  none committed")

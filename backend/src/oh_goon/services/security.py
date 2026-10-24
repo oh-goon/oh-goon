@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass, field
 
 from oh_goon.core.capability_registry import recipe_capability
 from oh_goon.core.errors import RunNotFound, SecurityRunNotFound
 from oh_goon.core.models.operation import RecipeOperationEvidence
+from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.security import (
     FleetSbomBundle,
     FleetSbomDocument,
@@ -16,6 +18,14 @@ from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary import OperationAction, UvRecipeId
 from oh_goon.runtime.state import LocalState
 from oh_goon.services.repositories import RepositoryService
+
+
+@dataclass
+class _FindingGroup:
+    aliases: set[str] = field(default_factory=set)
+    fixed: set[str] = field(default_factory=set)
+    summary: str | None = None
+    repositories: dict[str, RepositoryIdentity] = field(default_factory=dict)
 
 
 class SecurityService:
@@ -32,9 +42,7 @@ class SecurityService:
         capability_id = recipe_capability(UvRecipeId.AUDIT).capability_id
         audited = clean = stale = 0
         affected_ids: set[str] = set()
-        grouped: dict[tuple[str, str | None], dict[str, object]] = defaultdict(
-            lambda: {"aliases": set(), "fixed": set(), "summary": None, "repositories": {}}
-        )
+        grouped: dict[tuple[str, str | None], _FindingGroup] = defaultdict(_FindingGroup)
         for entry in included:
             current = state.journal.current_capability(entry.repository.path, capability_id, target)
             if current is None:
@@ -46,28 +54,28 @@ class SecurityService:
             evidence = current.report.evidence
             if not isinstance(evidence, RecipeOperationEvidence):
                 continue
-            findings = evidence.recipe.findings
-            if not findings:
+            observed_findings = evidence.recipe.findings
+            if not observed_findings:
                 clean += 1
                 continue
             affected_ids.add(entry.repository.repository_id)
-            for finding in findings:
+            for finding in observed_findings:
                 key = (finding.advisory_id, finding.package)
                 row = grouped[key]
-                row["aliases"].update(finding.aliases)  # type: ignore[union-attr]
-                row["fixed"].update(finding.fixed_versions)  # type: ignore[union-attr]
-                row["summary"] = row["summary"] or finding.summary
-                row["repositories"][entry.repository.repository_id] = entry.repository  # type: ignore[index]
+                row.aliases.update(finding.aliases)
+                row.fixed.update(finding.fixed_versions)
+                row.summary = row.summary or finding.summary
+                row.repositories[entry.repository.repository_id] = entry.repository
         findings = [
             FleetSecurityFinding(
                 advisory_id=advisory,
                 package=package,
-                aliases=sorted(row["aliases"]),  # type: ignore[arg-type]
-                fixed_versions=sorted(row["fixed"]),  # type: ignore[arg-type]
-                summary=row["summary"] if isinstance(row["summary"], str) else None,
-                repositories=sorted(
-                    row["repositories"].values(), key=lambda item: item.name.casefold()
-                ),  # type: ignore[union-attr]
+                aliases=tuple(sorted(row.aliases)),
+                fixed_versions=tuple(sorted(row.fixed)),
+                summary=row.summary,
+                repositories=tuple(
+                    sorted(row.repositories.values(), key=lambda item: item.name.casefold())
+                ),
             )
             for (advisory, package), row in grouped.items()
         ]
@@ -88,7 +96,7 @@ class SecurityService:
             clean=clean,
             affected_repositories=len(affected_ids),
             stale=stale,
-            findings=findings,
+            findings=tuple(findings),
             latest_audit_run_id=latest.run.fleet_run_id if latest else None,
         )
 
@@ -120,5 +128,5 @@ class SecurityService:
         return FleetSbomBundle(
             fleet_run_id=fleet_run_id,
             journal_revision=state.journal.revision,
-            documents=documents,
+            documents=tuple(documents),
         )

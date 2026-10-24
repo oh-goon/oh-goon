@@ -5,9 +5,16 @@ from types import SimpleNamespace
 
 import oh_goon.cli_runtime_plans as plans
 from oh_goon.cli_parser import build_parser
+from oh_goon.cli_plan_summary import resolved_plan_summary
 from oh_goon.cli_runtime_plans import run_plan_command
-from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan import (
+    MissingConfigPolicy,
+    ResolvedCommandStep,
+    ResolvedFleetPlan,
+    ResolvedPreCommitStep,
+)
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
+from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 
 
@@ -116,3 +123,31 @@ def test_plan_run_completed_attention_required_is_nonzero(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "Execution status: COMPLETED" in output
     assert "Outcome: ATTENTION_REQUIRED" in output
+
+
+def test_resolved_plan_summary_supports_native_precommit_and_stream_outputs() -> None:
+    plan = ResolvedFleetPlan.create(
+        name="native-summary",
+        description="",
+        execution=VerificationExecutionPolicy(),
+        steps=(
+            ResolvedPreCommitStep(
+                step_id="hooks",
+                if_missing=MissingConfigPolicy.SKIP,
+                timeout_seconds=30,
+                runtime_id="managed-hooks",
+                runtime_pyproject_sha256="a" * 64,
+                runtime_uv_lock_sha256="b" * 64,
+            ),
+            ResolvedCommandStep(
+                step_id="diagnostics",
+                argv=("verify",),
+                timeout_seconds=30,
+                outputs=(PlanStreamOutput(name="diagnostic", stream="stderr", max_bytes=100),),
+            ),
+        ),
+    )
+    output = "\n".join(resolved_plan_summary(plan))
+    assert "pre_commit: if_missing=skip" in output
+    assert "runtime_id=managed-hooks" in output
+    assert "outputs=diagnostic=stderr(100B)" in output

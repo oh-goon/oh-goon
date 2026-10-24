@@ -63,20 +63,21 @@ def require_original_restart_issuer_in(
     # the Run, CLI or recovery caller.
     observation = provisioner.inspect_independent_root_custody(run_id)
     observer_uid = os.geteuid()
+    public_root_owner_uid = observation.get("independent_public_root_owner_uid")
     if (
         observation.get("schema") != "oh-goon.fleet-deployment-os-custody/v1"
         or observation.get("status") != "OBSERVED_NOT_ATTESTED"
         or observation.get("run_id") != run_id
         or type(observation.get("signer_process_euid")) is not int
         or observation["signer_process_euid"] != observer_uid
-        or type(observation.get("independent_public_root_owner_uid")) is not int
-        or observation["independent_public_root_owner_uid"] == observer_uid
-        or observation["independent_public_root_owner_uid"] < 0
+        or not isinstance(public_root_owner_uid, int)
+        or public_root_owner_uid == observer_uid
+        or public_root_owner_uid < 0
         or type(observation.get("issuer_roots_checked")) is not int
         or observation["issuer_roots_checked"] != 6
         or observation.get("enrollment") != "OBSERVED_NOT_ADMITTED"
         or observation.get("external_provisioning_attestation") != "NOT_ESTABLISHED"
-        or provisioner.public_root_owner_uid != observation["independent_public_root_owner_uid"]
+        or provisioner.public_root_owner_uid != public_root_owner_uid
     ):
         raise TrustProtocolError("independent original Fleet public-root OS custody unproven")
     binding.configured.require_unchanged(binding.current)
