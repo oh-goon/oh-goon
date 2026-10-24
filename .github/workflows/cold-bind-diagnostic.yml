@@ -37,11 +37,11 @@ jobs:
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
+          sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep strace
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Materialize committed locks once
         run: make init
-      - name: Time both versions in reversed order without instrumentation
+      - name: Compare native preflight before and after the optional SDK overlay
         shell: bash
         run: |
           set -euo pipefail
@@ -49,35 +49,59 @@ jobs:
           umask 077
           bench_root="$RUNNER_TEMP/cold-bind-profile"
           bench_target="backend/src/oh_goon/integrations/fleet_plan_bubblewrap_isolation.py"
+          sdk_root=/usr/local/lib/android/sdk
+          sdk_source="oh-goon-ci-sdk-$GITHUB_RUN_ID-$$"
+          sdk_mounted=0
           mkdir -p "$bench_root"
-          git show "$OH_GOON_PROFILE_BASE:$bench_target" > "$bench_root/base.py"
-          git show "$OH_GOON_PROFILE_CANDIDATE:$bench_target" > "$bench_root/candidate.py"
-          trap 'cp "$bench_root/candidate.py" "$bench_target"' EXIT
-          uname -r
-          stat -f -c %T /usr
-          bench_sample=0
-          for bench_variant in candidate base candidate base candidate; do
-            bench_sample=$((bench_sample + 1))
-            cp "$bench_root/$bench_variant.py" "$bench_target"
-            sync
-            printf '3\n' | sudo tee /proc/sys/vm/drop_caches > /dev/null
-            if ! uv run --offline --frozen --no-sync --project backend python -m pytest -c backend/pyproject.toml -o addopts= -q backend/tests/unit/entrypoints/test_cli_ai.py::test_native_bubblewrap_preflight_retains_canonical_git_root --durations=1 > "$bench_root/$bench_sample-$bench_variant.log" 2>&1; then
-              cat "$bench_root/$bench_sample-$bench_variant.log"
-              exit 1
+          cp "$bench_target" "$bench_root/restore.py"
+          cleanup() {
+            check_status=$?
+            trap - EXIT INT TERM
+            cp "$bench_root/restore.py" "$bench_target"
+            if [ "$sdk_mounted" = 1 ] || findmnt -rn -M "$sdk_root" -S "$sdk_source" > /dev/null; then
+              if ! sudo umount -- "$sdk_root"; then
+                echo "CI SDK overlay cleanup failed" >&2
+                if [ "$check_status" = 0 ]; then check_status=1; fi
+              fi
             fi
-            cat "$bench_root/$bench_sample-$bench_variant.log"
+            exit "$check_status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          git show "$OH_GOON_PROFILE_BASE:$bench_target" > "$bench_target"
+          test "$(readlink -e "$sdk_root")" = "$sdk_root"
+          test -d "$sdk_root"
+          if mountpoint -q -- "$sdk_root"; then exit 1; fi
+          for bench_phase in before after; do
+            if [ "$bench_phase" = after ]; then
+              sudo mount -t tmpfs -o ro,nodev,nosuid,noexec,size=4k "$sdk_source" "$sdk_root"
+              sdk_mounted=1
+              findmnt -rn -M "$sdk_root" -o SOURCE,FSTYPE,OPTIONS
+              sdk_identity=$(stat -Lc '%d:%i' "$sdk_root")
+              bwrap --unshare-user --unshare-pid --unshare-net --die-with-parent --ro-bind /usr /usr --ro-bind /lib /lib --ro-bind /lib64 /lib64 --proc /proc --dev /dev -- /usr/bin/python3 -I -S -c 'import os,sys; p="/usr/local/lib/android/sdk"; s=os.stat(p); assert f"{s.st_dev}:{s.st_ino}"==sys.argv[1]; assert os.statvfs(p).f_flag & os.ST_RDONLY; entries=os.scandir(p); assert next(entries,None) is None; entries.close(); print("Native nested SDK overlay identity, emptiness and read-only view verified")' "$sdk_identity"
+            fi
+            for bench_sample in 1 2; do
+              sync
+              printf '3\n' | sudo tee /proc/sys/vm/drop_caches > /dev/null
+              if ! uv run --offline --frozen --no-sync --project backend python -m pytest -c backend/pyproject.toml -o addopts= -q backend/tests/unit/entrypoints/test_cli_ai.py::test_native_bubblewrap_preflight_retains_canonical_git_root --durations=1 > "$bench_root/$bench_phase-$bench_sample.log" 2>&1; then
+                cat "$bench_root/$bench_phase-$bench_sample.log"
+                exit 1
+              fi
+              cat "$bench_root/$bench_phase-$bench_sample.log"
+            done
           done
           uv run --offline --frozen --no-sync --project backend python - <<'PY'
-          import hashlib, json, os, platform, re, sys
+          import json, os, re
           from pathlib import Path
           root = Path(os.environ["RUNNER_TEMP"]) / "cold-bind-profile"
-          samples = []
-          for index, variant in enumerate(("candidate", "base", "candidate", "base", "candidate"), 1):
-              log = (root / f"{index}-{variant}.log").read_text()
-              match = re.search(r"(\d+\.\d+)s call\s+.*test_native_bubblewrap_preflight_retains_canonical_git_root", log)
-              if match is None:
-                  raise RuntimeError(f"Missing native test duration in sample {index}")
-              samples.append({"index": index, "variant": variant, "source_sha256": hashlib.sha256((root / (variant + ".py")).read_bytes()).hexdigest(), "seconds": float(match.group(1)), "pytest": log})
-          result = {"base": os.environ["OH_GOON_PROFILE_BASE"], "candidate": os.environ["OH_GOON_PROFILE_CANDIDATE"], "python": sys.version, "kernel": platform.release(), "same_host": True, "cold_guest_caches_before_each": True, "instrumented": False, "hypervisor_cache_controlled": False, "samples": samples}
-          print("OH_GOON_MATCHED_TIMING_JSON=" + json.dumps(result, sort_keys=True))
+          result = {"source": os.environ["OH_GOON_PROFILE_BASE"], "same_host": True, "cold_guest_caches_before_each": True, "instrumented": False, "samples": []}
+          for phase in ("before", "after"):
+              for index in (1, 2):
+                  log = (root / f"{phase}-{index}.log").read_text()
+                  match = re.search(r"(\d+\.\d+)s call\s+.*test_native_bubblewrap_preflight_retains_canonical_git_root", log)
+                  if match is None:
+                      raise RuntimeError("Missing native test duration")
+                  result["samples"].append({"phase": phase, "index": index, "seconds": float(match.group(1)), "pytest": log})
+          print("OH_GOON_SDK_OVERLAY_TIMING=" + json.dumps(result, sort_keys=True))
           PY
