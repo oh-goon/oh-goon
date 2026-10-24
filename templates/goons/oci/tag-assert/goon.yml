@@ -1,4 +1,3 @@
-version: 1
 inputs:
   registry_hostname:
     type: hostname
@@ -7,7 +6,6 @@ inputs:
     type: oci_repository
     description: Exact repository inside the registry
   tag:
-    type: string
     pattern: '[a-z0-9_][a-z0-9_.-]{0,127}'
     description: Explicit tag or project release label to inspect or prepare
   expected_digest:

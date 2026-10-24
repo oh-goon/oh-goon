@@ -195,7 +195,7 @@ uv run --locked --project backend oh-goon enforcer run /path/to/team --json
 Normal CLI setup selects one versioned `run.yml` and registered repository ID:
 
 ```bash
-oh-goon templates init python/quality --output ./workflow
+oh-goon templates init python/quality --kind plan --output ./workflow
 # Edit workflow/run.yml before continuing.
 oh-goon config inspect ./workflow/run.yml
 oh-goon config validate ./workflow/run.yml
@@ -255,7 +255,6 @@ Repository identity belongs to the CI/CD execution target, not to Goon authoring
 `requirements:` is reserved for capability-specific repository facts that are not already known by the execution boundary. For example, a typed observer may require a real project file, while `uv:` automatically owns the locked UV-project contract and validates `pyproject.toml`, `uv.lock`, and the selected dependency group without copying package lists into YAML.
 
 ```yaml
-version: 1
 requirements:
 - kind: file_exists
   path: schema.json
@@ -263,7 +262,7 @@ steps:
 - run: uv run validate-schema schema.json
 ```
 
-Requirements remain owned by the Goon that declares them. A missing imported-Goon requirement makes that import `NOT_APPLICABLE` and skips only its owned Steps; it is not promoted into a global Plan admission failure. Composite Goons may have no own requirements while child Goons own capability-specific prerequisites. Plan-owned requirements remain hard admission requirements. Repository-path requirements may name only canonical source paths that survive sanitization; generated/operational paths such as `.git`, `.venv`, `node_modules`, caches, and generated output are invalid requirement targets. Resolution preserves provenance; there is no hidden promoted requirement or shadow dependency model.
+Requirements remain owned by the Goon that declares them. A missing imported-Goon requirement makes that import `NOT_APPLICABLE` and skips only its owned Steps; it is not promoted into a global Plan admission failure. Composite Goons may have no own requirements while child Goons own capability-specific prerequisites. A repository-root Atomic Goon's requirements remain hard admission requirements; Plans do not author requirements. Repository-path requirements may name only canonical source paths that survive sanitization; generated/operational paths such as `.git`, `.venv`, `node_modules`, caches, and generated output are invalid requirement targets. Resolution preserves provenance; there is no hidden promoted requirement or shadow dependency model.
 
 For canonical shipped-template resolution versus execution-time input transport, see
 [template input resolution and transport](development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md).

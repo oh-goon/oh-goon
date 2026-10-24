@@ -34,7 +34,7 @@ Saved Shared Plans live outside repository roots and outside disposable operatio
 
 `OH_GOON_SHARED_PLAN_DIR` may explicitly select another local root.
 
-`<plan-key>` is the local catalog handle. It does not rewrite the authored Plan's `name:`. This lets a canonical shipped Plan such as `security/trivy-audit` be saved under an operator-chosen local key without mutating its source bytes.
+`<plan-key>` is the explicit local catalog handle. Plan YAML contains no `name:` or `description:`; the selected key and original source digest remain separate facts. A shipped Plan such as `security/trivy-audit` can be saved under an operator-chosen local key without mutating its source bytes.
 
 Writes are atomic and stale-write protected. Replacing an existing Shared Plan requires the exact SHA-256 revision that was read. The returned document is derived from the exact committed UTF-8 bytes; later reads reopen disk as authority.
 

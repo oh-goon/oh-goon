@@ -1,2 +1,3 @@
-inputs: [repo, skill, acceptance]
-goons: [agent/search]
+goons:
+- import: agent/search
+  from: ./goons

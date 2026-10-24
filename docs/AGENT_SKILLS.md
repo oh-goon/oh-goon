@@ -380,7 +380,6 @@ All four Steps use the selected repository workspace and one native attempt.
 For example, an operator-owned `goon.yml` can contain:
 
 ```yaml
-execution: {purpose: verification}
 inputs:
   repo: {type: repository_reference}
   skill: {type: skill_reference}
@@ -389,7 +388,8 @@ steps:
   - id: check
     run: verify-project
     on_failure: continue
-    outputs: [{name: diagnostic, stream: stdout, max_bytes: 2048}]
+    outputs:
+      diagnostic: {stream: stdout, max_bytes: 2048}
   - id: propose
     uses: agent
     harness: local-model-proposal
@@ -406,7 +406,8 @@ steps:
     run: verify-project
     on_failure: continue
     when: {kind: step_status, step_id: apply, statuses: [COMPLETED]}
-    outputs: [{name: diagnostic, stream: stdout, max_bytes: 2048}]
+    outputs:
+      diagnostic: {stream: stdout, max_bytes: 2048}
 ```
 
 `verify-project` is your selected native test executable. It writes its bounded

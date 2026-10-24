@@ -14,8 +14,7 @@ from oh_goon.services.execution_lock_persistence import write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
 TERMINAL = {"COMPLETED", "CANCELLED", "FAILED"}
-GOON = """version: 1
-steps:
+GOON = """steps:
 - id: acceptance-step
   run: uv run --no-project python acceptance_step.py
 """

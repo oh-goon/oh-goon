@@ -1,4 +1,3 @@
-version: 1
 inputs:
   source_workspace:
     type: workspace_reference

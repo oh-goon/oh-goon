@@ -24,7 +24,9 @@ def run_template_command(args: argparse.Namespace) -> int:
                     raise ValueError("--review requires ALIAS=SKILL")
                 alias, skill = value.split("=", 1)
                 reviewers.append((alias, skill))
-            destination = initialize_run_configuration(args.key, args.output, reviewers=reviewers)
+            destination = initialize_run_configuration(
+                args.key, args.output, kind=args.kind, reviewers=reviewers
+            )
             print(f"Created: {destination}")
             print(
                 "Select the registered repository ID and required values, then inspect and validate run.yml."

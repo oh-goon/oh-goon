@@ -18,8 +18,14 @@ After [development setup](../DEVELOPMENT.md), invoke the source CLI with
 
 ```sh
 oh-goon templates list --kind plan
-oh-goon templates init python/quality --output ./workflow
+oh-goon templates init python/quality --kind plan --output ./workflow
 ```
+
+`--kind` is required because a Plan and a Goon may share the same catalog key.
+For a single Goon, use `oh-goon templates init python/test --kind goon --output ./workflow`.
+A Plan selection uses the catalog directly; a Goon selection creates a minimal
+`plan.yml` importing that exact Goon and selects the file from `run.yml`. Neither
+mode copies the selected Goon implementation or invents another source owner.
 
 Edit the generated `workflow/run.yml` to select the registered repository ID
 and the inputs you need. For example:

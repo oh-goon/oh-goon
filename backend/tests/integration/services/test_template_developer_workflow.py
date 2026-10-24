@@ -1,4 +1,4 @@
-"""The documented local Python journey executes real locked tools through Fleet."""
+"""Documented authoring journeys resolve actual sources and execute native tools."""
 
 import json
 import os
@@ -54,18 +54,15 @@ def test_native_project_configuration_reports_and_extensions(
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "plan.yml"
-    # Start with the real existing Plan, explicitly select ordinary local verification.
+    # Start with the real existing Plan; ordinary verification is its default.
     from oh_goon.runtime.plan_templates import PlanTemplateStore
 
     source = PlanTemplateStore().source("python/quality").content
-    path.write_text(
-        source.replace("version: 1\n", "version: 1\nexecution: {purpose: verification}\n", 1)
-    )
+    path.write_text(source)
     local = tmp_path / "goons/general/project-check"
     local.mkdir(parents=True)
     (local / "README.md").write_text("# general/project-check\n\nCompile the selected project.\n")
-    (local / "goon.yml").write_text(f"""version: 1
-uv:
+    (local / "goon.yml").write_text(f"""uv:
   project: '{project}'
   group: dev
 steps:
@@ -164,16 +161,13 @@ Path('unexpected.txt').write_text('must not reach here')
     directory = tmp_path / "goons/general/wait"
     directory.mkdir(parents=True)
     (directory / "README.md").write_text("# general/wait\n\nWait for explicit release.\n")
-    (directory / "goon.yml").write_text(f"""version: 1
-uv: {{group: dev}}
+    (directory / "goon.yml").write_text(f"""uv: {{group: dev}}
 steps:
 - run: uv run python wait.py {shlex.quote(str(ready))} {shlex.quote(str(hold))}
 - run: uv run python complete.py
 """)
     path = tmp_path / "plan.yml"
-    path.write_text(
-        "version: 1\nexecution: {purpose: verification}\ngoons:\n- import: general/wait\n  from: goons\n"
-    )
+    path.write_text("goons:\n- import: general/wait\n  from: goons\n")
     from oh_goon.runtime.league_folders import LeagueFolderStore
     from oh_goon.services.run_configuration import load_run_configuration
 
@@ -215,3 +209,55 @@ steps:
         if started is not None and not runtime.runs.get(started.fleet_run_id).run.status.terminal:
             runtime.runs.cancel(started.fleet_run_id)
         runtime.shutdown(wait_for_runs=True)
+
+
+def test_actual_local_search_example_projects_inputs_and_executes_its_frozen_tool(
+    tmp_path: Path,
+) -> None:
+    """Prove the checked-in fixture's source/Step boundary, without claiming Fleet admission."""
+    from oh_goon.core.models.fleet_plan import CompiledGoonImportStep
+    from oh_goon.integrations.fleet_plan_step_execution import (
+        StepRuntime,
+        execute_direct_step,
+        prepare_frozen_readonly_skill_search,
+    )
+    from oh_goon.runtime.goon_templates import GoonTemplateStore
+    from oh_goon.services.fleet_plan_input_inspection import inspect_projected_inputs
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+
+    original = ROOT / "examples/agent-skill-local-search"
+    workflow = tmp_path / "local-search"
+    shutil.copytree(original, workflow)
+    source = workflow / "plan.yml"
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
+    graph = resolver.analyze_source(source)
+    contract = {item.definition.name: item for item in inspect_projected_inputs(graph)}
+    assert set(contract) == {"repo", "skill", "acceptance"}
+    assert all(item.definition.required for item in contract.values())
+    edge = graph.root.compiled.steps[0]
+    assert isinstance(edge, CompiledGoonImportStep)
+    assert edge.goon == "agent/search"
+    assert graph.goon(source, edge).path == workflow / "goons/agent/search/goon.yml"
+    assert graph.containment_root == workflow
+
+    frozen, handoff, _ = resolver.resolve_frozen_local_search_agent(
+        source,
+        source_graph=graph,
+        inputs={"repo": "local:team/app", "skill": "local:team/search", "acceptance": "review"},
+        repository_root=workflow / "repos",
+        skill_root=workflow / "skills",
+        allowed_acceptance=("review",),
+    )
+    assert handoff.harness == "local-search"
+    assert len(frozen.steps) == 1 and frozen.steps[0].kind == "agent"
+    with prepare_frozen_readonly_skill_search(handoff) as (workspace, tool):
+        result = execute_direct_step(
+            workspace,
+            tool,
+            StepRuntime(git=None, extensions=None, tools=None, cancel_requested=None),
+            step_order=1,
+        )
+    assert result.returncode == 0
+    assert "needle" in result.stdout
+    assert result.supervisor is not None
+    assert not workspace.exists()

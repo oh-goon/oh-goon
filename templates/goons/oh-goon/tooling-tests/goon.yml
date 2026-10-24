@@ -1,4 +1,3 @@
-version: 1
 execution:
   shell: bash
 steps:

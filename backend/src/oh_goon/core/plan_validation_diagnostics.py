@@ -44,9 +44,9 @@ _CONFIG_FIELDS = frozenset(
 )
 _NEXT_ACTIONS = {
     "EXTERNAL_INPUT_NOT_OBSERVED": "Inspection does not read environment-backed inputs; explicit lock and run use the original environment authority.",
-    "UNKNOWN_INPUT": "Use config inspect run.yml to inspect accepted names; remove unrecognized inputs.",
-    "MISSING_REQUIRED_INPUT": "Supply required values in run.yml inputs, then use config validate run.yml.",
-    "INVALID_INPUT_VALUE": "Inspect the owning Goon's type and constraints; correct the value in run.yml.",
+    "UNKNOWN_INPUT": "Inspect the accepted input names; remove unrecognized caller inputs.",
+    "MISSING_REQUIRED_INPUT": "Supply required caller values, then retry validation.",
+    "INVALID_INPUT_VALUE": "Inspect the owning Goon's type and constraints; correct the caller input value.",
     "INVALID_INPUT_DEFAULT": "Correct the default in the owning Goon input definition.",
     "UNOWNED_PROJECTED_INPUT": "Expose the input through one selected Goon or author an explicit binding.",
     "AMBIGUOUS_PROJECTED_INPUT": "Select recipient imports explicitly with pass: or with: for each shared input.",

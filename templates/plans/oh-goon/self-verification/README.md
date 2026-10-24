@@ -10,8 +10,6 @@ Run the fast internal verification graph for one initialized Oh-Goon revision.
 oh-goon self verify
 ```
 
-**What to edit / settings owner:** repository owners maintain [`plan.yml`](plan.yml), its imported Goons and the Make lifecycle. This package is not a general user configuration example.
-
 The Plan selects backend P0, tooling, architecture, generated contracts, integration and repository-exam checks. The broader Make diagnostic flow and canonical `make certify` retain their separate meanings; passing diagnostics alone is not APP PASS.
 
 **Outputs and failures:** native checks, Run/Step evidence and Game Tape preserve their actual results. A failed, unavailable or interrupted check stays unverified. No model statement or diagnostic result substitutes for canonical certification.

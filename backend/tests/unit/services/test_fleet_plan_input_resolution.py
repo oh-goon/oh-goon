@@ -187,11 +187,40 @@ steps:
     assert "private-caller-canary" not in plan.configuration.model_dump_json()
 
 
-@pytest.mark.parametrize("scalar", ["false", "true", "0", "12"])
-def test_scalar_non_string_shorthand_preserves_existing_input_type_rejection(tmp_path, scalar):
+@pytest.mark.parametrize(
+    "scalar,expected,input_type",
+    [
+        ("false", False, "boolean"),
+        ("true", True, "boolean"),
+        ("0", 0, "integer"),
+        ("12", 12, "integer"),
+    ],
+)
+def test_scalar_shorthand_resolves_native_typed_defaults(tmp_path, scalar, expected, input_type):
     path = tmp_path / "goon.yml"
-    path.write_text(f"version: 1\ninputs:\n  value: {scalar}\nsteps:\n- run: echo ok\n")
-    with pytest.raises(FleetPlanInvalid, match="default must be a string"):
+    path.write_text(
+        f"version: 1\ninputs:\n  value: {scalar}\nsteps:\n- run: echo value-${{{{ inputs.value }}}}\n"
+    )
+    resolver = FleetPlanResolver()
+    defaults = {}
+    plan = resolver.resolve_source_graph(resolver.analyze_source(path), resolved_inputs=defaults)
+    assert defaults == {"value": expected}
+    assert type(defaults["value"]) is type(expected)
+    assert plan.steps[0].argv == ("echo", f"value-{scalar}")
+    assert plan.configuration is not None
+    entry = next(item for item in plan.configuration.entries if item.name == "value")
+    assert entry.input_type.value == input_type
+    assert entry.default_declared is True
+    assert entry.required is False
+    assert entry.binding.kind == "default"
+
+
+def test_unsupported_scalar_default_remains_rejected(tmp_path):
+    path = tmp_path / "goon.yml"
+    path.write_text("inputs: {value: 1.5}\nsteps: [{run: echo ok}]\n")
+    with pytest.raises(
+        FleetPlanInvalid, match="input definitions must be mappings, scalar defaults, or null"
+    ):
         FleetPlanResolver().resolve(path)
 
 

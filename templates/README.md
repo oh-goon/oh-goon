@@ -20,7 +20,7 @@ Your trusted workload needs a committed `pyproject.toml` and native `uv.lock`. I
 
 ```sh
 uv sync --locked --group dev
-oh-goon templates init python/quality --output ./workflow
+oh-goon templates init python/quality --kind plan --output ./workflow
 ```
 
 The initializer refuses an existing destination. It publishes `run.yml` only after every generated companion is complete. An interrupted output without `run.yml` is incomplete; initialization never overwrites it or removes user files. Choose a fresh output directory after a failed generation. Edit `workflow/run.yml`:
@@ -30,12 +30,10 @@ version: 1
 source: {kind: catalog-plan, name: python/quality}
 target: {repository_id: REPOSITORY_ID}
 inputs:
-  project: .
-  dependency_group: dev
   typechecker: ty
 ```
 
-Replace the target ID and select your project directory/group. A project under `backend` uses `project: backend`; omitted optional inputs keep their Goon-owned defaults. Keep credentials outside this file.
+Replace the target ID. This example changes the checker to ty; the default project and group remain `.` and `dev`. A project under `backend` uses `inputs.project: backend`. Keep credentials outside this file.
 
 ```sh
 oh-goon config inspect ./workflow/run.yml
@@ -58,7 +56,7 @@ oh-goon plan outputs RUN_ID
 
 ## Change values without editing the Goon
 
-Edit only `run.yml` for caller choices. Atomic Goons own input types, defaults, choices and constraints. Plans expose unambiguous unbound direct inputs, while fixed `with:` bindings remain fixed. Shared names need explicit recipients in the Plan/Composite; `config inspect` shows the selected contract.
+Edit only `run.yml` for caller choices. Atomic Goons own input types, defaults, choices and constraints. A required plain string can be written as `label:`; a default string as `label: example`. Use a mapping when a type, description or constraint adds information. Plans expose unambiguous unbound direct inputs, while fixed `with:` bindings remain fixed. Shared names need explicit recipients in the Plan/Composite; `config inspect` shows the selected contract.
 
 Native configuration stays native. Put pytest discovery/coverage in `pyproject.toml`; Ruff, Pyright and ty read their own project settings. Pi/OpenCode/Codex retain model window, reasoning, compaction, tools, authentication and personal configuration. Provider connections and OH-Goon profiles belong in the provider catalog; remote Skill sources belong in `.goonskills.yml`.
 
@@ -67,7 +65,6 @@ Native configuration stays native. Put pytest discovery/coverage in `pyproject.t
 Keep unchanged catalog Plans selected directly; no redundant copy is required. For a different roster, create `workflow/plan.yml` using ordinary Plan syntax:
 
 ```yaml
-version: 1
 goons:
 - import: python/quality
   pass: [project, dependency_group]
@@ -83,7 +80,6 @@ source: {kind: file-plan, path: plan.yml}
 target: {repository_id: REPOSITORY_ID}
 inputs:
   project: backend
-  dependency_group: dev
   typechecker: ty
 ```
 
@@ -94,7 +90,6 @@ The contained Plan path is relative to the workflow root. `pass:` deliberately r
 `as:` names one occurrence. This Plan keeps two project choices fixed and exposes independently typed checker choices:
 
 ```yaml
-version: 1
 goons:
 - import: python/typecheck
   as: api
@@ -115,7 +110,6 @@ Select it with `source: {kind: file-plan, path: plan.yml}` and set `inputs.api_c
 Move the Plan’s `goons:` entries. To change the order inside a Composite, select its Atomic Goons in your own Plan:
 
 ```yaml
-version: 1
 goons:
 - import: python/test
   pass: [project, dependency_group]
@@ -132,10 +126,8 @@ Keep producers before consumers of their outputs/workspaces. Invalid ordering fa
 Create `workflow/goons/general/project-check/{goon.yml,README.md}`. The README heading is `# general/project-check`; the Atomic Goon can be:
 
 ```yaml
-version: 1
 inputs:
   project:
-    type: string
     non_empty: true
     default: .
 uv:
@@ -178,6 +170,8 @@ A selected source is exactly one of `catalog-plan` with `name`, `file-plan` with
 `oh-goon/*` packages are internal verification/release capabilities. Use their owning Make/certification routes. The [example index](../examples/README.md) separates runnable workflows, external prerequisites, previews and integration fixtures.
 
 ## Package and execution contracts
+
+Plan/Goon source omits the default version, verification purpose and string type. A selected `run.yml` retains its own required version. Keep explicit policies when they change execution, such as `purpose: cicd`, and explicit bindings when several children consume the same caller choice.
 
 Each shipped package contains exactly `README.md` plus `goon.yml` or `plan.yml`, under `<kind>/<category>/<name>/`. Identity is `category/name`. Plans own ordered imports; an Atomic Goon owns `steps:`, a Composite Goon owns `goons:`, never both. YAML owns machine facts; README explains them.
 

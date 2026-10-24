@@ -4,10 +4,11 @@ Plans answer only: **which Goon capabilities run, in what order, and which Goon 
 
 Every shipped Plan package is exactly `templates/plans/<category>/<name>/{plan.yml,README.md}`. The package path is the shipped Plan identity, so `name:` is not repeated in YAML and human description belongs in `README.md`.
 
-A minimal Plan is:
+Start a catalog Plan with `oh-goon templates init python/quality --kind plan --output ./workflow`; its `run.yml` selects the catalog source directly.
+
+A minimal authored Plan is:
 
 ```yaml
-version: 1
 goons:
 - python/uv-audit
 ```
@@ -15,7 +16,6 @@ goons:
 A plain import automatically exposes its unambiguous public inputs. To fix an intentional override in the Plan:
 
 ```yaml
-version: 1
 goons:
 - import: python/quality
   with:

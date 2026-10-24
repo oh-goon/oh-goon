@@ -6,6 +6,9 @@ from pathlib import Path
 
 import yaml
 
+from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
+from oh_goon.integrations.fleet_plan_compilation import load_plan_template
+
 ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = (ROOT / "Makefile").read_text(encoding="utf-8")
 PLAN = ROOT / "templates/plans/oh-goon/app-certification/plan.yml"
@@ -55,8 +58,9 @@ def test_app_plan_is_one_small_release_critical_order_owner() -> None:
 
 
 def test_app_plan_is_direct_verification_of_initialized_repository() -> None:
-    data = yaml.safe_load(PLAN.read_text(encoding="utf-8"))
-    assert data["execution"] == {"purpose": "verification"}
+    plan = load_plan_template(PLAN)
+    assert plan.execution is not None
+    assert plan.execution.purpose is ExecutionPurpose.VERIFICATION
 
 
 def test_make_certify_has_one_certification_frontdoor() -> None:

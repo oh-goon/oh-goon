@@ -118,7 +118,7 @@ UI first, then use its canonical repository ID in the generated file:
 
 ```bash
 oh-goon templates list --kind plan
-oh-goon templates init python/quality --output ./workflow
+oh-goon templates init python/quality --kind plan --output ./workflow
 # Edit workflow/run.yml: target.repository_id and relevant inputs.
 oh-goon config inspect ./workflow/run.yml
 oh-goon config validate ./workflow/run.yml

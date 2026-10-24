@@ -26,9 +26,9 @@ def test_league_scan_maps_every_git_team_and_only_root_goon_yml_is_configured(
     configured = _git_team(root, "configured")
     _git_team(root, "missing")
     nested_only = _git_team(root, "nested-only")
-    (configured / "goon.yml").write_text("name: configured\nsteps: []\n", encoding="utf-8")
+    (configured / "goon.yml").write_text("steps:\n- run: 'true'\n", encoding="utf-8")
     (nested_only / "ci").mkdir()
-    (nested_only / "ci" / "goon.yml").write_text("name: nested\nsteps: []\n", encoding="utf-8")
+    (nested_only / "ci" / "goon.yml").write_text("steps:\n- run: 'true'\n", encoding="utf-8")
 
     state = local_state(LocalDatabase(tmp_path / "state.db"))
     state.add_location(root)
@@ -53,7 +53,7 @@ def test_league_scan_refuses_goon_yml_symlink(tmp_path: Path) -> None:
     root = tmp_path / "league"
     repository = _git_team(root, "api")
     outside = tmp_path / "outside.yml"
-    outside.write_text("name: outside\nsteps: []\n", encoding="utf-8")
+    outside.write_text("steps:\n- run: 'true'\n", encoding="utf-8")
     (repository / "goon.yml").symlink_to(outside)
 
     state = local_state(LocalDatabase(tmp_path / "state.db"))
@@ -76,7 +76,7 @@ def test_league_scan_is_derived_and_reflects_entrypoint_changes_without_persiste
     before = service.map()
     assert before.teams[0].pipeline.state == "MISSING"
 
-    (repository / "goon.yml").write_text("name: api\nsteps: []\n", encoding="utf-8")
+    (repository / "goon.yml").write_text("steps:\n- run: 'true'\n", encoding="utf-8")
     after = service.map()
 
     assert after.teams[0].pipeline.state == "CONFIGURED"
@@ -87,9 +87,9 @@ def test_configured_team_requires_managed_git_root_with_valid_entrypoint(tmp_pat
     root = tmp_path / "league"
     configured = _git_team(root, "api")
     missing = _git_team(root, "worker")
-    (configured / "goon.yml").write_text("name: api\nsteps: []\n", encoding="utf-8")
+    (configured / "goon.yml").write_text("steps:\n- run: 'true'\n", encoding="utf-8")
     outside = _git_team(tmp_path / "outside", "rogue")
-    (outside / "goon.yml").write_text("name: rogue\nsteps: []\n", encoding="utf-8")
+    (outside / "goon.yml").write_text("steps:\n- run: 'true'\n", encoding="utf-8")
 
     state = local_state(LocalDatabase(tmp_path / "state.db"))
     state.add_location(root)
@@ -107,7 +107,7 @@ def test_configured_team_resolves_nearest_managed_team_from_subdirectory(tmp_pat
     repository = _git_team(root, "api")
     nested = repository / "src" / "package"
     nested.mkdir(parents=True)
-    (repository / "goon.yml").write_text("name: api\nsteps: []\n", encoding="utf-8")
+    (repository / "goon.yml").write_text("steps:\n- run: 'true'\n", encoding="utf-8")
 
     state = local_state(LocalDatabase(tmp_path / "state.db"))
     state.add_location(root)
@@ -138,8 +138,8 @@ def test_configured_team_matches_top_down_league_discovery_for_nested_git_root(
     inner = outer / "packages" / "api"
     inner.mkdir(parents=True)
     (inner / ".git").mkdir()
-    (outer / "goon.yml").write_text("name: mono\nsteps: []\n", encoding="utf-8")
-    (inner / "goon.yml").write_text("name: api\nsteps: []\n", encoding="utf-8")
+    (outer / "goon.yml").write_text("steps:\n- run: 'true'\n", encoding="utf-8")
+    (inner / "goon.yml").write_text("steps:\n- run: 'true'\n", encoding="utf-8")
     work = inner / "src"
     work.mkdir()
 

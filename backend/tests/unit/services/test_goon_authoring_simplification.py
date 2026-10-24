@@ -330,16 +330,15 @@ def test_plan_projected_input_must_have_one_direct_owner(tmp_path: Path) -> None
         FleetPlanResolver(goon_templates=GoonTemplateStore(store_root)).resolve(root)
 
 
-def test_goon_metadata_is_explicit_while_plan_metadata_remains_package_owned() -> None:
+def test_goon_and_plan_names_come_from_the_selected_source_owner() -> None:
     from oh_goon.integrations.fleet_plan_compilation import parse_goon_template, parse_plan_template
 
-    goon = parse_goon_template(
-        "version: 1\nname: readable-label\ndescription: Real behavior.\nsteps:\n- run: 'true'\n"
-    )
-    assert goon.name == "readable-label"
-    assert goon.description == "Real behavior."
-    with pytest.raises(FleetPlanInvalid, match="unsupported fields: description"):
-        parse_plan_template("version: 1\ndescription: legacy label\ngoons:\n- python/quality\n")
+    content = "version: 1\nsteps:\n- run: 'true'\n"
+    source = parse_goon_template(content, expected_name="package-name")
+    assert source.name == "package-name"
+    assert source.description == ""
+    assert parse_goon_template(content, source="untrusted-readable-label").name == "goon"
+    assert parse_plan_template("version: 1\ngoons: [python/quality]\n").name == "plan"
 
 
 def test_goon_positive_tool_authority_compiles_to_exact_step_capabilities() -> None:
@@ -347,8 +346,6 @@ def test_goon_positive_tool_authority_compiles_to_exact_step_capabilities() -> N
 
     goon = parse_goon_template(
         """version: 1
-name: tooling-tests
-description: Run repository tooling tests under strict executable authority.
 execution:
   shell: bash
 tools:
@@ -369,8 +366,6 @@ def test_goon_execution_shell_compiles_once_without_duplicate_allow() -> None:
 
     goon = parse_goon_template(
         """version: 1
-name: tooling-tests
-description: Strict tooling.
 execution:
   shell: bash
 tools:
@@ -389,8 +384,6 @@ def test_goon_execution_shell_can_be_the_only_authored_tool_authority() -> None:
 
     goon = parse_goon_template(
         """version: 1
-name: shell-only
-description: Strict shell workload.
 execution:
   shell: sh
 steps:
@@ -415,8 +408,6 @@ def test_goon_tools_allow_is_canonical_positive_admission(allow: list[str], mess
     with pytest.raises(FleetPlanInvalid, match=message):
         parse_goon_template(
             f"""version: 1
-name: tooling-tests
-description: Strict tooling.
 tools:
   allow:
 {rendered}
@@ -432,8 +423,6 @@ def test_goon_top_level_tools_cannot_merge_with_step_tool_capabilities() -> None
     with pytest.raises(FleetPlanInvalid, match="must choose top-level tools.allow"):
         parse_goon_template(
             """version: 1
-name: tooling-tests
-description: Strict tooling.
 tools:
   allow:
   - bash
@@ -454,8 +443,6 @@ def test_goon_top_level_tools_do_not_broaden_multiple_steps() -> None:
     ):
         parse_goon_template(
             """version: 1
-name: multi-step
-description: Multiple Steps need separate authority ownership.
 tools:
   allow:
   - sh

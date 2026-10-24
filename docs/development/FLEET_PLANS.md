@@ -26,7 +26,6 @@ templates/plans/<category>/<name>/{plan.yml,README.md}
 ## Normal Atomic Goon
 
 ```yaml
-version: 1
 uv:
   group: dev
 steps:
@@ -35,12 +34,11 @@ steps:
 
 `run:` is parsed into an exact argv by the backend and never executes through a shell. Shell operators, redirects, command substitution, multiline shell programs and inline `python -c`/`sh -c` programs are rejected. If a command is complicated, expose a real project command or reusable tool and invoke that.
 
-A normal command Step does not author a timeout, cache key, dependency list, lock check, executor-capacity defaults, or Step ID. The backend owns those execution facts. `id:` is used only when a stable semantic name is useful or another declaration must refer to that Step.
+A normal command Step omits default timeouts, cache keys, dependency lists, lock checks, executor-capacity defaults, and Step IDs. The backend owns those execution facts. `id:` is used only when a stable semantic name is useful or another declaration must refer to that Step.
 
 ## UV means one locked Python environment
 
 ```yaml
-version: 1
 uv:
   project: backend
   group: dev
@@ -59,7 +57,6 @@ source/sandbox/cache/evidence boundaries around that native lifecycle.
 ## Composite Goon
 
 ```yaml
-version: 1
 goons:
 - python/ruff
 - python/test
@@ -70,7 +67,6 @@ Composition preserves written order and duplicates. Inputs use unique named proj
 ## Plan
 
 ```yaml
-version: 1
 goons:
 - python/quality
 - security/cve-combined
@@ -78,10 +74,9 @@ goons:
 
 A Plan is an execution/admission boundary and capability roster, not a second implementation schema. It never owns executable Steps, requirements, environment, outputs, dependency lists or copied Goon input schemas.
 
-A plain Plan exposes unique unbound public inputs automatically. Use `with:` at the import to show a fixed override:
+Version 1 is the default and need not be repeated. A plain Plan exposes unique unbound public inputs automatically. Use `with:` at the import to show a fixed override:
 
 ```yaml
-version: 1
 goons:
 - import: python/quality
   with:
@@ -103,7 +98,7 @@ There is no `variables` namespace, `coalesce()` expression language, or Step-out
 
 ## Requirements
 
-A Goon declares a requirement only when it adds a capability fact that the execution target does not already provide. Empty `requirements: []` is invalid ceremony. Imported-Goon requirements remain local applicability predicates: a missing fact skips that import and its owned Steps rather than becoming a hidden Plan-wide blocker. Plan-owned requirements remain hard admission requirements. Repository validity, Git-root topology, executor-capacity inheritance and command deadlines belong to backend execution/admission boundaries rather than being repeated in Goon YAML. Requirements may refer only to canonical source paths that survive source sanitization, never generated or operational paths such as `.git`, virtual environments, dependency installs, caches, or generated output.
+A Goon declares a requirement only when it adds a capability fact that the execution target does not already provide. Empty `requirements: []` is invalid ceremony. Imported-Goon requirements remain local applicability predicates: a missing fact skips that import and its owned Steps rather than becoming a hidden Plan-wide blocker. A requirement declared by a repository-root Atomic Goon remains a hard admission requirement; Plans do not author requirements. Repository validity, Git-root topology, executor-capacity inheritance and command deadlines belong to backend execution/admission boundaries rather than being repeated in Goon YAML. Requirements may refer only to canonical source paths that survive source sanitization, never generated or operational paths such as `.git`, virtual environments, dependency installs, caches, or generated output.
 
 ## Typed capabilities
 

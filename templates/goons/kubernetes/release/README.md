@@ -6,29 +6,27 @@ Commit one immutable OCI digest reference to exactly one apps/v1 Deployment cont
 
 **Prerequisites:** A digest-qualified image, exact target and declared host token/CA bindings.
 
-**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+```sh
+oh-goon templates init kubernetes/release --kind goon --output ./workflow
+```
+
+Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+
+This typed operation requires strict CI/CD execution. Add the explicit policy to the generated `workflow/plan.yml`:
+
+```yaml
+execution: {purpose: cicd}
+```
+
+Configure the admitted strict executor before running; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md). For a full build/publish/deploy workflow, use the [release-deploy Plan](../../../plans/oci/release-deploy/README.md).
 
 **Expected outputs:** Set-image resource/generation/image outputs and subsequent native rollout result.
 
-**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
-
-**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
-
 Select the exact API hostname, namespace, Deployment and container. Supply the declared token and CA certificate through host-backed environment authority. Image updates require a digest-qualified image; rollout verification consumes the exact expected generation and image. Inspect the Run for the actual mutation/verification result.
-
-## Contract
-
-- Canonical identity: `kubernetes/release`.
-- Repository identity is enforced by the CI/CD execution target; this Goon adds only capability-specific requirements.
-- Inputs: `kubernetes_api_hostname`, `namespace`, `deployment`, `container`, `image`.
-- Steps: `commit`, `verify`.
-- Public outputs: `KUBERNETES_RESOURCE_VERSION`, `KUBERNETES_GENERATION`, `KUBERNETES_IMAGE`.
 
 ## Safety boundary
 
 The image input must be a full registry/repository reference qualified by `@sha256:<64 lowercase hex>`; mutable tags are rejected before API access. Kubernetes mutation uses the typed direct API contract with explicit endpoint, namespace, Deployment/container identity, bearer-token/CA sources, TLS verification, and optimistic preconditions. It does not consume ambient kubeconfig.
-
-Machine-readable truth is [`goon.yml`](./goon.yml). The README explains intent and safety only; it is never runtime authority.
 
 ## Explicit recipient forwarding
 

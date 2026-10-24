@@ -520,7 +520,7 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
         diagnostic: {
           schema: "oh-goon.plan-validation-diagnostic/v1", status: "rejected",
           stage: "input_contract", code: "INVALID_INPUT_VALUE", inputs: ["coverage_threshold"],
-          safe_next_action: "Use plan inputs to inspect the owning Goon's type and constraints; correct the caller value.",
+          safe_next_action: "Inspect the owning Goon's type and constraints; correct the caller input value.",
           execution: "not_started_by_diagnostic",
         },
         execution: "not_started_by_inspection",

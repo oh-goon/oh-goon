@@ -243,7 +243,7 @@ How must repeated `oh-goon start` or contributor `make dev` decide whether to st
 How must `oh-goon open` derive a safe browser target and local-access capability from the exact current launch without treating configured endpoint intent, a guessed port, a new token, or raw Launch Manifest serialization as runtime truth?
 
 ## Q140
-Why must APP certification declare `ldd` as explicit backend-test Step tool authority, and how must long certification progress remain visibly live even when the durable sanitize/log pipeline or caller UI batches ordinary output without turning progress into a second evidence or execution owner?
+How does APP certification admit the backend-test Step's `ldd` authority through canonical Make requirements and independent permission, and how must long certification progress remain visibly live even when the durable sanitize/log pipeline or caller UI batches ordinary output without turning progress into a second evidence or execution owner?
 
 ## Q141
 How must `oh-goon logs` and `oh-goon stop` consume Launch Manifest truth without becoming a second native logging or process/lifecycle owner, and why must stop use exact process-birth proof plus a stable pidfd rather than a PID signal alone?

@@ -1,4 +1,3 @@
-version: 1
 execution:
   repositories:
     mode: parallel

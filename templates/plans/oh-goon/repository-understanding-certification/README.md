@@ -10,8 +10,6 @@ Verify the repository-understanding exam material and retain its manifest.
 make repository-understanding-exam
 ```
 
-**What to edit / settings owner:** repository owners maintain [`plan.yml`](plan.yml), its imported Goons and the Make lifecycle. This package is not a general user configuration example.
-
 This verifies the question/answer bank and version-bound evidence. It does not execute or certify a candidate model. Grader-only answer truth must stay outside repository evidence delivered to a candidate.
 
 **Outputs and failures:** native checks, Run/Step evidence and Game Tape preserve their actual results. A failed, unavailable or interrupted check stays unverified. No model statement or diagnostic result substitutes for canonical certification.

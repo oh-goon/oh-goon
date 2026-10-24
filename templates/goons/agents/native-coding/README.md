@@ -4,17 +4,17 @@ Run one selected native coding agent over the captured repository and Skill.
 The Agent owns reasoning, tools and editing within the selected isolated
 workspace. Its report is a claim; native verification retains result authority.
 
-**Status:** runnable with prerequisites. **Effects:** Runs the declared model/tool/native phase with its declared repository access and disclosure recipient.
+**Status:** runnable with prerequisites. **Effects:** Lets the selected native agent edit its admitted isolated workspace and report the result.
 
-**Prerequisites:** Explicit repository/Skill source roots, a permitted acceptance profile and the configured provider/native agent required by this Goon. Project check scripts must exist when selected; effectful work still needs fresh original admission.
+**Prerequisites:** Installed Pi/OpenCode/Codex, a compatible isolated managed profile, captured repository/Skill sources and admitted write scope.
 
-**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+```sh
+oh-goon templates init agents/native-coding --kind goon --output ./workflow
+```
 
-**Expected outputs:** Typed Agent records, proposal data or native project check results, according to the selected phase. Agent claims do not become verification truth.
+Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
-**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
-
-**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
+**Result:** A typed native report. Project verification remains a separate executable Step.
 
 `repo` and `skill` select the authorized captured sources. `goal` defaults to
 following the Skill; `acceptance` defaults to `native-coding` and must be

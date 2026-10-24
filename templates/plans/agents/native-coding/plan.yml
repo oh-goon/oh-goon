@@ -1,4 +1,3 @@
-version: 1
 goons:
 - agents/native-coding
 - agents/verification

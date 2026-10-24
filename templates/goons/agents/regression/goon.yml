@@ -1,4 +1,3 @@
-version: 1
 inputs:
   regression_command: {type: repository_path}
 steps:

@@ -6,13 +6,13 @@ Run a read-only Trivy filesystem vulnerability scan and retain its actual machin
 
 **Prerequisites:** Installed native scanners and admitted declared online egress. Trivy report bytes require strict content-store publication.
 
-**What to edit / settings owner:** select caller values in your workflow `run.yml`. [`goon.yml`](goon.yml) owns input types/defaults, Steps, requirements, effects and outputs. Select this capability through a Plan; use [the common setup and customization guide](../../../README.md) for inspect → validate → lock → run.
+```sh
+oh-goon templates init security/trivy-audit --kind plan --output ./workflow
+```
+
+The [security/trivy-audit Plan](../../../plans/security/trivy-audit/README.md) supplies the surrounding policy and ordered work. Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** Native scanner status and the declared report; nonzero findings remain a failed Step.
-
-**Failures:** invalid bindings reject before work; native failures, missing capabilities and incomplete execution retain their actual Step/Run status. Configuration validation alone proves no successful effect.
-
-**Customize:** change caller inputs in `run.yml`; use ordinary `with:`/`pass:` bindings and ordered imports in a project Plan/Composite for structural changes. Native tools keep their own configuration.
 
 Install the selected native scanner and configure its declared online access. A nonzero vulnerability result remains a failure. Trivy’s retained report requires configured strict content-store publication; the package’s retention contract explains what can be retrieved.
 

@@ -1,4 +1,3 @@
-version: 1
 uv:
   project: backend
   group: build
@@ -8,8 +7,6 @@ steps:
 - id: package
   run: uv run oh-goon-package-source
   working_directory: .
-  workspace:
-    from: repository
   outputs:
     ARCHIVE_SHA256: release-artifacts/archive-sha256.txt
   artifacts:
