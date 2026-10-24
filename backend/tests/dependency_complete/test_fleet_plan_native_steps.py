@@ -656,9 +656,9 @@ def test_native_timeout_retains_physical_failure_evidence_without_accepting_comp
     assert step.native_agent is not None
     selected = replace(
         step.native_agent,
-        # The whole-Step budget includes producer work and namespace preparation.
-        # The native fixture stays blocked after inference until this deadline.
-        profile=step.native_agent.profile.model_copy(update={"timeout_seconds": 30.0}),
+        # Keep headroom for producer/namespace setup before the real child blocks
+        # after approved inference; shared happy-path cases use a 10-second budget.
+        profile=step.native_agent.profile.model_copy(update={"timeout_seconds": 15.0}),
     )
     step = step.model_copy(update={"native_agent": selected})
     runtime = replace(runtime, native_profile=selected)

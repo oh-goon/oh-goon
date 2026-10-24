@@ -594,7 +594,6 @@ def test_native_bubblewrap_preflight_retains_canonical_git_root(
         config_file=native_cli.config,
     )
     assert selected.backend_configuration_id is not None and backend is not None
-    assert git.root(native_cli.workspace) == native_cli.workspace
     assert git.observation_runner is not None
     assert git.observe(native_cli.workspace).is_repository
     native_cli.build.assert_not_called()

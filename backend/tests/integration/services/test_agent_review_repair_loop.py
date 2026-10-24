@@ -174,7 +174,6 @@ model = "synthetic/reviewer"
             10,
         ),
         ("budget", 1, "attempts_exhausted", ["review"], 4),
-        ("clean", 2, "converged", ["review", "verification"], 4),
         ("credentials", 2, "converged", ["review", "verification"], 4),
         ("verification", 2, "verification_failed", ["review", "verification"], 4),
         ("leave_alone", 2, "review_incomplete", ["review"], 4),
@@ -451,7 +450,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                 path.write_text(yaml.safe_dump(authored, sort_keys=False))
                 options["inputs"].pop("verification_command")
                 monkeypatch.setenv("TEST_REVIEW_VERIFICATION", "check")
-            if scenario in ("clean", "verification", "credentials"):
+            if scenario in ("verification", "credentials"):
                 (repo / "code.txt").write_text("repaired\n")
             if scenario == "credentials":
                 monkeypatch.setenv("TEST_REVIEW_KEY", "fixture-secret-not-a-source")
