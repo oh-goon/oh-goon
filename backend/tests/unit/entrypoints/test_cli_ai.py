@@ -126,12 +126,33 @@ def native_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespa
 def test_ai_uses_one_resolved_selection_and_original_run_wait(
     native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main([*native_cli.argv, "--verify", "python -c 'print(42)'", "--json"]) == 0
+    assert (
+        main(
+            [
+                *native_cli.argv,
+                "--verify",
+                "python -c 'print(42)'",
+                "--verify",
+                "python '/tmp/independent verifier.py' "
+                "'https://example.invalid/items?x=1&x=2' 'two words'",
+                "--json",
+            ]
+        )
+        == 0
+    )
     call = native_cli.runtime.plans.run_native_agent.call_args.kwargs
     assert call["selected"].definition.executable == str(native_cli.executable)
     assert not call["selected"].interactive
     assert call["workspace"] == native_cli.workspace
-    assert call["verification"] == (("python", "-c", "print(42)"),)
+    assert call["verification"] == (
+        ("python", "-c", "print(42)"),
+        (
+            "python",
+            "/tmp/independent verifier.py",
+            "https://example.invalid/items?x=1&x=2",
+            "two words",
+        ),
+    )
     assert call["task"] == "repair the defect" and call["skill"] is None
     native_cli.runtime.locations.add.assert_called_once_with(native_cli.workspace)
     native_cli.runtime.runs.wait_for_terminal.assert_called_once_with("native-run")
@@ -161,11 +182,14 @@ def test_ai_does_not_change_configured_parent_or_excluded_repository(
     assert "excluded" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("outcome", [FleetRunOutcome.FAILED, FleetRunOutcome.ATTENTION_REQUIRED])
 def test_ai_native_failure_returns_nonzero_and_preserves_run_detail(
-    native_cli: SimpleNamespace,
+    native_cli: SimpleNamespace, outcome: FleetRunOutcome
 ) -> None:
-    native_cli.detail.outcome = FleetRunOutcome.FAILED
-    native_cli.detail.run.status = FleetRunStatus.FAILED
+    native_cli.detail.outcome = outcome
+    native_cli.detail.run.status = (
+        FleetRunStatus.FAILED if outcome is FleetRunOutcome.FAILED else FleetRunStatus.COMPLETED
+    )
     assert main(native_cli.argv) == 1
 
 
