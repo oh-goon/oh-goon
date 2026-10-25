@@ -30,7 +30,6 @@ def _prepare(monkeypatch, runtime: _Runtime) -> None:
     monkeypatch.setattr(cli, "run_local_state_command", lambda _args: None)
     monkeypatch.setattr(cli, "run_start_command", lambda _args: None)
     monkeypatch.setattr(cli, "run_enforcer_compare_command", lambda _args: None)
-    monkeypatch.setattr(cli, "run_state_free_developer_command", lambda _args: None)
 
     def build(_cls, *, standard_local=None):
         return runtime

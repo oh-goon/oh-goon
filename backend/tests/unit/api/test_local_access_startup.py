@@ -78,8 +78,7 @@ def test_start_stops_before_reuse_or_launch_when_local_state_preflight_fails(
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("reuse must not run")),
     )
     monkeypatch.setattr(
-        cli_start,
-        "built_ui_available",
+        "oh_goon.api.ui.built_ui_available",
         lambda: (_ for _ in ()).throw(AssertionError("startup work must not run")),
     )
 
@@ -94,7 +93,7 @@ def test_start_generates_launch_capability_before_uvicorn(
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "oh-goon.db"))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli_start, "check_local_state_for_startup", lambda: 0)
-    monkeypatch.setattr(cli_start, "built_ui_available", lambda: True)
+    monkeypatch.setattr("oh_goon.api.ui.built_ui_available", lambda: True)
     monkeypatch.setattr(cli_start, "LeagueFolderStore", _Folders)
     monkeypatch.setattr(
         cli_start,
@@ -170,7 +169,7 @@ def test_start_reuses_compatible_live_owner_without_starting_second_uvicorn(
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "oh-goon.db"))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli_start, "check_local_state_for_startup", lambda: 0)
-    monkeypatch.setattr(cli_start, "built_ui_available", lambda: True)
+    monkeypatch.setattr("oh_goon.api.ui.built_ui_available", lambda: True)
     monkeypatch.setattr(cli_start, "LeagueFolderStore", _Folders)
     owner = LocalLaunchOwner.create(
         intent=built_local_intent(host="127.0.0.1", port=8787),

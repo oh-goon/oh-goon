@@ -1,2 +1,3 @@
 #!/bin/sh
-exit 0
+set -eu
+exec uv run --frozen --no-sync dataflow-publish "$@"

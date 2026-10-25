@@ -14,10 +14,6 @@ Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`
 
 **Expected outputs:** The prepare Step publishes `RELEASE_TAG`; following commands consume explicit output/environment bindings.
 
-**Teaching example. Not a production baseline. Atomic Goon.**
+The [project fixture](../../../../template-certification/fixtures/advanced/isolated-dataflow/) supplies real preparation, pytest/pytest-timeout and native uv build behavior. Its publication command copies exactly one built wheel and source archive into a local `published/<label>/` directory. It requires the explicitly imported `RELEASE_TOKEN` for that local permission check; use a disposable non-secret value. The fixture makes no external publication request.
 
-This teaching workflow requires the project-owned preparation/publication scripts and locked tools illustrated by the existing certification fixture. Its declared Step outputs and environment imports are explicit dataflow; native failure remains authoritative.
-
-Demonstrates explicit inputs, step outputs, env/variable derivation, and per-step imports without ambient shell state.
-
-This package intentionally favors readability over a complete production policy. Use it to learn the Plan/Goon authoring model; do not copy it into production without adding the domain-specific admission, resource, secret, network, evidence, and release controls required by that workload.
+The ordinary verification Plan uses the registered project workspace. The package name does not supply strict isolation. Its output reference and per-Step environment import remain explicit; native test failure stops build and publication. External release workloads need their own declared domain authority.

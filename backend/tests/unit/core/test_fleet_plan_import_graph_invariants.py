@@ -3,11 +3,20 @@ from __future__ import annotations
 import pytest
 
 from oh_goon.core.models.fleet_plan import (
+    PlanArtifactDeclaration,
     ResolvedCommandStep,
     ResolvedFleetPlan,
     ResolvedImport,
 )
-from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy, CicdResourcePolicy
+from oh_goon.core.models.fleet_plan_execution_policy import (
+    CicdExecutionPolicy,
+    InspectionExecutionPolicy,
+    MaintenanceExecutionPolicy,
+    MigrationExecutionPolicy,
+    PlanExecutionPolicy,
+    VerificationExecutionPolicy,
+)
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 
 
 def _step(step_id: str) -> ResolvedCommandStep:
@@ -66,3 +75,29 @@ def test_sibling_import_scopes_cannot_overlap() -> None:
 
     with pytest.raises(ValueError, match="sibling imports.*overlap"):
         _plan(first, second)
+
+
+@pytest.mark.parametrize(
+    "execution",
+    [
+        VerificationExecutionPolicy(),
+        InspectionExecutionPolicy(),
+        MaintenanceExecutionPolicy(),
+        MigrationExecutionPolicy(),
+    ],
+)
+def test_retained_artifacts_require_strict_execution_before_effects(
+    execution: PlanExecutionPolicy,
+) -> None:
+    step = ResolvedCommandStep(
+        step_id="produce",
+        argv=("produce-model",),
+        timeout_seconds=10,
+        artifacts=(PlanArtifactDeclaration(path="model.json", retention="content_store"),),
+    )
+    baseline = ResolvedFleetPlan.create(
+        name="model", description="", execution=CicdExecutionPolicy(), steps=(step,)
+    )
+    assert baseline.steps[0].artifacts[0].retention == "content_store"
+    with pytest.raises(ValueError, match="content_store.*execution.purpose=cicd"):
+        ResolvedFleetPlan.create(name="model", description="", execution=execution, steps=(step,))

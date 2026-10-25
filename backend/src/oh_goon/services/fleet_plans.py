@@ -32,6 +32,7 @@ from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.execution_lock_models import ExecutionLock, LockedExternalArtifact
 from oh_goon.core.models.fleet_plan import (
     MAX_AGENT_TASK_CHARS,
+    AgentPlanStep,
     ManagedExtension,
     ResolvedFleetPlan,
     ResolvedLocalSearchAgentStep,
@@ -759,10 +760,22 @@ class FleetPlanService:
                         "Native Plan requires one explicit workspace and its frozen native selection"
                     )
                 native_workspace = native_workspace.resolve(strict=True)
-                # Authoring has not resolved actual Step effects yet. Preflight
-                # a read-only boundary, then check the frozen target below.
+                source_graph = _selected_source_graph(
+                    self._resolver, plan_path, source_graph=source_graph
+                )
+                source_graph.validate_agent_selection(
+                    native_selected=True, require_review_phases=False
+                )
+                read_only_workspace = all(
+                    step.requested_effects.repository_access == "read_only"
+                    for owner, identifier in source_graph.agent_step_sources()
+                    for step in source_graph.node(owner).compiled.steps
+                    if isinstance(step, AgentPlanStep) and step.step_id == identifier
+                )
+                # These are fixed authored effects from the same captured graph
+                # passed to resolution below, not a second source interpretation.
                 native_agent = self._prepare_native_agent(
-                    native_agent, native_workspace, read_only_workspace=True
+                    native_agent, native_workspace, read_only_workspace=read_only_workspace
                 )
             if (
                 not self._standard_local_fleet

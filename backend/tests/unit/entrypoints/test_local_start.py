@@ -8,7 +8,7 @@ def test_start_requires_bundled_ui_without_starting_server(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state.db"))
-    monkeypatch.setattr("oh_goon.cli_start.built_ui_available", lambda: False)
+    monkeypatch.setattr("oh_goon.api.ui.built_ui_available", lambda: False)
 
     assert main(["start"]) == 2
 
@@ -28,7 +28,7 @@ def test_start_serves_one_loopback_app_and_reports_saved_league(
     from oh_goon.runtime.league_folders import LeagueFolderStore
 
     LeagueFolderStore().replace((league_root,))
-    monkeypatch.setattr("oh_goon.cli_start.built_ui_available", lambda: True)
+    monkeypatch.setattr("oh_goon.api.ui.built_ui_available", lambda: True)
     monkeypatch.setattr(
         "oh_goon.cli_start.start_inprocess_readiness_monitor",
         lambda **kwargs: (kwargs["on_ready"](), types.SimpleNamespace(cancel=lambda: None))[1],

@@ -409,7 +409,7 @@ def test_codex_service_direct_run_rejects_native_state_overlap_before_source_cap
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overlap: str
 ) -> None:
     from oh_goon.application import ApplicationRuntime
-    from oh_goon.integrations import agent_native_execution
+    from oh_goon.integrations import agent_native_execution, fleet_plan_native_steps
 
     workspace = tmp_path / "teams" / "repo"
     workspace.mkdir(parents=True)
@@ -451,6 +451,11 @@ def test_codex_service_direct_run_rejects_native_state_overlap_before_source_cap
             lambda *args: pytest.fail("native file bytes were opened before separation"),
         )
         monkeypatch.setattr(
+            fleet_plan_native_steps,
+            "verify_native_agent_executable",
+            lambda *args: pytest.fail("native file bytes were opened before separation"),
+        )
+        monkeypatch.setattr(
             runtime.plans._resolver,
             "resolve_frozen_agents",
             lambda *args, **kwargs: pytest.fail("native state reached source capture"),
@@ -464,6 +469,160 @@ def test_codex_service_direct_run_rejects_native_state_overlap_before_source_cap
                 role="review",
             )
         assert runtime.runs.history().items == ()
+    finally:
+        runtime.shutdown(wait_for_runs=True)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX executable fixture")
+@pytest.mark.parametrize("read_only", [False, True], ids=["coding", "review"])
+def test_native_plan_local_profile_honors_authored_workspace_access_and_reuses_source_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read_only: bool
+) -> None:
+    import sys
+    from unittest.mock import Mock
+
+    from oh_goon.application import ApplicationRuntime
+    from oh_goon.core.errors import FleetPlanInvalid
+    from oh_goon.core.execution_lock_identity import build_execution_lock
+    from oh_goon.core.models.agent_providers import CodexLoginConnection
+    from oh_goon.core.models.fleet_plan_composition import PlanInputValue
+    from oh_goon.core.models.operation import FleetPlanOperationEvidence
+    from oh_goon.core.models.run import FleetRunState
+    from oh_goon.core.product_identity import repository_id
+    from oh_goon.integrations.agent_native_execution import native_executable_sha256
+    from oh_goon.services.agent_authoring_sources import capture_agent_sources
+    from oh_goon.services.execution_lock_persistence import write_execution_lock
+    from tests.factories.shipped_templates import PLAN_TEMPLATES
+
+    repository = tmp_path / "repositories" / "subject"
+    repository.mkdir(parents=True)
+    source = repository / "code.txt"
+    source.write_text("broken\n")
+    verifier = repository / "check"
+    verifier.write_text(
+        f"#!{sys.executable}\n"
+        "from pathlib import Path\n"
+        "assert Path('code.txt').read_text() == 'repaired\\n'\n"
+        "Path('verification-completed').touch()\n"
+    )
+    verifier.chmod(0o755)
+    assert (
+        subprocess.run([str(verifier)], cwd=repository, capture_output=True, timeout=10).returncode
+        == 1
+    )
+    _git(repository, "init", "-q")
+    program = tmp_path / "native-tools" / "codex"
+    program.parent.mkdir()
+    program.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "sys.stdin.buffer.read()\n"
+        "Path('code.txt').write_text('repaired\\n')\n"
+        "Path('native-invoked').touch()\n"
+        "print(json.dumps({'type': 'turn.started'}), flush=True)\n"
+        "print(json.dumps({'type': 'item.completed', 'item': "
+        "{'type': 'agent_message', 'text': 'Synthetic edit completed'}}), flush=True)\n"
+        "print(json.dumps({'type': 'turn.completed'}), flush=True)\n"
+    )
+    program.chmod(0o755)
+    account = tmp_path / "empty-native-account"
+    account.mkdir()
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="local-login",
+        definition=NativeAgentDefinition(executable=str(program)),
+        profile=NativeAgentProfile(
+            backend="local",
+            codex_login=CodexLoginConnection(
+                home=str(account), model="synthetic-native", reasoning_effort="low"
+            ),
+        ),
+        executable_sha256=native_executable_sha256(program),
+    )
+    workflow = tmp_path / "workflow"
+    skill = workflow / "skills" / "task"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Fixture\nRepair code.txt. Read no auth or env files.\n")
+    path = workflow / "plan.yml"
+    path.write_text(
+        PLAN_TEMPLATES.source(
+            "agents/native-review" if read_only else "agents/native-coding"
+        ).content
+    )
+    inputs: dict[str, PlanInputValue] = {
+        "repo": "local:subject",
+        "skill": "local:skills/task",
+    }
+    if not read_only:
+        inputs["verification_command"] = "check"
+    acceptance = ("agentic-review" if read_only else "native-coding",)
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    runtime = ApplicationRuntime.build(standard_local=True)
+    try:
+        runtime.locations.add(repository.parent)
+        resolver = runtime.plans._resolver
+        graph = resolver.analyze_source(path)
+        monkeypatch.setattr(
+            resolver,
+            "analyze_source",
+            lambda *args, **kwargs: pytest.fail("the captured source graph was rediscovered"),
+        )
+        capture = Mock(wraps=capture_agent_sources)
+        monkeypatch.setattr(
+            "oh_goon.services.agent_authoring_sources.capture_agent_sources", capture
+        )
+
+        def start_selected() -> FleetRunState:
+            return runtime.plans.run(
+                path,
+                inputs=inputs,
+                repository_ids={repository_id(repository)},
+                repository=repository,
+                agent_repository_root=repository.parent,
+                agent_skill_root=workflow,
+                allowed_agent_acceptance=acceptance,
+                native_agent=selected,
+                native_workspace=repository,
+                source_graph=graph,
+            )
+
+        if read_only:
+            with pytest.raises(FleetPlanInvalid, match="Codex login requires"):
+                start_selected()
+            capture.assert_not_called()
+            assert runtime.runs.history().items == ()
+            assert source.read_text() == "broken\n"
+            assert not (repository / "native-invoked").exists()
+            assert not (repository / "verification-completed").exists()
+        else:
+            plan, _, _ = resolver.resolve_frozen_agents(
+                path,
+                inputs=inputs,
+                repository_root=repository.parent,
+                skill_root=workflow,
+                allowed_acceptance=acceptance,
+                native_agent=selected,
+                repository=repository,
+                git_service=runtime.plans._git_service,
+                source_graph=graph,
+            )
+            write_execution_lock(workflow / "goon.lock", build_execution_lock(plan))
+            capture.reset_mock()
+            started = start_selected()
+            completed = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
+            evidence = completed.operations[0].evidence
+            assert isinstance(evidence, FleetPlanOperationEvidence)
+            assert completed.game_tape.status.value == "PASSED"
+            assert len(evidence.plan.steps) == 2
+            assert all(step.status == "COMPLETED" for step in evidence.plan.steps)
+            assert evidence.plan.steps[1].argv == ("./check",)
+            assert source.read_text() == "repaired\n"
+            assert (repository / "native-invoked").is_file()
+            assert (repository / "verification-completed").is_file()
+            capture.assert_called_once()
     finally:
         runtime.shutdown(wait_for_runs=True)
 

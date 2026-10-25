@@ -251,6 +251,13 @@ OH_GOON_LIVE_CODEX_MODEL=gpt-6-luna \
 uv run --offline --frozen --no-sync --project backend pytest -m certification backend/tests/integration/services/test_native_codex_live.py
 ```
 
+With the same explicit executable and existing native sign-in selection,
+`test_live_native_template_workflow.py` executes initialized shipped Plan and
+Goon selections through the public CLI, lock, native coding and a project
+verification Step. An independent verifier first fails the original sample and
+then passes its real edited source; verifier and project-check bytes must remain
+unchanged. Codex alone handles sign-in. The harness never opens auth or env files.
+
 The selected native installation and the loaded Oh-Goon/Python runtime must be
 outside the authentication-home tree, as required by the existing native tool
 permissions. These cases request low reasoning effort and consume real inference;

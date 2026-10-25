@@ -4,7 +4,7 @@ Build one retained OCI archive through the typed isolated builder.
 
 **Status:** runnable with prerequisites. **Effects:** Builds and retains an image workspace; base pulls use the selected registry.
 
-**Prerequisites:** A compatible isolated OCI builder, a repository Containerfile with digest-pinned base images, the selected base-pull registry and configured retained workspace storage. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+**Prerequisites:** An admitted strict executor with Buildah and crun, a repository Containerfile with digest-pinned base images, the selected base-pull registry and configured retained workspace storage. The current local backend refuses strict Runs until independent native parent custody can be established; installing these tools alone does not qualify it. See the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
 ```sh
 oh-goon templates init oci/image --kind plan --output ./workflow
