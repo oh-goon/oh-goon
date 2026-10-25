@@ -731,8 +731,18 @@ def test_ai_always_emits_one_durable_handoff_reference_at_admission(
     assert json.loads(references[0]) == ["oh-goon", "plan", "handoff", "native-run", "--json"]
 
 
+@pytest.mark.parametrize(
+    "status,outcome",
+    [
+        (FleetRunStatus.FAILED, FleetRunOutcome.FAILED),
+        (FleetRunStatus.COMPLETED, FleetRunOutcome.ATTENTION_REQUIRED),
+    ],
+)
 def test_ai_explicit_prior_handoff_is_data_for_a_fresh_native_run(
-    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    native_cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    status: FleetRunStatus,
+    outcome: FleetRunOutcome,
 ) -> None:
     from oh_goon import cli_plan_run_readback
 
@@ -741,7 +751,8 @@ def test_ai_explicit_prior_handoff_is_data_for_a_fresh_native_run(
     projection = Mock(
         return_value={
             "fleet_run_id": "prior-run",
-            "outcome": "FAILED",
+            "status": status.value,
+            "outcome": outcome.value,
             "remaining_work": "Unverified",
         }
     )
@@ -750,10 +761,32 @@ def test_ai_explicit_prior_handoff_is_data_for_a_fresh_native_run(
     native_cli.runtime.runs.get.assert_called_once_with("prior-run")
     projection.assert_called_once_with(prior)
     call = native_cli.runtime.plans.run_native_agent.call_args.kwargs
-    assert json.loads(call["prior_context"])["outcome"] == "FAILED"
+    context = json.loads(call["prior_context"])
+    assert context["status"] == status.value
+    assert context["outcome"] == outcome.value
     assert call["task"] == "repair the defect"
     assert call["selected"].definition.executable == str(native_cli.executable)
     native_cli.runtime.runs.cancel.assert_not_called()
+
+
+def test_ai_unknown_prior_handoff_rejects_before_catalog_mutation_or_new_run(
+    native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from oh_goon.core.errors import RunNotFound
+
+    native_cli.runtime.runs.get = Mock(side_effect=RunNotFound("Unknown fleet run: prior-run"))
+
+    assert main([*native_cli.argv, "--handoff-from", "prior-run"]) == 2
+
+    native_cli.runtime.runs.get.assert_called_once_with("prior-run")
+    native_cli.runtime.locations.add.assert_not_called()
+    native_cli.runtime.plans.run_native_agent.assert_not_called()
+    native_cli.runtime.runs.wait_for_terminal.assert_not_called()
+    native_cli.runtime.runs.cancel.assert_not_called()
+    captured = capsys.readouterr()
+    assert "Unknown fleet run: prior-run" in captured.err
+    assert "Durable Run handoff argv:" not in captured.err
+    assert not captured.out
 
 
 def test_ai_oversize_prior_handoff_rejects_before_new_admission_or_catalog_mutation(
