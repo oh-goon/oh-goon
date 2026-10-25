@@ -28,7 +28,7 @@ from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
 from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNativeAgent
-from oh_goon.core.models.agent_review import AgentAdjudicationRecord
+from oh_goon.core.models.agent_review import AgentAdjudicationRecord, review_output_schema
 from oh_goon.core.models.fleet_observation import (
     AgentHarnessObservation,
     NativeAgentObservation,
@@ -580,7 +580,9 @@ def execute_native_agent_step(
             )
 
             output_schema = None
-            if step.role == "adjudication":
+            if step.role == "review":
+                output_schema = review_output_schema(prepared.handoff, step.step_id)
+            elif step.role == "adjudication":
                 output_schema = AgentAdjudicationRecord.model_json_schema(by_alias=True)
                 properties = output_schema["properties"]
                 output_schema["required"] = list(properties)

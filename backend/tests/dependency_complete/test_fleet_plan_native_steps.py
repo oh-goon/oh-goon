@@ -838,7 +838,8 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
 
     def reject_service(**_kwargs: Any) -> Any:
         schema = _kwargs["output_schema"]
-        if role == "adjudication":
+        if role in ("review", "adjudication"):
+            assert schema is not None
             assert schema["properties"]["candidate_identity"]["enum"] == [
                 handoff.source.repository.content_identity
             ]
@@ -847,6 +848,21 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
             for node in (schema, *schema["$defs"].values()):
                 assert node["additionalProperties"] is False
                 assert set(node["required"]) == set(node["properties"])
+            if role == "review":
+                assert schema["properties"]["reviewer"]["enum"] == [step.step_id]
+                assert schema["properties"]["skill_identity"]["enum"] == [
+                    handoff.source.skill.content_identity
+                ]
+                assert schema["properties"]["summary"]["maxLength"] == 4000
+                assert schema["properties"]["findings"]["maxItems"] == 64
+                finding = schema["$defs"]["ReviewFinding"]["properties"]
+                assert finding["explanation"]["maxLength"] == 4000
+                assert finding["evidence"]["maxItems"] == 16
+                expanded, compact = schema["properties"]["reviewed_paths"]["anyOf"]
+                assert expanded["type"] == "array" and expanded["items"] == {"type": "string"}
+                assert compact["properties"]["complete_scope"]["enum"] == [review_scope(handoff)]
+                assert compact["required"] == ["complete_scope"]
+                assert compact["additionalProperties"] is False
         else:
             assert schema is None
         rejected = service_owner.CodexServiceExecutionFailure(failure)

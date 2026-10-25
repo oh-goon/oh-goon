@@ -340,7 +340,32 @@ class _CampaignResponses(CodexResponsesFixture):
         self.inputs: dict[tuple[str, str], dict[str, Any]] = {}
         self.probed: set[tuple[str, str]] = set()
         self.schema_bound_occurrences: set[tuple[str, str]] = set()
+        self.review_schema_bound_occurrences: set[tuple[str, str]] = set()
         super().__init__(transport="http", prompt=lambda: None, auth_token=_TOKEN)
+
+    def _assert_review_schema(self, output_format: object, identity: dict[str, Any]) -> None:
+        assert isinstance(output_format, dict) and output_format["type"] == "json_schema"
+        assert output_format["strict"] is True
+        schema = output_format["schema"]
+        canonical_schema = AgentReviewRecord.model_json_schema(by_alias=True)
+        assert set(schema["properties"]) == set(canonical_schema["properties"])
+        assert set(schema["required"]) == set(canonical_schema["properties"])
+        assert schema["additionalProperties"] is False
+        assert schema["$defs"] == canonical_schema["$defs"]
+        for field in ("reviewer", "candidate_identity", "scope_identity", "skill_identity"):
+            assert schema["properties"][field]["enum"] == [identity[field]]
+        coverage = schema["properties"]["reviewed_paths"]["anyOf"]
+        assert len(coverage) == 2
+        assert canonical_schema["properties"]["reviewed_paths"] in coverage
+        compact = next(option for option in coverage if option.get("type") == "object")
+        assert compact["additionalProperties"] is False
+        assert compact["required"] == ["complete_scope"]
+        assert set(compact["properties"]) == {"complete_scope"}
+        assert compact["properties"]["complete_scope"]["type"] == "string"
+        assert compact["properties"]["complete_scope"]["enum"] == [identity["scope_identity"]]
+        self.review_schema_bound_occurrences.add(
+            (identity["reviewer"], identity["candidate_identity"])
+        )
 
     def _record(self, payload: dict[str, Any]) -> dict[str, Any]:
         identity = payload["identity"]
@@ -355,7 +380,9 @@ class _CampaignResponses(CodexResponsesFixture):
                 **identity,
                 verdict="CLEAN" if clean else "FINDING",
                 summary="Inspected complete captured source with native read-only tools",
-                reviewed_paths={"complete_scope": identity["scope_identity"]},
+                reviewed_paths=[member["path"] for member in members]
+                if clean
+                else {"complete_scope": identity["scope_identity"]},
                 findings=[]
                 if clean
                 else [
@@ -489,7 +516,9 @@ class _CampaignResponses(CodexResponsesFixture):
         identity = payload["identity"]
         key = identity["reviewer"], identity["candidate_identity"]
         output_format = body.get("text", {}).get("format")
-        if "oh-goon.agent-adjudication/v1" in payload["output_contract"]:
+        if "oh-goon.agent-review/v1" in payload["output_contract"]:
+            self._assert_review_schema(output_format, identity)
+        elif "oh-goon.agent-adjudication/v1" in payload["output_contract"]:
             assert isinstance(output_format, dict) and output_format["type"] == "json_schema"
             assert output_format["strict"] is True
             schema = output_format["schema"]
@@ -801,6 +830,9 @@ def test_installed_codex_service_campaign_preserves_phase_authority(
                     "cancel": ["review", "adjudicate", "repair"],
                 }[scenario]
             ), facts
+            assert endpoint.review_schema_bound_occurrences == {
+                (review.reviewer, review.candidate_identity) for review in reviews
+            }
             if scenario == "cancel":
                 # Cancellation can precede final native observation publication.
                 # Only the five already completed reasoning Steps are guaranteed.
