@@ -157,7 +157,7 @@ def _native_agent_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model:
     return plan, repository, options
 
 
-@pytest.mark.parametrize("harness", ["local-model-review", "local-model-skill-loop"])
+@pytest.mark.parametrize("harness", ["local-model-review", "local-model-skill-resources"])
 def test_real_hashmarks_and_installed_ollama_review_survives_restart(
     actual_model: str,
     tmp_path: Path,
@@ -165,11 +165,11 @@ def test_real_hashmarks_and_installed_ollama_review_survives_restart(
     harness: str,
 ):
     plan, repository, opts = _native_agent_source(tmp_path, monkeypatch, actual_model)
-    if harness == "local-model-skill-loop":
+    if harness == "local-model-skill-resources":
         goon = tmp_path / "goons" / "agent" / "search" / "goon.yml"
         goon.write_text(
             goon.read_text().replace(
-                "harness: local-model-review", "harness: local-model-skill-loop"
+                "harness: local-model-review", "harness: local-model-skill-resources"
             )
         )
         skill = tmp_path / "skills" / "team" / "search"
@@ -182,7 +182,7 @@ def test_real_hashmarks_and_installed_ollama_review_survives_restart(
         )
     resolved, frozen, _ = FleetPlanResolver(
         goon_templates=GoonTemplateStore(),
-    ).resolve_frozen_local_search_agent(
+    ).resolve_frozen_agent(
         plan,
         inputs=opts["inputs"],
         repository_root=opts["agent_repository_root"],

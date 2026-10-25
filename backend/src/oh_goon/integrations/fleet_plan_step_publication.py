@@ -9,7 +9,7 @@ from pathlib import Path
 from oh_goon.core.agent_review_plan import agent_phase_role
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.file_digest import sha256_file_with_size
-from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep, ResolvedPlanStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedPlanStep
 from oh_goon.core.models.fleet_plan_evidence import (
     MissingPlanArtifact,
     PlanArtifactEvidence,
@@ -162,8 +162,8 @@ def _published_outputs(
     # A model's validated proposal is data, not an effect grant. Publish it
     # through the SAME successful-attempt output owner as ordinary Step files,
     # with the original producer execution identity on strict attempts.
-    if isinstance(step, ResolvedLocalSearchAgentStep) and (
-        step.harness == "local-model-proposal" or agent_phase_role(step) == "proposal"
+    if isinstance(step, ResolvedAgentStep) and (
+        step.workload.harness == "local-model-proposal" or agent_phase_role(step) == "proposal"
     ):
         try:
             from oh_goon.integrations.agent_patch_apply import proposal_from_step_stdout

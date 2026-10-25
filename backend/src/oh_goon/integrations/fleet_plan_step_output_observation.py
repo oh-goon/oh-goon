@@ -7,7 +7,7 @@ from typing import Any, Literal, Protocol
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.models.diagnostic import MAX_DIAGNOSTIC_MESSAGE_CHARS, DiagnosticEvent
 from oh_goon.core.models.fleet_observation import AgentHarnessObservation
-from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep, ResolvedPlanStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedPlanStep
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.engine.command import CommandOutputObserver, CommandProcessObserver, CommandResult
@@ -41,7 +41,11 @@ def observed_command_runner(
         runtime_supervision: CommandRuntimeSupervision | None = None,
         **native_options: Any,
     ) -> CommandResult:
-        selected = step.native_agent if isinstance(step, ResolvedLocalSearchAgentStep) else None
+        selected = (
+            step.workload.native_agent
+            if isinstance(step, ResolvedAgentStep) and step.workload.harness == "native"
+            else None
+        )
         private_native_protocol = (
             selected is not None
             and (

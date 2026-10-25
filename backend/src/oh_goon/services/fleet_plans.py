@@ -13,10 +13,16 @@ from typing import TYPE_CHECKING
 import yaml
 
 from oh_goon.core.agent_review_plan import agent_phase_role
-from oh_goon.core.errors import FleetPlanInvalid, InvalidRunTransition, RunNotFound, StateConflict
+from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
+from oh_goon.core.errors import FleetPlanInvalid, InvalidRunTransition, StateConflict
 from oh_goon.core.execution_lock_identity import build_execution_lock, verify_execution_lock
 from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import (
+    MAX_AGENT_CAMPAIGN_MESSAGE_CHARS,
+    TRUNCATED_AGENT_CAMPAIGN_MESSAGE,
+    AgentCampaignDecision,
+    AgentCampaignIntent,
+    AgentCampaignUnstartedSelection,
     AgentRepairBudget,
     AgentRepairContext,
     AgentRepairResult,
@@ -34,8 +40,9 @@ from oh_goon.core.models.fleet_plan import (
     MAX_AGENT_TASK_CHARS,
     AgentPlanStep,
     ManagedExtension,
+    ResolvedAgentStep,
     ResolvedFleetPlan,
-    ResolvedLocalSearchAgentStep,
+    ResolvedPlanStep,
 )
 from oh_goon.core.models.fleet_plan_composition import PlanInputDefinition, PlanInputValue
 from oh_goon.core.models.fleet_plan_diagnostics import (
@@ -290,7 +297,7 @@ class FleetPlanService:
                     execution=plan.execution,
                     steps=tuple(
                         step.model_copy(update={"review_context": context})
-                        if isinstance(step, ResolvedLocalSearchAgentStep)
+                        if isinstance(step, ResolvedAgentStep)
                         else step
                         for step in plan.steps
                     ),
@@ -812,7 +819,7 @@ class FleetPlanService:
                     git_service=self._git_service if native_agent is not None else None,
                 )
             else:
-                plan, handoff, source_sha256 = self._resolver.resolve_frozen_local_search_agent(
+                plan, handoff, source_sha256 = self._resolver.resolve_frozen_agent(
                     plan_path,
                     inputs=inputs or {},
                     repository_root=agent_repository_root,
@@ -853,7 +860,7 @@ class FleetPlanService:
                 require_native_workspace_runtime_separation(
                     native_workspace,
                     read_only_workspace=all(
-                        isinstance(step, ResolvedLocalSearchAgentStep)
+                        isinstance(step, ResolvedAgentStep)
                         and handoff[step.step_id].requested_effects.repository_access == "read_only"
                         for step in plan.steps
                     ),
@@ -944,7 +951,7 @@ class FleetPlanService:
                     )
                 }
             )
-        agents = [step for step in plan.steps if isinstance(step, ResolvedLocalSearchAgentStep)]
+        agents = [step for step in plan.steps if isinstance(step, ResolvedAgentStep)]
         deliveries = (
             handoff if isinstance(handoff, dict) else {agent.step_id: handoff for agent in agents}
         )
@@ -1053,9 +1060,7 @@ class FleetPlanService:
             )
         if native_agent is not None:
             if review_write_roots is None:
-                raise FleetPlanInvalid(
-                    "Native repair requires the complete review campaign, not legacy local proposal repair"
-                )
+                raise FleetPlanInvalid("Native repair requires the complete review campaign")
             if native_workspace is None or agent_connection is not None:
                 raise FleetPlanInvalid(
                     "Native repair requires one explicit workspace and its frozen native selection"
@@ -1076,8 +1081,11 @@ class FleetPlanService:
         deadline_at = utc_now() + timedelta(seconds=budget.timeout_seconds)
         deadline = time.monotonic() + budget.timeout_seconds
         attempts: list[FleetRunDetail] = []
-        admitted_run_ids: list[str] = []
-        unresolved_run_ids: list[str] = []
+        campaign_revision: int | None = None
+        campaign: AgentReviewRepairCampaign | None = None
+        maximum_runs = budget.max_attempts
+        current_selection: AgentCampaignUnstartedSelection | None = None
+        redaction_steps: tuple[ResolvedPlanStep, ...] = ()
 
         def stop_requested() -> RepairStop | None:
             if cancel_requested is not None and cancel_requested():
@@ -1086,15 +1094,62 @@ class FleetPlanService:
                 return RepairStop.TIMED_OUT
             return None
 
+        def commit_policy(
+            reason: RepairStop | None,
+            message: str = "",
+            *,
+            next_phase: str | None = None,
+        ) -> None:
+            nonlocal campaign_revision
+            assert campaign_revision is not None
+            retained, consumed, unresolved = self._runs.campaign_decision_inputs(repair_id)
+            from oh_goon.integrations.fleet_plan_secret_redaction import redact_host_secret_text
+
+            for step in redaction_steps:
+                message = redact_host_secret_text(step, message)
+            message = redact_diagnostic_text(message)
+            if len(message) > MAX_AGENT_CAMPAIGN_MESSAGE_CHARS:
+                message = TRUNCATED_AGENT_CAMPAIGN_MESSAGE
+            # The predecessor and outcome bind this retry identity to one policy decision.
+            import hashlib
+
+            decision = AgentCampaignDecision(
+                campaign_id=repair_id,
+                expected_revision=campaign_revision,
+                decision_id=hashlib.sha256(
+                    f"{repair_id}:{campaign_revision}:{reason or next_phase}".encode()
+                ).hexdigest(),
+                phase_ordinal=len(retained.phases),
+                remaining_runs=maximum_runs - len(retained.phases),
+                consumed_runs=tuple(consumed),
+                unresolved_run_ids=tuple(unresolved),
+                candidate_identity=campaign.candidate_identity if campaign is not None else None,
+                scope_identity=campaign.scope_identity if campaign is not None else None,
+                next_phase=next_phase,
+                next_step_ids=tuple(step.step_id for step in campaign.plan.steps)
+                if reason is None and campaign is not None
+                else tuple(step.step_id for step in plan.steps)
+                if reason is None
+                else (),
+                unstarted_selection=current_selection if reason is not None else None,
+                stop_reason=reason,
+                message=message,
+            )
+            committed = self._runs.commit_agent_campaign_decision(decision)
+            campaign_revision = committed.latest_revision
+
         def result(reason: RepairStop, message: str = "") -> AgentRepairResult:
+            if campaign_revision is not None:
+                if reason in {RepairStop.CONVERGED, RepairStop.TEST_PASSED}:
+                    reason = stop_requested() or reason
+                commit_policy(reason, message)
+                return self._runs.agent_campaign_result(repair_id)
             return AgentRepairResult(
                 repair_id,
                 budget,
                 reason,
                 tuple(attempts),
-                message,
-                tuple(admitted_run_ids),
-                tuple(unresolved_run_ids),
+                redact_diagnostic_text(message),
             )
 
         def discard_unadmitted_source(
@@ -1112,7 +1167,6 @@ class FleetPlanService:
 
         if (stop := stop_requested()) is not None:
             return result(stop)
-        campaign = None
         lock = load_execution_lock(lock_path or (plan_path.parent / LOCK_FILE_NAME))
         capture_options: AgentCaptureOptions = dict(
             inputs=selected_inputs,
@@ -1149,7 +1203,7 @@ class FleetPlanService:
                 )
                 target_handoff = handoffs
             else:
-                plan, single_handoff, source_sha = self._resolver.resolve_frozen_local_search_agent(
+                plan, single_handoff, source_sha = self._resolver.resolve_frozen_agent(
                     plan_path,
                     inputs=selected_inputs,
                     repository_root=agent_repository_root,
@@ -1181,14 +1235,31 @@ class FleetPlanService:
         if identify_repository(repository) != repository_id:
             raise FleetPlanInvalid("repair capture differs from selected Fleet repository")
         steps = validate_agent_repair_plan(plan, single_handoff) if campaign is None else None
-        verify_execution_lock(
-            build_execution_lock(plan, external_artifacts=external_artifacts), lock
-        )
+        original_lock = build_execution_lock(plan, external_artifacts=external_artifacts)
+        verify_execution_lock(original_lock, lock)
         maximum_runs = (
             budget.max_attempts if campaign is None else 4 * (budget.max_attempts - 1) + 2
         )
+        redaction_steps = plan.steps
+        original_digest = original_lock.digest
         if campaign is not None:
             plan = campaign.plan
+        retained_intent = self._runs.begin_agent_campaign(
+            AgentCampaignIntent(
+                campaign_id=repair_id,
+                repository_id=repository_id,
+                original_execution_digest=original_digest,
+                budget=budget,
+                maximum_runs=maximum_runs,
+                deadline_at=deadline_at,
+                initial_phase=campaign.phase if campaign is not None else "repair",
+                initial_step_ids=tuple(step.step_id for step in plan.steps),
+                candidate_identity=campaign.candidate_identity if campaign is not None else None,
+                scope_identity=campaign.scope_identity if campaign is not None else None,
+                write_roots=campaign.write_roots if campaign is not None else (),
+            )
+        )
+        campaign_revision = retained_intent.latest_revision
         from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
         with RepositoryWorkspaceAuthority.pin_repository_subject(
@@ -1204,6 +1275,7 @@ class FleetPlanService:
                 repair_context = AgentRepairContext.model_validate(
                     {
                         "repair_id": repair_id,
+                        "campaign_revision": campaign_revision,
                         "attempt": ordinal,
                         "max_attempts": maximum_runs,
                         **(
@@ -1259,6 +1331,12 @@ class FleetPlanService:
                 if (stop := stop_requested()) is not None:
                     return discard_unadmitted_source(target, stop)
                 selected_run_id = repair_id if ordinal == 1 else new_fleet_run_id()
+                current_selection = AgentCampaignUnstartedSelection(
+                    selected_run_id=selected_run_id,
+                    phase_ordinal=ordinal,
+                    phase=campaign.phase if campaign is not None else "repair",
+                    selected_step_ids=tuple(step.step_id for step in target.plan.steps),
+                )
                 try:
                     started = self._runs.start_prepared_plan(
                         target,
@@ -1268,28 +1346,51 @@ class FleetPlanService:
                         requested_priority=requested_priority,
                         source=FleetRunSource.CICD if repository_goon else FleetRunSource.MANUAL,
                     )
+                    if started.fleet_run_id != selected_run_id or started.target != target:
+                        raise StateConflict(
+                            "Admission response differs from its exact selected Run/target"
+                        )
                 except Exception as exc:
-                    try:
-                        observed = self._runs.get(selected_run_id)
-                    except RunNotFound:
+                    # Missing observation is not proof of absent admission. The
+                    # original Journal's atomic phase linkage owns that fact.
+                    retained = self._runs.campaign_journal(repair_id)
+                    linked = next(
+                        (
+                            phase
+                            for phase in retained.phases
+                            if phase.fleet_run_id == selected_run_id
+                        ),
+                        None,
+                    )
+                    if linked is None:
                         return discard_unadmitted_source(
                             target, RepairStop.EXECUTION_UNRESOLVED, str(exc)
                         )
-                    except Exception as readback_error:
-                        unresolved_run_ids.append(selected_run_id)
+                    campaign_revision = retained.latest_revision
+                    current_selection = None
+                    if (
+                        linked.context != repair_context
+                        or linked.execution_digest != target.execution_digest
+                    ):
                         return result(
                             RepairStop.EXECUTION_UNRESOLVED,
-                            f"{exc}; admission readback unavailable: {readback_error}",
+                            "Admission linkage conflicts with the exact selected target",
                         )
-                    if observed.run.target != target:
-                        return discard_unadmitted_source(
-                            target, RepairStop.EXECUTION_UNRESOLVED, str(exc)
-                        )
-                    admitted_run_ids.append(selected_run_id)
                     try:
-                        if not observed.run.status.terminal:
+                        # Exact canonical linkage is sufficient to cancel the
+                        # selected child even when its response/readback was lost.
+                        try:
                             self._runs.cancel(selected_run_id)
-                            observed = self._runs.wait_for_terminal(selected_run_id)
+                        except InvalidRunTransition:
+                            pass
+                        observed = self._runs.wait_for_terminal(selected_run_id)
+                        if (
+                            observed.run.fleet_run_id != selected_run_id
+                            or observed.run.target != target
+                        ):
+                            raise StateConflict(
+                                "Admitted Run readback conflicts with its selected target"
+                            )
                         attempts.append(observed)
                     except Exception as cleanup_error:
                         return result(
@@ -1297,7 +1398,8 @@ class FleetPlanService:
                             f"{exc}; native cleanup/readback also failed: {cleanup_error}",
                         )
                     return result(RepairStop.EXECUTION_UNRESOLVED, str(exc))
-                admitted_run_ids.append(started.fleet_run_id)
+                current_selection = None
+                campaign_revision = self._runs.campaign_journal(repair_id).latest_revision
 
                 def cancel_current(started: FleetRunState = started) -> None:
                     try:
@@ -1357,6 +1459,7 @@ class FleetPlanService:
                         return result(RepairStop.SOURCE_CHANGED, str(exc))
                     if decision is not None:
                         return result(decision, campaign.message)
+                    commit_policy(None, next_phase=campaign.phase)
                     plan, target_handoff = campaign.plan, campaign.handoffs
                     continue
                 assert steps is not None
@@ -1391,10 +1494,10 @@ class FleetPlanService:
                 # All non-source semantics stay frozen. Rebuild only the Agent's source
                 # binding through its original resolver and the canonical Plan constructor.
                 from oh_goon.services.fleet_plan_step_resolution import (
-                    resolve_delivered_local_search_agent_step,
+                    resolve_delivered_agent_step,
                 )
 
-                rebound = resolve_delivered_local_search_agent_step(single_handoff).model_copy(
+                rebound = resolve_delivered_agent_step(single_handoff).model_copy(
                     update={
                         "step_id": steps.agent.step_id,
                         "source_step_id": single_handoff.step_id,
@@ -1414,6 +1517,7 @@ class FleetPlanService:
                 )
                 steps = validate_agent_repair_plan(plan, single_handoff)
                 target_handoff = single_handoff
+                commit_policy(None, next_phase="repair")
         raise AssertionError("validated repair budget did not select a terminal decision")
 
     def run_reviewed(

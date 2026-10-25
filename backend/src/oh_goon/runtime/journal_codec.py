@@ -8,6 +8,7 @@ from enum import StrEnum
 from pydantic import BaseModel, TypeAdapter
 
 from oh_goon.core.errors import JournalCorruption
+from oh_goon.core.models.agent_repair import AgentCampaignFact
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.reconciliation import (
     RepositoryEffectAcknowledgementEvidence,
@@ -15,6 +16,7 @@ from oh_goon.core.models.reconciliation import (
 )
 from oh_goon.core.models.run_events import FleetRunEvent
 from oh_goon.runtime.journal_facts import (
+    AgentCampaignCommitted,
     EffectAcknowledgementCommitted,
     EffectReconciliationCommitted,
     FleetOperationCommitted,
@@ -26,10 +28,12 @@ from oh_goon.runtime.journal_facts import (
 GENESIS_HASH = "0" * 64
 _FLEET_RUN_EVENT_ADAPTER: TypeAdapter[FleetRunEvent] = TypeAdapter(FleetRunEvent)
 _EFFECT_RECONCILIATION_ADAPTER = TypeAdapter(RepositoryEffectReconciliationEvidence)
+_CAMPAIGN_ADAPTER: TypeAdapter[AgentCampaignFact] = TypeAdapter(AgentCampaignFact)
 _EFFECT_ACKNOWLEDGEMENT_ADAPTER = TypeAdapter(RepositoryEffectAcknowledgementEvidence)
 
 
 class JournalFactKind(StrEnum):
+    CAMPAIGN = "CAMPAIGN"
     OPERATION = "OPERATION"
     RUN_EVENT = "RUN_EVENT"
     FLEET_OPERATION = "FLEET_OPERATION"
@@ -98,6 +102,15 @@ class JournalFactCodec:
         )
 
     @staticmethod
+    def encode_campaign(fact: AgentCampaignFact) -> EncodedJournalFact:
+        return EncodedJournalFact(
+            kind=JournalFactKind.CAMPAIGN,
+            report_json=None,
+            event_json=None,
+            effect_json=_canonical_model_json(fact),
+        )
+
+    @staticmethod
     def hash_fact(
         *,
         previous_hash: str,
@@ -153,6 +166,12 @@ class JournalFactCodec:
         if fact_hash != expected_hash:
             raise JournalCorruption(f"Journal fact hash mismatch at revision {revision}")
         try:
+            if fact_kind is JournalFactKind.CAMPAIGN:
+                if report_json is not None or event_json is not None or effect_json is None:
+                    raise ValueError("Invalid campaign Journal fact shape")
+                return AgentCampaignCommitted(
+                    revision, session_id, _CAMPAIGN_ADAPTER.validate_json(effect_json)
+                )
             report = (
                 OperationReport.model_validate(json.loads(report_json))
                 if report_json is not None

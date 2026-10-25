@@ -588,7 +588,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                 review_steps = [
                     step.step_id
                     for step in plan.steps
-                    if getattr(step, "harness", None) == "provider-review"
+                    if step.kind == "agent" and step.workload.harness == "provider-review"
                 ]
                 assert [o["reviewer"] for o in observed[: min(calls, 4)]] == review_steps[
                     : min(calls, 4)
@@ -949,6 +949,503 @@ def test_protected_native_campaign_keeps_exact_phase_scope_through_real_apply(
                 runtime.shutdown(wait_for_runs=True)
 
         finally:
+            server.shutdown()
+            worker.join(timeout=5)
+        assert not worker.is_alive()
+
+
+_CRASHING_CAMPAIGN_CONTROLLER = r"""
+import json
+import os
+import sys
+from pathlib import Path
+
+from oh_goon.application import ApplicationRuntime
+from oh_goon.core.models.agent_providers import AgentConnection
+from oh_goon.core.models.agent_repair import AgentRepairBudget, AgentRepairStopReason
+from oh_goon.core.product_identity import repository_id
+
+selected = json.loads(sys.argv[1])
+
+# Keep original product admission, process publication and effect execution;
+# inject only a real controller death at an existing owner boundary.
+if selected["cut"] == "admission":
+    from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
+
+    start_phase = FleetRunControlPlane.start_prepared_plan
+
+    def crash_after_admission(self, *args, **kwargs):
+        start_phase(self, *args, **kwargs)
+        os._exit(84)
+
+    FleetRunControlPlane.start_prepared_plan = crash_after_admission
+elif selected["cut"] == "process":
+    from oh_goon.core.vocabulary import FleetRunEventType
+    from oh_goon.runtime.journal import Journal
+
+    record_process = Journal.record_execution_lifecycle
+
+    def crash_after_process_publication(self, *args, **kwargs):
+        record_process(self, *args, **kwargs)
+        if kwargs["event_type"] is FleetRunEventType.PROCESS_STARTED:
+            os._exit(85)
+
+    Journal.record_execution_lifecycle = crash_after_process_publication
+elif selected["cut"] == "apply":
+    from oh_goon.runtime.fault_injection import FaultPoint
+    from oh_goon.services.repository_effect_execution import RepositoryEffectExecution
+
+    class CrashAfterAppliedEffect:
+        def hit(self, point):
+            repository = Path(selected["repository"])
+            if (
+                point is FaultPoint.BEFORE_OPERATION_COMMIT
+                and (repository / "code.txt").read_text() == "repaired\n"
+                and (repository / "regression.txt").is_file()
+            ):
+                os._exit(86)
+
+    initialize_effects = RepositoryEffectExecution.__init__
+
+    def initialize_crashing_effects(self, *args, **kwargs):
+        kwargs["faults"] = CrashAfterAppliedEffect()
+        initialize_effects(self, *args, **kwargs)
+
+    RepositoryEffectExecution.__init__ = initialize_crashing_effects
+
+runtime = ApplicationRuntime.build(standard_local=True)
+runtime.locations.add(Path(selected["repository_root"]))
+commit = runtime.runs.commit_agent_campaign_decision
+
+def crash_at_publication(decision):
+    if decision.stop_reason is AgentRepairStopReason.CONVERGED:
+        if selected["cut"] == "after":
+            commit(decision)
+        os._exit(81 if selected["cut"] == "before" else 82)
+    return commit(decision)
+
+runtime.runs.commit_agent_campaign_decision = crash_at_publication
+result = result = runtime.plans.repair(
+    Path(selected["plan"]), repository_id=repository_id(Path(selected["repository"])),
+    budget=AgentRepairBudget(max_attempts=2, timeout_seconds=45, step_timeout_seconds=10),
+    inputs=selected["inputs"], agent_repository_root=Path(selected["repository_root"]),
+    agent_skill_root=Path(selected["skill_root"]), allowed_agent_acceptance=("agentic-review",),
+    agent_connection=AgentConnection.model_validate(selected["connection"]),
+    review_write_roots=tuple(selected.get("write_roots", ("code.txt",))), fleet_run_id="crash-campaign",
+)
+print(result.stop_reason.value, file=sys.stderr, flush=True)
+os._exit(83)
+"""
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("cut", ["before", "after"])
+def test_controller_death_around_final_publication_reopens_original_result(
+    tmp_path, monkeypatch, cut
+):
+    """Detect inferring convergence from verification or losing a committed decision.
+
+    The child executes original Fleet admission, real provider subprocesses and
+    native verification. Only the death cut is injected; stdout is discarded.
+    """
+    from oh_goon.core.errors import JournalConflict, StateConflict
+    from oh_goon.core.projections.agent_campaign import project_agent_campaign
+    from oh_goon.runtime.database import LocalDatabase
+    from oh_goon.runtime.journal import Journal
+    from oh_goon.runtime.local_state_maintenance import reset_local_state
+
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            source = json.loads(payload["messages"][1]["content"])
+            requests.append(source["identity"]["reviewer"])
+            record = dict(
+                schema="oh-goon.agent-review/v1",
+                **source["identity"],
+                verdict="CLEAN",
+                summary="Complete current-candidate review",
+                reviewed_paths=[member["path"] for member in source["repository"]],
+                findings=[],
+            )
+            response = json.dumps(
+                {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(record)}}]}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+        def log_message(self, *_args):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        worker = Thread(target=partial(server.serve_forever, poll_interval=0.01))
+        worker.start()
+        try:
+            resolver, path, repo, options = agent_review_case(
+                tmp_path, endpoint=f"http://127.0.0.1:{server.server_port}"
+            )
+            (repo / "code.txt").write_text("repaired\n")
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            plan, _, _ = resolver.resolve_frozen_agents(path, **options)
+            write_execution_lock(path.parent / "goon.lock", build_execution_lock(plan))
+            database_path = tmp_path / "state/database.sqlite"
+            monkeypatch.setenv("OH_GOON_DB", str(database_path))
+            monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+            monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+            selected = dict(
+                cut=cut,
+                plan=str(path),
+                repository=str(repo),
+                repository_root=str(options["repository_root"]),
+                skill_root=str(options["skill_root"]),
+                inputs=options["inputs"],
+                connection=options["connection"].model_dump(mode="json"),
+            )
+            child = subprocess.run(
+                [sys.executable, "-c", _CRASHING_CAMPAIGN_CONTROLLER, json.dumps(selected)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=60,
+                check=False,
+            )
+            assert child.returncode == (81 if cut == "before" else 82), child.stderr.decode()
+            assert len(requests) == 4
+            database = LocalDatabase(database_path)
+            journal = Journal(database)
+            view = journal.read_view()
+            campaign = view.campaign("crash-campaign")
+            details = view.run_details()
+            assert [phase.context.phase for phase in campaign.phases] == [
+                "review",
+                "verification",
+            ]
+            assert len(details) == 2 and all(
+                detail.outcome.value == "SUCCESS" for detail in details
+            )
+            assert all(detail.campaign_journal == campaign for detail in details)
+            assert all(detail.game_tape.campaign_journal == campaign for detail in details)
+            report = project_agent_campaign("crash-campaign", details, campaign=campaign)
+            if cut == "before":
+                assert campaign.terminal_decision is None
+                assert report["result"] == "incomplete"
+                assert report["controller_result"]["availability"] == "unavailable"
+                with pytest.raises(JournalConflict, match="missing or incomplete"):
+                    journal.agent_campaign_result("crash-campaign")
+                with pytest.raises(StateConflict, match="incomplete campaign"):
+                    reset_local_state(database_path)
+                assert database_path.is_file()
+            else:
+                receipt = journal.agent_campaign_result("crash-campaign")
+                assert receipt.converged and receipt.committed_decision_id
+                assert report["result"] == "converged"
+                assert report["controller_result"]["decision_id"] == receipt.committed_decision_id
+            assert journal.read_view().revision == view.revision
+            assert len(requests) == 4  # Reading did not resume or rerun native work.
+        finally:
+            server.shutdown()
+            worker.join(timeout=5)
+        assert not worker.is_alive()
+
+
+def _assert_started_crash_processes_exited(details):
+    """Use bound native process identities; never turn observation into cleanup truth."""
+    import select
+    import signal
+
+    from oh_goon.core.models.run_events import ProcessStartedEvent
+    from oh_goon.core.process_birth import observe_process_birth, observe_process_liveness
+
+    started = [
+        event
+        for detail in details
+        for event in detail.lifecycle_events
+        if type(event) is ProcessStartedEvent
+    ]
+    for event in started:
+        assert event.process_identity is not None
+        if observe_process_liveness(event.pid) is False:
+            continue
+        birth = observe_process_birth(event.pid)
+        assert birth is not None
+        if f"{birth.boot_id}:{birth.start_ticks}" != event.process_identity:
+            continue  # The exact recorded process exited; its PID was reused.
+        try:
+            descriptor = os.pidfd_open(event.pid)
+        except ProcessLookupError:
+            assert observe_process_liveness(event.pid) is False
+            continue
+        try:
+            # pidfd readiness is the native exit barrier; no sleep-based race.
+            if not select.select([descriptor], [], [], 5)[0]:
+                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                pytest.fail("Original parent-death guard did not stop its recorded process")
+        finally:
+            os.close(descriptor)
+        assert observe_process_liveness(event.pid) is False
+    return started
+
+
+@pytest.mark.process
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux parent-death and pidfd evidence")
+@pytest.mark.parametrize("cut,exit_code", [("admission", 84), ("process", 85), ("apply", 86)])
+def test_controller_death_during_admission_process_and_applied_effect(
+    tmp_path,
+    monkeypatch,
+    installed_cli,
+    cut,
+    exit_code,
+):
+    """Retain actual effects and unresolved lineage without replay or invented success."""
+    from oh_goon.core.errors import (
+        JournalConflict,
+        RepositoryEffectQuarantined,
+        RuntimeSafetyBlocked,
+        StateConflict,
+    )
+    from oh_goon.core.models.run_events import DescendantsQuiescentEvent
+    from oh_goon.core.projections.agent_campaign import project_agent_campaign
+    from oh_goon.runtime.database import LocalDatabase
+    from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
+    from oh_goon.runtime.journal import Journal
+    from oh_goon.runtime.local_state_maintenance import reset_local_state
+
+    observed = []
+    controller_dead = Event()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            source = json.loads(request["messages"][1]["content"])
+            identity = source["identity"]
+            observed.append(identity["reviewer"])
+            if cut != "apply":
+                # Admission/process death must not depend on a fast model reply.
+                # The HTTP fixture releases only after the actual child exits.
+                assert controller_dead.wait(15)
+            member = next(item for item in source["repository"] if item["path"] == "repo/code.txt")
+            system = request["messages"][0]["content"]
+            if 'schema="oh-goon.agent-review/v1"' in system:
+                record = dict(
+                    schema="oh-goon.agent-review/v1",
+                    **identity,
+                    verdict="FINDING",
+                    summary="Exact original source requires the scoped repair",
+                    reviewed_paths=[item["path"] for item in source["repository"]],
+                    findings=[
+                        dict(
+                            finding_id="original-defect",
+                            explanation="Broken original source",
+                            evidence=[dict(path=member["path"], sha256=member["sha256"], line=1)],
+                        )
+                    ],
+                )
+            elif 'schema="oh-goon.agent-adjudication/v1"' in system:
+                records = source["context"]["reviews"]
+                record = dict(
+                    schema="oh-goon.agent-adjudication/v1",
+                    candidate_identity=identity["candidate_identity"],
+                    scope_identity=identity["scope_identity"],
+                    dispositions=[
+                        dict(
+                            reviewer=review["reviewer"],
+                            finding_id=finding["finding_id"],
+                            decision="repair",
+                            rationale="Original bounded defect",
+                        )
+                        for review in records
+                        for finding in review["findings"]
+                    ],
+                    queue=[
+                        dict(
+                            queue_id="q1",
+                            rationale="One source defect",
+                            regression_expectation="Check repaired content",
+                            findings=[
+                                dict(reviewer=review["reviewer"], finding_id=finding["finding_id"])
+                                for review in records
+                                for finding in review["findings"]
+                            ],
+                        )
+                    ],
+                )
+            else:
+                record = dict(
+                    schema="agent-patch-batch-v1",
+                    candidate_identity=identity["candidate_identity"],
+                    summary="Repair actual code and create independent regression evidence",
+                    regressions=[
+                        dict(
+                            queue_id="q1",
+                            path="repo/regression.txt",
+                            expectation="Check repaired content",
+                        )
+                    ],
+                    operations=[
+                        dict(
+                            action="update",
+                            path="repo/code.txt",
+                            source_sha256=member["sha256"],
+                            replacement="repaired\n",
+                        ),
+                        dict(
+                            action="create",
+                            path="repo/regression.txt",
+                            source_sha256=None,
+                            replacement='#!/bin/sh\n[ "$(cat code.txt)" = repaired ]\n',
+                        ),
+                    ],
+                )
+            response = json.dumps(
+                {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(record)}}]}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            try:
+                self.wfile.write(response)
+            except (BrokenPipeError, ConnectionResetError):
+                assert cut != "apply"
+
+        def log_message(self, *_args):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        worker = Thread(target=partial(server.serve_forever, poll_interval=0.01))
+        worker.start()
+        try:
+            resolver, path, repo, options = agent_review_case(
+                tmp_path, endpoint=f"http://127.0.0.1:{server.server_port}"
+            )
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            plan, _, _ = resolver.resolve_frozen_agents(path, **options)
+            write_execution_lock(path.parent / "goon.lock", build_execution_lock(plan))
+            lock_before = (path.parent / "goon.lock").read_bytes()
+            database_path = tmp_path / "state/database.sqlite"
+            monkeypatch.setenv("OH_GOON_DB", str(database_path))
+            monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+            monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+            selected = dict(
+                cut=cut,
+                plan=str(path),
+                repository=str(repo),
+                repository_root=str(options["repository_root"]),
+                skill_root=str(options["skill_root"]),
+                inputs=options["inputs"],
+                connection=options["connection"].model_dump(mode="json"),
+                write_roots=("code.txt", "regression.txt"),
+            )
+            try:
+                child = subprocess.run(
+                    [sys.executable, "-c", _CRASHING_CAMPAIGN_CONTROLLER, json.dumps(selected)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    timeout=60,
+                    check=False,
+                )
+            finally:
+                controller_dead.set()
+            assert child.returncode == exit_code, child.stderr.decode()
+            database = LocalDatabase(database_path)
+            journal = Journal(database)
+            view = journal.read_view()
+            campaign = view.campaign("crash-campaign")
+            details = view.run_details()
+            expected_phases = ["review", "adjudicate", "repair"] if cut == "apply" else ["review"]
+            assert [phase.context.phase for phase in campaign.phases] == expected_phases
+            assert tuple(phase.fleet_run_id for phase in campaign.phases) == tuple(
+                detail.run.fleet_run_id for detail in details
+            )
+            assert campaign.terminal_decision is None
+            assert not details[-1].run.status.terminal
+            assert not details[-1].operations
+            assert all(detail.outcome.value == "SUCCESS" for detail in details[:-1])
+            report = project_agent_campaign("crash-campaign", details, campaign=campaign)
+            assert report["result"] == "incomplete"
+            assert report["controller_result"]["availability"] == "unavailable"
+            with pytest.raises(JournalConflict, match="missing or incomplete"):
+                journal.agent_campaign_result("crash-campaign")
+            with pytest.raises(StateConflict, match="active or unresolved Runs"):
+                reset_local_state(database_path)
+            assert journal.read_view().revision == view.revision
+            started = _assert_started_crash_processes_exited(details)
+            if cut == "process":
+                assert len(started) == 1
+                assert not any(
+                    isinstance(event, DescendantsQuiescentEvent)
+                    for event in details[-1].lifecycle_events
+                )
+                # Host observation does not manufacture the missing owner cleanup receipt.
+                assert details[-1].game_tape.status.value != "PASSED"
+            if cut == "apply":
+                assert len(observed) == 6
+                assert (repo / "code.txt").read_text() == "repaired\n"
+                assert (repo / "regression.txt").is_file()
+                attempts = RepositoryEffectAttemptStore(database).all()
+                assert len(attempts) == 1 and attempts[0].status.value == "EFFECT_STARTED"
+                assert attempts[0].fleet_run_id == details[-1].run.fleet_run_id
+                assert journal.operation(attempts[0].operation_id) is None
+                settled_processes = {
+                    event.physical_execution_id
+                    for event in details[-1].lifecycle_events
+                    if isinstance(event, DescendantsQuiescentEvent)
+                }
+                assert all(
+                    event.physical_execution_id in settled_processes
+                    for event in started
+                    if event.fleet_run_id == details[-1].run.fleet_run_id
+                )
+            else:
+                assert (repo / "code.txt").read_text() == "broken\n"
+                assert not (repo / "regression.txt").exists()
+            assert (path.parent / "goon.lock").read_bytes() == lock_before
+            admitted_ids = tuple(detail.run.fleet_run_id for detail in details)
+            model_calls = len(observed)
+            assert journal.read_view().revision == view.revision
+            assert len(observed) == model_calls  # Canonical readback itself issued no work.
+            if cut == "apply":
+                # Startup may run the existing recovery owner, never campaign policy.
+                # Actual applied external effects must remain quarantined for an
+                # explicit original reconciliation/acknowledgement before mutation.
+                reopened = ApplicationRuntime.build(standard_local=True)
+                try:
+                    assert (
+                        tuple(
+                            detail.run.fleet_run_id for detail in journal.read_view().run_details()
+                        )
+                        == admitted_ids
+                    )
+                    assert journal.agent_campaign("crash-campaign").terminal_decision is None
+                    assert (repo / "code.txt").read_text() == "repaired\n"
+                    assert len(observed) == model_calls
+                    probe = tmp_path / "restart-probe"
+                    probe.mkdir()
+                    probe_plan = probe / "goon.yml"
+                    probe_plan.write_text(
+                        "execution: {purpose: maintenance}\nsteps:\n- run: touch forbidden-replay\n"
+                    )
+                    reopened.plans.lock(probe_plan)
+                    with pytest.raises((RepositoryEffectQuarantined, RuntimeSafetyBlocked)):
+                        reopened.plans.run(
+                            probe_plan,
+                            repository_ids={repository_id(repo)},
+                            fleet_run_id="forbidden-replay",
+                        )
+                    assert not (repo / "forbidden-replay").exists()
+                    assert (
+                        tuple(
+                            detail.run.fleet_run_id for detail in journal.read_view().run_details()
+                        )
+                        == admitted_ids
+                    )
+                finally:
+                    reopened.shutdown(wait_for_runs=True)
+        finally:
+            controller_dead.set()
             server.shutdown()
             worker.join(timeout=5)
         assert not worker.is_alive()

@@ -9,7 +9,8 @@ from pydantic import ValidationError
 
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, StepFailurePolicy
 from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+from oh_goon.engine.command import CommandResult
+from oh_goon.integrations._fleet_plan_step_outcome import from_command
 from oh_goon.integrations._fleet_plan_step_retry import _successful_direct_publication
 
 
@@ -22,7 +23,11 @@ def test_stream_diagnostic_is_the_current_native_attempt(tmp_path):
         outputs=(PlanStreamOutput(name="diagnostic", stream="stderr", max_bytes=100),),
     )
     result = _successful_direct_publication(
-        step, StepOutcome(argv=("verify",), returncode=13, stderr="current failure\n"), tmp_path
+        step,
+        from_command(
+            CommandResult(argv=("verify",), returncode=13, stdout="", stderr="current failure\n")
+        ),
+        tmp_path,
     )
     assert result.outcome.returncode == 13
     assert result.outputs == {"diagnostic": "current failure"}
@@ -39,7 +44,9 @@ def test_invalid_stream_cannot_erase_native_failure_or_publish_feedback(tmp_path
         outputs=(PlanStreamOutput(name="diagnostic", stream="stdout", max_bytes=10),),
     )
     result = _successful_direct_publication(
-        step, StepOutcome(argv=("verify",), returncode=19, stdout=text), tmp_path
+        step,
+        from_command(CommandResult(argv=("verify",), returncode=19, stdout=text, stderr="")),
+        tmp_path,
     )
     assert result.outcome.returncode == 19
     assert result.outputs == {}

@@ -10,6 +10,63 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentDefinition,
     NativeAgentProfile,
 )
+from oh_goon.core.models.fleet_plan import AgentPlanStep, ResolvedAgentStep
+
+
+@pytest.mark.parametrize(
+    "workload",
+    [
+        {"harness": "local-search", "model": "foreign"},
+        {"harness": "local-search", "native_agent": {}},
+        {"harness": "local-model-search"},
+        {"harness": "local-model-review", "model": "selected", "connection": {}},
+        {"harness": "provider-review", "model": "selected"},
+        {"harness": "native", "model": "foreign"},
+        {"harness": "local-model-skill-loop", "model": "selected"},
+        {"harness": "unhandled-new-workload"},
+    ],
+)
+def test_resolved_agent_rejects_contradictory_or_unhandled_workloads(
+    workload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        ResolvedAgentStep.model_validate(
+            {
+                "step_id": "agent",
+                "timeout_seconds": 30,
+                "delivery_sha256": "a" * 64,
+                "handoff_identity": "handoff",
+                "source_step_id": "agent",
+                "workload": workload,
+            }
+        )
+
+
+def test_retired_skill_loop_is_refused_at_authoring_before_source_capture() -> None:
+    payload = {
+        "step_id": "agent",
+        "harness": "local-model-skill-resources",
+        "task": "Review the source",
+        "timeout_seconds": 30,
+    }
+    assert AgentPlanStep.model_validate(payload).harness == "local-model-skill-resources"
+    with pytest.raises(ValidationError, match="harness"):
+        AgentPlanStep.model_validate({**payload, "harness": "local-model-skill-loop"})
+
+
+def test_legacy_flat_agent_payload_cannot_be_admitted_as_current_intent() -> None:
+    with pytest.raises(ValidationError, match="workload"):
+        ResolvedAgentStep.model_validate(
+            {
+                "step_id": "agent",
+                "timeout_seconds": 30,
+                "delivery_sha256": "a" * 64,
+                "handoff_identity": "handoff",
+                "source_step_id": "agent",
+                "argv": ["python"],
+                "harness": "local-search",
+            }
+        )
 
 
 def test_existing_catalog_wire_stays_unchanged_when_native_selection_is_absent() -> None:

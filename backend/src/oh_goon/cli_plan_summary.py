@@ -7,10 +7,10 @@ from oh_goon.core.fleet_plan_tool_requirements import (
     step_execution_tool_names,
 )
 from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
     ResolvedFleetPlan,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
-    ResolvedLocalSearchAgentStep,
     ResolvedOciBuildStep,
     ResolvedOciPublishStep,
     ResolvedOciTagAssertStep,
@@ -251,8 +251,8 @@ def _step_summary(step: ResolvedPlanStep) -> tuple[str, ...]:
             "    extension: "
             f"name={step.extension} command={step.command} extension_id={step.extension_id}"
         )
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
-        selected = step.native_agent
+    if isinstance(step, ResolvedAgentStep) and step.workload.harness == "native":
+        selected = step.workload.native_agent
         lines.append(
             "    native_agent: "
             f"agent={selected.agent} executable={selected.definition.executable} "

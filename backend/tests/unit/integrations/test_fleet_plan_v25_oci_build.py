@@ -64,7 +64,7 @@ def _repository(tmp_path: Path, dockerfile: str) -> Path:
 def test_oci_template_resolves_to_explicit_v25_authority() -> None:
     step, plan = _plan()
 
-    assert plan.contract_version == 44
+    assert plan.contract_version == 45
     assert step_execution_tool(step) == "buildah"
     assert step.capabilities.egress.mode == "hostname_allowlist"
     assert step.capabilities.egress.rules[0].hostname == "registry.example.com"

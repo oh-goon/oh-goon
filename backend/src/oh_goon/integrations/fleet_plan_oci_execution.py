@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -184,12 +184,10 @@ def _oci_environment(
 
 def _missing_archive_outcome(outcome: StepOutcome) -> StepOutcome:
     message = "Fleet OCI builder completed without declared archive output"
-    return StepOutcome(
-        argv=outcome.argv,
+    return replace(
+        outcome,
         returncode=PLAN_CONTRACT_RETURN_CODE,
-        stdout=outcome.stdout,
         stderr=(outcome.stderr + f"\n{message}").strip(),
-        duration_ms=outcome.duration_ms,
     )
 
 
@@ -212,12 +210,10 @@ def _write_oci_evidence(step: ResolvedOciBuildStep, paths: _OciPaths) -> None:
 
 
 def _contract_failure(message: str, outcome: StepOutcome) -> StepOutcome:
-    return StepOutcome(
-        argv=outcome.argv,
+    return replace(
+        outcome,
         returncode=PLAN_CONTRACT_RETURN_CODE,
-        stdout=outcome.stdout,
         stderr=(outcome.stderr + f"\n{message}").strip(),
-        duration_ms=outcome.duration_ms,
     )
 
 

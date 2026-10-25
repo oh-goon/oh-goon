@@ -10,6 +10,7 @@ import pytest
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.errors import InvalidRequest
+from oh_goon.core.models.fleet_plan_evidence import PlanStepSettlementEvidence
 from oh_goon.core.models.game_tape import GameTapeIssueFocus, GameTapeWhyNotDiagnostic
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
 
@@ -65,6 +66,7 @@ class _RunOwner:
             game_tape=self.tape,
             repository_admissions=(),
             journal_revision=42,
+            campaign_journal=None,
         )
 
     def __getattr__(self, name):
@@ -291,6 +293,7 @@ def test_handoff_preserves_failed_verification_beside_successful_untrusted_claim
         exit_code=7,
         reason="Independent verifier failed",
         native_agent_observations=(claim,),
+        settlement=PlanStepSettlementEvidence(),
     )
     tape = _Tape()
     tape.repositories = (SimpleNamespace(repository_execution_id="repository-exec", steps=(step,)),)
@@ -314,6 +317,7 @@ def test_handoff_bounds_steps_and_qualifies_absent_native_claims(capsys):
         exit_code=None,
         reason=None,
         native_agent_observations=(),
+        settlement=PlanStepSettlementEvidence(),
     )
     tape = _Tape()
     tape.repositories = (
@@ -359,6 +363,7 @@ def test_handoff_claim_excerpt_retains_origin_tail_and_exact_omission_accounting
         exit_code=125,
         reason="Native preflight rejected",
         native_agent_observations=(observation,),
+        settlement=PlanStepSettlementEvidence(),
     )
     tape = _Tape()
     tape.repositories = (SimpleNamespace(repository_execution_id="repository-exec", steps=(step,)),)

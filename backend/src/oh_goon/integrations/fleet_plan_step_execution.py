@@ -38,17 +38,19 @@ from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.fleet_observation import AgentHarnessObservation
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
+    ResolvedAgentStep,
+    ResolvedBuiltinAgentWorkload,
     ResolvedCommandStep,
     ResolvedExtensionStep,
     ResolvedGitStep,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
-    ResolvedLocalSearchAgentStep,
     ResolvedOciBuildStep,
     ResolvedOciPublishStep,
     ResolvedOciTagAssertStep,
     ResolvedPlanStep,
     ResolvedPreCommitStep,
+    ResolvedProviderAgentWorkload,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits, PlanExecutionPolicy
 from oh_goon.core.models.fleet_plan_observation_steps import ResolvedDependencyInventoryStep
@@ -356,10 +358,10 @@ def execute_strict_step(
     step_order: int,
     output_observer: StepOutputObserver | None = None,
 ) -> StepOutcome:
-    if isinstance(step, ResolvedLocalSearchAgentStep):
+    if isinstance(step, ResolvedAgentStep):
         # This Step-level cut is not the optional untrusted Agent sandbox.
         # Do not reinterpret trusted local test evidence as strict admission.
-        raise FleetPlanInvalid("Agent local-search strict backend is not admitted")
+        raise FleetPlanInvalid("Agent strict execution backend is not admitted")
     _require_strict_managed_runtime(step, attempt.managed_runtime)
     environment = strict_plan_environment(
         step.environment,
@@ -429,13 +431,13 @@ def _execute_typed_step(
     runtime: StepRuntime,
 ) -> StepOutcome:
     try:
-        if isinstance(step, ResolvedLocalSearchAgentStep):
+        if isinstance(step, ResolvedAgentStep):
             native_deadline = None
-            if step.harness == "native":
-                assert step.native_agent is not None
+            if step.workload.harness == "native":
+                assert step.workload.harness == "native"
                 assert step.timeout_seconds is not None
                 native_deadline = time.monotonic() + min(
-                    step.timeout_seconds, step.native_agent.profile.timeout_seconds
+                    step.timeout_seconds, step.workload.native_agent.profile.timeout_seconds
                 )
             if step.step_id != step.source_step_id and not step.step_id.endswith(
                 "." + step.source_step_id
@@ -453,7 +455,7 @@ def _execute_typed_step(
             ):
                 raise FleetPlanInvalid("Agent Step delivery does not match resolved source digest")
             native_input = None
-            if step.harness == "native":
+            if step.workload.harness == "native":
                 from oh_goon.integrations.fleet_plan_native_steps import prepare_native_step_input
 
                 native_input = prepare_native_step_input(packet, step, runtime)
@@ -463,9 +465,16 @@ def _execute_typed_step(
                     packet,
                     expected_handoff_identity=step.handoff_identity,
                 )
-            if handoff.step_id != step.source_step_id or handoff.harness != step.harness:
+            if handoff.step_id != step.source_step_id or handoff.harness != step.workload.harness:
                 raise FleetPlanInvalid("Agent Step meaning differs from admitted frozen delivery")
-            if handoff.requested_effects.model != step.model:
+            selected_model = (
+                step.workload.model
+                if isinstance(
+                    step.workload, (ResolvedBuiltinAgentWorkload, ResolvedProviderAgentWorkload)
+                )
+                else None
+            )
+            if handoff.requested_effects.model != selected_model:
                 raise FleetPlanInvalid(
                     "Agent model differs from admitted frozen recipient selection"
                 )
@@ -475,7 +484,7 @@ def _execute_typed_step(
                 raise FleetPlanInvalid(
                     "Agent feedback was not bound by the original Fleet sequencer"
                 )
-            if step.harness == "local-search":
+            if step.workload.harness == "local-search":
                 with prepare_frozen_readonly_skill_search(handoff) as (root, tool_step):
                     return _execute_command_step(root, tool_step, process, runtime)
             with prepare_agent_evidence(handoff) as prepared:
@@ -602,14 +611,14 @@ def _execute_typed_step(
 def _execute_model_agent(
     *,
     handoff: FrozenAgentStepHandoff,
-    step: ResolvedLocalSearchAgentStep,
+    step: ResolvedAgentStep,
     process: _StepProcess,
     runtime: StepRuntime,
     workspace: PreparedAgentEvidence,
     repository_evidence: str,
 ) -> StepOutcome:
     """Consume one mandatory producer observation inside the original Agent Step."""
-    if step.harness.startswith("provider-"):
+    if isinstance(step.workload, ResolvedProviderAgentWorkload):
         from oh_goon.integrations.agent_review_execution import execute_provider_agent
 
         return execute_provider_agent(
@@ -620,14 +629,15 @@ def _execute_model_agent(
             timeout=_command_timeout(step, runtime),
             repository_evidence=repository_evidence,
         )
+    if not isinstance(step.workload, ResolvedBuiltinAgentWorkload):
+        raise FleetPlanInvalid("Agent workload does not support a bounded model turn")
     selected_query = None
-    if step.harness in (
+    if step.workload.harness in (
         "local-model-search",
         "local-model-review",
         "local-model-tools",
         "local-model-files",
         "local-model-skill-resources",
-        "local-model-skill-loop",
         "local-model-proposal",
     ):
         if handoff.requested_effects.recipients != ("ollama_local",):
@@ -640,12 +650,11 @@ def _execute_model_agent(
             raise FleetPlanInvalid("local model turn requires frozen SKILL.md")
         prompt_builder = (
             frozen_local_model_tool_prompt
-            if step.harness
+            if step.workload.harness
             in (
                 "local-model-tools",
                 "local-model-files",
                 "local-model-skill-resources",
-                "local-model-skill-loop",
                 "local-model-proposal",
             )
             else frozen_local_model_prompt
@@ -656,26 +665,23 @@ def _execute_model_agent(
             recipient=handoff.requested_effects.recipients[0],
             **(
                 {
-                    "allow_file": step.harness
+                    "allow_file": step.workload.harness
                     in (
                         "local-model-files",
                         "local-model-skill-resources",
-                        "local-model-skill-loop",
                         "local-model-proposal",
                     ),
-                    "allow_skill_file": step.harness
+                    "allow_skill_file": step.workload.harness
                     in (
                         "local-model-skill-resources",
-                        "local-model-skill-loop",
                         "local-model-proposal",
                     ),
                 }
-                if step.harness
+                if step.workload.harness
                 in (
                     "local-model-tools",
                     "local-model-files",
                     "local-model-skill-resources",
-                    "local-model-skill-loop",
                     "local-model-proposal",
                 )
                 else {}
@@ -684,12 +690,14 @@ def _execute_model_agent(
         prompt = prepend_repository_evidence(prompt, repository_evidence=repository_evidence)
         prompt = append_untrusted_agent_feedback(prompt, step.feedback_value)
         model_environment = {**process.environment, "OLLAMA_HOST": "http://127.0.0.1:11434"}
-        assert step.model is not None  # canonical local-model source resolution requires it
+        assert (
+            step.workload.model is not None
+        )  # canonical local-model source resolution requires it
         # Non-pulling local model existence check before model disclosure.
         check = process.command_runner(
             "ollama",
             "show",
-            step.model,
+            step.workload.model,
             cwd=process.paths.tmp,
             timeout=_command_timeout(step, runtime),
             cancel_requested=runtime.cancel_requested,
@@ -705,7 +713,7 @@ def _execute_model_agent(
         answer = process.command_runner(
             "ollama",
             "run",
-            step.model,
+            step.workload.model,
             prompt,
             "--format",
             "json",
@@ -726,26 +734,23 @@ def _execute_model_agent(
         selected_action = (
             parse_local_model_tool_action(
                 answer.stdout,
-                allow_file=step.harness
+                allow_file=step.workload.harness
                 in (
                     "local-model-files",
                     "local-model-skill-resources",
-                    "local-model-skill-loop",
                     "local-model-proposal",
                 ),
-                allow_skill_file=step.harness
+                allow_skill_file=step.workload.harness
                 in (
                     "local-model-skill-resources",
-                    "local-model-skill-loop",
                     "local-model-proposal",
                 ),
             )
-            if step.harness
+            if step.workload.harness
             in (
                 "local-model-tools",
                 "local-model-files",
                 "local-model-skill-resources",
-                "local-model-skill-loop",
                 "local-model-proposal",
             )
             else None
@@ -757,12 +762,11 @@ def _execute_model_agent(
         )
         if runtime.cancel_requested is not None and runtime.cancel_requested():
             raise OperationCancelledError("Agent cancelled after model selection")
-        if step.harness in (
+        if step.workload.harness in (
             "local-model-review",
             "local-model-tools",
             "local-model-files",
             "local-model-skill-resources",
-            "local-model-skill-loop",
             "local-model-proposal",
         ):
             return _run_local_model_review(
@@ -798,7 +802,7 @@ def _execute_model_agent(
 def _run_local_model_review(
     *,
     handoff: FrozenAgentStepHandoff,
-    step: ResolvedLocalSearchAgentStep,
+    step: ResolvedAgentStep,
     process: _StepProcess,
     runtime: StepRuntime,
     first_query: str | None,
@@ -814,12 +818,11 @@ def _run_local_model_review(
     or persistence authority. All model/tool processes use the same runner,
     cancellation, attempt paths and runtime deadline.
     """
-    assert step.model is not None  # this loop is selected only for captured local-model Steps
-    tool_mode = step.harness in (
+    assert isinstance(step.workload, ResolvedBuiltinAgentWorkload)
+    tool_mode = step.workload.harness in (
         "local-model-tools",
         "local-model-files",
         "local-model-skill-resources",
-        "local-model-skill-loop",
         "local-model-proposal",
     )
     action = (
@@ -830,7 +833,7 @@ def _run_local_model_review(
     previous: set[LocalModelToolAction] = set()
     inspected_paths: set[str] = set()
     transcript: list[str] = []
-    max_actions = 4 if step.harness in ("local-model-skill-loop", "local-model-proposal") else 2
+    max_actions = 4 if step.workload.harness in ("local-model-proposal",) else 2
     history: list[dict[str, object]] = []
     for ordinal in range(1, max_actions + 1):
         if runtime.cancel_requested is not None and runtime.cancel_requested():
@@ -894,29 +897,27 @@ def _run_local_model_review(
                 **observation,
                 action=action,
                 history=tuple(history)
-                if step.harness in ("local-model-skill-loop", "local-model-proposal")
+                if step.workload.harness in ("local-model-proposal",)
                 else (),
-                allow_file=step.harness
+                allow_file=step.workload.harness
                 in (
                     "local-model-files",
                     "local-model-skill-resources",
-                    "local-model-skill-loop",
                     "local-model-proposal",
                 ),
-                allow_skill_file=step.harness
+                allow_skill_file=step.workload.harness
                 in (
                     "local-model-skill-resources",
-                    "local-model-skill-loop",
                     "local-model-proposal",
                 ),
-                allow_proposal=step.harness == "local-model-proposal",
+                allow_proposal=step.workload.harness == "local-model-proposal",
             )
         else:
             assert action.query is not None
             prompt = frozen_local_model_observation_prompt(**observation, query=action.query)
         prompt = prepend_repository_evidence(prompt, repository_evidence=repository_evidence)
         prompt = append_untrusted_agent_feedback(prompt, step.feedback_value)
-        if step.harness in ("local-model-skill-loop", "local-model-proposal"):
+        if step.workload.harness in ("local-model-proposal",):
             history.append(
                 {
                     "tool": action.tool,
@@ -929,7 +930,7 @@ def _run_local_model_review(
         response = process.command_runner(
             "ollama",
             "run",
-            step.model,
+            step.workload.model,
             prompt,
             "--format",
             "json",
@@ -947,7 +948,7 @@ def _run_local_model_review(
                 returncode=PLAN_CONTRACT_RETURN_CODE,
                 stderr="selected Ollama model review invocation failed",
             )
-        if step.harness == "local-model-proposal":
+        if step.workload.harness == "local-model-proposal":
             from oh_goon.core.agent_model_selection import (
                 _one_json_object,
                 frozen_patch_proposal_receipt,
@@ -977,17 +978,15 @@ def _run_local_model_review(
             parse_local_model_tool_review_decision(
                 response.stdout,
                 can_continue=ordinal < max_actions,
-                allow_file=step.harness
+                allow_file=step.workload.harness
                 in (
                     "local-model-files",
                     "local-model-skill-resources",
-                    "local-model-skill-loop",
                     "local-model-proposal",
                 ),
-                allow_skill_file=step.harness
+                allow_skill_file=step.workload.harness
                 in (
                     "local-model-skill-resources",
-                    "local-model-skill-loop",
                     "local-model-proposal",
                 ),
             )
@@ -1103,7 +1102,9 @@ def _prepare_strict_uv_attempt(
     return prepared, None
 
 
-def _command_timeout(step: ResolvedCommandStep, runtime: StepRuntime) -> float | None:
+def _command_timeout(
+    step: ResolvedCommandStep | ResolvedAgentStep, runtime: StepRuntime
+) -> float | None:
     """Exactly one runtime deadline owner reaches command execution."""
     if runtime.runtime_supervision is not None:
         return None
@@ -1278,15 +1279,13 @@ def _execute_git_step(
 ) -> StepOutcome:
     environment = dict(process.environment)
     environment["GIT_TERMINAL_PROMPT"] = "0"
-    return from_command(
-        execute_git(
-            runtime.git,
-            repository,
-            step,
-            runtime.cancel_requested,
-            environment=environment,
-            command_runner=process.git_command_runner,
-        )
+    return execute_git(
+        runtime.git,
+        repository,
+        step,
+        runtime.cancel_requested,
+        environment=environment,
+        command_runner=process.git_command_runner,
     )
 
 
@@ -1299,11 +1298,7 @@ def _with_output_observer(
     fleet_run_id: str | None,
     repository_id: str | None,
 ) -> _StepProcess:
-    if (
-        observer is None
-        and diagnostics is None
-        and not isinstance(step, ResolvedLocalSearchAgentStep)
-    ):
+    if observer is None and diagnostics is None and not isinstance(step, ResolvedAgentStep):
         return process
     command_runner = (
         observed_command_runner(
@@ -1490,7 +1485,6 @@ def prepare_frozen_readonly_skill_search(
             "local-model-tools",
             "local-model-files",
             "local-model-skill-resources",
-            "local-model-skill-loop",
             "local-model-proposal",
         )
         or effects.repository_access != "read_only"
@@ -1510,14 +1504,12 @@ def prepare_frozen_readonly_skill_search(
                 "local-model-tools",
                 "local-model-files",
                 "local-model-skill-resources",
-                "local-model-skill-loop",
                 "local-model-proposal",
             )
         )
         or (
             tool_kind == "list_skill_paths"
-            and handoff.harness
-            not in ("local-model-skill-resources", "local-model-skill-loop", "local-model-proposal")
+            and handoff.harness not in ("local-model-skill-resources", "local-model-proposal")
         )
         or (
             tool_kind == "read_file"
@@ -1525,7 +1517,6 @@ def prepare_frozen_readonly_skill_search(
             not in (
                 "local-model-files",
                 "local-model-skill-resources",
-                "local-model-skill-loop",
                 "local-model-proposal",
             )
         )
@@ -1562,12 +1553,11 @@ def prepare_frozen_readonly_skill_search(
             json.dumps({"tool": "read_file", "path": selected_path}),
             allow_file=True,
             allow_skill_file=handoff.harness
-            in ("local-model-skill-resources", "local-model-skill-loop", "local-model-proposal"),
+            in ("local-model-skill-resources", "local-model-proposal"),
         )
         allowed_paths = {"repo/" + member.path for member in handoff.source.repository.members}
         if handoff.harness in (
             "local-model-skill-resources",
-            "local-model-skill-loop",
             "local-model-proposal",
         ):
             allowed_paths.update("skill/" + member.path for member in handoff.source.skill.members)

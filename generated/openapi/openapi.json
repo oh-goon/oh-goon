@@ -84,6 +84,447 @@
         "title": "AgentAdjudicationRecord",
         "type": "object"
       },
+      "AgentCampaignDecision": {
+        "additionalProperties": false,
+        "description": "Policy output with bounded references to the settled inputs it consumed.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "candidate_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Identity"
+          },
+          "consumed_runs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AgentCampaignRunEvidence"
+            },
+            "title": "Consumed Runs",
+            "type": "array"
+          },
+          "decision_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "decision",
+            "default": "decision",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Message",
+            "type": "string"
+          },
+          "next_phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Phase"
+          },
+          "next_step_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Next Step Ids",
+            "type": "array"
+          },
+          "phase_ordinal": {
+            "maximum": 160.0,
+            "minimum": 0.0,
+            "title": "Phase Ordinal",
+            "type": "integer"
+          },
+          "remaining_runs": {
+            "maximum": 160.0,
+            "minimum": 0.0,
+            "title": "Remaining Runs",
+            "type": "integer"
+          },
+          "scope_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Identity"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRepairStopReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unresolved_run_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved Run Ids",
+            "type": "array"
+          },
+          "unstarted_selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentCampaignUnstartedSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "campaign_id",
+          "expected_revision",
+          "decision_id",
+          "phase_ordinal",
+          "remaining_runs"
+        ],
+        "title": "AgentCampaignDecision",
+        "type": "object"
+      },
+      "AgentCampaignIntent": {
+        "additionalProperties": false,
+        "description": "Bounded original intent retained once before phase admission.",
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/AgentRepairBudget"
+          },
+          "campaign_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "candidate_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Identity"
+          },
+          "deadline_at": {
+            "format": "date-time",
+            "title": "Deadline At",
+            "type": "string"
+          },
+          "expected_revision": {
+            "const": 0,
+            "default": 0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "initial_phase": {
+            "minLength": 1,
+            "title": "Initial Phase",
+            "type": "string"
+          },
+          "initial_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Initial Step Ids",
+            "type": "array"
+          },
+          "kind": {
+            "const": "intent",
+            "default": "intent",
+            "title": "Kind",
+            "type": "string"
+          },
+          "maximum_runs": {
+            "maximum": 160.0,
+            "minimum": 1.0,
+            "title": "Maximum Runs",
+            "type": "integer"
+          },
+          "original_execution_digest": {
+            "minLength": 1,
+            "title": "Original Execution Digest",
+            "type": "string"
+          },
+          "repository_id": {
+            "minLength": 1,
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "scope_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Identity"
+          },
+          "write_roots": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Write Roots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "repository_id",
+          "original_execution_digest",
+          "budget",
+          "maximum_runs",
+          "deadline_at",
+          "initial_phase",
+          "initial_step_ids"
+        ],
+        "title": "AgentCampaignIntent",
+        "type": "object"
+      },
+      "AgentCampaignPhase": {
+        "additionalProperties": false,
+        "description": "Exact selected membership, appended in the Run admission transaction.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "context": {
+            "$ref": "#/components/schemas/AgentRepairContext"
+          },
+          "execution_digest": {
+            "minLength": 1,
+            "title": "Execution Digest",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "fleet_run_id": {
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "phase",
+            "default": "phase",
+            "title": "Kind",
+            "type": "string"
+          },
+          "selected_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Selected Step Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "expected_revision",
+          "fleet_run_id",
+          "context",
+          "execution_digest",
+          "selected_step_ids"
+        ],
+        "title": "AgentCampaignPhase",
+        "type": "object"
+      },
+      "AgentCampaignReadback": {
+        "additionalProperties": false,
+        "description": "Complete verified Journal cut; observing it never resumes work.",
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "complete": {
+            "default": true,
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "journal_revision": {
+            "minimum": 0.0,
+            "title": "Journal Revision",
+            "type": "integer"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/AgentCampaignRecord"
+            },
+            "title": "Records",
+            "type": "array"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "journal_revision",
+          "records"
+        ],
+        "title": "AgentCampaignReadback",
+        "type": "object"
+      },
+      "AgentCampaignRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "fact": {
+            "discriminator": {
+              "mapping": {
+                "decision": "#/components/schemas/AgentCampaignDecision",
+                "intent": "#/components/schemas/AgentCampaignIntent",
+                "phase": "#/components/schemas/AgentCampaignPhase"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentCampaignIntent"
+              },
+              {
+                "$ref": "#/components/schemas/AgentCampaignPhase"
+              },
+              {
+                "$ref": "#/components/schemas/AgentCampaignDecision"
+              }
+            ],
+            "title": "Fact"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "session_id": {
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "revision",
+          "fact"
+        ],
+        "title": "AgentCampaignRecord",
+        "type": "object"
+      },
+      "AgentCampaignRunEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "fleet_run_id": {
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "operation_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Operation Ids",
+            "type": "array"
+          },
+          "terminal_sequence": {
+            "minimum": 1.0,
+            "title": "Terminal Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "terminal_sequence"
+        ],
+        "title": "AgentCampaignRunEvidence",
+        "type": "object"
+      },
+      "AgentCampaignUnstartedSelection": {
+        "additionalProperties": false,
+        "description": "A requested identity with no admitted Run at the decision read cut.",
+        "properties": {
+          "admission_status": {
+            "const": "not_admitted",
+            "default": "not_admitted",
+            "title": "Admission Status",
+            "type": "string"
+          },
+          "phase": {
+            "minLength": 1,
+            "title": "Phase",
+            "type": "string"
+          },
+          "phase_ordinal": {
+            "maximum": 160.0,
+            "minimum": 1.0,
+            "title": "Phase Ordinal",
+            "type": "integer"
+          },
+          "selected_run_id": {
+            "minLength": 1,
+            "title": "Selected Run Id",
+            "type": "string"
+          },
+          "selected_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Selected Step Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "selected_run_id",
+          "phase_ordinal",
+          "phase",
+          "selected_step_ids"
+        ],
+        "title": "AgentCampaignUnstartedSelection",
+        "type": "object"
+      },
       "AgentConnection": {
         "additionalProperties": false,
         "description": "Frozen public connection facts. Credential values remain process authority.",
@@ -296,6 +737,36 @@
         "title": "AgentProvider",
         "type": "object"
       },
+      "AgentRepairBudget": {
+        "additionalProperties": false,
+        "properties": {
+          "max_attempts": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "step_timeout_seconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 21600.0,
+            "title": "Step Timeout Seconds",
+            "type": "number"
+          },
+          "timeout_seconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 86400.0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "max_attempts",
+          "timeout_seconds",
+          "step_timeout_seconds"
+        ],
+        "title": "AgentRepairBudget",
+        "type": "object"
+      },
       "AgentRepairContext": {
         "additionalProperties": false,
         "description": "Frozen limits transported in each original admitted target, never model data.",
@@ -305,6 +776,18 @@
             "minimum": 1.0,
             "title": "Attempt",
             "type": "integer"
+          },
+          "campaign_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Revision"
           },
           "candidate_identity": {
             "anyOf": [
@@ -414,6 +897,27 @@
         ],
         "title": "AgentRepairContext",
         "type": "object"
+      },
+      "AgentRepairStopReason": {
+        "enum": [
+          "converged",
+          "review_incomplete",
+          "adjudication_incomplete",
+          "regression_failed",
+          "verification_failed",
+          "no_progress",
+          "test_passed",
+          "attempts_exhausted",
+          "cancelled",
+          "timed_out",
+          "feedback_unavailable",
+          "proposal_failed",
+          "apply_failed",
+          "source_changed",
+          "execution_unresolved"
+        ],
+        "title": "AgentRepairStopReason",
+        "type": "string"
       },
       "AgentReviewObservation": {
         "additionalProperties": false,
@@ -2560,6 +3064,9 @@
             "default": 0,
             "title": "Returncode",
             "type": "integer"
+          },
+          "settlement": {
+            "$ref": "#/components/schemas/PlanStepSettlementEvidence"
           },
           "started_at": {
             "anyOf": [
@@ -4715,6 +5222,9 @@
           "returncode": {
             "title": "Returncode",
             "type": "integer"
+          },
+          "settlement": {
+            "$ref": "#/components/schemas/PlanStepSettlementEvidence"
           },
           "started_at": {
             "anyOf": [
@@ -7010,6 +7520,16 @@
             ],
             "title": "Application Launch"
           },
+          "campaign_journal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentCampaignReadback"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "execution": {
             "discriminator": {
               "mapping": {
@@ -8067,6 +8587,16 @@
               }
             ],
             "title": "Application Launch"
+          },
+          "campaign_journal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentCampaignReadback"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "configuration": {
             "anyOf": [
@@ -11821,6 +12351,9 @@
           "retry_context": {
             "$ref": "#/components/schemas/GameTapeRetryContextSummary",
             "readOnly": true
+          },
+          "settlement": {
+            "$ref": "#/components/schemas/PlanStepSettlementEvidence"
           },
           "started_at": {
             "anyOf": [
@@ -18890,6 +19423,17 @@
             "title": "Execution Authority Economics",
             "type": "array"
           },
+          "observed_returncode": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Returncode"
+          },
           "release_effect": {
             "anyOf": [
               {
@@ -19243,6 +19787,76 @@
           "disposition"
         ],
         "title": "PlanStepPreview",
+        "type": "object"
+      },
+      "PlanStepSettlementEvidence": {
+        "additionalProperties": false,
+        "description": "The Step acceptor's result, separate from physical/native observations.\n\nMissing settlement is explicit uncertainty. Readers must never reconstruct\nthis decision from a native profile, protocol event or daemon exit signal.",
+        "properties": {
+          "cleanup": {
+            "default": "UNAVAILABLE",
+            "enum": [
+              "VERIFIED",
+              "UNVERIFIED",
+              "UNAVAILABLE"
+            ],
+            "title": "Cleanup",
+            "type": "string"
+          },
+          "observed_returncode": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Returncode"
+          },
+          "outcome": {
+            "default": "INCOMPLETE",
+            "enum": [
+              "SUCCESS",
+              "FAILED",
+              "CANCELLED",
+              "TIMED_OUT",
+              "OUTPUT_LIMITED",
+              "AUTHORITY_LOST",
+              "INCOMPLETE",
+              "SKIPPED"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "owner": {
+            "const": "fleet_step_settlement",
+            "default": "fleet_step_settlement",
+            "title": "Owner",
+            "type": "string"
+          },
+          "reason": {
+            "default": "MISSING_SETTLEMENT",
+            "enum": [
+              "ACCEPTED_EXIT",
+              "ACCEPTED_SERVICE_COMPLETION",
+              "ACCEPTED_IN_PROCESS",
+              "FAILED_EXIT",
+              "FAILED_TO_START",
+              "CALLER_CANCELLED",
+              "DEADLINE_EXPIRED",
+              "OUTPUT_LIMIT_EXCEEDED",
+              "AUTHORITY_REVOKED",
+              "CLEANUP_UNVERIFIED",
+              "SUPERVISION_UNAVAILABLE",
+              "MISSING_SETTLEMENT",
+              "NOT_STARTED"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "PlanStepSettlementEvidence",
         "type": "object"
       },
       "PlanStepTeardownEvidence": {
@@ -21888,6 +22502,254 @@
         "title": "RequirementsRepositoryAdmissionEvidence",
         "type": "object"
       },
+      "ResolvedAgentStep": {
+        "additionalProperties": false,
+        "description": "Neutral immutable Agent intent under the original Step lifecycle.\n\nThe workload variant owns only its relevant selection. Source and Skill\nbytes travel separately in the original attempt's delivery packet; neither\nthe packet nor this identity envelope grants execution authority.",
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/PlanArtifactDeclaration"
+            },
+            "maxItems": 32,
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "cache": {
+            "$ref": "#/components/schemas/PlanStepCache"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/PlanStepCapabilities"
+          },
+          "delivery_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Delivery Sha256",
+            "type": "string"
+          },
+          "environment": {
+            "items": {
+              "$ref": "#/components/schemas/ResolvedEnvironmentBinding"
+            },
+            "maxItems": 64,
+            "title": "Environment",
+            "type": "array"
+          },
+          "feedback_reference": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Reference"
+          },
+          "feedback_value": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Value"
+          },
+          "handoff_identity": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Handoff Identity",
+            "type": "string"
+          },
+          "imports": {
+            "$ref": "#/components/schemas/PlanStepImports"
+          },
+          "kind": {
+            "const": "agent",
+            "default": "agent",
+            "title": "Kind",
+            "type": "string"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/StepLifecycle",
+            "default": "normal"
+          },
+          "on_failure": {
+            "$ref": "#/components/schemas/StepFailurePolicy",
+            "default": "stop"
+          },
+          "outputs": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PlanPublishedOutput"
+                },
+                {
+                  "$ref": "#/components/schemas/PlanStreamOutput"
+                }
+              ]
+            },
+            "maxItems": 16,
+            "title": "Outputs",
+            "type": "array"
+          },
+          "retry": {
+            "$ref": "#/components/schemas/StepRetryPolicy"
+          },
+          "review_context": {
+            "anyOf": [
+              {
+                "maxLength": 65536,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Context"
+          },
+          "source_step_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Source Step Id",
+            "type": "string"
+          },
+          "step_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Step Id",
+            "type": "string"
+          },
+          "success_codes": {
+            "default": [
+              0
+            ],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Success Codes",
+            "type": "array"
+          },
+          "timeout_seconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 21600.0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          },
+          "when": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "path_exists": "#/components/schemas/PathExistsCondition",
+                    "path_missing": "#/components/schemas/PathMissingCondition",
+                    "step_status": "#/components/schemas/StepStatusCondition"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PathExistsCondition"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PathMissingCondition"
+                  },
+                  {
+                    "$ref": "#/components/schemas/StepStatusCondition"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "When"
+          },
+          "working_directory": {
+            "const": ".",
+            "default": ".",
+            "title": "Working Directory",
+            "type": "string"
+          },
+          "workload": {
+            "discriminator": {
+              "mapping": {
+                "local-model-files": "#/components/schemas/ResolvedBuiltinAgentWorkload",
+                "local-model-proposal": "#/components/schemas/ResolvedBuiltinAgentWorkload",
+                "local-model-review": "#/components/schemas/ResolvedBuiltinAgentWorkload",
+                "local-model-search": "#/components/schemas/ResolvedBuiltinAgentWorkload",
+                "local-model-skill-resources": "#/components/schemas/ResolvedBuiltinAgentWorkload",
+                "local-model-tools": "#/components/schemas/ResolvedBuiltinAgentWorkload",
+                "local-search": "#/components/schemas/ResolvedSearchAgentWorkload",
+                "native": "#/components/schemas/ResolvedNativeAgentWorkload",
+                "provider-adjudicate": "#/components/schemas/ResolvedProviderAgentWorkload",
+                "provider-proposal": "#/components/schemas/ResolvedProviderAgentWorkload",
+                "provider-review": "#/components/schemas/ResolvedProviderAgentWorkload"
+              },
+              "propertyName": "harness"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResolvedSearchAgentWorkload"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedBuiltinAgentWorkload"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedProviderAgentWorkload"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedNativeAgentWorkload"
+              }
+            ],
+            "title": "Workload"
+          },
+          "workspace": {
+            "$ref": "#/components/schemas/PlanStepWorkspace"
+          }
+        },
+        "required": [
+          "step_id",
+          "timeout_seconds",
+          "workload",
+          "delivery_sha256",
+          "handoff_identity",
+          "source_step_id"
+        ],
+        "title": "ResolvedAgentStep",
+        "type": "object"
+      },
+      "ResolvedBuiltinAgentWorkload": {
+        "additionalProperties": false,
+        "description": "An explicitly selected bounded local-model protocol and model.",
+        "properties": {
+          "harness": {
+            "enum": [
+              "local-model-search",
+              "local-model-review",
+              "local-model-tools",
+              "local-model-files",
+              "local-model-skill-resources",
+              "local-model-proposal"
+            ],
+            "title": "Harness",
+            "type": "string"
+          },
+          "model": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$",
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "harness",
+          "model"
+        ],
+        "title": "ResolvedBuiltinAgentWorkload",
+        "type": "object"
+      },
       "ResolvedCommandStep": {
         "additionalProperties": false,
         "properties": {
@@ -22451,11 +23313,8 @@
             ]
           },
           "contract_version": {
-            "default": 44,
-            "enum": [
-              43,
-              44
-            ],
+            "const": 45,
+            "default": 45,
             "title": "Contract Version",
             "type": "integer"
           },
@@ -22574,7 +23433,7 @@
             "items": {
               "discriminator": {
                 "mapping": {
-                  "agent": "#/components/schemas/ResolvedLocalSearchAgentStep",
+                  "agent": "#/components/schemas/ResolvedAgentStep",
                   "command": "#/components/schemas/ResolvedCommandStep",
                   "dependency_inventory": "#/components/schemas/ResolvedDependencyInventoryStep",
                   "extension": "#/components/schemas/ResolvedExtensionStep",
@@ -22590,7 +23449,7 @@
               },
               "oneOf": [
                 {
-                  "$ref": "#/components/schemas/ResolvedLocalSearchAgentStep"
+                  "$ref": "#/components/schemas/ResolvedAgentStep"
                 },
                 {
                   "$ref": "#/components/schemas/ResolvedCommandStep"
@@ -23217,281 +24076,6 @@
         "title": "ResolvedKubernetesSetImageStep",
         "type": "object"
       },
-      "ResolvedLocalSearchAgentStep": {
-        "additionalProperties": false,
-        "description": "Resolved read-only Agent intent for a fixed tool or provider harness.\n\nThe immutable AG-02 packet is transported *separately* by the original\nattempt. This identity-only plan value never embeds captured repository or\nSkill bytes in journal/Plan projections. Unlike a generic command, it\nkeeps ``kind=agent`` visible and forbids caller-supplied command arguments.",
-        "properties": {
-          "argv": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 64,
-            "minItems": 1,
-            "title": "Argv",
-            "type": "array"
-          },
-          "artifacts": {
-            "items": {
-              "$ref": "#/components/schemas/PlanArtifactDeclaration"
-            },
-            "maxItems": 32,
-            "title": "Artifacts",
-            "type": "array"
-          },
-          "cache": {
-            "$ref": "#/components/schemas/PlanStepCache"
-          },
-          "capabilities": {
-            "$ref": "#/components/schemas/PlanStepCapabilities"
-          },
-          "connection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentConnection"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "delivery_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Delivery Sha256",
-            "type": "string"
-          },
-          "environment": {
-            "items": {
-              "$ref": "#/components/schemas/ResolvedEnvironmentBinding"
-            },
-            "maxItems": 64,
-            "title": "Environment",
-            "type": "array"
-          },
-          "feedback_reference": {
-            "anyOf": [
-              {
-                "maxLength": 240,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feedback Reference"
-          },
-          "feedback_value": {
-            "anyOf": [
-              {
-                "maxLength": 2048,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feedback Value"
-          },
-          "handoff_identity": {
-            "maxLength": 160,
-            "minLength": 1,
-            "title": "Handoff Identity",
-            "type": "string"
-          },
-          "harness": {
-            "default": "local-search",
-            "enum": [
-              "local-search",
-              "local-model-search",
-              "local-model-review",
-              "local-model-tools",
-              "local-model-files",
-              "local-model-skill-resources",
-              "local-model-skill-loop",
-              "local-model-proposal",
-              "provider-review",
-              "provider-adjudicate",
-              "provider-proposal",
-              "native"
-            ],
-            "title": "Harness",
-            "type": "string"
-          },
-          "imports": {
-            "$ref": "#/components/schemas/PlanStepImports"
-          },
-          "kind": {
-            "const": "agent",
-            "default": "agent",
-            "title": "Kind",
-            "type": "string"
-          },
-          "lifecycle": {
-            "$ref": "#/components/schemas/StepLifecycle",
-            "default": "normal"
-          },
-          "model": {
-            "anyOf": [
-              {
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
-          },
-          "native_agent": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ResolvedNativeAgent"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "on_failure": {
-            "$ref": "#/components/schemas/StepFailurePolicy",
-            "default": "stop"
-          },
-          "outputs": {
-            "items": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/PlanPublishedOutput"
-                },
-                {
-                  "$ref": "#/components/schemas/PlanStreamOutput"
-                }
-              ]
-            },
-            "maxItems": 16,
-            "title": "Outputs",
-            "type": "array"
-          },
-          "retry": {
-            "$ref": "#/components/schemas/StepRetryPolicy"
-          },
-          "review_context": {
-            "anyOf": [
-              {
-                "maxLength": 65536,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Context"
-          },
-          "role": {
-            "default": "report",
-            "enum": [
-              "report",
-              "review",
-              "adjudication",
-              "proposal"
-            ],
-            "title": "Role",
-            "type": "string"
-          },
-          "source_step_id": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Source Step Id",
-            "type": "string"
-          },
-          "step_id": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Step Id",
-            "type": "string"
-          },
-          "success_codes": {
-            "default": [
-              0
-            ],
-            "items": {
-              "type": "integer"
-            },
-            "title": "Success Codes",
-            "type": "array"
-          },
-          "timeout_seconds": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 21600.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": 3600.0,
-            "title": "Timeout Seconds"
-          },
-          "uv": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/UvExecutionEnvironment"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "when": {
-            "anyOf": [
-              {
-                "discriminator": {
-                  "mapping": {
-                    "path_exists": "#/components/schemas/PathExistsCondition",
-                    "path_missing": "#/components/schemas/PathMissingCondition",
-                    "step_status": "#/components/schemas/StepStatusCondition"
-                  },
-                  "propertyName": "kind"
-                },
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/PathExistsCondition"
-                  },
-                  {
-                    "$ref": "#/components/schemas/PathMissingCondition"
-                  },
-                  {
-                    "$ref": "#/components/schemas/StepStatusCondition"
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "When"
-          },
-          "working_directory": {
-            "default": ".",
-            "maxLength": 240,
-            "minLength": 1,
-            "title": "Working Directory",
-            "type": "string"
-          },
-          "workspace": {
-            "$ref": "#/components/schemas/PlanStepWorkspace"
-          }
-        },
-        "required": [
-          "step_id",
-          "argv",
-          "delivery_sha256",
-          "handoff_identity",
-          "source_step_id"
-        ],
-        "title": "ResolvedLocalSearchAgentStep",
-        "type": "object"
-      },
       "ResolvedNativeAgent": {
         "description": "Resolved host facts transported unchanged to the existing execution owner.",
         "properties": {
@@ -23553,6 +24137,37 @@
           "executable_sha256"
         ],
         "title": "ResolvedNativeAgent",
+        "type": "object"
+      },
+      "ResolvedNativeAgentWorkload": {
+        "additionalProperties": false,
+        "description": "Native reasoning/tool ownership and native-owned model configuration.",
+        "properties": {
+          "harness": {
+            "const": "native",
+            "default": "native",
+            "title": "Harness",
+            "type": "string"
+          },
+          "native_agent": {
+            "$ref": "#/components/schemas/ResolvedNativeAgent"
+          },
+          "role": {
+            "default": "report",
+            "enum": [
+              "report",
+              "review",
+              "adjudication",
+              "proposal"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "native_agent"
+        ],
+        "title": "ResolvedNativeAgentWorkload",
         "type": "object"
       },
       "ResolvedOciBuildStep": {
@@ -24164,6 +24779,56 @@
           "runtime_uv_lock_sha256"
         ],
         "title": "ResolvedPreCommitStep",
+        "type": "object"
+      },
+      "ResolvedProviderAgentWorkload": {
+        "additionalProperties": false,
+        "description": "A direct, bounded provider request with its frozen connection.",
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/AgentConnection"
+          },
+          "harness": {
+            "enum": [
+              "provider-review",
+              "provider-adjudicate",
+              "provider-proposal"
+            ],
+            "title": "Harness",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "required": [
+          "harness",
+          "connection"
+        ],
+        "title": "ResolvedProviderAgentWorkload",
+        "type": "object"
+      },
+      "ResolvedSearchAgentWorkload": {
+        "additionalProperties": false,
+        "description": "Model-free deterministic search over the exact frozen source.",
+        "properties": {
+          "harness": {
+            "const": "local-search",
+            "default": "local-search",
+            "title": "Harness",
+            "type": "string"
+          }
+        },
+        "title": "ResolvedSearchAgentWorkload",
         "type": "object"
       },
       "ResolvedStepSource": {
@@ -28984,6 +29649,9 @@
             "minLength": 1,
             "title": "Repository State Before",
             "type": "string"
+          },
+          "settlement": {
+            "$ref": "#/components/schemas/PlanStepSettlementEvidence"
           },
           "started_at": {
             "anyOf": [

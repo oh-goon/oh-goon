@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 
+from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.runtime.database import DATABASE_SCHEMA_VERSION, inspect_local_database
 from oh_goon.runtime.league_folders import LeagueFolderStore
@@ -42,7 +43,7 @@ def _local_state_check_command(inspection: LocalStateInspection, _args: argparse
     if inspection.compatible:
         return 0
     print()
-    _print_reset_recovery()
+    _print_reset_recovery(inspection=inspection)
     return 2
 
 
@@ -52,7 +53,7 @@ def _local_state_prelaunch_command(
     _print_inspection(inspection)
     if not inspection.compatible:
         print()
-        _print_reset_recovery()
+        _print_reset_recovery(inspection=inspection)
         return 2
     try:
         probe_sqlite_prelaunch(inspection.path)
@@ -81,7 +82,11 @@ def _local_state_reset_command(inspection: LocalStateInspection, args: argparse.
         _print_reset_recovery(indent="  ")
         return 2
 
-    deleted = reset_local_state(inspection.path)
+    try:
+        deleted = reset_local_state(inspection.path)
+    except (FleetDomainError, OSError) as exc:
+        print(f"Local state reset failed: {exc}")
+        return 2
     print(f"Local state reset: {inspection.path}")
     print(f"League folders remain in: {league_folders.path}")
     if deleted:
@@ -118,7 +123,7 @@ def check_local_state_for_startup() -> int:
         _print_inspection(inspection)
         print()
         print("Startup stopped before opening the application.")
-        _print_reset_recovery()
+        _print_reset_recovery(inspection=inspection)
         return 2
     try:
         probe_sqlite_prelaunch(inspection.path)
@@ -144,7 +149,14 @@ def _print_inspection(inspection: LocalStateInspection) -> None:
     print(inspection.detail)
 
 
-def _print_reset_recovery(*, indent: str = "") -> None:
+def _print_reset_recovery(
+    *, indent: str = "", inspection: LocalStateInspection | None = None
+) -> None:
+    if inspection is not None and not inspection.compatible:
+        print(
+            f"{indent}Preserve this database and its SQLite sidecars. Use its matching original runtime to settle Runs, effects and workspace writers before archival or replacement."
+        )
+        print(f"{indent}Reset commands apply only to compatible, fully settled local state.")
     print(f"{indent}Source checkout: {SOURCE_RESET_COMMAND}")
     print(f"{indent}Built release:   {BUILT_RELEASE_RESET_COMMAND}")
     print(

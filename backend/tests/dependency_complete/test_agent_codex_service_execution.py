@@ -24,7 +24,7 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord
-from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep
 from oh_goon.core.models.fleet_plan_values import HostEnvironmentPart, ResolvedEnvironmentBinding
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
@@ -299,14 +299,13 @@ def execute_fixture(
     )
     process = _with_output_observer(
         process,
-        ResolvedLocalSearchAgentStep(
+        ResolvedAgentStep(
+            timeout_seconds=3600,
+            workload={"harness": "native", "native_agent": selected},
             step_id="native-service",
-            argv=("python",),
             delivery_sha256="0" * 64,
             handoff_identity="original-frozen-handoff",
             source_step_id="native-service",
-            harness="native",
-            native_agent=selected,
             environment=(
                 ResolvedEnvironmentBinding(
                     name="ADMITTED_SECRET",
@@ -360,6 +359,8 @@ def test_service_turn_success_retains_actual_owned_daemon_cancellation_receipt(
     assert shutdown.supervisor.termination_receipt is not None
     assert result.outcome.stdout == "Native final report"
     assert result.outcome.returncode == 0 and result.protocol.settled is True
+    assert result.outcome.completion == "service_shutdown"
+    assert result.outcome.observed_returncode is None
     assert events.index("mcp_gate") < events.index("model_turn")
     assert events.index("store_separation") < events.index("mcp_discovery")
     assert events.index("mcp_discovery") < events.index("thread_start") < events.index("mcp_gate")

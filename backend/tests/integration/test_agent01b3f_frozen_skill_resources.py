@@ -34,7 +34,7 @@ def test_list_skill_files_then_read_resource_in_same_original_fleet_step(tmp_pat
         ],
     )
     frozen, handoff = _lock(plan, opts)
-    assert frozen.steps[0].harness == handoff.harness == "local-model-skill-resources"
+    assert frozen.steps[0].workload.harness == handoff.harness == "local-model-skill-resources"
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3f-skill-list-read")
     assert detail.game_tape.status.value == "PASSED"
     assert (tmp_path / "calls").read_text().strip() == "3"
@@ -110,9 +110,7 @@ def test_skill_source_change_changes_frozen_lock_identity(tmp_path, monkeypatch)
     from oh_goon.runtime.goon_templates import GoonTemplateStore
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
-    later, changed, _ = FleetPlanResolver(
-        goon_templates=GoonTemplateStore()
-    ).resolve_frozen_local_search_agent(
+    later, changed, _ = FleetPlanResolver(goon_templates=GoonTemplateStore()).resolve_frozen_agent(
         plan,
         inputs=opts["inputs"],
         repository_root=opts["agent_repository_root"],

@@ -42,7 +42,7 @@ def _recapture(plan, options, previous):
         expected_previous_handoff_identity=previous.handoff_identity,
         **_source_options(options),
     )
-    frozen, selected, _ = resolver.resolve_frozen_local_search_agent(
+    frozen, selected, _ = resolver.resolve_frozen_agent(
         plan, handoff=handoff, **_source_options(options)
     )
     assert selected == handoff

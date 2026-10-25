@@ -197,12 +197,12 @@ class FleetRunLifecycle:
             if isinstance(target.plan.execution, CicdExecutionPolicy):
                 raise FleetPlanInvalid("standard-local host execution refuses CI/CD plans")
             if any(step.kind == "agent" for step in target.plan.steps):
-                from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
+                from oh_goon.core.models.fleet_plan import ResolvedAgentStep
 
                 agent_steps = [step for step in target.plan.steps if step.kind == "agent"]
-                if any(
-                    not isinstance(step, ResolvedLocalSearchAgentStep) for step in agent_steps
-                ) or len(target.agent_deliveries) != len(agent_steps):
+                if any(not isinstance(step, ResolvedAgentStep) for step in agent_steps) or len(
+                    target.agent_deliveries
+                ) != len(agent_steps):
                     raise FleetPlanInvalid(
                         "standard-local Agent requires original typed frozen delivery"
                     )

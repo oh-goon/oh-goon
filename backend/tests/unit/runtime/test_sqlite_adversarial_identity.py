@@ -331,11 +331,13 @@ def test_current_database_without_identity_cookie_is_rejected_without_mutation(
         external.execute("PRAGMA application_id = 0")
         assert int(external.execute("PRAGMA application_id").fetchone()[0]) == 0
 
+    before = path.read_bytes()
     with pytest.raises(
         DatabaseSchemaMismatch, match="missing its required application_id identity"
     ):
-        LocalDatabase(path, journal_mode="DELETE")
+        LocalDatabase(path, journal_mode="WAL")
 
+    assert path.read_bytes() == before
     with closing(sqlite3.connect(path, isolation_level=None)) as external:
         assert int(external.execute("PRAGMA application_id").fetchone()[0]) == 0
         assert (

@@ -355,6 +355,7 @@ class PlanStepAttemptEvidence(ImmutableModel):
     attempt: int = Field(ge=1, le=5)
     argv: tuple[str, ...] = Field(default_factory=tuple)
     returncode: int
+    observed_returncode: int | None = None
     stdout_evidence: PlanOutputEvidence
     stderr_evidence: PlanOutputEvidence
     duration_ms: int = Field(default=0, ge=0)
@@ -380,6 +381,65 @@ class PlanStepAttemptEvidence(ImmutableModel):
     execution_authority: PlanExecutionAuthorityDiagnosticEvidence | None = None
 
 
+class PlanStepSettlementEvidence(ImmutableModel):
+    """The Step acceptor's result, separate from physical/native observations.
+
+    Missing settlement is explicit uncertainty. Readers must never reconstruct
+    this decision from a native profile, protocol event or daemon exit signal.
+    """
+
+    owner: Literal["fleet_step_settlement"] = "fleet_step_settlement"
+    outcome: Literal[
+        "SUCCESS",
+        "FAILED",
+        "CANCELLED",
+        "TIMED_OUT",
+        "OUTPUT_LIMITED",
+        "AUTHORITY_LOST",
+        "INCOMPLETE",
+        "SKIPPED",
+    ] = "INCOMPLETE"
+    cleanup: Literal["VERIFIED", "UNVERIFIED", "UNAVAILABLE"] = "UNAVAILABLE"
+    reason: Literal[
+        "ACCEPTED_EXIT",
+        "ACCEPTED_SERVICE_COMPLETION",
+        "ACCEPTED_IN_PROCESS",
+        "FAILED_EXIT",
+        "FAILED_TO_START",
+        "CALLER_CANCELLED",
+        "DEADLINE_EXPIRED",
+        "OUTPUT_LIMIT_EXCEEDED",
+        "AUTHORITY_REVOKED",
+        "CLEANUP_UNVERIFIED",
+        "SUPERVISION_UNAVAILABLE",
+        "MISSING_SETTLEMENT",
+        "NOT_STARTED",
+    ] = "MISSING_SETTLEMENT"
+    observed_returncode: int | None = None
+
+    @model_validator(mode="after")
+    def validate_meaning(self) -> PlanStepSettlementEvidence:
+        reasons = {
+            "SUCCESS": {"ACCEPTED_EXIT", "ACCEPTED_SERVICE_COMPLETION", "ACCEPTED_IN_PROCESS"},
+            "FAILED": {"FAILED_EXIT", "FAILED_TO_START"},
+            "CANCELLED": {"CALLER_CANCELLED"},
+            "TIMED_OUT": {"DEADLINE_EXPIRED"},
+            "OUTPUT_LIMITED": {"OUTPUT_LIMIT_EXCEEDED"},
+            "AUTHORITY_LOST": {"AUTHORITY_REVOKED"},
+            "INCOMPLETE": {"MISSING_SETTLEMENT", "CLEANUP_UNVERIFIED", "SUPERVISION_UNAVAILABLE"},
+            "SKIPPED": {"NOT_STARTED"},
+        }
+        if self.reason not in reasons[self.outcome]:
+            raise ValueError("Step settlement outcome and reason disagree")
+        if self.outcome == "SUCCESS" and self.cleanup != "VERIFIED":
+            raise ValueError("Successful Step settlement requires verified cleanup")
+        if self.reason == "FAILED_TO_START" and (
+            self.cleanup != "VERIFIED" or self.observed_returncode is not None
+        ):
+            raise ValueError("Known launch refusal requires no owned process or observed exit")
+        return self
+
+
 class _PlanStepExecutionBase(ImmutableModel):
     step_id: str
     kind: str
@@ -397,6 +457,7 @@ class _PlanStepExecutionBase(ImmutableModel):
     outputs: tuple[PublishedPlanOutputEvidence, ...] = Field(default_factory=tuple)
     teardown: PlanStepTeardownEvidence | None = None
     observations: tuple[FleetObservationEvidence, ...] = Field(default_factory=tuple, max_length=8)
+    settlement: PlanStepSettlementEvidence = Field(default_factory=PlanStepSettlementEvidence)
 
     @model_validator(mode="after")
     def validate_timing(self) -> _PlanStepExecutionBase:

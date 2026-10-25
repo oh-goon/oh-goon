@@ -7,6 +7,7 @@ from types import MappingProxyType
 
 from oh_goon.core.errors import InvalidRunTransition
 from oh_goon.core.fleet_plan_projection import fleet_plan_logical_slot
+from oh_goon.core.models.agent_repair import AgentCampaignRecord
 from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.run import FleetRunDetail
@@ -18,6 +19,7 @@ from oh_goon.core.result_lifecycle import result_freshness
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.vocabulary import FleetRunEventType, OperationAction, ResultFreshness
 from oh_goon.runtime.journal_facts import (
+    AgentCampaignCommitted,
     EffectAcknowledgementCommitted,
     EffectReconciliationCommitted,
     FleetOperationCommitted,
@@ -112,6 +114,7 @@ class CurrentFleetPlanOperation:
 class JournalIndex:
     """Private disposable indexes for one already-verified Journal read cut."""
 
+    campaigns: Mapping[str, tuple[AgentCampaignRecord, ...]]
     operation_facts: tuple[OperationFact, ...]
     operations_by_id: Mapping[str, OperationReport]
     timelines_by_repository: Mapping[str, tuple[OperationFact, ...]]
@@ -145,7 +148,21 @@ class JournalIndex:
         current_fleet_plan_operations: dict[
             tuple[str, tuple[str, str]], CurrentFleetPlanOperation
         ] = {}
+        campaigns: dict[str, list[AgentCampaignRecord]] = {}
         for entry in entries:
+            if isinstance(entry, AgentCampaignCommitted):
+                history = campaigns.setdefault(entry.fact.campaign_id, [])
+                previous = history[-1].revision if history else 0
+                if entry.fact.expected_revision != previous:
+                    raise InvalidRunTransition(
+                        "Journal invariant violated: campaign predecessor mismatch"
+                    )
+                history.append(
+                    AgentCampaignRecord(
+                        session_id=entry.session_id, revision=entry.revision, fact=entry.fact
+                    )
+                )
+                continue
             if isinstance(entry, EffectReconciliationCommitted):
                 reconciliations_by_operation.setdefault(
                     entry.evidence.effect.operation_id, []
@@ -192,6 +209,7 @@ class JournalIndex:
             latest_run_by_family[state.action] = state.fleet_run_id
 
         return cls(
+            campaigns=MappingProxyType({key: tuple(value) for key, value in campaigns.items()}),
             operation_facts=operation_facts,
             operations_by_id=MappingProxyType(operations_by_id),
             timelines_by_repository=repository_indexes.timelines,

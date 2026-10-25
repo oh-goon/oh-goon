@@ -68,8 +68,8 @@ def test_bounded_model_selected_search_is_original_fleet_success_and_durable(tmp
     plan, repository, opts = _case_model(tmp_path, monkeypatch)
     frozen, handoff = _lock(plan, opts)
     step = frozen.steps[0]
-    assert step.kind == "agent" and step.harness == "local-model-search"
-    assert step.model == "qwen3:0.6b"
+    assert step.kind == "agent" and step.workload.harness == "local-model-search"
+    assert step.workload.model == "qwen3:0.6b"
     assert handoff.requested_effects.recipients == ("ollama_local",)
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
@@ -192,7 +192,7 @@ def test_model_identity_changes_lock_and_packet(tmp_path, monkeypatch):
     goon.write_text(goon.read_text().replace("qwen3:0.6b", "qwen3:1.7b"))
     changed, changed_handoff, _ = FleetPlanResolver(
         goon_templates=GoonTemplateStore()
-    ).resolve_frozen_local_search_agent(
+    ).resolve_frozen_agent(
         plan,
         inputs=opts["inputs"],
         repository_root=opts["agent_repository_root"],

@@ -199,7 +199,7 @@ from oh_goon.core.models.fleet_plan_values import (
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
-FLEET_PLAN_CONTRACT_VERSION: Literal[44] = 44
+FLEET_PLAN_CONTRACT_VERSION: Literal[45] = 45
 _NATIVE_AGENT_ADAPTER = TypeAdapter(ResolvedNativeAgent)
 DEFAULT_PRE_COMMIT_REQUIREMENT = "pre-commit==4.6.2"
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 3600.0
@@ -311,6 +311,16 @@ class AgentPlanStep(ImmutableModel):
     when: StepCondition | None = None
     timeout_seconds: float = Field(default=3600, gt=0, le=21600)
     requested_effects: AgentStepRequestedEffects = Field(default_factory=AgentStepRequestedEffects)
+
+    @field_validator("harness")
+    @classmethod
+    def reject_retired_skill_loop(cls, value: str) -> str:
+        if value == "local-model-skill-loop":
+            raise ValueError(
+                "local-model-skill-loop was removed; re-author with a selected native "
+                "Agent for reasoning, or a bounded Skill-resource/proposal workload"
+            )
+        return value
 
 
 class GitPlanStep(ImmutableModel):
@@ -504,91 +514,114 @@ class ResolvedCommandStep(CommandPlanStep):
         return self
 
 
-class ResolvedLocalSearchAgentStep(ResolvedCommandStep):
-    """Resolved read-only Agent intent for a fixed tool or provider harness.
+class ResolvedSearchAgentWorkload(ImmutableModel):
+    """Model-free deterministic search over the exact frozen source."""
 
-    The immutable AG-02 packet is transported *separately* by the original
-    attempt. This identity-only plan value never embeds captured repository or
-    Skill bytes in journal/Plan projections. Unlike a generic command, it
-    keeps ``kind=agent`` visible and forbids caller-supplied command arguments.
+    harness: Literal["local-search"] = "local-search"
+
+
+class ResolvedBuiltinAgentWorkload(ImmutableModel):
+    """An explicitly selected bounded local-model protocol and model."""
+
+    harness: Literal[
+        "local-model-search",
+        "local-model-review",
+        "local-model-tools",
+        "local-model-files",
+        "local-model-skill-resources",
+        "local-model-proposal",
+    ]
+    model: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
+
+
+class ResolvedProviderAgentWorkload(ImmutableModel):
+    """A direct, bounded provider request with its frozen connection."""
+
+    harness: Literal["provider-review", "provider-adjudicate", "provider-proposal"]
+    connection: AgentConnection
+    model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
+
+    @model_validator(mode="after")
+    def validate_selected_profile(self) -> ResolvedProviderAgentWorkload:
+        if self.model not in (None, self.connection.profile):
+            raise ValueError("provider model request differs from the frozen connection profile")
+        return self
+
+
+class ResolvedNativeAgentWorkload(ImmutableModel):
+    """Native reasoning/tool ownership and native-owned model configuration."""
+
+    harness: Literal["native"] = "native"
+    native_agent: ResolvedNativeAgent
+    role: AgentResultRole = "report"
+
+
+ResolvedAgentWorkload = Annotated[
+    ResolvedSearchAgentWorkload
+    | ResolvedBuiltinAgentWorkload
+    | ResolvedProviderAgentWorkload
+    | ResolvedNativeAgentWorkload,
+    Field(discriminator="harness"),
+]
+
+
+class ResolvedAgentStep(ImmutableModel):
+    """Neutral immutable Agent intent under the original Step lifecycle.
+
+    The workload variant owns only its relevant selection. Source and Skill
+    bytes travel separately in the original attempt's delivery packet; neither
+    the packet nor this identity envelope grants execution authority.
     """
 
-    # Frozen Pydantic schema specialization preserves the command payload ancestry.
-    kind: Literal["agent"] = "agent"  # type: ignore[assignment]
+    kind: Literal["agent"] = "agent"
+    step_id: str = Field(min_length=1, max_length=80)
+    lifecycle: StepLifecycle = StepLifecycle.NORMAL
+    timeout_seconds: float = Field(gt=0, le=21600)
+    working_directory: Literal["."] = "."
+    imports: PlanStepImports = Field(default_factory=PlanStepImports)
+    workspace: PlanStepWorkspace = Field(default_factory=PlanStepWorkspace)
+    cache: PlanStepCache = Field(default_factory=PlanStepCache)
+    capabilities: PlanStepCapabilities = Field(default_factory=PlanStepCapabilities)
+    success_codes: tuple[int, ...] = (0,)
+    on_failure: StepFailurePolicy = StepFailurePolicy.STOP
+    when: StepCondition | None = None
+    retry: StepRetryPolicy = Field(default_factory=StepRetryPolicy)
+    artifacts: tuple[PlanArtifactDeclaration, ...] = Field(default_factory=tuple, max_length=32)
+    outputs: tuple[PlanPublishedOutput | PlanStreamOutput, ...] = Field(
+        default_factory=tuple, max_length=16
+    )
+    environment: tuple[ResolvedEnvironmentBinding, ...] = Field(
+        default_factory=tuple, max_length=64
+    )
+    workload: ResolvedAgentWorkload
+    _outputs = field_validator("outputs")(_validate_published_outputs)
     delivery_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     handoff_identity: str = Field(min_length=1, max_length=160)
     source_step_id: str = Field(min_length=1, max_length=80)
     feedback_reference: str | None = Field(default=None, max_length=240)
     # Original sequencer alone binds this from a published prior Step, never the model.
     feedback_value: str | None = Field(default=None, max_length=2048)
-    harness: Literal[
-        "local-search",
-        "local-model-search",
-        "local-model-review",
-        "local-model-tools",
-        "local-model-files",
-        "local-model-skill-resources",
-        "local-model-skill-loop",
-        "local-model-proposal",
-        "provider-review",
-        "provider-adjudicate",
-        "provider-proposal",
-        "native",
-    ] = "local-search"
-    role: AgentResultRole = Field(default="report", exclude_if=lambda value: value == "report")
-    native_agent: ResolvedNativeAgent | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
-    model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
-    connection: AgentConnection | None = Field(default=None, exclude_if=lambda value: value is None)
     review_context: str | None = Field(
         default=None, max_length=65536, exclude_if=lambda value: value is None
     )
 
     @model_validator(mode="after")
-    def validate_readonly_tool_shape(self) -> "ResolvedLocalSearchAgentStep":
-        if self.harness == "native":
-            if self.native_agent is None:
-                raise ValueError("native Agent requires its exact resolved implementation")
-            if self.connection is not None or self.model is not None:
-                raise ValueError("native Agent retains its native model configuration")
-        elif self.native_agent is not None or self.role != "report":
-            raise ValueError("native role and implementation require a native Agent harness")
-        if self.harness.startswith("provider-") != (self.connection is not None):
-            raise ValueError("provider Agent requires a frozen connection")
+    def validate_execution_envelope(self) -> "ResolvedAgentStep":
         if (
-            self.argv != ("python",)
-            or self.uv is not None
-            or self.working_directory != "."
-            or self.success_codes != (0,)
+            self.success_codes != (0,)
             or self.capabilities.egress.mode != "none"
             or self.capabilities.nested_strict_execution
             or self.capabilities.tools
             or self.imports.env
             or self.workspace.publish
         ):
-            raise ValueError("local-search Agent Step must retain the fixed offline tool contract")
-        if self.feedback_reference is not None and self.harness not in (
-            "local-model-skill-loop",
+            raise ValueError("Agent Step must retain its admitted fixed effect envelope")
+        if self.feedback_reference is not None and self.workload.harness not in (
             "local-model-proposal",
         ):
-            raise ValueError(
-                "only the read-only Skill loop and proposal harness accept failed-test feedback"
-            )
-        if (self.harness == "local-search" and self.model is not None) or (
-            self.harness
-            in (
-                "local-model-search",
-                "local-model-review",
-                "local-model-tools",
-                "local-model-files",
-                "local-model-skill-resources",
-                "local-model-skill-loop",
-                "local-model-proposal",
-            )
-            and self.model is None
-        ):
-            raise ValueError("model recipient and selected model must match the Agent harness")
+            raise ValueError("only the read-only proposal harness accepts failed-test feedback")
+        if self.feedback_value is not None and self.feedback_reference is None:
+            raise ValueError("Agent feedback requires its original published output reference")
         return self
 
 
@@ -694,7 +727,7 @@ class ResolvedExtensionStep(ImmutableModel):
 
 
 ResolvedPlanStep = Annotated[
-    ResolvedLocalSearchAgentStep
+    ResolvedAgentStep
     | ResolvedCommandStep
     | ResolvedGitStep
     | ResolvedPreCommitStep
@@ -760,8 +793,18 @@ class ResolvedImport(ImmutableModel):
 class ResolvedFleetPlan(ImmutableModel):
     """Fully bound immutable execution plan.  Runtime never re-reads YAML/TOML."""
 
-    # Retained Runs keep their original execution identity when reopened.
-    contract_version: Literal[43, 44] = FLEET_PLAN_CONTRACT_VERSION
+    contract_version: Literal[45] = FLEET_PLAN_CONTRACT_VERSION
+
+    @field_validator("contract_version", mode="before")
+    @classmethod
+    def require_current_execution_contract(cls, value: object) -> object:
+        if value != FLEET_PLAN_CONTRACT_VERSION:
+            raise ValueError(
+                "Incompatible resolved Plan contract; re-resolve and re-lock authoring "
+                "with the current runtime before admission"
+            )
+        return value
+
     plan_id: str
     name: str
     description: str = ""

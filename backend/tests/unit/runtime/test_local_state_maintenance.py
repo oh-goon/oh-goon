@@ -75,8 +75,8 @@ def test_local_state_reset_deletes_database_and_sqlite_sidecars_only(
 ) -> None:
     path = tmp_path / "state.db"
     _set_database(monkeypatch, path)
-    for state_file in sqlite_state_files(path):
-        state_file.write_bytes(b"state")
+    LocalDatabase(path, journal_mode="DELETE")
+    Path(f"{path}-journal").touch()
     unrelated = tmp_path / "keep.txt"
     unrelated.write_text("keep")
 
@@ -95,15 +95,15 @@ def test_local_state_reset_durably_publishes_each_existing_file_absence(
 
     path = tmp_path / "state.db"
     _set_database(monkeypatch, path)
-    for state_file in sqlite_state_files(path):
-        state_file.write_bytes(b"state")
+    LocalDatabase(path, journal_mode="DELETE")
+    Path(f"{path}-journal").touch()
     synced: list[Path] = []
     monkeypatch.setattr(exact_file_write, "_fsync_directory", synced.append)
 
     deleted = reset_local_state(path)
 
-    assert deleted == sqlite_state_files(path)
-    assert synced == [tmp_path] * len(sqlite_state_files(path))
+    assert deleted == (path, Path(f"{path}-journal"))
+    assert synced == [tmp_path] * len(deleted)
     assert all(not state_file.exists() for state_file in sqlite_state_files(path))
 
 
@@ -341,3 +341,385 @@ def test_source_make_local_state_reset_is_explicit_confirmed_recovery() -> None:
     makefile = (root / "Makefile").read_text(encoding="utf-8")
     target = makefile.split("local-state-reset:", 1)[1].split("\n\n", 1)[0]
     assert "backend/.venv/bin/oh-goon-local-state reset --yes" in target
+
+
+@pytest.mark.parametrize("schema", [0, DATABASE_SCHEMA_VERSION - 1, DATABASE_SCHEMA_VERSION + 1])
+def test_reset_preserves_unknown_or_incompatible_store_bytes(tmp_path, schema):
+    from oh_goon.core.errors import DatabaseSchemaMismatch
+
+    path = tmp_path / "original.db"
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("CREATE TABLE original_writer_evidence(value TEXT)")
+        connection.execute("INSERT INTO original_writer_evidence VALUES ('unresolved effect')")
+        connection.execute(f"PRAGMA user_version = {schema}")
+        connection.commit()
+    before = path.read_bytes()
+    with pytest.raises(DatabaseSchemaMismatch):
+        reset_local_state(path)
+    assert path.read_bytes() == before
+    with closing(sqlite3.connect(path)) as connection:
+        assert (
+            connection.execute("SELECT value FROM original_writer_evidence").fetchone()[0]
+            == "unresolved effect"
+        )
+
+
+def test_reset_refuses_active_canonical_run_without_deleting_authority(tmp_path):
+    from oh_goon.core.errors import StateConflict
+    from oh_goon.core.models.repository import RepositoryIdentity
+    from oh_goon.core.vocabulary import OperationAction
+    from oh_goon.runtime.journal import Journal
+    from tests.factories.capabilities import admit_test_run
+
+    database = LocalDatabase(tmp_path / "state.db", journal_mode="DELETE")
+    journal = Journal(database)
+    repository = RepositoryIdentity(name="repo", path=tmp_path / "repo")
+    admit_test_run(journal, "active-original", OperationAction.INIT, [repository])
+    before = database.path.read_bytes()
+    with pytest.raises(StateConflict, match="active or unresolved Runs"):
+        reset_local_state(database.path)
+    assert database.path.read_bytes() == before
+    assert journal.read_view().required_run_detail("active-original").run.status.value == "QUEUED"
+
+
+def test_reset_refuses_incomplete_campaign_between_phase_admissions(tmp_path):
+    from datetime import timedelta
+
+    from oh_goon.core.errors import StateConflict
+    from oh_goon.core.models.agent_repair import AgentCampaignIntent, AgentRepairBudget
+    from oh_goon.core.time import utc_now
+    from oh_goon.runtime.journal import Journal
+
+    database = LocalDatabase(tmp_path / "state.db", journal_mode="DELETE")
+    journal = Journal(database)
+    journal.begin_agent_campaign(
+        AgentCampaignIntent(
+            campaign_id="between-phases",
+            repository_id="repo",
+            original_execution_digest="original",
+            budget=AgentRepairBudget(max_attempts=1, timeout_seconds=60, step_timeout_seconds=10),
+            maximum_runs=2,
+            deadline_at=utc_now() + timedelta(seconds=60),
+            initial_phase="review",
+            initial_step_ids=("review",),
+        )
+    )
+    before = database.path.read_bytes()
+    with pytest.raises(StateConflict, match="incomplete campaign controller"):
+        reset_local_state(database.path)
+    assert database.path.read_bytes() == before
+    assert journal.agent_campaign("between-phases").intent is not None
+
+
+def _terminal_cleanup_journal(tmp_path, mode):
+    import subprocess
+
+    from oh_goon.core.models.fleet_plan import (
+        ResolvedCommandStep,
+        ResolvedDependencyInventoryStep,
+        ResolvedFleetPlan,
+    )
+    from oh_goon.core.models.fleet_plan_evidence import (
+        FleetPlanResult,
+        PlanStepSettlementEvidence,
+    )
+    from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
+    from oh_goon.core.models.operation import FleetPlanOperationEvidence
+    from oh_goon.core.models.repository import RepositoryIdentity
+    from oh_goon.core.models.run_admission import (
+        DirectFleetExecutionAdmission,
+        FleetRunAdmissionIntent,
+        fleet_repository_scope,
+    )
+    from oh_goon.core.product_identity import repository_id
+    from oh_goon.core.vocabulary import (
+        EffectBoundaryKind,
+        FleetRunEventType,
+        FleetRunTerminalIntent,
+        OperationAction,
+        Verdict,
+    )
+    from oh_goon.engine.command import CommandSupervisorReceipt
+    from oh_goon.engine.git import GitService
+    from oh_goon.integrations._fleet_plan_step_evidence import attempt_evidence, step_evidence
+    from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+    from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
+    from oh_goon.runtime.journal import Journal
+    from oh_goon.services.repository_effect_settlement import RepositoryEffectSettlement
+    from tests.factories.capabilities import capability_snapshot
+    from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+    from tests.factories.journal import admit_run, start_repository, start_run, terminalize_run
+    from tests.factories.operation_reports import make_operation_report
+    from tests.factories.run_admission import repository_admissions_for
+
+    repository_path = tmp_path / "repo"
+    repository_path.mkdir()
+    subprocess.run(["git", "init", "-q", str(repository_path)], check=True)
+    repository = RepositoryIdentity(
+        repository_id=repository_id(repository_path), name="repo", path=repository_path
+    )
+    database = LocalDatabase(tmp_path / "state.db", journal_mode="DELETE")
+    journal = Journal(database)
+    if mode == "in_process":
+        step = ResolvedDependencyInventoryStep(step_id="owned")
+        outcome = StepOutcome(argv=(), returncode=0, completion="in_process")
+    else:
+        step = ResolvedCommandStep(step_id="owned", argv=("native-work",))
+        outcome = StepOutcome(
+            argv=() if mode == "skipped" else ("native-work",),
+            returncode=0 if mode in {"skipped", "unavailable"} else 17,
+            skipped=mode == "skipped",
+            supervisor=None
+            if mode in {"unavailable", "never_started", "skipped"}
+            else CommandSupervisorReceipt(final_process_group_quiescent=mode != "unverified"),
+        )
+    attempts = (
+        ()
+        if mode in {"never_started", "skipped", "in_process"}
+        else (
+            attempt_evidence(
+                step=step,
+                attempt=1,
+                outcome=outcome,
+                repository_state_before="before",
+                repository_state_after="after",
+                worktree_files_after=(),
+            ),
+        )
+    )
+    execution = step_evidence(
+        step=step,
+        outcome=outcome,
+        attempts=attempts,
+        artifacts=(),
+        repository_state_before="before",
+        repository_state_after="after",
+        worktree_files_after=(),
+    )
+    if mode == "skipped":
+        execution = execution.model_copy(
+            update={
+                "settlement": PlanStepSettlementEvidence(
+                    outcome="SKIPPED",
+                    cleanup="UNAVAILABLE",
+                    reason="NOT_STARTED",
+                )
+            }
+        )
+    plan = ResolvedFleetPlan.create(
+        name="settled-cleanup",
+        description="Canonical terminal cleanup evidence",
+        execution=MaintenanceExecutionPolicy(),
+        steps=(step,),
+    )
+    target = structural_fleet_plan_target(plan)
+    capability = capability_snapshot(OperationAction.EXECUTE_PLAN, target)
+    admit_run(
+        journal,
+        "terminal-cleanup",
+        FleetRunAdmissionIntent(
+            target=target,
+            capability=capability,
+            execution=DirectFleetExecutionAdmission(),
+            repository_admissions=repository_admissions_for(target, (repository,)),
+        ),
+        fleet_repository_scope({repository.repository_id}),
+        [repository],
+    )
+    start_run(journal, "terminal-cleanup")
+    operation_id = start_repository(journal, "terminal-cleanup", repository)
+    terminal_type = (
+        FleetRunEventType.STEP_SKIPPED
+        if mode == "skipped"
+        else FleetRunEventType.STEP_SUCCEEDED
+        if execution.status == "COMPLETED"
+        else FleetRunEventType.STEP_FAILED
+    )
+    for event_type in (
+        FleetRunEventType.STEP_REACHED,
+        FleetRunEventType.STEP_STARTED,
+        terminal_type,
+    ):
+        if mode == "skipped" and event_type is FleetRunEventType.STEP_STARTED:
+            continue
+        journal.record_execution_lifecycle(
+            fleet_run_id="terminal-cleanup",
+            repository_id=repository.repository_id,
+            operation_id=operation_id,
+            event_type=event_type,
+            step_id=step.step_id,
+            step_order=1,
+            returncode=getattr(execution, "returncode", None)
+            if event_type is terminal_type
+            else None,
+        )
+    failed = execution.status == "FAILED"
+    report = make_operation_report(
+        repository,
+        OperationAction.EXECUTE_PLAN,
+        target=target,
+        fleet_run_id="terminal-cleanup",
+        operation_id=operation_id,
+        verdict=Verdict.FAILED if failed else Verdict.READY,
+        returncode=getattr(execution, "returncode", 0),
+        evidence=FleetPlanOperationEvidence(
+            kind="FLEET_PLAN",
+            plan=FleetPlanResult(plan_id=plan.plan_id, steps=(execution,)),
+        ),
+    )
+    attempt_store = RepositoryEffectAttemptStore(database)
+    settlement = RepositoryEffectSettlement(database, journal, attempt_store)
+    baseline = GitService().fingerprint(repository_path)
+    with database.transaction(write=True) as connection:
+        attempt_store.begin_fleet_in(
+            connection,
+            repository_path,
+            capability,
+            fleet_run_id="terminal-cleanup",
+            operation_id=operation_id,
+            target=target,
+            baseline=baseline,
+            effect_boundary=EffectBoundaryKind.EXTERNAL,
+        )
+        attempt_store.start_effect_in(connection, operation_id)
+        settlement.commit_success_in(connection, report, operation_id)
+    terminalize_run(journal, "terminal-cleanup", FleetRunTerminalIntent.COMPLETE)
+    if report.resource_settlement == "UNRESOLVED":
+        assert len(attempt_store.all()) == 1
+        assert attempt_store.all()[0].status.value == "OUTCOME_UNKNOWN"
+    else:
+        assert attempt_store.all() == []
+    assert journal.active_run() is None
+    assert journal.read_view().required_run_detail("terminal-cleanup").run.status.terminal
+    return database, journal
+
+
+@pytest.mark.parametrize("mode", ["unverified", "unavailable"])
+def test_reset_preserves_terminal_step_cleanup_after_effect_coordination_retired(tmp_path, mode):
+    from oh_goon.core.errors import StateConflict
+
+    database, journal = _terminal_cleanup_journal(tmp_path, mode)
+    before = database.path.read_bytes()
+    with pytest.raises(StateConflict, match="unresolved original Step cleanup"):
+        reset_local_state(database.path)
+    assert database.path.read_bytes() == before
+    assert journal.read_view().required_run_detail("terminal-cleanup").operations
+
+
+@pytest.mark.parametrize("mode", ["verified_failed", "in_process", "skipped", "never_started"])
+def test_reset_accepts_settled_failure_inprocess_and_never_started_cleanup(tmp_path, mode):
+    database, _ = _terminal_cleanup_journal(tmp_path, mode)
+    assert database.path in reset_local_state(database.path)
+    assert not database.path.exists()
+
+
+def _maintenance_mutation_probe(tmp_path):
+    import shlex
+    import sys
+
+    import yaml
+
+    directory = tmp_path / "probe"
+    directory.mkdir()
+    (tmp_path / "repo/mutation_probe.py").write_text(
+        "from pathlib import Path\nPath('mutation-marker').write_text('new execution\\n')\n"
+    )
+    source = directory / "goon.yml"
+    source.write_text(
+        yaml.safe_dump(
+            {
+                "execution": {"purpose": "maintenance"},
+                "steps": [{"run": shlex.join((sys.executable, "mutation_probe.py"))}],
+            }
+        )
+    )
+    return source
+
+
+@pytest.mark.parametrize("mode", ["unverified", "unavailable"])
+def test_committed_cleanup_fence_survives_runtime_restart_and_blocks_mutation(
+    tmp_path,
+    monkeypatch,
+    mode,
+):
+    from oh_goon.application import ApplicationRuntime
+    from oh_goon.core.errors import RuntimeSafetyBlocked, StateConflict
+    from oh_goon.core.product_identity import repository_id
+    from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
+
+    database, journal = _terminal_cleanup_journal(tmp_path, mode)
+    attempt_store = RepositoryEffectAttemptStore(database)
+    original = attempt_store.all()[0]
+    operation = journal.require_operation(original.operation_id)
+    assert operation.resource_settlement == "UNRESOLVED"
+    monkeypatch.setenv("OH_GOON_DB", str(database.path))
+    monkeypatch.setenv("OH_GOON_SQLITE_JOURNAL_MODE", "DELETE")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    plan = _maintenance_mutation_probe(tmp_path)
+    for restart in range(2):
+        runtime = ApplicationRuntime.build(standard_local=True)
+        try:
+            runtime.locations.add(tmp_path)
+            assert attempt_store.get(original.operation_id) == original
+            assert journal.require_operation(original.operation_id) == operation
+            assert journal.require_operation(original.operation_id).outcome == operation.outcome
+            revision = journal.read_view().revision
+            with pytest.raises(
+                StateConflict, match="filesystem reconciliation cannot prove quiescence"
+            ):
+                runtime.recovery.reconcile(
+                    original.operation_id, expected_record_version=original.record_version
+                )
+            with pytest.raises(
+                StateConflict, match="operator acknowledgement cannot prove quiescence"
+            ):
+                runtime.recovery.acknowledge(
+                    original.operation_id,
+                    note="Operator says done",
+                    expected_record_version=original.record_version,
+                )
+            assert journal.read_view().revision == revision
+            runtime.plans.lock(plan)
+            with pytest.raises(RuntimeSafetyBlocked, match="ORIGINAL_RESOURCE_CLEANUP_UNRESOLVED"):
+                runtime.plans.run(
+                    plan,
+                    repository_ids={repository_id(tmp_path / "repo")},
+                    fleet_run_id=f"forbidden-{restart}",
+                )
+            assert not (tmp_path / "repo/mutation-marker").exists()
+            assert journal.read_view().run_detail(f"forbidden-{restart}") is None
+            assert attempt_store.get(original.operation_id) == original
+            assert len(journal.read_view().run_details()) == 1
+        finally:
+            runtime.shutdown(wait_for_runs=True)
+
+
+def test_verified_failed_command_allows_a_valid_fresh_native_mutation(tmp_path, monkeypatch):
+    from oh_goon.application import ApplicationRuntime
+    from oh_goon.core.product_identity import repository_id
+
+    database, journal = _terminal_cleanup_journal(tmp_path, "verified_failed")
+    monkeypatch.setenv("OH_GOON_DB", str(database.path))
+    monkeypatch.setenv("OH_GOON_SQLITE_JOURNAL_MODE", "DELETE")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    plan = _maintenance_mutation_probe(tmp_path)
+    runtime = ApplicationRuntime.build(standard_local=True)
+    try:
+        runtime.locations.add(tmp_path)
+        runtime.plans.lock(plan)
+        state = runtime.plans.run(
+            plan,
+            repository_ids={repository_id(tmp_path / "repo")},
+            fleet_run_id="verified-fresh-mutation",
+        )
+        detail = runtime.runs.wait_for_terminal(state.fleet_run_id)
+        assert detail.outcome.value == "SUCCESS"
+        assert (tmp_path / "repo/mutation-marker").read_text() == "new execution\n"
+        original = journal.read_view().required_run_detail("terminal-cleanup").operations[0]
+        assert original.resource_settlement == "SETTLED"
+        assert not original.outcome.verdict.successful
+    finally:
+        runtime.shutdown(wait_for_runs=True)
+    assert database.path in reset_local_state(database.path)

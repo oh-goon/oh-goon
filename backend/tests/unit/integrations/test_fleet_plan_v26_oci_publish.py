@@ -128,7 +128,7 @@ def test_oci_credentials_fail_cheap_preflight_before_secret_capture(
 def test_publish_template_resolves_to_v26_content_addressed_authority() -> None:
     plan = _plan()
 
-    assert plan.contract_version == 44
+    assert plan.contract_version == 45
     assert [step.kind for step in plan.steps] == ["oci_build", "oci_publish"]
     build, publish = plan.steps
     assert isinstance(build, ResolvedOciBuildStep)
@@ -416,6 +416,9 @@ def test_committed_publish_reports_private_cleanup_failure_and_preserves_release
     assert outcome.release_effect.kind == "OCI_PUBLISH"
     assert outcome.release_effect.manifest_digest == digest
     assert "credential cleanup failed" in outcome.stderr
+    from oh_goon.integrations._fleet_plan_step_outcome import settle_step_execution
+
+    assert settle_step_execution(step, outcome).cleanup == "UNVERIFIED"
     assert not (repository / "oci/image-digest.txt").exists()
     assert not (repository / "oci/image-reference.txt").exists()
     assert not (repository / "oci/image-publish.json").exists()

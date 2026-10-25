@@ -48,22 +48,27 @@ def test_campaign_readback_uses_one_verified_cut_without_loading_captured_source
     )
     selected = SimpleNamespace(run=SimpleNamespace(target=target))
     calls = []
-    members = [selected]
+    members = (selected,)
+    campaign = SimpleNamespace(
+        campaign_id="initial", journal_revision=34, phases=(SimpleNamespace(fleet_run_id="child"),)
+    )
     view = SimpleNamespace(
         revision=34,
+        campaign=lambda _campaign_id: campaign,
         required_run_detail=lambda run_id: (calls.append(("selected", run_id)) or selected),
         run_details=lambda: (calls.append(("members",)) or members),
     )
     journal = SimpleNamespace(read_view=lambda: (calls.append(("cut",)) or view))
-    expected = {"schema": "oh-goon.agent-campaign-result/v1", "result": "incomplete"}
+    expected = {"schema": "oh-goon.agent-campaign-result/v2", "result": "incomplete"}
 
-    def project(campaign_id, details, *, journal_revision):
-        assert campaign_id == "initial" and details is members and journal_revision == 34
+    def project(campaign_id, details, *, journal_revision, campaign):
+        assert campaign.campaign_id == "initial" and campaign.journal_revision == 34
+        assert campaign_id == "initial" and details == members and journal_revision == 34
         return expected
 
     monkeypatch.setattr("oh_goon.services.fleet_run_control_plane.project_agent_campaign", project)
     result = FleetRunControlPlane.agent_campaign(SimpleNamespace(_journal=journal), "child")
-    assert result is expected and calls == [("cut",), ("selected", "child"), ("members",)]
+    assert result is expected and calls == [("cut",), ("selected", "child"), ("selected", "child")]
 
 
 def test_ordinary_run_cannot_be_presented_as_a_campaign():

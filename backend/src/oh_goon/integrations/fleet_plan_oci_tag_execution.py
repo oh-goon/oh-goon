@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -76,8 +76,11 @@ def execute_oci_tag_assert(
     outcome = from_command(result)
     if cleanup_error is not None:
         _clear_old_outputs(outputs)
-        return _contract_failure(
-            f"Private registry credential cleanup failed: {cleanup_error}", outcome
+        return replace(
+            _contract_failure(
+                f"Private registry credential cleanup failed: {cleanup_error}", outcome
+            ),
+            resource_cleanup="unverified",
         )
     if result.returncode != 0:
         return outcome
@@ -225,10 +228,8 @@ def _contract_failure(message: str, outcome: StepOutcome | None = None) -> StepO
         stderr="",
         duration_ms=0,
     )
-    return StepOutcome(
-        argv=base.argv,
+    return replace(
+        base,
         returncode=PLAN_CONTRACT_RETURN_CODE,
-        stdout=base.stdout,
         stderr=(base.stderr + f"\n{message}").strip(),
-        duration_ms=base.duration_ms,
     )

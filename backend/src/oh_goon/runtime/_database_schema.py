@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS executor_operational_state (
 CREATE TABLE IF NOT EXISTS journal_entries (
     revision INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('OPERATION', 'RUN_EVENT', 'FLEET_OPERATION', 'EFFECT_RECONCILIATION', 'EFFECT_ACKNOWLEDGEMENT')),
+    kind TEXT NOT NULL CHECK (kind IN ('OPERATION', 'RUN_EVENT', 'FLEET_OPERATION', 'EFFECT_RECONCILIATION', 'EFFECT_ACKNOWLEDGEMENT', 'CAMPAIGN')),
     report_json TEXT,
     event_json TEXT,
     effect_json TEXT,
@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS journal_entries (
         OR (kind = 'RUN_EVENT' AND report_json IS NULL AND event_json IS NOT NULL AND effect_json IS NULL)
         OR (kind = 'FLEET_OPERATION' AND report_json IS NOT NULL AND event_json IS NOT NULL AND effect_json IS NULL)
         OR (kind = 'EFFECT_RECONCILIATION' AND report_json IS NULL AND event_json IS NULL AND effect_json IS NOT NULL)
+        OR (kind = 'CAMPAIGN' AND report_json IS NULL AND event_json IS NULL AND effect_json IS NOT NULL)
         OR (kind = 'EFFECT_ACKNOWLEDGEMENT' AND report_json IS NULL AND event_json IS NULL AND effect_json IS NOT NULL)
     )
 );

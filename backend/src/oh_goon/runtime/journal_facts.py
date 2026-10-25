@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from oh_goon.core.models.agent_repair import AgentCampaignFact
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.reconciliation import (
     RepositoryEffectAcknowledgementEvidence,
@@ -48,10 +49,18 @@ class FleetOperationCommitted:
     event: FleetRunEvent
 
 
+@dataclass(frozen=True, slots=True)
+class AgentCampaignCommitted:
+    revision: int
+    session_id: str
+    fact: AgentCampaignFact
+
+
 OperationFact = OperationCommitted | FleetOperationCommitted
 JournalEntry = (
     OperationFact
     | RunEventCommitted
     | EffectReconciliationCommitted
     | EffectAcknowledgementCommitted
+    | AgentCampaignCommitted
 )

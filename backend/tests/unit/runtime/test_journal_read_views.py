@@ -211,13 +211,13 @@ def test_repeated_unchanged_reads_reuse_verified_read_cut(
     original = journal_store_module.JournalFactStore.load_entries
     calls = 0
 
-    def counting_load_entries(self, connection):
+    def counting_load_entries(connection):
         nonlocal calls
         calls += 1
-        return original(self, connection)
+        return original(connection)
 
     monkeypatch.setattr(
-        journal_store_module.JournalFactStore, "load_entries", counting_load_entries
+        journal_store_module.JournalFactStore, "load_entries", staticmethod(counting_load_entries)
     )
     first = journal.read_view()
     second = journal.read_view()

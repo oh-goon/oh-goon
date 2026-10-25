@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import AwareDatetime, Field, computed_field, model_validator
 
 from oh_goon.core.errors import ErrorKind, FleetDomainError
+from oh_goon.core.models.agent_repair import AgentCampaignReadback
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_plan_trust_receipt import RepositoryFleetPlanTrustReceipt
@@ -217,6 +218,7 @@ class FleetRunDetail(ImmutableModel):
     """Trusted immutable read projection produced by the canonical FleetRun reducer."""
 
     journal_revision: int | None = Field(default=None, ge=0)
+    campaign_journal: AgentCampaignReadback | None = None
     run: FleetRunState
     execution: FleetExecutionAdmission
     repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...]

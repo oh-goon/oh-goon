@@ -28,7 +28,7 @@ from oh_goon.core.models.agent_source import (
     FrozenSourceMember,
     FrozenSourceTree,
 )
-from oh_goon.core.models.fleet_plan import AgentStepRequestedEffects, ResolvedLocalSearchAgentStep
+from oh_goon.core.models.fleet_plan import AgentStepRequestedEffects, ResolvedAgentStep
 from oh_goon.core.product_identity import stable_id
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
@@ -49,7 +49,6 @@ _LOCAL_HARNESSES = (
     "local-model-tools",
     "local-model-files",
     "local-model-skill-resources",
-    "local-model-skill-loop",
     "local-model-proposal",
 )
 _PROVIDER_HARNESSES = ("provider-review", "provider-adjudicate", "provider-proposal")
@@ -74,7 +73,7 @@ def _case(
     *,
     cancelled: Callable[[], bool] | None = None,
     supervision: CommandRuntimeSupervision | None = None,
-) -> tuple[FrozenAgentStepHandoff, ResolvedLocalSearchAgentStep, _StepProcess, StepRuntime]:
+) -> tuple[FrozenAgentStepHandoff, ResolvedAgentStep, _StepProcess, StepRuntime]:
     provider = harness.startswith("provider-")
     handoff = FrozenAgentStepHandoff(
         source=FrozenAgentSourceCapture(
@@ -118,14 +117,13 @@ def _case(
         if provider
         else None
     )
-    step = ResolvedLocalSearchAgentStep.model_validate(
+    step = ResolvedAgentStep.model_validate(
         dict(
             step_id=handoff.step_id,
-            argv=("python",),
             timeout_seconds=30,
-            harness=harness,
-            model=None if provider else "review-model",
-            connection=connection,
+            workload={"harness": harness, "model": None, "connection": connection}
+            if provider
+            else {"harness": harness, "model": "review-model"},
             handoff_identity=handoff.handoff_identity,
             source_step_id=handoff.step_id,
             delivery_sha256=hashlib.sha256(packet).hexdigest(),

@@ -1,4 +1,4 @@
-"""AGENT-01B3G: opt-in four-action Skill review under the original Fleet Step."""
+"""AGENT-01B3G: bounded Skill resource and proposal actions under the original Fleet Step."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from tests.integration.test_agent01b3b_original_fleet_model_observation import _
 from tests.integration.test_agent01b3f_frozen_skill_resources import _resources_case
 
 
-def _loop_case(tmp_path, monkeypatch, *, model_replies, **kwargs):
+def _bounded_agent_case(tmp_path, monkeypatch, *, model_replies, proposal=False, **kwargs):
     plan, repo, opts, resource = _resources_case(
         tmp_path,
         monkeypatch,
@@ -19,9 +19,10 @@ def _loop_case(tmp_path, monkeypatch, *, model_replies, **kwargs):
         **kwargs,
     )
     goon = tmp_path / "goons" / "agent" / "search" / "goon.yml"
-    goon.write_text(
-        goon.read_text().replace("local-model-skill-resources", "local-model-skill-loop")
-    )
+    if proposal:
+        goon.write_text(
+            goon.read_text().replace("local-model-skill-resources", "local-model-proposal")
+        )
     return plan, repo, opts, resource
 
 
@@ -37,19 +38,22 @@ def test_four_different_tools_then_final_evaluation_is_persisted(tmp_path, monke
         return result
 
     monkeypatch.setattr(execution, "_run_local_model_review", record)
-    plan, repo, opts, resource = _loop_case(
+    from tests.integration.test_agent01b3i_source_bound_patch_proposal import _payload
+
+    plan, repo, opts, resource = _bounded_agent_case(
         tmp_path,
         monkeypatch,
+        proposal=True,
         model_replies=[
             '{"tool":"list_skill_paths"}',
             '{"decision":"tool","tool":"read_file","path":"skill/references/checklist.md"}',
             '{"decision":"tool","tool":"list_paths"}',
             '{"decision":"tool","tool":"read_file","path":"repo/code.txt"}',
-            '{"decision":"finish","summary":"Reviewed Skill checklist and repository source"}',
+            _payload(),
         ],
     )
     frozen, handoff = _lock(plan, opts)
-    assert handoff.harness == frozen.steps[0].harness == "local-model-skill-loop"
+    assert handoff.harness == frozen.steps[0].workload.harness == "local-model-proposal"
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3g-four")
     assert detail.game_tape.status.value == "PASSED"
     assert (tmp_path / "calls").read_text().strip() == "5"
@@ -58,29 +62,27 @@ def test_four_different_tools_then_final_evaluation_is_persisted(tmp_path, monke
     assert "needle from real original Fleet" in (tmp_path / "prompt-5.txt").read_text()
     assert "Previous tool observations" in (tmp_path / "prompt-5.txt").read_text()
     assert "list_skill_paths" in (tmp_path / "prompt-5.txt").read_text()
-    assert "Model evaluation: Reviewed Skill checklist" in recorded["stdout"]
+    assert "Agent proposal only" in recorded["stdout"]
     assert (
         detail.operations[0].evidence.plan.steps[0].stdout_evidence.sha256
         == hashlib.sha256(recorded["stdout"].encode()).hexdigest()
     )
 
 
-def test_fifth_tool_is_denied_without_running_it(tmp_path, monkeypatch):
-    plan, repo, opts, _ = _loop_case(
+def test_third_resource_tool_is_denied_without_running_it(tmp_path, monkeypatch):
+    plan, repo, opts, _ = _bounded_agent_case(
         tmp_path,
         monkeypatch,
         model_replies=[
             '{"tool":"list_skill_paths"}',
             '{"decision":"tool","tool":"list_paths"}',
-            '{"decision":"tool","tool":"read_file","path":"repo/code.txt"}',
-            '{"decision":"tool","tool":"read_file","path":"skill/references/checklist.md"}',
             '{"decision":"tool","tool":"search_text","query":"needle"}',
         ],
     )
     _lock(plan, opts)
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3g-budget")
     assert detail.game_tape.status.value != "PASSED"
-    assert (tmp_path / "calls").read_text().strip() == "5"
+    assert (tmp_path / "calls").read_text().strip() == "3"
 
 
 @pytest.mark.parametrize(
@@ -94,7 +96,7 @@ def test_fifth_tool_is_denied_without_running_it(tmp_path, monkeypatch):
     ],
 )
 def test_illegal_followup_cannot_dispatch(tmp_path, monkeypatch, forbidden):
-    plan, repo, opts, _ = _loop_case(
+    plan, repo, opts, _ = _bounded_agent_case(
         tmp_path,
         monkeypatch,
         model_replies=[
@@ -109,7 +111,7 @@ def test_illegal_followup_cannot_dispatch(tmp_path, monkeypatch, forbidden):
 
 
 def test_repeated_tool_refused_without_execution(tmp_path, monkeypatch):
-    plan, repo, opts, _ = _loop_case(
+    plan, repo, opts, _ = _bounded_agent_case(
         tmp_path,
         monkeypatch,
         model_replies=[
@@ -124,7 +126,7 @@ def test_repeated_tool_refused_without_execution(tmp_path, monkeypatch):
 
 
 def test_stale_skill_capture_fails_before_work(tmp_path, monkeypatch):
-    plan, repo, opts, resource = _loop_case(
+    plan, repo, opts, resource = _bounded_agent_case(
         tmp_path,
         monkeypatch,
         model_replies=[
@@ -136,9 +138,7 @@ def test_stale_skill_capture_fails_before_work(tmp_path, monkeypatch):
     from oh_goon.runtime.goon_templates import GoonTemplateStore
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
-    _, new, _ = FleetPlanResolver(
-        goon_templates=GoonTemplateStore()
-    ).resolve_frozen_local_search_agent(
+    _, new, _ = FleetPlanResolver(goon_templates=GoonTemplateStore()).resolve_frozen_agent(
         plan,
         inputs=opts["inputs"],
         repository_root=opts["agent_repository_root"],
@@ -154,7 +154,7 @@ def test_failed_read_file_exit_one_is_not_a_successful_model_observation(tmp_pat
 
     import oh_goon.integrations.fleet_plan_step_execution as execution
 
-    plan, repo, opts, _ = _loop_case(
+    plan, repo, opts, _ = _bounded_agent_case(
         tmp_path,
         monkeypatch,
         model_replies=[

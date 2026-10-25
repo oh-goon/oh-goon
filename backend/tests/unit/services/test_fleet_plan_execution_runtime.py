@@ -15,9 +15,9 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedFleetPlan,
-    ResolvedLocalSearchAgentStep,
 )
 from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
@@ -294,14 +294,13 @@ def test_protected_stream_is_private_while_native_protocol_still_receives_it(lau
             else None,
         ),
     )
-    step = ResolvedLocalSearchAgentStep(
+    step = ResolvedAgentStep(
+        timeout_seconds=3600,
+        workload={"harness": "native", "native_agent": selected},
         step_id="native",
-        argv=("python",),
         delivery_sha256="b" * 64,
         handoff_identity="handoff",
         source_step_id="native",
-        harness="native",
-        native_agent=selected,
     )
     store = GameTapeLiveOutputStore()
     store.open_run("run")
@@ -358,14 +357,13 @@ def test_protected_protocol_observer_exception_cannot_export_private_output():
             sandbox_owner="execution_backend",
         ),
     )
-    step = ResolvedLocalSearchAgentStep(
+    step = ResolvedAgentStep(
+        timeout_seconds=3600,
+        workload={"harness": "native", "native_agent": selected},
         step_id="native",
-        argv=("python",),
         delivery_sha256="b" * 64,
         handoff_identity="handoff",
         source_step_id="native",
-        harness="native",
-        native_agent=selected,
     )
     diagnostics = []
 

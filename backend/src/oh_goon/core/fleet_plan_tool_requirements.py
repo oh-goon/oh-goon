@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedDependencyInventoryStep,
     ResolvedExtensionStep,
@@ -8,7 +9,6 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedGitStep,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
-    ResolvedLocalSearchAgentStep,
     ResolvedOciBuildStep,
     ResolvedOciPublishStep,
     ResolvedOciTagAssertStep,
@@ -55,8 +55,10 @@ def step_execution_tool(step: ResolvedPlanStep) -> str | None:
     separately by ``step_execution_tool_names`` and never resolve that path again.
     """
 
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
-        return step.native_agent.definition.executable
+    if isinstance(step, ResolvedAgentStep):
+        if step.workload.harness == "native":
+            return step.workload.native_agent.definition.executable
+        return "python"
     if isinstance(step, ResolvedCommandStep):
         executable = step.argv[0]
         return executable if "/" not in executable and "\\" not in executable else None
@@ -81,7 +83,7 @@ def step_execution_tool_names(step: ResolvedPlanStep) -> tuple[str, ...]:
     """Return the complete frozen host-tool authority for one resolved Step."""
 
     names = set(step.capabilities.tools)
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
+    if isinstance(step, ResolvedAgentStep) and step.workload.harness == "native":
         # Native selection already owns the exact path and bytes. Python supports
         # producer evidence and the isolated relay; it does not select the agent.
         names.add("python")

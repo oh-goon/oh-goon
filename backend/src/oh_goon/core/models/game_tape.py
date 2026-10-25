@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import AwareDatetime, Field, computed_field, model_validator
 
+from oh_goon.core.models.agent_repair import AgentCampaignReadback
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
@@ -15,6 +16,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanArtifactEvidence,
     PlanOutputEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
     PublishedPlanOutputEvidence,
 )
 from oh_goon.core.models.game_tape_observability import GameTapeObservabilityReceipt
@@ -127,6 +129,7 @@ class GameTapeStepExecution(ImmutableModel):
     working_directory: str = Field(default=".", min_length=1, max_length=240)
     environment: tuple[GameTapeEnvironmentSource, ...] = Field(default_factory=tuple, max_length=64)
     exit_code: int | None = None
+    settlement: PlanStepSettlementEvidence = Field(default_factory=PlanStepSettlementEvidence)
     attempts: tuple[PlanStepAttemptEvidence, ...] = Field(default_factory=tuple, max_length=5)
     attempt_transitions: tuple[GameTapeAttemptTransition, ...] = Field(
         default_factory=tuple, max_length=4
@@ -465,6 +468,7 @@ class GameTape(ImmutableModel):
 
     schema_name: Literal["oh-goon.game-tape/v1"] = "oh-goon.game-tape/v1"
     journal_revision: int | None = Field(default=None, ge=0)
+    campaign_journal: AgentCampaignReadback | None = None
     terminal: bool = False
     configuration: PlanConfigurationEvidence | None = None
     fleet_run_id: str = Field(min_length=1)

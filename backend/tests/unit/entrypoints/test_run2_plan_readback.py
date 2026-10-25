@@ -175,9 +175,11 @@ def test_campaign_invocation_output_preserves_cancelled_before_admission(capsys)
     assert _print_agent_repair_result(receipt, as_json=True, campaign=True) == 130
     result = json.loads(capsys.readouterr().out)
     assert result["schema"] == "oh-goon.agent-repair-result/v1"
-    assert result["campaign"]["schema"] == "oh-goon.agent-campaign-result/v1"
+    assert result["campaign"]["schema"] == "oh-goon.agent-campaign-result/v2"
     assert result["campaign"]["result"] == "incomplete"
-    assert result["campaign"]["controller_result"]["stop_reason"] == "cancelled"
+    assert result["stop_reason"] == "cancelled"
+    assert result["campaign"]["controller_result"]["stop_reason"] is None
+    assert result["campaign"]["controller_result"]["availability"] == "unavailable"
     assert result["campaign"]["runs"] == []
 
 

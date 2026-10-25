@@ -381,7 +381,7 @@ def test_frozen_handoff_consumes_resolved_pins_without_reopening_registry_or_git
         raise AssertionError("frozen source delivery reacquired Git source")
 
     monkeypatch.setattr(GitService, "run", unavailable)
-    restored, delivery, _ = resolver.resolve_frozen_local_search_agent(
+    restored, delivery, _ = resolver.resolve_frozen_agent(
         path,
         handoff=handoff,
         locked_skills=plan.skill_sources,

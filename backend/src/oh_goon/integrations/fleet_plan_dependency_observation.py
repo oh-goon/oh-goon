@@ -17,12 +17,14 @@ def execute_dependency_inventory(
         or snapshot.evidence.completeness != "complete"
     ):
         return StepOutcome(
+            completion="in_process",
             argv=("dependency-inventory",),
             returncode=65,
             stderr=snapshot.evidence.reason or "Dependency lock evidence is incomplete",
             observations=(snapshot,),
         )
     return StepOutcome(
+        completion="in_process",
         argv=("dependency-inventory",),
         returncode=0,
         stdout=(

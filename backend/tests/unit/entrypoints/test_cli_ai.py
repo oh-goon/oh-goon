@@ -897,7 +897,7 @@ def test_native_service_rejects_invalid_prior_context_before_fresh_source_or_run
 def test_native_prior_context_is_bound_before_new_plan_lock_and_admission(
     native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedLocalSearchAgentStep
+    from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedFleetPlan
     from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
     from oh_goon.services.fleet_plans import FleetPlanService
 
@@ -907,14 +907,13 @@ def test_native_prior_context_is_bound_before_new_plan_lock_and_admission(
         workspace=native_cli.workspace,
         config_file=native_cli.config,
     )
-    step = ResolvedLocalSearchAgentStep(
+    step = ResolvedAgentStep(
+        workload={"harness": "native", "native_agent": selected},
+        timeout_seconds=3600,
         step_id="native-agent",
-        argv=("python",),
         delivery_sha256="a" * 64,
         handoff_identity="fresh-handoff",
         source_step_id="native-agent",
-        harness="native",
-        native_agent=selected,
     )
     original = ResolvedFleetPlan.create(
         name="native",

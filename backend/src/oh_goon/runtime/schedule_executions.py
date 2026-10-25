@@ -158,7 +158,8 @@ class ScheduleExecutionStore:
         with self._database.transaction() as c:
             return self.active_in(c)
 
-    def active_in(self, c: sqlite3.Connection) -> list[ScheduleRunRecord]:
+    @staticmethod
+    def active_in(c: sqlite3.Connection) -> list[ScheduleRunRecord]:
         return [
             _execution(r)
             for r in c.execute(

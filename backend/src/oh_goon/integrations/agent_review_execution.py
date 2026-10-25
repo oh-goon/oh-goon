@@ -18,12 +18,13 @@ from pydantic import SecretStr
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import AgentConnection, AgentMessage, ResolvedAgentModel
+from oh_goon.core.models.fleet_plan import ResolvedProviderAgentWorkload
 
 _HEADERS_ENV = "OH_GOON_AGENT_STEP_HEADERS"
 
 if TYPE_CHECKING:
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff, FrozenSourceMember
-    from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
+    from oh_goon.core.models.fleet_plan import ResolvedAgentStep
     from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
     from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, _StepProcess
 
@@ -44,7 +45,7 @@ def _prompt_member(member: FrozenSourceMember, *, prefix: str) -> dict[str, str]
 
 
 def provider_agent_request(
-    step: ResolvedLocalSearchAgentStep,
+    step: ResolvedAgentStep,
     handoff: FrozenAgentStepHandoff,
     *,
     repository_evidence: str,
@@ -52,7 +53,7 @@ def provider_agent_request(
     """Use the complete captured closure; oversize input fails rather than truncating it."""
     from oh_goon.core.models.agent_review import decode_agent_record, review_scope
 
-    if step.connection is None:
+    if not isinstance(step.workload, ResolvedProviderAgentWorkload):
         raise FleetPlanInvalid("provider Agent lacks its frozen connection")
     if type(repository_evidence) is not str or not repository_evidence.strip():
         raise FleetPlanInvalid("provider Agent requires initial Hashmarks repository evidence")
@@ -79,7 +80,7 @@ def provider_agent_request(
         separators=(",", ":"),
     )
     return {
-        "connection": step.connection.model_dump(mode="json"),
+        "connection": step.workload.connection.model_dump(mode="json"),
         "messages": [
             {
                 "role": "system",
@@ -93,7 +94,7 @@ def provider_agent_request(
     }
 
 
-def agent_phase_output_contract(step: ResolvedLocalSearchAgentStep) -> str:
+def agent_phase_output_contract(step: ResolvedAgentStep) -> str:
     """One typed output instruction for provider and selected native phase agents."""
     from oh_goon.core.agent_review_plan import agent_phase_role
 
@@ -141,7 +142,7 @@ def agent_phase_output_contract(step: ResolvedLocalSearchAgentStep) -> str:
 
 
 def execute_provider_agent(
-    step: ResolvedLocalSearchAgentStep,
+    step: ResolvedAgentStep,
     handoff: FrozenAgentStepHandoff,
     process: _StepProcess,
     runtime: StepRuntime,
@@ -155,11 +156,11 @@ def execute_provider_agent(
         step_host_environment_names,
     )
 
-    if step.connection is None:
+    if not isinstance(step.workload, ResolvedProviderAgentWorkload):
         raise FleetPlanInvalid("provider Agent lacks its frozen connection")
     for name in step_host_environment_names(step):
         require_exportable_host_environment_name(name)
-    selected = step.connection.resolve(process.host_environment)
+    selected = step.workload.connection.resolve(process.host_environment)
     payload = provider_agent_request(step, handoff, repository_evidence=repository_evidence)
     encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
     if len(encoded) > selected.provider.max_request_bytes:
@@ -191,7 +192,7 @@ def execute_provider_agent(
 
 
 def accept_agent_phase_output(
-    step: ResolvedLocalSearchAgentStep,
+    step: ResolvedAgentStep,
     handoff: FrozenAgentStepHandoff,
     outcome: StepOutcome,
 ) -> StepOutcome:

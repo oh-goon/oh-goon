@@ -34,8 +34,8 @@ from oh_goon.core.models.fleet_observation import (
 )
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
+    ResolvedAgentStep,
     ResolvedCommandStep,
-    ResolvedLocalSearchAgentStep,
 )
 from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution, PlanOutputEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
@@ -55,7 +55,7 @@ from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, execute_
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
-from oh_goon.services.fleet_plan_step_resolution import resolve_delivered_local_search_agent_step
+from oh_goon.services.fleet_plan_step_resolution import resolve_delivered_agent_step
 
 _STUB = r"""#!/usr/bin/python3
 import json, os, pathlib, signal, sys, urllib.request, time
@@ -121,7 +121,7 @@ def _case(
     sandboxed: bool = True,
     repository_files: dict[str, str] | None = None,
     skill_instructions: str = "# Native fixture\nInspect complete captured source.\n",
-) -> tuple[Path, FrozenAgentStepHandoff, ResolvedLocalSearchAgentStep, StepRuntime]:
+) -> tuple[Path, FrozenAgentStepHandoff, ResolvedAgentStep, StepRuntime]:
     repository = tmp_path / "repos/team/project"
     repository.mkdir(parents=True)
     (repository / "main.py").write_text("def answer():\n    return 42\n")
@@ -212,7 +212,7 @@ steps:
         backend_configuration_id=backend.configuration_identity() if backend is not None else None,
     )
     role: Literal["review", "report"] = "review" if mode in {"review", "wrong-review"} else "report"
-    step = resolve_delivered_local_search_agent_step(handoff, native_agent=selected, role=role)
+    step = resolve_delivered_agent_step(handoff, native_agent=selected, role=role)
     packet = handoff.encode_prework_delivery()
     runtime = StepRuntime(
         git=GitService(),
@@ -383,7 +383,7 @@ def test_native_receiver_refuses_missing_or_conflicting_authority_before_evidenc
     tmp_path: Path, attack: str
 ) -> None:
     _, handoff, step, runtime = _case(tmp_path)
-    selected = step.native_agent
+    selected = step.workload.native_agent
     assert selected is not None
     if attack == "no-connection":
         selected = replace(selected, connection=None)
@@ -404,7 +404,9 @@ def test_native_receiver_refuses_missing_or_conflicting_authority_before_evidenc
             selected,
             definition=selected.definition.model_copy(update={"arguments": ("--model", "foreign")}),
         )
-    step = step.model_copy(update={"native_agent": selected})
+    step = step.model_copy(
+        update={"workload": step.workload.model_copy(update={"native_agent": selected})}
+    )
     if attack != "profile-drift":
         runtime = replace(runtime, native_profile=selected)
     with pytest.raises(FleetPlanInvalid):
@@ -658,14 +660,16 @@ def test_native_timeout_retains_physical_failure_evidence_without_accepting_comp
     tmp_path: Path, model_transport: list[dict[str, Any]]
 ) -> None:
     repository, _, step, runtime = _case(tmp_path, mode="timeout", sandboxed=True)
-    assert step.native_agent is not None
+    assert step.workload.harness == "native"
     selected = replace(
-        step.native_agent,
+        step.workload.native_agent,
         # Keep headroom for producer/namespace setup before the real child blocks
         # after approved inference; shared happy-path cases use a 10-second budget.
-        profile=step.native_agent.profile.model_copy(update={"timeout_seconds": 15.0}),
+        profile=step.workload.native_agent.profile.model_copy(update={"timeout_seconds": 15.0}),
     )
-    step = step.model_copy(update={"native_agent": selected})
+    step = step.model_copy(
+        update={"workload": step.workload.model_copy(update={"native_agent": selected})}
+    )
     runtime = replace(runtime, native_profile=selected)
     outcome = execute_direct_step(repository, step, runtime, step_order=1)
     assert len(model_transport) == 1  # The native workload reached approved inference.
@@ -685,9 +689,9 @@ def test_native_timeout_retains_physical_failure_evidence_without_accepting_comp
 
 def test_unsupported_backend_sandbox_harness_rejects_before_producer(tmp_path: Path) -> None:
     _, _, step, _ = _case(tmp_path)
-    assert step.native_agent is not None
+    assert step.workload.harness == "native"
     selected = replace(
-        step.native_agent,
+        step.workload.native_agent,
         profile=NativeAgentProfile(backend="bubblewrap", sandbox_owner="execution_backend"),
     )
     with pytest.raises(FleetPlanInvalid, match="not qualified for this native agent"):
@@ -698,11 +702,11 @@ def test_codex_service_read_only_receiver_preserves_the_original_frozen_handoff(
     tmp_path: Path,
 ) -> None:
     _, handoff, step, runtime = _case(tmp_path, sandboxed=False)
-    assert step.native_agent is not None
+    assert step.workload.harness == "native"
     selected = replace(
-        step.native_agent,
+        step.workload.native_agent,
         agent="codex",
-        definition=step.native_agent.definition.model_copy(update={"arguments": ()}),
+        definition=step.workload.native_agent.definition.model_copy(update={"arguments": ()}),
         profile=NativeAgentProfile(
             codex_service=CodexServiceConnection(
                 home=str(tmp_path / "native-owned"), model="native", reasoning_effort="ultra"
@@ -718,7 +722,7 @@ def test_codex_service_read_only_receiver_preserves_the_original_frozen_handoff(
             update={"repository_access": "read_only", "recipients": ("codex",)}
         ),
     )
-    step = resolve_delivered_local_search_agent_step(handoff, native_agent=selected, role="review")
+    step = resolve_delivered_agent_step(handoff, native_agent=selected, role="review")
     runtime = replace(runtime, native_profile=selected)
     packet = handoff.encode_prework_delivery()
     prepared = prepare_native_step_input(packet, step, runtime)
@@ -794,11 +798,11 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
     from oh_goon.integrations import agent_codex_service_execution as service_owner
 
     repository, handoff, step, runtime = _case(tmp_path, sandboxed=False)
-    assert step.native_agent is not None
+    assert step.workload.harness == "native"
     selected = replace(
-        step.native_agent,
+        step.workload.native_agent,
         agent="codex",
-        definition=step.native_agent.definition.model_copy(update={"arguments": ()}),
+        definition=step.workload.native_agent.definition.model_copy(update={"arguments": ()}),
         profile=NativeAgentProfile(
             codex_service=CodexServiceConnection(
                 home=str(tmp_path / "native-owned"), model="native", reasoning_effort="ultra"
@@ -814,7 +818,7 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
             update={"repository_access": "read_only", "recipients": ("codex",)}
         ),
     )
-    step = resolve_delivered_local_search_agent_step(handoff, native_agent=selected, role=role)
+    step = resolve_delivered_agent_step(handoff, native_agent=selected, role=role)
     packet = handoff.encode_prework_delivery()
     runtime = replace(
         runtime,
@@ -930,9 +934,9 @@ def test_private_native_rejection_retains_bounded_static_context_after_a_settled
 
     repository, handoff, step, runtime = _case(tmp_path, sandboxed=False)
     selected = replace(
-        step.native_agent,
+        step.workload.native_agent,
         agent="codex",
-        definition=step.native_agent.definition.model_copy(update={"arguments": ()}),
+        definition=step.workload.native_agent.definition.model_copy(update={"arguments": ()}),
         profile=NativeAgentProfile(
             codex_service=CodexServiceConnection(
                 home=str(tmp_path / "native-owned"), model="native", reasoning_effort="low"
@@ -947,7 +951,7 @@ def test_private_native_rejection_retains_bounded_static_context_after_a_settled
             update={"repository_access": "read_only", "recipients": ("codex",)}
         ),
     )
-    step = resolve_delivered_local_search_agent_step(handoff, native_agent=selected, role="review")
+    step = resolve_delivered_agent_step(handoff, native_agent=selected, role="review")
     packet = handoff.encode_prework_delivery()
     runtime = replace(runtime, native_profile=selected, agent_delivery_for=lambda *_args: packet)
     execution = service_owner.CodexServiceExecution(

@@ -60,6 +60,9 @@ class _Tape:
             exit_code=7,
             reason="Original verifier failure",
             native_agent_observations=(),
+            settlement=_Facts(
+                {"outcome": "FAILED", "reason": "FAILED_EXIT", "cleanup": "VERIFIED"}
+            ),
             order=1,
             step_execution_id="step-one",
             status=SimpleNamespace(value="FAILED"),
@@ -116,6 +119,7 @@ class _CanonicalRuns:
             game_tape=self.tape,
             repository_admissions=(),
             journal_revision=100,
+            campaign_journal=None,
         )
 
     def events(self, run_id, after=0, *, limit=None):
@@ -135,6 +139,7 @@ class _CanonicalRuns:
             next_sequence=next_sequence,
             has_more=has_more,
             journal_revision=100,
+            campaign_journal=None,
             model_dump=lambda *, mode: {
                 "events": [{"sequence": next_sequence, "code": "ORIGINAL_EVENT"}],
                 "next_sequence": next_sequence,

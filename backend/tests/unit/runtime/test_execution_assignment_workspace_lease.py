@@ -343,3 +343,25 @@ def test_release_rejects_stale_pre_writer_lease_after_writer_binding(tmp_path: P
     with pytest.raises(WorkspaceLeaseLost, match="authority changed"):
         leases.release(lease, expected_state_version=state.state_version)
     assert leases.assert_current(writer_lease) == writer_lease
+
+
+def test_control_state_reset_preserves_original_active_workspace_writer(tmp_path: Path) -> None:
+    from oh_goon.core.errors import WorkspaceStateStale
+    from oh_goon.runtime.local_state_maintenance import reset_local_state
+
+    database, manager, workspace, ready, checkpoint = _candidate(tmp_path)
+    _authority, assignment = _assignment(database, manager, workspace, checkpoint)
+    leases = WorkspaceLeaseStore(database, workspaces=manager)
+    _in_use, lease = leases.acquire(
+        workspace,
+        assignment,
+        executor_id="original-executor",
+        executor_generation=1,
+        expected_state_version=ready.state_version,
+    )
+    before = database.path.read_bytes()
+    with pytest.raises(WorkspaceStateStale):
+        reset_local_state(database.path)
+    assert database.path.read_bytes() == before
+    assert leases.assert_current(lease) == lease
+    assert manager.physical_path(workspace).is_dir()

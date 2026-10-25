@@ -162,6 +162,7 @@ def _execution_failure(
     diagnostic_output: StepDiagnosticObserver | None = None,
     exception: BaseException | None = None,
     visible: NativeAgentEvents | None = None,
+    caller_cancelled: bool = False,
 ) -> CodexServiceExecutionFailure:
     event = diagnostic_output(message, exception) if diagnostic_output is not None else None
     diagnostic = (
@@ -191,6 +192,10 @@ def _execution_failure(
         StepOutcome(
             argv=physical.argv if isinstance(physical, CommandResult) else argv,
             returncode=returncode,
+            observed_returncode=physical.returncode
+            if isinstance(physical, CommandResult)
+            else None,
+            completion="process_exit" if caller_cancelled else "service_shutdown",
             stderr=message,
             duration_ms=physical.duration_ms,
             supervisor=physical.supervisor,
@@ -578,6 +583,7 @@ def execute_codex_service_run(
             "Codex service Run was cancelled",
             physical,
             argv,
+            caller_cancelled=True,
             diagnostic_output=process.diagnostic_output,
             visible=visible.snapshot(),
             exception=primary,
@@ -613,6 +619,8 @@ def execute_codex_service_run(
     outcome = StepOutcome(
         argv=(selected.definition.executable or "", "app-server"),
         returncode=0,
+        completion="service_shutdown",
+        observed_returncode=None,
         stdout=protocol.final_text,
         duration_ms=physical.duration_ms,
         supervisor=physical.supervisor,

@@ -97,7 +97,7 @@ def test_original_fleet_search_observation_review_finish_persists(tmp_path, monk
         ],
     )
     frozen, handoff = _lock(plan, opts)
-    assert frozen.steps[0].harness == "local-model-review"
+    assert frozen.steps[0].workload.harness == "local-model-review"
     assert handoff.harness == "local-model-review"
     detail = _run(plan, repo, opts)
     assert detail.game_tape.status.value == "PASSED"
@@ -113,7 +113,7 @@ def test_original_fleet_search_observation_review_finish_persists(tmp_path, monk
         arguments = (tmp_path / f"argv-{ordinal}.bin").read_bytes().split(b"\0")
         assert arguments[-1] == b""
         argv = [argument.decode("utf-8") for argument in arguments[:-1]]
-        assert argv[:3] == ["run", frozen.steps[0].model, prompt]
+        assert argv[:3] == ["run", frozen.steps[0].workload.model, prompt]
         assert argv[argv.index("--format") + 1] == "json"
         assert "--hidethinking" in argv[3:]
         assert "--nowordwrap" in argv[3:]
@@ -271,9 +271,7 @@ def test_review_harness_changes_authoritative_lock_identity(tmp_path, monkeypatc
     first, handoff = _lock(plan, opts)
     goon = tmp_path / "goons" / "agent" / "search" / "goon.yml"
     goon.write_text(goon.read_text().replace("local-model-review", "local-model-search"))
-    second, other, _ = FleetPlanResolver(
-        goon_templates=GoonTemplateStore()
-    ).resolve_frozen_local_search_agent(
+    second, other, _ = FleetPlanResolver(goon_templates=GoonTemplateStore()).resolve_frozen_agent(
         plan,
         inputs=opts["inputs"],
         repository_root=opts["agent_repository_root"],

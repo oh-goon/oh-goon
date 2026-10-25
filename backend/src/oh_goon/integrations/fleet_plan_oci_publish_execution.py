@@ -113,9 +113,12 @@ def execute_oci_publish(
     )
     if cleanup_error is not None:
         _clear_old_outputs(outputs)
-        return _contract_failure(
-            f"OCI publication committed but private registry credential cleanup failed: {cleanup_error}",
-            released,
+        return replace(
+            _contract_failure(
+                f"OCI publication committed but private registry credential cleanup failed: {cleanup_error}",
+                released,
+            ),
+            resource_cleanup="unverified",
         )
     return _finalize_publish_outputs(step, outputs, destination, manifest_digest, released)
 
@@ -194,8 +197,9 @@ def _cleanup_with_note(config: OciRegistryAttemptConfig, error: BaseException) -
 def _cleanup_contract_failure(outcome: StepOutcome, cleanup_error: OSError | None) -> StepOutcome:
     if cleanup_error is None:
         return outcome
-    return _contract_failure(
-        f"Private registry credential cleanup failed: {cleanup_error}", outcome
+    return replace(
+        _contract_failure(f"Private registry credential cleanup failed: {cleanup_error}", outcome),
+        resource_cleanup="unverified",
     )
 
 

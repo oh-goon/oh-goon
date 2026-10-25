@@ -23,10 +23,10 @@ from oh_goon.core.models.fleet_plan_evidence import (
 )
 from oh_goon.core.models.fleet_plan_release_evidence import KubernetesRolloutVerificationEvidence
 from oh_goon.core.path_layouts import AttemptPathLayout
-from oh_goon.engine.command import CommandResult
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
 from oh_goon.integrations._fleet_plan_step_dataflow import bind_step_outputs
 from oh_goon.integrations._fleet_plan_step_evidence import canonical_argv
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, settle_step_execution
 from oh_goon.integrations.fleet_plan_kubernetes_rollout_execution import (
     execute_kubernetes_rollout_verify,
 )
@@ -166,7 +166,7 @@ class _Clock:
 
 def test_release_template_resolves_v29_with_separate_explicit_rollout_gate() -> None:
     plan = _plan()
-    assert plan.contract_version == 44
+    assert plan.contract_version == 45
     commit, verify = plan.steps[-2:]
     assert isinstance(commit, ResolvedKubernetesSetImageStep)
     assert isinstance(verify, ResolvedKubernetesRolloutVerifyStep)
@@ -238,6 +238,8 @@ def test_rollout_verification_polls_read_only_until_exact_generation_is_ready(
     )
 
     assert outcome.returncode == 0
+    assert outcome.supervisor is not None
+    assert settle_step_execution(step, outcome).outcome == "SUCCESS"
     assert len(calls) == 2
     assert all(call[call.index("--request") + 1] == "GET" for call in calls)
     assert all("--data-binary" not in call for call in calls)
@@ -254,6 +256,44 @@ def test_rollout_verification_polls_read_only_until_exact_generation_is_ready(
     assert evidence.available_replicas == 2
     assert evidence.unavailable_replicas == 0
     assert evidence.transport_retries == 0
+
+
+@pytest.mark.parametrize("quiescent", [True, False, None])
+def test_each_native_poll_preserves_supervision_before_another_request(tmp_path, quiescent):
+    from dataclasses import replace
+
+    step = _bound_step()
+    calls = []
+    clock = _Clock()
+
+    def runner(*argv, **kwargs):
+        calls.append(argv)
+        Path(argv[argv.index("--output") + 1]).write_text(
+            json.dumps(
+                _deployment(available=1, unavailable=1) if len(calls) == 1 else _deployment()
+            )
+        )
+        return replace(
+            CommandResult(argv=argv, returncode=0, stdout="200", stderr=""),
+            supervisor=CommandSupervisorReceipt(final_process_group_quiescent=quiescent)
+            if quiescent is not None
+            else None,
+        )
+
+    outcome = execute_kubernetes_rollout_verify(
+        step,
+        _layout(tmp_path / "attempt"),
+        environment={},
+        host_environment={"KUBERNETES_TOKEN": TOKEN, "KUBERNETES_CA_CERTIFICATE": CA},
+        command_runner=runner,
+        cancel_requested=None,
+        clock=clock,
+        sleeper=clock.sleep,
+    )
+    settled = settle_step_execution(step, outcome)
+    assert len(calls) == (2 if quiescent is True else 1)
+    assert settled.outcome == ("SUCCESS" if quiescent is True else "INCOMPLETE")
+    assert settled.observed_returncode == 0
 
 
 def test_ready_rollout_reports_private_cleanup_failure_without_losing_observation(
@@ -286,6 +326,7 @@ def test_ready_rollout_reports_private_cleanup_failure_without_losing_observatio
     assert outcome.release_verification is not None
     assert outcome.release_verification.outcome == "READY"
     assert "credential cleanup failed" in outcome.stderr
+    assert settle_step_execution(step, outcome).cleanup == "UNVERIFIED"
 
 
 def test_rollout_verification_fails_closed_if_generation_is_superseded(tmp_path: Path) -> None:

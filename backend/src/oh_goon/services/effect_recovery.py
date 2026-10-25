@@ -164,6 +164,11 @@ class RepositoryEffectRecovery:
         # on observation failure the same transaction rolls back without mutation.
         with self._database.transaction(write=True) as connection:
             view = self._journal.read_view_from_connection(connection)
+            report = view.operation(operation_id)
+            if report is not None and report.resource_settlement == "UNRESOLVED":
+                raise StateConflict(
+                    "Original process/resource cleanup is unresolved; filesystem reconciliation cannot prove quiescence"
+                )
             try:
                 current = self._attempts.get_in(connection, operation_id)
             except OperationNotFound:
@@ -210,6 +215,11 @@ class RepositoryEffectRecovery:
         current, view = _recovery_read_cut(
             self._database, self._attempts, self._journal, operation_id
         )
+        report = view.operation(operation_id)
+        if report is not None and report.resource_settlement == "UNRESOLVED":
+            raise StateConflict(
+                "Original process/resource cleanup is unresolved; operator acknowledgement cannot prove quiescence"
+            )
         if current is None:
             existing = _acknowledgement_replay(view, operation_id, note)
             if existing is None:

@@ -43,9 +43,7 @@ def test_authorized_recapture_keeps_old_packet_and_selects_new_bytes(tmp_path, m
         "oh_goon.services.agent_authoring_sources._snapshot_authorized_tree",
         lambda *args, **kwargs: pytest.fail("selected capture was read again"),
     )
-    resolved, selected, _ = resolver.resolve_frozen_local_search_agent(
-        plan, handoff=second, **options
-    )
+    resolved, selected, _ = resolver.resolve_frozen_agent(plan, handoff=second, **options)
     assert selected.encode_prework_delivery() == second.encode_prework_delivery()
     assert resolved.steps[0].handoff_identity == second.handoff_identity
 
@@ -132,12 +130,12 @@ def test_cancelled_recapture_never_returns_a_next_handoff(tmp_path, monkeypatch,
 def test_selected_handoff_refuses_different_step_or_input_meaning(tmp_path):
     resolver, plan, options, _, _, first = _capture_case(tmp_path)
     with pytest.raises(FleetPlanInvalid, match="meaning"):
-        resolver.resolve_frozen_local_search_agent(
+        resolver.resolve_frozen_agent(
             plan, handoff=replace(first, task="search:another"), **options
         )
     options["inputs"] = {**options["inputs"], "repo": "local:other/source"}
     with pytest.raises(FleetPlanInvalid, match="selection"):
-        resolver.resolve_frozen_local_search_agent(plan, handoff=first, **options)
+        resolver.resolve_frozen_agent(plan, handoff=first, **options)
 
 
 def test_cancellation_after_capture_still_refuses_next_handoff(tmp_path, monkeypatch):

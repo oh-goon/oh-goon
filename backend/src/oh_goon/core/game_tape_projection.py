@@ -71,6 +71,7 @@ def project_game_tape(detail: FleetRunDetail) -> GameTape:
     )
     return GameTape(
         journal_revision=detail.journal_revision,
+        campaign_journal=detail.campaign_journal,
         terminal=detail.run.status.terminal,
         configuration=plan.configuration if plan is not None else None,
         fleet_run_id=detail.run.fleet_run_id,

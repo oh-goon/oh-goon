@@ -172,7 +172,7 @@ def test_workspace_schema_preserves_workspace_authority_tables(
     tmp_path: Path,
 ) -> None:
     database = _database(tmp_path)
-    assert DATABASE_SCHEMA_VERSION == 88
+    assert DATABASE_SCHEMA_VERSION == 89
     with database.transaction() as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == DATABASE_SCHEMA_VERSION
         tables = {

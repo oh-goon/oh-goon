@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 from pathlib import Path
 
 import pytest
@@ -11,18 +12,18 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedCommandStep,
 )
 from oh_goon.engine.git import GitService
+from oh_goon.integrations._fleet_plan_step_outcome import settle_step_execution
 from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, execute_direct_step
 
 
 def test_direct_command_missing_executable_is_normal_step_failure(tmp_path: Path) -> None:
     executable = "definitely-not-an-oh-goon-executable-9d61"
+    step = ResolvedCommandStep(
+        step_id="missing-tool-step", argv=(executable, "--version"), timeout_seconds=5
+    )
     outcome = execute_direct_step(
         tmp_path,
-        ResolvedCommandStep(
-            step_id="missing-tool-step",
-            argv=(executable, "--version"),
-            timeout_seconds=5,
-        ),
+        step,
         StepRuntime(
             git=GitService(),
             extensions=None,
@@ -35,6 +36,11 @@ def test_direct_command_missing_executable_is_normal_step_failure(tmp_path: Path
     assert outcome.returncode == PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE
     assert outcome.argv == (executable, "--version")
     assert outcome.stderr == f"Executable not found: {executable}"
+    assert outcome.completion == "not_started"
+    assert outcome.supervisor is None and outcome.observed_returncode is None
+    settled = settle_step_execution(step, outcome)
+    assert settled.outcome == "FAILED" and settled.reason == "FAILED_TO_START"
+    assert settled.cleanup == "VERIFIED"
 
 
 def test_missing_executable_return_code_cannot_be_declared_success() -> None:
@@ -69,6 +75,7 @@ def test_direct_command_permission_denied_is_normal_step_failure(tmp_path: Path)
     assert outcome.returncode == PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE
     assert outcome.argv == ("./tool.sh",)
     assert outcome.stderr == "Executable is not runnable: ./tool.sh"
+    assert outcome.completion == "not_started" and outcome.supervisor is None
 
 
 def test_not_runnable_return_code_cannot_be_declared_success() -> None:
@@ -103,6 +110,7 @@ def test_direct_command_invalid_executable_format_is_normal_step_failure(tmp_pat
     assert outcome.returncode == PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE
     assert outcome.argv == ("./tool",)
     assert outcome.stderr == "Executable is not runnable: ./tool"
+    assert outcome.completion == "not_started" and outcome.supervisor is None
 
 
 def test_existing_script_with_missing_interpreter_is_not_runnable(tmp_path: Path) -> None:
@@ -129,6 +137,24 @@ def test_existing_script_with_missing_interpreter_is_not_runnable(tmp_path: Path
     assert outcome.returncode == PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE
     assert outcome.argv == ("./tool.sh",)
     assert outcome.stderr == "Executable is not runnable: ./tool.sh"
+    assert outcome.completion == "not_started" and outcome.observed_returncode is None
+
+
+def test_other_launch_error_path_cannot_inherit_selected_command_refusal(tmp_path, monkeypatch):
+    other = str(tmp_path / "different-authority")
+
+    def fail(*args, **kwargs):
+        raise FileNotFoundError(errno.ENOENT, "Unrelated missing path", other)
+
+    monkeypatch.setattr("oh_goon.integrations.fleet_plan_step_execution.run_command", fail)
+    with pytest.raises(FileNotFoundError) as error:
+        execute_direct_step(
+            tmp_path,
+            ResolvedCommandStep(step_id="work", argv=("selected-command",)),
+            StepRuntime(git=GitService(), extensions=None, tools=None, cancel_requested=None),
+            step_order=1,
+        )
+    assert error.value.filename == other
 
 
 def test_direct_step_transports_only_resolved_runtime_supervision(

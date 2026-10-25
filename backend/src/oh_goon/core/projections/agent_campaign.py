@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from oh_goon.core.models.agent_repair import AgentRepairResult, AgentRepairStopReason
+from oh_goon.core.models.agent_repair import AgentCampaignReadback, AgentRepairStopReason
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord, AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
@@ -18,21 +18,21 @@ def project_agent_campaign(
     details: Sequence[FleetRunDetail],
     *,
     journal_revision: int | None = None,
-    invocation: AgentRepairResult | None = None,
+    campaign: AgentCampaignReadback | None = None,
 ) -> dict[str, Any]:
     """Expose original facts without reconstructing a controller stop decision.
 
-    The controller's final source recapture happens after its last Run. Its
-    invocation receipt is therefore required to report convergence. Retained
-    Runs alone cannot establish that recapture or authorize continuation.
+    Campaign decisions and child execution remain separate canonical facts.
+    A verified Journal cut is required for convergence; reading never resumes.
     """
+    if journal_revision is None and campaign is not None:
+        journal_revision = campaign.journal_revision
     members = []
     for detail in details:
         target = detail.run.target
         if (
             isinstance(target, FleetPlanTarget)
             and (context := target.agent_repair) is not None
-            and context.phase is not None
             and context.repair_id == campaign_id
         ):
             members.append((context, detail, target))
@@ -68,7 +68,7 @@ def project_agent_campaign(
         if detail.outcome.value == "CANCELLED":
             reasons.append(f"Run {run_id} was cancelled; interrupted work is incomplete")
         selected = [step.step_id for step in target.plan.steps]
-        executed = []
+        executed: list[dict[str, Any]] = []
         repair_steps = []
         for operation in detail.operations:
             evidence = operation.evidence
@@ -83,14 +83,33 @@ def project_agent_campaign(
                         **origin,
                         "status": step.status,
                         "exit_code": getattr(step, "returncode", None),
+                        "settlement": step.settlement.model_dump(mode="json"),
+                        "teardown": step.teardown.model_dump(mode="json")
+                        if step.teardown is not None
+                        else None,
+                        "blocking_cause": step.reason if step.status == "SKIPPED" else None,
                         "native_observations": [
                             {
                                 **observation.model_dump(mode="json", exclude={"events"}),
                                 "context_observations": [
-                                    event.model_dump(mode="json")
-                                    for event in observation.events
-                                    if event.kind == "context"
+                                    {
+                                        **event.model_dump(mode="json"),
+                                        "summary": event.summary[:512],
+                                        "omitted_summary_characters": max(
+                                            0, len(event.summary) - 512
+                                        ),
+                                    }
+                                    for event in tuple(
+                                        event
+                                        for event in observation.events
+                                        if event.kind == "context"
+                                    )[-8:]
                                 ],
+                                "event_projection_scope": "last_eight_controller_context_events",
+                                "excluded_event_count": len(observation.events)
+                                - min(
+                                    8, sum(event.kind == "context" for event in observation.events)
+                                ),
                             }
                             for observation in step.observations
                             if isinstance(observation, NativeAgentObservation)
@@ -100,6 +119,7 @@ def project_agent_campaign(
                                 "attempt": attempt.attempt,
                                 "argv": list(attempt.argv),
                                 "exit_code": attempt.returncode,
+                                "observed_returncode": attempt.observed_returncode,
                                 "supervisor": attempt.supervisor.model_dump(mode="json")
                                 if attempt.supervisor is not None
                                 else None,
@@ -165,7 +185,7 @@ def project_agent_campaign(
             "fleet_run_id": run_id,
             "attempt": context.attempt,
             "previous_run_id": context.previous_run_id,
-            "phase": context.phase,
+            "phase": context.phase or "failure_repair",
             "review_pass": context.review_pass,
             "candidate_identity": context.candidate_identity,
             "scope_identity": context.scope_identity,
@@ -189,6 +209,8 @@ def project_agent_campaign(
                     step["step_id"] == step_id
                     and step["status"] == "COMPLETED"
                     and step["exit_code"] == 0
+                    and step["settlement"]["outcome"] == "SUCCESS"
+                    and step["settlement"]["cleanup"] == "VERIFIED"
                     for step in executed
                 )
             ],
@@ -229,34 +251,74 @@ def project_agent_campaign(
     result = "incomplete"
     if not members:
         reasons.append("No admitted campaign Runs are available")
-    if invocation is None:
+    decision = campaign.terminal_decision if campaign is not None else None
+    cleanup_unresolved = any(
+        step["status"] != "SKIPPED"
+        and (
+            step["settlement"]["cleanup"] != "VERIFIED"
+            or (step["teardown"] is not None and step["teardown"]["status"] == "FAILED")
+        )
+        for row in runs
+        for step in row["recorded_steps"]
+    )
+    if cleanup_unresolved:
+        reasons.append("Recorded process/resource cleanup remains unresolved")
+    if campaign is None or decision is None:
         reasons.append(
-            "The controller stop receipt is not retained; Runs alone do not prove convergence"
+            "The committed campaign decision is unavailable; child success cannot establish convergence"
         )
     else:
         controller_result = {
-            "availability": "invocation_receipt",
-            "stop_reason": invocation.stop_reason.value,
-            "message": invocation.message,
+            "availability": "journal",
+            "owner": "campaign_policy",
+            "stop_reason": decision.stop_reason.value if decision.stop_reason is not None else None,
+            "decision_id": decision.decision_id,
+            "message": decision.message,
+            "candidate_identity": decision.candidate_identity,
+            "scope_identity": decision.scope_identity,
+            "remaining_runs": decision.remaining_runs,
+            "consumed_runs": [item.model_dump(mode="json") for item in decision.consumed_runs],
+            "unresolved_run_ids": list(decision.unresolved_run_ids),
         }
-        if invocation.repair_id != campaign_id:
-            reasons.append("The invocation receipt belongs to another campaign")
-        if invocation.unresolved_run_ids:
+        if campaign.campaign_id != campaign_id:
+            reasons.append("The Journal decision belongs to another campaign")
+        if not campaign.complete or campaign.journal_revision != journal_revision:
+            reasons.append("Campaign evidence is incomplete or belongs to a different Journal cut")
+        if decision.unresolved_run_ids:
             reasons.append(
-                "Admitted Run readback is unresolved: " + ", ".join(invocation.unresolved_run_ids)
+                "Admitted Run readback is unresolved: " + ", ".join(decision.unresolved_run_ids)
             )
-        if invocation.admitted_run_ids != tuple(row["fleet_run_id"] for row in runs):
+        phase_ids = tuple(phase.fleet_run_id for phase in campaign.phases)
+        if phase_ids != tuple(row["fleet_run_id"] for row in runs):
             reasons.append("The projection does not account for every admitted Run")
-        if invocation.attempts != tuple(detail for _, detail, _ in members):
-            reasons.append("The invocation receipt differs from retained Run evidence")
-        if invocation.converged and any(
+        if tuple(item.fleet_run_id for item in decision.consumed_runs) != phase_ids:
+            reasons.append("The terminal decision does not account for every admitted Run result")
+        for phase, (_, _, target) in zip(campaign.phases, members, strict=False):
+            if (
+                phase.selected_step_ids != tuple(step.step_id for step in target.plan.steps)
+                or phase.execution_digest != target.execution_digest
+            ):
+                reasons.append("The retained phase selection differs from admitted execution")
+        if decision.stop_reason is AgentRepairStopReason.CONVERGED and any(
             row["outcome"] != "SUCCESS" or row["unverified_step_ids"] for row in runs
         ):
-            reasons.append("The converged controller receipt conflicts with retained Run results")
-        if not reasons and invocation.converged:
+            reasons.append("The converged campaign decision conflicts with retained Run results")
+        if decision.stop_reason is AgentRepairStopReason.CONVERGED and (
+            not members
+            or decision.unstarted_selection is not None
+            or members[-1][0].phase != "verification"
+            or decision.candidate_identity != members[-1][0].candidate_identity
+            or decision.scope_identity != members[-1][0].scope_identity
+        ):
+            reasons.append(
+                "The converged decision is not bound to the final verification candidate/scope"
+            )
+        if not reasons and decision.stop_reason is AgentRepairStopReason.CONVERGED:
             result = "converged"
+        elif not reasons and decision.stop_reason is AgentRepairStopReason.TEST_PASSED:
+            result = "test_passed"
         elif (
-            invocation.stop_reason
+            decision.stop_reason
             in {
                 AgentRepairStopReason.APPLY_FAILED,
                 AgentRepairStopReason.PROPOSAL_FAILED,
@@ -269,14 +331,32 @@ def project_agent_campaign(
         ):
             result = "failed"
         else:
-            reasons.append(f"Controller stopped with {invocation.stop_reason.value}")
+            reasons.append(
+                f"Controller stopped with {decision.stop_reason.value if decision.stop_reason else 'unavailable'}"
+            )
     return {
-        "schema": "oh-goon.agent-campaign-result/v1",
+        "schema": "oh-goon.agent-campaign-result/v2",
         "campaign_id": campaign_id,
         "journal_revision": journal_revision,
         "result": result,
         "incomplete_reasons": reasons,
         "controller_result": controller_result,
+        "intent": campaign.intent.model_dump(mode="json")
+        if campaign is not None and campaign.intent is not None
+        else None,
+        "complete": campaign.complete if campaign is not None else False,
+        "safe_next_action": "fresh_authorized_invocation"
+        if decision is not None
+        and not decision.unresolved_run_ids
+        and not cleanup_unresolved
+        and not reasons
+        else "inspect_original_runs_and_resolve_ownership",
+        "unstarted_selection": decision.unstarted_selection.model_dump(mode="json")
+        if decision is not None and decision.unstarted_selection is not None
+        else None,
+        "decision_history": [record.model_dump(mode="json") for record in campaign.records]
+        if campaign is not None
+        else [],
         "original_execution_digest": first.original_execution_digest if first is not None else None,
         "repositories": [item.model_dump(mode="json") for item in members[0][1].run.targets]
         if members
@@ -285,8 +365,8 @@ def project_agent_campaign(
         if first is not None and first.attempt == 1
         else None,
         "last_admitted_candidate": members[-1][0].candidate_identity if members else None,
-        "final_candidate": members[-1][0].candidate_identity
-        if members and result == "converged"
+        "final_candidate": decision.candidate_identity
+        if decision is not None and result == "converged"
         else None,
         "runs": runs,
         "reviews": reviews,

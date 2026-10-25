@@ -299,13 +299,15 @@ def _print_agent_repair_result(
     result: AgentRepairResult, *, as_json: bool, campaign: bool = False
 ) -> int:
     campaign_projection = (
-        project_agent_campaign(result.repair_id, result.attempts, invocation=result)
+        project_agent_campaign(result.repair_id, result.attempts, campaign=result.campaign_journal)
         if campaign
         else None
     )
     receipt: dict[str, object] = {
         "schema": "oh-goon.agent-repair-result/v1",
         "repair_id": result.repair_id,
+        "committed_decision_id": result.committed_decision_id,
+        "journal_revision": result.journal_revision,
         "stop_reason": result.stop_reason.value,
         "test_passed": result.test_passed,
         "converged": result.converged,

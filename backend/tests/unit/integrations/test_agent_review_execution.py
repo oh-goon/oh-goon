@@ -41,7 +41,9 @@ from tests.factories.agent_review import agent_review_case
 def test_proposal_publication_binds_to_the_admitted_candidate(tmp_path, candidate):
     resolver, path, repo, options = agent_review_case(tmp_path)
     plan, _, _ = resolver.resolve_frozen_agents(path, **options)
-    step = next(s for s in plan.steps if getattr(s, "harness", None) == "provider-proposal")
+    step = next(
+        s for s in plan.steps if s.kind == "agent" and s.workload.harness == "provider-proposal"
+    )
     step = step.model_copy(
         update={"review_context": json.dumps({"candidate_identity": "admitted-candidate"})}
     )
@@ -94,10 +96,16 @@ def test_oversized_complete_source_fails_before_provider_process_or_scratch_payl
     resolver, path, _, options = agent_review_case(tmp_path)
     plan, deliveries, _ = resolver.resolve_frozen_agents(path, **options)
     step = plan.steps[0]
-    connection = step.connection.model_copy(
-        update={"provider": step.connection.provider.model_copy(update={"max_request_bytes": 1024})}
+    connection = step.workload.connection.model_copy(
+        update={
+            "provider": step.workload.connection.provider.model_copy(
+                update={"max_request_bytes": 1024}
+            )
+        }
     )
-    step = step.model_copy(update={"connection": connection})
+    step = step.model_copy(
+        update={"workload": step.workload.model_copy(update={"connection": connection})}
+    )
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     process = SimpleNamespace(
@@ -498,9 +506,15 @@ def test_provider_credentials_cannot_export_process_local_control_plane_authorit
     step = plan.steps[0]
     variable = local_access_protocol.LOCAL_ACCESS_ENV
     value = variable if field == "api_key_env" else {"x-auth": variable}
-    provider = step.connection.provider.model_copy(update={field: value})
+    provider = step.workload.connection.provider.model_copy(update={field: value})
     step = step.model_copy(
-        update={"connection": step.connection.model_copy(update={"provider": provider})}
+        update={
+            "workload": step.workload.model_copy(
+                update={
+                    "connection": step.workload.connection.model_copy(update={"provider": provider})
+                }
+            )
+        }
     )
     scratch = tmp_path / "scratch"
     scratch.mkdir()

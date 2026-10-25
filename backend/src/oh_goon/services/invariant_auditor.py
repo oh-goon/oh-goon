@@ -192,6 +192,17 @@ class SystemInvariantAuditor:
         findings: list[InvariantFinding] = []
         live_fleet_repositories: Counter[tuple[str, str]] = Counter()
         for attempt in cut.effect_attempts:
+            report = cut.journal.operation(attempt.operation_id)
+            if report is not None and report.resource_settlement == "UNRESOLVED":
+                findings.append(
+                    InspectRepositoryEffectFinding(
+                        finding_type="INSPECT_REPOSITORY_EFFECT",
+                        code="ORIGINAL_RESOURCE_CLEANUP_UNRESOLVED",
+                        severity=InvariantSeverity.ERROR,
+                        message="Canonical operation retains unresolved original process/resource cleanup",
+                        operation_id=attempt.operation_id,
+                    )
+                )
             if attempt.status in LIVE_OWNED_EFFECT_STATUSES and not _live_attempt_owned_by_lease(
                 attempt, cut.active_lease
             ):
