@@ -281,7 +281,7 @@ def test_consumer_before_producer_fails_with_ordering_guidance(tmp_path, resourc
                 "with": {"source_workspace": "${{ goons.builder.workspace }}"},
             },
         ]
-    document = {"goons": imports}
+    document = {"execution": {"purpose": "cicd"}, "goons": imports}
     path.write_text(yaml.safe_dump(document, sort_keys=False))
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     values = {

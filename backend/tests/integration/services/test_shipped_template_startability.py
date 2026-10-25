@@ -350,31 +350,41 @@ def _prove_iris_project_executable(
             "UV_NO_MANAGED_PYTHON": "1",
             "UV_PYTHON_DOWNLOADS": "never",
             "UV_PYTHON": str(python),
-            "UV_OFFLINE": "1",
         },
     )
-    result = subprocess.run(
-        (
-            str(uv),
-            "sync",
-            "--project",
-            str(repository),
-            "--locked",
-            "--no-default-groups",
-            "--group",
-            step.uv.group,
-            "--offline",
-        ),
-        cwd=repository,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=60,
+    argv = (
+        str(uv),
+        "sync",
+        "--project",
+        str(repository),
+        "--locked",
+        "--no-default-groups",
+        "--group",
+        step.uv.group,
     )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "native uv sync failed").strip()
-        raise FleetPlanInvalid(f"Native uv rejected Iris certification fixture: {detail}")
+    lock = repository / "uv.lock"
+    lock_before = lock.read_bytes()
+    # This copied fixture is a new execution subject. Materialize its native
+    # lock once, then verify that same interpreter/environment/cache offline.
+    # Caller-selected offline mode still applies to the preparation request.
+    for command, command_env in (
+        (argv, env),
+        ((*argv, "--check", "--offline"), {**env, "UV_OFFLINE": "1"}),
+    ):
+        result = subprocess.run(
+            command,
+            cwd=repository,
+            env=command_env,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "native uv sync failed").strip()
+            raise FleetPlanInvalid(f"Native uv rejected Iris certification fixture: {detail}")
+        if lock.read_bytes() != lock_before:
+            raise FleetPlanInvalid("Native uv rewrote the selected Iris certification lock")
 
     executable = _materialized_executable(environment, required_executable)
     if executable is None:
