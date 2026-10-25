@@ -11,11 +11,15 @@ import pytest
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_tool_requirements import required_runtime_tool_names
-from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan import (
+    ResolvedCommandStep,
+    ResolvedFleetPlan,
+    ResolvedOciBuildStep,
+)
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import fleet_repository_scope
 from oh_goon.core.path_authority import StrictHostPathAuthority
-from oh_goon.core.path_layouts import ManagedPreparationPathLayout
+from oh_goon.core.path_layouts import ManagedPreparationPathLayout, RunPathLayout
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
     FleetRunSource,
@@ -27,6 +31,7 @@ from oh_goon.integrations.executable_materialization_authority import (
     logical_step_execution_authority,
 )
 from oh_goon.integrations.fleet_plan_environment import step_host_environment_names
+from oh_goon.integrations.python_goon_projects import materialize_plan_projects
 from oh_goon.integrations.uv_python_runtime import find_uv_system_python
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from tests.factories.shipped_templates import AGENT_PLAN_TEMPLATES
@@ -209,8 +214,8 @@ def _prove_fixture_locks(
 
 def _managed_uv_requirements(
     plan: ResolvedFleetPlan,
-) -> dict[tuple[str, str], set[str]]:
-    requirements: dict[tuple[str, str], set[str]] = {}
+) -> dict[tuple[str, str | None, str | None], set[str]]:
+    requirements: dict[tuple[str, str | None, str | None], set[str]] = {}
     for step in plan.steps:
         if not isinstance(step, ResolvedCommandStep) or step.uv is None:
             continue
@@ -221,14 +226,16 @@ def _managed_uv_requirements(
             "--no-default-groups",
             "--project",
             step.uv.project,
-            "--group",
-            step.uv.group,
+            *(["--group", step.uv.group] if step.uv.group is not None else []),
         )
         if step.argv[: len(prefix)] != prefix or len(step.argv) <= len(prefix):
             raise FleetPlanInvalid(
                 f"managed uv step {step.step_id} does not use the canonical resolved uv argv"
             )
-        requirements.setdefault((step.uv.project, step.uv.group), set()).add(step.argv[len(prefix)])
+        package = step.project_source.content_sha256 if step.project_source is not None else None
+        requirements.setdefault((step.uv.project, step.uv.group, package), set()).add(
+            step.argv[len(prefix)]
+        )
     return requirements
 
 
@@ -273,10 +280,20 @@ def _prove_managed_uv_projects(
     cache: Path,
 ) -> None:
     native_uv = capture_native_uv_authority()
-    for index, ((project_name, group), executables) in enumerate(
-        sorted(_managed_uv_requirements(plan).items())
+    package_sources = materialize_plan_projects(
+        plan, RunPathLayout.from_root(scratch / "captured-packages")
+    )
+    for index, ((project_name, group, package), executables) in enumerate(
+        sorted(
+            _managed_uv_requirements(plan).items(),
+            key=lambda item: tuple(value or "" for value in item[0]),
+        )
     ):
-        project = repository.joinpath(*PurePosixPath(project_name).parts)
+        project = (
+            package_sources[package]
+            if package is not None
+            else repository.joinpath(*PurePosixPath(project_name).parts)
+        )
         environment = scratch / "managed" / f"{index:03d}"
         preparation = ManagedPreparationPathLayout.from_root(scratch / f"managed-{index}")
         env = native_uv.environment(
@@ -297,8 +314,8 @@ def _prove_managed_uv_projects(
                 str(project),
                 "--locked",
                 "--no-default-groups",
-                "--group",
-                group,
+                *(["--group", group] if group is not None else []),
+                *(["--no-editable"] if package is not None else []),
             ),
             project=project,
             env=env,
@@ -398,7 +415,7 @@ def _materialize_direct_package_executables(
 
 def _prove_repository_paths(plan: ResolvedFleetPlan, repository: Path) -> None:
     for step in plan.steps:
-        if getattr(step, "kind", None) != "oci_build":
+        if not isinstance(step, ResolvedOciBuildStep):
             continue
         containerfile = repository.joinpath(*PurePosixPath(step.containerfile).parts)
         context = repository.joinpath(*PurePosixPath(step.context).parts)
@@ -501,7 +518,7 @@ def test_shipped_catalog_plan_reaches_run_admitted_with_canonical_fixture_withou
         repository,
         path_authority=path_authority,
     )
-    repository_identity = RepositoryIdentity(path=repository)
+    repository_identity = RepositoryIdentity.model_validate({"path": repository})
     repository_scope = fleet_repository_scope({repository_identity.repository_id})
     intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)
     admission = planner.plan(intent, repository_scope=repository_scope)
