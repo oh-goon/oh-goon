@@ -647,8 +647,151 @@ unittest.main(argv=["live-codex-stocktake-verification"])
 """
 
 
+_DEPLOY_ORDER_SOURCES = {
+    "deploy_order/__init__.py": "",
+    "deploy_order/graph.py": """def order_services(dependencies):
+    return sorted(dependencies)
+""",
+    "deploy_order/__main__.py": """import json
+import sys
+
+from .graph import order_services
+
+
+def main():
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        print(json.dumps(order_services(json.load(stream))))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+""",
+    "README.md": """# Deployment ordering
+
+Repair this standard-library deployment manifest tool.
+
+`deploy_order.graph.order_services(dependencies)` accepts a dictionary mapping
+nonempty service names to lists of dependency names. Validate the entire manifest:
+keys and dependency names must be nonempty strings, values must be lists, every
+dependency must be declared, and cycles (including self cycles) are invalid.
+Invalid manifests raise ValueError. Duplicate dependency edges are allowed and
+mean one prerequisite. Empty manifests produce []. Do not mutate any input.
+
+Return every service exactly once, after its dependencies. At each selection,
+choose the alphabetically smallest currently ready service, including services
+that just became ready. Results must be independent of dictionary insertion and
+dependency-list order. Use an iterative algorithm so long chains do not exhaust
+the Python recursion limit.
+
+`python -m deploy_order MANIFEST` reads a UTF-8 JSON manifest file and prints
+one JSON list plus newline. Success exits 0 with no stderr. Invalid JSON,
+invalid manifests and file/encoding errors exit 2 with a useful diagnostic on
+stderr and nothing on stdout. Preserve the public function and CLI interface.
+""",
+}
+
+_DEPLOY_ORDER_TASK = (
+    "Repair the deployment manifest tool according to README.md. Implement "
+    "deterministic dependency ordering, complete manifest validation and atomic CLI "
+    "error handling. Use only the Python standard library. Before editing, execute "
+    "the exact repository_tools.list Hashmarks command from the supplied instructions. "
+    "Change only deploy_order/graph.py and deploy_order/__main__.py. "
+    "Independent verification runs after your coding Step."
+)
+
+_DEPLOY_ORDER_VERIFICATION = r"""import copy
+import json
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+
+repository = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repository))
+from deploy_order.graph import order_services
+
+
+def cli(path):
+    return subprocess.run(
+        [sys.executable, "-I", "-B", "-c",
+         "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));runpy.run_module('deploy_order',run_name='__main__')",
+         str(repository), str(path)],
+        text=True, capture_output=True, timeout=10,
+    )
+
+
+class DeploymentOrderContract(unittest.TestCase):
+    def test_empty_and_independent_services(self):
+        self.assertEqual(order_services({}), [])
+        self.assertEqual(order_services({"z": [], "a": [], "m": []}), ["a", "m", "z"])
+
+    def test_newly_ready_services_compete_with_existing_ready_services(self):
+        manifest = {"z": [], "b": ["a"], "a": [], "c": ["b"]}
+        self.assertEqual(order_services(manifest), ["a", "b", "c", "z"])
+
+    def test_shared_dependencies_duplicates_permutations_and_nonmutation(self):
+        manifest = {"web": ["cache", "db", "db"], "worker": ["db"],
+                    "db": [], "cache": ["db"]}
+        before = copy.deepcopy(manifest)
+        expected = ["db", "cache", "web", "worker"]
+        self.assertEqual(order_services(manifest), expected)
+        self.assertEqual(manifest, before)
+        reordered = {key: list(reversed(manifest[key])) for key in reversed(manifest)}
+        self.assertEqual(order_services(reordered), expected)
+        self.assertEqual(order_services({"café": [], "api": ["café"]}), ["café", "api"])
+
+    def test_invalid_shapes_and_undeclared_dependencies(self):
+        for manifest in (None, [], "api", {"": []}, {1: []}, {"api": "db"},
+                         {"api": ()}, {"api": None}, {"api": [1]}, {"api": [""]},
+                         {"api": ["missing"]}, {"ok": [], "z": ["absent"]}):
+            with self.subTest(manifest=manifest), self.assertRaises(ValueError):
+                order_services(manifest)
+
+    def test_cycles_including_disconnected_components(self):
+        for manifest in ({"a": ["a"]}, {"a": ["b"], "b": ["a"]},
+                         {"ready": [], "a": ["b"], "b": ["c"], "c": ["a"]}):
+            before = copy.deepcopy(manifest)
+            with self.subTest(manifest=manifest), self.assertRaises(ValueError):
+                order_services(manifest)
+            self.assertEqual(manifest, before)
+
+    def test_chain_beyond_recursion_limit(self):
+        names = [f"service-{index:05}" for index in range(2500)]
+        manifest = {name: [names[index - 1]] if index else []
+                    for index, name in reversed(list(enumerate(names)))}
+        self.assertEqual(order_services(manifest), names)
+
+    def test_cli_utf8_success_and_atomic_failures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "deployment manifest.json"
+            path.write_text(json.dumps({"api": ["café"], "café": []},
+                                       ensure_ascii=False), encoding="utf-8")
+            result = cli(path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, "")
+            self.assertTrue(result.stdout.endswith("\n"))
+            self.assertEqual(json.loads(result.stdout), ["café", "api"])
+            for payload in (b"{broken", b"[]", b'{"ok": [], "bad": ["absent"]}',
+                            b'{"ok": [], "a": ["a"]}', b"\xff"):
+                path.write_bytes(payload)
+                result = cli(path)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertTrue(result.stderr.strip())
+            result = cli(path.with_name("missing.json"))
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, "")
+            self.assertTrue(result.stderr.strip())
+
+
+unittest.main(argv=["live-codex-deployment-order-verification"])
+"""
+
+
 @pytest.mark.certification
-@pytest.mark.parametrize("scenario", ["ranges", "eventlog", "stocktake"])
+@pytest.mark.parametrize("scenario", ["ranges", "eventlog", "stocktake", "deploy-order"])
 def test_legacy_live_chatgpt_coding_uses_original_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -669,6 +812,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         "ranges": {"ranges.py": _BROKEN_SOURCE},
         "eventlog": _EVENTLOG_SOURCES,
         "stocktake": _STOCKTAKE_SOURCES,
+        "deploy-order": _DEPLOY_ORDER_SOURCES,
     }[scenario]
     for relative, text in source_files.items():
         path = repo / relative
@@ -682,6 +826,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             "ranges": _VERIFICATION,
             "eventlog": _EVENTLOG_VERIFICATION,
             "stocktake": _STOCKTAKE_VERIFICATION,
+            "deploy-order": _DEPLOY_ORDER_VERIFICATION,
         }[scenario],
         encoding="utf-8",
     )
@@ -753,6 +898,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         task = _EVENTLOG_TASK
     elif scenario == "stocktake":
         task = _STOCKTAKE_TASK
+    elif scenario == "deploy-order":
+        task = _DEPLOY_ORDER_TASK
     task_file = tmp_path / "task.txt"
     task_file.write_text(task, encoding="utf-8")
     catalog = tmp_path / "providers.json"
@@ -986,6 +1133,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             expected_source,
             {
                 "ranges": {"ranges.py"},
+                "deploy-order": {"deploy_order/graph.py", "deploy_order/__main__.py"},
                 "eventlog": {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"},
                 "stocktake": {
                     "stocktake/rows.py",
