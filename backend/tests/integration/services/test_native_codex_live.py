@@ -796,8 +796,306 @@ unittest.main(argv=["live-codex-deployment-order-verification"])
 """
 
 
+_LEDGER_SOURCES = {
+    "ledger/__init__.py": "",
+    "ledger/records.py": """import json
+
+
+def iter_events(lines):
+    for line in lines:
+        yield json.loads(line)
+""",
+    "ledger/database.py": """import sqlite3
+
+
+def import_events(database, events):
+    connection = sqlite3.connect(database)
+    connection.execute('CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, account TEXT NOT NULL, amount_cents INTEGER NOT NULL)')
+    inserted = 0
+    try:
+        for event in events:
+            connection.execute('INSERT OR REPLACE INTO events VALUES (?, ?, ?)',
+                               (event['id'], event['account'], event['amount_cents']))
+            connection.commit()
+            inserted += 1
+        return inserted
+    finally:
+        connection.close()
+
+
+def totals(database):
+    connection = sqlite3.connect(database)
+    try:
+        return [{'account': row[0], 'total_cents': row[1]}
+                for row in connection.execute('SELECT account, amount_cents FROM events ORDER BY account')]
+    finally:
+        connection.close()
+""",
+    "ledger/__main__.py": """import argparse
+import json
+import sys
+
+from .database import import_events, totals
+from .records import iter_events
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('database')
+    parser.add_argument('input', nargs='?')
+    args = parser.parse_args()
+    stream = open(args.input, encoding='utf-8') if args.input else sys.stdin
+    inserted = import_events(args.database, iter_events(stream))
+    print(json.dumps({'inserted': inserted, 'totals': totals(args.database)}))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
+""",
+    "README.md": """# Persistent ledger import
+
+Repair this Python standard-library package. Native SQLite owns transactions.
+
+`ledger.records.iter_events(lines)` lazily yields dictionaries from NDJSON text.
+Skip blank lines. Each object needs a nonblank string `id`, a nonblank string
+`account`, and an integer `amount_cents` in the signed SQLite 64-bit range.
+Booleans are invalid amounts. Preserve exact IDs/account names, including spaces,
+quotes and Unicode; do not trim them. Invalid JSON/records raise ValueError with
+`line N:` at the start, using physical one-based line numbers. Do not read ahead.
+
+`ledger.database.import_events(database, events)` consumes validated records once
+and returns the number of newly inserted IDs. Use the existing `events` table
+with columns `event_id`, `account`, `amount_cents`. Identical duplicates (same ID,
+account and amount) are no-ops, both within a batch and across persisted imports.
+A repeated ID with a different account or amount raises ValueError. An import is
+one atomic transaction: conflicting duplicates, parser failures or iterator
+exceptions roll back every new row in that batch while preserving prior imports.
+Propagate iterator exceptions. Never overwrite
+an existing event. Close owned database resources on every path.
+
+`ledger.database.totals(database)` returns one dictionary per account, sorted by
+account, with exactly `account` and `total_cents`. Sum all persisted amounts for
+that account, retaining zero totals. Empty ledgers return []. No total in this
+exercise exceeds SQLite's signed integer range.
+
+`python -m ledger DATABASE [INPUT]` imports a UTF-8 NDJSON file or stdin if INPUT
+is omitted. Print exactly one JSON object with `inserted` and `totals`, plus a
+newline; successful imports exit 0 with no stderr. Bad input, conflicting IDs,
+file/encoding errors and SQLite errors exit 2, emit a useful stderr diagnostic
+and no stdout. Preserve line numbers for bad records. Failed imports must leave
+previously committed events unchanged. Close owned input files and connections;
+stdin belongs to the caller. Preserve public APIs; use only the standard library.
+""",
+}
+
+_LEDGER_TASK = (
+    "Repair the persistent SQLite ledger import package according to README.md. "
+    "Fix lazy record validation, atomic imports, exact duplicate handling, aggregate "
+    "totals and CLI success/error behavior. Keep the public APIs and use only the "
+    "Python standard library. Before editing, execute the exact repository_tools.list "
+    "Hashmarks command from the supplied instructions. Change only ledger/records.py, "
+    "ledger/database.py and ledger/__main__.py. Independent verification owns its "
+    "temporary databases and runs after your coding Step."
+)
+
+_LEDGER_VERIFICATION = r"""import copy
+import json
+import pathlib
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import unittest
+from contextlib import closing
+
+repository = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repository))
+from ledger.records import iter_events
+from ledger.database import import_events, totals
+
+
+def event(identifier='one', account='cash', amount=5):
+    return {'id': identifier, 'account': account, 'amount_cents': amount}
+
+
+def ndjson(*events):
+    return ''.join(json.dumps(value, ensure_ascii=False) + '\n' for value in events)
+
+
+def snapshot(database):
+    with closing(sqlite3.connect(database)) as connection:
+        return connection.execute(
+            'SELECT event_id, account, amount_cents FROM events ORDER BY event_id'
+        ).fetchall()
+
+
+def cli(database, *arguments, text=''):
+    return subprocess.run(
+        [sys.executable, '-I', '-B', '-c',
+         "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));runpy.run_module('ledger',run_name='__main__')",
+         str(repository), str(database), *map(str, arguments)],
+        input=text, text=True, capture_output=True, timeout=10,
+    )
+
+
+class LedgerContract(unittest.TestCase):
+    def test_lazy_physical_line_validation(self):
+        consumed = []
+        def lines():
+            for index, line in enumerate(['\n', ndjson(event()), ' \n', '{broken\n']):
+                consumed.append(index)
+                yield line
+        records = iter(iter_events(lines()))
+        self.assertEqual(consumed, [])
+        self.assertEqual(next(records), event())
+        self.assertEqual(consumed, [0, 1])
+        with self.assertRaisesRegex(ValueError, '^line 4:'):
+            next(records)
+        self.assertEqual(list(iter_events(['\n', '  \t\n'])), [])
+
+    def test_record_validation_and_exact_values(self):
+        for invalid in ([], None, {}, event(identifier=''), event(identifier='  '),
+                        event(account=''), event(account='  '),
+                        event(identifier=[]), event(account=3), event(amount=True),
+                        event(amount=False), event(amount=1.5), event(amount='2'),
+                        event(amount=2**63), event(amount=-(2**63)-1)):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, '^line 2:'):
+                list(iter_events(['\n', ndjson(invalid)]))
+        values = [event(' quote\'雪 ', ' café ', -7)]
+        self.assertEqual(list(iter_events([ndjson(*values)])), values)
+
+    def test_persistent_idempotence_totals_and_single_pass_without_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = pathlib.Path(directory) / 'account ledger.sqlite'
+            values = [event('a', 'cash', 8), event('b', 'cash', -8),
+                      event('c', 'café', 13), event('d', 'café', -2), event('c', 'café', 13)]
+            original = copy.deepcopy(values)
+            class Once:
+                used = False
+                def __iter__(self):
+                    if self.used:
+                        raise AssertionError('events must be consumed once')
+                    self.used = True
+                    return iter(values)
+            self.assertEqual(import_events(database, Once()), 4)
+            self.assertEqual(values, original)
+            expected = [('a', 'cash', 8), ('b', 'cash', -8),
+                        ('c', 'café', 13), ('d', 'café', -2)]
+            self.assertEqual(snapshot(database), expected)
+            self.assertEqual(import_events(database, iter(values)), 0)
+            self.assertEqual(snapshot(database), expected)
+            self.assertEqual(totals(database), [
+                {'account': 'café', 'total_cents': 11}, {'account': 'cash', 'total_cents': 0}])
+
+    def test_late_conflict_rolls_back_then_corrected_retry_persists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = pathlib.Path(directory) / 'ledger.sqlite'
+            seed = event('existing', 'cash', 9)
+            self.assertEqual(import_events(database, iter([seed])), 1)
+            before = snapshot(database)
+            for conflict in (event('existing', 'cash', 10), event('existing', 'other', 9)):
+                with self.subTest(conflict=conflict), self.assertRaises(ValueError):
+                    import_events(database, iter([event('new', 'cash', 4), conflict]))
+                self.assertEqual(snapshot(database), before)
+            self.assertEqual(import_events(database, iter([event('new', 'cash', 4), seed])), 1)
+            self.assertEqual(snapshot(database), [('existing', 'cash', 9), ('new', 'cash', 4)])
+            before = snapshot(database)
+            with self.assertRaises(ValueError):
+                import_events(database, iter([event('fresh'), event('fresh', amount=6)]))
+            self.assertEqual(snapshot(database), before)
+
+    def test_parser_and_iterator_failures_are_atomic_without_intermediate_commits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = pathlib.Path(directory) / 'ledger.sqlite'
+            self.assertEqual(import_events(database, iter([event('seed')])), 1)
+            before = snapshot(database)
+            records = iter_events([ndjson(event('pending')), '\n', '{bad\n'])
+            with self.assertRaisesRegex(ValueError, '^line 3:'):
+                import_events(database, records)
+            self.assertEqual(snapshot(database), before)
+            def interrupted():
+                yield event('pending')
+                self.assertEqual(snapshot(database), before)
+                raise RuntimeError('input interrupted')
+            with self.assertRaisesRegex(RuntimeError, 'input interrupted'):
+                import_events(database, interrupted())
+            self.assertEqual(snapshot(database), before)
+            self.assertEqual(import_events(database, iter([event('pending')])), 1)
+
+    def test_empty_and_signed_integer_boundaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = pathlib.Path(directory) / 'ledger.sqlite'
+            self.assertEqual(import_events(database, iter(())), 0)
+            self.assertEqual(totals(database), [])
+            values = [event('min', 'negative', -(2**63)), event('max', 'positive', 2**63-1)]
+            self.assertEqual(import_events(database, iter_events(ndjson(*values).splitlines(keepends=True))), 2)
+            self.assertEqual(snapshot(database), [('max', 'positive', 2**63-1),
+                                                   ('min', 'negative', -(2**63))])
+            self.assertEqual(totals(database), [
+                {'account': 'negative', 'total_cents': -(2**63)},
+                {'account': 'positive', 'total_cents': 2**63-1}])
+            self.assertEqual(import_events(database, iter([
+                event('large', 'exact', 2**60+3), event('adjustment', 'exact', -1)])), 2)
+            self.assertEqual(totals(database), [
+                {'account': 'exact', 'total_cents': 2**60+2},
+                {'account': 'negative', 'total_cents': -(2**63)},
+                {'account': 'positive', 'total_cents': 2**63-1}])
+
+    def test_cli_file_stdin_persistence_and_atomic_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = pathlib.Path(directory) / 'café ledger.sqlite'
+            source = pathlib.Path(directory) / 'quoted input.ndjson'
+            values = [event("invoice'雪", 'cash', 7), event('two', 'cash', -2)]
+            source.write_text(ndjson(*values), encoding='utf-8')
+            result = cli(database, source)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, '')
+            self.assertTrue(result.stdout.endswith('\n'))
+            self.assertEqual(json.loads(result.stdout),
+                             {'inserted': 2, 'totals': [{'account': 'cash', 'total_cents': 5}]})
+            result = cli(database, text=ndjson(*values, event('three', 'bank', 4)))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout),
+                             {'inserted': 1, 'totals': [{'account': 'bank', 'total_cents': 4},
+                                                       {'account': 'cash', 'total_cents': 5}]})
+            before = snapshot(database)
+            for payload, line_number in (
+                (ndjson(event('pending')) + '\n{bad\n', 3),
+                (ndjson(event('pending'), event('two', amount=99)), None),
+                (ndjson(event('pending')) + '\n' + ndjson(event('bad', amount=True)), 3),
+            ):
+                result = cli(database, text=payload)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, '')
+                self.assertTrue(result.stderr.strip())
+                if line_number is not None:
+                    self.assertIn(f'line {line_number}:', result.stderr)
+                self.assertEqual(snapshot(database), before)
+            for payload in (b'\xff', b'{bad\n'):
+                source.write_bytes(payload)
+                result = cli(database, source)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, '')
+                self.assertTrue(result.stderr.strip())
+                self.assertEqual(snapshot(database), before)
+            result = cli(database, source.with_name('missing.ndjson'))
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, '')
+            self.assertTrue(result.stderr.strip())
+            self.assertEqual(snapshot(database), before)
+            result = cli(pathlib.Path(directory))
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, '')
+            self.assertTrue(result.stderr.strip())
+
+
+unittest.main(argv=['live-codex-sqlite-ledger-verification'])
+"""
+
+
 @pytest.mark.certification
-@pytest.mark.parametrize("scenario", ["ranges", "eventlog", "stocktake", "deploy-order"])
+@pytest.mark.parametrize("scenario", ["ranges", "eventlog", "stocktake", "deploy-order", "ledger"])
 def test_legacy_live_chatgpt_coding_uses_original_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -819,6 +1117,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         "eventlog": _EVENTLOG_SOURCES,
         "stocktake": _STOCKTAKE_SOURCES,
         "deploy-order": _DEPLOY_ORDER_SOURCES,
+        "ledger": _LEDGER_SOURCES,
     }[scenario]
     for relative, text in source_files.items():
         path = repo / relative
@@ -833,6 +1132,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             "eventlog": _EVENTLOG_VERIFICATION,
             "stocktake": _STOCKTAKE_VERIFICATION,
             "deploy-order": _DEPLOY_ORDER_VERIFICATION,
+            "ledger": _LEDGER_VERIFICATION,
         }[scenario],
         encoding="utf-8",
     )
@@ -906,6 +1206,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         task = _STOCKTAKE_TASK
     elif scenario == "deploy-order":
         task = _DEPLOY_ORDER_TASK
+    elif scenario == "ledger":
+        task = _LEDGER_TASK
     task_file = tmp_path / "task.txt"
     task_file.write_text(task, encoding="utf-8")
     catalog = tmp_path / "providers.json"
@@ -1120,6 +1422,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     )
 
     def assert_source_edits(before: dict[str, bytes], allowed: set[str]) -> dict[str, bytes]:
+        assert stat.S_ISDIR(repo.lstat().st_mode)
         actual_paths = {
             path.relative_to(repo).as_posix()
             for path in repo.rglob("*")
@@ -1127,6 +1430,10 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             and (path.is_symlink() or path.is_file())
         }
         assert actual_paths == set(before)
+        for relative in before:
+            path = repo / relative
+            assert stat.S_ISREG(path.lstat().st_mode)
+            assert all(not parent.is_symlink() for parent in path.parents if repo in parent.parents)
         after = {relative: (repo / relative).read_bytes() for relative in before}
         changed = {relative for relative in before if before[relative] != after[relative]}
         assert changed
@@ -1173,6 +1480,11 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             [GameTapeStatus.FAILED.value] if scenario == "eventlog" else []
         )
         assert [tuple(step["command"]) for step in steps[1:]] == list(verifications)
+        assert all(
+            len(step["attempts"]) == 1
+            and step["attempts"][0]["supervisor"]["final_process_group_quiescent"] is True
+            for step in steps
+        )
         native = steps[0]["native_agent_observations"][0]
         observation = (
             native["settled"],
@@ -1190,6 +1502,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             expected_source,
             {
                 "ranges": {"ranges.py"},
+                "ledger": {"ledger/records.py", "ledger/database.py", "ledger/__main__.py"},
                 "deploy-order": {"deploy_order/graph.py", "deploy_order/__main__.py"},
                 "eventlog": {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"},
                 "stocktake": {
@@ -1227,6 +1540,11 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             steps = detail["game_tape"]["repositories"][0]["steps"]
             assert [step["status"] for step in steps] == [GameTapeStatus.PASSED.value] * 4
             assert [tuple(step["command"]) for step in steps[1:]] == list(verifications)
+            assert all(
+                len(step["attempts"]) == 1
+                and step["attempts"][0]["supervisor"]["final_process_group_quiescent"] is True
+                for step in steps
+            )
             assert steps[0]["native_agent_observations"][0]["occurrence"] == native_occurrences[1]
             assert_source_edits(expected_source, {"eventlog/summary.py", "eventlog/__main__.py"})
             assert feature_verifier.read_bytes() == feature_verifier_bytes

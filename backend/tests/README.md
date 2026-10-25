@@ -255,6 +255,13 @@ revision-bound source evidence against the frozen broken implementation.
 The live cases require the exact supplied list command and its admitted paths and
 discovery qualifications; an envelope alone cannot satisfy the follow-up check.
 
+The ledger case repairs a persistent SQLite import CLI. Independent connections
+check duplicate-ID idempotence, exact integer totals, late-conflict/parser/iterator
+rollback, corrected retries and persistence across native CLI processes. Verifier
+databases stay outside source. Select `-k ledger` for this case. All live cases
+check original supervisor quiescence and require edited source members to remain
+regular files without symlinked parents.
+
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \
 OH_GOON_LIVE_CODEX_HOME=/path/to/existing/.codex \
