@@ -260,7 +260,14 @@ check duplicate-ID idempotence, exact integer totals, late-conflict/parser/itera
 rollback, corrected retries and persistence across native CLI processes. Verifier
 databases stay outside source. Select `-k ledger` for this case. All live cases
 check original supervisor quiescence and require edited source members to remain
-regular files without symlinked parents.
+single-link regular files without symlinked parents, matching normal source admission.
+
+The safe-ZIP case repairs a bundle extraction CLI. Independent verification checks
+binary/Unicode contents, archive member names/types, duplicate and prefix conflicts,
+uncompressed byte limits, and late policy/CRC failures before destination effects.
+Archives and destinations are verifier-owned temporary data. Select `-k safe-zip`;
+concurrent destination custody remains outside this ordinary coding task. Its
+workspace name contains a literal dot to exercise native project-key transport.
 
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \

@@ -63,10 +63,11 @@ def test_codex_login_binds_native_model_instructions_and_tool_permissions(
     )
     prompt = tmp_path / "PRIVATE-prompt-🧪.txt"
     prompt.write_text("PRIVATE evidence and Skill")
+    workspace = tmp_path / 'repo.with "quotes"'
     command = codex_login_command(
         selected,
         instructions=prompt,
-        workspace=tmp_path / "repo",
+        workspace=workspace,
         scratch=tmp_path / "scratch",
         evidence_state=tmp_path / "producer-state",
         read_roots=(capture,),
@@ -79,11 +80,19 @@ def test_codex_login_binds_native_model_instructions_and_tool_permissions(
     assert settings["model_reasoning_effort"] == "low"
     assert settings["model_instructions_file"] == str(prompt)
     assert settings["approval_policy"] == "never"
+    project_assignments = [
+        command.argv[index + 1]
+        for index, argument in enumerate(command.argv[:-1])
+        if argument == "-c" and command.argv[index + 1].lstrip().startswith("projects")
+    ]
+    assert len(project_assignments) == 1
+    assert project_assignments[0].partition("=")[0].strip() == "projects"
+    assert settings["projects"] == {str(workspace): {"trust_level": "untrusted"}}
     permissions = settings["permissions"]
     assert isinstance(permissions, dict)
     assert permissions["oh_goon"]["network"]["enabled"] is False
     filesystem = permissions["oh_goon"]["filesystem"]
-    assert filesystem[str(tmp_path / "repo")] == "write"
+    assert filesystem[str(workspace)] == "write"
     assert filesystem[str(capture)] == "read"
     assert filesystem[str(tmp_path / "producer-state")] == "write"
     assert str(home) not in filesystem and ":root" not in filesystem
