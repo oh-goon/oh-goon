@@ -9,16 +9,13 @@ if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
     from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
-from oh_goon.api.local_access import ensure_local_access_token
 from oh_goon.application import ApplicationRuntime
-from oh_goon.cli_developer import run_state_free_developer_command
 from oh_goon.cli_enforcer import run_enforcer_compare_command
 from oh_goon.cli_local_state import check_local_state_for_startup, run_local_state_command
 from oh_goon.cli_logs import run_logs_command
 from oh_goon.cli_open import run_open_command
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime import run_stateful_command
-from oh_goon.cli_self import run_self_command
 from oh_goon.cli_start import run_start_command
 from oh_goon.cli_status import run_status_command
 from oh_goon.cli_stop import run_stop_command
@@ -113,13 +110,25 @@ def _run_pre_runtime_command(args: argparse.Namespace) -> int | None:
         return result
     if args.command == "serve":
         return _run_serve_command(args)
-    return _first_command_result(
-        args,
-        (run_self_command, run_enforcer_compare_command, run_state_free_developer_command),
-    )
+    if args.command in {"self", "dev"}:
+        from oh_goon.cli_self import run_self_command
+
+        result = run_self_command(args)
+        if result is not None:
+            return result
+    result = run_enforcer_compare_command(args)
+    if result is not None:
+        return result
+    if args.command == "dev":
+        from oh_goon.cli_developer import run_state_free_developer_command
+
+        return run_state_free_developer_command(args)
+    return None
 
 
 def _run_serve_command(args: argparse.Namespace) -> int:
+    from oh_goon.api.local_access import ensure_local_access_token
+
     if check_local_state_for_startup() != 0:
         return 2
     token = ensure_local_access_token()
