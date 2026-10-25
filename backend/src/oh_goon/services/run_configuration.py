@@ -7,6 +7,7 @@ import stat
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import ValidationError
@@ -15,12 +16,15 @@ from yaml.tokens import AliasToken, AnchorToken, TagToken
 from oh_goon.core.errors import FleetPlanInvalid, RunConfigurationInvalid
 from oh_goon.core.models.caller_input_file import CallerInputFileIdentity
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
+from oh_goon.core.models.git_sources import LockedGoonSource
 from oh_goon.core.models.repository import RepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.models.run_configuration import (
     CatalogPlanSelection,
     FilePlanSelection,
+    GitPlanSelection,
     RunConfiguration,
 )
+from oh_goon.core.path_authority import ContainedPathSpace
 from oh_goon.core.vocabulary import FleetScope
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.runtime.template_discovery import template_package
@@ -30,6 +34,10 @@ from oh_goon.services.fleet_caller_file_freshness import (
     require_caller_file_fresh,
     stat_caller_file,
 )
+
+if TYPE_CHECKING:
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+    from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
 
 
 class _RunYamlLoader(yaml.SafeLoader):
@@ -132,8 +140,13 @@ class RunConfigurationSnapshot:
         repository_path: Path | None = None,
         *,
         plan_templates: PlanTemplateStore | None = None,
+        acquired_plan: Path | None = None,
     ) -> Path:
         source = self.selection.source
+        if isinstance(source, GitPlanSelection):
+            if acquired_plan is None:
+                raise FleetPlanInvalid("Git Plan source requires explicit acquisition with lock")
+            return acquired_plan
         if isinstance(source, CatalogPlanSelection):
             store = plan_templates or PlanTemplateStore()
             _, directory = template_package(
@@ -238,7 +251,7 @@ def load_run_configuration(path: Path) -> RunConfigurationSnapshot:
             ".".join(
                 str(part)
                 for part in error["loc"]
-                if part not in {"catalog-plan", "file-plan", "repository-goon"}
+                if part not in {"catalog-plan", "file-plan", "repository-goon", "git-plan"}
             )
             for error in exc.errors(include_input=False, include_url=False)
         )
@@ -269,13 +282,10 @@ def load_run_configuration(path: Path) -> RunConfigurationSnapshot:
     return RunConfigurationSnapshot(selection, data, identity)
 
 
-def normalize_run_configuration(
+def _configuration_repository(
     snapshot: RunConfigurationSnapshot,
     repositories: Iterable[RepositoryIdentity | RepositoryCatalogEntry],
-    *,
-    plan_templates: PlanTemplateStore | None = None,
-) -> NormalizedRunConfiguration:
-    """Select an explicit registered target; discovery and execution remain original owners."""
+) -> RepositoryIdentity:
     matches = []
     for entry in repositories:
         if isinstance(entry, RepositoryIdentity):
@@ -305,5 +315,107 @@ def normalize_run_configuration(
                 diagnostic_code="CONFIG_SCHEMA_INVALID",
                 fields=("repair.write_roots",),
             ) from exc
-    source = snapshot.source_path(repository.path, plan_templates=plan_templates)
+    return repository
+
+
+def normalize_run_configuration(
+    snapshot: RunConfigurationSnapshot,
+    repositories: Iterable[RepositoryIdentity | RepositoryCatalogEntry],
+    *,
+    plan_templates: PlanTemplateStore | None = None,
+    acquired_plan: Path | None = None,
+) -> NormalizedRunConfiguration:
+    """Select an explicit registered target; discovery and execution remain original owners."""
+    repository = _configuration_repository(snapshot, repositories)
+    source = snapshot.source_path(
+        repository.path, plan_templates=plan_templates, acquired_plan=acquired_plan
+    )
     return NormalizedRunConfiguration(snapshot, repository, source)
+
+
+def capture_run_configuration_source(
+    snapshot: RunConfigurationSnapshot,
+    repositories: Iterable[RepositoryIdentity | RepositoryCatalogEntry],
+    resolver: FleetPlanResolver,
+    *,
+    acquire: bool = False,
+    allow_network: bool = False,
+    update: bool = False,
+) -> tuple[NormalizedRunConfiguration, FleetPlanSourceGraph]:
+    """Acquire only explicitly, then capture one original source graph before closing Git."""
+    from oh_goon.core.execution_lock_identity import verify_execution_lock
+    from oh_goon.integrations.git_source_preparation import prepare_git_source
+    from oh_goon.services.execution_lock_persistence import parse_execution_lock
+
+    repository = _configuration_repository(snapshot, repositories)
+    locked: tuple[LockedGoonSource, ...] | None = ()
+    if snapshot.lock_path.exists() or snapshot.lock_path.is_symlink():
+        try:
+            lock_path, _ = locate_caller_file(snapshot.lock_path, root=snapshot.root)
+            lock_bytes = read_caller_file_bytes(lock_path, expected=stat_caller_file(lock_path))
+            lock = parse_execution_lock(lock_bytes.decode("utf-8"))
+            verify_execution_lock(lock, lock)
+            locked = lock.goon_sources
+        except (FleetPlanInvalid, OSError, UnicodeError, ValueError):
+            if acquire or allow_network:
+                raise FleetPlanInvalid(
+                    "Existing goon.lock is unavailable or invalid; restore its source pins before locking"
+                ) from None
+            locked = None
+    selection = snapshot.selection.source
+    if isinstance(selection, GitPlanSelection):
+        if locked is None:
+            raise FleetPlanInvalid(
+                "Existing goon.lock is unavailable or invalid; restore its source pins before acquisition"
+            )
+        frozen = next(
+            (
+                item
+                for item in locked
+                if item.kind == "plan"
+                and (item.git, item.ref, item.path, item.plan)
+                == (selection.git, selection.ref, selection.path, selection.plan)
+            ),
+            None,
+        )
+        if frozen is None and not acquire:
+            raise FleetPlanInvalid("Git Plan requires explicit acquisition with lock")
+        with prepare_git_source(
+            selection.git,
+            selection.ref,
+            commit=frozen.commit if frozen is not None and not update else None,
+            allow_network=allow_network,
+        ) as (checkout, commit):
+            root = ContainedPathSpace.from_root(checkout).resolve_from(
+                checkout,
+                selection.path,
+                label="Git example authoring root",
+                kind="directory",
+                require_exists=True,
+            )
+            plan = ContainedPathSpace.from_root(root).resolve_from(
+                root, selection.plan, label="Git example Plan", kind="file", require_exists=True
+            )
+            if plan.name == "goon.yml":
+                raise FleetPlanInvalid("Git Plan selection must name a Plan, not a Goon")
+            provenance = LockedGoonSource(
+                **selection.model_dump(exclude={"kind"}), kind="plan", commit=commit
+            )
+            graph = resolver.analyze_source(
+                plan,
+                containment_root=root,
+                plan_source=provenance,
+                locked_goons=locked,
+                acquire_goons=acquire,
+                update_goons=update,
+                allow_source_network=allow_network,
+            )
+            return NormalizedRunConfiguration(snapshot, repository, plan), graph
+    plan = snapshot.source_path(repository.path)
+    return NormalizedRunConfiguration(snapshot, repository, plan), resolver.analyze_source(
+        plan,
+        locked_goons=locked,
+        acquire_goons=acquire,
+        update_goons=update,
+        allow_source_network=allow_network,
+    )

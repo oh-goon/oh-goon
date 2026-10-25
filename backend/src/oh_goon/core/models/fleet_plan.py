@@ -4,7 +4,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import Field, TypeAdapter, field_validator, model_validator
+from pydantic import Field, PrivateAttr, TypeAdapter, field_validator, model_validator
 
 from oh_goon.core.fleet_plan_validation import validate_resolved_plan
 from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
@@ -126,6 +126,7 @@ from oh_goon.core.models.fleet_plan_resources import (
 from oh_goon.core.models.fleet_plan_resources import (
     ManagedToolRuntime as ManagedToolRuntime,
 )
+from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
 from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepCache as PlanStepCache,
 )
@@ -196,6 +197,7 @@ from oh_goon.core.models.fleet_plan_values import (
 from oh_goon.core.models.fleet_plan_values import (
     ResolvedEnvironmentBinding as ResolvedEnvironmentBinding,
 )
+from oh_goon.core.models.git_sources import GoonGitSource, LockedGoonSource
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
@@ -214,8 +216,12 @@ class UvExecutionEnvironment(ImmutableModel):
     """
 
     project: str = Field(default=".", min_length=1, max_length=240)
-    group: str = Field(
-        pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|\$\{\{\s*inputs\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\})$"
+    source: Literal["repository", "package"] = Field(
+        default="repository", exclude_if=lambda value: value == "repository"
+    )
+    group: str | None = Field(
+        default=None,
+        pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|\$\{\{\s*inputs\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\})$",
     )
 
     @field_validator("project")
@@ -399,6 +405,7 @@ class CompiledGoonImportStep(ImmutableModel):
     kind: Literal["goon"] = "goon"
     phase: Literal["review", "adjudicate", "repair", "regression", "verification"] | None = None
     source_root: str | None = Field(default=None, min_length=1, max_length=240)
+    git_source: GoonGitSource | None = None
 
     @field_validator("source_root")
     @classmethod
@@ -425,6 +432,8 @@ class CompiledGoonImportStep(ImmutableModel):
 
     @model_validator(mode="after")
     def validate_input_names(self) -> CompiledGoonImportStep:
+        if self.source_root is not None and self.git_source is not None:
+            raise ValueError("Select one explicit Goon source")
         names = [item.name for item in self.inputs]
         if len(names) != len(set(names)):
             raise ValueError("Compiled Goon input bindings must be unique")
@@ -459,6 +468,7 @@ class CompiledExecutionTemplate(ImmutableModel):
 
     version: Literal[1] = 1
     authoring_kind: Literal["plan", "goon"] = "goon"
+    runtime: Literal["python"] | None = None
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
     execution: PlanExecutionPolicy | None = None
@@ -500,15 +510,26 @@ class CompiledExecutionTemplate(ImmutableModel):
 
 
 class ResolvedCommandStep(CommandPlanStep):
+    project_source: PythonGoonProject | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     environment: tuple[ResolvedEnvironmentBinding, ...] = Field(
         default_factory=tuple, max_length=64
     )
 
     @model_validator(mode="after")
     def validate_uv_selection(self) -> ResolvedCommandStep:
+        package = self.uv is not None and self.uv.source == "package"
+        if package != (self.project_source is not None):
+            raise ValueError("Package execution requires the exact captured Python Goon source")
+        if package and self.uv is not None and self.uv.project != ".":
+            raise ValueError("Python Goon runtime selects its package root")
         if self.uv is not None and (
             "${{" in self.uv.project
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", self.uv.group) is None
+            or (
+                self.uv.group is not None
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", self.uv.group) is None
+            )
         ):
             raise ValueError("Resolved uv project and dependency group must be concrete")
         return self
@@ -794,6 +815,7 @@ class ResolvedFleetPlan(ImmutableModel):
     """Fully bound immutable execution plan.  Runtime never re-reads YAML/TOML."""
 
     contract_version: Literal[45] = FLEET_PLAN_CONTRACT_VERSION
+    _project_archives: dict[str, bytes] = PrivateAttr(default_factory=dict)
 
     @field_validator("contract_version", mode="before")
     @classmethod
@@ -822,6 +844,9 @@ class ResolvedFleetPlan(ImmutableModel):
     skill_sources: tuple[LockedSkillSource, ...] = Field(
         default_factory=tuple, max_length=128, exclude_if=lambda value: not value
     )
+    goon_sources: tuple[LockedGoonSource, ...] = Field(
+        default=(), max_length=128, exclude_if=lambda value: not value
+    )
 
     @classmethod
     def create(
@@ -835,6 +860,7 @@ class ResolvedFleetPlan(ImmutableModel):
         imports: tuple[ResolvedImport, ...] = (),
         step_sources: tuple[ResolvedStepSource, ...] = (),
         skill_sources: tuple[LockedSkillSource, ...] = (),
+        goon_sources: tuple[LockedGoonSource, ...] = (),
         configuration: PlanConfigurationEvidence | None = None,
         native_agent: ResolvedNativeAgent | None = None,
     ) -> ResolvedFleetPlan:
@@ -860,6 +886,11 @@ class ResolvedFleetPlan(ImmutableModel):
                 if skill_sources
                 else {}
             ),
+            **(
+                {"goon_sources": [item.model_dump(mode="json") for item in goon_sources]}
+                if goon_sources
+                else {}
+            ),
         }
         return cls(
             plan_id=stable_id("fleet-plan", payload),
@@ -871,6 +902,7 @@ class ResolvedFleetPlan(ImmutableModel):
             steps=steps,
             step_sources=step_sources,
             skill_sources=skill_sources,
+            goon_sources=goon_sources,
             configuration=configuration,
             native_agent=native_agent,
         )

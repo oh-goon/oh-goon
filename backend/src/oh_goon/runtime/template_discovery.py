@@ -74,7 +74,10 @@ def template_package(
 def validate_template_package(directory: Path, *, source_name: str, kind: str) -> Path:
     expected = {source_name, "README.md"}
     entries = {entry.name for entry in authored_source_entries(directory)}
-    if entries != expected:
+    python_project = source_name == "goon.yml" and "pyproject.toml" in entries
+    if python_project:
+        expected |= {"pyproject.toml", "uv.lock"}
+    if not expected <= entries or (not python_project and entries != expected):
         missing = sorted(expected - entries)
         extra = sorted(entries - expected)
         details: list[str] = []

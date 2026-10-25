@@ -8,7 +8,7 @@ Canonical ownership stays deliberately narrow:
 - `plan.yml` = human-authored intent; selects and orders Goons.
 - `goon.yml` = human-authored executable behavior; owns composition, Steps, inputs and requirements.
 - resolver = the one canonical interpretation of Plan/Goon execution semantics.
-- `goon.lock` = compact frozen execution fingerprint and exact remote Skill source commits.
+- `goon.lock` = compact frozen execution fingerprint and exact remote Goon/Plan and Skill source commits.
 - ecosystem dependency authority remains external to `goon.lock`: for Oh-Goon Python, `backend/pyproject.toml` owns intent and committed `backend/uv.lock` is native uv's exact resolution authority; `frontend/package-lock.json`, `Cargo.lock`, `go.sum`, etc. remain owned by their ecosystems according to each repository's policy.
 - Enforcer/admission = authorization and policy.
 - executor = executes the exact already-verified resolved identity.
@@ -16,7 +16,7 @@ Canonical ownership stays deliberately narrow:
 
 ## Minimal format
 
-The generated file contains only lock format version, resolved Plan/root digest, ordered top-level Goon reference/digest pairs, optional explicitly relevant external artifact path/digest pairs, optional remote Skill source pins, and the overall digest.
+The generated file contains only lock format version, resolved Plan/root digest, ordered top-level Goon reference/digest pairs, optional explicitly relevant external artifact path/digest pairs, optional remote Goon/Plan and Skill source pins, and the overall digest.
 
 It never contains Step definitions, commands, complete composition trees, resolved inputs, requirements, provenance trees, dependency inventories, lockfile contents, logs, outputs, runtime observations, repository targets, run IDs or timestamps.
 
@@ -28,9 +28,15 @@ One canonical JSON representation with stable dictionary ordering is used for ev
 
 An Atomic Goon digest covers its resolved execution-affecting Step semantics and requirements. A Composite Goon digest covers its resolved ordered child composition, transitive execution-affecting Step semantics and requirements. These structures exist only while hashing and are never copied into the lock file.
 
+For `runtime: python`, Step semantics include the captured complete-project
+identity and selected dependency group. Implementation, resources,
+`pyproject.toml` and native `uv.lock` therefore participate in freshness, while
+generated environments, caches and declared output locations do not. This is
+distinct from catalog `sha256`, which continues to describe YAML bytes only.
+
 The Plan/root digest covers root-owned execution policy and executable semantics plus the ordered selected top-level Goon references. Repository-root `goon.yml` is supported as an execution root without inventing a fake Goon reference.
 
-The overall digest covers the lock version, Plan/root digest, ordered Goon reference/digest pairs, ordered external artifact path/digest pairs, and declared remote Skill pins.
+The overall digest covers the lock version, Plan/root digest, ordered Goon reference/digest pairs, ordered external artifact path/digest pairs, and declared remote Goon/Plan and Skill pins.
 
 ## External artifacts
 
@@ -57,6 +63,32 @@ runs and lock regeneration retain pins. `oh-goon lock run.yml --update-skills` e
 resolves selectors again and atomically writes a new lock after successful capture.
 Changed declarations require that explicit update. No cache miss can select a
 new branch head. See [Agent Skills](AGENT_SKILLS.md) for the configuration.
+
+## Remote Goons and complete examples
+
+A Git import's `from: {git: URL, ref: REF, path: exact/category/name}` selects
+one package. A `run.yml` source with `kind: git-plan` additionally names its
+authoring root in `path` and exact contained Plan in `plan`. `goon_sources`
+records `kind`, `git`, requested `ref`, selected `path`, resolved `commit` and,
+for a complete example, `plan`. Native Git acquisition is shared with Skill
+sources; it does not make Goons into Skills or change their execution lifecycle.
+
+The first `lock` explicitly acquires source. Subsequent locking and execution
+retain its commit, even when a branch/tag moves or the disposable cache is lost.
+Cache recovery may acquire that exact commit; unavailable content refuses and
+never advances the pin. `oh-goon lock run.yml --update-goons` is the explicit
+refresh action. `--update-skills` refreshes Skill sources independently.
+
+Inspection/validation are cached-only and report acquisition-required source
+without fetching. Acquisition captures source without executing project code,
+installing dependencies or initializing submodules. The receiver consumes the
+captured package rather than reopening an author checkout or refetching a ref.
+Native Git inspects indexed attributes before materializing source. A selected
+configured smudge/process filter or required filter refuses acquisition; Oh-Goon
+does not execute it or substitute unfiltered source. Unrelated native filters,
+credentials and configuration remain available to their original Git owner.
+Acquisition disables hooks and filesystem-monitor callbacks for its native Git
+commands without replacing the caller's credential or connection configuration.
 
 ## Runtime invariant
 

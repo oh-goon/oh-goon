@@ -22,11 +22,11 @@ COPY backend/pyproject.toml backend/uv.lock backend/
 ENV UV_PYTHON=/usr/bin/python3.12 UV_PYTHON_DOWNLOADS=never SOURCE_DATE_EPOCH=1580601600
 RUN uv sync --locked --project backend --group dev --group quality --group build --no-install-project --no-python-downloads
 COPY backend/src backend/src
+COPY backend/hatch_build.py backend/hatch_build.py
 COPY templates templates
 COPY --from=frontend-build /src/frontend/dist generated/release/static
-RUN cd backend && uv build --wheel --no-build-isolation --no-sources --no-python-downloads --out-dir ../generated/release/dist
 RUN uv sync --locked --project backend --group dev --group quality --group build --no-python-downloads \
-    && backend/.venv/bin/oh-goon-release-artifact-check
+    && uv run --project backend --offline --frozen --no-sync oh-goon-release-wheel-build
 RUN uv export --project backend --frozen --no-dev --no-emit-project --format requirements.txt \
     --no-annotate --no-header --output-file generated/release/runtime-requirements.txt
 

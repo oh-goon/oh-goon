@@ -1,14 +1,15 @@
 [project]
-name = "oh-goon-examples"
+name = "iris-train"
 version = "0.1.0"
+readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["scikit-learn>=1.6,<2"]
 
 [project.scripts]
-iris-train = "oh_goon_examples.iris:main"
+iris-train = "iris_train.cli:main"
 
 [dependency-groups]
-ml = ["scikit-learn>=1.6,<2"]
+dev = ["pytest>=8", "ruff"]
 
 [build-system]
 requires = ["uv_build>=0.10.0,<0.11.0"]

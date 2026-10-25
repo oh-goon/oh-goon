@@ -52,6 +52,7 @@ from oh_goon.core.models.fleet_plan_execution_policy import (
 from oh_goon.core.models.fleet_plan_isolation import (
     CicdResourcePolicy,
 )
+from oh_goon.core.models.fleet_plan_requirements import UvProjectRequirement
 from oh_goon.core.models.fleet_plan_retry import ExitCodeNotDeclaredPlanRetryDecisionEvidence
 from oh_goon.core.models.fleet_plan_tool_authority import PlanHostToolAuthorityEvidence
 from oh_goon.core.models.goon_plan_source import PlanFileSource, SharedPlanSource, TeamGoonSource
@@ -87,7 +88,7 @@ def _output() -> PlanOutputEvidence:
     return PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
 
 
-def _detail(tmp_path: Path, *, native: bool = False) -> FleetRunDetail:
+def _detail(tmp_path: Path, *, native: bool = False, uv_base: bool = False) -> FleetRunDetail:
     repository = tmp_path / "repo"
     repository.mkdir()
     native_agent = None
@@ -112,6 +113,7 @@ def _detail(tmp_path: Path, *, native: bool = False) -> FleetRunDetail:
             handoff_identity="handoff",
             source_step_id="tests",
         )
+    requirements = (UvProjectRequirement(),) if uv_base else ()
     plan = ResolvedFleetPlan.create(
         name="quality",
         description="",
@@ -119,7 +121,7 @@ def _detail(tmp_path: Path, *, native: bool = False) -> FleetRunDetail:
             trust_repository_code=True,
             resources=CicdResourcePolicy(cpu_millis=1000, memory_mib=512, max_processes=64),
         ),
-        requirements=(),
+        requirements=requirements,
         imports=(
             ResolvedImport(
                 import_id="quality",
@@ -127,7 +129,7 @@ def _detail(tmp_path: Path, *, native: bool = False) -> FleetRunDetail:
                 name="python/quality",
                 source_sha256="0" * 64,
                 step_ids=("tests",),
-                requirements=(),
+                requirements=requirements,
             ),
         ),
         steps=(planned,),
@@ -300,6 +302,15 @@ def test_historical_native_receipt_keeps_selected_label_and_launcher_evidence_pa
     assert tool is not None and tool.name == "python" and tool.sha256 == "a" * 64
     assert "/private/native" not in rendered
     assert "required_tool: custom-pi" in rendered
+
+
+def test_base_only_native_uv_requirement_remains_readable_in_retained_receipt(
+    tmp_path: Path,
+) -> None:
+    receipt = enforcer_run_receipt(_detail(tmp_path, uv_base=True))
+    assert receipt.plan.requirements[0].detail == "base dependencies"
+    assert receipt.plan.imports[0].requirements[0].detail == "base dependencies"
+    assert "base dependencies" in render_enforcer_yaml(receipt)
 
 
 def test_enforcer_yaml_is_deterministic_and_excludes_sensitive_runtime_values(

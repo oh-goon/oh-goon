@@ -9,8 +9,8 @@ from oh_goon.core.game_tape_policy import (
     GAME_TAPE_TERMINAL_RETENTION_SECONDS,
 )
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.integrations.agent_skill_sources import skill_source_cache
 from oh_goon.integrations.fleet_content_store import FleetContentStore
+from oh_goon.integrations.git_source_preparation import git_source_cache
 from oh_goon.runtime.database import DATABASE_SCHEMA_VERSION, database_path_for_environment
 from oh_goon.runtime.diagnostics import (
     DEFAULT_DIAGNOSTIC_LOG_BACKUPS,
@@ -123,8 +123,8 @@ def storage_inventory(environment: dict[str, str] | None = None) -> tuple[Storag
         (
             StorageClass(
                 "skills.git-sources",
-                skill_source_cache(env),
-                "native Git Skill source preparation",
+                git_source_cache(env),
+                "shared native Git Goon and Skill source preparation",
                 "replaceable-source-cache",
                 "commits retained by native Git refs; temporary worktrees close after capture",
                 "native Git maintenance; explicit reset only while no worktrees are active",

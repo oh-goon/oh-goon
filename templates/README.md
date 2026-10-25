@@ -42,7 +42,7 @@ oh-goon lock ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 
-Inspection is local and read-only. Validation uses the canonical compiler/input binder; it does not prove installed tools or successful execution. Lock freezes the selected source/inputs and captured Skill identity. Run uses fresh original admission and waits for completion. Changing an identity-bearing selection requires a fresh lock.
+Inspection is local and read-only. Validation uses the canonical compiler/input binder; it does not prove installed tools or successful execution. Lock freezes the selected source/inputs and captured Goon/Plan and Skill identities. Run uses fresh original admission and waits for completion. Changing an identity-bearing selection requires a fresh lock.
 
 Ordinary verification uses the trusted local path. Explicit CI/CD templates retain their declared strict executor and content-store requirements; see the [execution contract](../docs/CI_CD_CONTRACT.md). A generated config never grants write authority, network access or certification.
 
@@ -148,9 +148,71 @@ Append an explicit local import to the contained Plan:
 
 `from:` selects a catalog directory within the root authoring workspace. Local packages never shadow shipped imports. Shared Plan storage owns only its Plan file, so use a file-backed Plan for local packages. Commands execute as argv without an implicit shell; keep program logic in real project commands.
 
+## Carry a reusable Python implementation
+
+For an Atomic Goon that owns its application, put a complete Python project
+beside `goon.yml`: `pyproject.toml`, committed native `uv.lock`, implementation,
+resources and tests. Declare its installed command in `[project.scripts]`:
+
+```yaml
+runtime: python
+inputs:
+  label: example
+steps:
+- run: project-check --label ${{ inputs.label }}
+```
+
+Develop the package directly with `uv sync`, `uv run pytest` and
+`uv run project-check --label example`. During execution, native uv installs
+the captured project and its runtime dependencies with no default dependency
+groups in an owned environment. Select `uv: {group: dev}` only when the workload
+requires that group. Package runtime rejects `uv.project`; the selected target
+repository does not supply its implementation. Execution leaves the developer's
+`.venv` alone and writes relative outputs into attempt-owned working state.
+Source, project metadata, native lock and resources bind the execution lock;
+generated environments, caches and declared output locations do not.
+The [Iris Goon](goons/ml/iris-train/README.md) is a complete shipped example.
+Package-owned runtime supports trusted package code. An explicit strict
+`trust_repository_code: false` refuses before native build preparation;
+isolated builds for untrusted packages are unavailable.
+
+## Select pinned Git source
+
+Import one exact package into a local Plan:
+
+```yaml
+goons:
+- import: general/project-check
+  from:
+    git: https://github.com/your-org/workflows.git
+    ref: main
+    path: goons/general/project-check
+```
+
+`path` contains `goon.yml` and ends in its exact `category/name`. To use a
+complete example, select its authoring root and Plan in `run.yml`:
+
+```yaml
+version: 1
+source:
+  kind: git-plan
+  git: https://github.com/your-org/workflows.git
+  ref: main
+  path: examples/orders
+  plan: plan.yml
+target: {repository_id: REPOSITORY_ID}
+```
+
+The Plan's contained local imports come from that same revision. `lock` acquires
+source and pins the commit; ordinary lock regeneration and runs retain it,
+including after cache loss. Use `oh-goon lock run.yml --update-goons` to refresh
+Goon/Plan pins explicitly. Skill refresh remains `--update-skills`. Inspection
+uses only cached source and reports acquisition is required when unavailable.
+Acquisition does not execute project code or install dependencies.
+
 ## Select a different source or domain
 
-A selected source is exactly one of `catalog-plan` with `name`, `file-plan` with contained `path`, or `repository-goon` with neither. Repository mode selects the exact `goon.yml` at the registered repository root and never merges it with a Plan. There are no layered values files, implicit environment substitution or alternate normal launch flags.
+A selected source is exactly one of `catalog-plan` with `name`, `file-plan` with contained `path`, `repository-goon` with neither, or `git-plan` with explicit `git`, `ref`, authoring `path` and contained `plan`. Repository mode selects the exact `goon.yml` at the registered repository root and never merges it with a Plan. There are no layered values files, implicit environment substitution or alternate normal launch flags.
 
 | Start here | Meaning and prerequisites |
 | --- | --- |
@@ -162,7 +224,7 @@ A selected source is exactly one of `catalog-plan` with `name`, `file-plan` with
 | [OCI deployment](plans/oci/release-deploy/README.md) | Publish exact digest, mutate and verify exact generation. |
 | [Kubernetes mutation](plans/kubernetes/set-image/README.md) | Digest-qualified update; no standalone readiness claim. |
 | [Vulnerability scan](plans/security/cve-combined/README.md) | Native scanners, declared egress and report retention. |
-| [Iris training](plans/ml/iris-training/README.md) | Teaching workflow requiring project-owned training command. |
+| [Iris training](plans/ml/iris-training/README.md) | Complete package-owned training project; retained model requires the Plan's strict executor. |
 | [Isolated dataflow](plans/advanced/isolated-dataflow/README.md) | Teaching workflow requiring explicit project scripts/token. |
 | [Native review](plans/agents/native-review/README.md) | Installed native agent, compatible profile and captured Skill. |
 | [Review–repair](../examples/agentic-review-repair-loop/README.md) | Ordered reviews and explicitly bounded admitted repairs. |
@@ -173,6 +235,6 @@ A selected source is exactly one of `catalog-plan` with `name`, `file-plan` with
 
 Plan/Goon source omits the default version, verification purpose and string type. A selected `run.yml` retains its own required version. Keep explicit policies when they change execution, such as `purpose: cicd`, and explicit bindings when several children consume the same caller choice.
 
-Each shipped package contains exactly `README.md` plus `goon.yml` or `plan.yml`, under `<kind>/<category>/<name>/`. Identity is `category/name`. Plans own ordered imports; an Atomic Goon owns `steps:`, a Composite Goon owns `goons:`, never both. YAML owns machine facts; README explains them.
+Each shipped Plan, Composite Goon and tool-invoking Atomic Goon contains exactly `README.md` plus `goon.yml` or `plan.yml`, under `<kind>/<category>/<name>/`. An Atomic Goon with `runtime: python` also owns its complete standalone Python project. Identity is `category/name`. Plans own ordered imports; an Atomic Goon owns `steps:`, a Composite Goon owns `goons:`, never both. YAML owns machine facts; README explains them.
 
 See [Plan composition](plans/README.md), [Goon capabilities](goons/README.md), [Goon authoring](../docs/development/GOON_AUTHORING.md), [input resolution](../docs/development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md), [input inspection](../docs/development/TEMPLATE_INPUT_INSPECTION.md), [retention](../docs/development/TEMPLATE_ARTIFACT_RETENTION.md), [network authority](../docs/development/TEMPLATE_NETWORK_AUTHORITY.md) and [catalog identity](../docs/development/TEMPLATE_CATALOG_DETERMINISM.md).

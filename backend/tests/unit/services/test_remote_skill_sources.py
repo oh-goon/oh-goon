@@ -14,7 +14,7 @@ from oh_goon.core.execution_lock_identity import build_execution_lock, verify_ex
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
-from oh_goon.integrations.agent_skill_sources import prepare_skill_source, skill_source_cache
+from oh_goon.integrations.git_source_preparation import git_source_cache, prepare_git_source
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.execution_lock_persistence import load_execution_lock, write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -134,7 +134,7 @@ def test_one_collection_prepares_once_and_transports_every_selected_resource(tmp
             expected_handoff_identity=handoff.handoff_identity,
         )
         assert restored.source.skill == handoff.source.skill
-    repository = next(skill_source_cache().glob("*.git"))
+    repository = next(git_source_cache().glob("*.git"))
     assert not (repository / "worktrees").exists()
     assert not (path.parent / ".gitmodules").exists()
     assert not (path.parent / "libs").exists()
@@ -162,18 +162,19 @@ def test_native_local_skill_acquisition_rejects_agent_editable_source_before_git
     run = Mock(side_effect=AssertionError("Agent-editable Skill source reached host Git"))
     monkeypatch.setattr(GitService, "run", run)
     with pytest.raises(FleetPlanInvalid, match="agent-editable workspace"):
-        with prepare_skill_source(selected, "main", commit="a" * 40, native_workspace=workspace):
+        with prepare_git_source(selected, "main", commit="a" * 40, native_workspace=workspace):
             pytest.fail("Unsupported source was prepared")
     run.assert_not_called()
-    assert not skill_source_cache().exists()
+    assert not git_source_cache().exists()
 
 
 def test_native_external_locked_skill_source_keeps_native_git_semantics(tmp_path, monkeypatch):
     _, _, remote, commit, options = case(tmp_path, monkeypatch)
     workspace = options["repository_root"] / "product"
-    with prepare_skill_source(
-        remote.as_uri(), "main", commit=commit, native_workspace=workspace
-    ) as (root, selected):
+    with prepare_git_source(remote.as_uri(), "main", commit=commit, native_workspace=workspace) as (
+        root,
+        selected,
+    ):
         assert selected == commit
         assert (
             root / "skills/review/references/guide.md"
@@ -208,7 +209,7 @@ def test_native_registry_transports_workspace_fence_before_pinned_acquisition(
     with pytest.raises(FleetPlanInvalid, match="agent-editable workspace"):
         resolver.resolve_frozen_agents(path, native_agent=selected, repository=remote, **options)
     run.assert_not_called()
-    assert not skill_source_cache().exists()
+    assert not git_source_cache().exists()
 
 
 def test_branch_advances_only_on_explicit_update_and_cache_miss_keeps_pin(tmp_path, monkeypatch):
@@ -221,7 +222,7 @@ def test_branch_advances_only_on_explicit_update_and_cache_miss_keeps_pin(tmp_pa
     git(remote, "commit", "-qm", "advance main")
     for cache_miss in (False, True):
         if cache_miss:
-            shutil.rmtree(skill_source_cache())
+            shutil.rmtree(git_source_cache())
         current, captured, _ = resolver.resolve_frozen_agents(
             path, locked_skills=original.skill_sources, **options
         )
@@ -320,7 +321,7 @@ def test_failed_refresh_preserves_lock_and_cleans_partial_checkout(tmp_path, mon
     diagnostic = capsys.readouterr().out
     assert "PLAN_RESOLUTION_REJECTED" in diagnostic
     assert str(remote) not in diagnostic
-    repository = next(skill_source_cache().glob("*.git"))
+    repository = next(git_source_cache().glob("*.git"))
     assert not (repository / "worktrees").exists()
 
 
@@ -328,7 +329,7 @@ def test_locked_commit_unavailable_never_falls_back_to_current_branch(tmp_path, 
     resolver, path, remote, _, options = case(tmp_path, monkeypatch)
     plan, _, _ = resolver.resolve_frozen_agents(path, **options)
     write_execution_lock(path.parent / "goon.lock", build_execution_lock(plan))
-    shutil.rmtree(skill_source_cache())
+    shutil.rmtree(git_source_cache())
     shutil.rmtree(remote / ".git")
     git(remote, "init", "-q", "-b", "main")
     (remote / "skills/review/SKILL.md").write_text("# Unrelated replacement\n")
@@ -336,7 +337,7 @@ def test_locked_commit_unavailable_never_falls_back_to_current_branch(tmp_path, 
     git(remote, "commit", "-qm", "replacement")
     with pytest.raises(FleetPlanInvalid, match="Git"):
         resolver.resolve_frozen_agents(path, locked_skills=plan.skill_sources, **options)
-    assert not tuple(skill_source_cache().glob("*.git"))
+    assert not tuple(git_source_cache().glob("*.git"))
 
 
 def test_two_versions_of_one_repository_use_distinct_worktrees(tmp_path, monkeypatch):
@@ -363,7 +364,7 @@ def test_two_versions_of_one_repository_use_distinct_worktrees(tmp_path, monkeyp
         "team": git(remote, "rev-parse", "HEAD"),
     }
     assert len(handoffs) == 2
-    assert len(tuple(skill_source_cache().glob("*.git"))) == 1
+    assert len(tuple(git_source_cache().glob("*.git"))) == 1
 
 
 def test_frozen_handoff_consumes_resolved_pins_without_reopening_registry_or_git(
@@ -375,7 +376,7 @@ def test_frozen_handoff_consumes_resolved_pins_without_reopening_registry_or_git
     plan, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
     handoff = next(iter(handoffs.values()))
     (path.parent / ".goonskills.yml").unlink()
-    shutil.rmtree(skill_source_cache())
+    shutil.rmtree(git_source_cache())
 
     def unavailable(*args, **kwargs):
         raise AssertionError("frozen source delivery reacquired Git source")
@@ -410,7 +411,7 @@ def test_failed_capture_closes_native_worktree(tmp_path, monkeypatch, failure):
         error = OperationCancelledError
     with pytest.raises(error):
         resolver.resolve_frozen_agents(path, **options)
-    repository = next(skill_source_cache().glob("*.git"))
+    repository = next(git_source_cache().glob("*.git"))
     assert not (repository / "worktrees").exists()
     assert not (path.parent / "goon.lock").exists()
 
@@ -444,6 +445,6 @@ def test_caller_rejections_precede_remote_skill_acquisition(tmp_path, monkeypatc
     def acquire(*args, **kwargs):
         pytest.fail("invalid caller inputs reached remote Skill acquisition")
 
-    monkeypatch.setattr(registry, "prepare_skill_source", acquire)
+    monkeypatch.setattr(registry, "prepare_git_source", acquire)
     with pytest.raises(FleetPlanInvalid):
         resolver.resolve_frozen_agents(path, **options)

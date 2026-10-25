@@ -162,9 +162,15 @@ once; downstream generators consume that artifact. Never hand edit generated
 files. `make generate` writes contracts; `make check-generated` checks freshness.
 `generated/release/` is release output. Frontend builds must not mutate backend source.
 
-Each shipped package contains exactly YAML and README:
+Each Plan, Composite Goon, and tool-invoking Atomic Goon contains exactly YAML and README:
 `templates/goons/<category>/<name>/{goon.yml,README.md}` or
 `templates/plans/<category>/<name>/{plan.yml,README.md}`.
+An Atomic Goon with `runtime: python` owns a complete standalone Python project
+beside `goon.yml`: `README.md`, `pyproject.toml`, native `uv.lock`, implementation,
+resources and tests. Its captured authored contents participate in execution
+identity; disposable environments, caches and declared outputs do not. Native uv
+installs that project in an owned environment, with base dependencies only unless
+`uv.group` explicitly selects a group. `uv.project` cannot redirect package runtime.
 
 - Plan owns run intent and ordered `goons:`, never executable steps or commands.
   Atomic Goon owns `steps:`; Composite Goon owns `goons:`; exactly one form.
@@ -182,7 +188,11 @@ Each shipped package contains exactly YAML and README:
   without changing its package identity or lookup. Preserve ordered duplicate edges.
 - Project-owned Goons use an explicit import `from:` catalog directory confined to
   the root authoring workspace. Omitted `from:` selects the shipped catalog;
-  local packages never shadow shipped imports. Shared Plan storage owns only its
+  local packages never shadow shipped imports. Git imports use explicit
+  `from: {git: URL, ref: REF, path: exact/category/name}`; `goon.lock` pins the
+  selected commit, and only `lock --update-goons` refreshes it. A `git-plan`
+  selection explicitly names its authoring root and contained Plan at one revision.
+  Shared Plan storage owns only its
   Plan file and refuses external local imports. See `templates/README.md`.
 - Classification is backend-owned and category-derived: `python`, `security`,
   `oci`, `kubernetes`, and `agents` are production; `advanced`, `general`, and `ml` are

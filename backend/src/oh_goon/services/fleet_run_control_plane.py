@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from oh_goon.services.fleet_local_lace_takeover import OriginalLocalLaceTakeoverCoordinator
 
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from datetime import datetime
 from typing import Any
 
@@ -59,11 +61,12 @@ from oh_goon.core.models.run_events import FleetRunEventBatch
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
-from oh_goon.core.product_identity import new_fleet_run_id
+from oh_goon.core.product_identity import new_fleet_run_id, repository_subject_instance_id
 from oh_goon.core.projections.agent_campaign import project_agent_campaign
 from oh_goon.core.run_identity import (
     require_fleet_run_detail_binding,
     require_fleet_run_scheduling_binding,
+    with_retained_project_deliveries,
 )
 from oh_goon.core.vocabulary import (
     FleetRunFailureStage,
@@ -83,6 +86,14 @@ from oh_goon.services.fleet_rerun_scope import rerun_repository_scope
 from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.game_tape_live_output import read_game_tape_live_output
+
+
+class _RecoveredRunSourceConflict(Exception):
+    """Unwind only source custody created by a losing admission attempt."""
+
+    def __init__(self, state: FleetRunState) -> None:
+        super().__init__("Original Run retained different source delivery references")
+        self.state = state
 
 
 class FleetRunControlPlane:
@@ -219,6 +230,28 @@ class FleetRunControlPlane:
         )
         return self._admission.repository_instance_ids(intent, repository_scope=scope)
 
+    @contextmanager
+    def project_source_transport_for_prepared_plan(
+        self, target: FleetPlanTarget, *, repository_ids: set[str]
+    ) -> Iterator[tuple[FleetPlanTarget, dict[str, str]]]:
+        """Retain Schedule source with the original Fleet input-custody lifecycle."""
+        intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)
+        scope = _requested_repository_scope(
+            intent, repository_ids=repository_ids, all_repositories=False
+        )
+        repositories = self._admission.repository_targets(intent, repository_scope=scope)
+        instances = {
+            repository.repository_id: repository_subject_instance_id(repository.path)
+            for repository in repositories
+        }
+        with self._lifecycle.project_source_transport(intent, repositories) as bound:
+            assert isinstance(bound.target, FleetPlanTarget)
+            # Durable receivers need only the retained references, never private packets.
+            frozen = FleetPlanTarget.model_validate(
+                bound.target.model_dump(exclude_computed_fields=True)
+            )
+            yield frozen, instances
+
     def start_bound(
         self,
         capability: CapabilitySnapshot,
@@ -339,34 +372,62 @@ class FleetRunControlPlane:
             # prevent a cancelled/completed child slipping through planning.
             require_scheduled_child()
             require_target_caller_file_fresh(intent.target)
+            transport = (
+                self._lifecycle.project_source_transport(
+                    intent, tuple(entry.repository for entry in plan.targets)
+                )
+                if isinstance(intent.target, FleetPlanTarget)
+                and any(
+                    getattr(step, "project_source", None) is not None
+                    for step in intent.target.plan.steps
+                )
+                else nullcontext(intent)
+            )
+            original_intent = intent
             try:
-                ticket, state = self._lifecycle.admit(
-                    fleet_run_id,
-                    intent,
-                    repository_scope,
-                    [entry.repository for entry in plan.targets],
-                    expected_durable_revision=plan.durable_revision,
-                    repository_admissions=plan.repository_admissions,
-                    source=source,
-                    readmitted_from_run_id=readmitted_from_run_id,
-                    rerun_from_run_id=rerun_from_run_id,
-                    requested_priority=requested_priority,
-                    schedule_run_id=schedule_run_id,
-                )
-            except JournalConflict:
-                existing = _matching_existing_run(
-                    self._journal,
-                    fleet_run_id,
-                    intent,
-                    repository_scope=repository_scope,
-                    source=source,
-                    readmitted_from_run_id=readmitted_from_run_id,
-                    rerun_from_run_id=rerun_from_run_id,
-                    requested_priority=requested_priority,
-                )
-                if existing is not None:
-                    return existing
-                raise
+                with transport as intent:
+                    try:
+                        ticket, state = self._lifecycle.admit(
+                            fleet_run_id,
+                            intent,
+                            repository_scope,
+                            [entry.repository for entry in plan.targets],
+                            expected_durable_revision=plan.durable_revision,
+                            repository_admissions=plan.repository_admissions,
+                            source=source,
+                            readmitted_from_run_id=readmitted_from_run_id,
+                            rerun_from_run_id=rerun_from_run_id,
+                            requested_priority=requested_priority,
+                            schedule_run_id=schedule_run_id,
+                        )
+                    except JournalConflict:
+                        existing = _matching_existing_run(
+                            self._journal,
+                            fleet_run_id,
+                            original_intent,
+                            repository_scope=repository_scope,
+                            source=source,
+                            readmitted_from_run_id=readmitted_from_run_id,
+                            rerun_from_run_id=rerun_from_run_id,
+                            requested_priority=requested_priority,
+                        )
+                        if existing is None:
+                            raise
+                        if (
+                            existing.target is not None
+                            and intent.target is not None
+                            and existing.target.model_dump(exclude_computed_fields=True)
+                            != intent.target.model_dump(exclude_computed_fields=True)
+                        ):
+                            raise _RecoveredRunSourceConflict(existing) from None
+                        # A lost ACK for this exact target must retain its committed inputs.
+                        return existing
+            except _RecoveredRunSourceConflict as recovered:
+                if getattr(recovered, "__notes__", ()):
+                    raise FleetPlanInvalid(
+                        "Unadmitted Python Goon source cleanup failed"
+                    ) from recovered
+                return recovered.state
             self._submit(fleet_run_id, ticket)
             return state
 
@@ -849,11 +910,14 @@ def _matching_existing_run(
     detail = journal.read_view().run_detail(fleet_run_id)
     if detail is None:
         return None
+    target = intent.target
+    if isinstance(target, FleetPlanTarget) and isinstance(detail.run.target, FleetPlanTarget):
+        target = with_retained_project_deliveries(target, detail.run.target)
     require_fleet_run_detail_binding(
         detail,
         source=source,
         capability=intent.definition.durable_snapshot(),
-        target=intent.target,
+        target=target,
         repository_scope=repository_scope,
         readmitted_from_run_id=readmitted_from_run_id,
         rerun_from_run_id=rerun_from_run_id,

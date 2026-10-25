@@ -36,9 +36,7 @@ def _template_tree(root: Path) -> tuple[Path, Path, Path]:
     backend = root / "backend"
     backend.mkdir()
     (backend / "pyproject.toml").write_text(
-        "[tool.hatch.build.targets.wheel.force-include]\n"
-        '"../templates/goons" = "oh_goon/templates/goons"\n'
-        '"../templates/plans" = "oh_goon/templates/plans"\n',
+        '[tool.hatch.build.targets.wheel.hooks.custom]\npath = "hatch_build.py"\n',
         encoding="utf-8",
     )
     return templates, goons, plans
@@ -57,6 +55,62 @@ def test_template_layout_accepts_minimal_canonical_tree(
 ) -> None:
     _bind_template_roots(monkeypatch, tmp_path)
     assert template_layout.check_template_layout_contract() == []
+
+
+def test_template_layout_accepts_complete_python_goon_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _bind_template_roots(monkeypatch, tmp_path)
+    package = tmp_path / "templates/goons/python/quality"
+    (package / "goon.yml").write_text("version: 1\nruntime: python\n", encoding="utf-8")
+    for name in ("pyproject.toml", "uv.lock", ".gitignore", "data/input.csv"):
+        path = package / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("authored source\n", encoding="utf-8")
+
+    assert template_layout.check_template_layout_contract() == []
+
+    (package / "uv.lock").unlink()
+    assert any(
+        "missing uv.lock" in issue.message
+        for issue in template_layout.check_template_layout_contract()
+    )
+
+
+def test_template_layout_keeps_plan_packages_minimal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _bind_template_roots(monkeypatch, tmp_path)
+    package = tmp_path / "templates/plans/python/quality"
+    (package / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+
+    assert any(
+        "must contain exactly plan.yml and README.md (unexpected pyproject.toml)"
+        in issue.message
+        for issue in template_layout.check_template_layout_contract()
+    )
+
+
+@pytest.mark.parametrize(
+    "filename", ["goon.yml", "README.md", "pyproject.toml", "uv.lock"]
+)
+def test_template_layout_rejects_python_project_authority_symlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filename: str
+) -> None:
+    _bind_template_roots(monkeypatch, tmp_path)
+    package = tmp_path / "templates/goons/python/quality"
+    for name in ("pyproject.toml", "uv.lock"):
+        (package / name).write_text("[project]\n", encoding="utf-8")
+    assert template_layout.check_template_layout_contract() == []
+    outside = tmp_path / "outside"
+    outside.write_bytes((package / filename).read_bytes())
+    (package / filename).unlink()
+    (package / filename).symlink_to(outside)
+
+    assert any(
+        f"requires a regular non-symlink {filename}" in issue.message
+        for issue in template_layout.check_template_layout_contract()
+    )
 
 
 def test_template_layout_fixture_models_semantic_wheel_force_include(
@@ -165,7 +219,7 @@ def test_template_layout_rejects_missing_packaging_and_start_tokens(
     (tmp_path / "templates" / "README.md").write_text("README only\n", encoding="utf-8")
     issues = template_layout.check_template_layout_contract()
     text = "\n".join(issue.message for issue in issues)
-    assert text.count("wheel packaging must include") == 2
+    assert "wheel packaging requires its admitted-source custom hook" in text
     assert "template start page missing 'Composite Goon'" in text
     assert "template start page missing 'run:'" in text
 

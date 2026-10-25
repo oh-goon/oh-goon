@@ -16,8 +16,9 @@ from pydantic import Field, ValidationError, field_validator
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_lock_models import LockedSkillSource
-from oh_goon.integrations.agent_skill_sources import PreparedSkill, prepare_skill_source
+from oh_goon.integrations.agent_skill_sources import PreparedSkill
 from oh_goon.integrations.fleet_plan_compilation import parse_fleet_yaml_document
+from oh_goon.integrations.git_source_preparation import prepare_git_source
 
 REGISTRY_FILE_NAME = ".goonskills.yml"
 _MAX_BYTES = 65536
@@ -204,7 +205,7 @@ def original_skill_aliases(
         for name, source in registry.sources.items():
             try:
                 root, commit = stack.enter_context(
-                    prepare_skill_source(
+                    prepare_git_source(
                         source.source,
                         source.ref,
                         commit=locked[name].commit

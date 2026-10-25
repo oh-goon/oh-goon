@@ -1,13 +1,18 @@
-"""Own the release-only UI payload at the Python package build boundary.
+"""Consume admitted release payloads at the native Hatch build boundary.
 
 The repository source and editable developer environment do not contain a built
 frontend.  Only a standard release wheel is allowed to consume
 ``generated/release/static``.  Keeping that mapping here means native editable
 materialization never depends on a generated release directory, while release
-wheel construction fails closed if its already-built UI payload is missing.
+wheel construction fails closed if its already-built UI or captured catalog
+delivery is missing. The producer owns temporary catalog storage and cleanup.
 """
+
 from __future__ import annotations
 
+import hashlib
+import os
+import tarfile
 from pathlib import Path
 from typing import Any
 
@@ -31,10 +36,42 @@ def release_static_inclusion(*, project_root: Path, version: str) -> dict[str, s
     return {str(static_root): RELEASE_STATIC_TARGET}
 
 
+def release_catalog_inclusion(*, version: str) -> dict[str, str]:
+    """Verify explicit source delivery without importing the product in PEP 517."""
+
+    if version != "standard":
+        return {}
+    archive_text = os.environ.get("OH_GOON_RELEASE_CATALOG_ARCHIVE", "")
+    expected = os.environ.get("OH_GOON_RELEASE_CATALOG_ARCHIVE_SHA256", "")
+    archive_path = Path(archive_text)
+    if not archive_text or not expected or archive_path.is_symlink() or not archive_path.is_file():
+        raise RuntimeError(
+            "standard release wheel requires admitted template catalog source; "
+            "use the existing release wheel build owner"
+        )
+    digest = hashlib.sha256()
+    with archive_path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    if digest.hexdigest() != expected:
+        raise RuntimeError("release template catalog delivery differs from admitted source")
+    destination = archive_path.parent / "hatch-catalogs"
+    destination.mkdir()
+    with tarfile.open(archive_path, mode="r:") as archive:
+        for member in archive:
+            if not member.isfile() and not member.isdir():
+                raise RuntimeError("release template catalog contains non-regular source")
+        archive.extractall(destination, filter="data")
+    if {path.name for path in destination.iterdir()} != {"goons", "plans"}:
+        raise RuntimeError("release template catalog must contain goons and plans")
+    return {str(destination): "oh_goon/templates"}
+
+
 class CustomBuildHook(BuildHookInterface):
-    """Attach generated UI bytes only to a standard release wheel."""
+    """Attach built UI and verified captured catalogs to a standard release wheel."""
 
     def initialize(self, version: str, build_data: dict[str, Any]) -> None:
         inclusion = release_static_inclusion(project_root=Path(self.root), version=version)
+        inclusion.update(release_catalog_inclusion(version=version))
         if inclusion:
             build_data.setdefault("force_include", {}).update(inclusion)

@@ -220,12 +220,20 @@ an implicit fleet, define scheduler Steps, or grant stored permission.
 Strict CI/CD backend authority is also explicit. `FleetExecutorPool` selects and reserves one exact executor/backend before `RUN_ADMITTED`; the admitted backend/configuration evidence is then consumed by `FleetPlanRunExecutor.prepare_strict_run()` and revalidated before launch. Strict preparation never performs a second backend search, while direct plans use the separate `prepare_direct_run()` path and cannot consume isolation evidence. Missing admitted evidence, changed configuration, or unavailable exact placement fails closed instead of selecting a currently suitable fallback.
 The durable admission shape is equally explicit: `RUN_ADMITTED.execution` is either `kind: direct` or `kind: strict`. The strict variant contains one `placement` fact whose backend evidence and executor-capacity reservation were selected together before admission, plus optional placement-loss re-admission lineage. Execution revalidates and later releases that same placement; backend/capacity are never carried as sibling authority fields or paired again downstream.
 
-Goon source scope is independent of repository target scope and has exactly two normal modes:
+Goon source scope is independent of repository target scope. The browser has two normal modes:
 
 - **Team Goon:** resolve the exact selected Team's root `goon.yml` bytes; execution scope is exactly that one Team.
 - **Shared Plan:** resolve one explicitly selected oh-goon-owned `plan.yml` once; execution scope is the explicit repository set. Target repositories' own `goon.yml` files are not read, validated, merged, inherited, replaced, modified, or used as fallback for that run. Plans select/order Goons; executable behavior remains Goon-owned.
 
-Both modes converge only *after* source resolution on the same Fleet Plan, FleetRun, executor, Journal, and Enforcer boundaries. Source provenance remains one fact and repository execution scope remains another; a shared source is never copied into per-repository source facts.
+The CLI also selects exact catalog, contained file or pinned Git Plans through
+[run configuration](development/TEMPLATE_INPUT_INSPECTION.md). A `git-plan`
+names one authoring root and exact Plan; native Git acquisition and `goon.lock`
+preserve its commit and contained local imports. Package-owned Python Goons
+carry complete captured projects independently of their target repositories;
+native uv installs the selected base/group dependencies in owned environments
+and relative outputs use writable attempt state. See the [Python project contract](architecture/ADR_PYTHON_GOON_PROJECTS.md).
+
+All source modes converge only *after* source resolution on the same Fleet Plan, FleetRun, executor, Journal, and Enforcer boundaries. Source provenance remains one fact and repository execution scope remains another; a shared source is never copied into per-repository source facts.
 
 Effectful direct maintenance is explicit too: `oh-goon operation <action> <repository>` requires the repository argument; only read-only inspection commands may use a convenience current-directory default.
 
@@ -301,6 +309,11 @@ before workload; the command never falls back to host execution. Deployment inte
 provisioner; their owner retains asynchronous execution semantics.
 
 Within strict CI/CD, repository code is trusted by default and CPU, memory, and PID caps are unspecified.
+Package-owned `runtime: python` currently requires trusted package code:
+explicit `trust_repository_code: false` refuses during resolution before native
+build/install preparation. Host preparation cannot establish the selected
+untrusted isolation, and isolated package builds are unavailable. This boundary
+does not change ordinary local execution or claim APP qualification.
 There are no hidden static CPU/RAM/PID defaults. Omitted caps inherit the capacity available from the
 selected executor for that admitted run, and the exact reserved capacity is bound into admission and
 Enforcer evidence. A later run may legitimately observe different available capacity.

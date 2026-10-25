@@ -47,6 +47,4 @@ clear_release_outputs
 mkdir -p "$ROOT/generated/release/static" "$ROOT/generated/release/dist"
 cp -a frontend/dist/. generated/release/static/
 require_built_ui
-(cd backend && uv build --wheel --no-build-isolation --no-sources --no-python-downloads --out-dir ../generated/release/dist)
-rm -f "$ROOT/generated/release/dist/.gitignore"
-backend/.venv/bin/oh-goon-release-artifact-check
+uv run --project backend --offline --frozen --no-sync oh-goon-release-wheel-build

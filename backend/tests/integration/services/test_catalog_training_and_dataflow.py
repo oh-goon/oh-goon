@@ -23,6 +23,7 @@ from oh_goon.runtime.league_folders import LeagueFolderStore
 
 ROOT = Path(__file__).resolve().parents[4]
 FIXTURES = ROOT / "template-certification" / "fixtures"
+IRIS_PROJECT = ROOT / "templates/goons/ml/iris-train"
 pytestmark = pytest.mark.skipif(
     os.name != "posix" or shutil.which("uv") is None, reason="native POSIX uv required"
 )
@@ -32,19 +33,33 @@ def _native(argv: list[str], repository: Path) -> subprocess.CompletedProcess[st
     return subprocess.run(argv, cwd=repository, capture_output=True, text=True, timeout=120)
 
 
-def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixture: str, group: str) -> Path:
+def _project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixture: str | Path, group: str | None
+) -> Path:
     repository = tmp_path / "repositories" / "subject"
-    shutil.copytree(FIXTURES / fixture, repository)
+    shutil.copytree(
+        FIXTURES / fixture if isinstance(fixture, str) else fixture,
+        repository,
+        ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache", "ml-output"),
+    )
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.delenv("OH_GOON_EXECUTORS_FILE", raising=False)
-    before = (repository / "uv.lock").read_bytes()
-    prepared = _native(
-        ["uv", "sync", "--locked", "--no-default-groups", "--group", group], repository
-    )
-    assert prepared.returncode == 0, "native uv could not prepare the selected locked fixture"
-    assert (repository / "uv.lock").read_bytes() == before
+    if (repository / "uv.lock").is_file():
+        before = (repository / "uv.lock").read_bytes()
+        prepared = _native(
+            [
+                "uv",
+                "sync",
+                "--locked",
+                "--no-default-groups",
+                *(["--group", group] if group else []),
+            ],
+            repository,
+        )
+        assert prepared.returncode == 0, "native uv could not prepare the selected locked fixture"
+        assert (repository / "uv.lock").read_bytes() == before
     for argv in (
         ["git", "init", "-q"],
         ["git", "add", "."],
@@ -107,15 +122,12 @@ def test_iris_project_command_trains_and_writes_actual_model_parameters(
     threshold: int,
     expected: int,
 ) -> None:
-    repository = _project(tmp_path, monkeypatch, "ml/iris", "ml")
+    repository = _project(tmp_path, monkeypatch, IRIS_PROJECT, None)
     completed = _native(
         [
             "uv",
             "run",
-            "--frozen",
-            "--no-default-groups",
-            "--group",
-            "ml",
+            "--no-sync",
             "iris-train",
             "--random-seed",
             "42",
@@ -147,7 +159,7 @@ def test_iris_strict_plan_requires_deployment_before_training(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repository = _project(tmp_path, monkeypatch, "ml/iris", "ml")
+    repository = _project(tmp_path, monkeypatch, "repository/empty", None)
     configuration = _configuration(tmp_path, repository, "ml/iris-training", "plan", {}, capsys)
     assert main(["run", str(configuration), "--json"]) == 2
     assert not (repository / "ml-output").exists()
@@ -163,7 +175,7 @@ def test_iris_atomic_wrapper_refuses_retention_before_training_or_run_admission(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repository = _project(tmp_path, monkeypatch, "ml/iris", "ml")
+    repository = _project(tmp_path, monkeypatch, "repository/empty", None)
     workflow = tmp_path / "workflow"
     assert (
         main(["templates", "init", "ml/iris-train", "--kind", "goon", "--output", str(workflow)])

@@ -16,7 +16,7 @@
       }
     },
     "ml/iris-training": {
-      "fixture": "ml/iris",
+      "fixture": "repository/empty",
       "inputs": {"random_seed": "42", "test_size_percent": "20", "minimum_accuracy_percent": "90", "max_iterations": "300"}
     },
     "oci/image": {

@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
@@ -12,6 +13,7 @@ from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
+    ResolvedCommandStep,
     ResolvedExtensionStep,
     ResolvedFleetPlan,
     ResolvedPlanStep,
@@ -29,7 +31,8 @@ from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.models.termination import TerminationSignal
-from oh_goon.core.path_authority import StrictHostPathAuthority, canonical_path
+from oh_goon.core.path_authority import RepositoryPathSpace, StrictHostPathAuthority, canonical_path
+from oh_goon.core.path_layouts import AttemptPathLayout, RunPathLayout
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.ports.step_output import StepOutputObserver
@@ -133,6 +136,7 @@ class FleetPlanRunExecutor:
         admitted_source_authority: RepositorySourceAuthority,
         admitted_isolation_backend: PlanIsolationBackendEvidence | None,
         admitted_run: FleetRunDetail | None = None,
+        execution_target: FleetPlanTarget | None = None,
     ) -> PreparedPlanRun:
         """Validate and freeze strict CI/CD inputs before EFFECT_STARTED."""
 
@@ -146,6 +150,7 @@ class FleetPlanRunExecutor:
             raise FleetPlanInvalid(
                 "Strict Fleet CI/CD requires configured deployment path authority"
             )
+        plan = self._with_project_delivery(plan, execution_target, repository.repository_id)
         process_isolation = select_bound_process_isolation_backend(
             plan,
             admitted_isolation_backend,
@@ -236,10 +241,77 @@ class FleetPlanRunExecutor:
             else ExecutionIdentity(digest=build_execution_lock(plan).digest),
             native_profile=plan.native_agent,
         )
-        sequence = FleetPlanStepSequence(repository, runtime, output_observer)
-        for step in plan.steps:
-            sequence.run_direct(step)
-        return self._outcome(sequence)
+        if not any(getattr(step, "project_source", None) is not None for step in plan.steps):
+            sequence = FleetPlanStepSequence(repository, runtime, output_observer)
+            for step in plan.steps:
+                sequence.run_direct(step)
+            return self._outcome(sequence)
+        from oh_goon.integrations.python_goon_projects import materialize_plan_projects
+
+        if self._run_parent is not None:
+            self._run_parent.mkdir(parents=True, exist_ok=True)
+        plan = self._with_project_delivery(plan, execution_target, repository_id)
+        with TemporaryDirectory(prefix="oh-goon-python-run-", dir=self._run_parent) as directory:
+            layout = RunPathLayout.from_root(Path(directory))
+            sources = materialize_plan_projects(plan, layout)
+            workspaces: dict[str, Path] = {}
+            for step in plan.steps:
+                if isinstance(step, ResolvedCommandStep) and step.project_source is not None:
+                    workspace = AttemptPathLayout.from_root(
+                        layout.attempt_root(step.step_id, 1)
+                    ).workspace
+                    workspace.mkdir(parents=True)
+                    RepositoryPathSpace.from_root(workspace).resolve(
+                        step.working_directory,
+                        label=f"Python Goon {step.step_id} output working_directory",
+                        kind="directory",
+                    ).mkdir(parents=True, exist_ok=True)
+                    workspaces[step.step_id] = workspace
+            runtime = replace(runtime, project_sources=sources, project_workspaces=workspaces)
+            sequence = FleetPlanStepSequence(repository, runtime, output_observer)
+            for step in plan.steps:
+                sequence.run_direct(step)
+            return self._outcome(sequence)
+
+    def _with_project_delivery(
+        self, plan: ResolvedFleetPlan, target: FleetPlanTarget | None, repository_id: str | None
+    ) -> ResolvedFleetPlan:
+        from oh_goon.integrations.python_goon_projects import MAX_PROJECT_ARCHIVE_BYTES
+
+        projects = {
+            step.project_source.content_sha256: step.project_source
+            for step in plan.steps
+            if isinstance(step, ResolvedCommandStep) and step.project_source is not None
+        }
+        if not projects:
+            return plan
+        if target is None:
+            if set(projects) <= plan._project_archives.keys():
+                return plan
+            raise FleetPlanInvalid("Python Goon execution requires original source transport")
+        if self._content_store is None or repository_id is None:
+            raise FleetPlanInvalid("Python Goon source transport requires repository custody")
+        references = {
+            item.project_sha256: item
+            for item in target.project_deliveries
+            if item.owner_repository_id == repository_id
+        }
+        if not set(projects) <= references.keys():
+            raise FleetPlanInvalid("Python Goon delivery does not cover the admitted repository")
+        archives: dict[str, bytes] = {}
+        for digest in projects:
+            reference = references[digest]
+            stored = self._content_store.get(
+                reference.reference_id, owner_repository_id=repository_id, expected_kind="file"
+            )
+            with stored.path.open("rb") as source:
+                packet = source.read(MAX_PROJECT_ARCHIVE_BYTES + 1)
+            if len(packet) > MAX_PROJECT_ARCHIVE_BYTES:
+                raise FleetPlanInvalid("Python Goon source exceeds delivery bounds")
+            archives[digest] = packet
+        captured = plan.model_copy()
+        captured._project_archives = archives
+        return captured
 
     def git_for_plan(
         self,
@@ -389,7 +461,8 @@ class FleetPlanRunExecutor:
         self.git_for_plan(repository, plan)
         for step in plan.steps:
             self._preflight_common(repository, step, cancel_requested=cancel_requested)
-            step_working_directory(repository, step)
+            if not isinstance(step, ResolvedCommandStep) or step.project_source is None:
+                step_working_directory(repository, step)
             self._validate_live_managed_runtime(step)
 
     def _preflight_strict_steps(
@@ -401,7 +474,8 @@ class FleetPlanRunExecutor:
     ) -> None:
         for step in plan.steps:
             self._preflight_common(repository, step, cancel_requested=cancel_requested)
-            step_working_directory(repository, step)
+            if not isinstance(step, ResolvedCommandStep) or step.project_source is None:
+                step_working_directory(repository, step)
 
     @staticmethod
     def _preflight_common(
@@ -413,7 +487,8 @@ class FleetPlanRunExecutor:
         if cancel_requested is not None and cancel_requested():
             raise OperationCancelledError("Fleet plan cancelled during preflight")
         require_environment(step)
-        validate_step_declared_paths(repository, step)
+        if not isinstance(step, ResolvedCommandStep) or step.project_source is None:
+            validate_step_declared_paths(repository, step)
         if isinstance(step, ResolvedPreCommitStep) and (
             step.if_missing is MissingConfigPolicy.FAIL
             and not (repository / ".pre-commit-config.yaml").is_file()

@@ -41,7 +41,13 @@ The expected result is three successful Steps and `total_order_value` of `1236.7
 
 The final `.showcase/result.json` uses `retention: evidence`: Game Tape records its presence, hash and size. This declaration does not retain durable file bytes. See [artifact retention](https://github.com/oh-goon/oh-goon/blob/main/docs/development/TEMPLATE_ARTIFACT_RETENTION.md).
 
-This root Goon uses the currently supported target-project `uv.group` contract. Its empty `runtime` group selects application dependencies without installing test tools. Native uv owns installation and execution; there is no dependency-install Step. Ordinary trusted local execution may use the target project's `.venv`. Use a disposable copy for the comparison; developer-environment isolation is not claimed for this path.
+This root Goon selects `runtime: python`. It captures this complete project and
+installs its base application dependencies with no default dependency groups.
+Native uv owns installation; there is no dependency-install Step. Execution
+uses separate package source, environment and writable output roots. It does
+not reuse or prune the developer's `.venv`, and the target repository supplies
+no implementation. Authored code, resources, project metadata and native lock
+bind freshness; caches and declared `.showcase/` outputs do not.
 
 ## Airflow
 
@@ -51,8 +57,15 @@ Trigger `orders_taskflow_comparison`. Set `ORDERS_FIXTURE=official`, `changed`, 
 
 With Airflow and pytest installed in that separate environment, run `python -m pytest tests/test_airflow_adapter.py`. It uses isolated temporary SQLite state to verify a copied DAG's native import, dependency graph, complete local `dag.test()` runs, XCom totals and invalid-input failure propagation. A scheduler/worker deployment remains a separate verification boundary.
 
-## Scope and the Python Goon proposal
+## Scope and the Python Goon contract
 
 Both adapters use the same installed `orders_pipeline.operations`. OH-Goon observes three linear Steps; Airflow observes three dependent tasks. Neither engine invokes the other. Equivalent results here do not establish general DAG equivalence, relative performance, or reliability.
 
-The [complete Python Goon projects ADR](https://github.com/oh-goon/oh-goon/blob/main/docs/architecture/ADR_PYTHON_GOON_PROJECTS.md) remains proposed. This example satisfies its standalone application direction and explicit workflow inputs, but does not implement package-owned `runtime: python`, base-only environment selection, whole-package source capture/freshness, separate package/target/output roots, or pinned Git Goon acquisition. Current shipped catalog packages still contain YAML and README only. This repository-root comparison does not complete the Iris migration or the broader initialization/result roadmap.
+This example uses the [complete Python Goon contract](https://github.com/oh-goon/oh-goon/blob/main/docs/architecture/ADR_PYTHON_GOON_PROJECTS.md):
+one installable application, explicit workflow inputs, package-owned runtime,
+base-only dependency selection and captured authored source. The shipped
+[Iris Goon](https://github.com/oh-goon/oh-goon/tree/main/templates/goons/ml/iris-train)
+uses the same package contract. Reusable packages can also be selected from
+explicit pinned Git coordinates; see the [template guide](https://github.com/oh-goon/oh-goon/blob/main/templates/README.md#select-pinned-git-source).
+This root-Goon comparison does not establish scheduler/worker deployment,
+strict/native qualification, APP certification or the broader initialization/result roadmap.

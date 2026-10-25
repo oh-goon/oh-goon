@@ -107,7 +107,7 @@ class UvProjectRequirement(ImmutableModel):
 
     kind: Literal["uv_project"] = "uv_project"
     project: str = Field(default=".", min_length=1, max_length=240)
-    group: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    group: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
     @field_validator("project")
     @classmethod

@@ -139,7 +139,10 @@ def _requirement_summary(requirement: RepositoryRequirement) -> str:
     ):
         return f"  require {requirement.kind}: {requirement.path}"
     if isinstance(requirement, UvProjectRequirement):
-        return f"  require uv_project: group={requirement.group}"
+        selection = (
+            f"group={requirement.group}" if requirement.group is not None else "base dependencies"
+        )
+        return f"  require uv_project: {selection}"
     qualifiers = []
     if requirement.non_empty:
         qualifiers.append("non_empty=true")

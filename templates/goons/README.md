@@ -1,6 +1,10 @@
 # Shipped Goons
 
-Goons are Oh Goon capabilities. Each package is exactly `templates/goons/<category>/<name>/{goon.yml,README.md}`.
+Goons are Oh Goon capabilities. Composite and tool-invoking Atomic packages
+contain exactly `templates/goons/<category>/<name>/{goon.yml,README.md}`.
+An Atomic Goon with `runtime: python` also owns its complete standalone Python
+project: `pyproject.toml`, committed native `uv.lock`, implementation, resources
+and optional tests. See [package-owned Python authoring](../../docs/development/GOON_AUTHORING.md#package-owned-python-goon).
 
 An **Atomic Goon** declares `steps:`. A **Composite Goon** declares `goons:`. A Goon declares exactly one of those forms, never both. Composite imports use exact logical `category/name` identifiers and explicit `pass:`/`with:` forwarding where needed. Requirements remain owned by the Goon that declares them.
 

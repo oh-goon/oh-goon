@@ -1,5 +1,4 @@
-uv:
-  group: ml
+runtime: python
 inputs:
   random_seed:
     type: integer
@@ -26,7 +25,7 @@ inputs:
     default: 300
     description: Maximum estimator iterations passed to the training command
 steps:
-- run: uv run iris-train --random-seed ${{ inputs.random_seed }} --test-size-percent ${{ inputs.test_size_percent }} --minimum-accuracy-percent
+- run: iris-train --random-seed ${{ inputs.random_seed }} --test-size-percent ${{ inputs.test_size_percent }} --minimum-accuracy-percent
     ${{ inputs.minimum_accuracy_percent }} --max-iterations ${{ inputs.max_iterations }}
   artifacts:
   - path: ml-output/iris-training-metrics.json

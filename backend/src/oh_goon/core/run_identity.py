@@ -9,7 +9,7 @@ from oh_goon.core.models.run_admission import (
     fleet_rerun_parent,
 )
 from oh_goon.core.models.scheduling import SchedulingPriority
-from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.vocabulary import FleetRunSource
 
 
@@ -26,7 +26,7 @@ def require_fleet_run_binding(
         raise JournalConflict(
             f"Fleet run identity {run.fleet_run_id} is already bound to another execution source"
         )
-    if run.action is not capability.action or run.target != target:
+    if run.action is not capability.action or _target_facts(run.target) != _target_facts(target):
         raise JournalConflict(
             f"Fleet run identity {run.fleet_run_id} is already bound to another operation intent"
         )
@@ -39,6 +39,25 @@ def require_fleet_run_binding(
             f"Fleet run identity {run.fleet_run_id} is already bound to another capability policy"
         )
     return run
+
+
+def with_retained_project_deliveries(
+    target: FleetPlanTarget, retained: FleetPlanTarget
+) -> FleetPlanTarget:
+    """Reuse original source custody only for an otherwise identical unbound request."""
+    if target.project_deliveries or not retained.project_deliveries:
+        return target
+    unbound = retained.model_copy(update={"project_deliveries": ()})
+    if _target_facts(target) != _target_facts(unbound):
+        return target
+    return target.model_copy(update={"project_deliveries": retained.project_deliveries})
+
+
+def _target_facts(target: OperationTarget | None) -> object:
+    """Private source packets transport captured bytes; serialized facts bind authority."""
+    return (
+        target.model_dump(mode="json", exclude_computed_fields=True) if target is not None else None
+    )
 
 
 def require_fleet_run_detail_binding(

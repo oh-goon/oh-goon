@@ -35,6 +35,7 @@ from oh_goon.core.models.fleet_plan_evidence import FleetPlanPreview
 from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepCache,
 )
+from oh_goon.core.models.git_sources import LockedGoonSource
 from oh_goon.core.path_authority import RepositoryPathSpace, navigation_path
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
@@ -98,6 +99,11 @@ class FleetPlanResolver:
         containment_root: Path | None = None,
         compiled_overrides: Mapping[Path, CompiledExecutionTemplate] | None = None,
         root_expected_name: str | None = None,
+        locked_goons: tuple[LockedGoonSource, ...] | None = (),
+        acquire_goons: bool = False,
+        update_goons: bool = False,
+        allow_source_network: bool = False,
+        plan_source: LockedGoonSource | None = None,
     ) -> FleetPlanSourceGraph:
         path = navigation_path(plan_path)
         root = _containment_root(path, containment_root)
@@ -107,6 +113,11 @@ class FleetPlanResolver:
             compiled_overrides=compiled_overrides,
             goon_templates=self.goon_templates,
             root_expected_name=root_expected_name,
+            locked_goons=locked_goons,
+            acquire_goons=acquire_goons,
+            update_goons=update_goons,
+            allow_source_network=allow_source_network,
+            plan_source=plan_source,
         )
 
     def resolve_source_graph(
@@ -1025,11 +1036,18 @@ class FleetPlanResolver:
                 steps=steps,
                 step_sources=scope.step_sources,
                 skill_sources=skill_sources() if callable(skill_sources) else skill_sources,
+                goon_sources=source_graph.goon_sources,
                 configuration=context.diagnostics.evidence(),
                 native_agent=native_agent,
             )
         except ValidationError as exc:
             raise FleetPlanInvalid(f"Invalid resolved Fleet Plan: {exc}") from exc
+        plan._project_archives.update(
+            {
+                project.identity.content_sha256: project.archive
+                for project in source_graph.python_projects()
+            }
+        )
         return plan, plan_root, source_sha256
 
 

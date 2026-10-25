@@ -21,6 +21,16 @@ def main() -> int:
     parser.add_argument("--minimum-accuracy-percent", type=int, required=True)
     parser.add_argument("--max-iterations", type=int, required=True)
     args = parser.parse_args()
+    for name, lower, upper in (
+        ("random_seed", 0, 2147483647),
+        ("test_size_percent", 10, 40),
+        ("minimum_accuracy_percent", 80, 100),
+        ("max_iterations", 100, 2000),
+    ):
+        if not lower <= getattr(args, name) <= upper:
+            parser.error(
+                f"--{name.replace('_', '-')} must be between {lower} and {upper}"
+            )
     data, labels = load_iris(return_X_y=True)
     train_data, test_data, train_labels, test_labels = train_test_split(
         data,
@@ -30,7 +40,9 @@ def main() -> int:
         random_state=args.random_seed,
     )
     scaler = StandardScaler()
-    classifier = LogisticRegression(max_iter=args.max_iterations, random_state=args.random_seed)
+    classifier = LogisticRegression(
+        max_iter=args.max_iterations, random_state=args.random_seed
+    )
     pipeline = make_pipeline(scaler, classifier)
     pipeline.fit(train_data, train_labels)
     accuracy = pipeline.score(test_data, test_labels)

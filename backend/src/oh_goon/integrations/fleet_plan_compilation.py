@@ -17,6 +17,7 @@ from oh_goon.core.models.fleet_plan import (
     CompiledGoonImportStep,
     ExtensionCatalog,
 )
+from oh_goon.core.models.git_sources import GoonGitSource
 from oh_goon.core.path_authority import ContainedPathSpace, navigation_path
 from oh_goon.core.template_identity import canonical_template_key, import_step_id
 from oh_goon.integrations.fleet_plan_goon_authoring import (
@@ -162,6 +163,7 @@ def _compile_goon_payload(
         "env",
         "outputs",
         "uv",
+        "runtime",
         "steps",
         "goons",
     }
@@ -195,7 +197,7 @@ def _compile_goon_payload(
                 f"Invalid Goon {source}: Composite Goons leave repository requirements "
                 "with child Goons"
             )
-        if "uv" in normalized:
+        if "uv" in normalized or "runtime" in normalized:
             raise FleetPlanInvalid(
                 f"Invalid Goon {source}: uv belongs to an Atomic Goon execution environment, "
                 "not a Composite Goon"
@@ -328,6 +330,7 @@ def _compile_goon_imports(
     result: list[dict[str, Any]] = []
     authored_aliases: dict[str, int] = {}
     for index, item in enumerate(raw, start=1):
+        git_source = None
         if isinstance(item, str):
             raw_key = item
             source_root = None
@@ -363,7 +366,15 @@ def _compile_goon_imports(
                 authored_aliases[authored_alias] = index
             raw_key = cast(str, item.get("import"))
             source_root = item.get("from")
-            if "from" in item and (
+            if isinstance(source_root, dict):
+                try:
+                    git_source = GoonGitSource.model_validate(source_root)
+                except ValidationError as exc:
+                    raise FleetPlanInvalid(
+                        "Goon Git source requires explicit git, ref and contained path"
+                    ) from exc
+                source_root = None
+            elif "from" in item and (
                 not isinstance(source_root, str)
                 or not source_root.strip()
                 or len(source_root) > 240
@@ -446,6 +457,7 @@ def _compile_goon_imports(
                 "step_id": compiled_id,
                 "goon": key,
                 "source_root": source_root,
+                "git_source": git_source.model_dump() if git_source is not None else None,
                 "phase": item.get("phase") if isinstance(item, dict) else None,
                 "failure_impact": failure_impact,
                 "inputs": compiled_bindings,
@@ -819,18 +831,21 @@ def _parse_run_argv(value: Any) -> list[str]:
 
 
 def _apply_uv_environment(normalized: dict[str, Any]) -> None:
+    runtime = normalized.get("runtime")
+    if runtime is not None and runtime != "python":
+        raise FleetPlanInvalid("Goon runtime must be python when selected")
     raw_uv = normalized.pop("uv", None)
-    if raw_uv is None:
+    if raw_uv is None and runtime is None:
         return
-    if (
-        not isinstance(raw_uv, dict)
-        or not set(raw_uv) <= {"group", "project"}
-        or "group" not in raw_uv
-    ):
-        raise FleetPlanInvalid("Goon uv must contain group and may contain project")
+    if raw_uv is None:
+        raw_uv = {}
+    if not isinstance(raw_uv, dict) or not set(raw_uv) <= {"group", "project"}:
+        raise FleetPlanInvalid("Goon uv may contain group and project")
+    if runtime is not None and "project" in raw_uv:
+        raise FleetPlanInvalid("Python runtime owns the Goon package project; remove uv.project")
     group = raw_uv.get("group")
     project = raw_uv.get("project", ".")
-    if (
+    if group is not None and (
         not isinstance(group, str)
         or re.fullmatch(
             r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|\$\{\{\s*inputs\.[A-Za-z_][A-Za-z0-9_-]*\s*\}\})",
@@ -857,7 +872,26 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
             raise FleetPlanInvalid(
                 "Goon uv cache lineage is backend-owned; remove authored Step cache"
             )
+        if runtime == "python":
+            membership = [step.get("working_directory", ".")]
+            for field in ("artifacts", "outputs"):
+                declarations = step.get(field)
+                if isinstance(declarations, list):
+                    membership.extend(
+                        declaration.get("path")
+                        for declaration in declarations
+                        if isinstance(declaration, dict)
+                    )
+            if any(isinstance(value, str) and "${" in value for value in membership):
+                raise FleetPlanInvalid(
+                    "Python Goon working_directory and artifact/output file paths must be literal; "
+                    "keep inputs in command arguments so captured source membership stays stable"
+                )
         argv = step.get("argv")
+        if runtime == "python" and isinstance(argv, list) and argv:
+            if argv[:2] == ["uv", "run"]:
+                raise FleetPlanInvalid("Python runtime Steps invoke the installed command directly")
+            argv = ["uv", "run", *argv]
         if not isinstance(argv, list) or len(argv) < 3 or argv[:2] != ["uv", "run"]:
             raise FleetPlanInvalid("Goon uv Steps must use run: uv run <command>")
         if argv[2].startswith("-"):
@@ -871,11 +905,14 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
             "--no-default-groups",
             "--project",
             project,
-            "--group",
-            group,
+            *(["--group", group] if group is not None else []),
             *argv[2:],
         ]
-        step["uv"] = {"project": project, "group": group}
+        step["uv"] = {
+            "project": project,
+            "group": group,
+            "source": "package" if runtime == "python" else "repository",
+        }
         step.setdefault("working_directory", project)
 
 

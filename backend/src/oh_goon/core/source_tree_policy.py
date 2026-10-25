@@ -108,10 +108,19 @@ def is_package_manager_materialization_path(
     return any(part in PACKAGE_MANAGER_MATERIALIZATION_DIRECTORY_NAMES for part in relative.parts)
 
 
-def is_transient_source_path(path: Path | PurePosixPath | str) -> bool:
+def is_transient_source_path(
+    path: Path | PurePosixPath | str,
+    *,
+    exclude_paths: tuple[str, ...] = (),
+) -> bool:
     """Whether a repository-relative path is generated/operational and never source identity."""
 
     relative = repository_relative_path(path)
+    if any(
+        relative == PurePosixPath(root) or PurePosixPath(root) in relative.parents
+        for root in exclude_paths
+    ):
+        return True
     for root in TRANSIENT_RELATIVE_PATHS:
         if relative == root or root in relative.parents:
             return True
@@ -139,6 +148,12 @@ def _isolated_python_project_lock_owner(relative: PurePosixPath) -> str | None:
         return "certification fixture"
     if relative.name == "uv.lock" and relative.parent.parent == CANONICAL_EXAMPLES_ROOT:
         return "standalone Python example"
+    if (
+        relative.name == "uv.lock"
+        and len(relative.parts) == 5
+        and relative.parts[:2] == ("templates", "goons")
+    ):
+        return "Python Goon package"
     return None
 
 

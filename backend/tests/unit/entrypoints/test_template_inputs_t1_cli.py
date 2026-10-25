@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 
 import pytest
 
 from oh_goon.cli import main
 from oh_goon.core.models.fleet_plan import AgentPlanStep, CompiledGoonImportStep
+from oh_goon.integrations.python_goon_projects import materialize_python_goon_project
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -48,6 +50,11 @@ def test_every_catalog_contract_is_discoverable_from_selected_config(tmp_path, m
             native_agent=native,
             repair=phases,
         )
+        if graph.root.python_project is not None:
+            project = graph.root.python_project
+            frozen = tmp_path / "captured-project"
+            materialize_python_goon_project(project.archive, project.identity, frozen)
+            shutil.copytree(frozen, config.parent / "repository", dirs_exist_ok=True)
         assert main(["config", "inspect", str(config), "--json"]) == 0, (kind, key)
         report = json.loads(capsys.readouterr().out)
         expected = resolver.inspect_inputs(snapshot.path)

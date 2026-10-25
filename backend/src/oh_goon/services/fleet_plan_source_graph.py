@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 
 from oh_goon.core.errors import FleetPlanInvalid
@@ -13,6 +14,7 @@ from oh_goon.core.models.fleet_plan import (
     PlanStep,
     PreCommitPlanStep,
 )
+from oh_goon.core.models.git_sources import LockedGoonSource
 from oh_goon.core.path_authority import ContainedPathSpace, canonical_path, navigation_path
 from oh_goon.core.product_identity import stable_id
 from oh_goon.integrations.fleet_plan_compilation import GoonTemplateProvider
@@ -20,6 +22,12 @@ from oh_goon.integrations.fleet_plan_source_snapshot import (
     FleetPlanStepPosition,
     read_fleet_plan_source,
 )
+from oh_goon.integrations.python_goon_projects import (
+    CapturedPythonGoonProject,
+    capture_python_goon_project,
+)
+
+MAX_GRAPH_PROJECT_BYTES = 128 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +40,8 @@ class FleetPlanSourceNode:
     local_source: str | None = None
     step_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
     value_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
+    python_project: CapturedPythonGoonProject | None = None
+    authoring_root: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +54,12 @@ class FleetPlanSourceGraph:
     uses_pre_commit: bool
     _goon_edges: Mapping[tuple[Path, str], FleetPlanSourceNode]
     _nodes: Mapping[Path, FleetPlanSourceNode]
+    goon_sources: tuple[LockedGoonSource, ...] = ()
+
+    def python_projects(self) -> tuple[CapturedPythonGoonProject, ...]:
+        return tuple(
+            node.python_project for node in self._nodes.values() if node.python_project is not None
+        )
 
     def immutable_source_closure_identity(self) -> str:
         """Digest the already-analyzed original Plan + every imported Goon.
@@ -188,6 +204,15 @@ class _SourceGraphBuild:
     seen_extensions: set[str] = field(default_factory=set)
     visited: set[Path] = field(default_factory=set)
     uses_pre_commit: bool = False
+    acquisitions: ExitStack = field(default_factory=ExitStack)
+    locked_goons: tuple[LockedGoonSource, ...] | None = ()
+    acquire_goons: bool = False
+    update_goons: bool = False
+    allow_source_network: bool = False
+    acquired_git: dict[tuple[str, str], tuple[Path, str]] = field(default_factory=dict)
+    goon_sources: dict[tuple[str, str, str], LockedGoonSource] = field(default_factory=dict)
+    project_bytes: int = 0
+    archive_bytes: int = 0
 
 
 def analyze_fleet_plan_sources(
@@ -197,23 +222,42 @@ def analyze_fleet_plan_sources(
     compiled_overrides: Mapping[Path, CompiledExecutionTemplate] | None = None,
     goon_templates: GoonTemplateProvider | None = None,
     root_expected_name: str | None = None,
+    locked_goons: tuple[LockedGoonSource, ...] | None = (),
+    acquire_goons: bool = False,
+    update_goons: bool = False,
+    allow_source_network: bool = False,
+    plan_source: LockedGoonSource | None = None,
 ) -> FleetPlanSourceGraph:
     """Read each root/Goon source once and validate the complete composition graph."""
 
     path = navigation_path(plan_path)
+    pinned_commits: dict[tuple[str, str], str] = {}
+    for pin in locked_goons or ():
+        previous = pinned_commits.setdefault((pin.git, pin.ref), pin.commit)
+        if previous != pin.commit:
+            raise FleetPlanInvalid("Locked Git source selections disagree on their captured commit")
     overrides = {
         canonical_path(item): template for item, template in (compiled_overrides or {}).items()
     }
     root = _read_node(path, overrides, expected_name=root_expected_name)
-    build = _SourceGraphBuild(loaded={("path", str(canonical_path(root.path))): root})
-    _visit_source(
-        root,
-        source_stack=(root,),
-        overrides=overrides,
-        goon_templates=goon_templates,
-        authoring_root=containment_root,
-        build=build,
+    build = _SourceGraphBuild(
+        loaded={("path", str(canonical_path(root.path))): root},
+        locked_goons=locked_goons,
+        acquire_goons=acquire_goons,
+        update_goons=update_goons,
+        allow_source_network=allow_source_network,
+        project_bytes=root.python_project.identity.byte_count if root.python_project else 0,
+        archive_bytes=len(root.python_project.archive) if root.python_project else 0,
     )
+    with build.acquisitions:
+        _visit_source(
+            root,
+            source_stack=(root,),
+            overrides=overrides,
+            goon_templates=goon_templates,
+            authoring_root=containment_root,
+            build=build,
+        )
     return FleetPlanSourceGraph(
         root=root,
         containment_root=containment_root,
@@ -222,6 +266,9 @@ def analyze_fleet_plan_sources(
         _goon_edges=MappingProxyType(build.goon_edges),
         _nodes=MappingProxyType(
             {canonical_path(node.path): node for node in build.loaded.values()}
+        ),
+        goon_sources=tuple(
+            ([plan_source] if plan_source is not None else []) + list(build.goon_sources.values())
         ),
     )
 
@@ -272,7 +319,7 @@ def _visit_source(
             source_stack=(*source_stack, child),
             overrides=overrides,
             goon_templates=goon_templates,
-            authoring_root=authoring_root,
+            authoring_root=child.authoring_root or authoring_root,
             build=build,
         )
 
@@ -305,6 +352,7 @@ def _read_node(
         source_sha256=source.sha256,
         step_positions=source.step_positions,
         value_positions=source.value_positions,
+        python_project=_capture_project(source.path, source.compiled, source.sha256),
     )
 
 
@@ -321,7 +369,54 @@ def _load_goon_child(
     local_source = None
     local_root = None
     cache_key = ("goon", key)
-    if step.source_root is not None:
+    remote_root = None
+    if step.git_source is not None:
+        from oh_goon.integrations.git_source_preparation import prepare_git_source
+
+        selection = step.git_source
+        if build.locked_goons is None:
+            raise FleetPlanInvalid(
+                "Git source pins are unavailable; restore goon.lock before acquisition"
+            )
+        if tuple(PurePosixPath(selection.path).parts[-2:]) != tuple(key.split("/")):
+            raise FleetPlanInvalid("Git Goon package path must preserve its category/name identity")
+        coordinates = (selection.git, selection.ref, selection.path)
+        frozen = next(
+            (
+                item
+                for item in build.locked_goons
+                if item.kind == "goon" and (item.git, item.ref, item.path) == coordinates
+            ),
+            None,
+        )
+        if frozen is None and not build.acquire_goons:
+            raise FleetPlanInvalid("Git Goon source requires explicit acquisition with lock")
+        source_key = (selection.git, selection.ref)
+        if source_key not in build.acquired_git:
+            build.acquired_git[source_key] = build.acquisitions.enter_context(
+                prepare_git_source(
+                    selection.git,
+                    selection.ref,
+                    commit=frozen.commit if frozen is not None and not build.update_goons else None,
+                    allow_network=build.acquire_goons or build.allow_source_network,
+                )
+            )
+        checkout, commit = build.acquired_git[source_key]
+        if frozen is not None and not build.update_goons and commit != frozen.commit:
+            raise FleetPlanInvalid("Git Goon selections disagree on the locked commit")
+        selected = ContainedPathSpace.from_root(checkout).resolve_from(
+            checkout,
+            selection.path,
+            label="Git Goon package",
+            kind="directory",
+            require_exists=True,
+        )
+        remote_root = checkout
+        local_root = selected.parent.parent
+        local_source = f"git:{selection.git}@{commit}:{selection.path}/goon.yml"
+        cache_key = ("git", local_source)
+        build.goon_sources[coordinates] = LockedGoonSource(**selection.model_dump(), commit=commit)
+    elif step.source_root is not None:
         space = ContainedPathSpace.from_root(authoring_root)
         root = space.resolve_from(
             parent_path.parent,
@@ -360,6 +455,17 @@ def _load_goon_child(
         raise FleetPlanInvalid(
             f"Imported Goon {key!r} cannot declare execution policy; execution belongs to the root Plan or repository Goon"
         )
+    captured_project = _capture_project(
+        source.path,
+        compiled,
+        source.sha256,
+        catalog_package=True,
+        max_source_bytes=min(64 * 1024 * 1024, MAX_GRAPH_PROJECT_BYTES - build.project_bytes),
+        max_archive_bytes=min(96 * 1024 * 1024, MAX_GRAPH_PROJECT_BYTES - build.archive_bytes),
+    )
+    if captured_project is not None:
+        build.project_bytes += captured_project.identity.byte_count
+        build.archive_bytes += len(captured_project.archive)
     node = FleetPlanSourceNode(
         path=source.path,
         compiled=compiled,
@@ -369,6 +475,30 @@ def _load_goon_child(
         local_source=local_source,
         step_positions=source.step_positions,
         value_positions=source.value_positions,
+        python_project=captured_project,
+        authoring_root=remote_root,
     )
     build.loaded[cache_key] = node
     return node
+
+
+def _capture_project(
+    path: Path,
+    compiled: CompiledExecutionTemplate,
+    sha256: str,
+    *,
+    catalog_package: bool = False,
+    max_source_bytes: int = 64 * 1024 * 1024,
+    max_archive_bytes: int = 96 * 1024 * 1024,
+) -> CapturedPythonGoonProject | None:
+    if compiled.runtime == "python":
+        return capture_python_goon_project(
+            path.parent,
+            compiled,
+            yaml_sha256=sha256,
+            max_source_bytes=max_source_bytes,
+            max_archive_bytes=max_archive_bytes,
+        )
+    if catalog_package and (path.parent / "pyproject.toml").is_file():
+        raise FleetPlanInvalid("A Python Goon package must select runtime: python")
+    return None

@@ -132,6 +132,9 @@ class _FleetPlanRunInputs:
         active_steps = tuple(step for step in plan.steps if step.step_id not in self.import_skips)
         active_plan = plan.model_copy(update={"steps": active_steps})
         combined_managed = dict(managed_runtimes or {})
+        from oh_goon.integrations.python_goon_projects import materialize_plan_projects
+
+        materialize_plan_projects(active_plan, self._layout)
         uv_managed = prepare_uv_project_runtimes(
             active_plan,
             source_root=self.base_workspace,

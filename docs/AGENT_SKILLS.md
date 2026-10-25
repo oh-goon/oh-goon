@@ -308,6 +308,12 @@ participate in execution identity. Generic storage pruning does not delete
 this cache; explicit removal while no captures are active is safe, and the
 next capture restores the locked commits.
 
+Before materialization, native Git evaluates indexed attributes and effective
+filter configuration. Acquisition refuses selected configured smudge/process
+filters and required filters, preserving the no-project-code boundary rather
+than substituting unfiltered source. Unrelated native filters, credentials and
+configuration remain available.
+
 Selected directories retain their supporting files and relative layout. Git
 metadata is excluded; repository cache-name filters do not discard Skill
 resources, such as a committed `coverage/` example directory.

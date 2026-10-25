@@ -755,12 +755,19 @@ class FleetAdmissionPlanner:
         repository_scope: FleetRepositoryScope,
     ) -> dict[str, str]:
         """Snapshot current repository instances for one already-resolved Fleet intent."""
-        state = self._state.read_view()
-        targets = self._eligible_targets(intent, state, repository_scope)
         return {
-            entry.repository.repository_id: repository_subject_instance_id(entry.repository.path)
-            for entry in targets
+            repository.repository_id: repository_subject_instance_id(repository.path)
+            for repository in self.repository_targets(intent, repository_scope=repository_scope)
         }
+
+    def repository_targets(
+        self, intent: ResolvedCapabilityIntent, *, repository_scope: FleetRepositoryScope
+    ) -> tuple[RepositoryIdentity, ...]:
+        """Resolve the existing explicit selection for source custody and instance binding."""
+        state = self._state.read_view()
+        return tuple(
+            entry.repository for entry in self._eligible_targets(intent, state, repository_scope)
+        )
 
     def plan(
         self,

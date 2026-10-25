@@ -10,7 +10,6 @@ dependencies = []
 orders-pipeline = "orders_pipeline.cli:main"
 
 [dependency-groups]
-runtime = []
 dev = ["pytest>=8"]
 
 [tool.uv.build-backend]

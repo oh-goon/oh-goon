@@ -8,13 +8,19 @@ read individual packages using `template_package`, which checks the same
 canonical layout. There is **no** independently authored `catalog.yml`,
 search index, fallback lookup, extension inference or alias registry.
 
-The only address is `category/name`. Every package has exactly two authored
-files: `plan.yml` or `goon.yml` and `README.md`. Path owns logical identity;
-README owns human explanation; YAML owns executable meaning. Template class
-comes from the canonical category policy, never README or YAML metadata.
+The only address is `category/name`. Plans, Composite Goons and tool-invoking
+Atomic Goons have exactly two authored files: `plan.yml` or `goon.yml` and
+`README.md`. An Atomic Goon with `runtime: python` also contains its standalone
+Python project: `pyproject.toml`, native `uv.lock`, implementation, resources
+and optional tests. Path owns logical identity; README owns human explanation;
+YAML owns executable meaning. Template class comes from the canonical category
+policy, never README or YAML metadata.
 
 The discovery owner sorts canonical keys and rejects noncanonical directory
-names, unexpected package members, and symlink package paths. Known transport
+names, unexpected members of two-file packages, and symlink package paths.
+Python package capture uses the existing authored-source snapshot and Hashmarks
+owners; it excludes generated environments, caches and declared output locations.
+Known transport
 sidecars are discarded by the common authored-source-membership owner, not by
 ad-hoc catalog logic. A syntactically similar package name is never a fallback
 for a missing or malformed requested key. Distinct canonical names remain
@@ -28,6 +34,14 @@ and Goons. The hash is not over a README, a package directory, the catalog,
 compiled contract, or a later reread. Changing README prose may change the
 human catalog description without changing the source digest. Changing YAML,
 including line endings, changes the digest.
+
+Python package execution also carries a distinct complete-project identity
+covering its captured authored code, metadata, native lock and resources.
+It does not reinterpret the catalog YAML digest. A changed implementation or
+resource invalidates stale execution authority even when `goon.yml` is unchanged.
+Native execution consumes the captured bytes rather than rereading a live
+checkout or mutable cache. Git acquisition supplies the same source graph with
+explicit locked origin/ref/path/commit provenance; it adds no catalog fallback.
 
 ## Determinism versus staleness
 

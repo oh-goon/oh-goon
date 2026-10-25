@@ -105,6 +105,44 @@ def test_standalone_python_example_owns_its_native_lock(tmp_path: Path) -> None:
     assert canonical_source_layout_issues(tmp_path, check_tracked_generated=False) == ()
 
 
+def test_python_goon_project_owns_its_native_lock(tmp_path: Path) -> None:
+    _minimal_source(tmp_path)
+    package = tmp_path / "templates/goons/ml/standalone-model"
+    package.mkdir(parents=True)
+    metadata = package / "pyproject.toml"
+    metadata.write_text(
+        '[project]\nname = "model"\nversion = "0.0.0"\n', encoding="utf-8"
+    )
+    lock = package / "uv.lock"
+    lock.write_text("version = 1\npackage = []\n", encoding="utf-8")
+
+    assert canonical_source_layout_issues(tmp_path, check_tracked_generated=False) == ()
+
+    metadata.unlink()
+    issues = canonical_source_layout_issues(tmp_path, check_tracked_generated=False)
+    assert any(
+        issue.path == lock
+        and "requires a sibling regular non-symlink pyproject.toml" in issue.reason
+        for issue in issues
+    )
+
+
+def test_python_goon_lock_does_not_admit_another_nested_project(tmp_path: Path) -> None:
+    _minimal_source(tmp_path)
+    package = tmp_path / "templates/goons/ml/standalone-model/nested"
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    lock = package / "uv.lock"
+    lock.write_text("version = 1\npackage = []\n", encoding="utf-8")
+
+    assert any(
+        issue.path == lock and "unexpected uv.lock source path" in issue.reason
+        for issue in canonical_source_layout_issues(
+            tmp_path, check_tracked_generated=False
+        )
+    )
+
+
 @pytest.mark.parametrize("replacement", ["missing", "symlink", "directory"])
 def test_standalone_python_example_lock_requires_regular_project_metadata(
     tmp_path: Path, replacement: str

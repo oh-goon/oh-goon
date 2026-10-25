@@ -15,7 +15,10 @@ from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.league_folders import LeagueFolderStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.repository_discovery import RepositoryDiscoveryService
-from oh_goon.services.run_configuration import load_run_configuration, normalize_run_configuration
+from oh_goon.services.run_configuration import (
+    capture_run_configuration_source,
+    load_run_configuration,
+)
 from oh_goon.services.run_configuration_inspection import inspect_run_configuration
 
 
@@ -28,10 +31,16 @@ def prepare_configuration(args: argparse.Namespace) -> None:
             LeagueFolderStore().list(), require_pyproject=False
         )
     )
-    selected = normalize_run_configuration(snapshot, repositories)
-    args._run_configuration = selected
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
-    graph = resolver.analyze_source(selected.plan_path)
+    selected, graph = capture_run_configuration_source(
+        snapshot,
+        repositories,
+        resolver,
+        acquire=args.command == "lock",
+        allow_network=args.command in {"lock", "run"},
+        update=bool(getattr(args, "update_goons", False)),
+    )
+    args._run_configuration = selected
     agent = snapshot.selection.agent
     repair = snapshot.selection.repair
     agent_source = graph.has_agent_source_contract()

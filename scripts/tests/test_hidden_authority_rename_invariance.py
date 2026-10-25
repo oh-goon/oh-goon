@@ -423,7 +423,7 @@ def test_pytest_testpaths_semantic_removal_is_rejected(tmp_path: Path) -> None:
     )
 
 
-def test_wheel_force_include_toml_representation_is_semantic(tmp_path: Path) -> None:
+def test_wheel_catalog_hook_toml_representation_is_semantic(tmp_path: Path) -> None:
     from oh_goon.repository_tooling.architecture.template_layout_contract import (
         _check_wheel_force_include,
     )
@@ -431,15 +431,9 @@ def test_wheel_force_include_toml_representation_is_semantic(tmp_path: Path) -> 
     pyproject = tmp_path / "backend/pyproject.toml"
     pyproject.parent.mkdir(parents=True)
     equivalent_forms = (
-        "[tool.hatch.build.targets.wheel.force-include]\n"
-        "'../templates/goons' = 'oh_goon/templates/goons'\n"
-        "'../templates/plans' = 'oh_goon/templates/plans'\n",
-        "[tool.hatch.build.targets.wheel.force-include]\n"
-        "'../templates/plans'='oh_goon/templates/plans'\n"
-        "'../templates/goons'='oh_goon/templates/goons'\n",
-        "[tool.hatch.build.targets.wheel.force-include]\n"
-        '"../templates/goons"="oh_goon/templates/goons"\n'
-        '"../templates/plans" = "oh_goon/templates/plans"\n',
+        "[tool.hatch.build.targets.wheel.hooks.custom]\npath = 'hatch_build.py'\n",
+        "[tool.hatch.build.targets.wheel.hooks.custom]\npath='hatch_build.py'\n",
+        '[tool.hatch.build.targets.wheel.hooks.custom]\npath = "hatch_build.py"\n',
     )
     for text in equivalent_forms:
         pyproject.write_text(text, encoding="utf-8")
@@ -448,7 +442,7 @@ def test_wheel_force_include_toml_representation_is_semantic(tmp_path: Path) -> 
         assert violations == []
 
 
-def test_wheel_force_include_semantic_target_change_is_rejected(tmp_path: Path) -> None:
+def test_wheel_catalog_source_cannot_bypass_admitted_staging(tmp_path: Path) -> None:
     from oh_goon.repository_tooling.architecture.template_layout_contract import (
         _check_wheel_force_include,
     )
@@ -458,12 +452,12 @@ def test_wheel_force_include_semantic_target_change_is_rejected(tmp_path: Path) 
     pyproject.write_text(
         "[tool.hatch.build.targets.wheel.force-include]\n"
         '"../templates/goons" = "oh_goon/templates/WRONG"\n'
-        '"../templates/plans" = "oh_goon/templates/plans"\n',
+        '[tool.hatch.build.targets.wheel.hooks.custom]\npath = "hatch_build.py"\n',
         encoding="utf-8",
     )
     violations: list[Violation] = []
     _check_wheel_force_include(pyproject, violations)
     assert any(
-        'wheel packaging must include "../templates/goons"' in item.message
+        'wheel packaging must stage "../templates/goons"' in item.message
         for item in violations
     )
