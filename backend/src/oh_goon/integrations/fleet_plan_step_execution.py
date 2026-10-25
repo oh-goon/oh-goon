@@ -1070,7 +1070,7 @@ def _execute_command_step(
 ) -> StepOutcome:
     argv = step.argv
     managed = process.managed_runtime
-    package = process.package_project
+    package = process.package_project if step.project_source is not None else None
     if package is None and (
         step.project_source is not None
         or isinstance(managed, UvProjectManagedRuntime)

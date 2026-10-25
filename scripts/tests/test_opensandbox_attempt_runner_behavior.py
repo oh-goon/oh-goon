@@ -636,37 +636,35 @@ def test_privilege_drop_failure_prevents_native_exec(
 def test_native_unprivileged_workload_cannot_mutate_immutable_inputs(
     tmp_path: Path,
 ) -> None:
+    from oh_goon.integrations._fleet_plan_host_resources import HostToolBinding
+    from oh_goon.integrations._fleet_plan_runtime_root import capture_runtime_root
+    from oh_goon.integrations.content_snapshot import snapshot_identity
+
     root = tmp_path / "root"
     payload = _base_payload(tmp_path)
     runtime = tmp_path / "native-runtime"
-    runtime.mkdir()
     shell = Path("/bin/sh").resolve(strict=True)
-    targets = [shell]
-    linked = subprocess.run(
-        ["ldd", str(shell)], check=True, capture_output=True, text=True
+    inspector = shutil.which("ldd")
+    assert inspector is not None
+    capture_runtime_root(
+        (HostToolBinding("sh", shell, shell, snapshot_identity(shell)),),
+        {},
+        runtime,
+        runtime_inspector=Path(inspector).resolve(strict=True),
+        network_enabled=False,
+        cancel_requested=None,
     )
-    for token in linked.stdout.split():
-        if token.startswith("/"):
-            targets.append(Path(token))
-    for source in targets:
-        destination = runtime / source.relative_to("/")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
-        destination.chmod(0o555)
-    shell_target = runtime / "bin/sh"
-    shell_target.parent.mkdir(parents=True, exist_ok=True)
-    if shell_target != runtime / shell.relative_to("/"):
-        shutil.copyfile(shell, shell_target)
-        shell_target.chmod(0o555)
     archive = tmp_path / "input/native-runtime.tar.gz"
     archive_tree(runtime, archive)
     payload["runtime_root_archive"] = "input/native-runtime.tar.gz"
+    shutil.copyfile(shell, tmp_path / "input/sh")
+    payload["toolchain"] = [{"name": "sh", "source": "input/sh", "mode": 0o555}]
     source_archive = _tree_archive(tmp_path, **{"source.txt": "captured-source"})
     payload["readonly_inputs"] = [
         {"declared_path": "/managed/source", "kind": "tree", "source": source_archive}
     ]
     payload["argv"] = [
-        "/bin/sh",
+        "/toolchain/bin/sh",
         "-c",
         "set -eu; "
         "if printf changed > /managed/source/source.txt 2>/dev/null; then exit 10; fi; "

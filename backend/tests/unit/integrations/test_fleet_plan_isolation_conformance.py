@@ -287,6 +287,11 @@ def test_remote_runner_preserves_runtime_observation_on_workload_timeout(
         del args, kwargs
         raise subprocess.TimeoutExpired(("true",), 12.0, output="partial")
 
+    # This portable test observes a simulated native timeout after real source
+    # capture and runtime binding. VM ownership/privilege enforcement is proven
+    # separately by the privileged helper tests; this phase grants no native
+    # qualification in a non-root test process.
+    monkeypatch.setattr(remote_runner, "_prepare_workload_filesystem", lambda _payload, _root: None)
     monkeypatch.setattr(remote_runner, "_run", timeout)
     result = remote_runner._execute_attempt(payload, tmp_path / "remote-timeout-fleet" / "rootfs")
 
