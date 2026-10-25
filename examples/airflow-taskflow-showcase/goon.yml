@@ -1,0 +1,21 @@
+uv:
+  group: runtime
+inputs:
+  fixture:
+    type: choice
+    choices: [official, changed, invalid]
+    default: official
+steps:
+  - id: extract
+    run: uv run orders-pipeline extract --fixture ${{ inputs.fixture }}
+    outputs:
+      DATA: .showcase/extracted.json
+  - id: transform
+    run: uv run orders-pipeline transform --data ${{ steps.extract.outputs.DATA }}
+    outputs:
+      TOTAL: .showcase/total.txt
+  - id: load
+    run: uv run orders-pipeline load --total ${{ steps.transform.outputs.TOTAL }}
+    artifacts:
+      - path: .showcase/result.json
+        retention: evidence

@@ -1,0 +1,21 @@
+[project]
+name = "airflow-oh-goon-orders"
+version = "0.1.0"
+description = "Engine independent orders workload from the official Airflow TaskFlow tutorial"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+orders-pipeline = "orders_pipeline.cli:main"
+
+[dependency-groups]
+runtime = []
+dev = ["pytest>=8"]
+
+[tool.uv.build-backend]
+module-name = "orders_pipeline"
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"

@@ -44,7 +44,10 @@ inputs:
 ```
 
 `REPOSITORY_ID` is a placeholder for the target's registered canonical identity.
-Register the repository in the UI and copy that ID; a path is not an identity.
+Follow the [template first-run guide](../../templates/README.md) for headless
+registration with `league add-folder` and `league scan --json`. Copy the selected
+repository's canonical `repository_id` into `target.repository_id`; the current
+initializer requires this explicit ID transfer.
 The Python values above illustrate this repository's layout. Native uv, Ruff,
 Pytest and the selected type checker retain their project configuration and
 results. Inspect your actual selected contract before changing values.
