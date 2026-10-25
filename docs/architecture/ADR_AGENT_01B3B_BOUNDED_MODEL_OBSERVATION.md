@@ -1,5 +1,9 @@
 # ADR — AGENT-01B3B bounded local model review through original Fleet Step
 
+**Historical representation.** Current execution uses neutral `ResolvedAgentStep`
+and its builtin workload variant; the former local-search class is removed. See
+the [current owner map](../development/AGENT_RUNTIME_OWNERS.md).
+
 **Decision:** Extend the existing `ResolvedLocalSearchAgentStep` protocol with
 an explicit `local-model-review` harness; retain AGENT-01B3A semantics for
 `local-model-search` and original offline semantics for `local-search`.

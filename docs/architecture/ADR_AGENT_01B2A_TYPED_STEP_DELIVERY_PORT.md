@@ -2,6 +2,11 @@
 
 Status: Development decision, not Fleet admission/release.
 
+**Historical representation.** `ResolvedAgentStep` now replaces the inherited
+local-search class with discriminated workload variants. The original separate
+delivery and Fleet/Step authority remain; see the
+[current owner map](../development/AGENT_RUNTIME_OWNERS.md).
+
 ## Why
 
 AG-02 captured source and AGENT-01B1 transported its immutable packet to the

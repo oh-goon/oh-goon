@@ -122,13 +122,13 @@ their existing claim and execution authority labels remain distinct.
 Use `oh-goon plan campaign FLEET_RUN_ID --json` with any linked Run to inspect the
 same retained evidence after interruption. It reads one original journal cut;
 it neither loads raw model transcripts nor resumes work. Missing Runs, absent
-Step results and nonterminal or cancelled Runs remain incomplete. The controller
-stop receipt currently belongs to the invocation, so durable readback reports
-`controller_result.availability: unavailable` and `result: incomplete`, including
-when final verification succeeded: the controller's subsequent final source
-recapture is not established by those Runs. Save the original invocation JSON
-when its final convergence decision is needed. A fresh authorized invocation is
-required for continuation.
+Step results and nonterminal or cancelled Runs remain incomplete. Committed
+controller intent, exact phase linkage and decisions reopen from the canonical
+Journal independently of invocation JSON. Successful child verification without
+the subsequent committed controller decision reports
+`controller_result.availability: unavailable` and `result: incomplete`; those
+Runs alone cannot establish convergence. A fresh authorized invocation is
+required for continuation; readback starts no work.
 
 ## Hashmarks dogfood acceptance
 
@@ -192,12 +192,14 @@ facts in the existing export receipt, lock, invocation result and Run evidence:
   Preserve exact verification membership when supplied; do not infer test success
   from a model claim or a command description.
 
-The original invocation's controller receipt decides workflow convergence;
-original Runs and native Step evidence decide execution outcomes. Save its JSON
-campaign result and inspect `plan campaign RUN_ID --json`. Retained readback
-without the invocation receipt reports the controller result unavailable and
-the campaign incomplete, including after successful final verification. Neither
-report authorizes continuation or publication. A fresh continuation needs fresh
+Campaign policy decides workflow convergence and retains its decision in the
+canonical Journal; original Runs and settled Step evidence decide execution
+outcomes. Inspect `plan campaign RUN_ID --json` after reopening the runtime;
+the verified Journal read cut retains campaign intent, exact linked phases and
+committed controller decisions independently of invocation stdout. Successful
+child verification without a committed controller decision remains incomplete,
+with the missing decision explicit. Readback never resumes work or authorizes
+publication. A fresh continuation needs fresh
 caller authority, capture and limits. PR preparation may use these facts; pushing
 or publishing a PR remains a separate explicitly authorized action.
 
@@ -243,10 +245,10 @@ or grant shell, network, or repository-write capabilities.
 | --- | --- | --- |
 | Skill source | `.goonskills.yml` maps local resources and groups remote directories by Git source/ref. Complete captured resources travel with the frozen handoff. | `goon.lock` records remote commits; a cache miss restores the same commit. |
 | Local read-only tools | Selected harnesses can request bounded repository retrieval, list repository/Skill paths, and read admitted captured files. | Hashmarks observes and presents repository evidence with explicit bounds and source revisions. Exact resource reads use frozen bytes; the model cannot supply arbitrary shell commands or read arbitrary host paths. |
-| Bounded Skill loop | `local-model-skill-loop` permits up to four admitted tool actions followed by a final model evaluation. | Repeated or invalid requests and requests beyond the action budget fail the Step. |
+| Native reasoning/tool loop | Selected native Agents own conversation, tools, compaction and reasoning inside the admitted Step. | The former `local-model-skill-loop` mode is removed; re-author old inputs with native selection and obtain fresh admission. |
 | File proposal | `local-model-proposal` can return a bounded replacement bound to one captured file's source digest. | A proposal is data and does not modify the repository. |
 | Explicit apply and test | A later operator-authored command Step can invoke `oh-goon agent apply` for the explicitly selected path, followed by an authored test Step. | The apply owner checks the proposed source identity; the native test's real result remains authoritative. |
-| Failed-test feedback | An explicitly selected earlier command output can feed a later `local-model-skill-loop` Step. | The recipient remains read-only, and an earlier failed test keeps the Run failed. |
+| Failed-test feedback | An explicitly selected earlier command output can feed a later `local-model-proposal` Step. | The recipient remains read-only, and an earlier failed test keeps the Run failed. |
 | Automatic repair | A caller-bounded test → proposal → apply → retest sequence can repeat with fresh captures. | Each attempt is a separate original Fleet Run; native test results decide continuation. |
 
 Ordinary local execution selects `oh-goon run run.yml` and uses the
@@ -353,7 +355,7 @@ receiver verifies the captured delivery and supplied pins; it does not reopen
 the registry or reacquire Skill bytes.
 
 The previous handoff and its encoded packet remain unchanged. Resolve the new
-handoff with `resolve_frozen_local_search_agent(..., handoff=new_handoff)`, review
+handoff with `resolve_frozen_agent(..., handoff=new_handoff)`, review
 and write its execution lock through the existing lock owner, and explicitly
 submit `FleetPlanService.run(..., agent_handoff=new_handoff)` under a new Run ID.
 Fleet verifies the lock and transports that selected packet; admission and Step
@@ -447,15 +449,18 @@ Tapes remain failed, including a failed check preceding a successful retest.
 Generic rerun/readmission cannot inherit a repair budget. A restart does not
 automatically resume the loop; existing Fleet recovery governs any active Run.
 
-New Plans use contract version 44. Stored version-43 Plans remain readable with
-their original identities. This execution feature does not establish real
-Ollama model quality, native Linux/WSL qualification, or release certification.
+The neutral Agent execution contract replaces older serialized Agent Steps.
+Old configuration and locks require explicit re-authoring and re-locking; they
+are not converted or interpreted through compatibility aliases. See the
+[state cutover contract](development/AGENT_RUNTIME_OWNERS.md#execution-state-cutover-and-recovery).
+This does not establish real Ollama model quality, native Linux/WSL qualification,
+or release certification.
 
 ## Failed-test feedback
 
 The producer must be an earlier command Step with `on_failure: continue`, a
 declared bounded output file, and one permitted attempt. The receiving
-`local-model-skill-loop` or `local-model-proposal` Agent selects one exact
+`local-model-proposal` Agent selects one exact
 `${{ steps.test.outputs.diagnostic }}` reference and a matching
 `FAILED`-only `step_status` condition. The original sequencer binds the actual
 published scalar; the model receives it as escaped **UNTRUSTED DATA**.
@@ -467,7 +472,6 @@ source, selected model, or admitted tool set. It does not cause a retest, create
 a fresh source revision, or turn a failed native test into success.
 
 The current behavioral examples are the
-[bounded Skill loop](../backend/tests/integration/test_agent01b3g_bounded_skill_loop.py),
 [explicit proposal/apply/test sequence](../backend/tests/integration/test_agent01b3j_authorized_proposal_apply.py),
 and [failed-test model feedback](../backend/tests/integration/test_agent01b3l_original_fleet_model_feedback.py)
 integration tests. Their deterministic model fixtures verify protocol and

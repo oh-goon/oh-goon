@@ -60,12 +60,12 @@ def _check(root: Path) -> list[str]:
         "AgentOrchestrator",
     ],
 )
-def test_separate_agent_authority_classes_fail_before_work(
+def test_private_class_spelling_cannot_establish_execution_authority(
     baseline: Path, klass: str
 ) -> None:
     candidate = baseline / "backend/src/oh_goon/services/agent_host.py"
     candidate.write_text(f"class {klass}:\n    pass\n", encoding="utf-8")
-    assert any("agent-specific authority owner" in m for m in _check(baseline))
+    assert _check(baseline) == []
 
 
 @pytest.mark.parametrize(
@@ -93,6 +93,106 @@ def test_pure_adapter_does_not_create_an_alternate_owner(baseline: Path) -> None
         encoding="utf-8",
     )
     assert _check(baseline) == []
+
+
+def test_import_shadow_is_not_inferred_to_be_a_process_launch(baseline: Path) -> None:
+    candidate = baseline / "backend/src/oh_goon/integrations/agent_harness_adapter.py"
+    candidate.write_text(
+        "import subprocess\n"
+        "def describe(subprocess):\n    return subprocess.run()\n"
+        "def local():\n    subprocess = object()\n    return subprocess\n"
+    )
+    assert _check(baseline) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import subprocess as sp\nlaunch = sp.Popen\nlaunch(['codex'])\n",
+        "from subprocess import run as native\nsecond_alias = native\nsecond_alias(['codex'])\n",
+        "import os as operating_system\nlaunch = getattr(operating_system, 'execve')\nlaunch('codex', [], {})\n",
+        "def publish(journal):\n    finish = journal.finish_detail\n    finish()\n",
+        "def publish(journal):\n    finish = journal.terminalize_run_in\n    finish()\n",
+        "def publish(journal):\n    decide = journal.commit_agent_campaign_decision\n    decide()\n",
+        "def launch(runs):\n    admit = runs.start_prepared_plan\n    admit()\n",
+        "from oh_goon.services import fleet_run_control_plane as fleet\ndef acquire():\n    return fleet.FleetRunControlPlane\n",
+    ],
+)
+def test_adapter_callable_alias_cannot_bypass_effect_or_admission(
+    baseline: Path, source: str
+) -> None:
+    candidate = baseline / "backend/src/oh_goon/integrations/agent_harness_adapter.py"
+    candidate.write_text("def describe(request):\n    return request.argv\n")
+    assert _check(baseline) == []
+    candidate.write_text(source)
+    assert any(
+        "adapter bypass" in message or "adapter acquired Run authority" in message
+        for message in _check(baseline)
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from oh_goon.core.models.fleet_observation import NativeAgentObservation as Native\ndef accept(value):\n    return isinstance(value, Native)\n",
+        "from oh_goon.core.models import fleet_observation as observations\ndef accept(value):\n    return isinstance(value, observations.NativeAgentObservation)\n",
+        "from oh_goon.integrations import agent_codex_service as protocol\ndef choose():\n    return protocol.CodexServiceClient\n",
+        "from oh_goon.engine.command import run_command as launch\nlaunch(['true'])\n",
+        "from oh_goon.runtime.database import LocalDatabase as State\n",
+        "import sqlite3 as sql\nopen_state = sql.connect\nopen_state('campaign.sqlite')\n",
+        "import subprocess as process\nlaunch = process.run\nlaunch(['true'])\n",
+        "def choose(runs):\n    admit = runs.start_bound\n    return admit()\n",
+    ],
+)
+def test_campaign_cannot_interpret_native_transport_or_acquire_effect_capabilities(
+    baseline: Path, source: str
+) -> None:
+    candidate = baseline / "backend/src/oh_goon/services/fleet_plan_repair.py"
+    candidate.write_text("def choose(result):\n    return result.settlement\n")
+    assert _check(baseline) == []
+    candidate.write_text(source)
+    assert any(
+        "campaign acquired" in message
+        or "campaign bypass" in message
+        or "adapter bypass effect" in message
+        for message in _check(baseline)
+    )
+
+
+def test_campaign_private_rename_and_required_backend_variation_are_allowed(
+    baseline: Path,
+) -> None:
+    candidate = baseline / "backend/src/oh_goon/services/fleet_plan_repair.py"
+    candidate.write_text(
+        "from oh_goon.core.models.fleet_observation import AgentReviewObservation\n"
+        "from oh_goon.runtime.journal_view import JournalReadView\n"
+        "from oh_goon.integrations.agent_patch_apply import validate_write_roots\n"
+        "def _choose(result):\n    return result.settlement\n"
+        "def choose(result):\n    return _choose(result)\n"
+    )
+    backend = (
+        baseline / "backend/src/oh_goon/integrations/fleet_plan_process_isolation.py"
+    )
+    backend.write_text(
+        "import subprocess\ndef execute(argv):\n    return subprocess.run(argv)\n"
+    )
+    assert _check(baseline) == []
+    candidate.write_text(
+        candidate.read_text().replace("_choose", "_inspect_settlement")
+    )
+    assert _check(baseline) == []
+
+
+def test_native_step_adapter_has_the_same_no_admission_boundary(baseline: Path) -> None:
+    candidate = baseline / "backend/src/oh_goon/integrations/fleet_plan_native_steps.py"
+    candidate.write_text(
+        "def invoke(admitted_runner, argv):\n    return admitted_runner(argv)\n"
+    )
+    assert _check(baseline) == []
+    candidate.write_text(
+        "def invoke(runs):\n    admission = runs.start_bound\n    return admission()\n"
+    )
+    assert any("adapter bypass admission" in message for message in _check(baseline))
 
 
 def test_agent_cli_side_entrance_rejected(baseline: Path) -> None:
@@ -183,10 +283,10 @@ def test_adr_prose_changes_preserve_structural_authority_checks(baseline: Path) 
     assert _check(baseline) == []
 
     candidate = baseline / "backend/src/oh_goon/services/agent_host.py"
-    candidate.write_text("class AgentRunExecutor:\n    pass\n", encoding="utf-8")
-    assert _check(baseline) == [
-        "X0 AG-00 agent-specific authority owner forbidden: AgentRunExecutor"
-    ]
+    candidate.write_text(
+        "import subprocess\nlaunch = subprocess.run\nlaunch(['true'])\n"
+    )
+    assert any("agent adapter bypass effect" in message for message in _check(baseline))
 
 
 def test_agent_adr_missing_after_enrollment_fails_closed(baseline: Path) -> None:

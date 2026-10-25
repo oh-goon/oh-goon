@@ -4,7 +4,21 @@
 
 oh-goon is a local-first control plane with one public Python process composition/lifecycle root, one SQLite coordination boundary, one append-only Journal, and domain-specific lifecycle owners. The repository is pre-live: prefer deleting a wrong internal design and updating all callers over preserving compatibility surfaces.
 
-Selected Agent Steps use this same execution lifecycle. The [Agent Skills guide](AGENT_SKILLS.md) describes captured resources, bounded local-model inspection, explicitly authored proposal/apply/test Steps and failed-test feedback. Explicitly bounded review–repair execution recaptures each changed candidate, admits a separate original Fleet Run for each phase, and requires fresh review and native verification before convergence. Native agents retain their own reasoning, tools and compaction; the controller does not replace their inner loop. The [canonical Agent execution decision](architecture/ADR_AGENT_WORKLOAD_CANONICAL_EXECUTION.md) defines the ownership boundary.
+Selected Agent Steps use this same execution lifecycle and a neutral immutable
+intent with explicit search, bounded model, provider and native workload variants.
+The [Agent Skills guide](AGENT_SKILLS.md) describes captured resources and explicit
+proposal/apply/test work. Review–repair recaptures changed candidates, admits a
+separate original Fleet Run for each phase, and requires fresh review and native
+verification before convergence. Native agents retain reasoning, tools and compaction.
+
+Canonical Step settlement accepts execution and cleanup facts; campaign policy
+consumes that result without interpreting native transport. The original Journal
+retains campaign intent, atomic phase linkage and predecessor-bound advancement
+and terminal decisions. CLI, API and Game Tape read the same identified cut;
+successful child verification cannot fill a missing controller decision. Reading
+never resumes execution. The [current Agent owner map](development/AGENT_RUNTIME_OWNERS.md)
+defines these contracts and the incompatible-state cutover; retained Agent ADRs
+explain their historical designs.
 
 [Current architecture decisions](development/ARCHITECTURE_DECISIONS.md) summarize the active invariants. Retained ADRs explain why a boundary exists; their checkpoint results and unfinished native proofs remain historical evidence. Ordinary Linux/WSL execution uses its selected workload contract. Additional containment or custody requirements apply only when the selected backend/workload requests those guarantees.
 

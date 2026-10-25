@@ -10,7 +10,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from oh_goon.repository_tooling.architecture.common import Violation, project_scripts_from_text
+from oh_goon.repository_tooling.architecture.common import (
+    Violation,
+    project_scripts_from_text,
+    python_ast,
+    python_semantic_facts,
+)
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 
 DIAGNOSTIC_MODULE = "oh_goon.repository_tooling.local_lace_physical_preflight"
@@ -616,7 +621,7 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
     for relative, klass, method, needed in required_edges:
         path = package / relative
         try:
-            tree = parsed.setdefault(path, ast.parse(path.read_text(encoding="utf-8")))
+            tree = parsed.setdefault(path, python_ast(path))
         except (OSError, SyntaxError):
             issues.append(Violation(path, "X0 AG-00 canonical owner missing or not parseable"))
             continue
@@ -647,14 +652,6 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
                 )
             )
 
-    # New Agent-specific owner surfaces are prohibited; small post-admission
-    # argument/capability adapters are permitted, but cannot create effects.
-    forbidden_owner = re.compile(
-        r"agent.*(runtime|scheduler|orchestrat(or|ion)|executor|execution|launcher|"
-        r"admission|admitter|enforcer|journal|factpublisher|physicalobserver|"
-        r"recovery|looprunner|terminal|sandboxmanager|policyengine)",
-        re.I,
-    )
     # These direct effects are forbidden only inside files marketed as agent
     # integrations, never across general existing Fleet backend implementations.
     effect_calls = frozenset(
@@ -679,58 +676,95 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
         if not any(path.is_relative_to(package / part) for part in CONTROL_DIRS):
             continue
         try:
-            source_tree = parsed.get(path) or ast.parse(path.read_text(encoding="utf-8"))
+            parsed.get(path) or python_ast(path)
         except (OSError, SyntaxError):
             issues.append(Violation(path, "X0 AG-00 control source cannot be inspected"))
             continue
         agent_file = "agent" in path.stem.lower()
-        declarations = (
-            node
-            for node in ast.walk(source_tree)
-            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-        )
-        for declaration in declarations:
-            if forbidden_owner.search(declaration.name) or (
-                agent_file
-                and re.search(
-                    r"(?:RunExecutor|Scheduler|Enforcer|Journal|PhysicalObserver|LoopRunner|Recovery|SandboxManager|PolicyEngine)$",
-                    declaration.name,
-                    re.I,
-                )
-            ):
-                issues.append(
-                    Violation(
-                        path,
-                        f"X0 AG-00 agent-specific authority owner forbidden: {declaration.name}",
-                    )
-                )
+        # A private declaration's spelling grants no authority. Check imports,
+        # actual effect calls and accepting lifecycle edges instead of rejecting
+        # a harmless type/function merely for containing an authority-like word.
         # A narrow agent *adapter* may describe a frozen request, never create
         # a direct process, database or journal bypass itself.
-        if agent_file:
-            imported: dict[str, str] = {}
-            for node in ast.walk(source_tree):
-                if isinstance(node, ast.Import):
-                    for alias in node.names:
-                        imported[alias.asname or alias.name] = alias.name
-                if isinstance(node, ast.ImportFrom) and node.module:
-                    for alias in node.names:
-                        imported[alias.asname or alias.name] = node.module + "." + alias.name
-            for node in ast.walk(source_tree):
-                if isinstance(node, ast.Call):
-                    target = ast.unparse(node.func)
-                    head, sep, tail = target.partition(".")
-                    target = imported.get(head, head) + (sep + tail if sep else "")
-                    if target in effect_calls or target.endswith(
-                        (
-                            ".publish_local_resource_intent",
-                            ".publish_local_resource_intent_in",
-                            ".finish_detail",
-                            ".append_fact",
+        adapter = path.parent == package / "integrations" and (
+            agent_file or path.stem == "fleet_plan_native_steps"
+        )
+        campaign = path == package / "services/fleet_plan_repair.py"
+        if agent_file or adapter or campaign:
+            facts = python_semantic_facts(path, imported_only=True)
+            for target, _node in facts.calls:
+                if target in effect_calls:
+                    issues.append(
+                        Violation(path, f"X0 AG-00 agent adapter bypass effect: {target}")
+                    )
+            # Supplied capability receivers need not be imported symbols. Resolve
+            # simple callable aliases without guessing arbitrary receiver types.
+            receiver_facts = python_semantic_facts(path)
+            for target, _node in receiver_facts.calls:
+                if target.endswith(
+                    (
+                        ".publish_local_resource_intent",
+                        ".publish_local_resource_intent_in",
+                        ".finish_detail",
+                        ".append_fact",
+                        ".admit_run_in",
+                        ".terminalize_run_in",
+                        ".commit_agent_campaign_decision",
+                        ".commit_agent_campaign_decision_in",
+                    )
+                ):
+                    issues.append(
+                        Violation(path, f"X0 AG-00 agent adapter bypass effect: {target}")
+                    )
+            if adapter:
+                for imported in sorted(facts.imports | facts.references):
+                    if any(
+                        imported == module or imported.startswith(module + ".")
+                        for module in (
+                            "oh_goon.services.fleet_run_control_plane",
+                            "oh_goon.services.fleet_run_lifecycle",
+                            "oh_goon.runtime.journal",
+                            "oh_goon.runtime.database",
                         )
                     ):
                         issues.append(
-                            Violation(path, f"X0 AG-00 agent adapter bypass effect: {target}")
+                            Violation(path, f"X0 agent adapter acquired Run authority: {imported}")
                         )
+                for target, _node in receiver_facts.calls:
+                    if target.endswith((".start_prepared_plan", ".start_bound", "._start_intent")):
+                        issues.append(
+                            Violation(path, f"X0 agent adapter bypass admission: {target}")
+                        )
+            if campaign:
+                # Phase policy consumes canonical settled results. Native transport,
+                # process control, admission and persistence belong to its callers
+                # and adapters; proposal argument validation remains a pure input.
+                for imported in sorted(facts.imports | facts.references):
+                    if any(
+                        imported == module or imported.startswith(module + ".")
+                        for module in (
+                            "oh_goon.core.models.fleet_observation.NativeAgentObservation",
+                            "oh_goon.core.models.fleet_observation.NativeServiceExecutionEvidence",
+                            "oh_goon.integrations.agent_native_execution",
+                            "oh_goon.integrations.agent_codex_service",
+                            "oh_goon.integrations.agent_codex_service_execution",
+                            "oh_goon.integrations.agent_opencode_service",
+                            "oh_goon.integrations.fleet_plan_native_steps",
+                            "oh_goon.engine.command",
+                            "oh_goon.services.fleet_run_control_plane",
+                            "oh_goon.services.fleet_run_lifecycle",
+                            "oh_goon.runtime.database",
+                            "oh_goon.runtime.journal",
+                        )
+                    ):
+                        issues.append(
+                            Violation(path, f"X0 campaign acquired execution authority: {imported}")
+                        )
+                for target, _node in receiver_facts.calls:
+                    if target.endswith(
+                        (".start_prepared_plan", ".start_bound", "._start_intent", ".run_command")
+                    ):
+                        issues.append(Violation(path, f"X0 campaign bypass execution: {target}"))
     pyproject = root / "backend/pyproject.toml"
     try:
         scripts = project_scripts_from_text(pyproject.read_text(encoding="utf-8"))

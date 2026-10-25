@@ -16,6 +16,7 @@ The repository must keep one canonical owner for each critical responsibility:
 - `backend/src/oh_goon/workflow.py` may call backend capabilities but may not import/reimplement backend domain authority such as repository identity, schema, Fleet history, or APP-success evidence.
 - Pre-Plan startup checks only prerequisites needed to launch Oh-Goon. Node/npm/frontend/dev/browser semantics remain owned by APP Goons.
 - Durable APP/PACKAGE success comes from canonical Run evidence. Mirror pass-marker files are forbidden.
+- Agent phase policy consumes canonical typed Step settlement. It cannot import native transport observations/protocol, process control, Run admission or database/Journal writers. Native adapters cannot acquire Run admission/publication or launch raw subprocesses. The existing [X0 rule](../../backend/src/oh_goon/repository_tooling/architecture/x0_single_execution_contract.py) resolves static import and callable aliases, preserves legitimate backend mechanisms and tests private helper renames; arbitrary reflection and crash ordering remain behavioral proof obligations. The [current census](AGENT_RUNTIME_OWNERS.md#bounded-authority-census) states the inspected scope and unsupported entrypoint combinations.
 - Frontend HTTP/write transport remains centralized through `ApiClient` / mutation transport instead of feature-local transport paths.
 - Destructive API operations require an explicit target; Fleet Run cancellation remains identity-bound from the displayed Run through the command boundary.
 

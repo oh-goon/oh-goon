@@ -1,5 +1,11 @@
 # ADR — AGENT-01B3G: opt-in bounded read-only Skill loop
 
+**Historical decision, superseded.** The multi-turn `local-model-skill-loop`
+selection and its retained history protocol are removed. Native Agents now own
+reasoning/tool loops under the shared Fleet/Step contract. The
+[current owner map](../development/AGENT_RUNTIME_OWNERS.md) describes retained
+builtin requests, neutral workload variants and pre-effect old-input refusal.
+
 ## Motivation
 A two-action Agent Skill could list the captured checklist and read it, but
 would have no remaining tool action to inspect the repository it was asked to
