@@ -249,7 +249,7 @@ oh-goon agent service prepare --agent opencode --executable /opt/native-opencode
 ```
 
 The helper only prints the following native setup contracts, based on the
-observed public Codex 0.163.0 and OpenCode 2.1.2 interfaces. It does not establish
+observed public Codex 0.164.0 and OpenCode 2.1.2 interfaces. It does not establish
 the version or compatibility of the executable at a supplied path:
 
 | Agent | Prepared native recipe and remaining owner work |
@@ -296,7 +296,7 @@ phase policy, private-store exclusion and tool quiescence remain unverified.
 
 The [installed Codex service
 probe](../backend/tests/integration/services/test_native_codex_service.py) used
-0.163.0 with a complete public runtime outside synthetic native stores. Native
+0.164.0 with a complete public runtime outside synthetic native stores. Native
 service-known profiles denied source/Git mutations, private-store reads/writes
 and subprocess escapes during review and re-review; repair changed only the
 selected source directory, and scratch output remained available. The original
@@ -306,8 +306,10 @@ the reported profile identifier lacks full effective grants/configuration
 identity. An empty zero-turn thread starts, but native resume from a fresh
 connection refuses it before any persisted turn history. This model-free case
 uses no real authentication/configuration files or model turns. Separate
-installed local-provider cases below qualify actual native follow-up and compaction;
-real-account sign-in/refresh remains unverified.
+installed local-provider cases below qualify actual native follow-up and compaction.
+Separate initialized Plan and Goon probes complete real signed-in service turns
+and independent verification. Token refresh and credential persistence remain
+unverified; the harness never opens native authentication or env files.
 
 The [installed OpenCode readiness
 probe](../backend/tests/integration/services/test_native_opencode_service.py)
@@ -379,7 +381,8 @@ tool IPC and version overrides are removed. Native tools receive only the explic
 PATH/TMPDIR environment. Login/config failures remain native failures.
 
 Before the first model turn, the original command owner verifies the selected
-binary's `--version` (currently qualified: `codex-cli 0.163.0`). A user-agent version
+binary's `--version` (currently qualified: `codex-cli 0.164.0`). Other versions,
+including 0.163.0, are refused before service startup. A user-agent version
 from readiness is insufficient. Native RPC confirms disabled extension/browser/
 computer/delegation features, MCP exclusion on the actual workload thread, and
 the selected native profile.
@@ -400,10 +403,11 @@ inventories, unknown states, and unsupported extension origins fail before model
 submission; missing tools alone never proves exclusion. Existing disabled
 plugin/app features retain their own checks.
 
-This profile makes no MCP-startup isolation claim. In Codex 0.163.0, the
+This profile makes no MCP-startup isolation claim. The installed 0.164.0
+configured-MCP probe observes native initialization during status discovery.
+The earlier Codex 0.163.0
 [status collector](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/codex-mcp/src/mcp/mod.rs)
-can eagerly start configured servers, so status discovery is not a names-only
-or startup-free operation. Native owns that ordinary initialization and its
+also eagerly starts configured servers. Native owns that ordinary initialization and its
 credentials; the workload model receives neither discovered server instructions
 nor private configuration values. An empty `mcp_servers={}` override retains lower-layer registrations
 under native [table merging](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/merge.rs).
@@ -456,7 +460,7 @@ CLI profiles keep their current execution path.
 
 | Native service | Protocol to qualify |
 | --- | --- |
-| Codex | Its [app-server protocol](https://learn.chatgpt.com/docs/app-server), with native-managed authentication, threads/turns and a version-specific effective tool policy. Public Codex 0.163.0 includes an explicit-socket proxy; that does not establish that a usable endpoint is running here. External-token authentication would transfer credential lifecycle to the caller and does not satisfy this design. |
+| Codex | Its [app-server protocol](https://learn.chatgpt.com/docs/app-server), with native-managed authentication, threads/turns and a version-specific effective tool policy. Public Codex 0.164.0 includes an explicit-socket proxy; that does not establish that a usable endpoint is running here. External-token authentication would transfer credential lifecycle to the caller and does not satisfy this design. |
 | OpenCode | Its [V2 CLI](https://dev.opencode.ai/v2/docs/cli/) and [V2 API](https://dev.opencode.ai/v2/docs/api) describe the shared native service and owned session operations. Installed 2.1.2 uses `--server`, `OPENCODE_PASSWORD` and `/api/info`; V1 `attach`, SDK and `/global/health` examples do not define this recipe. Qualify the selected server's exact protocol; do not start or replace a shared service implicitly. |
 
 API transport does not enforce filesystem permissions on a server's tools. An
@@ -472,10 +476,10 @@ A native harness sandbox may be the selected backend mechanism when its actual
 phase policy, private-read/write denials and lifecycle are verified. This does not
 require another tool router or a redundant enclosing Bubblewrap layer. Qualify the
 installed native policy directly first, then reject missing guarantees before
-submission. Codex 0.163.0's stable
+submission. The historical Codex 0.163.0 stable
 [read-only policy](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/schema/typescript/v2/SandboxPolicy.ts)
-does not itself specify private-path read denial; newer documented fields cannot
-be assumed available in that installed protocol.
+does not itself specify private-path read denial. The current 0.164.0 qualification
+uses explicit native permission profiles and measured private-canary denials.
 
 The adapter must bind an explicitly selected endpoint, peer/service identity,
 protocol version, workspace and owned native session to the original Run. Keep

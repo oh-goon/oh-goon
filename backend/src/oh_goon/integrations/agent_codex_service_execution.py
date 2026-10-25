@@ -311,7 +311,7 @@ async def _turn(
                 final = text
                 visible.retain("agent", "Untrusted native visible agent message:\n" + text)
             elif kind == "commandExecution":
-                # Codex 0.163 public CommandExecutionThreadItem fields only.
+                # Codex 0.164 public CommandExecutionThreadItem fields only.
                 # Do not retain cwd, process IDs, commandActions, RPC metadata,
                 # unrelated item types, reasoning, or ambient configuration.
                 command = item.get("command")
@@ -429,7 +429,7 @@ def execute_codex_service_run(
     )
     if (
         version.returncode != 0
-        or version.stdout.strip() != "codex-cli 0.163.0"
+        or version.stdout.strip() != "codex-cli 0.164.0"
         or not version.supervisor.final_process_group_quiescent
     ):
         raise _execution_failure(

@@ -684,7 +684,7 @@ def test_codex_service_recipe_preserves_native_advertised_alias(tmp_path: Path) 
         str(advertised),
     ]
     assert recipe["transport"] == "codex-app-server-jsonl-proxy"
-    assert recipe["recipe_interface_version"] == "0.163.0"
+    assert recipe["recipe_interface_version"] == "0.164.0"
     assert recipe["readiness"] == {
         "methods": ["initialize", "initialized"],
         "retained_fields": ["userAgent", "platformFamily", "platformOs"],

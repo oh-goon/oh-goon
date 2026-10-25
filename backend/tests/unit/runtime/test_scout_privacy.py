@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import errno
 import os
 import sqlite3
+import stat
+from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
+
+import pytest
 
 from oh_goon.core.time import utc_now
 from oh_goon.runtime.database import LocalDatabase
@@ -227,17 +232,169 @@ def test_scout_restart_preserves_revision_and_rehardens_sidecar_permissions(tmp_
 
 
 def test_scout_storage_bytes_tolerates_transient_shm_disappearance(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = LocalDatabase(tmp_path / "state.sqlite3")
     ScoutObservationStore(database)
     analytical = ScoutAnalyticalDatabase(database.path)
     real_open = os.open
 
-    def disappearing_open(path, flags, *args):
+    def disappearing_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
         if str(path).endswith("-shm"):
             raise FileNotFoundError(path)
-        return real_open(path, flags, *args)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
 
     monkeypatch.setattr(os, "open", disappearing_open)
     assert analytical.storage_bytes() > 0
+
+
+@pytest.fixture
+def native_scout_wal(
+    tmp_path: Path,
+) -> Iterator[tuple[ScoutAnalyticalDatabase, sqlite3.Connection]]:
+    database = LocalDatabase(tmp_path / "state.sqlite3")
+    ScoutObservationStore(database)
+    analytical = ScoutAnalyticalDatabase(database.path)
+    keeper = sqlite3.connect(analytical.path, isolation_level=None)
+    try:
+        keeper.execute("PRAGMA journal_mode = WAL")
+        keeper.execute("CREATE TABLE native_close_probe(value INTEGER)")
+        keeper.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        keeper.execute("INSERT INTO native_close_probe VALUES (7)")
+        yield analytical, keeper
+    finally:
+        keeper.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX unlink-while-open semantics required")
+@pytest.mark.parametrize("suffix", ["-wal", "-shm"])
+@pytest.mark.parametrize("operation", ["harden", "storage"])
+def test_native_sqlite_close_can_unlink_an_opened_transient_scout_file(
+    native_scout_wal: tuple[ScoutAnalyticalDatabase, sqlite3.Connection],
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+    operation: str,
+) -> None:
+    analytical, keeper = native_scout_wal
+    candidate = Path(f"{analytical.path}{suffix}")
+    native_open = os.open
+    opened: int | None = None
+    replacement = b"new sidecar inode"
+    main_bytes = analytical.path.stat().st_size
+    wal_bytes = Path(f"{analytical.path}-wal").stat().st_size
+
+    def close_after_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal opened
+        descriptor = native_open(path, flags, mode, dir_fd=dir_fd)
+        if Path(os.fsdecode(path)) == candidate and opened is None:
+            opened = descriptor
+            assert os.fstat(descriptor).st_nlink == 1
+            keeper.close()  # Native SQLite removes its last connection's WAL and SHM.
+            metadata = os.fstat(descriptor)
+            assert stat.S_ISREG(metadata.st_mode)
+            assert metadata.st_nlink == 0
+            assert not candidate.exists()
+            candidate.write_bytes(replacement)
+            candidate.chmod(0o644)
+        return descriptor
+
+    if operation == "harden":
+        with analytical.transaction() as connection:
+            assert connection.execute("SELECT value FROM native_close_probe").fetchone()[0] == 7
+            # The Scout transaction closes first, leaving keeper as SQLite's
+            # final connection during post-transaction permission hardening.
+            monkeypatch.setattr(os, "open", close_after_open)
+    else:
+        monkeypatch.setattr(os, "open", close_after_open)
+        measured = analytical.storage_bytes()
+        assert measured == main_bytes + (wal_bytes if suffix == "-shm" else 0)
+
+    assert opened is not None
+    with pytest.raises(OSError) as closed:
+        os.fstat(opened)
+    assert closed.value.errno == errno.EBADF
+    assert candidate.read_bytes() == replacement
+    assert stat.S_IMODE(candidate.stat().st_mode) == 0o644
+    assert stat.S_IMODE(analytical.path.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor/link semantics required")
+@pytest.mark.parametrize("suffix", ["", "-wal", "-shm"])
+@pytest.mark.parametrize("operation", ["harden", "storage"])
+def test_scout_refuses_a_hardlink_added_after_its_file_is_opened(
+    native_scout_wal: tuple[ScoutAnalyticalDatabase, sqlite3.Connection],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    suffix: str,
+    operation: str,
+) -> None:
+    analytical, _keeper = native_scout_wal
+    candidate = Path(f"{analytical.path}{suffix}")
+    alias = tmp_path / "foreign-link"
+    native_open = os.open
+
+    def link_after_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        descriptor = native_open(path, flags, mode, dir_fd=dir_fd)
+        if Path(os.fsdecode(path)) == candidate and not alias.exists():
+            os.link(candidate, alias)
+            assert os.fstat(descriptor).st_nlink == 2
+        return descriptor
+
+    with pytest.raises(RuntimeError, match="single-link regular file"):
+        if operation == "harden":
+            with analytical.transaction():
+                monkeypatch.setattr(os, "open", link_after_open)
+        else:
+            monkeypatch.setattr(os, "open", link_after_open)
+            analytical.storage_bytes()
+    assert alias.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX unlink-while-open semantics required")
+@pytest.mark.parametrize("operation", ["harden", "storage"])
+def test_scout_still_refuses_an_unlinked_persistent_database_descriptor(
+    native_scout_wal: tuple[ScoutAnalyticalDatabase, sqlite3.Connection],
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    analytical, _keeper = native_scout_wal
+    native_open = os.open
+
+    def unlink_after_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        descriptor = native_open(path, flags, mode, dir_fd=dir_fd)
+        if Path(os.fsdecode(path)) == analytical.path:
+            analytical.path.unlink()
+            assert os.fstat(descriptor).st_nlink == 0
+        return descriptor
+
+    with pytest.raises(RuntimeError, match="single-link regular file"):
+        if operation == "harden":
+            with analytical.transaction():
+                monkeypatch.setattr(os, "open", unlink_after_open)
+        else:
+            monkeypatch.setattr(os, "open", unlink_after_open)
+            analytical.storage_bytes()

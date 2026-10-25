@@ -318,7 +318,7 @@ def test_installed_codex_service_run_retains_context_and_verifies_independently(
             execution = native.execution
             assert execution is not None, facts
             assert execution.authority == "ORIGINAL_STEP_EXECUTION", facts
-            assert execution.native_version == "0.163.0", facts
+            assert execution.native_version == "0.164.0", facts
             assert execution.repository_access == "write", facts
             assert execution.preflight == "verified" and execution.mcp_catalog == "empty", facts
             assert execution.native_state_separation == "verified", facts

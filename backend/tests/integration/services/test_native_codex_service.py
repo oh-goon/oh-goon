@@ -189,7 +189,7 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
             async with CodexServiceClient(
                 advertised, timeout_seconds=10, experimental_api=True
             ) as client:
-                assert client.metadata["service_version"] == "0.163.0"
+                assert client.metadata["service_version"] == "0.164.0"
                 assert client.metadata["execution_admitted"] is False
                 available = await client.list_permission_profiles(cwd=workspace)
                 assert {"phase-review", "phase-repair"} <= {
@@ -240,7 +240,7 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
             async with CodexServiceClient(
                 advertised, timeout_seconds=10, experimental_api=True
             ) as resumed_client:
-                # Native 0.163 materializes persistent history at the first turn.
+                # Native 0.164 materializes persistent history at the first turn.
                 # An untouched thread can start, but cannot be resumed after detach.
                 with pytest.raises(AgentProviderError, match="refused the request"):
                     await resumed_client.resume_thread(

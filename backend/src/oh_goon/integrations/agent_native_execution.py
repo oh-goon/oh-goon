@@ -105,7 +105,7 @@ def prepare_native_service_setup(
         endpoint = "unix://" + advertised
         return {
             **shared,
-            "recipe_interface_version": "0.163.0",
+            "recipe_interface_version": "0.164.0",
             "transport": "codex-app-server-jsonl-proxy",
             "endpoint": endpoint,
             "launch_argv": [program, "app-server", "--listen", endpoint],
