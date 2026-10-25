@@ -81,6 +81,104 @@ def test_generation_is_deterministic_and_byte_identical(tmp_path: Path) -> None:
     assert parse_execution_lock(render_execution_lock(first)) == first
 
 
+@pytest.mark.parametrize("changed", ["executable", "profile", "connection"])
+def test_native_selection_identities_remain_fresh_across_alternating_values(
+    tmp_path: Path, changed: str
+) -> None:
+    from dataclasses import replace
+
+    from oh_goon.core.models.agent_providers import (
+        AgentConnection,
+        AgentModel,
+        AgentProvider,
+        AgentProvidersConfig,
+        NativeAgentDefinition,
+        NativeAgentProfile,
+        ResolvedNativeAgent,
+    )
+    from oh_goon.core.models.execution_lock_models import ExecutionLock
+    from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+    from tests.factories.agent_review import agent_review_case
+
+    connection = AgentConnection.select(
+        AgentProvidersConfig(
+            default_model="approved",
+            providers={
+                "company": AgentProvider(
+                    api="openai-chat-completions", base_url="http://127.0.0.1:12345/v1"
+                )
+            },
+            models={
+                "approved": AgentModel(
+                    provider="company", model="synthetic-reviewer", parameters={"temperature": 0.25}
+                )
+            },
+        )
+    )
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap", inference_profile="approved"),
+        executable_sha256="a" * 64,
+        connection=connection,
+    )
+    if changed == "executable":
+        another = replace(
+            selected,
+            definition=NativeAgentDefinition(executable="/native/another-pi"),
+            executable_sha256="b" * 64,
+        )
+    elif changed == "profile":
+        another = replace(
+            selected, profile=selected.profile.model_copy(update={"timeout_seconds": 60.0})
+        )
+    else:
+        another = replace(
+            selected,
+            connection=connection.model_copy(
+                update={
+                    "provider": connection.provider.model_copy(
+                        update={"base_url": "http://127.0.0.1:12346/v1"}
+                    ),
+                    "selection": connection.selection.model_copy(
+                        update={"parameters": {"temperature": 0.75}}
+                    ),
+                }
+            ),
+        )
+
+    resolver, path, _, options = agent_review_case(
+        tmp_path, plan_template="agents/native-review", native_agent=selected
+    )
+    options["inputs"] = {"repo": "local:repo", "skill": "local:skills/repair"}
+    graph = resolver.analyze_source(path)
+    plans: list[ResolvedFleetPlan] = []
+    locks: list[ExecutionLock] = []
+    for native in (selected, another, selected):
+        options["native_agent"] = native
+        plan, _, _ = resolver.resolve_frozen_agents(path, source_graph=graph, **options)
+        restored = ResolvedFleetPlan.model_validate_json(plan.model_dump_json())
+        assert restored == plan and restored.native_agent == native
+        lock = build_execution_lock(restored)
+        transported = parse_execution_lock(render_execution_lock(lock))
+        verify_execution_lock(lock, transported)
+        plans.append(restored)
+        locks.append(lock)
+
+    first, second, repeated = plans
+    assert first.plan_id != second.plan_id
+    assert locks[0].plan != locks[1].plan and locks[0].digest != locks[1].digest
+    stale_plan = second.model_copy(update={"plan_id": first.plan_id})
+    with pytest.raises(ValueError, match="plan_id must match"):
+        ResolvedFleetPlan.model_validate_json(stale_plan.model_dump_json())
+    with pytest.raises(FleetPlanInvalid, match="stale"):
+        verify_execution_lock(locks[1], locks[0])
+    assert repeated.model_dump_json() == first.model_dump_json()
+    assert locks[2] == build_execution_lock(first) == locks[0]
+    assert ResolvedFleetPlan.model_validate_json(first.model_dump_json()) == first
+
+
 def test_configuration_is_provenance_not_executable_identity_and_is_source_bound(tmp_path):
     goons = tmp_path / "goons"
     _package(goons, "general/a", _input_atomic())

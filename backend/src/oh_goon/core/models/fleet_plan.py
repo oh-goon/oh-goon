@@ -200,6 +200,7 @@ from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
 FLEET_PLAN_CONTRACT_VERSION: Literal[44] = 44
+_NATIVE_AGENT_ADAPTER = TypeAdapter(ResolvedNativeAgent)
 DEFAULT_PRE_COMMIT_REQUIREMENT = "pre-commit==4.6.2"
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 3600.0
 
@@ -807,11 +808,7 @@ class ResolvedFleetPlan(ImmutableModel):
             ],
             "steps": [step.model_dump(mode="json", exclude_computed_fields=True) for step in steps],
             **(
-                {
-                    "native_agent": TypeAdapter(ResolvedNativeAgent).dump_python(
-                        native_agent, mode="json"
-                    )
-                }
+                {"native_agent": _NATIVE_AGENT_ADAPTER.dump_python(native_agent, mode="json")}
                 if native_agent is not None
                 else {}
             ),
