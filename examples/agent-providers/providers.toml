@@ -1,5 +1,4 @@
 version = 1
-default_model = "local"
 
 # These are connection descriptions. Validation never starts or probes a server.
 [providers.ollama]

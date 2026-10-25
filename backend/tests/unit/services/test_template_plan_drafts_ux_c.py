@@ -371,7 +371,8 @@ def test_default_agent_selections_follow_the_compiled_harness_and_phases(
     path = initialize_run_configuration(key, tmp_path / "workflow", kind=kind)
     selected = load_run_configuration(path).selection
     assert selected.source.kind == ("catalog-plan" if kind == "plan" else "file-plan")
-    assert (selected.agent.implementation == "pi") is native
+    assert (selected.agent.implementation == "codex") is native
+    assert (selected.agent.profile == "isolated-managed") is native
     assert (selected.agent.model_profile == "REQUIRED_MODEL_PROFILE") is not native
     assert (selected.repair is not None) is repair
     assert sorted(item.name for item in path.parent.iterdir()) == (

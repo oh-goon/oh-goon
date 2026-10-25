@@ -17,6 +17,7 @@ from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 
 ProviderApi = Literal["ollama", "openai-chat-completions", "openai-responses", "anthropic-messages"]
 NativeAgentName = Literal["opencode", "pi", "codex"]
+DEFAULT_NATIVE_AGENT: NativeAgentName = "codex"
 DEFAULT_NATIVE_AGENT_PROFILE = "isolated-managed"
 _NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}\Z")
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")

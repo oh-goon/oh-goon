@@ -10,7 +10,7 @@ Run one writable native Agent, then the project’s explicit verification script
 oh-goon templates init agents/native-coding --kind plan --output ./workflow
 ```
 
-Edit `workflow/run.yml` with your registered target and caller choices. Omitted options keep their Goon-owned defaults:
+The initializer selects Codex with `isolated-managed`. Edit `workflow/run.yml` with your registered target and caller choices; the example below explicitly selects your configured `signed-in` profile for trusted local coding. Select Pi or OpenCode explicitly with a compatible profile. Omitted options keep their Goon-owned defaults:
 
 ```yaml
 version: 1

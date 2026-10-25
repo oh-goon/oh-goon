@@ -39,7 +39,10 @@ def initialize_run_configuration(
     """Author one selection and necessary Plan intent; never admit effects."""
     import tempfile
 
-    from oh_goon.core.models.agent_providers import DEFAULT_NATIVE_AGENT_PROFILE
+    from oh_goon.core.models.agent_providers import (
+        DEFAULT_NATIVE_AGENT,
+        DEFAULT_NATIVE_AGENT_PROFILE,
+    )
     from oh_goon.core.models.fleet_plan import AgentPlanStep
     from oh_goon.core.template_identity import TemplateClassification
     from oh_goon.integrations.exact_file_write import (
@@ -127,7 +130,7 @@ def initialize_run_configuration(
                 None,
             )
             selection = (
-                {"implementation": "pi", "profile": DEFAULT_NATIVE_AGENT_PROFILE}
+                {"implementation": DEFAULT_NATIVE_AGENT, "profile": DEFAULT_NATIVE_AGENT_PROFILE}
                 if any(step.harness == "native" for step in agent_steps)
                 else {"model_profile": "REQUIRED_MODEL_PROFILE"}
             )
