@@ -48,6 +48,7 @@ export function GameTapeCampaignJournal({ campaign }: { campaign?: AgentCampaign
             <dl className="game-tape-receipt">
               <div><dt>{t("gameTape.campaign.decisionIdentity")}</dt><dd><code>{fact.decision_id}</code></dd></div>
               <div><dt>{t("gameTape.campaign.decision")}</dt><dd>{fact.stop_reason ?? fact.next_phase ?? "—"}</dd></div>
+              {fact.passed_test_step_id ? <div><dt>{t("gameTape.campaign.passedTest")}</dt><dd><code>{fact.passed_test_step_id}</code></dd></div> : null}
               {fact.next_phase ? <div><dt>{t("gameTape.campaign.nextPhase")}</dt><dd>{fact.next_phase}</dd></div> : null}
               {fact.next_phase || (fact.next_step_ids?.length ?? 0) > 0 ? <CampaignStepMembership label={t("gameTape.campaign.nextSteps")} ids={fact.next_step_ids ?? []} /> : null}
               <div><dt>{t("gameTape.campaign.remainingRuns")}</dt><dd>{fact.remaining_runs}</dd></div>

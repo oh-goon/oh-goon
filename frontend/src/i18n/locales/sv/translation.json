@@ -1386,6 +1386,7 @@
       "run": "Antagen körning",
       "steps": "Valda steg",
       "decisionIdentity": "Beslutsidentitet",
+      "passedTest": "Godkänt inbyggt teststeg",
       "remainingRuns": "Återstående körningsbudget",
       "unresolved": "Olösta körningar",
       "terminalSequence": "Slutlig journalsekvens {{sequence}}",

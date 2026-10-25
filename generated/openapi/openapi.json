@@ -155,6 +155,18 @@
             "title": "Next Step Ids",
             "type": "array"
           },
+          "passed_test_step_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed Test Step Id"
+          },
           "phase_ordinal": {
             "maximum": 160.0,
             "minimum": 0.0,

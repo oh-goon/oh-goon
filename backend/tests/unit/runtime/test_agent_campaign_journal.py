@@ -18,16 +18,23 @@ from oh_goon.core.models.agent_repair import (
     AgentRepairContext,
     AgentRepairStopReason,
 )
-from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
+    FailedPlanStepExecution,
     FleetPlanResult,
+    PlanEgressEvidence,
+    PlanExecutionSupervisorEvidence,
     PlanOutputEvidence,
+    PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
+    SkippedPlanStepExecution,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import (
     FleetPlanRunLimits,
     MaintenanceExecutionPolicy,
 )
+from oh_goon.core.models.goon_plan_source import PlanFileSource
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import (
@@ -35,14 +42,22 @@ from oh_goon.core.models.run_admission import (
     FleetRunAdmissionIntent,
     fleet_repository_scope,
 )
-from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
 from oh_goon.core.product_identity import repository_id
 from oh_goon.core.time import utc_now
-from oh_goon.core.vocabulary import FleetRunEventType, FleetRunTerminalIntent, OperationAction
+from oh_goon.core.vocabulary import (
+    FleetRunEventType,
+    FleetRunTerminalIntent,
+    OperationAction,
+    Verdict,
+)
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.journal import Journal
 from tests.factories.capabilities import capability_snapshot
-from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+from tests.factories.fleet_plan_targets import (
+    structural_execution_identity,
+    structural_fleet_plan_target,
+)
 from tests.factories.journal import (
     admit_run,
     commit_operation,
@@ -54,7 +69,7 @@ from tests.factories.operation_reports import make_operation_report
 from tests.factories.run_admission import repository_admissions_for
 
 
-def campaign(tmp_path: Path):
+def campaign(tmp_path: Path, *, initial_phase="review", failure_driven=False):
     journal = Journal(LocalDatabase(tmp_path / "state.db"))
     repository = RepositoryIdentity(
         repository_id=repository_id(tmp_path / "repo"), name="repo", path=tmp_path / "repo"
@@ -66,18 +81,18 @@ def campaign(tmp_path: Path):
         original_execution_digest="original",
         budget=budget,
         maximum_runs=2,
-        initial_phase="review",
-        initial_step_ids=("review",),
+        initial_phase="repair" if failure_driven else initial_phase,
+        initial_step_ids=(initial_phase, "agent") if failure_driven else (initial_phase,),
         deadline_at=utc_now() + timedelta(seconds=60),
-        candidate_identity="candidate",
-        scope_identity="scope",
-        write_roots=("code.py",),
+        candidate_identity=None if failure_driven else "candidate",
+        scope_identity=None if failure_driven else "scope",
+        write_roots=() if failure_driven else ("code.py",),
     )
     journal.begin_agent_campaign(intent)
     return journal, repository, intent
 
 
-def phase_target(journal: Journal, *, ordinal=1, phase="review"):
+def phase_target(journal: Journal, *, ordinal=1, phase="review", failure_driven=False):
     current = journal.agent_campaign("campaign")
     intent = current.intent
     assert intent is not None
@@ -85,7 +100,21 @@ def phase_target(journal: Journal, *, ordinal=1, phase="review"):
         name="phase",
         description="Journal boundary fixture",
         execution=MaintenanceExecutionPolicy(),
-        steps=(ResolvedCommandStep(step_id=phase, argv=("check",), timeout_seconds=10),),
+        steps=(ResolvedCommandStep(step_id=phase, argv=("check",), timeout_seconds=10),)
+        + (
+            (
+                ResolvedAgentStep(
+                    step_id="agent",
+                    timeout_seconds=10,
+                    workload={"harness": "local-model-proposal", "model": "fixture"},
+                    delivery_sha256="a" * 64,
+                    handoff_identity="frozen",
+                    source_step_id="agent",
+                ),
+            )
+            if failure_driven
+            else ()
+        ),
     )
     context = AgentRepairContext(
         repair_id="campaign",
@@ -93,21 +122,37 @@ def phase_target(journal: Journal, *, ordinal=1, phase="review"):
         attempt=ordinal,
         max_attempts=2,
         previous_run_id="campaign" if ordinal == 2 else None,
-        phase=phase,
-        review_pass=1,
-        original_execution_digest="original",
-        candidate_identity="candidate",
-        scope_identity="scope",
-        write_roots=("code.py",),
+        phase=None if failure_driven else phase,
+        review_pass=None if failure_driven else 1,
+        original_execution_digest=None if failure_driven else "original",
+        candidate_identity=None if failure_driven else "candidate",
+        scope_identity=None if failure_driven else "scope",
+        write_roots=() if failure_driven else ("code.py",),
         limits=FleetPlanRunLimits(deadline_at=intent.deadline_at, step_timeout_seconds=10),
     )
+    if failure_driven:
+        return FleetPlanTarget(
+            kind="fleet_plan",
+            plan=plan,
+            source=PlanFileSource(sha256="0" * 64),
+            identity=structural_execution_identity(plan),
+            agent_repair=context,
+            agent_deliveries=(
+                AgentStepDeliveryReference(
+                    step_id="agent",
+                    handoff_identity="frozen",
+                    delivery_sha256="a" * 64,
+                    reference_id="retained-fixture",
+                ),
+            ),
+        )
     base = structural_fleet_plan_target(plan)
     return FleetPlanTarget(**{**base.model_dump(), "agent_repair": context})
 
 
-def admit_phase(journal, repository, *, ordinal=1, phase="review"):
+def admit_phase(journal, repository, *, ordinal=1, phase="review", failure_driven=False):
     run_id = "campaign" if ordinal == 1 else "second"
-    target = phase_target(journal, ordinal=ordinal, phase=phase)
+    target = phase_target(journal, ordinal=ordinal, phase=phase, failure_driven=failure_driven)
     intent = FleetRunAdmissionIntent(
         target=target,
         capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
@@ -120,13 +165,13 @@ def admit_phase(journal, repository, *, ordinal=1, phase="review"):
     return run_id, target
 
 
-def settle(journal, repository, run_id, target):
+def settle(journal, repository, run_id, target, *, exit_code=0, settlement=None, attempts=True):
     start_run(journal, run_id)
     operation_id = start_repository(journal, run_id, repository)
     for event_type in (
         FleetRunEventType.STEP_REACHED,
         FleetRunEventType.STEP_STARTED,
-        FleetRunEventType.STEP_SUCCEEDED,
+        FleetRunEventType.STEP_SUCCEEDED if exit_code == 0 else FleetRunEventType.STEP_FAILED,
     ):
         journal.record_execution_lifecycle(
             fleet_run_id=run_id,
@@ -135,30 +180,87 @@ def settle(journal, repository, run_id, target):
             event_type=event_type,
             step_id=target.plan.steps[0].step_id,
             step_order=1,
-            returncode=0 if event_type is FleetRunEventType.STEP_SUCCEEDED else None,
+            returncode=exit_code
+            if event_type in {FleetRunEventType.STEP_SUCCEEDED, FleetRunEventType.STEP_FAILED}
+            else None,
         )
+    if target.agent_repair.phase is None:
+        for event_type in (FleetRunEventType.STEP_REACHED, FleetRunEventType.STEP_SKIPPED):
+            journal.record_execution_lifecycle(
+                fleet_run_id=run_id,
+                repository_id=repository.repository_id,
+                operation_id=operation_id,
+                event_type=event_type,
+                step_id="agent",
+                step_order=2,
+            )
     output = PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
+    step_type = CompletedPlanStepExecution if exit_code == 0 else FailedPlanStepExecution
     report = make_operation_report(
         repository,
         OperationAction.EXECUTE_PLAN,
         target=target,
         fleet_run_id=run_id,
         operation_id=operation_id,
+        returncode=exit_code,
+        verdict=Verdict.READY if exit_code == 0 else Verdict.FAILED,
         evidence=FleetPlanOperationEvidence(
             kind="FLEET_PLAN",
             plan=FleetPlanResult(
                 plan_id=target.plan.plan_id,
                 steps=(
-                    CompletedPlanStepExecution(
+                    step_type(
                         step_id=target.plan.steps[0].step_id,
                         kind="command",
                         argv=("check",),
                         stdout_evidence=output,
                         stderr_evidence=output,
-                        returncode=0,
+                        returncode=exit_code,
                         repository_state_before="before",
                         repository_state_after="after",
+                        settlement=settlement
+                        if settlement is not None
+                        else PlanStepSettlementEvidence(
+                            outcome="SUCCESS" if exit_code == 0 else "FAILED",
+                            cleanup="VERIFIED",
+                            reason="ACCEPTED_EXIT" if exit_code == 0 else "FAILED_EXIT",
+                            observed_returncode=exit_code,
+                        ),
+                        attempts=(
+                            PlanStepAttemptEvidence(
+                                attempt=1,
+                                returncode=exit_code,
+                                stdout_evidence=output,
+                                stderr_evidence=output,
+                                repository_state_before="before",
+                                repository_state_after="after",
+                                egress=PlanEgressEvidence(mode="none"),
+                                supervisor=PlanExecutionSupervisorEvidence(
+                                    final_process_group_quiescent=True
+                                ),
+                            ),
+                        )
+                        if attempts
+                        else (),
                     ),
+                )
+                + (
+                    (
+                        SkippedPlanStepExecution(
+                            step_id="agent",
+                            kind="agent",
+                            reason="Condition not selected",
+                            stdout_evidence=output,
+                            stderr_evidence=output,
+                            repository_state_before="before",
+                            repository_state_after="after",
+                            settlement=PlanStepSettlementEvidence(
+                                outcome="SKIPPED", cleanup="UNAVAILABLE", reason="NOT_STARTED"
+                            ),
+                        ),
+                    )
+                    if target.agent_repair.phase is None
+                    else ()
                 ),
             ),
         ),
@@ -167,7 +269,15 @@ def settle(journal, repository, run_id, target):
     terminalize_run(journal, run_id, FleetRunTerminalIntent.COMPLETE)
 
 
-def decision(journal, *, stop=None, decision_id="advance", next_phase="verification"):
+def decision(
+    journal,
+    *,
+    stop=None,
+    decision_id="advance",
+    next_phase="verification",
+    passed_test_step_id=None,
+    next_step_ids=None,
+):
     current = journal.agent_campaign("campaign")
     view = journal.read_view()
     evidence = []
@@ -193,8 +303,19 @@ def decision(journal, *, stop=None, decision_id="advance", next_phase="verificat
         consumed_runs=tuple(evidence),
         unresolved_run_ids=tuple(unresolved),
         stop_reason=stop,
+        passed_test_step_id=passed_test_step_id,
         next_phase=next_phase if stop is None else None,
-        next_step_ids=(next_phase,) if stop is None else (),
+        next_step_ids=(
+            next_step_ids
+            if next_step_ids is not None
+            else (
+                (next_phase, "agent")
+                if current.phases and current.phases[-1].context.phase is None
+                else (next_phase,)
+            )
+        )
+        if stop is None
+        else (),
         candidate_identity="candidate",
         scope_identity="scope",
     )
@@ -412,3 +533,144 @@ def test_redaction_expansion_retains_bounded_idempotent_canonical_diagnostic(tmp
     assert reopened.agent_campaign_result("campaign").message == TRUNCATED_AGENT_CAMPAIGN_MESSAGE
     assert reopened.commit_agent_campaign_decision(terminal).terminal_decision == retained
     assert reopened.read_view().revision == before
+
+
+@pytest.mark.parametrize(
+    "contradiction",
+    [
+        "failed",
+        "unknown_settlement",
+        "unknown_cleanup",
+        "missing_attempt",
+        "different_step",
+        "phase_campaign",
+    ],
+)
+def test_test_passed_publication_requires_its_accepted_native_test(tmp_path, contradiction):
+    initial_phase = "test" if contradiction != "phase_campaign" else "review"
+    journal, repository, _ = campaign(
+        tmp_path, initial_phase=initial_phase, failure_driven=contradiction != "phase_campaign"
+    )
+    run_id, target = admit_phase(
+        journal, repository, phase=initial_phase, failure_driven=contradiction != "phase_campaign"
+    )
+    settlement = (
+        PlanStepSettlementEvidence()
+        if contradiction == "unknown_settlement"
+        else (
+            PlanStepSettlementEvidence(
+                outcome="INCOMPLETE", cleanup="UNVERIFIED", reason="CLEANUP_UNVERIFIED"
+            )
+            if contradiction == "unknown_cleanup"
+            else None
+        )
+    )
+    settle(
+        journal,
+        repository,
+        run_id,
+        target,
+        exit_code=17 if contradiction == "failed" else 0,
+        settlement=settlement,
+        attempts=contradiction != "missing_attempt",
+    )
+    terminal = decision(
+        journal,
+        stop=AgentRepairStopReason.TEST_PASSED,
+        passed_test_step_id="different" if contradiction == "different_step" else initial_phase,
+    )
+    if contradiction != "phase_campaign":
+        terminal = terminal.model_copy(update={"candidate_identity": None, "scope_identity": None})
+    before = journal.read_view().revision
+    with pytest.raises(JournalConflict, match="exact accepted native test"):
+        journal.commit_agent_campaign_decision(terminal)
+    assert journal.read_view().revision == before
+    assert journal.agent_campaign("campaign").terminal_decision is None
+
+
+@pytest.mark.parametrize("prior_cleanup", ["VERIFIED", "UNVERIFIED"])
+def test_test_passed_reference_preserves_prior_failure_and_requires_all_cleanup(
+    tmp_path, prior_cleanup
+):
+    journal, repository, _ = campaign(tmp_path, initial_phase="test", failure_driven=True)
+    run_id, target = admit_phase(journal, repository, phase="test", failure_driven=True)
+    settle(
+        journal,
+        repository,
+        run_id,
+        target,
+        exit_code=17,
+        settlement=PlanStepSettlementEvidence(
+            outcome="INCOMPLETE", cleanup="UNVERIFIED", reason="CLEANUP_UNVERIFIED"
+        )
+        if prior_cleanup == "UNVERIFIED"
+        else None,
+    )
+    journal.commit_agent_campaign_decision(
+        decision(journal, next_phase="repair", next_step_ids=("test", "agent")).model_copy(
+            update={"candidate_identity": None, "scope_identity": None}
+        )
+    )
+    run_id, target = admit_phase(journal, repository, ordinal=2, phase="test", failure_driven=True)
+    settle(journal, repository, run_id, target)
+    terminal = decision(
+        journal,
+        stop=AgentRepairStopReason.TEST_PASSED,
+        passed_test_step_id="test",
+        decision_id="terminal",
+    ).model_copy(update={"candidate_identity": None, "scope_identity": None})
+    if prior_cleanup == "UNVERIFIED":
+        before = journal.read_view().revision
+        with pytest.raises(JournalConflict, match="settled cleanup"):
+            journal.commit_agent_campaign_decision(terminal)
+        assert journal.read_view().revision == before
+        assert journal.agent_campaign("campaign").terminal_decision is None
+        return
+    journal.commit_agent_campaign_decision(terminal)
+    reopened = Journal(LocalDatabase(tmp_path / "state.db"))
+    receipt = reopened.agent_campaign_result("campaign")
+    assert receipt.test_passed
+    assert receipt.campaign_journal.terminal_decision.passed_test_step_id == "test"
+    assert receipt.attempts[0].operations[0].evidence.plan.steps[0].settlement.outcome == "FAILED"
+
+
+def test_test_passed_reference_is_mandatory_only_for_that_decision(tmp_path):
+    journal, _, _ = campaign(tmp_path)
+    with pytest.raises(ValueError, match="accepted native test reference"):
+        decision(journal, stop=AgentRepairStopReason.TEST_PASSED)
+    with pytest.raises(ValueError, match="accepted native test reference"):
+        decision(journal, stop=AgentRepairStopReason.CANCELLED, passed_test_step_id="test")
+
+
+@pytest.mark.parametrize("classification", ["missing", "unverified_cleanup", "service_completion"])
+def test_convergence_consumes_canonical_settlement_before_publication(tmp_path, classification):
+    journal, repository, _ = campaign(tmp_path)
+    run_id, target = admit_phase(journal, repository)
+    settlement = (
+        PlanStepSettlementEvidence()
+        if classification == "missing"
+        else PlanStepSettlementEvidence(
+            outcome="INCOMPLETE", cleanup="UNVERIFIED", reason="CLEANUP_UNVERIFIED"
+        )
+        if classification == "unverified_cleanup"
+        else PlanStepSettlementEvidence(
+            outcome="SUCCESS",
+            cleanup="VERIFIED",
+            reason="ACCEPTED_SERVICE_COMPLETION",
+            observed_returncode=-15,
+        )
+    )
+    settle(journal, repository, run_id, target, settlement=settlement)
+    journal.commit_agent_campaign_decision(decision(journal))
+    run_id, target = admit_phase(journal, repository, ordinal=2, phase="verification")
+    settle(journal, repository, run_id, target)
+    terminal = decision(journal, stop=AgentRepairStopReason.CONVERGED, decision_id="converge")
+    before = journal.read_view().revision
+    if classification == "service_completion":
+        journal.commit_agent_campaign_decision(terminal)
+        assert journal.agent_campaign_result("campaign").converged
+    else:
+        with pytest.raises(JournalConflict, match="exact accepted settled Step evidence"):
+            journal.commit_agent_campaign_decision(terminal)
+        assert journal.read_view().revision == before
+        assert journal.agent_campaign("campaign").terminal_decision is None

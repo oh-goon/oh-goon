@@ -18,7 +18,8 @@ from oh_goon.core.models.agent_repair import (
     AgentRepairStopReason,
 )
 from oh_goon.core.models.fleet import OperationState
-from oh_goon.core.models.operation import OperationReport
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep
+from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
 from oh_goon.core.models.reconciliation import (
     RepositoryEffectAcknowledgementEvidence,
     RepositoryEffectReconciliationEvidence,
@@ -326,6 +327,59 @@ class Journal:
                 raise JournalConflict(
                     "Campaign convergence requires its final settled verification phase"
                 )
+        if decision.stop_reason is AgentRepairStopReason.TEST_PASSED:
+            detail = view.required_run_detail(phases[-1].fleet_run_id)
+            target = detail.run.target
+            evidence = detail.operations[0].evidence if len(detail.operations) == 1 else None
+            result = evidence.plan if isinstance(evidence, FleetPlanOperationEvidence) else None
+            selected_command = (
+                next(
+                    (
+                        step
+                        for step in target.plan.steps
+                        if step.step_id == decision.passed_test_step_id
+                    ),
+                    None,
+                )
+                if isinstance(target, FleetPlanTarget)
+                else None
+            )
+            passed = (
+                next(
+                    (step for step in result.steps if step.step_id == decision.passed_test_step_id),
+                    None,
+                )
+                if result is not None
+                else None
+            )
+            if (
+                not isinstance(selected_command, ResolvedCommandStep)
+                or not isinstance(target, FleetPlanTarget)
+                or target.agent_repair is None
+                or target.agent_repair.phase is not None
+                or result is None
+                or result.plan_id != target.plan.plan_id
+                or tuple((step.step_id, step.kind) for step in result.steps)
+                != tuple((step.step_id, step.kind) for step in target.plan.steps)
+                or passed is None
+                or passed.status != "COMPLETED"
+                or passed.settlement.outcome != "SUCCESS"
+                or passed.settlement.cleanup != "VERIFIED"
+                or passed.settlement.reason != "ACCEPTED_EXIT"
+                or not passed.attempts
+                or any(
+                    step.status != "SKIPPED" and step.settlement.cleanup != "VERIFIED"
+                    for step in result.steps
+                )
+                or any(
+                    operation.resource_settlement == "UNRESOLVED"
+                    for phase in phases
+                    for operation in view.required_run_detail(phase.fleet_run_id).operations
+                )
+            ):
+                raise JournalConflict(
+                    "Test-passed decision lacks its exact accepted native test or settled cleanup"
+                )
         if decision.stop_reason is None:
             if (
                 not isinstance(current.records[-1].fact, AgentCampaignPhase)
@@ -339,6 +393,32 @@ class Journal:
             for phase in phases
         ):
             raise JournalConflict("Campaign convergence conflicts with unsuccessful child results")
+        if decision.stop_reason is AgentRepairStopReason.CONVERGED:
+            for phase in phases:
+                detail = view.required_run_detail(phase.fleet_run_id)
+                target = detail.run.target
+                evidence = detail.operations[0].evidence if len(detail.operations) == 1 else None
+                result = evidence.plan if isinstance(evidence, FleetPlanOperationEvidence) else None
+                if (
+                    not isinstance(target, FleetPlanTarget)
+                    or result is None
+                    or result.plan_id != target.plan.plan_id
+                    or tuple((step.step_id, step.kind) for step in result.steps)
+                    != tuple((step.step_id, step.kind) for step in target.plan.steps)
+                    or any(
+                        step.status != "COMPLETED"
+                        or step.settlement.outcome != "SUCCESS"
+                        or step.settlement.cleanup != "VERIFIED"
+                        for step in result.steps
+                    )
+                    or any(
+                        operation.resource_settlement == "UNRESOLVED"
+                        for operation in detail.operations
+                    )
+                ):
+                    raise JournalConflict(
+                        "Campaign convergence lacks exact accepted settled Step evidence"
+                    )
         self._facts.append_campaign(connection, decision)
         return self._facts.read_view(connection).campaign(decision.campaign_id)
 

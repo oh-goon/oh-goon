@@ -81,6 +81,7 @@ def project_agent_campaign(
                 executed.append(
                     {
                         **origin,
+                        "kind": step.kind,
                         "status": step.status,
                         "exit_code": getattr(step, "returncode", None),
                         "settlement": step.settlement.model_dump(mode="json"),
@@ -277,6 +278,7 @@ def project_agent_campaign(
             "candidate_identity": decision.candidate_identity,
             "scope_identity": decision.scope_identity,
             "remaining_runs": decision.remaining_runs,
+            "passed_test_step_id": decision.passed_test_step_id,
             "consumed_runs": [item.model_dump(mode="json") for item in decision.consumed_runs],
             "unresolved_run_ids": list(decision.unresolved_run_ids),
         }
@@ -303,6 +305,31 @@ def project_agent_campaign(
             row["outcome"] != "SUCCESS" or row["unverified_step_ids"] for row in runs
         ):
             reasons.append("The converged campaign decision conflicts with retained Run results")
+        if decision.stop_reason is AgentRepairStopReason.TEST_PASSED:
+            passed = (
+                next(
+                    (
+                        step
+                        for step in runs[-1]["recorded_steps"]
+                        if step["step_id"] == decision.passed_test_step_id
+                    ),
+                    None,
+                )
+                if runs
+                else None
+            )
+            if (
+                not members
+                or members[-1][0].phase is not None
+                or passed is None
+                or passed["status"] != "COMPLETED"
+                or passed["kind"] != "command"
+                or passed["settlement"]["outcome"] != "SUCCESS"
+                or passed["settlement"]["cleanup"] != "VERIFIED"
+                or passed["settlement"]["reason"] != "ACCEPTED_EXIT"
+                or not passed["attempts"]
+            ):
+                reasons.append("The test-passed decision lacks its accepted native test result")
         if decision.stop_reason is AgentRepairStopReason.CONVERGED and (
             not members
             or decision.unstarted_selection is not None

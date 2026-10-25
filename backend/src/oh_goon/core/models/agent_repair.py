@@ -183,11 +183,18 @@ class AgentCampaignDecision(ImmutableModel):
     next_step_ids: tuple[str, ...] = ()
     unstarted_selection: AgentCampaignUnstartedSelection | None = None
     stop_reason: AgentRepairStopReason | None = None
+    passed_test_step_id: str | None = Field(default=None, min_length=1)
     unresolved_run_ids: tuple[str, ...] = ()
     message: str = Field(default="", max_length=MAX_AGENT_CAMPAIGN_MESSAGE_CHARS)
 
     @model_validator(mode="after")
     def validate_decision(self) -> AgentCampaignDecision:
+        if (self.stop_reason is AgentRepairStopReason.TEST_PASSED) != (
+            self.passed_test_step_id is not None
+        ):
+            raise ValueError(
+                "Test-passed decision requires exactly its accepted native test reference"
+            )
         if self.stop_reason is None and (self.next_phase is None or not self.next_step_ids):
             raise ValueError("advancement requires the selected next phase")
         if self.stop_reason is not None and (self.next_phase is not None or self.next_step_ids):

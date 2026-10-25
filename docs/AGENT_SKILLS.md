@@ -449,6 +449,9 @@ new frozen source identity, attempt ordinal, parent Run and original limits.
 The result receipt lists the admitted Runs and a stop reason. `test_passed`
 means the selected native verification passed; original failed Steps and Game
 Tapes remain failed, including a failed check preceding a successful retest.
+The committed decision retains `passed_test_step_id`, the policy-selected native
+test occurrence in its final Run; publication verifies that exact accepted Step
+and settled cleanup rather than promoting the Run's earlier failed checks.
 Generic rerun/readmission cannot inherit a repair budget. A restart does not
 automatically resume the loop; existing Fleet recovery governs any active Run.
 

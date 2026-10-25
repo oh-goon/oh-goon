@@ -41,6 +41,18 @@ describe("GameTapeCampaignJournal", () => {
     expect(screen.queryByText("converged")).toBeNull();
   });
 
+  it("shows the policy-selected accepted native test occurrence", () => {
+    const record = decision(2, true);
+    if (record.fact.kind !== "decision") throw new Error("Expected decision fixture");
+    record.fact.stop_reason = "test_passed";
+    record.fact.passed_test_step_id = "original-native-retest";
+    render(<GameTapeCampaignJournal campaign={readback([record])} />);
+    fireEvent.click(screen.getByText("Campaign intent, phase linkage and decisions"));
+    expect(screen.getByText("Accepted native test Step")).toBeVisible();
+    expect(screen.getByText("original-native-retest")).toBeVisible();
+    expect(screen.getAllByText("test_passed").some((node) => !node.closest("details"))).toBe(true);
+  });
+
   it("preserves the original candidate, budget and exact admitted phase membership", () => {
     render(<GameTapeCampaignJournal campaign={readback([
       { session_id: "intent", revision: 1, fact: {

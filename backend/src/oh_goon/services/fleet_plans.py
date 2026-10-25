@@ -94,6 +94,7 @@ from oh_goon.services.fleet_plan_input_routing import CallerFileRoutingOrigin
 from oh_goon.services.fleet_plan_preparation import prepare_declared_plan_runtimes
 from oh_goon.services.fleet_plan_repair import (
     AgentReviewRepairCampaign,
+    PassedRepairTest,
     repair_attempt_decision,
     validate_agent_repair_plan,
 )
@@ -1086,6 +1087,7 @@ class FleetPlanService:
         maximum_runs = budget.max_attempts
         current_selection: AgentCampaignUnstartedSelection | None = None
         redaction_steps: tuple[ResolvedPlanStep, ...] = ()
+        passed_test_step_id: str | None = None
 
         def stop_requested() -> RepairStop | None:
             if cancel_requested is not None and cancel_requested():
@@ -1133,6 +1135,9 @@ class FleetPlanService:
                 else (),
                 unstarted_selection=current_selection if reason is not None else None,
                 stop_reason=reason,
+                passed_test_step_id=passed_test_step_id
+                if reason is RepairStop.TEST_PASSED
+                else None,
                 message=message,
             )
             committed = self._runs.commit_agent_campaign_decision(decision)
@@ -1463,9 +1468,12 @@ class FleetPlanService:
                     plan, target_handoff = campaign.plan, campaign.handoffs
                     continue
                 assert steps is not None
-                decision = repair_attempt_decision(detail, steps)
-                if decision is not None:
-                    return result(decision)
+                repair_decision = repair_attempt_decision(detail, steps)
+                if isinstance(repair_decision, PassedRepairTest):
+                    passed_test_step_id = repair_decision.step_id
+                    return result(RepairStop.TEST_PASSED)
+                if repair_decision is not None:
+                    return result(repair_decision)
                 if ordinal == budget.max_attempts:
                     return result(RepairStop.ATTEMPTS_EXHAUSTED)
                 try:

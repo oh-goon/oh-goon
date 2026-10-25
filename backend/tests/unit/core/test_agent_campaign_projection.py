@@ -29,7 +29,10 @@ from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     FailedPlanStepExecution,
     FleetPlanResult,
+    PlanEgressEvidence,
+    PlanExecutionSupervisorEvidence,
     PlanOutputEvidence,
+    PlanStepAttemptEvidence,
     PlanStepSettlementEvidence,
     SkippedPlanStepExecution,
 )
@@ -160,6 +163,18 @@ def _phase(
             *((native,) if native is not None else ()),
         ),
         returncode=exit_code,
+        attempts=(
+            PlanStepAttemptEvidence(
+                attempt=1,
+                returncode=exit_code,
+                stdout_evidence=output,
+                stderr_evidence=output,
+                repository_state_before="before",
+                repository_state_after="after",
+                egress=PlanEgressEvidence(mode="none"),
+                supervisor=PlanExecutionSupervisorEvidence(final_process_group_quiescent=True),
+            ),
+        ),
         settlement=PlanStepSettlementEvidence(
             outcome="SUCCESS" if exit_code == 0 else "FAILED",
             cleanup="VERIFIED",
@@ -258,6 +273,9 @@ def _receipt(details, stop=AgentRepairStopReason.CONVERGED):
                     for detail in details
                 ),
                 stop_reason=stop,
+                passed_test_step_id=details[-1].run.target.plan.steps[0].step_id
+                if stop is AgentRepairStopReason.TEST_PASSED
+                else None,
                 candidate_identity=details[-1].run.target.agent_repair.candidate_identity,
                 scope_identity=details[-1].run.target.agent_repair.scope_identity,
             ),
@@ -618,3 +636,54 @@ def test_failure_driven_policy_preserves_historical_test_failure_in_durable_read
     assert result["runs"][0]["recorded_steps"][0]["status"] == "FAILED"
     assert result["runs"][0]["recorded_steps"][0]["exit_code"] == 17
     assert result["final_candidate"] is None  # No phased-review convergence claim.
+    assert result["controller_result"]["passed_test_step_id"] == "retest"
+
+
+@pytest.mark.parametrize(
+    "contradiction", ["failed", "missing_reference", "different_step", "missing_attempt"]
+)
+def test_test_passed_decision_cannot_hide_missing_or_failed_native_test(contradiction):
+    detail = _phase(
+        1, "test", exit_code=17 if contradiction == "failed" else 0, failure_driven=True
+    )
+    receipt = _receipt((detail,), AgentRepairStopReason.TEST_PASSED)
+    journal = receipt.campaign_journal
+    if contradiction in {"missing_reference", "different_step"}:
+        terminal = journal.records[-1]
+        terminal = terminal.model_copy(
+            update={
+                "fact": terminal.fact.model_copy(
+                    update={
+                        "passed_test_step_id": None
+                        if contradiction == "missing_reference"
+                        else "agent"
+                    }
+                )
+            }
+        )
+        journal = journal.model_copy(update={"records": (*journal.records[:-1], terminal)})
+    elif contradiction == "missing_attempt":
+        operation = detail.operations[0]
+        plan = operation.evidence.plan
+        operation = operation.model_copy(
+            update={
+                "evidence": operation.evidence.model_copy(
+                    update={
+                        "plan": plan.model_copy(
+                            update={
+                                "steps": (
+                                    plan.steps[0].model_copy(update={"attempts": ()}),
+                                    *plan.steps[1:],
+                                )
+                            }
+                        )
+                    }
+                )
+            }
+        )
+        detail = detail.model_copy(update={"operations": (operation,)})
+    result = project_agent_campaign("campaign", (detail,), campaign=journal)
+    assert result["result"] == "incomplete"
+    assert result["controller_result"]["stop_reason"] == "test_passed"
+    assert any("accepted native test" in reason for reason in result["incomplete_reasons"])
+    assert result["safe_next_action"] == "inspect_original_runs_and_resolve_ownership"

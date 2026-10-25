@@ -66,6 +66,13 @@ class AgentRepairSteps:
     allowed_path: str
 
 
+@dataclass(frozen=True, slots=True)
+class PassedRepairTest:
+    """The failure-driven policy's exact accepted native test occurrence."""
+
+    step_id: str
+
+
 def _requires_status(step: ResolvedPlanStep, source: str, status: str) -> bool:
     return (
         isinstance(step.when, StepStatusCondition)
@@ -186,7 +193,9 @@ def validate_agent_repair_plan(
     return AgentRepairSteps(test, agent, apply, retest, reference[1], path)
 
 
-def repair_attempt_decision(detail: FleetRunDetail, steps: AgentRepairSteps) -> Stop | None:
+def repair_attempt_decision(
+    detail: FleetRunDetail, steps: AgentRepairSteps
+) -> Stop | PassedRepairTest | None:
     """None means the exact failed retest permits another caller-budgeted attempt."""
     if getattr(getattr(detail.run, "failure", None), "code", None) == "OPERATION_DEADLINE_EXPIRED":
         return Stop.TIMED_OUT
@@ -228,7 +237,7 @@ def repair_attempt_decision(detail: FleetRunDetail, steps: AgentRepairSteps) -> 
     test, agent, apply, retest = result.steps
     if test.status == "COMPLETED" and test.returncode == 0:
         return (
-            Stop.TEST_PASSED
+            PassedRepairTest(test.step_id)
             if all(step.status == "SKIPPED" for step in (agent, apply, retest))
             else Stop.EXECUTION_UNRESOLVED
         )
@@ -239,7 +248,7 @@ def repair_attempt_decision(detail: FleetRunDetail, steps: AgentRepairSteps) -> 
     if apply.status != "COMPLETED" or apply.returncode != 0:
         return Stop.APPLY_FAILED
     if retest.status == "COMPLETED" and retest.returncode == 0:
-        return Stop.TEST_PASSED
+        return PassedRepairTest(retest.step_id)
     if retest.status != "FAILED" or not retest.attempts:
         return Stop.EXECUTION_UNRESOLVED
     if not _has_feedback(retest, steps.feedback_name):

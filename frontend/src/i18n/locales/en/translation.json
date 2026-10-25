@@ -1386,6 +1386,7 @@
       "run": "Admitted Run",
       "steps": "Selected Steps",
       "decisionIdentity": "Decision identity",
+      "passedTest": "Accepted native test Step",
       "remainingRuns": "Remaining Run budget",
       "unresolved": "Unresolved Runs",
       "terminalSequence": "Terminal Journal sequence {{sequence}}",
