@@ -51,7 +51,7 @@ def test_capture_survives_relocation_and_transports_no_live_path(
 
 
 @pytest.mark.parametrize("imported", [False, True])
-def test_explicit_untrusted_package_policy_refuses_during_resolution(
+def test_explicit_untrusted_package_policy_preserves_required_isolation_during_resolution(
     project: Path, tmp_path: Path, imported: bool
 ) -> None:
     declaration: dict[str, Any]
@@ -78,8 +78,16 @@ def test_explicit_untrusted_package_policy_refuses_during_resolution(
         )
     declaration["execution"] = {"purpose": "cicd", "trust_repository_code": False}
     source.write_text(yaml.safe_dump(declaration))
-    with pytest.raises(FleetPlanInvalid, match="does not support untrusted strict preparation"):
-        resolver.resolve(source)
+    from oh_goon.core.models.fleet_plan_execution_policy import compile_lace_required_guarantees
+    from oh_goon.core.models.fleet_plan_isolation import IsolationKernelBoundary
+
+    plan = resolver.resolve(source)
+    assert plan.steps and all(
+        isinstance(step, ResolvedCommandStep) and step.project_source is not None
+        for step in plan.steps
+    )
+    guarantees = compile_lace_required_guarantees(plan.execution).require_defined()
+    assert guarantees.minimum_kernel_boundary is IsolationKernelBoundary.APPLICATION_KERNEL
 
 
 def test_generated_state_does_not_change_authored_package_identity(project: Path) -> None:

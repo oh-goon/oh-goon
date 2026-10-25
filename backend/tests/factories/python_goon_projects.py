@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
+from textwrap import dedent
 from typing import TypedDict
 
 import pytest
@@ -16,6 +19,112 @@ from oh_goon.runtime import goon_templates
 from oh_goon.runtime.league_folders import LeagueFolderStore
 
 SHOWCASE = Path(__file__).resolve().parents[3] / "examples/airflow-taskflow-showcase"
+
+
+def write_isolated_build_project(path: Path, *, stale_lock: bool = False) -> None:
+    """Create a native self-contained backend whose writes expose the build boundary."""
+    path.mkdir(parents=True)
+    (path / "README.md").write_text("# general/isolated-build\n")
+    (path / "goon.yml").write_text(
+        "runtime: python\nexecution: {purpose: cicd, trust_repository_code: false}\n"
+        "steps:\n- run: isolated-build\n"
+    )
+    metadata = dedent("""\
+        [project]
+        name = "isolated-build"
+        version = "1.0.0"
+        requires-python = ">=3.12"
+        [project.scripts]
+        isolated-build = "isolated_app:main"
+        [dependency-groups]
+        dev = ["goon-dev-only"]
+        [tool.uv.sources]
+        goon-dev-only = {path = "vendor/goon_dev_only-1.0.0-py3-none-any.whl"}
+        [build-system]
+        requires = []
+        build-backend = "backend"
+        backend-path = ["."]
+        """)
+    (path / "pyproject.toml").write_text(metadata)
+    vendor = path / "vendor"
+    vendor.mkdir()
+    with zipfile.ZipFile(vendor / "goon_dev_only-1.0.0-py3-none-any.whl", "w") as wheel:
+        wheel.writestr("goon_dev_only.py", "DEVELOPMENT_ONLY = True\n")
+        wheel.writestr(
+            "goon_dev_only-1.0.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: goon-dev-only\nVersion: 1.0.0\n",
+        )
+        wheel.writestr(
+            "goon_dev_only-1.0.0.dist-info/WHEEL",
+            "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        wheel.writestr("goon_dev_only-1.0.0.dist-info/RECORD", "")
+    (path / "isolated_app.py").write_text(
+        dedent("""\
+        import importlib.util
+        import json
+        from pathlib import Path
+
+        def main():
+            result = {
+                "dev_dependency_absent": importlib.util.find_spec("goon_dev_only") is None,
+                "installed_module": __file__,
+            }
+            Path("isolated-result.json").write_text(json.dumps(result))
+            print("installed-command-ran")
+        """)
+    )
+    (path / "backend.py").write_text(
+        dedent("""\
+        import json
+        import os
+        import socket
+        import zipfile
+        from pathlib import Path
+
+        def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+            project = Path(__file__).parent
+            observed = {"private_write": True}
+            if "PROBE_CAPTURED_SOURCE" in os.environ:
+                source = Path(os.environ["PROBE_CAPTURED_SOURCE"])
+                assert (source / "pyproject.toml").is_file()
+                try:
+                    source.chmod(0o700)
+                    (source / "backend-host-write").write_text("prohibited")
+                except OSError:
+                    observed["readonly_source"] = True
+                else:
+                    observed["readonly_source"] = False
+                observed["host_secret_absent"] = not Path(os.environ["PROBE_HOST_SECRET"]).exists()
+                try:
+                    with socket.create_connection(("127.0.0.1", int(os.environ["PROBE_HOST_PORT"])), timeout=1):
+                        observed["network_denied"] = False
+                except OSError:
+                    observed["network_denied"] = True
+            (project / "backend-build.json").write_text(json.dumps(observed))
+            filename = "isolated_build-1.0.0-py3-none-any.whl"
+            with zipfile.ZipFile(Path(wheel_directory) / filename, "w") as wheel:
+                wheel.writestr("isolated_app.py", (project / "isolated_app.py").read_text())
+                wheel.writestr("isolated_build-1.0.0.dist-info/METADATA", "Metadata-Version: 2.1\\nName: isolated-build\\nVersion: 1.0.0\\n")
+                wheel.writestr("isolated_build-1.0.0.dist-info/WHEEL", "Wheel-Version: 1.0\\nGenerator: test\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n")
+                wheel.writestr("isolated_build-1.0.0.dist-info/entry_points.txt", "[console_scripts]\\nisolated-build = isolated_app:main\\n")
+                wheel.writestr("isolated_build-1.0.0.dist-info/RECORD", "")
+            return filename
+        """)
+    )
+    with tempfile.TemporaryDirectory(prefix="oh-goon-native-lock-") as directory:
+        subprocess.run(
+            ["uv", "lock", "--offline", "--cache-dir", directory],
+            cwd=path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    assert not (path / "backend-build.json").exists()
+    if stale_lock:
+        (path / "pyproject.toml").write_text(
+            metadata.replace('version = "1.0.0"', 'version = "2.0.0"')
+        )
 
 
 class SharedPackageScheduleOptions(TypedDict):

@@ -172,9 +172,16 @@ repository does not supply its implementation. Execution leaves the developer's
 Source, project metadata, native lock and resources bind the execution lock;
 generated environments, caches and declared output locations do not.
 The [Iris Goon](goons/ml/iris-train/README.md) is a complete shipped example.
-Package-owned runtime supports trusted package code. An explicit strict
-`trust_repository_code: false` refuses before native build preparation;
-isolated builds for untrusted packages are unavailable.
+An explicit strict `trust_repository_code: false` runs native installation and
+package builds inside the selected Step isolation boundary. Captured source
+stays read-only; a verified private build copy and non-editable environment live
+in attempt-owned cache state. The Step's environment, network and resource
+policy applies during preparation. Untrusted attempts use an empty owned uv
+cache. The current remote provider requires a deny-all VM, so native uv must
+find its dependencies within the captured project or its own bundled backend;
+host caches and ambient credentials are not inherited. Missing isolation
+prerequisites or unavailable dependencies fail without a host-build fallback.
+Ordinary trusted execution keeps its existing preparation behavior.
 
 ## Select pinned Git source
 

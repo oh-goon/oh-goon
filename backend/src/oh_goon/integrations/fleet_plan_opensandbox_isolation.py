@@ -40,7 +40,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
 )
 from oh_goon.integrations.fleet_plan_runtime_authority import expected_runtime_authority_sources
 
-_RUNNER_PROTOCOL = 4
+_RUNNER_PROTOCOL = 5
 
 
 class OpenSandboxRuntimeKind(str):

@@ -751,6 +751,31 @@ class PreparedPlanRun:
         binding = self._inputs.step_binding(step)
         cache_identity = self._lineage.seed_cache(step, cache)
         if isinstance(binding.managed_runtime, UvProjectManagedRuntime):
+            managed = binding.managed_runtime
+            if managed.package_source is not None:
+                package_binding = next(
+                    (
+                        item
+                        for item in binding.sandbox_bindings
+                        if canonical_path(item.declared_path)
+                        == canonical_path(managed.package_source)
+                    ),
+                    None,
+                )
+                if package_binding is None:
+                    raise FleetPlanInvalid(
+                        "Isolated Python Goon build requires its frozen package source binding"
+                    )
+                copied_package = copy_frozen_directory(
+                    package_binding.snapshot_path,
+                    attempt_layout.uv_build_project,
+                    label=f"Python Goon {step.step_id} isolated build project",
+                    cancel_requested=self._cancel_requested,
+                )
+                if copied_package != package_binding.identity:
+                    raise FleetPlanInvalid(
+                        "Python Goon source changed while creating its isolated build project"
+                    )
             cache_identity = _seed_uv_prepared_cache(
                 cache,
                 binding.managed_runtime,
@@ -895,28 +920,60 @@ def _materialize_generated_runtime_links_under(
                 entry = current_path / name
                 if not entry.is_symlink():
                     continue
-                sandbox_target = _external_sandbox_target(
-                    entry, host_root=host_root, sandbox_root=sandbox_root
-                )
-                if sandbox_target is None:
-                    continue
-                source = _frozen_sandbox_source(attempt, sandbox_target)
-                if source is None:
-                    relative = entry.relative_to(host_root)
-                    raise FleetPlanInvalid(
-                        "Fleet generated runtime symlink does not resolve to declared frozen "
-                        f"sandbox authority: {sandbox_root / PurePosixPath(*relative.parts)} "
-                        f"-> {sandbox_target}"
-                    )
-                relative = entry.relative_to(host_root)
-                _replace_link_with_frozen_source(
+                _materialize_generated_runtime_link(
+                    attempt,
                     entry,
-                    source,
-                    label=(
-                        "Fleet generated runtime link "
-                        f"{sandbox_root / PurePosixPath(*relative.parts)}"
-                    ),
+                    host_root=host_root,
+                    sandbox_root=sandbox_root,
                 )
+
+
+def materialize_generated_runtime_archive_symlink(
+    attempt: FleetPlanStepAttempt,
+    host_root: Path,
+    entry: Path,
+    *,
+    sandbox_root: PurePosixPath,
+) -> bool:
+    """Reuse original frozen runtime authority while importing private remote staging."""
+    roots = (
+        EXECUTION_RUNTIME_MATERIALIZATION_ROOTS
+        if sandbox_root == SANDBOX_PATHS.workspace
+        else _CACHE_EXECUTION_RUNTIME_MATERIALIZATION_ROOTS
+        if sandbox_root == SANDBOX_PATHS.cache
+        else ()
+    )
+    relative = PurePosixPath(*entry.relative_to(host_root).parts)
+    for root in roots:
+        generated = host_root.joinpath(*root.parts)
+        if relative != root and relative.is_relative_to(root) and not generated.is_symlink():
+            return _materialize_generated_runtime_link(
+                attempt,
+                entry,
+                host_root=host_root,
+                sandbox_root=sandbox_root,
+            )
+    return False
+
+
+def _materialize_generated_runtime_link(
+    attempt: FleetPlanStepAttempt, entry: Path, *, host_root: Path, sandbox_root: PurePosixPath
+) -> bool:
+    sandbox_target = _external_sandbox_target(entry, host_root=host_root, sandbox_root=sandbox_root)
+    if sandbox_target is None:
+        return False
+    source = _frozen_sandbox_source(attempt, sandbox_target)
+    relative = entry.relative_to(host_root)
+    location = sandbox_root / PurePosixPath(*relative.parts)
+    if source is None:
+        raise FleetPlanInvalid(
+            "Fleet generated runtime symlink does not resolve to declared frozen "
+            f"sandbox authority: {location} -> {sandbox_target}"
+        )
+    _replace_link_with_frozen_source(
+        entry, source, label=f"Fleet generated runtime link {location}"
+    )
+    return True
 
 
 def _external_sandbox_target(

@@ -42,8 +42,10 @@ from oh_goon.runtime.process_group import (
     wait_for_process_group_quiescence,
 )
 
-_PROTOCOL = 3
+_PROTOCOL = 5
 _RESERVED = ("/workspace", "/cache", "/home/fleet", "/tmp", "/config", "/toolchain")
+_WORKLOAD_UID = 65534
+_WORKLOAD_GID = 65534
 _PROCESS_GROUP_TERM_GRACE_SECONDS = 1.0
 _PROCESS_GROUP_KILL_SETTLEMENT_SECONDS = 1.0
 _OUTPUT_READER_SETTLEMENT_SECONDS = 2.0
@@ -129,6 +131,85 @@ def _prepare_root(payload: dict[str, Any], root: Path) -> None:
             if "/" in name or "\\" in name:
                 raise ValueError("Fleet runner etc file name is invalid")
             (etc / name).write_text(str(text), encoding="utf-8")
+
+
+def _prepare_workload_filesystem(payload: dict[str, Any], root: Path) -> None:
+    """Keep immutable inputs outside the disposable workload's write authority.
+
+    The helper retains VM-root ownership; the executed workload does not. Only
+    the original attempt's five writable roots change ownership. Read-only
+    managed inputs and runtime ancestors cannot be chmod'ed or replaced by the
+    workload, even when a project ships owner-writable files.
+    """
+    if os.geteuid() != 0 or root.is_symlink() or root.stat().st_uid != 0:
+        raise ValueError("Fleet runner requires VM-root custody before workload preparation")
+    writable = {"workspace", "home/fleet", "tmp", "config"}
+    if not bool(payload.get("cache_read_only", False)):
+        writable.add("cache")
+    for current, directories, files in os.walk(root, topdown=False, followlinks=False):
+        current_path = Path(current)
+        for path in (current_path, *(current_path / name for name in (*directories, *files))):
+            relative = path.relative_to(root).as_posix()
+            owned = any(relative == base or relative.startswith(base + "/") for base in writable)
+            metadata = path.lstat()
+            os.chown(
+                path,
+                _WORKLOAD_UID if owned else 0,
+                _WORKLOAD_GID if owned else 0,
+                follow_symlinks=False,
+            )
+            if stat.S_ISLNK(metadata.st_mode):
+                continue
+            if stat.S_ISDIR(metadata.st_mode):
+                mode = (stat.S_IMODE(metadata.st_mode) & 0o777) | 0o700 if owned else 0o555
+            elif stat.S_ISREG(metadata.st_mode):
+                mode = (
+                    ((stat.S_IMODE(metadata.st_mode) & 0o777) | 0o600)
+                    if owned
+                    else (0o444 | (0o111 if metadata.st_mode & 0o111 else 0))
+                )
+            else:
+                raise ValueError("Fleet runner input contains an unsupported filesystem object")
+            path.chmod(mode)
+    # Native subprocess/entropy facilities, never host filesystem mounts.
+    devices = root / "dev"
+    devices.mkdir(exist_ok=True)
+    for name, minor in (("null", 3), ("zero", 5), ("random", 8), ("urandom", 9)):
+        destination = devices / name
+        if destination.exists() or destination.is_symlink():
+            raise ValueError("Fleet runner runtime may not replace a fixed device")
+        os.mknod(destination, stat.S_IFCHR | 0o666, os.makedev(1, minor))
+        destination.chmod(0o666)
+    devices.chmod(0o555)
+
+
+def _drop_workload_privileges() -> None:
+    """Drop saved IDs and every capability before the admitted executable starts."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(38, 1, 0, 0, 0) != 0:  # Linux PR_SET_NO_NEW_PRIVS.
+        error = ctypes.get_errno()
+        raise OSError(error, "Fleet runner cannot establish no_new_privs")
+    os.setgroups([])
+    os.setresgid(_WORKLOAD_GID, _WORKLOAD_GID, _WORKLOAD_GID)
+    os.setresuid(_WORKLOAD_UID, _WORKLOAD_UID, _WORKLOAD_UID)
+
+    class CapabilityHeader(ctypes.Structure):
+        _fields_ = [("version", ctypes.c_uint32), ("pid", ctypes.c_int)]
+
+    class CapabilityData(ctypes.Structure):
+        _fields_ = [
+            ("effective", ctypes.c_uint32),
+            ("permitted", ctypes.c_uint32),
+            ("inheritable", ctypes.c_uint32),
+        ]
+
+    header = CapabilityHeader(0x20080522, 0)  # Linux capability ABI v3.
+    data = (CapabilityData * 2)()
+    if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, "Fleet runner cannot clear workload capabilities")
+    if os.getresuid() != (_WORKLOAD_UID,) * 3 or os.getresgid() != (_WORKLOAD_GID,) * 3:
+        raise ValueError("Fleet runner workload identity did not converge")
 
 
 def _identity(payload: object) -> str:
@@ -441,6 +522,7 @@ def _fork_atomic_child(
             os.chdir(cwd)
             os.setsid()
             _restore_atomic_interpreter(binding)
+            _drop_workload_privileges()
             _fexecve(descriptor, exec_argv, env)
         except BaseException as exc:
             try:
@@ -609,6 +691,7 @@ def _execute_attempt(payload: dict[str, Any], root: Path) -> dict[str, Any]:
     runtime_authority: dict[str, str | None] | None = None
     try:
         _prepare_root(payload, root)
+        _prepare_workload_filesystem(payload, root)
         runtime_binding = _bind_runtime_execution(payload, root)
         runtime_authority = dict(runtime_binding["authority"])
         completed = _run(payload, root, runtime_binding)
@@ -632,6 +715,12 @@ def _execute_attempt(payload: dict[str, Any], root: Path) -> dict[str, Any]:
             **_archive_result_trees(root),
         }
     except BaseException as exc:
+        if runtime_binding is not None:
+            # Only a completed native launch, including its canonical settled
+            # timeout, may publish mutable outputs. An unexpected helper error
+            # is not process-tree quiescence; the original provider must destroy
+            # its sandbox instead of accepting an archive from this cut.
+            raise
         return {
             "returncode": 125,
             **_observation_field(runtime_authority),

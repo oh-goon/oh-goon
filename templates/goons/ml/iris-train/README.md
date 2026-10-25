@@ -55,6 +55,12 @@ are the reusable training product. See the [retention contract](../../../../docs
 The Plan retains `purpose: cicd`. A verification-purpose wrapper refuses this
 content-store declaration before training. Native local command success alone
 does not establish strict Fleet execution or retained-artifact publication.
-Package preparation currently supports trusted code; an explicit strict
-`trust_repository_code: false` refuses before build because isolated package
-builds are unavailable.
+The default policy trusts package code. With explicit strict
+`trust_repository_code: false`, native installation and builds use the selected
+Step isolation boundary, a verified private build copy and an attempt-owned
+environment. Untrusted attempts start with an empty uv cache, and the current
+remote provider requires a deny-all VM. This package's registry dependencies
+therefore need a self-contained source variant for that profile; otherwise native
+installation fails before training. The shipped package keeps its trusted-code
+policy and does not fall back from strict builds to the host. Successful
+installation alone does not establish strict qualification.

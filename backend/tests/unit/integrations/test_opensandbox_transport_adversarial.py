@@ -1,16 +1,35 @@
 from __future__ import annotations
 
+import io
+import json
+import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.engine.command import CommandResult, RuntimeAuthorityReceipt
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations import _fleet_plan_opensandbox_transport as subject
 from oh_goon.integrations.fleet_plan_runtime_authority import observed_runtime_authority_payload
+from oh_goon.runtime.diagnostics import DiagnosticRouter
+
+
+def test_remote_result_read_bounds_bytes_before_json_construction(tmp_path: Path) -> None:
+    result_file = tmp_path / "result.json"
+    payload = {"protocol": subject._RUNNER_PROTOCOL, "stdout": "ordinary result"}
+    result_file.write_text(json.dumps(payload))
+    assert subject._read_remote_result(result_file) == payload
+    with result_file.open("r+b") as stream:
+        stream.truncate(17 * 1024 * 1024)
+    with pytest.raises(FleetPlanInvalid, match="exceeds its source-size bound"):
+        subject._read_remote_result(result_file)
+    result_file.write_bytes(b"\xff")
+    with pytest.raises(FleetPlanInvalid, match="not valid JSON"):
+        subject._read_remote_result(result_file)
 
 
 def _settings() -> SimpleNamespace:
@@ -154,7 +173,12 @@ def test_create_sandbox_wraps_transport_exception(monkeypatch: pytest.MonkeyPatc
 def test_destroy_sandbox_uses_api_and_falls_back_to_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _settings()
     calls: list[tuple[str, ...]] = []
-    monkeypatch.setattr(subject, "_run_osb", lambda _settings, *args, **kwargs: calls.append(args))
+
+    def kill(_settings: object, *args: str, **kwargs: object) -> CommandResult:
+        calls.append(args)
+        return CommandResult(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subject, "_run_osb", kill)
     monkeypatch.setattr(subject, "_httpx2", lambda: _Http(delete=_Response(204)))
     subject._destroy_sandbox(settings, "a")
     assert calls == []
@@ -163,7 +187,7 @@ def test_destroy_sandbox_uses_api_and_falls_back_to_cli(monkeypatch: pytest.Monk
     assert calls[-1][:3] == ("sandbox", "kill", "b")
 
 
-def test_destroy_sandbox_swallows_api_and_cleanup_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_destroy_sandbox_reports_api_and_cleanup_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     class Broken:
         def delete(self, *args: object, **kwargs: object) -> object:
             raise OSError("offline")
@@ -172,7 +196,81 @@ def test_destroy_sandbox_swallows_api_and_cleanup_failure(monkeypatch: pytest.Mo
     monkeypatch.setattr(
         subject, "_run_osb", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cli"))
     )
-    subject._destroy_sandbox(_settings(), "sandbox")
+    with pytest.raises(FleetPlanInvalid, match="cleanup could not be established"):
+        subject._destroy_sandbox(_settings(), "sandbox")
+
+
+def test_destroy_sandbox_rejects_nonzero_provider_kill(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subject, "_httpx2", lambda: _Http(delete=_Response(500)))
+    monkeypatch.setattr(
+        subject,
+        "_run_osb",
+        lambda *args, **kwargs: CommandResult(returncode=1, stdout="", stderr=""),
+    )
+    with pytest.raises(FleetPlanInvalid, match="provider kill exit=1"):
+        subject._destroy_sandbox(_settings(), "sandbox")
+
+
+@pytest.mark.parametrize("cancelled", (False, True))
+def test_provider_cleanup_failure_preserves_result_and_cancellation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancelled: bool
+) -> None:
+    events: list[DiagnosticEvent] = []
+    cleanup: list[str] = []
+
+    class RetainedSink:
+        def write(self, event: DiagnosticEvent) -> None:
+            events.append(event)
+
+    class FailingSink:
+        def write(self, event: DiagnosticEvent) -> None:
+            raise OSError("diagnostic storage unavailable")
+
+    request = SimpleNamespace(
+        attempt=SimpleNamespace(
+            paths=SimpleNamespace(root=tmp_path), resources=CicdResourcePolicy()
+        ),
+        diagnostics=DiagnosticRouter((FailingSink(), RetainedSink())),
+        fleet_run_id="run-cleanup",
+        step_id="build",
+    )
+    original = CommandResult(returncode=7, stdout="product output", stderr="product failure")
+    cancellation = OperationCancelledError("original cancellation")
+    monkeypatch.setattr(subject, "_create_sandbox", lambda *a, **kw: "sandbox-owned")
+
+    def execute(*args: object, **kwargs: object) -> CommandResult:
+        if cancelled:
+            raise cancellation
+        return original
+
+    def evidence(*args: object) -> None:
+        cleanup.append("evidence")
+        raise OSError("provider-secret-must-not-be-logged")
+
+    def destroy(*args: object) -> None:
+        cleanup.append("destroy")
+        raise OSError("provider-secret-must-not-be-logged")
+
+    monkeypatch.setattr(subject, "_execute_open_sandbox_attempt", execute)
+    monkeypatch.setattr(subject, "write_remote_resource_evidence", evidence)
+    monkeypatch.setattr(subject, "_destroy_sandbox", destroy)
+    options = dict(expected_runtime_authority=None, timeout=5, cancel_requested=None)
+    if cancelled:
+        with pytest.raises(OperationCancelledError) as captured:
+            subject.OpenSandboxCliTransport().execute(_settings(), request, **options)
+        assert captured.value is cancellation
+        assert len(cancellation.__notes__) == 2
+    else:
+        result = subject.OpenSandboxCliTransport().execute(_settings(), request, **options)
+        assert result.returncode == original.returncode
+        assert result.stdout == original.stdout and result.supervisor is original.supervisor
+        assert result.stderr.startswith("product failure\n")
+        assert "provider-secret" not in result.stderr
+    assert cleanup == ["evidence", "destroy"]
+    assert len(events) == 2
+    assert {event.failure_class for event in events} == {"provider_cleanup_incomplete"}
+    assert all(event.fleet_run_id == "run-cleanup" and event.step_id == "build" for event in events)
+    assert all("provider-secret" not in event.message for event in events)
 
 
 def test_cli_success_and_returned_output_contracts() -> None:
@@ -190,6 +288,16 @@ def test_cli_success_and_returned_output_contracts() -> None:
     assert events == [("stdout", "out"), ("stderr", "err")]
 
 
+def test_remote_result_requires_current_helper_protocol(tmp_path: Path) -> None:
+    result = tmp_path / "result.json"
+    result.write_text('{"protocol":' + str(subject._RUNNER_PROTOCOL) + ',"returncode":0}')
+    assert subject._read_remote_result(result)["returncode"] == 0
+    for protocol in ("3", "4", "true", '"5"', "null"):
+        result.write_text('{"protocol":' + protocol + ',"returncode":0}')
+        with pytest.raises(FleetPlanInvalid, match="unsupported protocol"):
+            subject._read_remote_result(result)
+
+
 def test_replace_tree_archive_rejects_invalid_tar_and_restores_tree(tmp_path: Path) -> None:
     destination = tmp_path / "dest"
     destination.mkdir()
@@ -205,6 +313,129 @@ def test_replace_tree_archive_rejects_invalid_tar_and_restores_tree(tmp_path: Pa
     subject._replace_tree_from_archive(destination, archive)
     assert (destination / "a.txt").read_text(encoding="utf-8") == "hello"
     assert archive.stat().st_size > 0
+
+
+def _remote_runtime_archives(
+    tmp_path: Path, *, archive_kind: str, members: tuple[tuple[str, bytes | str], ...]
+) -> tuple[SimpleNamespace, dict[str, object], dict[str, Path]]:
+    workspace, cache, runtime = (tmp_path / name for name in ("workspace", "cache", "runtime"))
+    for root in (workspace, cache, runtime):
+        root.mkdir()
+    for root in (workspace, cache):
+        (root / "prior.txt").write_bytes(b"existing attempt state")
+    python = runtime / "usr/bin/python3"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"exact frozen Python bytes, not the host interpreter")
+    python.chmod(0o755)
+    archives: dict[str, Path] = {}
+    for kind in ("workspace", "cache"):
+        archive_path = tmp_path / f"{kind}.tar.gz"
+        with tarfile.open(archive_path, "w:gz") as archive:
+            selected = members if kind == archive_kind else (("unchanged.txt", b"untouched"),)
+            for name, value in selected:
+                member = tarfile.TarInfo(name)
+                member.mode = 0o755 if isinstance(value, str) else 0o644
+                if isinstance(value, str):
+                    member.type = tarfile.SYMTYPE
+                    member.linkname = value
+                    archive.addfile(member)
+                else:
+                    member.size = len(value)
+                    archive.addfile(member, io.BytesIO(value))
+        archives[f"{kind}_archive"] = archive_path
+    request = SimpleNamespace(
+        attempt=SimpleNamespace(
+            paths=SimpleNamespace(workspace=workspace, cache=cache),
+            runtime_root=SimpleNamespace(root=runtime),
+            host_tools=(),
+            sandbox_bindings=(),
+        )
+    )
+    result: dict[str, object] = {
+        "protocol": subject._RUNNER_PROTOCOL,
+        "workspace_archive": "output/workspace.tar.gz",
+        "cache_archive": "output/cache.tar.gz",
+    }
+    return request, result, archives
+
+
+@pytest.mark.parametrize(
+    ("archive_kind", "root"),
+    (
+        ("workspace", ".venv"),
+        ("cache", "uv-project-environment"),
+    ),
+)
+@pytest.mark.parametrize("link_target", ("/usr/bin/python3", "../../../usr/bin/python3"))
+def test_remote_generated_interpreter_links_materialize_exact_frozen_authority(
+    tmp_path: Path, archive_kind: str, root: str, link_target: str
+) -> None:
+    request, result, archives = _remote_runtime_archives(
+        tmp_path,
+        archive_kind=archive_kind,
+        members=(
+            (f"{root}/bin/python", link_target),
+            (f"{root}/bin/python3", "python"),
+            ("output.txt", b"application output"),
+        ),
+    )
+    destination = getattr(request.attempt.paths, archive_kind)
+    with pytest.raises(FleetPlanInvalid, match="archive is invalid"):
+        subject._replace_tree_from_archive(destination, archives[f"{archive_kind}_archive"])
+    assert (destination / "prior.txt").read_bytes() == b"existing attempt state"
+    subject._restore_result_archives(request, result, archives)
+    interpreter = destination / root / "bin/python"
+    assert not interpreter.is_symlink()
+    assert interpreter.read_bytes() == b"exact frozen Python bytes, not the host interpreter"
+    assert interpreter.stat().st_mode & 0o777 == 0o755
+    assert (destination / root / "bin/python3").read_bytes() == interpreter.read_bytes()
+    assert (destination / "output.txt").read_bytes() == b"application output"
+
+
+@pytest.mark.parametrize(
+    ("archive_kind", "name", "target"),
+    (
+        ("workspace", "output/python", "/usr/bin/python3"),
+        ("cache", "other-environment/bin/python", "/usr/bin/python3"),
+        ("cache", "uv-project-environment", "/usr/bin/python3"),
+        ("cache", "uv-project-environment/bin/python", "/private/host-secret"),
+        ("cache", "uv-project-environment/bin/python", "/workspace/mutable"),
+    ),
+)
+def test_remote_archive_external_links_fail_outside_original_runtime_authority(
+    tmp_path: Path, archive_kind: str, name: str, target: str
+) -> None:
+    request, result, archives = _remote_runtime_archives(
+        tmp_path,
+        archive_kind=archive_kind,
+        members=((name, target),),
+    )
+    with pytest.raises(FleetPlanInvalid, match="archive is invalid"):
+        subject._restore_result_archives(request, result, archives)
+    destination = getattr(request.attempt.paths, archive_kind)
+    assert (destination / "prior.txt").read_bytes() == b"existing attempt state"
+    assert not tuple(destination.parent.glob(".fleet-restore-*"))
+
+
+def test_remote_archive_cannot_redirect_generated_link_through_prior_parent_symlink(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    protected = outside / "python"
+    protected.write_bytes(b"host file must remain unchanged")
+    request, result, archives = _remote_runtime_archives(
+        tmp_path,
+        archive_kind="cache",
+        members=(
+            ("uv-project-environment/bin", str(outside)),
+            ("uv-project-environment/bin/python", "/usr/bin/python3"),
+        ),
+    )
+    with pytest.raises(FleetPlanInvalid, match="archive is invalid"):
+        subject._restore_result_archives(request, result, archives)
+    assert protected.read_bytes() == b"host file must remain unchanged"
+    assert (request.attempt.paths.cache / "prior.txt").is_file()
 
 
 @pytest.mark.parametrize("cancel_at", [None, "creation", "launch"])

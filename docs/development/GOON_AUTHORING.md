@@ -54,12 +54,18 @@ an additional group. `uv.project` is invalid for package-owned runtime. Commands
 name the installed entry point directly and receive no ambient executable fallback.
 The developer's `.venv` is neither reused nor pruned.
 
-Package-owned runtime supports trusted package code. Explicit strict
-`trust_repository_code: false` refuses before build/install preparation because
-isolated package builds are unavailable. Ordinary local execution and the
-default trusted policy retain their existing behavior. Build preparation is
-effectful native work; an installed environment does not establish strict or
-APP qualification.
+With explicit strict `trust_repository_code: false`, native dependency
+installation and package builds run inside the selected Step isolation boundary.
+The captured source stays read-only; native uv builds from a verified private
+copy in the attempt's writable cache and installs non-editably into its owned
+environment. The Step's environment, network and resource policy applies to
+preparation too. Untrusted attempts start with an empty owned uv cache; host
+caches and credentials are not inherited. The current remote provider requires
+a deny-all VM, so dependencies must be available inside the captured project
+or supplied by native uv itself. Missing isolation prerequisites or unavailable
+dependencies fail without a host-build fallback. Ordinary local execution and
+the default trusted policy retain their existing preparation behavior. An
+installed environment does not establish strict or APP qualification.
 
 A literal `working_directory`, such as `scratch/results`, selects a contained
 subdirectory created in each Step's owned output workspace. Artifact and file

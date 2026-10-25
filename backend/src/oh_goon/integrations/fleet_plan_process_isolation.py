@@ -26,6 +26,7 @@ from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import ExplicitRepositoryScope, StrictFleetExecutionAdmission
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.models.termination import TerminationSignal
+from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.ports.original_mount_intent import OriginalSandboxMount
 from oh_goon.core.vocabulary import FleetRunSource
@@ -447,6 +448,7 @@ class IsolatedProcessRequest:
     fleet_run_id: str | None = None
     step_id: str | None = None
     command_ordinal: int = 1
+    diagnostics: DiagnosticEmitter | None = field(default=None, repr=False, compare=False)
     local_resource_intent: LocalLaceIntentReservation | None = None
     # WF-03B: the original worker must supply this *after* durable Run
     # admission. A serialized consent alone is never an effect authority.

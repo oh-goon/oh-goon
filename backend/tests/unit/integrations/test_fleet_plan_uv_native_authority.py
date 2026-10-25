@@ -151,10 +151,14 @@ def test_uv_preparation_cleans_only_settled_native_environments(
         assert not tuple((run_root / ".preparation/uv-environments").iterdir())
 
 
-def test_untrusted_package_preparation_refuses_before_creating_runtime_state(
+@pytest.mark.parametrize("package", (True, False))
+def test_untrusted_uv_preparation_defers_every_build_to_isolated_step(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    package: bool,
 ) -> None:
     from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+    from oh_goon.integrations import fleet_plan_managed_runtime
 
     project = PythonGoonProject(
         content_sha256="a" * 64, archive_sha256="b" * 64, byte_count=1, entry_count=1
@@ -174,29 +178,41 @@ def test_untrusted_package_preparation_refuses_before_creating_runtime_state(
             ),
         }
     )
-    trusted = _plan(step)
+    if not package:
+        step = _step()
+    trusted = _plan(step, step.model_copy(update={"step_id": "second"}))
     untrusted = trusted.model_copy(
         update={"execution": trusted.execution.model_copy(update={"trust_repository_code": False})}
     )
-    run_root = tmp_path / "uncreated-run"
+    run_root = tmp_path / "run"
+    repository = _repository(tmp_path)
+    selected: list[Path] = []
 
-    def no_python(_uv: Path) -> Path:
-        raise AssertionError("untrusted package must refuse before native Python discovery")
+    def select_python(uv: Path) -> Path:
+        selected.append(uv)
+        return Path("/usr/bin/python3")
 
     def no_launch(*argv: str, **kwargs: object) -> CommandResult:
-        raise AssertionError("untrusted package must refuse before native process work")
+        raise AssertionError("untrusted project must not execute build/install on the host")
 
-    with pytest.raises(FleetPlanInvalid, match="requires isolated builds"):
-        prepare_uv_project_runtimes(
-            untrusted,
-            source_root=tmp_path / "target",
-            run_root=run_root,
-            path_authority=_path_authority(tmp_path),
-            cancel_requested=None,
-            python_resolver=no_python,
-            command_runner=no_launch,
-        )
-    assert not run_root.exists()
+    monkeypatch.setattr(fleet_plan_managed_runtime, "capture_native_uv_authority", no_launch)
+    runtimes = prepare_uv_project_runtimes(
+        untrusted,
+        source_root=repository.path,
+        run_root=run_root,
+        path_authority=_path_authority(tmp_path),
+        cancel_requested=None,
+        python_resolver=select_python,
+        command_runner=no_launch,
+        host_environment={"HOME": "/private/host", "UV_INDEX_PASSWORD": "private"},
+    )
+    assert len(selected) == 1
+    assert set(runtimes) == {"package", "second"}
+    assert all(runtime.isolated_preparation for runtime in runtimes.values())
+    assert runtimes["package"].cache == runtimes["second"].cache
+    assert tuple(runtimes["package"].cache.iterdir()) == ()
+    assert tuple((run_root / ".preparation" / "uv-environments").iterdir()) == ()
+    assert all(runtime.package_source is not None for runtime in runtimes.values()) == package
 
 
 def test_uv_managed_step_requires_repository_workspace_source() -> None:
@@ -519,6 +535,216 @@ def test_uv_preparation_failure_stops_before_application_work(
 
 
 @pytest.mark.parametrize("quiescent", (True, False, None))
+def test_trusted_package_build_writes_only_owned_copy_and_retains_unsettled_work(
+    tmp_path: Path, quiescent: bool | None
+) -> None:
+    from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+    from oh_goon.core.path_layouts import RunPathLayout
+    from oh_goon.integrations.content_snapshot import snapshot_identity
+
+    source = tmp_path / "authored"
+    source.mkdir()
+    (source / "pyproject.toml").write_bytes(b"authored project metadata")
+    identity = snapshot_identity(source)
+    project = PythonGoonProject(
+        content_sha256=identity.sha256,
+        archive_sha256="b" * 64,
+        byte_count=identity.byte_count,
+        entry_count=identity.entry_count,
+    )
+    layout = RunPathLayout.from_root(tmp_path / "run")
+    captured = layout.package_source(identity.sha256)
+    captured.mkdir(parents=True)
+    (captured / "pyproject.toml").write_bytes(b"authored project metadata")
+    step = _step().model_copy(
+        update={
+            "uv": UvExecutionEnvironment(source="package"),
+            "project_source": project,
+        }
+    )
+    observed: list[tuple[Path, Path]] = []
+
+    def backend(*argv: str, **kwargs: object) -> CommandResult:
+        build = Path(argv[argv.index("--project") + 1])
+        env = cast(dict[str, str], kwargs["env"])
+        environment = Path(env["UV_PROJECT_ENVIRONMENT"])
+        environment.mkdir()
+        (environment / "native-install").write_bytes(b"installed")
+        assert build != captured
+        assert (build / "pyproject.toml").read_bytes() == b"authored project metadata"
+        (build / "pyproject.toml").write_bytes(b"backend-authored metadata")
+        observed.append((build, environment))
+        return CommandResult(
+            argv=argv,
+            returncode=0,
+            stdout="",
+            stderr="",
+            supervisor=cast(
+                CommandSupervisorReceipt,
+                None
+                if quiescent is None
+                else CommandSupervisorReceipt(final_process_group_quiescent=quiescent),
+            ),
+        )
+
+    def prepare() -> object:
+        return prepare_uv_project_runtimes(
+            _plan(step),
+            source_root=tmp_path / "target",
+            run_root=layout.root,
+            path_authority=_path_authority(tmp_path),
+            cancel_requested=None,
+            command_runner=backend,
+            python_resolver=lambda _uv: Path("/usr/bin/python3"),
+        )
+
+    if quiescent is True:
+        runtimes = cast(dict[str, object], prepare())
+        assert "package" in runtimes
+    else:
+        with pytest.raises(FleetPlanInvalid, match="cleanup is incomplete"):
+            prepare()
+    assert (captured / "pyproject.toml").read_bytes() == b"authored project metadata"
+    build, environment = observed[0]
+    assert build.exists() == (quiescent is not True)
+    assert environment.exists() == (quiescent is not True)
+
+
+def test_package_preparation_refuses_changed_source_before_backend_execution(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+    from oh_goon.core.path_layouts import RunPathLayout
+    from oh_goon.integrations.content_snapshot import snapshot_identity
+
+    layout = RunPathLayout.from_root(tmp_path / "run")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pyproject.toml").write_bytes(b"captured metadata")
+    expected = snapshot_identity(source)
+    captured = layout.package_source(expected.sha256)
+    captured.mkdir(parents=True)
+    (captured / "pyproject.toml").write_bytes(b"changed after source capture")
+    project = PythonGoonProject(
+        content_sha256=expected.sha256,
+        archive_sha256="b" * 64,
+        byte_count=expected.byte_count,
+        entry_count=expected.entry_count,
+    )
+    step = _step().model_copy(
+        update={
+            "uv": UvExecutionEnvironment(source="package"),
+            "project_source": project,
+        }
+    )
+
+    def no_backend(*argv: str, **kwargs: object) -> CommandResult:
+        raise AssertionError("source mismatch must refuse before native build effects")
+
+    with pytest.raises(FleetPlanInvalid, match="source changed"):
+        prepare_uv_project_runtimes(
+            _plan(step),
+            source_root=tmp_path / "target",
+            run_root=layout.root,
+            path_authority=_path_authority(tmp_path),
+            cancel_requested=None,
+            command_runner=no_backend,
+            python_resolver=lambda _uv: Path("/usr/bin/python3"),
+        )
+    assert tuple((layout.root / ".preparation" / "uv-projects").iterdir()) == ()
+
+
+@pytest.mark.parametrize("tamper", (False, True))
+def test_direct_package_builds_keep_repeated_import_source_immutable(
+    tmp_path: Path, tamper: bool
+) -> None:
+    from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+    from oh_goon.core.path_layouts import AttemptPathLayout
+    from oh_goon.engine.git import GitService
+    from oh_goon.integrations.content_snapshot import snapshot_identity
+    from oh_goon.integrations.fleet_plan_step_execution import (
+        StepRuntime,
+        _execute_command_step,
+        _prepare_python_project_attempt,
+        _StepProcess,
+    )
+
+    source = tmp_path / "captured"
+    source.mkdir()
+    (source / "pyproject.toml").write_bytes(b"authored native metadata")
+    identity = snapshot_identity(source)
+    project = PythonGoonProject(
+        content_sha256=identity.sha256,
+        archive_sha256="a" * 64,
+        byte_count=identity.byte_count,
+        entry_count=identity.entry_count,
+    )
+    step = _step().model_copy(
+        update={
+            "project_source": project,
+            "uv": UvExecutionEnvironment(source="package"),
+            "argv": (
+                "uv",
+                "run",
+                "--frozen",
+                "--no-default-groups",
+                "--project",
+                ".",
+                "application",
+            ),
+        }
+    )
+    repository = tmp_path / "workspace"
+    repository.mkdir()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(*argv: str, **kwargs: object) -> CommandResult:
+        calls.append(argv)
+        bound = Path(argv[argv.index("--project") + 1])
+        assert bound != source
+        if argv[:2] == ("uv", "sync"):
+            assert (bound / "pyproject.toml").read_bytes() == b"authored native metadata"
+            (bound / "pyproject.toml").write_bytes(b"backend-generated metadata")
+        else:
+            assert argv[:3] == ("uv", "run", "--no-sync")
+            assert (bound / "pyproject.toml").read_bytes() == b"backend-generated metadata"
+        return _ok(*argv)
+
+    runtime = StepRuntime(
+        git=GitService(),
+        extensions=None,
+        tools=None,
+        cancel_requested=None,
+        project_sources={project.content_sha256: source},
+    )
+    for index in range(2):
+        paths = AttemptPathLayout.from_root(tmp_path / f"attempt-{index}")
+        for path in (paths.home, paths.tmp, paths.cache, paths.config):
+            path.mkdir(parents=True, exist_ok=True)
+        process = _StepProcess(
+            paths=paths,
+            environment={},
+            host_environment={},
+            command_runner=runner,
+            git_command_runner=runner,
+            managed_runtime=None,
+        )
+        if index == 1 and tamper:
+            (source / "pyproject.toml").write_bytes(b"changed captured metadata")
+            with pytest.raises(FleetPlanInvalid, match="source changed"):
+                _prepare_python_project_attempt(repository, step, process, runtime)
+            assert len(calls) == 2
+            break
+        prepared, failure = _prepare_python_project_attempt(repository, step, process, runtime)
+        assert failure is None
+        assert prepared.package_project == paths.uv_build_project
+        assert _execute_command_step(repository, step, prepared, runtime).returncode == 0
+        assert (source / "pyproject.toml").read_bytes() == b"authored native metadata"
+    if not tamper:
+        assert len(calls) == 4
+
+
+@pytest.mark.parametrize("quiescent", (True, False, None))
 def test_strict_uv_attempt_materializes_offline_then_runs_no_sync(
     tmp_path: Path,
     quiescent: bool | None,
@@ -701,6 +927,192 @@ def test_strict_uv_materialization_failure_prevents_application_command(
             "build",
         )
     ]
+
+
+@pytest.mark.parametrize("package", (True, False))
+@pytest.mark.parametrize("failure", (None, "native", "unsettled", "receipt"))
+def test_untrusted_uv_attempt_uses_locked_isolated_build_before_installed_command(
+    tmp_path: Path, package: bool, failure: str | None
+) -> None:
+    from oh_goon.core.path_layouts import AttemptPathLayout
+    from oh_goon.engine.git import GitService
+    from oh_goon.integrations.fleet_plan_managed_runtime import UvProjectManagedRuntime
+    from oh_goon.integrations.fleet_plan_step_execution import (
+        StepRuntime,
+        _execute_command_step,
+        _prepare_strict_uv_attempt,
+        _StepProcess,
+    )
+
+    paths = AttemptPathLayout.from_root(tmp_path / "attempt")
+    for path in (paths.workspace, paths.home, paths.tmp, paths.cache, paths.config):
+        path.mkdir(parents=True, exist_ok=True)
+    (paths.workspace / "backend").mkdir()
+    captured_source = tmp_path / "captured-project"
+    captured_source.mkdir()
+    (captured_source / "immutable").write_bytes(b"authored package")
+    if package:
+        paths.uv_build_project.mkdir()
+        (paths.uv_build_project / "immutable").write_bytes(b"authored package")
+    project = paths.uv_build_project if package else paths.workspace / "backend"
+    step = _step()
+    if package:
+        step = step.model_copy(
+            update={
+                "uv": UvExecutionEnvironment(source="package"),
+                "argv": (
+                    "uv",
+                    "run",
+                    "--frozen",
+                    "--no-default-groups",
+                    "--project",
+                    ".",
+                    "application",
+                ),
+            }
+        )
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def runner(*argv: str, **kwargs: object) -> CommandResult:
+        calls.append((tuple(argv), dict(kwargs)))
+        if argv[:2] == ("uv", "sync"):
+            (project / "native-build-output").write_bytes(b"backend may write here")
+            return CommandResult(
+                argv=argv,
+                returncode=2 if failure == "native" else 0,
+                stdout="",
+                stderr="native build rejected" if failure == "native" else "",
+                supervisor=cast(
+                    CommandSupervisorReceipt,
+                    None
+                    if failure == "receipt"
+                    else CommandSupervisorReceipt(
+                        final_process_group_quiescent=failure != "unsettled"
+                    ),
+                ),
+            )
+        return _ok(*argv)
+
+    def cancel_requested() -> bool:
+        return False
+
+    process = _StepProcess(
+        paths=paths,
+        environment={"UV_OFFLINE": "1", "UV_INDEX_PRIVATE_PASSWORD": "declared-secret"},
+        host_environment={"UNRELATED_SECRET": "host-only", "UV_UNDECLARED_SETTING": "ambient"},
+        command_runner=runner,
+        git_command_runner=runner,
+        managed_runtime=UvProjectManagedRuntime(
+            project="." if package else "backend",
+            group=None if package else "build",
+            cache=tmp_path / "empty-prepared-cache",
+            python=Path("/usr/bin/python3"),
+            package_source=captured_source if package else None,
+            isolated_preparation=True,
+        ),
+    )
+    runtime = StepRuntime(
+        git=GitService(), extensions=None, tools=None, cancel_requested=cancel_requested
+    )
+    prepared, preparation_failure = _prepare_strict_uv_attempt(
+        paths.workspace, step, process, runtime
+    )
+    argv, options = calls[0]
+    assert argv == (
+        "uv",
+        "sync",
+        "--project",
+        str(project),
+        "--locked",
+        "--link-mode",
+        "copy",
+        "--no-default-groups",
+        *(["--no-editable"] if package else ["--group", "build"]),
+    )
+    assert options["cancel_requested"] is cancel_requested
+    environment = options["env"]
+    assert isinstance(environment, dict)
+    assert environment["UV_OFFLINE"] == "1"
+    assert environment["UV_INDEX_PRIVATE_PASSWORD"] == "declared-secret"
+    assert "UNRELATED_SECRET" not in environment and "UV_UNDECLARED_SETTING" not in environment
+    assert not (captured_source / "native-build-output").exists()
+    assert (captured_source / "immutable").read_bytes() == b"authored package"
+    if failure is not None:
+        assert preparation_failure is not None
+        assert len(calls) == 1
+        if failure != "native":
+            assert settle_step_execution(step, preparation_failure).outcome == "INCOMPLETE"
+        return
+    assert preparation_failure is None
+    outcome = _execute_command_step(paths.workspace, step, prepared, runtime)
+    assert outcome.returncode == 0
+    assert calls[1][0][:3] == ("uv", "run", "--no-sync")
+    assert str(project) in calls[1][0]
+    if package:
+        assert calls[1][0][-1] == str(
+            paths.cache / "uv-project-environment" / "bin" / "application"
+        )
+
+
+def test_strict_uv_build_transports_original_runtime_supervision(tmp_path: Path) -> None:
+    from oh_goon.core.models.runtime_supervision import RuntimeSupervisionPolicy
+    from oh_goon.core.path_layouts import AttemptPathLayout
+    from oh_goon.engine.command_supervision import CommandRuntimeSupervision
+    from oh_goon.engine.git import GitService
+    from oh_goon.integrations.fleet_plan_managed_runtime import UvProjectManagedRuntime
+    from oh_goon.integrations.fleet_plan_step_execution import (
+        StepRuntime,
+        _prepare_strict_uv_attempt,
+        _StepProcess,
+    )
+
+    paths = AttemptPathLayout.from_root(tmp_path / "attempt")
+    (paths.workspace / "backend").mkdir(parents=True)
+    supervision = CommandRuntimeSupervision(
+        policy=RuntimeSupervisionPolicy(
+            max_runtime_seconds=60,
+            heartbeat_interval_seconds=1,
+            heartbeat_timeout_seconds=5,
+            termination_grace_seconds=1,
+            quiescence_timeout_seconds=5,
+            yield_deadline_seconds=5,
+            policy_revision="strict-native-build-test",
+        ),
+        generation=1,
+        heartbeat=lambda *_: None,
+        lease_valid=lambda *_: True,
+        semantic_progress=lambda *_: None,
+    )
+    observed: list[dict[str, object]] = []
+
+    def runner(*argv: str, **kwargs: object) -> CommandResult:
+        observed.append(kwargs)
+        return _ok(*argv)
+
+    process = _StepProcess(
+        paths=paths,
+        environment={},
+        host_environment={},
+        command_runner=runner,
+        git_command_runner=runner,
+        managed_runtime=UvProjectManagedRuntime(
+            project="backend",
+            group="build",
+            cache=tmp_path / "cache",
+            python=Path("/usr/bin/python3"),
+            isolated_preparation=True,
+        ),
+    )
+    runtime = StepRuntime(
+        git=GitService(),
+        extensions=None,
+        tools=None,
+        cancel_requested=None,
+        runtime_supervision=supervision,
+    )
+    _prepare_strict_uv_attempt(paths.workspace, _step(), process, runtime)
+    assert observed[0]["runtime_supervision"] is supervision
+    assert observed[0]["timeout"] is None
 
 
 def test_uv_prepared_cache_seed_has_identity_owner(
