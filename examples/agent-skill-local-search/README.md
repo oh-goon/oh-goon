@@ -1,30 +1,33 @@
-# Frozen local-search fixture
+# Frozen local-search workflow
 
-Classification: integration-fixture
+Classification: runnable-with-prerequisites
 
-This small product example demonstrates the existing Resolver capture and Step
-preparation contract. Its one-sentence `SKILL.md` is test data. Reusable review
-and development Skills are owned by
-[agentsCookbook](https://github.com/Hugloss/agentsCookbook); see the
-[optional pinned-source recipe](../agent-skill-cookbook/README.md).
+Search the captured sample repository for `needle` through the original Step supervisor and Hashmarks evidence owner. One selected [`run.yml`](run.yml) drives source capture, locking, Fleet admission, native execution and durable Game Tape. This recipient-free tool needs no model or native-agent selection.
 
-The `local-search` harness and `search:needle` task use
-`prepare_frozen_readonly_skill_search(handoff)`. That function stages verified
-frozen repository and Skill bytes and prepares one fixed `rg --fixed-strings`
-command. Preparation does not execute a command. The original Step executor
-owns execution, timeouts, cancellation, and output; Fleet owns Run admission
-and durable results when that Step is run through Fleet.
+Use an initialized Oh-Goon installation with native Git. Copy this complete directory outside the Oh-Goon checkout, retaining its Plan, local Goon, repository and Skill. Initialize and register the sample repository:
 
-[`plan.yml`](plan.yml) imports the project-owned Goon with `from: ./goons`. Its three unique public inputs project from that Goon; the Plan does not repeat their schema.
+```sh
+git init ./repos/team/app
+oh-goon league add-folder /absolute/path/to/local-search/repos
+oh-goon league scan --json
+```
 
-The related functional tests construct isolated source fixtures and exercise
-this same preparation/Step boundary:
+Edit the included `run.yml`: set the registered sample repository's `target.repository_id` and set `agent.repository_root` to the absolute path of the copied `repos` directory. Keep `agent.skill_root: skills`; it is relative to `run.yml`. `inputs.repo`, `inputs.skill` and `agent.acceptance` select the existing captured-source contract.
+
+```sh
+oh-goon config inspect ./run.yml
+oh-goon config validate ./run.yml
+oh-goon lock ./run.yml
+oh-goon run ./run.yml --json
+oh-goon plan tape RUN_ID --json
+```
+
+The Plan imports the project-owned Goon with `from: ./goons`; its unique inputs project from that Goon. The search reads frozen repository bytes, reports evidence for the captured identity and preserves native failure/cancellation results. It does not claim that an absent match proves repository-wide absence. The small `SKILL.md` is product test data; reusable Skills belong to [agentsCookbook](https://github.com/Hugloss/agentsCookbook).
+
+The [canonical example regression](../../backend/tests/integration/services/test_example_workflows.py) copies the actual configuration and executes the installed CLI through Fleet and Game Tape. It also proves that an ambient provider catalog receives no request. Supporting native tests use the checked-in source bytes and cover frozen delivery, no-match, cancellation, forbidden effects and tampered packets:
 
 ```sh
 uv run --project backend --offline --frozen --no-sync pytest backend/tests/integration/test_agent01a_frozen_local_search.py
 ```
 
-Run that command from the OH-Goon root with native `rg` available. It tests a
-local tool turn without invoking a model. Supported model harnesses, Fleet
-execution, and their remaining qualification limits are documented in
-[Agent Skills](../../docs/AGENT_SKILLS.md).
+Preparation alone remains source/Step prework; the canonical Run supplies admission and durable results. See [Agent Skills](../../docs/AGENT_SKILLS.md) for the source and execution boundaries.

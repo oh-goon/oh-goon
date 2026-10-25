@@ -14,12 +14,15 @@ import shlex
 import shutil
 import subprocess
 import sys
+from contextlib import redirect_stdout
 from functools import partial
 from http.server import BaseHTTPRequestHandler
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.models.agent_providers import (
@@ -208,11 +211,12 @@ class _ManagedReviewResponses(CodexResponsesFixture):
 
 
 @pytest.mark.certification
+@pytest.mark.parametrize("entrypoint", ["native-run", "catalog-plan", "catalog-goon"])
 @pytest.mark.skipif(
     sys.platform != "linux" or shutil.which("bwrap") is None, reason="Bubblewrap required"
 )
 def test_installed_managed_codex_reviews_without_workspace_or_host_effects(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entrypoint: str
 ) -> None:
     executable = os.environ.get("OH_GOON_NATIVE_CODEX")
     runtime_root = os.environ.get("OH_GOON_NATIVE_CODEX_RUNTIME_ROOT")
@@ -301,10 +305,67 @@ def test_installed_managed_codex_reviews_without_workspace_or_host_effects(
                 standard_local=True, standard_process_isolation=backend, git_service=git
             )
             runtime.locations.add(repo)
-            admitted = runtime.plans.run_native_agent(
-                selected=selected, workspace=repo, skill=skill, task=_TASK, role="review"
-            )
-            detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=70)
+            if entrypoint == "native-run":
+                admitted = runtime.plans.run_native_agent(
+                    selected=selected, workspace=repo, skill=skill, task=_TASK, role="review"
+                )
+                detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=70)
+            else:
+                from oh_goon.cli import main
+                from oh_goon.core.product_identity import repository_id
+
+                config = catalog.model_dump(mode="json")
+                config["native_agents"] = {"codex": selected.definition.model_dump(mode="json")}
+                config["native_profiles"] = {
+                    selected.profile_name: selected.profile.model_dump(mode="json")
+                }
+                providers = tmp_path / "providers.json"
+                providers.write_text(json.dumps(config))
+                monkeypatch.setenv("OH_GOON_PROVIDERS_FILE", str(providers))
+                workflow = tmp_path / "workflow"
+                kind = "plan" if entrypoint == "catalog-plan" else "goon"
+                with redirect_stdout(StringIO()):
+                    assert main(["league", "add-folder", str(repo.parent)]) == 0
+                    assert (
+                        main(
+                            [
+                                "templates",
+                                "init",
+                                "agents/native-review",
+                                "--kind",
+                                kind,
+                                "--output",
+                                str(workflow),
+                            ]
+                        )
+                        == 0
+                    )
+                selection = workflow / "run.yml"
+                shutil.copytree(skill, workflow / "skills/managed")
+                payload = yaml.safe_load(selection.read_text())
+                payload["target"]["repository_id"] = repository_id(repo)
+                payload["inputs"] = {"repo": "local:app", "skill": "local:managed", "goal": _TASK}
+                payload["agent"] = {
+                    "implementation": "codex",
+                    "profile": selected.profile_name,
+                    "acceptance": "agentic-review",
+                    "repository_root": str(repo.parent),
+                    "skill_root": "skills",
+                }
+                selection.write_text(yaml.safe_dump(payload, sort_keys=False))
+                for command in ("inspect", "validate"):
+                    with redirect_stdout(StringIO()) as output:
+                        result = main(["config", command, str(selection), "--json"])
+                    assert result == 0, output.getvalue()
+                    assert json.loads(output.getvalue())["status"] == "inputs-valid"
+                with redirect_stdout(StringIO()):
+                    assert main(["lock", str(selection)]) == 0
+                assert endpoint.request_count == 0
+                with redirect_stdout(StringIO()) as output:
+                    result = main(["run", str(selection), "--json"])
+                assert result == 0, output.getvalue()
+                receipt = json.loads(output.getvalue())
+                detail = runtime.runs.get(receipt["fleet_run_id"])
             steps = detail.game_tape.repositories[0].steps
             facts = {
                 "outcome": detail.outcome,

@@ -1,0 +1,10 @@
+version: 1
+source: {kind: file-plan, path: plan.yml}
+target: {repository_id: REPOSITORY_ID}
+inputs:
+  repo: local:team/app
+  skill: local:team/search
+agent:
+  acceptance: review
+  repository_root: /approved/repositories
+  skill_root: skills

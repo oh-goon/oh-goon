@@ -145,10 +145,13 @@ retries and compaction. Reconnect diagnostics may recover only through a later
 native completion; explicit failed turns, missing completion and physical command
 failure still cannot pass.
 
-The installed managed-Codex review probe selects a complete public native
-installation and its explicit runtime root. Through the original Run, Bubblewrap
-and inference broker, a local Responses fixture requests a real native tool and
-then supplies a compact complete-scope review claim. It checks source write,
+The installed managed-Codex review probes select a complete public native
+installation and its explicit runtime root. They exercise a direct native Run and
+initialized shipped Plan and Goon workflows through config inspection, validation,
+lock and waited execution. Inspection, validation and locking make no model request.
+Through the original Run, Bubblewrap and inference broker, a local Responses
+fixture requests a real native tool and then supplies a compact complete-scope
+review claim. The probes check source write,
 host-private read and host-loopback denial, host-only credential isolation,
 qualified Hashmarks/Skill delivery on both requests, and canonical retained
 review membership:

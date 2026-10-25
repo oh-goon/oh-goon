@@ -63,6 +63,7 @@ def inspect_run_configuration(
         graph.validate_agent_selection(
             native_selected=snapshot.selection.agent.implementation is not None,
             require_review_phases=snapshot.selection.repair is not None,
+            model_selected=snapshot.selection.agent.model_profile is not None,
         )
     resolved = None
     effective_inputs = {}
@@ -247,7 +248,11 @@ def inspect_run_configuration(
             "skill_closure": "not-captured" if agent_source else "not-applicable",
             "native_availability": "unknown" if agent_source else "not-applicable",
             "provider": "configuration-not-inspected;not-connected"
-            if agent_source
+            if snapshot.selection.agent is not None
+            and (
+                snapshot.selection.agent.model_profile is not None
+                or snapshot.selection.agent.implementation is not None
+            )
             else "not-applicable",
             "admission": "not-started",
             "execution": "not-started",

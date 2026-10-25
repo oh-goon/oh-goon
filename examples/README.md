@@ -7,9 +7,9 @@ Use [the template first-run guide](../templates/README.md) to register a target 
 | [Agent providers](agent-providers/README.md) | Configuration example | Provider catalog validation; requests need a real selected endpoint. |
 | [Local Skill authoring](agent-skill-authoring/README.md) | Preview-only fixture | Typed local Skill/source capture; its `opencode` declaration is not executable. |
 | [Pinned cookbook review](agent-skill-cookbook/README.md) | Runnable with prerequisites | Canonical `run.yml`, remote Skill registry and installed native agent/profile. |
-| [Frozen local search](agent-skill-local-search/README.md) | Integration fixture | Real fixed local-search preparation/Step behavior, without a model. |
+| [Frozen local search](agent-skill-local-search/README.md) | Runnable with prerequisites | Recipient-free captured-source search through the CLI, Fleet and Game Tape. |
 | [Offline Skill resources](agent-skill-offline/README.md) | Preview-only fixture | Local resource capture and relocation; scripts travel as data. |
 | [Review–repair](agentic-review-repair-loop/README.md) | Runnable with prerequisites | Provider or native workflow, explicit phase composition and bounded repair. |
-| [Standard Atomic](standard-atomic/README.md) | Integration fixture | Real subprocess success/failure/cancellation; no complete Fleet/Game Tape claim. |
+| [Standard Atomic](standard-atomic/README.md) | Runnable with prerequisites | Shell execution through the CLI, Fleet and Game Tape; separate native failure/cancellation checks. |
 
 The per-domain Plan READMEs contain small configurations for Python, OCI, Kubernetes, security, ML and advanced teaching workflows. Native tools and services retain their configuration and execution authority. Example infrastructure addresses and target IDs must be replaced deliberately; configuration inspection is not an external qualification receipt.

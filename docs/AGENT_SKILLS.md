@@ -326,11 +326,13 @@ continues to be owned by agentsCookbook.
 | --- | --- |
 | [Authoring](../examples/agent-skill-authoring/README.md) | Inspect named inputs and capture a local Skill; its `opencode` Goon is preview-only. |
 | [Offline resources](../examples/agent-skill-offline/README.md) | Verify that a Skill, references, script resource, and asset survive source capture and relocation together. |
-| [Local search](../examples/agent-skill-local-search/README.md) | Demonstrate frozen-source preparation for the original fixed-string search Step. |
+| [Local search](../examples/agent-skill-local-search/README.md) | Execute recipient-free frozen-source search through the original fixed-string Step and locked Fleet workflow. |
 
 Agent authoring binds repository, Skill and acceptance inputs explicitly.
-Select implementation, profile, model profile, repository/Skill roots and
-acceptance in the relevant `agent` group of `run.yml`. The config supplies no
+Select repository/Skill roots and acceptance in the `agent` group of `run.yml`.
+Model-backed harnesses also require their native implementation/profile or managed
+model profile; recipient-free read-only `local-search` does not select a model.
+The config supplies no
 native model metadata or private credentials. Normal `config inspect` remains
 local and cannot fetch remote Skill sources; explicit locking uses the original
 source capture owner. No stored selection grants fresh effect consent.

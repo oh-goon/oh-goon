@@ -4,7 +4,7 @@ Train and evaluate through a repository-provided `iris-train` command.
 
 **Status:** teaching example. **Effects:** Executes training and writes metrics and model parameters.
 
-**Prerequisites:** The project must implement `iris-train` in its locked `ml` group. The existing template-certification Iris fixture is the reference workload; this template does not install a training program. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+**Prerequisites:** The project must implement `iris-train` in its locked `ml` group and produce the declared metrics and model-parameter files. The template-certification Iris fixture checks command arguments and startup/admission only; it does not train a model or produce those artifacts. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
 ```sh
 oh-goon templates init ml/iris-training --kind plan --output ./workflow

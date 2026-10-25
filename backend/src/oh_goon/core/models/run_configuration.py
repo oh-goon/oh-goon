@@ -66,8 +66,6 @@ class RunAgentSelection(_SelectionModel):
             raise ValueError("native agent selection requires implementation and profile together")
         if self.implementation is not None and self.model_profile is not None:
             raise ValueError("native agents own model settings; model_profile is incompatible")
-        if self.implementation is None and self.model_profile is None:
-            raise ValueError("managed inference requires an explicit model_profile")
         return self
 
 

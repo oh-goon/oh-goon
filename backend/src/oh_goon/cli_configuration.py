@@ -34,13 +34,15 @@ def prepare_configuration(args: argparse.Namespace) -> None:
     graph = resolver.analyze_source(selected.plan_path)
     agent = snapshot.selection.agent
     repair = snapshot.selection.repair
-    if graph.has_agent_source_contract():
+    agent_source = graph.has_agent_source_contract()
+    if (agent is not None) != agent_source:
+        raise FleetPlanInvalid("agent selection must match the selected source's Agent contract")
+    if agent_source:
         graph.validate_agent_selection(
             native_selected=agent is not None and agent.implementation is not None,
             require_review_phases=repair is not None,
+            model_selected=agent is not None and agent.model_profile is not None,
         )
-    if agent is not None and not graph.has_agent_source_contract():
-        raise FleetPlanInvalid("Agent selection requires an authored Agent source contract")
     args._source_graph = graph
     args._selected_inputs = selected.inputs
     args._caller_input_file_snapshot = snapshot
