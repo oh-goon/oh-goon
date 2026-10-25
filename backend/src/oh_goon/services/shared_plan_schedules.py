@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceStale
+from contextlib import nullcontext
+
+from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceStale, ScheduleNotFound
 from oh_goon.core.models.goon_plan_source import SharedPlanSource
 from oh_goon.core.models.schedule import ScheduleCreate, ScheduleDefinition
 from oh_goon.core.product_identity import repository_subject_instance_id
+from oh_goon.core.run_identity import with_retained_project_deliveries
 from oh_goon.core.vocabulary import ScheduleState
 from oh_goon.runtime.shared_plans import SharedPlanFileStore
 from oh_goon.services.fleet_plans import FleetPlanService
@@ -76,22 +79,44 @@ class SharedPlanScheduleService:
             expected_plan_id=expected_plan_id,
             root_expected_name=document.plan_key,
         )
-        repository_instance_ids = self._plans.repository_instance_ids_for_target(
-            target, repository_ids=set(repository_ids)
-        )
-        if repository_instance_ids != expected_repository_instance_ids:
-            raise FleetPlanSourceStale(
-                "Schedule repository selection changed during preparation; reload the current "
-                "League before creating the Schedule"
+        package_sources = any(getattr(step, "project_source", None) for step in target.plan.steps)
+        if package_sources:
+            try:
+                current = self._schedules.definition(schedule_id)
+            except ScheduleNotFound:
+                current = None
+            if current is not None and current.repository_ids == tuple(sorted(repository_ids)):
+                target = with_retained_project_deliveries(target, current.target)
+        transport = (
+            self._plans.project_source_transport_for_target(
+                target,
+                repository_ids=set(repository_ids),
+                expected_repository_instance_ids=expected_repository_instance_ids,
             )
-        return self._schedules.create_prepared(
-            schedule_id,
-            ScheduleCreate(
-                name=name,
-                repository_ids=tuple(sorted(repository_ids)),
-                repository_instance_ids=repository_instance_ids,
-                target=target,
-                interval_minutes=interval_minutes,
-                state=state,
-            ),
+            if package_sources
+            else nullcontext(
+                (
+                    target,
+                    self._plans.repository_instance_ids_for_target(
+                        target, repository_ids=set(repository_ids)
+                    ),
+                )
+            )
         )
+        with transport as (target, repository_instance_ids):
+            if repository_instance_ids != expected_repository_instance_ids:
+                raise FleetPlanSourceStale(
+                    "Schedule repository selection changed during preparation; reload the current "
+                    "League before creating the Schedule"
+                )
+            return self._schedules.create_prepared(
+                schedule_id,
+                ScheduleCreate(
+                    name=name,
+                    repository_ids=tuple(sorted(repository_ids)),
+                    repository_instance_ids=repository_instance_ids,
+                    target=target,
+                    interval_minutes=interval_minutes,
+                    state=state,
+                ),
+            )

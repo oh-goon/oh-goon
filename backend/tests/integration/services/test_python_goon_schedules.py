@@ -7,7 +7,6 @@ import json
 import os
 import shutil
 import subprocess
-from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -16,20 +15,36 @@ import pytest
 import yaml
 
 from oh_goon.application import ApplicationRuntime
-from oh_goon.core.errors import FleetPlanInvalid, JournalConflict, StateConflict
+from oh_goon.core.errors import (
+    FleetPlanInvalid,
+    FleetPlanSourceStale,
+    JournalConflict,
+    RunNotFound,
+    ScheduleNotFound,
+    StateConflict,
+)
 from oh_goon.core.models.caller_input_file import CallerInputFileIdentity
+from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FleetRunState
-from oh_goon.core.models.target import FleetPlanTarget
-from oh_goon.core.product_identity import repository_id, schedule_repository_fleet_run_id
+from oh_goon.core.models.target import FleetPlanTarget, GoonProjectDeliveryReference
+from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.product_identity import (
+    repository_id,
+    schedule_repository_fleet_run_id,
+)
 from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
 from oh_goon.integrations import fleet_plan_step_execution
 from oh_goon.integrations.fleet_content_store import FleetContentObject
-from oh_goon.runtime.league_folders import LeagueFolderStore
+from oh_goon.runtime.diagnostics import JsonlDiagnosticSink
 from oh_goon.services import fleet_run_control_plane
 from oh_goon.services.run_configuration import load_run_configuration
+from tests.factories import python_goon_projects
+from tests.factories.python_goon_projects import SharedPackageScheduleOptions
 
-SHOWCASE = Path(__file__).resolve().parents[4] / "examples/airflow-taskflow-showcase"
+execution = python_goon_projects.execution
+shared_execution = python_goon_projects.shared_execution
+
 pytestmark = pytest.mark.skipif(
     os.name != "posix" or shutil.which("uv") is None, reason="native POSIX uv required"
 )
@@ -46,36 +61,6 @@ class _ScheduleOptions(TypedDict):
     interval_minutes: int
     caller_input_file: CallerInputFileIdentity
     external_artifacts: tuple[tuple[str, bytes], ...]
-
-
-@pytest.fixture
-def execution(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[tuple[ApplicationRuntime, Path, Path]]:
-    repository = tmp_path / "repositories/target"
-    repository.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", str(repository)], check=True)
-    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    LeagueFolderStore().replace((repository,))
-    workflow = tmp_path / "workflow"
-    package = workflow / "goons/general/orders"
-    shutil.copytree(
-        SHOWCASE,
-        package,
-        ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache", ".showcase"),
-    )
-    (package / "README.md").write_text("# general/orders\n\nRun a complete Python package.\n")
-    plan = workflow / "plan.yml"
-    plan.write_text("goons:\n- import: general/orders\n  from: goons\n")
-    runtime = ApplicationRuntime.build(standard_local=True)
-    runtime.locations.add(repository.parent)
-    try:
-        yield runtime, repository, plan
-    finally:
-        runtime.shutdown(wait_for_runs=True)
 
 
 def test_package_run_replay_reuses_original_delivery_and_rejects_changed_authority(
@@ -113,6 +98,47 @@ def test_package_run_replay_reuses_original_delivery_and_rejects_changed_authori
             ),
             **options,
         )
+
+
+def test_wrong_retained_package_archive_refuses_before_admission(
+    execution: tuple[ApplicationRuntime, Path, Path],
+) -> None:
+    runtime, repository, plan = execution
+    runtime.plans.lock(plan)
+    owner = repository_id(repository)
+    original = runtime.plans.schedule(
+        plan, schedule_id="retained-package-baseline", repository_ids={owner}, interval_minutes=60
+    ).target
+    baseline = runtime.runs.start_prepared_plan(
+        original, repository_ids={owner}, fleet_run_id="valid-retained-package"
+    )
+    completed = runtime.runs.wait_for_terminal(baseline.fleet_run_id, timeout=30)
+    assert completed.game_tape.status.value == "PASSED"
+    source = original.plan.steps[0]
+    assert source.kind == "command" and source.project_source is not None
+    store = runtime.plans._content_store
+    assert store is not None
+    wrong = store.put_frozen_bytes(b"different captured package", owner_repository_id=owner)
+    mismatched = original.model_copy(
+        update={
+            "project_deliveries": (
+                GoonProjectDeliveryReference(
+                    project_sha256=source.project_source.content_sha256,
+                    owner_repository_id=owner,
+                    reference_id=wrong.reference_id,
+                ),
+            )
+        }
+    )
+    try:
+        with pytest.raises(FleetPlanInvalid, match="expected captured source identity"):
+            runtime.runs.start_prepared_plan(
+                mismatched, repository_ids={owner}, fleet_run_id="wrong-retained-package"
+            )
+        with pytest.raises(RunNotFound):
+            runtime.runs.get("wrong-retained-package")
+    finally:
+        store.release_reference(wrong.reference_id, owner_repository_id=owner)
 
 
 @pytest.mark.parametrize("phase", ("preparation", "command"))
@@ -177,6 +203,100 @@ def test_native_package_lifecycle_retains_scratch_only_when_terminal_supervision
             assert workspace.is_dir()
             assert environment.is_dir()
             assert package_source.is_dir()
+    assert not (repository / ".venv").exists()
+    assert not (repository / ".showcase").exists()
+
+
+@pytest.mark.parametrize(
+    ("phase", "quiescent", "diagnostic_failure"),
+    (
+        ("preparation", False, False),
+        ("preparation", None, False),
+        ("command", False, False),
+        ("command", None, False),
+        ("preparation", False, True),
+    ),
+)
+def test_cancellation_after_unsettled_native_receipt_preserves_package_resources(
+    execution: tuple[ApplicationRuntime, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    quiescent: bool | None,
+    diagnostic_failure: bool,
+) -> None:
+    runtime, repository, plan = execution
+    runtime.plans.lock(plan)
+    native_runner = fleet_plan_step_execution._direct_step_command_runner
+    roots: list[tuple[Path, Path, Path]] = []
+    failed_diagnostics: list[DiagnosticEvent] = []
+    if diagnostic_failure:
+        original_write = JsonlDiagnosticSink.write
+
+        def refuse_diagnostic(sink: JsonlDiagnosticSink, event: DiagnosticEvent) -> None:
+            if event.operation == "retain_incomplete_package_scratch":
+                failed_diagnostics.append(event)
+                raise OSError("injected bounded diagnostic storage failure")
+            original_write(sink, event)
+
+        monkeypatch.setattr(JsonlDiagnosticSink, "write", refuse_diagnostic)
+
+    def cancel_after_native(*argv: str, **kwargs: Any) -> CommandResult:
+        result = native_runner(*argv, **kwargs)
+        selected = argv[:2] == ("uv", "sync" if phase == "preparation" else "run")
+        if selected:
+            roots.append(
+                (
+                    kwargs["cwd"],
+                    Path(kwargs["env"]["UV_PROJECT_ENVIRONMENT"]),
+                    Path(argv[argv.index("--project") + 1]),
+                )
+            )
+            runtime.runs.cancel("cancel-after-unsettled-package")
+            return replace(
+                result,
+                supervisor=(
+                    replace(result.supervisor, final_process_group_quiescent=False)
+                    if quiescent is False
+                    else cast(CommandSupervisorReceipt, None)
+                ),
+            )
+        return result
+
+    monkeypatch.setattr(
+        fleet_plan_step_execution, "_direct_step_command_runner", cancel_after_native
+    )
+    started = runtime.plans.run(
+        plan,
+        repository_ids={repository_id(repository)},
+        fleet_run_id="cancel-after-unsettled-package",
+    )
+    cancelled = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
+    assert cancelled.run.status.value == "CANCELLED"
+    assert cancelled.game_tape.status.value != "PASSED"
+    first_step = cancelled.game_tape.repositories[0].steps[0]
+    assert first_step.settlement.outcome == "INCOMPLETE"
+    assert first_step.settlement.cleanup == "UNAVAILABLE"
+    assert roots
+    diagnostic_path = ApplicationStatePathLayout.from_database(
+        Path(os.environ["OH_GOON_DB"])
+    ).diagnostics_log
+    if diagnostic_failure:
+        retained = [event.model_dump() for event in failed_diagnostics]
+    else:
+        diagnostics = [json.loads(line) for line in diagnostic_path.read_text().splitlines()]
+        retained = [
+            event
+            for event in diagnostics
+            if event.get("fleet_run_id") == started.fleet_run_id
+            and event["operation"] == "retain_incomplete_package_scratch"
+        ]
+    assert len(retained) == 1
+    assert retained[0]["repository_id"] == repository_id(repository)
+    for workspace, environment, source in roots:
+        assert workspace.is_dir()
+        assert environment.is_dir()
+        assert source.is_dir()
+        assert str(source.parents[2]) in retained[0]["message"]
     assert not (repository / ".venv").exists()
     assert not (repository / ".showcase").exists()
 
@@ -350,3 +470,74 @@ def test_failed_schedule_publication_releases_its_unadmitted_package_source(
     for reference in references:
         with pytest.raises(FleetPlanInvalid, match="unavailable"):
             store.get(reference.reference_id, owner_repository_id=repository_id(repository))
+
+
+def test_shared_schedule_failed_publication_releases_new_package_references(
+    shared_execution: tuple[ApplicationRuntime, Path, Path, SharedPackageScheduleOptions],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, repository, _, options = shared_execution
+    baseline = runtime.shared_plan_schedules.create("shared-baseline", **options)
+    assert baseline.target.project_deliveries
+    store = runtime.plans._content_store
+    assert store is not None
+    references: list[FleetContentObject] = []
+    put = store.put_frozen_bytes
+
+    def observe_put(data: bytes, *, owner_repository_id: str) -> FleetContentObject:
+        stored = put(data, owner_repository_id=owner_repository_id)
+        references.append(stored)
+        return stored
+
+    def fail_publication(*args: object, **kwargs: object) -> None:
+        raise StateConflict("injected Shared Schedule persistence refusal")
+
+    monkeypatch.setattr(store, "put_frozen_bytes", observe_put)
+    monkeypatch.setattr(runtime.schedules, "create_prepared", fail_publication)
+    with pytest.raises(StateConflict, match="persistence refusal"):
+        runtime.shared_plan_schedules.create("shared-refused", **options)
+    with pytest.raises(ScheduleNotFound):
+        runtime.schedules.definition("shared-refused")
+    assert references
+    for reference in references:
+        with pytest.raises(FleetPlanInvalid, match="unavailable"):
+            store.get(reference.reference_id, owner_repository_id=repository_id(repository))
+    for retained in baseline.target.project_deliveries:
+        assert store.get(
+            retained.reference_id, owner_repository_id=repository_id(repository)
+        ).path.is_file()
+
+
+def test_shared_schedule_repository_replacement_refuses_before_package_store_effects(
+    shared_execution: tuple[ApplicationRuntime, Path, Path, SharedPackageScheduleOptions],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, repository, _, options = shared_execution
+    baseline = runtime.shared_plan_schedules.create("shared-baseline", **options)
+    assert baseline.target.project_deliveries
+    prepare = runtime.plans.prepare_reviewed_execution_target
+    store = runtime.plans._content_store
+    assert store is not None
+    calls: list[str] = []
+    put = store.put_frozen_bytes
+
+    def observe_put(data: bytes, *, owner_repository_id: str) -> FleetContentObject:
+        calls.append(owner_repository_id)
+        return put(data, owner_repository_id=owner_repository_id)
+
+    def replace_after_preparation(*args: Any, **kwargs: Any) -> FleetPlanTarget:
+        target = prepare(*args, **kwargs)
+        repository.rename(repository.with_name("retired-target"))
+        repository.mkdir()
+        subprocess.run(["git", "init", "-q", str(repository)], check=True)
+        return target
+
+    monkeypatch.setattr(
+        runtime.plans, "prepare_reviewed_execution_target", replace_after_preparation
+    )
+    monkeypatch.setattr(store, "put_frozen_bytes", observe_put)
+    with pytest.raises(FleetPlanSourceStale, match="changed during preparation"):
+        runtime.shared_plan_schedules.create("shared-stale", **options)
+    assert calls == []
+    with pytest.raises(ScheduleNotFound):
+        runtime.schedules.definition("shared-stale")

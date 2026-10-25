@@ -22,6 +22,12 @@ It never contains Step definitions, commands, complete composition trees, resolv
 
 If information can be verified through a digest without being duplicated, do not put it in `goon.lock`.
 
+The lock owner bounds generated/read lock files at 4 MiB, separately from the
+64 KiB caller `run.yml` limit. This admits the supported Goon/Skill source pins
+and ordered execution references without publishing an unreadable next-run
+lock. Oversized or ambiguous YAML mappings refuse before source acquisition;
+generated oversized locks refuse before publication.
+
 ## Hash semantics
 
 One canonical JSON representation with stable dictionary ordering is used for every semantic digest. Semantically significant sequence ordering remains significant. Platform path separators are normalized for external artifact paths. Plan/Goon comments, YAML formatting and display descriptions are not part of their semantic execution fingerprint. Explicit captured external artifacts, including `run.yml`, bind exact bytes and therefore require relocking after any byte change.
@@ -75,6 +81,9 @@ sources; it does not make Goons into Skills or change their execution lifecycle.
 
 The first `lock` explicitly acquires source. Subsequent locking and execution
 retain its commit, even when a branch/tag moves or the disposable cache is lost.
+Every selected path sharing one origin/ref retains that same captured commit,
+including newly added imports and an explicitly selected Plan from that source.
+Written import order does not determine which revision is selected.
 Cache recovery may acquire that exact commit; unavailable content refuses and
 never advances the pin. `oh-goon lock run.yml --update-goons` is the explicit
 refresh action. `--update-skills` refreshes Skill sources independently.
@@ -89,6 +98,9 @@ does not execute it or substitute unfiltered source. Unrelated native filters,
 credentials and configuration remain available to their original Git owner.
 Acquisition disables hooks and filesystem-monitor callbacks for its native Git
 commands without replacing the caller's credential or connection configuration.
+Native Git supplies its repository-context environment-variable names;
+acquisition removes inherited index/object/worktree context while preserving
+native configuration parameters and credentials.
 
 ## Runtime invariant
 

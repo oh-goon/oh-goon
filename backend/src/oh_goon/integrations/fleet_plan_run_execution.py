@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.models.agent_repair import AgentRepairContext
+from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
@@ -258,6 +259,11 @@ class FleetPlanRunExecutor:
             prefix="oh-goon-python-run-", dir=self._run_parent, delete=False
         )
         retain_package_scratch = False
+
+        def retain_unsettled_package_scratch() -> None:
+            nonlocal retain_package_scratch
+            retain_package_scratch = True
+
         try:
             directory = temporary.name
             layout = RunPathLayout.from_root(Path(directory))
@@ -275,7 +281,12 @@ class FleetPlanRunExecutor:
                         kind="directory",
                     ).mkdir(parents=True, exist_ok=True)
                     workspaces[step.step_id] = workspace
-            runtime = replace(runtime, project_sources=sources, project_workspaces=workspaces)
+            runtime = replace(
+                runtime,
+                project_sources=sources,
+                project_workspaces=workspaces,
+                on_unsettled_package_process=retain_unsettled_package_scratch,
+            )
             sequence = FleetPlanStepSequence(repository, runtime, output_observer)
             for step in plan.steps:
                 sequence.run_direct(step)
@@ -292,11 +303,27 @@ class FleetPlanRunExecutor:
                 )
             return outcome
         except BaseException as error:
-            if uv_preparation_requires_retained_scratch(error):
+            if retain_package_scratch or uv_preparation_requires_retained_scratch(error):
                 retain_package_scratch = True
-                error.add_note(
-                    f"Python Goon Run scratch retained while native process cleanup is incomplete: {temporary.name}"
+                retained_note = (
+                    "Python Goon Run scratch retained while native process cleanup is incomplete: "
+                    f"{temporary.name}"
                 )
+                error.add_note(retained_note)
+                if self._diagnostics is not None:
+                    self._diagnostics.emit(
+                        DiagnosticEvent(
+                            severity="WARNING",
+                            source="fleet_plan_run_execution",
+                            owner="FleetPlanRunExecutor",
+                            operation="retain_incomplete_package_scratch",
+                            message=retained_note,
+                            execution_affected=True,
+                            exception_type=error.__class__.__name__,
+                            fleet_run_id=fleet_run_id,
+                            repository_id=repository_id,
+                        )
+                    )
             raise
         finally:
             if not retain_package_scratch:

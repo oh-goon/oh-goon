@@ -11,7 +11,10 @@ from oh_goon.core.fleet_plan_composition import bind_inputs, coerce_input
 from oh_goon.core.models.fleet_plan import AgentPlanStep, CompiledGoonImportStep
 from oh_goon.core.models.fleet_plan_composition import PlanInputType
 from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
-from oh_goon.services.execution_lock_persistence import parse_execution_lock
+from oh_goon.services.execution_lock_persistence import (
+    MAX_EXECUTION_LOCK_BYTES,
+    parse_execution_lock,
+)
 from oh_goon.services.fleet_caller_file_freshness import (
     locate_caller_file,
     read_caller_file_bytes,
@@ -31,7 +34,9 @@ def _lock_records(root: Path) -> dict[str, Any]:
         return {"status": "absent", "skill_pins": []}
     try:
         selected, _ = locate_caller_file(path, root=root)
-        captured = read_caller_file_bytes(selected, expected=stat_caller_file(selected))
+        captured = read_caller_file_bytes(
+            selected, expected=stat_caller_file(selected), max_bytes=MAX_EXECUTION_LOCK_BYTES
+        )
         # Parse the captured cut with the original lock owner; reopening the path
         # would discard the no-follow identity proof and its bounded read.
         lock = parse_execution_lock(captured.decode("utf-8", errors="strict"))

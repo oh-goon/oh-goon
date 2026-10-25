@@ -198,6 +198,7 @@ from oh_goon.core.models.fleet_plan_values import (
     ResolvedEnvironmentBinding as ResolvedEnvironmentBinding,
 )
 from oh_goon.core.models.git_sources import GoonGitSource, LockedGoonSource
+from oh_goon.core.models.provenance import MAX_SOURCE_LOCATION_LENGTH
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
@@ -785,7 +786,7 @@ class ResolvedStepSource(ImmutableModel):
     """Non-semantic source position for one resolved concrete step."""
 
     step_id: str = Field(min_length=1, max_length=80)
-    source: str = Field(min_length=1, max_length=240)
+    source: str = Field(min_length=1, max_length=MAX_SOURCE_LOCATION_LENGTH)
     line: int = Field(ge=1)
     column: int = Field(ge=1)
 

@@ -18,6 +18,7 @@ from oh_goon.core.capability_registry import (
 from oh_goon.core.errors import (
     ExecutorReadmissionNotAllowed,
     FleetPlanInvalid,
+    FleetPlanSourceStale,
     InvalidRunTransition,
     JournalConflict,
     StateConflict,
@@ -232,7 +233,11 @@ class FleetRunControlPlane:
 
     @contextmanager
     def project_source_transport_for_prepared_plan(
-        self, target: FleetPlanTarget, *, repository_ids: set[str]
+        self,
+        target: FleetPlanTarget,
+        *,
+        repository_ids: set[str],
+        expected_repository_instance_ids: dict[str, str] | None = None,
     ) -> Iterator[tuple[FleetPlanTarget, dict[str, str]]]:
         """Retain Schedule source with the original Fleet input-custody lifecycle."""
         intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)
@@ -244,6 +249,14 @@ class FleetRunControlPlane:
             repository.repository_id: repository_subject_instance_id(repository.path)
             for repository in repositories
         }
+        if (
+            expected_repository_instance_ids is not None
+            and instances != expected_repository_instance_ids
+        ):
+            raise FleetPlanSourceStale(
+                "Schedule repository selection changed during preparation; reload the current "
+                "League before creating the Schedule"
+            )
         with self._lifecycle.project_source_transport(intent, repositories) as bound:
             assert isinstance(bound.target, FleetPlanTarget)
             # Durable receivers need only the retained references, never private packets.

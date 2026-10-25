@@ -22,7 +22,8 @@ def main():
     parser.add_argument("--label", required=True)
     args = parser.parse_args()
     Path("label.txt").write_text(args.label)
-    Path("tools.txt").write_text("present" if importlib.util.find_spec("pytest") else "absent")
+    Path("tools.txt").write_text("present" if importlib.util.find_spec("probe_devtool") else "absent")
+    Path("ambient-tools.txt").write_text("present" if importlib.util.find_spec("pytest") else "absent")
     Path("cwd.txt").write_text(str(Path.cwd()))
     return 0
 """
@@ -42,6 +43,10 @@ def test_package_groups_repeated_imports_and_no_ambient_command_fallback(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    # Locking and installation must work without any warmed registry metadata
+    # or wheels from the controller's own development environment.
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "cold-uv-cache"))
+    monkeypatch.setenv("UV_OFFLINE", "1")
     LeagueFolderStore().replace((repository,))
     workflow = tmp_path / "workflow"
     package = workflow / "goons/general/probe"
@@ -56,9 +61,23 @@ requires-python = ">=3.12"
 [project.scripts]
 environment-probe = "probe:main"
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["probe-devtool"]
+[tool.uv.sources]
+probe-devtool = {path = "dev-tools"}
 [build-system]
-requires = ["uv_build>=0.10.0,<0.11.0"]
+requires = ["uv_build>=0.10.0"]
+build-backend = "uv_build"
+""")
+    development_tool = package / "dev-tools"
+    development_module = development_tool / "src/probe_devtool"
+    development_module.mkdir(parents=True)
+    (development_module / "__init__.py").write_text("DEVELOPMENT_ONLY = True\n")
+    (development_tool / "pyproject.toml").write_text("""[project]
+name = "probe-devtool"
+version = "0.1.0"
+requires-python = ">=3.12"
+[build-system]
+requires = ["uv_build>=0.10.0"]
 build-backend = "uv_build"
 """)
     lock = subprocess.run(
@@ -79,7 +98,12 @@ build-backend = "uv_build"
             {
                 "run": "environment-probe --label ${{ inputs.label }}",
                 "working_directory": working_directory,
-                "outputs": {"LABEL": "label.txt", "TOOLS": "tools.txt", "CWD": "cwd.txt"},
+                "outputs": {
+                    "LABEL": "label.txt",
+                    "TOOLS": "tools.txt",
+                    "AMBIENT_TOOLS": "ambient-tools.txt",
+                    "CWD": "cwd.txt",
+                },
                 "artifacts": [{"path": "label.txt", "retention": "evidence"}],
             }
         ],
@@ -123,6 +147,7 @@ build-backend = "uv_build"
     for label, output in zip(("first", "second"), outputs, strict=True):
         assert output["LABEL"]["sha256"] == hashlib.sha256(label.encode()).hexdigest()
         assert output["TOOLS"]["sha256"] == hashlib.sha256(b"absent").hexdigest()
+        assert output["AMBIENT_TOOLS"]["sha256"] == hashlib.sha256(b"absent").hexdigest()
     for label, step in zip(("first", "second"), steps, strict=True):
         artifact = step["artifacts"][0]
         assert artifact["status"] == "PRESENT"
@@ -136,7 +161,7 @@ build-backend = "uv_build"
     assert not (repository / "scratch").exists()
     assert not (package / "scratch").exists()
     locked_source = (workflow / "goon.lock").read_bytes()
-    for name in ("label.txt", "tools.txt", "cwd.txt"):
+    for name in ("label.txt", "tools.txt", "ambient-tools.txt", "cwd.txt"):
         generated_output = package / working_directory / name
         generated_output.parent.mkdir(parents=True, exist_ok=True)
         generated_output.write_text("local generated output")
@@ -147,8 +172,9 @@ build-backend = "uv_build"
     specification["uv"] = {"group": "dev"}
     goon.write_text(yaml.safe_dump(specification))
     for step in run():
-        output = next(item for item in step["outputs"] if item["name"] == "TOOLS")
-        assert output["sha256"] == hashlib.sha256(b"present").hexdigest()
+        outputs_by_name = {item["name"]: item for item in step["outputs"]}
+        assert outputs_by_name["TOOLS"]["sha256"] == hashlib.sha256(b"present").hexdigest()
+        assert outputs_by_name["AMBIENT_TOOLS"]["sha256"] == hashlib.sha256(b"absent").hexdigest()
     assert developer.read_text() == "developer environment"
 
     # `true` exists on the host, but is not an installed project command.

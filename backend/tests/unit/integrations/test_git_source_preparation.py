@@ -266,8 +266,11 @@ def test_native_non_checkout_filters_and_credentials_configuration_are_preserved
         ["git", "config", "--file", str(config), "filter.fixture.clean", command], check=True
     )
     subprocess.run(
-        ["git", "config", "--file", str(config), "filter.fixture.required", "false"], check=True
+        ["git", "config", "--file", str(config), "filter.fixture.required", "true"], check=True
     )
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "filter.fixture.required")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
     subprocess.run(
         ["git", "config", "--file", str(config), "credential.helper", "fixture-auth"], check=True
     )
@@ -308,3 +311,40 @@ def test_source_index_operations_disable_fsmonitor_without_replacing_native_conf
             == command
         )
     assert not marker.exists()
+
+
+def test_ambient_repository_selection_cannot_redirect_source_index_operations(
+    tmp_path, monkeypatch
+):
+    source, commit = _native_source(tmp_path, monkeypatch)
+    other = tmp_path / "other"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(other)], check=True)
+    (other / "untouched.txt").write_text("keep ambient worktree\n")
+    subprocess.run(["git", "-C", str(other), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(other),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "ambient repository",
+        ],
+        check=True,
+    )
+    index = other / ".git/index"
+    before = index.read_bytes()
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(index))
+    with prepare_git_source(str(source), "main", commit=commit) as (root, selected):
+        assert selected == commit
+        assert (root / "sample.txt").read_text() == "captured source\n"
+    assert index.read_bytes() == before
+    assert (other / "untouched.txt").read_text() == "keep ambient worktree\n"

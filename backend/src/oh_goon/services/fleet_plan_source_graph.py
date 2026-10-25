@@ -210,6 +210,7 @@ class _SourceGraphBuild:
     update_goons: bool = False
     allow_source_network: bool = False
     acquired_git: dict[tuple[str, str], tuple[Path, str]] = field(default_factory=dict)
+    selected_git_commits: dict[tuple[str, str], str] = field(default_factory=dict)
     goon_sources: dict[tuple[str, str, str], LockedGoonSource] = field(default_factory=dict)
     project_bytes: int = 0
     archive_bytes: int = 0
@@ -236,6 +237,13 @@ def analyze_fleet_plan_sources(
         previous = pinned_commits.setdefault((pin.git, pin.ref), pin.commit)
         if previous != pin.commit:
             raise FleetPlanInvalid("Locked Git source selections disagree on their captured commit")
+    selected_commits = {} if update_goons else pinned_commits
+    if plan_source is not None:
+        previous = selected_commits.setdefault(
+            (plan_source.git, plan_source.ref), plan_source.commit
+        )
+        if previous != plan_source.commit:
+            raise FleetPlanInvalid("Selected Git Plan differs from the locked source commit")
     overrides = {
         canonical_path(item): template for item, template in (compiled_overrides or {}).items()
     }
@@ -246,6 +254,7 @@ def analyze_fleet_plan_sources(
         acquire_goons=acquire_goons,
         update_goons=update_goons,
         allow_source_network=allow_source_network,
+        selected_git_commits=selected_commits,
         project_bytes=root.python_project.identity.byte_count if root.python_project else 0,
         archive_bytes=len(root.python_project.archive) if root.python_project else 0,
     )
@@ -397,11 +406,12 @@ def _load_goon_child(
                 prepare_git_source(
                     selection.git,
                     selection.ref,
-                    commit=frozen.commit if frozen is not None and not build.update_goons else None,
+                    commit=build.selected_git_commits.get(source_key),
                     allow_network=build.acquire_goons or build.allow_source_network,
                 )
             )
         checkout, commit = build.acquired_git[source_key]
+        build.selected_git_commits[source_key] = commit
         if frozen is not None and not build.update_goons and commit != frozen.commit:
             raise FleetPlanInvalid("Git Goon selections disagree on the locked commit")
         selected = ContainedPathSpace.from_root(checkout).resolve_from(

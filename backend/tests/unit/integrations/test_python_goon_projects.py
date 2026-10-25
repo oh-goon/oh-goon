@@ -4,6 +4,8 @@ import gzip
 import hashlib
 import io
 import shutil
+import subprocess
+import sys
 import tarfile
 from pathlib import Path
 from typing import Any
@@ -232,6 +234,83 @@ def test_escaping_dependency_and_source_symlinks_refuse(project: Path, tmp_path:
     (project / "escape").symlink_to(tmp_path / "private")
     with pytest.raises(FleetPlanInvalid, match="escaping symlink"):
         FleetPlanResolver().resolve(project / "goon.yml")
+
+
+@pytest.mark.process
+def test_native_virtual_workspace_must_relocate_with_captured_project(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    member = project / "member"
+    member.mkdir(parents=True)
+    (project / "goon.yml").write_text("runtime: python\nsteps:\n- run: inside\n")
+    (project / "README.md").write_text("# general/inside\n")
+    metadata = """[project]
+name = "inside"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["outside"]
+[project.scripts]
+inside = "inside:main"
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+[tool.uv.sources]
+outside = {workspace = true}
+[tool.uv.workspace]
+members = ["member"]
+"""
+    (project / "pyproject.toml").write_text(metadata)
+    (project / "src/inside").mkdir(parents=True)
+    (project / "src/inside/__init__.py").write_text("def main():\n    print('inside')\n")
+    (member / "pyproject.toml").write_text(
+        '[project]\nname = "outside"\nversion = "0.1.0"\n[tool.uv]\npackage = false\n'
+    )
+
+    def native_lock(root: Path, *, check: bool = False) -> None:
+        result = subprocess.run(
+            [
+                "uv",
+                "lock",
+                "--offline",
+                "--project",
+                str(root),
+                "--python",
+                sys.executable,
+                *(["--check"] if check else []),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+    native_lock(project)
+    captured = FleetPlanResolver().analyze_source(project / "goon.yml").python_projects()[0]
+    receiver = tmp_path / "receiver"
+    materialize_python_goon_project(captured.archive, captured.identity, receiver)
+    native_lock(receiver, check=True)
+
+    # Native uv accepts this workspace, but it cannot relocate as one package.
+    member.rename(tmp_path / "outside")
+    (project / "pyproject.toml").write_text(metadata.replace('["member"]', '["../outside"]'))
+    native_lock(project)
+    with pytest.raises(FleetPlanInvalid, match="dependency path escapes"):
+        FleetPlanResolver().analyze_source(project / "goon.yml")
+
+
+@pytest.mark.parametrize("path", ("../outside", "C:/outside", r"C:\outside"))
+def test_locked_virtual_dependency_cannot_escape_package(project: Path, path: str) -> None:
+    resolver = FleetPlanResolver()
+    assert resolver.resolve(project / "goon.yml").steps
+    lock = project / "uv.lock"
+    with lock.open("a") as stream:
+        stream.write(
+            '\n[[package]]\nname = "outside"\nversion = "0.1.0"\n'
+            + "source = {virtual = "
+            + repr(path)
+            + "}\n"
+        )
+    with pytest.raises(FleetPlanInvalid, match="dependency path escapes"):
+        resolver.resolve(project / "goon.yml")
 
 
 @pytest.mark.parametrize("target", (".showcase/result.json", ".showcase"))

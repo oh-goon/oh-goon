@@ -4,7 +4,7 @@ import json
 import shlex
 import time
 from collections.abc import Callable, Mapping
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -1580,6 +1580,20 @@ class FleetPlanService:
             target, repository_ids=repository_ids
         )
 
+    def project_source_transport_for_target(
+        self,
+        target: FleetPlanTarget,
+        *,
+        repository_ids: set[str],
+        expected_repository_instance_ids: dict[str, str] | None = None,
+    ) -> AbstractContextManager[tuple[FleetPlanTarget, dict[str, str]]]:
+        """Retain already-resolved Schedule source through the original Fleet owner."""
+        return self._runs.project_source_transport_for_prepared_plan(
+            target,
+            repository_ids=repository_ids,
+            expected_repository_instance_ids=expected_repository_instance_ids,
+        )
+
     def _prepare_scheduled_target(
         self,
         plan_path: Path,
@@ -1677,9 +1691,7 @@ class FleetPlanService:
             if current is not None and current.repository_ids == tuple(sorted(repository_ids)):
                 target = with_retained_project_deliveries(target, current.target)
         transport = (
-            self._runs.project_source_transport_for_prepared_plan(
-                target, repository_ids=repository_ids
-            )
+            self.project_source_transport_for_target(target, repository_ids=repository_ids)
             if package_sources
             else nullcontext(
                 (
@@ -1741,9 +1753,7 @@ class FleetPlanService:
         if package_sources and current.repository_ids == tuple(sorted(repository_ids)):
             target = with_retained_project_deliveries(target, current.target)
         transport = (
-            self._runs.project_source_transport_for_prepared_plan(
-                target, repository_ids=repository_ids
-            )
+            self.project_source_transport_for_target(target, repository_ids=repository_ids)
             if package_sources
             else nullcontext(
                 (

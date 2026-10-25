@@ -35,6 +35,7 @@ def _lock(sources):
         {"git": "ext::command"},
         {"ref": "main:other"},
         {"path": "../general/check"},
+        {"path": "C:/goons/general/check"},
         {"path": "goons/general/line\nbreak"},
     ],
 )

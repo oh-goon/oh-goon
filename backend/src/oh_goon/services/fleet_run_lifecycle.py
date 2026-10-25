@@ -278,6 +278,9 @@ class FleetRunLifecycle:
         """Promote exact captured package inputs at the original Run reservation boundary."""
         import hashlib
 
+        from oh_goon.core.file_digest import sha256_file
+        from oh_goon.integrations.python_goon_projects import MAX_PROJECT_ARCHIVE_BYTES
+
         target = intent.target
         if not isinstance(target, FleetPlanTarget):
             yield intent
@@ -327,6 +330,20 @@ class FleetRunLifecycle:
                         owner_repository_id=reference.owner_repository_id,
                         expected_kind="file",
                     )
+                    if (reference.owner_repository_id, reference.project_sha256) in existing:
+                        stored = self._content_store.get(
+                            reference.reference_id,
+                            owner_repository_id=reference.owner_repository_id,
+                            expected_kind="file",
+                        )
+                        if (
+                            stored.identity.byte_count > MAX_PROJECT_ARCHIVE_BYTES
+                            or sha256_file(stored.path)
+                            != projects[reference.project_sha256].archive_sha256
+                        ):
+                            raise FleetPlanInvalid(
+                                "Retained Python Goon archive differs from the expected captured source identity"
+                            )
             bound = target.model_copy(update={"project_deliveries": tuple(references)})
             yield replace(intent, target=bound)
         except BaseException as error:

@@ -35,6 +35,8 @@ def test_installed_package_cancellation_reaps_native_process_and_removes_owned_r
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "cold-uv-cache"))
+    monkeypatch.setenv("UV_OFFLINE", "1")
     LeagueFolderStore().replace((repository,))
     ready, hold = tmp_path / "ready", tmp_path / "hold"
     os.mkfifo(ready)
@@ -76,7 +78,7 @@ requires-python = ">=3.12"
 [project.scripts]
 cancellable = "cancellable:main"
 [build-system]
-requires = ["uv_build>=0.10.0,<0.11.0"]
+requires = ["uv_build>=0.10.0"]
 build-backend = "uv_build"
 """)
     locked = subprocess.run(

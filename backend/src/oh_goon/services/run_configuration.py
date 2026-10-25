@@ -345,14 +345,19 @@ def capture_run_configuration_source(
     """Acquire only explicitly, then capture one original source graph before closing Git."""
     from oh_goon.core.execution_lock_identity import verify_execution_lock
     from oh_goon.integrations.git_source_preparation import prepare_git_source
-    from oh_goon.services.execution_lock_persistence import parse_execution_lock
+    from oh_goon.services.execution_lock_persistence import (
+        MAX_EXECUTION_LOCK_BYTES,
+        parse_execution_lock,
+    )
 
     repository = _configuration_repository(snapshot, repositories)
     locked: tuple[LockedGoonSource, ...] | None = ()
     if snapshot.lock_path.exists() or snapshot.lock_path.is_symlink():
         try:
             lock_path, _ = locate_caller_file(snapshot.lock_path, root=snapshot.root)
-            lock_bytes = read_caller_file_bytes(lock_path, expected=stat_caller_file(lock_path))
+            lock_bytes = read_caller_file_bytes(
+                lock_path, expected=stat_caller_file(lock_path), max_bytes=MAX_EXECUTION_LOCK_BYTES
+            )
             lock = parse_execution_lock(lock_bytes.decode("utf-8"))
             verify_execution_lock(lock, lock)
             locked = lock.goon_sources
@@ -362,6 +367,16 @@ def capture_run_configuration_source(
                     "Existing goon.lock is unavailable or invalid; restore its source pins before locking"
                 ) from None
             locked = None
+        else:
+            if not acquire and allow_network:
+                expected = next(
+                    (item.digest for item in lock.external if item.path == snapshot.relative_path),
+                    None,
+                )
+                if expected != "sha256:" + snapshot.sha256:
+                    raise FleetPlanInvalid(
+                        "run.yml changed from goon.lock; explicitly lock the current selection before acquisition"
+                    )
     selection = snapshot.selection.source
     if isinstance(selection, GitPlanSelection):
         if locked is None:
@@ -380,10 +395,14 @@ def capture_run_configuration_source(
         )
         if frozen is None and not acquire:
             raise FleetPlanInvalid("Git Plan requires explicit acquisition with lock")
+        pinned = frozen or next(
+            (item for item in locked if (item.git, item.ref) == (selection.git, selection.ref)),
+            None,
+        )
         with prepare_git_source(
             selection.git,
             selection.ref,
-            commit=frozen.commit if frozen is not None and not update else None,
+            commit=pinned.commit if pinned is not None and not update else None,
             allow_network=allow_network,
         ) as (checkout, commit):
             root = ContainedPathSpace.from_root(checkout).resolve_from(

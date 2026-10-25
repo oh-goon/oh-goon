@@ -59,24 +59,44 @@ def parse_fleet_yaml_document(content: str, *, source: str) -> ParsedFleetYamlDo
 def _reject_duplicate_yaml_keys(node: MappingNode | SequenceNode, *, source: str) -> None:
     """Reject silent YAML mapping overrides before constructing the document."""
 
-    if isinstance(node, MappingNode):
-        seen: set[str] = set()
-        for key_node, value_node in node.value:
-            if isinstance(key_node, ScalarNode):
-                key = key_node.value
-                if key in seen:
-                    line = key_node.start_mark.line + 1
-                    column = key_node.start_mark.column + 1
-                    raise FleetPlanInvalid(
-                        f"Invalid YAML {source}: duplicate key {key!r} at line {line}, column {column}"
-                    )
-                seen.add(key)
-            if isinstance(value_node, (MappingNode, SequenceNode)):
-                _reject_duplicate_yaml_keys(value_node, source=source)
-        return
-    for item in node.value:
-        if isinstance(item, (MappingNode, SequenceNode)):
-            _reject_duplicate_yaml_keys(item, source=source)
+    active: set[int] = set()
+    checked: set[int] = set()
+
+    def visit(current: MappingNode | SequenceNode) -> None:
+        identity = id(current)
+        if identity in active:
+            raise FleetPlanInvalid(f"Invalid YAML {source}: cyclic aliases are prohibited")
+        if identity in checked:
+            return
+        active.add(identity)
+        if isinstance(current, MappingNode):
+            seen: set[str] = set()
+            for key_node, value_node in current.value:
+                if isinstance(key_node, ScalarNode):
+                    key = key_node.value
+                    if key == "<<":
+                        raise FleetPlanInvalid(
+                            f"Invalid YAML {source}: merge mappings are prohibited"
+                        )
+                    if key in seen:
+                        line = key_node.start_mark.line + 1
+                        column = key_node.start_mark.column + 1
+                        raise FleetPlanInvalid(
+                            f"Invalid YAML {source}: duplicate key {key!r} at line {line}, column {column}"
+                        )
+                    seen.add(key)
+                elif isinstance(key_node, (MappingNode, SequenceNode)):
+                    visit(key_node)
+                if isinstance(value_node, (MappingNode, SequenceNode)):
+                    visit(value_node)
+        else:
+            for item in current.value:
+                if isinstance(item, (MappingNode, SequenceNode)):
+                    visit(item)
+        active.remove(identity)
+        checked.add(identity)
+
+    visit(node)
 
 
 def compile_goon_document(

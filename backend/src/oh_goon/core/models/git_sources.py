@@ -8,7 +8,9 @@ from urllib.parse import urlsplit
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.path_authority import repository_relative_parts
 
 
 class GoonGitSource(ImmutableModel):
@@ -77,7 +79,12 @@ class GoonGitSource(ImmutableModel):
             or any(ord(character) < 32 or ord(character) == 127 for character in value)
         ):
             raise ValueError("Git source path must be contained in the selected repository")
-        return path.as_posix()
+        try:
+            return repository_relative_parts(path.as_posix(), label="Git source path").as_posix()
+        except FleetPlanInvalid:
+            raise ValueError(
+                "Git source path must be contained in the selected repository"
+            ) from None
 
 
 class LockedGoonSource(GoonGitSource):

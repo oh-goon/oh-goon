@@ -56,6 +56,9 @@ Oh-Goon backend, cookbook checkout or parent source. Local dependencies must
 remain inside the project; escaping paths and reliance on an ancestor uv
 workspace are outside this standalone model. Native uv owns dependency
 resolution, build/install semantics and stale-lock refusal.
+Contained native uv workspace members remain supported. Local dependency,
+workspace member/exclusion and virtual lock-source paths must all stay inside
+the captured package so relocation preserves their native project authority.
 
 The existing source-snapshot and Hashmarks owners capture authored package
 contents. Generated environments/caches, declared output locations and
@@ -248,6 +251,9 @@ Goons; `.goonskills.yml` remains the separate Skill source contract.
 - Ordinary relocking and runs retain exact commits. A moving branch/tag or
   cache miss never advances a locked selection. Cache recovery may acquire the
   exact pinned commit; unavailable content fails clearly.
+- All selected paths sharing one origin/ref use one captured commit, regardless
+  of import order. Adding a package or selecting a Plan from that same source
+  retains its existing pin until explicit source refresh.
 - `lock run.yml --update-goons` explicitly refreshes Goon/Plan source pins.
   `--update-skills` refreshes Skill pins independently.
 - Inspection and validation use cached source only; unavailable source reports
@@ -260,6 +266,9 @@ Goons; `.goonskills.yml` remains the separate Skill source contract.
   source is never silently replaced with unfiltered bytes. Native credentials
   and unrelated configuration retain their original Git authority.
   Acquisition disables hooks and filesystem-monitor callbacks for its Git commands.
+  Native Git identifies repository-context environment variables; acquisition
+  clears those inherited contexts so an enclosing Git process cannot redirect
+  its index/worktree operations. Native configuration and credentials remain selected.
 - Capture closes temporary worktrees on success/failure while respecting cache
   leases. Cache paths remain disposable locations rather than source identity.
   Execution consumes captured bytes instead of refetching a selector or reading

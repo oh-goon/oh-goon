@@ -93,6 +93,7 @@ def prepare_git_source(
         max_capture_bytes_per_stream=1024 * 1024,
     )
     git = GitService(default_timeout_seconds=60, command_runner=native_command)
+    environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     quiescent = True
 
     def run(
@@ -116,7 +117,7 @@ def prepare_git_source(
                 *args,
                 cwd=cwd or cache,
                 cancel_requested=None if cleanup else cancel_requested,
-                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+                env=environment,
                 command_runner=partial(native_command, input_data=input_data),
             )
         except BaseException as exc:
@@ -133,6 +134,13 @@ def prepare_git_source(
             operation = next(argument for argument in args if not argument.startswith("-"))
             raise FleetPlanInvalid(f"Source Git {operation} failed (exit {result.returncode})")
         return result
+
+    # Git owns its repository-context variable set. An enclosing Git process
+    # must not redirect our index/object/worktree operations into another owner.
+    # Native config/credential parameters retain the caller's selected values.
+    for name in run("rev-parse", "--local-env-vars").stdout.splitlines():
+        if name.startswith("GIT_") and not name.startswith("GIT_CONFIG"):
+            environment.pop(name, None)
 
     with (cache / (key + ".lock")).open("a+b") as lease:
         fcntl.flock(lease, fcntl.LOCK_EX)

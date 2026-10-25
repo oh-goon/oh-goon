@@ -44,6 +44,8 @@ beside `goon.yml` and `README.md`. Declare `project-check` in
 `[project.scripts]`; run the same installed command locally with native uv.
 The project must install after relocation without parent projects, escaping
 local dependencies, an ancestor workspace or the Oh-Goon backend.
+Contained native uv workspace members are allowed; local dependency, workspace
+and virtual lock-source paths stay within the captured package.
 
 `runtime: python` selects this package, independently of the target repository.
 Native uv installs it with `--locked --no-default-groups --no-editable` into an
@@ -480,6 +482,9 @@ goons:
 The path ends in the imported `category/name` and contains `goon.yml`.
 `lock` acquires source and freezes the exact commit in `goon.lock`; ordinary
 locking and runs retain that pin, including after cache loss.
+Paths sharing one origin/ref keep the same captured commit even when new imports
+are added or reordered. A complete Plan selected from that same source retains
+its existing pin as well.
 `lock run.yml --update-goons` explicitly refreshes Goon/Plan source selectors.
 `--update-skills` remains separate. Inspection uses cached source only and
 reports unavailable source without fetching. Git acquisition does not execute

@@ -10,6 +10,8 @@ from oh_goon.core.vocabulary import (
     WorktreeState,
 )
 
+MAX_SOURCE_LOCATION_LENGTH = 4096
+
 
 class StrictProvenanceModel(ImmutableModel):
     pass

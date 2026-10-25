@@ -12049,7 +12049,7 @@
             "type": "integer"
           },
           "source": {
-            "maxLength": 240,
+            "maxLength": 4096,
             "minLength": 1,
             "title": "Source",
             "type": "string"
@@ -13056,7 +13056,7 @@
             "title": "Condition"
           },
           "declaration": {
-            "maxLength": 240,
+            "maxLength": 4128,
             "minLength": 1,
             "title": "Declaration",
             "type": "string"
@@ -25008,7 +25008,7 @@
             "type": "integer"
           },
           "source": {
-            "maxLength": 240,
+            "maxLength": 4096,
             "minLength": 1,
             "title": "Source",
             "type": "string"

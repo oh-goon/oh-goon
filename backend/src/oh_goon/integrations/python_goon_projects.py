@@ -15,6 +15,7 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.file_digest import sha256_file
 from oh_goon.core.models.fleet_plan import CompiledExecutionTemplate, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+from oh_goon.core.path_authority import repository_relative_parts
 from oh_goon.core.path_layouts import RunPathLayout
 from oh_goon.integrations.content_snapshot import replace_tree_from_tar_gz
 from oh_goon.integrations.source_snapshot import snapshot_source_directory
@@ -78,6 +79,12 @@ def capture_python_goon_project(
             except (ValueError, OSError) as exc:
                 raise FleetPlanInvalid(f"Invalid Python Goon {name}") from exc
             _require_contained_dependency_paths(metadata)
+            workspace: object = metadata
+            for component in ("tool", "uv", "workspace"):
+                workspace = workspace.get(component) if isinstance(workspace, dict) else None
+            if isinstance(workspace, dict):
+                for field in ("members", "exclude"):
+                    _require_contained_dependency_paths({"path": workspace.get(field, [])})
         archive_path = Path(directory) / "project.tar.gz"
         with archive_path.open("wb") as output:
             with gzip.GzipFile(fileobj=output, mode="wb", mtime=0, filename="") as compressed:
@@ -110,15 +117,19 @@ def _require_contained_dependency_paths(value: object) -> None:
     """Constrain native path authority, without resolving Python dependencies."""
     if isinstance(value, dict):
         for key, item in value.items():
-            if key in {"path", "directory", "editable", "backend-path"}:
+            if key in {"path", "directory", "editable", "virtual", "backend-path"}:
                 paths = item if isinstance(item, list) else [item]
                 for path in paths:
                     if isinstance(path, str):
-                        relative = PurePosixPath(path.replace("\\", "/"))
-                        if relative.is_absolute() or ".." in relative.parts:
+                        try:
+                            repository_relative_parts(
+                                str(PurePosixPath(path.replace("\\", "/"))),
+                                label="Python Goon dependency path",
+                            )
+                        except FleetPlanInvalid:
                             raise FleetPlanInvalid(
                                 "Python Goon dependency path escapes its project"
-                            )
+                            ) from None
             _require_contained_dependency_paths(item)
     elif isinstance(value, list):
         for item in value:
