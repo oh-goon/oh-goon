@@ -1423,6 +1423,44 @@ def _require_standard_bind_structure(
     pending = [root]
     inspected = 0
     synthetic = {Path("/dev") / name for name in ("null", "zero", "random", "urandom", "tty")}
+
+    def require_symlink_target(path: Path) -> None:
+        # The kernel can establish an ordinary target's fresh type/inode
+        # without resolving every path prefix again in Python. Special
+        # targets still need the canonical path for visibility exceptions.
+        # Preserve the original resolution/error path for lookup failures,
+        # including chains beyond the kernel's symlink traversal limit.
+        try:
+            target_metadata = path.stat()
+        except OSError:
+            target_metadata = None
+        if target_metadata is not None:
+            if (target_metadata.st_dev, target_metadata.st_ino) in private_file_identities:
+                raise FleetPlanInvalid("Native bind exposes a private application file alias")
+            if stat.S_ISREG(target_metadata.st_mode) or stat.S_ISDIR(target_metadata.st_mode):
+                return
+        try:
+            target = path.resolve(strict=True)
+            target_metadata = target.stat()
+            target_mode = target_metadata.st_mode
+        except FileNotFoundError:
+            return  # A dangling link conveys no host endpoint.
+        if (target_metadata.st_dev, target_metadata.st_ino) in private_file_identities:
+            raise FleetPlanInvalid("Native bind exposes a private application file alias")
+        if system_runtime_roots and (
+            target in synthetic
+            or (
+                (stat.S_ISSOCK(target_mode) or stat.S_ISFIFO(target_mode))
+                and not any(target.is_relative_to(bound) for bound in system_runtime_roots)
+            )
+        ):
+            return
+        if not (stat.S_ISREG(target_mode) or stat.S_ISDIR(target_mode)):
+            raise FleetPlanInvalid(
+                "Standard sandbox bind symlink exposes a host IPC/special object: "
+                f"{path} -> {target}"
+            )
+
     while pending:
         path = pending.pop()
         metadata = path.lstat()
@@ -1439,41 +1477,7 @@ def _require_standard_bind_structure(
                 "Scoped native write roots cannot expose symlinks or hardlinked files"
             )
         if stat.S_ISLNK(metadata.st_mode):
-            # The kernel can establish an ordinary target's fresh type/inode
-            # without resolving every path prefix again in Python. Special
-            # targets still need the canonical path for visibility exceptions.
-            # Preserve the original resolution/error path for lookup failures,
-            # including chains beyond the kernel's symlink traversal limit.
-            try:
-                target_metadata = path.stat()
-            except OSError:
-                target_metadata = None
-            if target_metadata is not None:
-                if (target_metadata.st_dev, target_metadata.st_ino) in private_file_identities:
-                    raise FleetPlanInvalid("Native bind exposes a private application file alias")
-                if stat.S_ISREG(target_metadata.st_mode) or stat.S_ISDIR(target_metadata.st_mode):
-                    continue
-            try:
-                target = path.resolve(strict=True)
-                target_metadata = target.stat()
-                target_mode = target_metadata.st_mode
-            except FileNotFoundError:
-                continue  # A dangling link conveys no host endpoint.
-            if (target_metadata.st_dev, target_metadata.st_ino) in private_file_identities:
-                raise FleetPlanInvalid("Native bind exposes a private application file alias")
-            if system_runtime_roots and (
-                target in synthetic
-                or (
-                    (stat.S_ISSOCK(target_mode) or stat.S_ISFIFO(target_mode))
-                    and not any(target.is_relative_to(bound) for bound in system_runtime_roots)
-                )
-            ):
-                continue
-            if not (stat.S_ISREG(target_mode) or stat.S_ISDIR(target_mode)):
-                raise FleetPlanInvalid(
-                    "Standard sandbox bind symlink exposes a host IPC/special object: "
-                    f"{path} -> {target}"
-                )
+            require_symlink_target(path)
         elif stat.S_ISDIR(metadata.st_mode):
             with os.scandir(path) as entries:
                 for entry in entries:
@@ -1482,11 +1486,11 @@ def _require_standard_bind_structure(
                         raise FleetPlanInvalid(
                             "Standard sandbox bind exceeds its physical entry budget"
                         )
-                    # Hints only route nodes to the fresh lstat above; they
-                    # never establish an accepted type or inode. Unknown-type
-                    # predicates may cache metadata, so leaf decisions use a
-                    # new pathname stat rather than DirEntry's cached result.
-                    if not (entry.is_dir(follow_symlinks=False) or entry.is_symlink()):
+                    # Directory hints only queue nodes for fresh lstat above.
+                    # Every other entry uses fresh pathname metadata now;
+                    # unknown-type predicates can populate a DirEntry cache
+                    # that must never authorize the current pathname.
+                    if not entry.is_dir(follow_symlinks=False):
                         entry_metadata = os.stat(entry.path, follow_symlinks=False)
                         kind = stat.S_IFMT(entry_metadata.st_mode)
                         if (
@@ -1503,7 +1507,22 @@ def _require_standard_bind_structure(
                                     "Scoped native write roots cannot expose hardlinked files"
                                 )
                             continue
-                        if kind not in (stat.S_IFDIR, stat.S_IFLNK):
+                        if kind == stat.S_IFLNK:
+                            # Check a link immediately from its fresh pathname
+                            # metadata instead of queueing a duplicate lstat.
+                            # Retain the same inspected-entry budget accounting.
+                            inspected += 1
+                            if inspected > 1_000_000:
+                                raise FleetPlanInvalid(
+                                    "Standard sandbox bind exceeds its physical entry budget"
+                                )
+                            if writable:
+                                raise FleetPlanInvalid(
+                                    "Scoped native write roots cannot expose symlinks or hardlinked files"
+                                )
+                            require_symlink_target(Path(entry.path))
+                            continue
+                        if kind != stat.S_IFDIR:
                             if writable and entry_metadata.st_nlink != 1:
                                 raise FleetPlanInvalid(
                                     "Scoped native write roots cannot expose hardlinked files"

@@ -84,7 +84,7 @@ def _observe_directory_entries(
             opened.append(entries)
             yield (transform(entry) for entry in entries)
 
-    monkeypatch.setattr(module.os, "scandir", scandir)
+    monkeypatch.setattr(os, "scandir", scandir)
     return opened
 
 
@@ -363,6 +363,76 @@ def test_stale_regular_entry_is_reclassified_before_admission(
     with pytest.raises(FleetPlanInvalid, match="IPC/special"):
         backend.require_standard_available(_request(backend, workspace, read_only_workspace=True))
     assert replaced
+
+
+def test_stale_symlink_hint_cannot_hide_ipc_in_its_replacement_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    public = tmp_path / "public-input"
+    public.write_text("public input")
+    selected = workspace / "selected"
+    selected.symlink_to(public)
+    calls: list[tuple[str, ...]] = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    request = _request(backend, workspace, read_only_workspace=True)
+    backend.require_standard_available(request)
+    assert len(calls) == 1 and calls[0][-1] == "/bin/true"
+    replaced = False
+
+    def replace_entry(entry: os.DirEntry[str]) -> os.DirEntry[str]:
+        nonlocal replaced
+        if Path(entry.path) == selected and not replaced:
+            selected.unlink()
+            selected.mkdir()
+            os.mkfifo(selected / "endpoint")
+            replaced = True
+        return entry
+
+    _observe_directory_entries(monkeypatch, workspace, replace_entry)
+    with pytest.raises(FleetPlanInvalid, match="IPC/special"):
+        backend.require_standard_available(request)
+    assert replaced
+    assert len(calls) == 1
+    assert public.read_text() == "public input"
+
+
+def test_many_public_symlinks_recheck_targets_without_exhausting_directory_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    public = tmp_path / "public-input"
+    public.write_text("public input")
+    for index in range(4097):
+        (workspace / f"link-{index:04d}").symlink_to(public)
+    calls: list[tuple[str, ...]] = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    request = _request(backend, workspace, read_only_workspace=True)
+    backend.require_standard_available(request)
+    assert len(calls) == 1 and calls[0][-1] == "/bin/true"
+    endpoint = tmp_path / "host-endpoint"
+    os.mkfifo(endpoint)
+    selected = workspace / "link-0000"
+    selected.unlink()
+    selected.symlink_to(endpoint)
+    with pytest.raises(FleetPlanInvalid, match="IPC/special"):
+        backend.require_standard_available(request)
+    assert len(calls) == 1
+    assert public.read_text() == "public input"
 
 
 @pytest.mark.parametrize("replacement", ["fifo", "private-hardlink"])
@@ -1810,7 +1880,7 @@ def test_successful_preflight_retention_is_bounded_to_eight_topologies(
         return CommandResult(0, "", "")
 
     monkeypatch.setattr(module, "run_command", command)
-    requests = []
+    requests: list[StandardIsolatedProcessRequest] = []
     for index in range(9):
         if index == 8:
             backend.require_standard_available(requests[0])
@@ -2037,12 +2107,12 @@ def test_cleanup_failure_cannot_publish_verified_success_or_replace_timeout(
     monkeypatch.setattr(module, "run_command", command)
     backend.require_standard_available(request)
 
-    class CleanupDenied(tempfile.TemporaryDirectory):
-        def __exit__(self, *args):
+    class CleanupDenied(tempfile.TemporaryDirectory[str]):
+        def __exit__(self, *args: Any) -> None:
             super().__exit__(*args)
             raise PermissionError("synthetic cleanup denial")
 
-    monkeypatch.setattr(module.tempfile, "TemporaryDirectory", CleanupDenied)
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", CleanupDenied)
     if timed_out:
         with pytest.raises(CommandTimeoutExpired) as caught:
             backend.execute(request, timeout=1, cancel_requested=None)
@@ -2087,7 +2157,7 @@ def test_protected_native_temp_state_cannot_materialize_under_source(
     backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "repo"
     workspace.mkdir()
-    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: str(workspace))
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(workspace))
     monkeypatch.setattr(
         module, "run_command", lambda *a, **kw: pytest.fail("overlapping scratch launched")
     )
