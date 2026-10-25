@@ -82,6 +82,14 @@ including when mixed with native commands; it cannot supply native process proof
 | Review/adjudication/proposal claim for one candidate/scope/occurrence | Typed role acceptors → campaign policy or separately admitted apply | Generic native completion/CLEAN does not establish verification truth. Hashmarks owns repository evidence/selection, not child execution or campaign grading. |
 | Next phase or terminal controller decision for one campaign revision | Campaign policy → original driver and Journal semantic append boundary | Child Runs retain execution truth; durable publication retains the policy decision and references. Read views verify/project these facts without rerunning policy. |
 
+Compound Steps accept every helper's causal completion and cleanup before another
+model/tool launch or derived publication. A zero native exit with accepted
+cancellation, timeout, authority loss or output limit cannot authorize the next
+helper. Missing supervision or unverified cleanup retains the original physical
+receipt and stops the sequence. Step acceptance rejects unknown supervisor reasons
+before publication and exhaustively handles the command owner's current variants;
+verified `output_cleanup` remains an ordinary completed process boundary.
+
 The inspected effect cuts are original Run admission (identity/lease/Journal),
 Step launch through the supplied command/backend owner, separately admitted patch
 publication, operation settlement, original Run terminalization plus lease release,

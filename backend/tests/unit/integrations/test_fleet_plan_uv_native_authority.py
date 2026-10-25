@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -15,7 +16,8 @@ from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepWorkspace, StepWorkspaceSource
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.path_authority import StrictHostPathAuthority
-from oh_goon.engine.command import CommandResult
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
+from oh_goon.integrations._fleet_plan_step_outcome import settle_step_execution
 from oh_goon.integrations.fleet_plan_managed_runtime import (
     prepare_uv_project_runtimes,
 )
@@ -411,8 +413,10 @@ def test_uv_preparation_failure_stops_before_application_work(
     assert tuple((run_root / ".preparation" / "uv-environments").glob("*")) == ()
 
 
+@pytest.mark.parametrize("quiescent", (True, False, None))
 def test_strict_uv_attempt_materializes_offline_then_runs_no_sync(
     tmp_path: Path,
+    quiescent: bool | None,
 ) -> None:
     from oh_goon.core.path_layouts import AttemptPathLayout
     from oh_goon.engine.git import GitService
@@ -434,6 +438,19 @@ def test_strict_uv_attempt_materializes_offline_then_runs_no_sync(
 
     def runner(*argv: str, **kwargs: object) -> CommandResult:
         calls.append((tuple(argv), dict(kwargs)))
+        if argv[:2] == ("uv", "sync"):
+            return CommandResult(
+                argv=argv,
+                returncode=0,
+                stdout="",
+                stderr="",
+                supervisor=cast(
+                    CommandSupervisorReceipt,
+                    CommandSupervisorReceipt(final_process_group_quiescent=quiescent)
+                    if quiescent is not None
+                    else None,
+                ),
+            )
         return _ok(*argv)
 
     step = _step().model_copy(update={"working_directory": "tools"})
@@ -458,6 +475,13 @@ def test_strict_uv_attempt_materializes_offline_then_runs_no_sync(
     )
 
     prepared, failure = _prepare_strict_uv_attempt(repository, step, process, runtime)
+    if quiescent is not True:
+        assert failure is not None and len(calls) == 1
+        settlement = settle_step_execution(step, failure)
+        assert settlement.outcome == "INCOMPLETE"
+        assert settlement.cleanup == ("UNVERIFIED" if quiescent is False else "UNAVAILABLE")
+        assert failure.observed_returncode == 0
+        return
     assert failure is None
     outcome = _execute_command_step(repository, step, prepared, runtime)
     assert outcome.returncode == 0

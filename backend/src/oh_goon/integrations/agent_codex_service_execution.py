@@ -30,7 +30,11 @@ from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, PLAN_TIMEO
 from oh_goon.core.product_identity import stable_id
 from oh_goon.engine.command import CommandCancelledError, CommandResult
 from oh_goon.engine.errors import OperationCancelledError
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+from oh_goon.integrations._fleet_plan_step_outcome import (
+    StepOutcome,
+    from_command,
+    process_boundary_settled,
+)
 from oh_goon.integrations.agent_codex_service import CodexServiceClient
 from oh_goon.integrations.agent_native_execution import NativeAgentEvents
 from oh_goon.integrations.fleet_plan_process_isolation import native_runtime_read_only_mounts
@@ -162,7 +166,7 @@ def _execution_failure(
     diagnostic_output: StepDiagnosticObserver | None = None,
     exception: BaseException | None = None,
     visible: NativeAgentEvents | None = None,
-    caller_cancelled: bool = False,
+    service_shutdown: bool = True,
 ) -> CodexServiceExecutionFailure:
     event = diagnostic_output(message, exception) if diagnostic_output is not None else None
     diagnostic = (
@@ -195,7 +199,7 @@ def _execution_failure(
             observed_returncode=physical.returncode
             if isinstance(physical, CommandResult)
             else None,
-            completion="process_exit" if caller_cancelled else "service_shutdown",
+            completion="service_shutdown" if service_shutdown else "process_exit",
             stderr=message,
             duration_ms=physical.duration_ms,
             supervisor=physical.supervisor,
@@ -432,15 +436,17 @@ def execute_codex_service_run(
         cancel_requested=runtime.cancel_requested,
         input_data=b"",
     )
+    version_outcome = from_command(version)
     if (
-        version.returncode != 0
+        version_outcome.returncode != 0
         or version.stdout.strip() != "codex-cli 0.164.0"
-        or not version.supervisor.final_process_group_quiescent
+        or process_boundary_settled(version_outcome) is not True
     ):
         raise _execution_failure(
             "Codex service version has not been qualified",
             version,
             argv,
+            service_shutdown=False,
             diagnostic_output=process.diagnostic_output,
             visible=visible.snapshot(),
         )
@@ -583,7 +589,7 @@ def execute_codex_service_run(
             "Codex service Run was cancelled",
             physical,
             argv,
-            caller_cancelled=True,
+            service_shutdown=False,
             diagnostic_output=process.diagnostic_output,
             visible=visible.snapshot(),
             exception=primary,

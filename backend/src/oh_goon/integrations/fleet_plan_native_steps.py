@@ -47,6 +47,7 @@ from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
     from_command,
     output_contract_failure,
+    process_boundary_settled,
 )
 from oh_goon.integrations.agent_inference_broker import approved_model_broker
 from oh_goon.integrations.agent_inference_relay import model_inference_relay
@@ -523,8 +524,9 @@ def execute_native_agent_step(
         read_only_mounts=frozen_mounts,
         read_only_workspace=sandboxed,
     )
-    if evidence.returncode != 0:
-        return from_command(evidence)
+    evidence_outcome = from_command(evidence)
+    if evidence_outcome.returncode != 0 or process_boundary_settled(evidence_outcome) is not True:
+        return evidence_outcome
     # The native workload's complete serialized input has its own receiving
     # bound below. Local-model disclosure budgets do not constrain this path.
     disclosure = task_evidence_prompt(

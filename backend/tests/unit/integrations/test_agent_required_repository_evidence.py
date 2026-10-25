@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -30,9 +31,10 @@ from oh_goon.core.models.agent_source import (
 )
 from oh_goon.core.models.fleet_plan import AgentStepRequestedEffects, ResolvedAgentStep
 from oh_goon.core.product_identity import stable_id
-from oh_goon.engine.command import CommandResult
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
 from oh_goon.engine.errors import OperationCancelledError
+from oh_goon.integrations._fleet_plan_step_outcome import settle_step_execution
 from oh_goon.integrations.fleet_plan_step_execution import (
     CommandRunner,
     StepRuntime,
@@ -283,6 +285,110 @@ def test_initial_evidence_precedes_every_reasoning_turn_without_reducing_scope(
     assert retained["evidence"]["evidence_packet_identity"] in prompts[0]
     if harness == "local-model-review":
         assert len(followup_disclosures[0]) > 2048
+    assert not list(process.paths.tmp.iterdir())
+
+
+@pytest.mark.parametrize("boundary", ("model-check", "model-selection", "model-followup"))
+@pytest.mark.parametrize(
+    "quiescent,reason,expected",
+    [
+        (True, "none", "SUCCESS"),
+        (True, "output_cleanup", "SUCCESS"),
+        (False, "none", "INCOMPLETE"),
+        (None, "none", "INCOMPLETE"),
+        (True, "cancel", "CANCELLED"),
+        (True, "timeout", "TIMED_OUT"),
+        (True, "authority", "AUTHORITY_LOST"),
+        (True, "output_limit", "OUTPUT_LIMITED"),
+    ],
+)
+def test_compound_agent_stops_at_the_original_unsettled_model_process(
+    tmp_path: Path, boundary: str, quiescent: bool | None, reason: Any, expected: str
+) -> None:
+    calls: list[str] = []
+    selected_result: CommandResult | None = None
+    model_turns = 0
+
+    def runner(*args: str, **kwargs: Any) -> CommandResult:
+        nonlocal selected_result, model_turns
+        if args[0] != "ollama":
+            calls.append("repository-evidence" if not model_turns else "tool")
+            return _native_reply(args, kwargs)
+        if args[1] == "show":
+            name, stdout = "model-check", ""
+        else:
+            model_turns += 1
+            name = "model-selection" if model_turns == 1 else "model-followup"
+            stdout = json.dumps(
+                {"query": "needle"}
+                if model_turns == 1
+                else {"decision": "finish", "summary": "Reviewed captured evidence"}
+            )
+        calls.append(name)
+        result = CommandResult(argv=args, returncode=0, stdout=stdout, stderr="")
+        if name == boundary:
+            result = replace(
+                result,
+                supervisor=cast(
+                    CommandSupervisorReceipt,
+                    CommandSupervisorReceipt(
+                        final_process_group_quiescent=quiescent,
+                        cleanup_reason=reason,
+                        process_group_cleanup_requested=reason != "none",
+                    )
+                    if quiescent is not None
+                    else None,
+                ),
+                physical_execution_id="selected-model-process",
+            )
+            selected_result = result
+        return result
+
+    _, step, process, runtime = _case(tmp_path, "local-model-review", runner)
+    outcome = _execute_typed_step(tmp_path, step, process, runtime)
+    settlement = settle_step_execution(step, outcome)
+    assert selected_result is not None
+    if expected == "SUCCESS":
+        assert settlement.outcome == "SUCCESS" and settlement.cleanup == "VERIFIED"
+        assert calls == [
+            "repository-evidence",
+            "model-check",
+            "model-selection",
+            "tool",
+            "model-followup",
+        ]
+    else:
+        assert calls[-1] == boundary
+        assert settlement.outcome == expected
+        assert settlement.cleanup == (
+            "UNVERIFIED"
+            if quiescent is False
+            else "UNAVAILABLE"
+            if quiescent is None
+            else "VERIFIED"
+        )
+        assert outcome.supervisor is selected_result.supervisor
+        assert outcome.physical_execution_id == "selected-model-process"
+        assert outcome.observed_returncode == 0
+
+
+def test_unknown_supervisor_reason_stops_before_model_or_output_publication(tmp_path: Path) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def runner(*args: str, **kwargs: Any) -> CommandResult:
+        calls.append(args)
+        return replace(
+            _native_reply(args, kwargs),
+            supervisor=CommandSupervisorReceipt(
+                cleanup_reason=cast(Any, "unhandled-authority-outcome"),
+                process_group_cleanup_requested=True,
+            ),
+        )
+
+    _, step, process, runtime = _case(tmp_path, "local-model-review", runner)
+    with pytest.raises(FleetPlanInvalid, match="supervisor cleanup reason"):
+        _execute_typed_step(tmp_path, step, process, runtime)
+    assert len(calls) == 1
     assert not list(process.paths.tmp.iterdir())
 
 

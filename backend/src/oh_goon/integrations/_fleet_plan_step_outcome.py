@@ -67,6 +67,12 @@ class StepOutcome:
     resource_cleanup: Literal["verified", "unverified"] = "verified"
 
     def __post_init__(self) -> None:
+        if self.supervisor is not None and (
+            type(self.supervisor.cleanup_reason) is not str
+            or self.supervisor.cleanup_reason
+            not in {"none", "timeout", "cancel", "authority", "output_cleanup", "output_limit"}
+        ):
+            raise FleetPlanInvalid("Unsupported Step supervisor cleanup reason")
         if type(self.resource_cleanup) is not str or self.resource_cleanup not in (
             "verified",
             "unverified",
@@ -246,18 +252,28 @@ def settle_step_execution(
         return PlanStepSettlementEvidence(outcome="SKIPPED", reason="NOT_STARTED", **common)
     supervisor = outcome.supervisor
     reason = supervisor.cleanup_reason if supervisor is not None else "none"
-    if reason == "cancel" and outcome.completion != "service_shutdown":
-        return PlanStepSettlementEvidence(outcome="CANCELLED", reason="CALLER_CANCELLED", **common)
-    if reason == "timeout":
-        return PlanStepSettlementEvidence(outcome="TIMED_OUT", reason="DEADLINE_EXPIRED", **common)
-    if reason == "authority":
-        return PlanStepSettlementEvidence(
-            outcome="AUTHORITY_LOST", reason="AUTHORITY_REVOKED", **common
-        )
-    if reason == "output_limit":
-        return PlanStepSettlementEvidence(
-            outcome="OUTPUT_LIMITED", reason="OUTPUT_LIMIT_EXCEEDED", **common
-        )
+    match reason:
+        case "none" | "output_cleanup":
+            pass
+        case "cancel":
+            if outcome.completion != "service_shutdown":
+                return PlanStepSettlementEvidence(
+                    outcome="CANCELLED", reason="CALLER_CANCELLED", **common
+                )
+        case "timeout":
+            return PlanStepSettlementEvidence(
+                outcome="TIMED_OUT", reason="DEADLINE_EXPIRED", **common
+            )
+        case "authority":
+            return PlanStepSettlementEvidence(
+                outcome="AUTHORITY_LOST", reason="AUTHORITY_REVOKED", **common
+            )
+        case "output_limit":
+            return PlanStepSettlementEvidence(
+                outcome="OUTPUT_LIMITED", reason="OUTPUT_LIMIT_EXCEEDED", **common
+            )
+        case unknown_reason:
+            assert_never(unknown_reason)
     if outcome.returncode == PLAN_TIMEOUT_RETURN_CODE:
         return PlanStepSettlementEvidence(outcome="TIMED_OUT", reason="DEADLINE_EXPIRED", **common)
     if closure is False:

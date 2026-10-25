@@ -157,7 +157,10 @@ def _run_rollout_observation_window(
         )
         last_argv = result.argv
         last_process = from_command(result)
-        if process_boundary_settled(last_process) is not True:
+        if (
+            process_boundary_settled(last_process) is not True
+            or last_process.returncode != result.returncode
+        ):
             return last_process
         status = kubernetes_http_status(result)
         if result.returncode != 0 or status != 200:

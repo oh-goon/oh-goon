@@ -90,6 +90,7 @@ from oh_goon.integrations._fleet_plan_step_outcome import (
     executable_not_found_outcome,
     executable_not_runnable_outcome,
     from_command,
+    process_boundary_settled,
 )
 from oh_goon.integrations.executable_materialization_authority import (
     verify_step_executable_materialization,
@@ -704,9 +705,12 @@ def _execute_model_agent(
             env=model_environment,
             runtime_supervision=runtime.runtime_supervision,
         )
-        if check.returncode != 0:
+        checked = from_command(check)
+        if process_boundary_settled(checked) is not True:
+            return checked
+        if checked.returncode != 0:
             return replace(
-                from_command(check),
+                checked,
                 returncode=PLAN_CONTRACT_RETURN_CODE,
                 stderr="selected Ollama model is not installed locally",
             )
@@ -725,9 +729,12 @@ def _execute_model_agent(
             env=model_environment,
             runtime_supervision=runtime.runtime_supervision,
         )
-        if answer.returncode != 0:
+        answered = from_command(answer)
+        if process_boundary_settled(answered) is not True:
+            return answered
+        if answered.returncode != 0:
             return replace(
-                from_command(answer),
+                answered,
                 returncode=PLAN_CONTRACT_RETURN_CODE,
                 stderr="selected Ollama model invocation failed",
             )
@@ -942,9 +949,12 @@ def _run_local_model_review(
             env=model_environment,
             runtime_supervision=runtime.runtime_supervision,
         )
-        if response.returncode != 0:
+        responded = from_command(response)
+        if process_boundary_settled(responded) is not True:
+            return responded
+        if responded.returncode != 0:
             return replace(
-                from_command(response),
+                responded,
                 returncode=PLAN_CONTRACT_RETURN_CODE,
                 stderr="selected Ollama model review invocation failed",
             )
@@ -1097,8 +1107,9 @@ def _prepare_strict_uv_attempt(
         cancel_requested=runtime.cancel_requested,
         env=env,
     )
-    if result.returncode != 0:
-        return prepared, from_command(result)
+    outcome = from_command(result)
+    if outcome.returncode != 0 or process_boundary_settled(outcome) is not True:
+        return prepared, outcome
     return prepared, None
 
 

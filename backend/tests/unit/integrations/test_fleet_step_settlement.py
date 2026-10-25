@@ -36,6 +36,7 @@ from oh_goon.integrations._fleet_plan_step_outcome import (
         (0, "output_limit", "process_exit", True, "OUTPUT_LIMITED", "VERIFIED"),
         (0, "authority", "process_exit", True, "AUTHORITY_LOST", "VERIFIED"),
         (0, "output_cleanup", "process_exit", False, "INCOMPLETE", "UNVERIFIED"),
+        (0, "output_cleanup", "process_exit", True, "SUCCESS", "VERIFIED"),
         (0, "none", "process_exit", None, "INCOMPLETE", "UNAVAILABLE"),
     ],
 )

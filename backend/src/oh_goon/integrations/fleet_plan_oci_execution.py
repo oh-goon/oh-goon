@@ -12,7 +12,11 @@ from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedOc
 from oh_goon.core.path_authority import RepositoryPathSpace
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.engine.command import CommandResult
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, from_command
+from oh_goon.integrations._fleet_plan_step_outcome import (
+    StepOutcome,
+    from_command,
+    process_boundary_settled,
+)
 from oh_goon.integrations.exact_file_write import publish_text_file, remove_file_durably
 
 
@@ -65,7 +69,9 @@ def execute_oci_build(
         env=_oci_environment(environment, step),
     )
     outcome = from_command(result)
-    if result.returncode != 0:
+    if process_boundary_settled(outcome) is not True:
+        return outcome
+    if outcome.returncode != 0:
         _clear_oci_outputs(outputs)
         return outcome
     if not outputs.archive.is_file():

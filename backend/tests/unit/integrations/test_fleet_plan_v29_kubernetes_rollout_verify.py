@@ -258,8 +258,21 @@ def test_rollout_verification_polls_read_only_until_exact_generation_is_ready(
     assert evidence.transport_retries == 0
 
 
-@pytest.mark.parametrize("quiescent", [True, False, None])
-def test_each_native_poll_preserves_supervision_before_another_request(tmp_path, quiescent):
+@pytest.mark.parametrize(
+    "quiescent,reason,expected",
+    [
+        (True, "none", "SUCCESS"),
+        (False, "none", "INCOMPLETE"),
+        (None, "none", "INCOMPLETE"),
+        (True, "cancel", "CANCELLED"),
+        (True, "timeout", "TIMED_OUT"),
+        (True, "authority", "AUTHORITY_LOST"),
+        (True, "output_limit", "OUTPUT_LIMITED"),
+    ],
+)
+def test_each_native_poll_preserves_supervision_before_another_request(
+    tmp_path, quiescent, reason, expected
+):
     from dataclasses import replace
 
     step = _bound_step()
@@ -275,7 +288,11 @@ def test_each_native_poll_preserves_supervision_before_another_request(tmp_path,
         )
         return replace(
             CommandResult(argv=argv, returncode=0, stdout="200", stderr=""),
-            supervisor=CommandSupervisorReceipt(final_process_group_quiescent=quiescent)
+            supervisor=CommandSupervisorReceipt(
+                final_process_group_quiescent=quiescent,
+                cleanup_reason=reason,
+                process_group_cleanup_requested=reason != "none",
+            )
             if quiescent is not None
             else None,
         )
@@ -291,8 +308,8 @@ def test_each_native_poll_preserves_supervision_before_another_request(tmp_path,
         sleeper=clock.sleep,
     )
     settled = settle_step_execution(step, outcome)
-    assert len(calls) == (2 if quiescent is True else 1)
-    assert settled.outcome == ("SUCCESS" if quiescent is True else "INCOMPLETE")
+    assert len(calls) == (2 if expected == "SUCCESS" else 1)
+    assert settled.outcome == expected
     assert settled.observed_returncode == 0
 
 

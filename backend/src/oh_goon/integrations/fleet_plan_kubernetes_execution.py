@@ -157,8 +157,9 @@ def _read_current_deployment(
         output=config.before_response,
     )
     status = kubernetes_http_status(result)
-    if process_boundary_settled(from_command(result)) is not True:
-        return _outcome(result)
+    outcome = _outcome(result)
+    if process_boundary_settled(outcome) is not True or outcome.returncode != result.returncode:
+        return outcome
     if result.returncode != 0:
         return _read_failure(result, status, operation="read Deployment")
     if status != 200:
@@ -372,11 +373,12 @@ def _local_evidence_failure(
 
 
 def _require_authoritative_patch_success(result: CommandResult, status: int) -> None:
+    outcome = from_command(result)
     if (
-        result.returncode != 0
+        outcome.returncode != 0
         or status < 200
         or status >= 300
-        or process_boundary_settled(from_command(result)) is not True
+        or process_boundary_settled(outcome) is not True
     ):
         raise ExternalEffectOutcomeUnknown(
             "Kubernetes image PATCH returned a non-success response whose commit status is not "

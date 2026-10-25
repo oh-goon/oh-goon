@@ -8,7 +8,7 @@ import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx2
 import pytest
@@ -44,7 +44,12 @@ from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt, Comm
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_step_evidence import attempt_evidence, step_evidence
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, from_command, timeout_outcome
+from oh_goon.integrations._fleet_plan_step_outcome import (
+    StepOutcome,
+    from_command,
+    settle_step_execution,
+    timeout_outcome,
+)
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_native_steps import (
     prepare_native_step_input,
@@ -496,6 +501,82 @@ def test_initial_evidence_uses_private_query_file_and_spends_the_same_step_deadl
     assert outcome.returncode == 0, outcome.stderr
     assert len(timeouts) == 2 and timeouts[1] < timeouts[0] - 0.2
     assert query_files and all(not path.exists() for path in query_files)
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "quiescent,reason,expected",
+    [
+        (True, "none", "SUCCESS"),
+        (True, "output_cleanup", "SUCCESS"),
+        (False, "none", "INCOMPLETE"),
+        (None, "none", "INCOMPLETE"),
+        (True, "cancel", "CANCELLED"),
+        (True, "timeout", "TIMED_OUT"),
+        (True, "authority", "AUTHORITY_LOST"),
+        (True, "output_limit", "OUTPUT_LIMITED"),
+    ],
+)
+def test_native_producer_cleanup_must_settle_before_native_agent_launch(
+    tmp_path: Path,
+    model_transport: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    quiescent: bool | None,
+    reason: Any,
+    expected: str,
+) -> None:
+    from oh_goon.integrations import fleet_plan_step_execution as module
+
+    repository, _, step, runtime = _case(tmp_path)
+    commands: list[tuple[str, ...]] = []
+    evidence: list[CommandResult] = []
+
+    def factory(*args: Any, **kwargs: Any) -> Any:
+        bound = native_profile_command_runner(*args, **kwargs)
+
+        def run(*argv: str, **options: Any) -> CommandResult:
+            commands.append(argv)
+            result = bound(*argv, **options)
+            if "--query-file" in argv:
+                result = replace(
+                    result,
+                    supervisor=cast(
+                        CommandSupervisorReceipt,
+                        CommandSupervisorReceipt(
+                            final_process_group_quiescent=quiescent,
+                            cleanup_reason=reason,
+                            process_group_cleanup_requested=reason != "none",
+                        )
+                        if quiescent is not None
+                        else None,
+                    ),
+                )
+                evidence.append(result)
+            return result
+
+        return run
+
+    monkeypatch.setattr(module, "native_profile_command_runner", factory)
+    outcome = execute_direct_step(repository, step, runtime, step_order=1)
+    settlement = settle_step_execution(step, outcome)
+    assert len(evidence) == 1
+    if expected == "SUCCESS":
+        assert settlement.outcome == "SUCCESS" and len(commands) == 2
+        assert len(model_transport) == 1 and (repository / "native-write.txt").exists()
+    else:
+        assert len(commands) == 1 and model_transport == []
+        assert not (repository / "native-write.txt").exists()
+        assert settlement.outcome == expected
+        assert settlement.cleanup == (
+            "UNVERIFIED"
+            if quiescent is False
+            else "UNAVAILABLE"
+            if quiescent is None
+            else "VERIFIED"
+        )
+        assert outcome.supervisor is evidence[0].supervisor
+        assert outcome.physical_execution_id == evidence[0].physical_execution_id
+        assert outcome.observed_returncode == 0
 
 
 @pytest.mark.process

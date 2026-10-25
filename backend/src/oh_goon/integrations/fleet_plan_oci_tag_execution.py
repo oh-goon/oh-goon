@@ -11,7 +11,11 @@ from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedOc
 from oh_goon.core.path_authority import RepositoryPathSpace
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.engine.command import CommandResult
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, from_command
+from oh_goon.integrations._fleet_plan_step_outcome import (
+    StepOutcome,
+    from_command,
+    process_boundary_settled,
+)
 from oh_goon.integrations.exact_file_write import publish_text_file, remove_file_durably
 from oh_goon.integrations.fleet_plan_oci_registry_execution import (
     OciRegistryAttemptConfig,
@@ -82,7 +86,9 @@ def execute_oci_tag_assert(
             ),
             resource_cleanup="unverified",
         )
-    if result.returncode != 0:
+    if process_boundary_settled(outcome) is not True:
+        return outcome
+    if outcome.returncode != 0:
         return outcome
     observed_digest = result.stdout.strip()
     if _DIGEST.fullmatch(observed_digest) is None:

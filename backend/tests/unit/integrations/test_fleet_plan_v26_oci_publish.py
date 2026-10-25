@@ -8,6 +8,7 @@ import tarfile
 from functools import cache
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -18,14 +19,14 @@ from oh_goon.core.fleet_plan_tool_requirements import required_execution_tool_na
 from oh_goon.core.models.fleet_plan import ResolvedOciBuildStep, ResolvedOciPublishStep
 from oh_goon.core.models.fleet_plan_evidence import PlanResourceEvidence
 from oh_goon.core.path_layouts import AttemptPathLayout
-from oh_goon.engine.command import CommandResult
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_host_resources import (
     HostToolBinding,
     capture_host_environment,
     preflight_host_environment_feasibility,
 )
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, settle_step_execution
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.executable_materialization_authority import (
     StepExecutableMaterializationReceipt,
@@ -249,8 +250,23 @@ def test_empty_publish_credential_fails_before_execution_resources_are_frozen(mo
         capture_host_environment(plan)
 
 
+@pytest.mark.parametrize(
+    "quiescent,reason,expected",
+    [
+        (True, "none", "SUCCESS"),
+        (False, "none", "INCOMPLETE"),
+        (None, "none", "INCOMPLETE"),
+        (True, "cancel", "CANCELLED"),
+        (True, "timeout", "TIMED_OUT"),
+        (True, "authority", "AUTHORITY_LOST"),
+        (True, "output_limit", "OUTPUT_LIMITED"),
+    ],
+)
 def test_publish_execution_uses_digest_destination_private_auth_and_nonsecret_evidence(
     tmp_path: Path,
+    quiescent: bool | None,
+    reason: Any,
+    expected: str,
 ) -> None:
     plan = _plan()
     step = plan.steps[1]
@@ -277,7 +293,21 @@ def test_publish_execution_uses_digest_destination_private_auth_and_nonsecret_ev
         digestfile = Path(argv[argv.index("--digestfile") + 1])
         digestfile.write_text(digest + "\n", encoding="utf-8")
         return CommandResult(
-            returncode=0, stdout="copied", stderr="", argv=tuple(argv), duration_ms=9
+            returncode=0,
+            stdout="copied",
+            stderr="",
+            argv=tuple(argv),
+            duration_ms=9,
+            supervisor=cast(
+                CommandSupervisorReceipt,
+                CommandSupervisorReceipt(
+                    final_process_group_quiescent=quiescent,
+                    cleanup_reason=reason,
+                    process_group_cleanup_requested=reason != "none",
+                )
+                if quiescent is not None
+                else None,
+            ),
         )
 
     outcome = execute_oci_publish(
@@ -289,6 +319,15 @@ def test_publish_execution_uses_digest_destination_private_auth_and_nonsecret_ev
         command_runner=runner,
         cancel_requested=None,
     )
+
+    if expected != "SUCCESS":
+        settlement = settle_step_execution(step, outcome)
+        assert settlement.outcome == expected
+        assert outcome.observed_returncode == 0 and outcome.release_effect is None
+        assert not (repository / step.output.metadata).exists()
+        assert not (repository / step.output.reference).exists()
+        assert isinstance(seen["authfile"], Path) and not seen["authfile"].exists()
+        return
 
     argv = seen["argv"]
     assert outcome.returncode == 0
