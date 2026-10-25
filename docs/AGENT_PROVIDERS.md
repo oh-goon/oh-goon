@@ -406,9 +406,11 @@ read-only. In the bounded campaign, review, adjudication, proposal and fresh
 re-review retain that read-only native policy and the existing typed result
 acceptors. The separate original batch apply Step validates the admitted write
 roots, candidate identity and every preimage before applying proposal data.
-Service adjudication passes the existing typed record's JSON Schema with exact
-frozen candidate/scope identities through native output-schema transport; the
-original acceptor still independently validates the returned record.
+Service review and adjudication pass JSON Schemas derived from their existing
+typed records through native output-schema transport, bound to the exact frozen
+candidate and scope. Review also binds the reviewer occurrence and Skill identity
+and permits explicit reviewed paths or compact complete-scope coverage. The
+original acceptors still independently validate the returned records.
 Apply, regression and verification Steps retain their existing trusted-local
 execution. The controller captures the changed candidate once before subsequent
 reasoning and refuses changes outside the admitted repair phase. Select the

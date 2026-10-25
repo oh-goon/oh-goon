@@ -158,6 +158,33 @@ def review_wire_record(
     return data
 
 
+def review_output_schema(handoff: FrozenAgentStepHandoff, occurrence: str) -> dict[str, Any]:
+    """Constrain native generation to the existing explicit or compact review wire."""
+    schema = AgentReviewRecord.model_json_schema(by_alias=True)
+    properties = schema["properties"]
+    scope = review_scope(handoff)
+    for field, value in {
+        "reviewer": occurrence,
+        "candidate_identity": handoff.source.repository.content_identity,
+        "scope_identity": scope,
+        "skill_identity": handoff.source.skill.content_identity,
+    }.items():
+        properties[field]["enum"] = [value]
+    properties["reviewed_paths"] = {
+        "anyOf": [
+            properties["reviewed_paths"],
+            {
+                "type": "object",
+                "properties": {"complete_scope": {"type": "string", "enum": [scope]}},
+                "required": ["complete_scope"],
+                "additionalProperties": False,
+            },
+        ]
+    }
+    schema["required"] = list(properties)
+    return schema
+
+
 def review_from_context(data: dict[str, Any], handoff: FrozenAgentStepHandoff) -> AgentReviewRecord:
     """Read previously admitted context against this phase's exact frozen repository.
 

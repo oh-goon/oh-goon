@@ -16,9 +16,11 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.agent_review import (
+    MAX_REVIEW_BYTES,
     AgentReviewRecord,
     accept_review,
     review_from_context,
+    review_output_schema,
     review_scope,
     review_wire_record,
 )
@@ -628,3 +630,57 @@ def test_compact_clean_is_an_explicit_claim_with_canonical_complete_paths(tmp_pa
     assert accepted.observations[0].record.model_dump(mode="json")["reviewed_paths"] == [
         "repo/" + member.path for member in handoff.source.repository.members
     ]
+
+
+@pytest.mark.parametrize("compact", [False, True])
+@pytest.mark.parametrize("violation", ["summary", "explanation", "evidence"])
+def test_review_field_limits_apply_below_the_whole_record_budget(tmp_path, compact, violation):
+    plan, handoffs, _ = native_phase_case(tmp_path)
+    step = plan.steps[0]
+    handoff = handoffs[step.step_id]
+    record = review_record(step, handoff)
+    payload = (
+        review_wire_record(record, handoff, step.step_id)
+        if compact
+        else record.model_dump(mode="json")
+    )
+    assert accept_review(json.dumps(payload), handoff, step.step_id) == record
+    if violation == "summary":
+        payload["summary"] = "x" * 4000
+    elif violation == "explanation":
+        payload["findings"][0]["explanation"] = "x" * 4000
+    else:
+        payload["findings"][0]["evidence"] *= 16
+    accepted = accept_review(json.dumps(payload), handoff, step.step_id)
+    assert accepted.summary == payload["summary"]
+    assert accepted.findings[0].explanation == payload["findings"][0]["explanation"]
+    assert len(accepted.findings[0].evidence) == len(payload["findings"][0]["evidence"])
+    if violation == "summary":
+        payload["summary"] += "x"
+    elif violation == "explanation":
+        payload["findings"][0]["explanation"] += "x"
+    else:
+        payload["findings"][0]["evidence"].append(payload["findings"][0]["evidence"][0])
+    text = json.dumps(payload)
+    assert len(text.encode()) < MAX_REVIEW_BYTES
+    with pytest.raises(FleetPlanInvalid, match="invalid typed record"):
+        accept_review(text, handoff, step.step_id)
+
+
+def test_review_schema_selection_cannot_change_a_previous_occurrences_frozen_identities(tmp_path):
+    plan, handoffs, _ = native_phase_case(tmp_path)
+    first, second = [step for step in plan.steps if agent_phase_role(step) == "review"][:2]
+    original = review_output_schema(handoffs[first.step_id], first.step_id)
+    before = json.dumps(original, sort_keys=True)
+    other = review_output_schema(handoffs[second.step_id], second.step_id)
+    assert json.dumps(original, sort_keys=True) == before
+    for schema, step in ((original, first), (other, second)):
+        handoff = handoffs[step.step_id]
+        assert schema["properties"]["reviewer"]["enum"] == [step.step_id]
+        assert schema["properties"]["candidate_identity"]["enum"] == [
+            handoff.source.repository.content_identity
+        ]
+        assert schema["properties"]["scope_identity"]["enum"] == [review_scope(handoff)]
+        assert schema["properties"]["skill_identity"]["enum"] == [
+            handoff.source.skill.content_identity
+        ]
