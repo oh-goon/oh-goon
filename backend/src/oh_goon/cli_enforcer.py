@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import difflib
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import ValidationError
@@ -10,8 +11,9 @@ from pydantic import ValidationError
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_plan_inputs import plan_inputs
 from oh_goon.core.errors import FleetDomainError
-from oh_goon.core.models.enforcer_receipt import EnforcerRunReceipt
-from oh_goon.services.enforcer_run_receipt import render_enforcer_yaml
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.enforcer_receipt import EnforcerRunReceipt
 
 
 def run_enforcer_compare_command(args: argparse.Namespace) -> int | None:
@@ -53,6 +55,8 @@ def run_enforcer_command(runtime: ApplicationRuntime, args: argparse.Namespace) 
 
 
 def _compare_enforcer_receipts(before: Path, after: Path) -> int:
+    from oh_goon.services.enforcer_run_receipt import render_enforcer_yaml
+
     try:
         before_receipt = _load_enforcer_receipt(before)
         after_receipt = _load_enforcer_receipt(after)
@@ -80,6 +84,8 @@ def _compare_enforcer_receipts(before: Path, after: Path) -> int:
 
 
 def _load_enforcer_receipt(path: Path) -> EnforcerRunReceipt:
+    from oh_goon.core.models.enforcer_receipt import EnforcerRunReceipt
+
     resolved = path.expanduser().resolve()
     payload = yaml.safe_load(resolved.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):

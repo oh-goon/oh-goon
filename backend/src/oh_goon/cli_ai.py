@@ -16,6 +16,7 @@ from functools import partial
 from pathlib import Path
 from queue import Empty, Full, Queue
 from threading import Event, Thread
+from typing import TYPE_CHECKING
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.errors import FleetDomainError
@@ -26,22 +27,18 @@ from oh_goon.core.models.agent_providers import (
     AgentProvidersConfig,
     ResolvedNativeAgent,
 )
-from oh_goon.core.models.fleet_plan import MAX_AGENT_TASK_CHARS
-from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
-from oh_goon.engine.command import CommandTerminal
-from oh_goon.engine.git import GitService
-from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
-from oh_goon.integrations.fleet_plan_native_steps import require_native_agent_compatibility
-from oh_goon.integrations.fleet_plan_process_isolation import (
-    ProcessIsolationBackend,
-    native_profile_command_runner,
-)
 from oh_goon.runtime.agent_providers import (
     agent_providers_path,
     load_agent_providers,
     resolve_native_agent,
 )
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.run import FleetRunDetail
+    from oh_goon.engine.command import CommandTerminal
+    from oh_goon.engine.git import GitService
+    from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
 
 _MAX_TASK_BYTES = 65536
 _MAX_TERMINAL_CHUNK_BYTES = 65536
@@ -84,6 +81,8 @@ def add_ai_command(
 
 
 def _task(args: argparse.Namespace) -> str:
+    from oh_goon.core.models.fleet_plan import MAX_AGENT_TASK_CHARS
+
     data: bytes
     if args.prompt is not None:
         data = args.prompt.encode("utf-8")
@@ -115,6 +114,8 @@ def _interactive(args: argparse.Namespace) -> bool:
 
 
 def _isolation(selected: ResolvedNativeAgent) -> ProcessIsolationBackend | None:
+    from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+
     caps = selected.profile.resources
     requested = any(
         value is not None for value in (caps.cpu_millis, caps.memory_mib, caps.max_processes)
@@ -143,6 +144,9 @@ def resolve_native_cli_selection(
     interactive: bool = False,
 ) -> tuple[ResolvedNativeAgent, ProcessIsolationBackend | None, GitService]:
     """Resolve a single catalog and native workload before application mutation."""
+    from oh_goon.engine.git import GitService
+    from oh_goon.integrations.fleet_plan_native_steps import require_native_agent_compatibility
+    from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
     from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
     config_path = agent_providers_path(os.environ, config_file)
@@ -400,6 +404,8 @@ def _host_terminal() -> Iterator[CommandTerminal]:
     import fcntl
     import termios
     import tty
+
+    from oh_goon.engine.command import CommandTerminal
 
     input_fd, output_fd = sys.stdin.fileno(), sys.stdout.fileno()
     original = termios.tcgetattr(input_fd)

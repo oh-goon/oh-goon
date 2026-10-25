@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import sqlite3
 
-from oh_goon import cli
+import pytest
+
+from oh_goon import cli, cli_runtime
 from oh_goon.runtime.database import DatabasePathIdentityLost
 
 
@@ -43,7 +45,7 @@ def test_cli_reports_primary_runtime_storage_loss_once_and_shutdown_cannot_mask_
     runtime = _Runtime()
     _prepare(monkeypatch, runtime)
     monkeypatch.setattr(
-        cli,
+        cli_runtime,
         "run_stateful_command",
         lambda _runtime, _args: (_ for _ in ()).throw(
             sqlite3.OperationalError("unable to open database file")
@@ -60,7 +62,7 @@ def test_cli_reports_primary_runtime_storage_loss_once_and_shutdown_cannot_mask_
 def test_cli_turns_storage_loss_during_shutdown_into_failure(monkeypatch, capsys) -> None:
     runtime = _Runtime()
     _prepare(monkeypatch, runtime)
-    monkeypatch.setattr(cli, "run_stateful_command", lambda _runtime, _args: 0)
+    monkeypatch.setattr(cli_runtime, "run_stateful_command", lambda _runtime, _args: 0)
 
     assert cli.main([]) == 2
     output = capsys.readouterr().out
@@ -73,7 +75,7 @@ def test_cli_reports_database_identity_replacement_without_traceback(monkeypatch
     _prepare(monkeypatch, runtime)
     monkeypatch.setattr(runtime, "shutdown", lambda **_kwargs: None)
     monkeypatch.setattr(
-        cli,
+        cli_runtime,
         "run_stateful_command",
         lambda _runtime, _args: (_ for _ in ()).throw(
             DatabasePathIdentityLost("database path was replaced after runtime admission")
@@ -100,7 +102,7 @@ def test_cli_preserves_nonzero_primary_result_when_shutdown_loses_database_ident
 ) -> None:
     runtime = _Runtime()
     _prepare(monkeypatch, runtime)
-    monkeypatch.setattr(cli, "run_stateful_command", lambda _runtime, _args: 7)
+    monkeypatch.setattr(cli_runtime, "run_stateful_command", lambda _runtime, _args: 7)
     monkeypatch.setattr(
         runtime,
         "shutdown",
@@ -111,3 +113,21 @@ def test_cli_preserves_nonzero_primary_result_when_shutdown_loses_database_ident
     output = capsys.readouterr().out
     assert output.count("OH-GOON RUNTIME DATABASE IDENTITY LOST") == 1
     assert "file is not a database" in output
+
+
+def test_cli_closes_runtime_when_stateful_dispatch_loading_fails(monkeypatch) -> None:
+    import builtins
+
+    runtime = _Runtime()
+    _prepare(monkeypatch, runtime)
+    original_import = builtins.__import__
+
+    def unavailable_dispatch(name, *args, **kwargs):
+        if name == "oh_goon.cli_runtime":
+            raise ModuleNotFoundError("stateful dispatch unavailable", name=name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", unavailable_dispatch)
+    with pytest.raises(ModuleNotFoundError, match="stateful dispatch unavailable"):
+        cli.main([])
+    assert runtime.shutdown_calls == 1

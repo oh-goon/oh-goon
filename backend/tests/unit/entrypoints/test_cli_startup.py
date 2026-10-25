@@ -23,9 +23,78 @@ if sys.argv[1] == 'without-web-server':
 
     sys.meta_path.insert(0, WebServerUnavailable())
 
+if sys.argv[1] == 'without-run-execution':
+    class RunExecutionUnavailable(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname in {
+                'oh_goon.services.fleet_plans',
+                'oh_goon.integrations.fleet_plan_native_steps',
+            }:
+                raise ModuleNotFoundError('Run execution implementation unavailable', name=fullname)
+
+    sys.meta_path.insert(0, RunExecutionUnavailable())
+
 from oh_goon.cli import main
 raise SystemExit(main(sys.argv[2:]))
 """
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("command", ["list", "show", "init"])
+def test_template_cli_runs_without_unselected_run_execution(tmp_path: Path, command: str) -> None:
+    control = tmp_path / "control"
+    environment = {
+        name: value for name, value in os.environ.items() if not name.startswith("OH_GOON_")
+    }
+    environment.update(
+        OH_GOON_DB=str(control / "application.sqlite"),
+        OH_GOON_LEAGUE_FILE=str(control / "league.yml"),
+        XDG_CONFIG_HOME=str(control / "config"),
+        XDG_DATA_HOME=str(control / "data"),
+        XDG_STATE_HOME=str(control / "state"),
+    )
+    outputs = []
+    for mode in ("normal", "without-run-execution"):
+        destination = tmp_path / mode
+        arguments = (
+            ["templates", "list", "--json"]
+            if command == "list"
+            else ["templates", command, "python/quality", "--kind", "plan"]
+        )
+        if command == "init":
+            arguments.extend(["--output", str(destination)])
+        with (
+            (tmp_path / f"{mode}.stdout").open("w+b") as output,
+            (tmp_path / f"{mode}.stderr").open("w+b") as errors,
+        ):
+            completed = subprocess.run(
+                [sys.executable, "-I", "-c", _FRESH_CLI, mode, *arguments],
+                cwd=tmp_path,
+                env=environment,
+                stdout=output,
+                stderr=errors,
+                timeout=30,
+                check=False,
+            )
+            output.seek(0)
+            stdout = output.read(1_048_577)
+            errors.seek(0)
+            stderr = errors.read(65_537)
+        assert len(stdout) <= 1_048_576 and len(stderr) <= 65_536
+        assert completed.returncode == 0, stderr.decode("utf-8", errors="replace")
+        if command == "init":
+            assert (destination / "run.yml").is_file()
+            outputs.append(
+                {
+                    path.relative_to(destination): path.read_bytes()
+                    for path in destination.rglob("*")
+                    if path.is_file()
+                }
+            )
+        else:
+            outputs.append(json.loads(stdout) if command == "list" else stdout)
+        assert not control.exists()
+    assert outputs[0] == outputs[1]
 
 
 @pytest.mark.process
