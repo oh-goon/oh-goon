@@ -69,7 +69,10 @@ class ScoutAnalyticalDatabase:
     def storage_bytes(self) -> int:
         """Return a race-safe on-disk footprint of the disposable Scout database family."""
         self._require_disposable_identity()
-        return sum(_regular_file_size_if_present(candidate) for candidate in self._sidecar_files())
+        return sum(
+            _regular_file_size_if_present(candidate, transient=candidate != self.path)
+            for candidate in self._sidecar_files()
+        )
 
     def _connect(self, *, write: bool) -> sqlite3.Connection:
         ensure_private_directory(self.path.parent)
@@ -130,10 +133,10 @@ class ScoutAnalyticalDatabase:
         if os.name == "nt":
             return
         for candidate in self._sidecar_files():
-            _harden_existing_regular_file(candidate)
+            _harden_existing_regular_file(candidate, transient=candidate != self.path)
 
 
-def _regular_file_size_if_present(path: Path) -> int:
+def _regular_file_size_if_present(path: Path, *, transient: bool = False) -> int:
     """Read size from an opened regular file; transient WAL/SHM removal is normal."""
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
@@ -153,6 +156,8 @@ def _regular_file_size_if_present(path: Path) -> int:
         raise
     try:
         metadata = os.fstat(descriptor)
+        if transient and stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 0:
+            return 0
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             raise RuntimeError(
                 f"Scout analytical database path must be a single-link regular file: {path}"
@@ -162,7 +167,7 @@ def _regular_file_size_if_present(path: Path) -> int:
         os.close(descriptor)
 
 
-def _harden_existing_regular_file(path: Path) -> None:
+def _harden_existing_regular_file(path: Path, *, transient: bool = False) -> None:
     """Apply owner-only mode without following a concurrently replaced symlink."""
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
@@ -183,6 +188,11 @@ def _harden_existing_regular_file(path: Path) -> None:
         raise
     try:
         metadata = os.fstat(descriptor)
+        if transient and stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 0:
+            # Native SQLite closed its last connection after our open. The
+            # orphan descriptor is no longer the named WAL/SHM; never reopen
+            # the path or harden a replacement inode.
+            return
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             raise RuntimeError(
                 f"Scout analytical database path must be a single-link regular file: {path}"
