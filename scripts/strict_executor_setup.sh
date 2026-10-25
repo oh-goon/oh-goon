@@ -64,4 +64,6 @@ if ! systemd-run --user --quiet --wait --pipe --collect --property=Type=exec --p
   exit 2
 fi
 printf '[OK] Delegate=yes transient unit available\n\n'
-printf 'Strict executor host ready.\nRetry the explicit strict release/CI or strict-acceptance command.\n'
+printf 'Native systemd delegation preparation complete.\n'
+printf 'This does not provision Fleet enrollment or prove independent kernel custody.\n'
+printf 'Strict execution still requires its original deployment authority; delegation alone cannot enable it.\n'

@@ -29,3 +29,7 @@ oh-goon run ./workflow/run.yml
 ```
 
 **Expected outputs:** `RELEASE_TAG` from the prepare Step and native Step outcomes; project scripts own other products.
+
+The [project fixture](../../../../template-certification/fixtures/advanced/isolated-dataflow/) implements this workflow with real pytest/pytest-timeout tests and native `uv build`. Its preparation command validates and publishes the selected label. The last command receives the label with `-beta` appended and the explicitly imported `RELEASE_TOKEN`, then exports the built wheel and source archive to `published/<label>-beta/`. That fixture performs local file publication and makes no registry request. Use a disposable non-secret token for its local permission check.
+
+The Plan keeps ordinary local verification policy. Its name grants no strict isolation; a workload publishing to an external system needs that system's explicit execution and release authority.

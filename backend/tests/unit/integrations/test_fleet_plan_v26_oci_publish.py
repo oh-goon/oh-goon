@@ -150,7 +150,7 @@ def test_publish_template_resolves_to_v26_content_addressed_authority() -> None:
         "OCI_REGISTRY_PASSWORD",
     )
     assert {item.name for item in publish.outputs} == {"OCI_DIGEST", "OCI_REFERENCE"}
-    assert required_execution_tool_names(plan) == ("buildah", "skopeo")
+    assert required_execution_tool_names(plan) == ("buildah", "crun", "skopeo")
     assert publish.capabilities.egress.rules[0].hostname == "harbor.example.com"
 
 

@@ -4,7 +4,7 @@ Run one writable native Agent, then the project’s explicit verification script
 
 **Status:** runnable with prerequisites. **Effects:** Sends admitted evidence to the native agent and permits scoped writes before native verification.
 
-**Prerequisites:** An authorized repository root, captured Skill resources and configured model connection. Install the selected native agent and configure a compatible isolated managed profile; native model/auth settings remain native-owned.
+**Prerequisites:** An authorized repository root, captured Skill resources and an installed native agent with an explicit compatible profile. For trusted local Codex coding, use the [existing sign-in profile](../../../../docs/AGENT_PROVIDERS.md#use-an-existing-codex-sign-in). Codex owns authentication; no auth-file or env-file inspection is needed. Read-only reviews retain their isolation requirements.
 
 ```sh
 oh-goon templates init agents/native-coding --kind plan --output ./workflow
@@ -21,8 +21,8 @@ inputs:
   skill: local:skills/repair
   verification_command: scripts/verify
 agent:
-  implementation: pi
-  profile: isolated-managed
+  implementation: codex
+  profile: signed-in
   acceptance: native-coding
   repository_root: /approved/repositories
   skill_root: .

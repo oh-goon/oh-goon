@@ -177,6 +177,13 @@ attempt is invalid unless the immediately preceding attempt contains the matchin
 
 ## Local Enforcer command
 
+`make strict-executor-setup` prepares native systemd delegation only. It does not
+enroll Runs or establish independent kernel custody. The local cgroup effect
+owner currently refuses all custody-dependent effects because it has no
+provisioned independent parent owner; a successful delegation setup cannot
+override that refusal. Strict Plans require their original deployment authority
+and remain unexecuted when that authority cannot be established.
+
 Developers inspect a Team through the **same repository-root `goon.yml`** that will execute:
 
 ```bash

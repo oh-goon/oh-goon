@@ -89,6 +89,10 @@ def step_execution_tool_names(step: ResolvedPlanStep) -> tuple[str, ...]:
     primary = step_execution_tool(step)
     if primary is not None and "/" not in primary and "\\" not in primary:
         names.add(primary)
+    if isinstance(step, ResolvedOciBuildStep):
+        # Buildah's OCI isolation executes RUN instructions through this fixed
+        # companion. It must be frozen with Buildah, never discovered at launch.
+        names.add("crun")
     return tuple(sorted(names))
 
 

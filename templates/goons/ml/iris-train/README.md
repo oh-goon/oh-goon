@@ -14,8 +14,10 @@ The [ml/iris-training Plan](../../../plans/ml/iris-training/README.md) supplies 
 
 **Expected outputs:** Metrics JSON is evidence; reusable model-parameter bytes have content-store retention.
 
-The template-certification Iris fixture supplies an `iris-train` argument stub in its locked `ml` group for startup/admission checks. It does not train a model or produce the declared artifacts. Provide a real project command before running this teaching workflow. Change seed, split, accuracy and iteration inputs through caller values.
+The [Iris project fixture](../../../../template-certification/fixtures/ml/iris/) supplies a real `iris-train` command and native scikit-learn dependency in its locked `ml` group. It fits scaling and logistic regression on the training partition, evaluates held-out rows and writes both declared JSON artifacts. The command exits nonzero when actual accuracy misses the selected minimum. Change seed, split, accuracy and iteration inputs through caller values.
 
 The project command owns the training program and writes the declared metrics and model-parameter artifacts. Oh Goon does not embed a Python program in YAML or create a second dependency description for scikit-learn.
 
 **Artifact retention:** Metrics JSON is `evidence`; model parameters use `content_store` because their file bytes are the reusable training product. See the [canonical retention contract](../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md).
+
+Select the strict `ml/iris-training` Plan for this retained product. A verification-purpose wrapper refuses this Goon's content-store retention before training; it does not discard the retention request or choose a weaker execution policy.

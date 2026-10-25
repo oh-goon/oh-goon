@@ -184,7 +184,7 @@ def test_release_template_resolves_v29_with_separate_explicit_rollout_gate() -> 
     assert verify.policy.poll_interval_seconds == 5
     assert verify.timeout_seconds == 300
     assert verify.retry.max_attempts == 1
-    assert required_execution_tool_names(plan) == ("buildah", "curl", "skopeo", "uv")
+    assert required_execution_tool_names(plan) == ("buildah", "crun", "curl", "skopeo", "uv")
     summary = "\n".join(resolved_plan_summary(plan))
     assert "kubernetes_set_image:" in summary
     assert "rollout_waited=false" in summary

@@ -30,8 +30,9 @@ not duplicate the path with a second `evidence` declaration to get both.
 A reported `MISSING` artifact has no file bytes to retain; do not mistake a
 missing artifact for a successful retained publication. A successful
 `content_store` publication requires strict execution and an available
-`FleetContentStore`. Direct execution rejects content-store retention instead
-of silently downgrading it to evidence. Retained objects are content-addressed
+`FleetContentStore`. Resolution rejects content-store retention outside
+`execution.purpose: cicd` before Run admission or native work; direct execution
+also retains its defensive publication refusal. Retained objects are content-addressed
 and references are repository-scoped: an SHA alone is not retrieval authority.
 
 ### Concrete shipped choices
