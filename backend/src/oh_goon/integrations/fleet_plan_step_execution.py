@@ -1070,12 +1070,13 @@ def _execute_command_step(
 ) -> StepOutcome:
     argv = step.argv
     managed = process.managed_runtime
-    package = process.package_project if step.project_source is not None else None
-    if package is None and (
+    package_runtime = (
         step.project_source is not None
         or isinstance(managed, UvProjectManagedRuntime)
         and managed.package_source is not None
-    ):
+    )
+    package = process.package_project if package_runtime else None
+    if package_runtime and package is None:
         raise FleetPlanInvalid("Python Goon application requires its prepared project binding")
     if isinstance(managed, UvProjectManagedRuntime) or package is not None:
         if argv[:2] != ("uv", "run"):
