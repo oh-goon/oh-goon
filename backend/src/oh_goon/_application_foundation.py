@@ -96,6 +96,7 @@ class _LocalStateFoundation:
 
 def _build_capability_runtime(
     database: LocalDatabase,
+    journal: Journal,
     git: GitService,
     extensions: FleetExtensionStore,
     tools: FleetToolStore,
@@ -127,7 +128,7 @@ def _build_capability_runtime(
             content_store=content_store,
             run_parent=run_parent,
             output_observer_factory=live_output.observer,
-            lifecycle_observer_factory=Journal(database).execution_lifecycle_observer,
+            lifecycle_observer_factory=journal.execution_lifecycle_observer,
             diagnostics=diagnostics,
             terminal=terminal,
             standard_process_isolation=standard_process_isolation,
@@ -282,6 +283,7 @@ def build_runtime_foundation(
     live_output = GameTapeLiveOutputStore()
     executor_pool, capability_executor, content_store = _build_capability_runtime(
         database,
+        local.journal,
         git,
         extension_store,
         tool_store,
