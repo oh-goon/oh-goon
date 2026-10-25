@@ -5,6 +5,48 @@ import { DEFAULT_RUN_ID, FAILED_RUN_ID } from "./fixtures/runIds";
 import { openFixture, openRunFixture } from "./helpers/navigation";
 import { gameTapeFlow, gameTapeFlowSearch, gameTapeInspector, gameTapeRegion, runHistoryRegion } from "./helpers/locators";
 
+test("Campaign Journal readback and settled Step results stay visible after reload", async ({ page }) => {
+  await openRunFixture(page, { scenario: "agent-campaign", view: "summary" });
+  const tape = gameTapeRegion(page);
+  const campaign = tape.getByRole("region", { name: "Agent campaign Journal", exact: true });
+  await expect(campaign.getByText("converged", { exact: true }).first()).toBeVisible();
+  await expect(campaign.getByText("203", { exact: true })).toBeVisible();
+  await campaign.locator("summary").click();
+  await expect(campaign.getByText("committed-campaign-decision", { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 375, height: 800 });
+  expect(await campaign.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await page.reload();
+  await expect(campaign.getByText("converged", { exact: true }).first()).toBeVisible();
+  await tape.getByRole("button", { name: "Steps", exact: true }).click();
+  await gameTapeFlow(page).getByRole("button", { name: new RegExp(`Step 2: ${LONG_STEP_NAME}`) }).first().click();
+  const settlement = gameTapeInspector(page).getByRole("region", { name: "Accepted execution result", exact: true });
+  await expect(settlement.getByText("SUCCESS", { exact: true })).toBeVisible();
+  await expect(settlement.getByText("VERIFIED", { exact: true })).toBeVisible();
+});
+
+test("Successful child Run with no committed campaign decision remains explicitly incomplete", async ({ page }) => {
+  await openRunFixture(page, { scenario: "agent-campaign-missing", view: "summary" });
+  const campaign = gameTapeRegion(page).getByRole("region", { name: "Agent campaign Journal", exact: true });
+  await expect(campaign.getByText("Terminal decision unavailable", { exact: true })).toBeVisible();
+  await expect(campaign.getByText(/Child Run success does not establish campaign completion/)).toBeVisible();
+  await expect(campaign.getByText("converged", { exact: true })).toHaveCount(0);
+});
+
+test("Unadmitted campaign selection stays distinct from an admitted Run", async ({ page }) => {
+  await openRunFixture(page, { scenario: "agent-campaign-not-admitted", view: "summary" });
+  const campaign = gameTapeRegion(page).getByRole("region", { name: "Agent campaign Journal", exact: true });
+  await campaign.locator("summary").click();
+  const selection = campaign.getByRole("region", { name: "Selected work not admitted", exact: true });
+  await expect(selection.getByText("selected-but-not-admitted-run", { exact: true })).toBeVisible();
+  await expect(selection.getByText("not_admitted", { exact: true })).toBeVisible();
+  await expect(selection.getByText("unstarted-verification-step", { exact: true })).toBeVisible();
+  await expect(selection.getByText("verification · 2", { exact: true })).toBeVisible();
+  await expect(selection.getByRole("link")).toHaveCount(0);
+  await expect(selection.getByText("Admitted Run", { exact: true })).toHaveCount(0);
+  await page.setViewportSize({ width: 375, height: 800 });
+  expect(await selection.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+});
+
 test("Run configuration explanation exposes captured provenance through a read-only disclosure", async ({ page }) => {
   await openRunFixture(page);
   const tape = gameTapeRegion(page);

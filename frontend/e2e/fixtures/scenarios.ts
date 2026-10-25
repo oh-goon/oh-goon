@@ -5,6 +5,7 @@ export interface BrowserFixtureScenarioDefinition {
   readonly holdSubmit?: boolean;
   readonly submitFailureDiagnosticId?: string;
   readonly terminalOutcome?: "failed";
+  readonly campaignDecision?: "converged" | "missing" | "not_admitted";
 }
 
 export const BROWSER_FIXTURE_SCENARIOS = {
@@ -15,6 +16,9 @@ export const BROWSER_FIXTURE_SCENARIOS = {
   "slow-submit": { holdSubmit: true },
   "write-error-submit": { submitFailureDiagnosticId: "fixture-shared-run-rejected" },
   "failed-run": { terminalOutcome: "failed" },
+  "agent-campaign": { campaignDecision: "converged" },
+  "agent-campaign-missing": { campaignDecision: "missing" },
+  "agent-campaign-not-admitted": { campaignDecision: "not_admitted" },
 } satisfies Record<string, BrowserFixtureScenarioDefinition>;
 
 export type BrowserFixtureScenario = keyof typeof BROWSER_FIXTURE_SCENARIOS;

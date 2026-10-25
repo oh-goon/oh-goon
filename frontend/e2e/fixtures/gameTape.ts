@@ -1,9 +1,45 @@
 import { GameTapeStatus } from "@generated/enums";
-import type { GameTapeFailureHistory, GameTapeLiveOutputBatch, GameTapeLiveOutputChunk, GameTapeRunDiff } from "@generated/models";
+import type { AgentCampaignReadback, GameTapeFailureHistory, GameTapeLiveOutputBatch, GameTapeLiveOutputChunk, GameTapeRunDiff } from "@generated/models";
 
 import { PRIMARY_REPOSITORY } from "./identities";
 import { FIXTURE_PLAN_ID } from "./plans";
 import { FIXTURE_FINISHED, FIXTURE_NOW } from "./time";
+
+export function fixtureCampaignReadback(runId: string, terminal: boolean, unstarted = false): AgentCampaignReadback {
+  const campaignId = "campaign-browser-original";
+  return {
+    campaign_id: campaignId, journal_revision: 203, complete: true,
+    records: [
+      { session_id: "campaign-intent", revision: 1, fact: {
+        kind: "intent", campaign_id: campaignId, repository_id: PRIMARY_REPOSITORY.repository_id,
+        original_execution_digest: "original-execution-identity", maximum_runs: 8,
+        initial_phase: "review", initial_step_ids: ["review-a", "review-b"],
+        budget: { max_attempts: 2, timeout_seconds: 120, step_timeout_seconds: 30 },
+        deadline_at: FIXTURE_FINISHED, candidate_identity: "captured-candidate", scope_identity: "complete-review-scope", write_roots: ["src"],
+      } },
+      { session_id: "campaign-phase", revision: 2, fact: {
+        kind: "phase", campaign_id: campaignId, expected_revision: 1, fleet_run_id: runId,
+        execution_digest: "verification-execution-identity", selected_step_ids: ["verification"],
+        context: { repair_id: campaignId, attempt: 1, max_attempts: 8, limits: { deadline_at: FIXTURE_FINISHED, step_timeout_seconds: 30 }, phase: "verification", review_pass: 1, original_execution_digest: "original-execution-identity", candidate_identity: "captured-candidate", scope_identity: "complete-review-scope", write_roots: ["src"] },
+      } },
+      ...(unstarted ? [{ session_id: "unstarted-decision", revision: 3, fact: {
+        kind: "decision" as const, campaign_id: campaignId, expected_revision: 2,
+        decision_id: "admission-blocked-decision", phase_ordinal: 1, remaining_runs: 7,
+        consumed_runs: [{ fleet_run_id: runId, terminal_sequence: 202 }],
+        stop_reason: "execution_unresolved" as const, unresolved_run_ids: [],
+        unstarted_selection: {
+          selected_run_id: "selected-but-not-admitted-run", phase_ordinal: 2, phase: "verification",
+          selected_step_ids: ["unstarted-verification-step"], admission_status: "not_admitted" as const,
+        },
+      } }] : terminal ? [{ session_id: "campaign-decision", revision: 3, fact: {
+        kind: "decision" as const, campaign_id: campaignId, expected_revision: 2,
+        decision_id: "committed-campaign-decision", phase_ordinal: 1, remaining_runs: 7,
+        consumed_runs: [{ fleet_run_id: runId, terminal_sequence: 202 }],
+        stop_reason: "converged" as const, unresolved_run_ids: [], message: "Final review and verification were accepted.",
+      } }] : []),
+    ],
+  };
+}
 
 export function fixtureRunDiff(runId: string, baselineRunId: string): GameTapeRunDiff {
   return {
