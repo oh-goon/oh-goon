@@ -696,6 +696,9 @@ _DEPLOY_ORDER_TASK = (
     "deterministic dependency ordering, complete manifest validation and atomic CLI "
     "error handling. Use only the Python standard library. Before editing, execute "
     "the exact repository_tools.list Hashmarks command from the supplied instructions. "
+    "Also run the supplied repository_tools.search command with a private query file "
+    "containing order_services; create it under the native $TMPDIR scratch directory, "
+    "outside the working repository. Inspect the frozen source evidence before editing. "
     "Change only deploy_order/graph.py and deploy_order/__main__.py. "
     "Independent verification runs after your coding Step."
 )
@@ -745,9 +748,12 @@ class DeploymentOrderContract(unittest.TestCase):
     def test_invalid_shapes_and_undeclared_dependencies(self):
         for manifest in (None, [], "api", {"": []}, {1: []}, {"api": "db"},
                          {"api": ()}, {"api": None}, {"api": [1]}, {"api": [""]},
+                         {"api": [[]]}, {"api": [{}]}, {"api": [True]},
                          {"api": ["missing"]}, {"ok": [], "z": ["absent"]}):
+            before = copy.deepcopy(manifest)
             with self.subTest(manifest=manifest), self.assertRaises(ValueError):
                 order_services(manifest)
+            self.assertEqual(manifest, before)
 
     def test_cycles_including_disconnected_components(self):
         for manifest in ({"a": ["a"]}, {"a": ["b"], "b": ["a"]},
@@ -934,11 +940,13 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     handoff_keys = ("fleet_run_id", "status", "outcome", "source_admissions", "recorded_steps")
     verification_launches: list[tuple[str, ...]] = []
     hashmarks_followup_succeeded = False
+    hashmarks_search_succeeded = False
     skill_resource_reported = False
 
     def command_runner(*argv: str, **kwargs: Any) -> CommandResult:
-        nonlocal hashmarks_followup_succeeded, skill_resource_reported
+        nonlocal hashmarks_followup_succeeded, hashmarks_search_succeeded, skill_resource_reported
         if argv[0] == str(program):
+            native_diagnostics["native_invocation_observed"] = True
             assert len(native_occurrences) == expected_native_launches, (
                 "Each Run launches Codex once"
             )
@@ -987,9 +995,16 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             actual_home = kwargs["env"]["CODEX_HOME"]
             assert actual_home == str(home)
             result = run_command(*argv, **kwargs)
+            native_diagnostics["native_returncode"] = result.returncode
+            for relative, data in expected_source.items():
+                assert (Path(payload["captured_repository"]) / relative).read_bytes() == data
+            for relative, text in skill_files.items():
+                assert (Path(payload["captured_skill"]) / relative).read_bytes() == text.encode()
             events = parse_native_agent_events("codex", result.stdout, returncode=result.returncode)
             skill_resource_reported = "native-cli-skill-resource-canary" in events.final_text
             item_facts: list[dict[str, str | int]] = []
+            # Native typed edits expose ordering; shell writes are not classified here.
+            native_edit_observed = False
             for line in result.stdout.splitlines():
                 if not line.strip():
                     continue
@@ -997,6 +1012,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                 if not isinstance(item, dict):
                     continue
                 item_type = item.get("type")
+                if item_type == "file_change":
+                    native_edit_observed = True
                 if (
                     item_type == "command_execution"
                     and item.get("exit_code") == 0
@@ -1014,7 +1031,41 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                             and followup.get("producer_implementation_identity")
                             == require_loaded_hashmarks_runtime()
                         ):
-                            hashmarks_followup_succeeded = True
+                            if payload["repository_tools"]["list"] in item["command"]:
+                                assert set(followup["paths"]) == {
+                                    "repo/" + relative for relative in expected_source
+                                }
+                                coverage = followup["discovery_coverage"]
+                                assert coverage["admitted_member_count"] == len(expected_source)
+                                assert coverage["repository_wide_completeness"] == "not-claimed"
+                                assert (
+                                    coverage["absence_outside_admitted_scope"] == "not-admissible"
+                                )
+                                if not native_edit_observed:
+                                    hashmarks_followup_succeeded = True
+                            elif scenario == "deploy-order" and "retrieval" in followup:
+                                retrieval = followup["retrieval"]
+                                assert retrieval["query"] == "order_services"
+                                assert any(
+                                    match["path"] == "deploy_order/graph.py"
+                                    and match["name"] == "order_services"
+                                    for match in retrieval["results"]
+                                )
+                                source = followup["source"]
+                                assert source["authority"] == "repository-evidence-only"
+                                assert source["execution_effect"] == "none"
+                                assert any(
+                                    match["path"] == "deploy_order/graph.py"
+                                    and match["literal"] == "order_services"
+                                    and match["member_revision"]
+                                    and any(
+                                        line["text"].strip() == "return sorted(dependencies)"
+                                        for line in match["context_excerpt"]
+                                    )
+                                    for match in source["occurrences"]
+                                )
+                                if not native_edit_observed:
+                                    hashmarks_search_succeeded = True
                 if len(item_facts) >= 32:
                     continue
                 fact: dict[str, str | int] = {
@@ -1044,6 +1095,10 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                     )
                     fact["expected_interpreter"] = int(sys.executable in command)
                     fact["command_not_found"] = int("command not found" in output)
+                    if fact["hashmarks_command"]:
+                        fact["missing_query_file"] = int("No such file or directory" in output)
+                        fact["denied_query_file"] = int("Permission denied" in output)
+                        fact["database_unavailable"] = int("database is locked" in output)
                 item_facts.append(fact)
             native_diagnostics.update(
                 returncode=result.returncode,
@@ -1104,6 +1159,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             pytest.fail("The CLI must emit one valid Run detail", pytrace=False)
         assert native_facts == [(0, True, False)]
         assert hashmarks_followup_succeeded
+        if scenario == "deploy-order":
+            assert hashmarks_search_succeeded
         assert skill_resource_reported
         assert verification_launches == list(verifications)
         steps = detail["game_tape"]["repositories"][0]["steps"]
