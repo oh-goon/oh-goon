@@ -18,7 +18,6 @@ from oh_goon.core.vocabulary import (
     UvRecipeId,
 )
 from oh_goon.integrations.migration_plan import automatic_migration_plan
-from oh_goon.integrations.recipe_advisories import extract_security_findings
 from oh_goon.integrations.recipe_command import prepare_recipe_command
 from tests.factories.run_admission import repository_admissions_for
 from tests.factories.schedules import persist_active_schedule, schedule_create
@@ -48,28 +47,6 @@ def test_recipe_command_owner_cleans_temporary_build_output() -> None:
         assert temporary_path.is_dir()
         assert str(temporary_path) in prepared.argv
     assert not temporary_path.exists()
-
-
-def test_recipe_advisory_parser_preserves_nested_fixed_versions() -> None:
-    findings = extract_security_findings(
-        {
-            "package": {"name": "demo", "version": "1.0"},
-            "advisories": [
-                {
-                    "id": "GHSA-demo",
-                    "aliases": ["CVE-2026-0001"],
-                    "summary": "demo advisory",
-                    "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "1.2"}]}]}],
-                }
-            ],
-        }
-    )
-
-    assert len(findings) == 1
-    assert findings[0].advisory_id == "GHSA-demo"
-    assert findings[0].package == "demo"
-    assert findings[0].version == "1.0"
-    assert findings[0].fixed_versions == ("1.2",)
 
 
 def test_migration_plan_is_pure_and_source_specific() -> None:

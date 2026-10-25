@@ -112,7 +112,7 @@ Select this profile explicitly for trusted local coding tasks. Codex owns its
 saved authentication and refresh; Oh-Goon resolves the home path without reading,
 copying or exporting credentials. This requires a Codex version supporting
 `exec --ignore-user-config`, native permission profiles and `model_instructions_file`
-(validated with 0.163.0). No API provider entry or local model server is needed:
+(live trusted-local coding validated with 0.164.0). No API provider entry or local model server is needed:
 
 ```json
 {
@@ -135,6 +135,13 @@ copying or exporting credentials. This requires a Codex version supporting
 ```sh
 oh-goon ai --agent codex --profile signed-in --config providers.json --workspace /path/to/projects/app --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
 ```
+
+The same selected profile works with the initialized `agents/native-coding`
+Plan or Goon through `run.yml`, lock and run; see the [native coding
+workflow](../templates/plans/agents/native-coding/README.md). Preflight uses the
+authored Agent effects from the captured graph. Writable coding does not become
+a read-only review during preparation; read-only workflows still require their
+original isolation boundary.
 
 This is an original managed Run with headless report Steps. Oh-Goon configures
 Codex's native session instructions file with the exact frozen task, Hashmarks

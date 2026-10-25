@@ -12,9 +12,18 @@ from oh_goon.core.fleet_plan_tool_requirements import (
     required_execution_tool_names,
     step_execution_tool,
 )
-from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedOciBuildStep
+from oh_goon.core.models.fleet_plan import (
+    PLAN_CONTRACT_RETURN_CODE,
+    ResolvedFleetPlan,
+    ResolvedOciBuildStep,
+)
+from oh_goon.core.path_authority import StrictHostPathAuthority
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.engine.command import CommandResult
+from oh_goon.integrations._fleet_plan_host_resources import (
+    capture_host_tools,
+    preflight_run_capabilities,
+)
 from oh_goon.integrations.fleet_plan_admission import (
     AcceptedCicdRepositoryAdmission,
     inspect_cicd_repository,
@@ -35,7 +44,7 @@ def _resolver() -> FleetPlanResolver:
 
 
 @cache
-def _plan() -> tuple[ResolvedOciBuildStep, object]:
+def _plan() -> tuple[ResolvedOciBuildStep, ResolvedFleetPlan]:
     plan = _resolver().resolve(
         PLAN_TEMPLATES.source("oci/image").path,
         inputs={"base_registry_hostname": "registry.example.com"},
@@ -68,7 +77,7 @@ def test_oci_template_resolves_to_explicit_v25_authority() -> None:
         "oci/image.oci.tar",
         "oci/image-build.json",
     }
-    assert required_execution_tool_names(plan) == ("buildah",)
+    assert required_execution_tool_names(plan) == ("buildah", "crun")
     assert plan.requirements == ()
     assert oci_build_repository_policy_id(step).startswith("oci-build-repository-policy-")
 
@@ -84,6 +93,42 @@ def test_oci_summary_explains_registry_and_inner_network_boundary() -> None:
     assert "run_network=none" in summary
     assert "registry_retries=0" in summary
     assert "archive=oci/image.oci.tar" in summary
+
+
+def test_oci_builder_requires_and_freezes_admitted_runtime_companion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, plan = _plan()
+    admitted = tmp_path / "admitted"
+    admitted.mkdir()
+    for name in ("buildah", "ldd"):
+        executable = admitted / name
+        executable.write_bytes(b"admitted-" + name.encode())
+        executable.chmod(0o755)
+    ambient = tmp_path / "ambient"
+    ambient.mkdir()
+    ambient_runtime = ambient / "crun"
+    ambient_runtime.write_bytes(b"unadmitted-runtime")
+    ambient_runtime.chmod(0o755)
+    monkeypatch.setenv("PATH", str(ambient))
+    authority = StrictHostPathAuthority.create(
+        trusted_roots=(admitted,),
+        tool_search_paths=(admitted,),
+        runtime_inspector=admitted / "ldd",
+    )
+
+    with pytest.raises(FleetPlanInvalid, match="missing required tool.*crun"):
+        preflight_run_capabilities(plan, authority)
+
+    runtime = admitted / "crun"
+    runtime.write_bytes(b"admitted-runtime")
+    runtime.chmod(0o755)
+    preflight_run_capabilities(plan, authority)
+    bindings = capture_host_tools(plan, tmp_path / "frozen-tools", authority, cancel_requested=None)
+    assert set(bindings) == {"buildah", "crun"}
+    assert bindings["crun"].source_path == runtime
+    runtime.write_bytes(b"changed-after-capture")
+    assert bindings["crun"].execution_snapshot_path.read_bytes() == b"admitted-runtime"
 
 
 def test_oci_containerfile_containment_uses_declared_build_context(tmp_path: Path) -> None:
@@ -214,6 +259,8 @@ def test_oci_build_execution_uses_fixed_buildah_contract_and_writes_metadata(
         "--network",
         "none",
     )
+    assert argv[argv.index("--isolation") + 1] == "oci"
+    assert argv[argv.index("--runtime") + 1] == "crun"
     assert (argv[argv.index("--retry")], argv[argv.index("--retry") + 1]) == ("--retry", "0")
     assert "--http-proxy=false" in argv
     assert "--pull=always" in argv
