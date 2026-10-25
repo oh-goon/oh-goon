@@ -32,24 +32,27 @@ def _managed_tree(root: Path, version: str = "1.2.3") -> dict[str, bytes]:
     (root / "generated" / "release" / "static" / "index.html").write_text(
         "ok", encoding="utf-8"
     )
-    for area, source in (("goons", "goon.yml"), ("plans", "plan.yml")):
+    payload = {
+        "oh_goon/__init__.py": b"VALUE = 1\n",
+        "oh_goon/static/index.html": b"ok",
+    }
+    for area, source, content in (
+        ("goons", "goon.yml", b"version: 1\nsteps:\n- run: uv --version\n"),
+        ("plans", "plan.yml", b"version: 1\ngoons:\n- python/quality\n"),
+    ):
         package = root / "templates" / area / "python" / "quality"
         package.mkdir(parents=True)
-        (package / source).write_text("version: 1\n", encoding="utf-8")
+        (package / source).write_bytes(content)
         (package / "README.md").write_text("# python/quality\n", encoding="utf-8")
+        prefix = f"oh_goon/templates/{area}/python/quality"
+        payload[f"{prefix}/{source}"] = content
+        payload[f"{prefix}/README.md"] = b"# python/quality\n"
     backend = root / "backend"
     (backend / "pyproject.toml").write_text(
         "[project]\nname='oh-goon'\nversion='1.2.3'\n[project.scripts]\noh-goon='oh_goon.cli:main'\n",
         encoding="utf-8",
     )
-    return {
-        "oh_goon/__init__.py": b"VALUE = 1\n",
-        "oh_goon/static/index.html": b"ok",
-        "oh_goon/templates/goons/python/quality/goon.yml": b"version: 1\n",
-        "oh_goon/templates/goons/python/quality/README.md": b"# python/quality\n",
-        "oh_goon/templates/plans/python/quality/plan.yml": b"version: 1\n",
-        "oh_goon/templates/plans/python/quality/README.md": b"# python/quality\n",
-    }
+    return payload
 
 
 def _wheel(
