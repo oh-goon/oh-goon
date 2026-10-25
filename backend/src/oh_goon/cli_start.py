@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
-from oh_goon.api.local_access import ensure_local_access_token
-from oh_goon.api.ui import built_ui_available
 from oh_goon.cli_local_state import check_local_state_for_startup
 from oh_goon.core.errors import LeaguePreferencesInvalid
 from oh_goon.core.launch_manifest import LaunchIntent
@@ -59,6 +58,9 @@ def _render_reuse_decision(*, workspace: Path, decision: LocalLaunchReuseDecisio
 def run_start_command(args: argparse.Namespace) -> int | None:
     if args.command != "start":
         return None
+    from oh_goon.api.local_access import ensure_local_access_token
+    from oh_goon.api.ui import built_ui_available
+
     if check_local_state_for_startup() != 0:
         return 2
 
@@ -77,7 +79,7 @@ def run_start_command(args: argparse.Namespace) -> int | None:
         return reuse_result
     import uvicorn
 
-    loaded = _load_league_folders()
+    loaded = _load_league_folders(built_ui_available)
     if loaded is None:
         return 2
     folders, saved = loaded
@@ -88,11 +90,14 @@ def run_start_command(args: argparse.Namespace) -> int | None:
         bindings=bindings,
         folders=folders,
         saved=saved,
+        token_factory=ensure_local_access_token,
     )
     return _run_local_server(owner, launch_context, uvicorn)
 
 
-def _load_league_folders() -> tuple[LeagueFolderStore, tuple[Path, ...]] | None:
+def _load_league_folders(
+    built_ui_available: Callable[[], bool],
+) -> tuple[LeagueFolderStore, tuple[Path, ...]] | None:
     if not built_ui_available():
         print("The bundled oh-goon UI is not present in this source checkout/install.")
         print("For contributor development use: make dev")
@@ -116,6 +121,7 @@ def _create_local_launch(
     bindings: LocalLaunchBindingStore,
     folders: LeagueFolderStore,
     saved: tuple[Path, ...],
+    token_factory: Callable[[], str],
 ) -> tuple[LocalLaunchOwner, LocalLaunchRuntimeContext]:
     owner = LocalLaunchOwner.create(
         intent=intent,
@@ -124,7 +130,7 @@ def _create_local_launch(
         store=events,
         binding_store=bindings,
     )
-    token = ensure_local_access_token()
+    token = token_factory()
     LocalLaunchAccessStore.configured().publish(
         launch_id=owner.identity.launch_id,
         owner_generation=owner.identity.owner_generation,
