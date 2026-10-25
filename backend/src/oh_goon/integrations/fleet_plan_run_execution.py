@@ -54,7 +54,10 @@ from oh_goon.integrations._fleet_plan_step_sequence import FleetPlanStepSequence
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.integrations.fleet_plan_environment import require_environment
 from oh_goon.integrations.fleet_plan_import_applicability import applicable_plan_for_repository
-from oh_goon.integrations.fleet_plan_managed_runtime import prepare_managed_runtimes
+from oh_goon.integrations.fleet_plan_managed_runtime import (
+    prepare_managed_runtimes,
+    uv_preparation_requires_retained_scratch,
+)
 from oh_goon.integrations.fleet_plan_process_isolation import (
     ProcessIsolationBackend,
     TrustedLocalRunScope,
@@ -251,7 +254,12 @@ class FleetPlanRunExecutor:
         if self._run_parent is not None:
             self._run_parent.mkdir(parents=True, exist_ok=True)
         plan = self._with_project_delivery(plan, execution_target, repository_id)
-        with TemporaryDirectory(prefix="oh-goon-python-run-", dir=self._run_parent) as directory:
+        temporary = TemporaryDirectory(
+            prefix="oh-goon-python-run-", dir=self._run_parent, delete=False
+        )
+        retain_package_scratch = False
+        try:
+            directory = temporary.name
             layout = RunPathLayout.from_root(Path(directory))
             sources = materialize_plan_projects(plan, layout)
             workspaces: dict[str, Path] = {}
@@ -271,7 +279,28 @@ class FleetPlanRunExecutor:
             sequence = FleetPlanStepSequence(repository, runtime, output_observer)
             for step in plan.steps:
                 sequence.run_direct(step)
-            return self._outcome(sequence)
+            outcome = self._outcome(sequence)
+            if any(
+                step.status != "SKIPPED" and step.settlement.cleanup != "VERIFIED"
+                for step in outcome.steps
+            ):
+                retain_package_scratch = True
+                outcome = replace(
+                    outcome,
+                    stderr=outcome.stderr.rstrip()
+                    + f"\nPython Goon Run scratch retained while native process cleanup is incomplete: {directory}",
+                )
+            return outcome
+        except BaseException as error:
+            if uv_preparation_requires_retained_scratch(error):
+                retain_package_scratch = True
+                error.add_note(
+                    f"Python Goon Run scratch retained while native process cleanup is incomplete: {temporary.name}"
+                )
+            raise
+        finally:
+            if not retain_package_scratch:
+                temporary.cleanup()
 
     def _with_project_delivery(
         self, plan: ResolvedFleetPlan, target: FleetPlanTarget | None, repository_id: str | None

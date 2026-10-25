@@ -106,6 +106,7 @@ from oh_goon.integrations.fleet_plan_managed_runtime import (
     ManagedRuntimeSpec,
     PreCommitManagedRuntime,
     UvProjectManagedRuntime,
+    uv_preparation_requires_retained_scratch,
 )
 from oh_goon.integrations.fleet_plan_oci_execution import execute_oci_build
 from oh_goon.integrations.fleet_plan_oci_publish_execution import execute_oci_publish
@@ -307,7 +308,11 @@ def execute_direct_step(
             return physical_runner(*args, timeout=selected_timeout, **kwargs)
 
         runner = bounded_runner
-    with tempfile.TemporaryDirectory(prefix="oh-goon-step-") as private_root:
+    package = isinstance(step, ResolvedCommandStep) and step.project_source is not None
+    temporary = tempfile.TemporaryDirectory(
+        prefix="oh-goon-step-", dir=repository.parent if package else None, delete=not package
+    )
+    with temporary as private_root:
         paths = AttemptPathLayout.from_root(Path(private_root))
         for path in (paths.home, paths.tmp, paths.cache, paths.config):
             path.mkdir()
@@ -327,31 +332,49 @@ def execute_direct_step(
             git_command_runner=runner,
             managed_runtime=None,
         )
-        if isinstance(step, ResolvedCommandStep) and step.project_source is not None:
-            process, failure = _prepare_python_project_attempt(repository, step, process, runtime)
-            if failure is not None:
-                return failure
-        process = _with_lifecycle_observer(
-            process,
-            step,
-            step_order,
-            attempt_number,
-            runtime.lifecycle_observer,
-        )
-        return _execute_typed_step(
-            repository,
-            step,
-            _with_output_observer(
-                process,
-                step,
-                attempt_number,
-                output_observer,
-                runtime.diagnostics,
-                runtime.fleet_run_id,
-                runtime.repository_id,
-            ),
-            runtime,
-        )
+        retain_package_scratch = False
+        try:
+            outcome = None
+            if isinstance(step, ResolvedCommandStep) and step.project_source is not None:
+                process, outcome = _prepare_python_project_attempt(
+                    repository, step, process, runtime
+                )
+            if outcome is None:
+                process = _with_lifecycle_observer(
+                    process, step, step_order, attempt_number, runtime.lifecycle_observer
+                )
+                outcome = _execute_typed_step(
+                    repository,
+                    step,
+                    _with_output_observer(
+                        process,
+                        step,
+                        attempt_number,
+                        output_observer,
+                        runtime.diagnostics,
+                        runtime.fleet_run_id,
+                        runtime.repository_id,
+                    ),
+                    runtime,
+                )
+            if package and process_boundary_settled(outcome) is not True:
+                retain_package_scratch = True
+                outcome = replace(
+                    outcome,
+                    stderr=outcome.stderr.rstrip()
+                    + f"\nPython Goon Step scratch retained while native process cleanup is incomplete: {private_root}",
+                )
+            return outcome
+        except BaseException as error:
+            if package and uv_preparation_requires_retained_scratch(error):
+                retain_package_scratch = True
+                error.add_note(
+                    f"Python Goon Step scratch retained while native process cleanup is incomplete: {private_root}"
+                )
+            raise
+        finally:
+            if package and not retain_package_scratch:
+                temporary.cleanup()
 
 
 def execute_strict_step(

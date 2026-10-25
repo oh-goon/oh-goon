@@ -68,7 +68,9 @@ def uv_preparation_requires_retained_scratch(error: BaseException) -> bool:
     supervisor = getattr(error, "supervisor", None)
     if supervisor is None:
         supervisor = getattr(error.__cause__, "supervisor", None)
-    return supervisor is not None and supervisor.final_process_group_quiescent is not True
+    if supervisor is None:
+        return hasattr(error, "supervisor") or hasattr(error.__cause__, "supervisor")
+    return supervisor.final_process_group_quiescent is not True
 
 
 @dataclass(frozen=True, slots=True)

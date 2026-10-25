@@ -8,8 +8,9 @@ import os
 import shutil
 import subprocess
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 import pytest
 import yaml
@@ -21,6 +22,8 @@ from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FleetRunState
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.product_identity import repository_id, schedule_repository_fleet_run_id
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
+from oh_goon.integrations import fleet_plan_step_execution
 from oh_goon.integrations.fleet_content_store import FleetContentObject
 from oh_goon.runtime.league_folders import LeagueFolderStore
 from oh_goon.services import fleet_run_control_plane
@@ -110,6 +113,72 @@ def test_package_run_replay_reuses_original_delivery_and_rejects_changed_authori
             ),
             **options,
         )
+
+
+@pytest.mark.parametrize("phase", ("preparation", "command"))
+@pytest.mark.parametrize(
+    "quiescent", (True, False, None), ids=("settled", "unsettled", "unavailable")
+)
+def test_native_package_lifecycle_retains_scratch_only_when_terminal_supervision_is_unsettled(
+    execution: tuple[ApplicationRuntime, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    quiescent: bool | None,
+) -> None:
+    """Inject terminal receipt loss after real uv/application work, without claiming live survivors."""
+    runtime, repository, plan = execution
+    runtime.plans.lock(plan)
+    native_runner = fleet_plan_step_execution._direct_step_command_runner
+    inputs: list[tuple[Path, Path, Path]] = []
+    injected = False
+
+    def observe_native(*argv: str, **kwargs: Any) -> CommandResult:
+        nonlocal injected
+        result = native_runner(*argv, **kwargs)
+        environment = Path(kwargs["env"]["UV_PROJECT_ENVIRONMENT"])
+        package_source = Path(argv[argv.index("--project") + 1])
+        inputs.append((kwargs["cwd"], environment, package_source))
+        selected = argv[:2] == ("uv", "sync" if phase == "preparation" else "run")
+        if selected and not injected:
+            injected = True
+            if quiescent is None:
+                return replace(result, supervisor=cast(CommandSupervisorReceipt, None))
+            return replace(
+                result,
+                supervisor=replace(result.supervisor, final_process_group_quiescent=quiescent),
+            )
+        return result
+
+    monkeypatch.setattr(fleet_plan_step_execution, "_direct_step_command_runner", observe_native)
+    started = runtime.plans.run(plan, repository_ids={repository_id(repository)})
+    completed = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
+    assert injected and inputs
+    operation = completed.operations[0]
+    assert isinstance(operation.evidence, FleetPlanOperationEvidence)
+    first = operation.evidence.plan.steps[0]
+    if quiescent is True:
+        assert completed.game_tape.status.value == "PASSED"
+        assert operation.resource_settlement == "SETTLED"
+        artifact = operation.evidence.plan.steps[-1].artifacts[0]
+        assert artifact.status == "PRESENT"
+        expected = (json.dumps({"total_order_value": "1236.70"}) + "\n").encode()
+        assert artifact.sha256 == hashlib.sha256(expected).hexdigest()
+        for workspace, environment, package_source in inputs:
+            assert not workspace.exists()
+            assert not environment.exists()
+            assert not package_source.exists()
+    else:
+        assert completed.game_tape.status.value != "PASSED"
+        assert operation.resource_settlement == "UNRESOLVED"
+        assert first.settlement.outcome == "INCOMPLETE"
+        assert first.settlement.cleanup == ("UNVERIFIED" if quiescent is False else "UNAVAILABLE")
+        assert all(step.status == "SKIPPED" for step in operation.evidence.plan.steps[1:])
+        for workspace, environment, package_source in inputs:
+            assert workspace.is_dir()
+            assert environment.is_dir()
+            assert package_source.is_dir()
+    assert not (repository / ".venv").exists()
+    assert not (repository / ".showcase").exists()
 
 
 def test_schedule_keeps_captured_package_after_source_removal_and_serialization(
