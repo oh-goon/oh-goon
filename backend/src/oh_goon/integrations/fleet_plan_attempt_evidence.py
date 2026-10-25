@@ -13,8 +13,8 @@ from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityRuntimeEvidence,
 )
 from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
     ResolvedCommandStep,
-    ResolvedLocalSearchAgentStep,
     ResolvedPlanStep,
     ResolvedPreCommitStep,
 )
@@ -138,7 +138,7 @@ def _direct_tool_evidence(
     return PlanToolEvidence(
         name=(
             path.name
-            if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None
+            if isinstance(step, ResolvedAgentStep) and step.workload.harness == "native"
             else Path(executable).name or executable
         ),
         origin=(
@@ -154,7 +154,7 @@ def _strict_tool_evidence(
     repository: Path,
     attempt: FleetPlanStepAttempt,
 ) -> PlanToolEvidence | None:
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
+    if isinstance(step, ResolvedAgentStep) and step.workload.harness == "native":
         # Native execution has no strict backend. A failed/replayed attempt must
         # not reinterpret its selected path as a strict host-tool binding.
         return None

@@ -19,17 +19,11 @@ from oh_goon.core.models.agent_review import (
     accept_review,
     review_scope,
 )
-from oh_goon.core.models.fleet_observation import (
-    NativeAgentObservation,
-    NativeServiceExecutionEvidence,
-)
 from oh_goon.core.models.fleet_plan import (
     ResolvedCommandStep,
     ResolvedFleetPlan,
-    ResolvedLocalSearchAgentStep,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
-    CompletedPlanStepExecution,
     FailedPlanStepExecution,
     FleetPlanResult,
     PlanEgressEvidence,
@@ -38,6 +32,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanOutputEvidence,
     PlanStandardIsolationEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
     SkippedPlanStepExecution,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
@@ -91,7 +86,7 @@ def test_shipped_loop_freezes_occurrences_and_shares_one_candidate(tmp_path):
         write_roots=("code.txt",),
     )
     assert len(campaign.plan.steps) == 4
-    assert all(s.harness == "provider-review" for s in campaign.plan.steps)
+    assert all(s.workload.harness == "provider-review" for s in campaign.plan.steps)
 
 
 def test_bound_skills_and_public_inputs_follow_native_projection(tmp_path):
@@ -118,7 +113,7 @@ def test_bound_skills_and_public_inputs_follow_native_projection(tmp_path):
     )
     assert selections == [connection]
     assert len({h.source.authored_skill_reference for h in deliveries.values()}) == 6
-    assert {s.connection.profile for s in plan.steps if s.kind == "agent"} == {"review"}
+    assert {s.workload.connection.profile for s in plan.steps if s.kind == "agent"} == {"review"}
 
 
 def test_native_apply_argument_bounds_are_checked_before_the_first_phase(tmp_path):
@@ -260,7 +255,7 @@ def test_same_native_workflow_keeps_phase_occurrences_when_implementation_change
     assert {key: value.handoff_identity for key, value in deliveries.items()} == {
         key: value.handoff_identity for key, value in another_deliveries.items()
     }
-    assert {step.native_agent.agent for step in another.steps if step.kind == "agent"} == {
+    assert {step.workload.native_agent.agent for step in another.steps if step.kind == "agent"} == {
         "opencode"
     }
     assert plan.plan_id != another.plan_id
@@ -277,10 +272,13 @@ def test_same_native_workflow_keeps_phase_occurrences_when_implementation_change
         tuple(step.step_id for step in campaign.plan.steps)
         == agent_review_phases(another)["review"]
     )
-    assert all(step.role == "review" and step.harness == "native" for step in campaign.plan.steps)
+    assert all(
+        step.workload.role == "review" and step.workload.harness == "native"
+        for step in campaign.plan.steps
+    )
     campaign._recapture(require_unchanged=True)
     assert all(
-        step.native_agent.agent == "opencode"
+        step.workload.native_agent.agent == "opencode"
         for step in campaign.original.steps
         if step.kind == "agent"
     )
@@ -336,15 +334,15 @@ def test_codex_service_campaign_retains_read_only_reasoning_and_native_apply(tmp
     assert {handoff.requested_effects.repository_access for handoff in handoffs.values()} == {
         "read_only"
     }
-    assert {step.role for step in plan.steps if step.kind == "agent"} == {
+    assert {step.workload.role for step in plan.steps if step.kind == "agent"} == {
         "review",
         "adjudication",
         "proposal",
     }
-    assert all(step.native_agent == selected for step in campaign.plan.steps)
+    assert all(step.workload.native_agent == selected for step in campaign.plan.steps)
     campaign.phase = "repair"
     proposal, apply = campaign._select_phase().steps
-    assert proposal.role == "proposal" and proposal.native_agent == selected
+    assert proposal.workload.role == "proposal" and proposal.workload.native_agent == selected
     assert isinstance(apply, ResolvedCommandStep)
     assert apply.argv.count("--write-root") == 2
     assert "code.txt" in apply.argv and "regression.txt" in apply.argv
@@ -429,6 +427,16 @@ def test_service_daemon_shutdown_preserves_failed_preflight_timeout_and_caller_c
         repository_state_before="source",
         repository_state_after="source",
         attempts=(attempt,),
+        settlement=PlanStepSettlementEvidence(
+            outcome="CANCELLED" if cancelled else "TIMED_OUT" if returncode == 124 else "FAILED",
+            cleanup="VERIFIED",
+            reason="CALLER_CANCELLED"
+            if cancelled
+            else "DEADLINE_EXPIRED"
+            if returncode == 124
+            else "FAILED_EXIT",
+            observed_returncode=returncode,
+        ),
     )
     skipped = tuple(
         SkippedPlanStepExecution(
@@ -710,7 +718,7 @@ def test_shipped_native_plan_swaps_pi_opencode_without_reauthoring_and_keeps_ver
     assert authored.decode() == PLAN_TEMPLATES.source(plan_key).content
     first, handoffs, _ = resolver.resolve_frozen_agents(path, **options)
     step = first.steps[0]
-    assert step.harness == "native" and step.role == role
+    assert step.workload.harness == "native" and step.workload.role == role
     assert handoffs[step.step_id].requested_effects.repository_access == access
     assert handoffs[step.step_id].requested_effects.recipients == ("company",)
     assert handoffs[step.step_id].source.acceptance_profile == acceptance
@@ -761,7 +769,16 @@ def test_native_phase_constraints_fail_before_first_phase(tmp_path, attack):
         if attack == "wrong_role":
             first, *rest = plan.steps
             plan = plan.model_copy(
-                update={"steps": (first.model_copy(update={"role": "report"}), *rest)}
+                update={
+                    "steps": (
+                        first.model_copy(
+                            update={
+                                "workload": first.workload.model_copy(update={"role": "report"})
+                            }
+                        ),
+                        *rest,
+                    )
+                }
             )
         AgentReviewRepairCampaign(
             plan,
@@ -863,121 +880,25 @@ def test_review_context_retains_source_and_original_skill_for_adjudication(tmp_p
     assert (repo / "code.txt").read_text() == "broken\n"
 
 
-@pytest.mark.parametrize(
-    "quiescent,cleanup,shutdown",
-    [
-        (None, None, None),
-        (False, None, None),
-        (True, None, None),
-        (True, "not_recorded", None),
-        (True, "unverified", None),
-        (True, "verified", None),
-        (True, None, "qualified"),
-        (False, None, "qualified"),
-        (True, "unverified", "qualified"),
-        (True, None, "missing_execution"),
-        (True, None, "wrong_profile"),
-        (True, None, "wrong_implementation"),
-        (True, None, "wrong_occurrence"),
-        (True, None, "wrong_role"),
-        (True, None, "wrong_kind"),
-        (True, None, "unsettled"),
-        (True, None, "failed"),
-        (True, None, "write"),
-        (True, None, "timeout"),
-    ],
-)
-def test_structured_phase_requires_affirmative_boundary_cleanup(
-    tmp_path, quiescent, cleanup, shutdown
+@pytest.mark.parametrize("quiescent", [None, False, True])
+@pytest.mark.parametrize("cleanup", [None, "not_recorded", "unverified", "verified"])
+@pytest.mark.parametrize("completion", ["process_exit", "service_shutdown"])
+def test_structured_phase_consumes_settled_result_and_affirmative_cleanup(
+    tmp_path, quiescent, cleanup, completion
 ):
+    from oh_goon.engine.command import CommandSupervisorReceipt
+    from oh_goon.integrations._fleet_plan_step_evidence import attempt_evidence, step_evidence
+
     expected = ResolvedCommandStep(step_id="review", argv=("true",))
-    observations = ()
-    if shutdown is not None:
-        selected = ResolvedNativeAgent(
-            agent="codex",
-            profile_name="owned-service",
-            definition=NativeAgentDefinition(executable="/native/codex"),
-            profile=NativeAgentProfile(
-                codex_service=CodexServiceConnection(
-                    home="/private/native", model="gpt-6.1-sol", reasoning_effort="low"
-                )
-            ),
-            executable_sha256="a" * 64,
-        )
-        expected = ResolvedLocalSearchAgentStep(
-            step_id="review",
-            argv=("python",),
-            harness="native",
-            role="review",
-            delivery_sha256="b" * 64,
-            handoff_identity="handoff",
-            source_step_id="review",
-            native_agent=selected,
-        )
-        execution = NativeServiceExecutionEvidence(
-            configuration_id="original-service-configuration",
-            permission_profile_id="original-native-profile",
-            native_version="0.163.0",
-            repository_access="write" if shutdown == "write" else "read_only",
-            disabled_features=(),
-        )
-        observations = (
-            NativeAgentObservation(
-                agent="codex",
-                implementation_identity="codex:sha256:"
-                + ("c" if shutdown == "wrong_implementation" else "a") * 64,
-                profile="other" if shutdown == "wrong_profile" else selected.profile_name,
-                input_identity="original-input",
-                occurrence="other" if shutdown == "wrong_occurrence" else "review",
-                source_identity="original-source",
-                role="proposal" if shutdown == "wrong_role" else "review",
-                events=(),
-                native_event_count=1,
-                settled=shutdown != "unsettled",
-                failed=shutdown == "failed",
-                execution=None if shutdown == "missing_execution" else execution,
-            ),
-        )
     plan = ResolvedFleetPlan.create(
         name="protected-phase",
         description="",
         requirements=(),
         execution=MaintenanceExecutionPolicy(),
         steps=(expected,),
-        native_agent=selected if shutdown is not None else None,
     )
-    output = PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
-    supervisor = PlanExecutionSupervisorEvidence.model_validate(
-        {
-            "process_group_cleanup_requested": True,
-            "cleanup_reason": "output_cleanup"
-            if shutdown is None
-            else "timeout"
-            if shutdown == "timeout"
-            else "cancel",
-            **(
-                {"final_process_group_quiescent": quiescent, "forced_termination": True}
-                if quiescent is not None
-                else {}
-            ),
-        }
-    )
-    # Existing retained receipts with no terminal observation stay unknown on readback.
-    supervisor = PlanExecutionSupervisorEvidence.model_validate_json(supervisor.model_dump_json())
-    assert supervisor.final_process_group_quiescent is quiescent
-    if quiescent is None:
-        assert "final_process_group_quiescent" not in supervisor.model_dump()
-        assert supervisor.forced_termination is None
-    attempt = PlanStepAttemptEvidence(
-        attempt=1,
-        returncode=0,
-        stdout_evidence=output,
-        stderr_evidence=output,
-        repository_state_before="source",
-        repository_state_after="source",
-        egress=PlanEgressEvidence(mode="none"),
-        supervisor=supervisor,
-        standard_isolation=PlanStandardIsolationEvidence(
+    isolation = (
+        PlanStandardIsolationEvidence(
             backend=PlanIsolationBackendEvidence(
                 backend_id="bubblewrap",
                 configuration_id="fixture-boundary",
@@ -991,44 +912,46 @@ def test_structured_phase_requires_affirmative_boundary_cleanup(
             filesystem_cleanup=cleanup,
         )
         if cleanup is not None
-        else None,
+        else None
     )
-    step = CompletedPlanStepExecution(
-        step_id="review",
-        kind="agent" if shutdown is not None and shutdown != "wrong_kind" else "command",
-        stdout_evidence=output,
-        stderr_evidence=output,
+    outcome = StepOutcome(
+        argv=("true",),
+        returncode=0,
+        completion=completion,
+        supervisor=CommandSupervisorReceipt(
+            process_group_cleanup_requested=True,
+            cleanup_reason="cancel" if completion == "service_shutdown" else "output_cleanup",
+            final_process_group_quiescent=quiescent,
+        )
+        if quiescent is not None
+        else None,
+        standard_isolation=isolation,
+    )
+    attempt = attempt_evidence(
+        step=expected,
+        attempt=1,
+        outcome=outcome,
         repository_state_before="source",
         repository_state_after="source",
+        worktree_files_after=(),
+    )
+    step = step_evidence(
+        step=expected,
+        outcome=outcome,
+        repository_state_before="source",
+        repository_state_after="source",
+        worktree_files_after=(),
         attempts=(attempt,),
-        observations=observations,
+        artifacts=(),
     )
-    target = (
-        FleetPlanTarget(
-            kind="fleet_plan",
-            plan=plan,
-            source=PlanFileSource(sha256="0" * 64),
-            identity=structural_execution_identity(plan),
-            agent_deliveries=(
-                AgentStepDeliveryReference(
-                    step_id="review",
-                    handoff_identity="handoff",
-                    delivery_sha256="b" * 64,
-                    reference_id="original-delivery",
-                ),
-            ),
-        )
-        if shutdown is not None
-        else structural_fleet_plan_target(plan)
-    )
+    target = structural_fleet_plan_target(plan)
     repository = RepositoryIdentity(path=tmp_path)
     report = make_operation_report(
         repository,
         OperationAction.EXECUTE_PLAN,
         target=target,
         evidence=FleetPlanOperationEvidence(
-            kind="FLEET_PLAN",
-            plan=FleetPlanResult(plan_id=plan.plan_id, steps=(step,)),
+            kind="FLEET_PLAN", plan=FleetPlanResult(plan_id=plan.plan_id, steps=(step,))
         ),
     )
     now = utc_now()
@@ -1050,8 +973,24 @@ def test_structured_phase_requires_affirmative_boundary_cleanup(
         operations=(report,),
         repository_admissions=repository_admissions_for(target, (repository,)),
     )
-    if quiescent is True and cleanup in (None, "verified") and shutdown in (None, "qualified"):
+    if quiescent is True and cleanup in (None, "verified"):
         assert completed_phase_steps(detail, plan) == (step,)
+        assert step.settlement.outcome == "SUCCESS"
+        # Reopening a receipt consumes the same settled meaning; it does not parse native events.
+        reopened = type(step).model_validate_json(
+            step.model_dump_json(exclude_computed_fields=True)
+        )
+        assert reopened.settlement == step.settlement
+        missing = step.model_copy(update={"settlement": PlanStepSettlementEvidence()})
+        missing_report = report.model_copy(
+            update={
+                "evidence": report.evidence.model_copy(
+                    update={"plan": FleetPlanResult(plan_id=plan.plan_id, steps=(missing,))}
+                )
+            }
+        )
+        with pytest.raises(FleetPlanInvalid, match="complete successful native attempt evidence"):
+            completed_phase_steps(detail.model_copy(update={"operations": (missing_report,)}), plan)
     else:
         with pytest.raises(FleetPlanInvalid, match="complete successful native attempt evidence"):
             completed_phase_steps(detail, plan)
@@ -1098,6 +1037,46 @@ def test_authored_selection_conflicts_reject_before_registry_or_source_capture(
         require_phases = True
     with pytest.raises(FleetPlanInvalid):
         resolver.resolve_frozen_agents(path, require_review_phases=require_phases, **options)
+
+
+@pytest.mark.parametrize("phase", ["regression", "verification"])
+@pytest.mark.parametrize("include_native_command", [False, True])
+def test_inprocess_observation_in_native_check_phase_rejects_before_capture(
+    tmp_path, monkeypatch, phase, include_native_command
+):
+    from shutil import copytree
+
+    import oh_goon.services.agent_skill_registry as registry
+    from oh_goon.runtime.goon_templates import GoonTemplateStore
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+
+    resolver, path, _, options = agent_review_case(tmp_path)
+    baseline, _, _ = resolver.resolve_frozen_agents(path, require_review_phases=True, **options)
+    assert all(
+        step.kind == "command"
+        for step in baseline.steps
+        if step.step_id in agent_review_phases(baseline)[phase]
+    )
+    catalog = tmp_path / "selected-goons"
+    copytree(GoonTemplateStore().root / "agents", catalog / "agents")
+    source = catalog / "agents" / phase / "goon.yml"
+    content = source.read_text()
+    inventory = "- id: inventory\n  uses: dependency_inventory\n"
+    if include_native_command:
+        content += inventory
+    else:
+        content = content[: content.index("steps:")] + "steps:\n" + inventory
+    source.write_text(content)
+    selected = FleetPlanResolver(goon_templates=GoonTemplateStore(catalog))
+
+    def acquired(*args, **kwargs):
+        pytest.fail("in-process native-check phase reached Skill acquisition or source capture")
+
+    monkeypatch.setattr(registry, "original_skill_aliases", acquired)
+    with pytest.raises(
+        FleetPlanInvalid, match=f"{phase} requires native verification.*dependency_inventory"
+    ):
+        selected.resolve_frozen_agents(path, require_review_phases=True, **options)
 
 
 def test_frozen_capture_reuses_the_exact_preflight_graph_without_rediscovery(tmp_path, monkeypatch):

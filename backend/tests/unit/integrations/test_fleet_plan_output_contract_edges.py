@@ -38,7 +38,7 @@ from oh_goon.engine.command import (
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations._fleet_plan_step_evidence import attempt_evidence
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, from_command
 from oh_goon.integrations.fleet_plan_output_limit import bounded_execution_failure_outcome
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import PhysicalFleetPlanExecutorHarness
@@ -359,6 +359,59 @@ def test_unsettled_boundary_cannot_publish_retry_or_run_later_steps(
     for skipped in retained.steps[1:]:
         assert skipped.status == "SKIPPED"
         assert "cleanup is unverified" in skipped.reason
+
+
+@pytest.mark.parametrize("supervised", [True, False])
+def test_missing_native_receipt_blocks_declared_continue_and_finalizer(
+    tmp_path, monkeypatch, supervised
+):
+    repository = tmp_path / "repo"
+    seed_cicd_repository(repository)
+    (repository / "result.txt").write_text("bounded result")
+    plan = ResolvedFleetPlan.create(
+        name="receiving-boundary",
+        description="",
+        execution=MaintenanceExecutionPolicy(),
+        steps=(
+            ResolvedCommandStep(
+                step_id="work",
+                argv=("work",),
+                on_failure=StepFailurePolicy.CONTINUE,
+                artifacts=(PlanArtifactDeclaration(path="result.txt"),),
+            ),
+            ResolvedCommandStep(step_id="followup", argv=("followup",)),
+            ResolvedCommandStep(
+                step_id="finalizer",
+                argv=("finalizer",),
+                lifecycle=StepLifecycle.FINALIZER,
+                on_failure=StepFailurePolicy.CONTINUE,
+            ),
+        ),
+    )
+    calls = []
+
+    def received(_repository, step, *args, **kwargs):
+        calls.append(step.step_id)
+        return (
+            from_command(CommandResult(argv=step.argv, returncode=0, stdout="", stderr=""))
+            if supervised
+            else StepOutcome(argv=step.argv, returncode=0)
+        )
+
+    monkeypatch.setattr("oh_goon.integrations._fleet_plan_step_retry.execute_direct_step", received)
+    result = PhysicalFleetPlanExecutorHarness(GitService()).execute(
+        repository, plan, cancel_requested=None
+    )
+    assert calls == (["work", "followup", "finalizer"] if supervised else ["work"])
+    assert [step.status for step in result.steps] == (
+        ["COMPLETED"] * 3 if supervised else ["FAILED", "SKIPPED", "SKIPPED"]
+    )
+    first = result.steps[0]
+    assert first.settlement.outcome == ("SUCCESS" if supervised else "INCOMPLETE")
+    assert bool(first.artifacts) is supervised
+    if not supervised:
+        assert first.returncode == PLAN_CONTRACT_RETURN_CODE
+        assert first.settlement.cleanup == "UNAVAILABLE"
 
 
 @pytest.mark.parametrize("failure", ["timeout", "output_limit"])

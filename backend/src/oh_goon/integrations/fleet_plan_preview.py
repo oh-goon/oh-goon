@@ -7,8 +7,8 @@ from oh_goon.core.errors import FleetPlanInvalid, StateConflict
 from oh_goon.core.fleet_plan_output_refs import step_output_reference
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
+    ResolvedAgentStep,
     ResolvedFleetPlan,
-    ResolvedLocalSearchAgentStep,
     ResolvedPlanStep,
     ResolvedPreCommitStep,
     StepStatusCondition,
@@ -76,7 +76,7 @@ def repository_plan_admission_evidence(
     """Observe one repository/Plan semantic admission fact without effects."""
 
     if isinstance(plan.execution, CicdExecutionPolicy) and any(
-        isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None
+        isinstance(step, ResolvedAgentStep) and step.workload.harness == "native"
         for step in plan.steps
     ):
         raise FleetPlanInvalid(

@@ -148,7 +148,7 @@ def execute_strict_with_retries(
             step_order=step_order,
             output_observer=output_observer,
         )
-        if process_boundary_settled(outcome) is False:
+        if process_boundary_settled(outcome) is not True:
             after = runtime.git.observe(attempt_repository, runtime.cancel_requested)
             publication = AttemptPublication({}, (), outcome, None, None)
         else:
@@ -221,7 +221,7 @@ def _execute_with_retries(
         published_evidence = physical.output_evidence
         succeeded = step_succeeded(step, outcome)
         decision: PlanRetryDecisionEvidence | None = None
-        cleanup_failed = process_boundary_settled(outcome) is False
+        cleanup_failed = process_boundary_settled(outcome) is not True
         if not outcome.skipped and not succeeded and not cleanup_failed:
             decision = retry_decision(
                 policy, attempt_number=attempt_number, exit_code=outcome.returncode
@@ -248,7 +248,7 @@ def _successful_direct_publication(
     outcome: StepOutcome,
     repository: Path,
 ) -> AttemptPublication:
-    if outcome.skipped or process_boundary_settled(outcome) is False:
+    if outcome.skipped or process_boundary_settled(outcome) is not True:
         return AttemptPublication({}, (), outcome, None, None)
     if not step_succeeded(step, outcome):
         # Explicitly continued, single-attempt direct command Steps may transport

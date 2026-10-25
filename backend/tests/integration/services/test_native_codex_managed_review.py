@@ -383,7 +383,7 @@ def test_installed_managed_codex_reviews_without_workspace_or_host_effects(
                                 "event_count": observation.native_event_count,
                                 "omitted_observations": observation.omitted_observations,
                             }
-                            for observation in step.native_agent_observations[:4]
+                            for observation in step.workload.native_agent_observations[:4]
                         ],
                     }
                     for step in steps[:4]

@@ -10,8 +10,9 @@ from oh_goon.core.models.fleet_plan import (
     AgentPlanStep,
     AgentResultRole,
     CompiledGoonImportStep,
+    DependencyInventoryPlanStep,
     PlanStep,
-    ResolvedLocalSearchAgentStep,
+    ResolvedAgentStep,
     ResolvedPlanStep,
 )
 
@@ -23,16 +24,22 @@ PHASES = ("review", "adjudicate", "repair", "regression", "verification")
 
 def agent_phase_role(step: PlanStep | ResolvedPlanStep) -> AgentResultRole | None:
     """Native author role and historical provider harnesses share one phase meaning."""
-    if not isinstance(step, (AgentPlanStep, ResolvedLocalSearchAgentStep)):
+    if not isinstance(step, (AgentPlanStep, ResolvedAgentStep)):
         return None
-    if step.harness == "native":
+    if isinstance(step, ResolvedAgentStep):
+        if step.workload.harness == "native":
+            return step.workload.role
+        harness: str = step.workload.harness
+    elif step.harness == "native":
         return step.role
+    else:
+        harness = step.harness
     roles: dict[str, AgentResultRole] = {
         "provider-review": "review",
         "provider-adjudicate": "adjudication",
         "provider-proposal": "proposal",
     }
-    return roles.get(step.harness)
+    return roles.get(harness)
 
 
 def agent_review_phases(plan: ResolvedFleetPlan) -> dict[str, tuple[str, ...]]:
@@ -80,10 +87,13 @@ def validate_agent_phase_steps(
         )
     for phase in ("regression", "verification"):
         if any(
-            isinstance(steps[item], (AgentPlanStep, ResolvedLocalSearchAgentStep))
-            for item in selected[phase]
+            isinstance(steps[item], (AgentPlanStep, ResolvedAgentStep)) for item in selected[phase]
         ):
             raise FleetPlanInvalid(f"{phase} requires native verification Steps")
+        if any(isinstance(steps[item], DependencyInventoryPlanStep) for item in selected[phase]):
+            raise FleetPlanInvalid(
+                f"{phase} requires native verification; dependency_inventory is an in-process observation"
+            )
     for step in steps.values():
         assert not isinstance(step, CompiledGoonImportStep)
         if isinstance(step, AgentPlanStep):

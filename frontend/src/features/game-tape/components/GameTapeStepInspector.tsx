@@ -80,6 +80,16 @@ export function GameTapeStepInspector({ step, artifacts = [], failureHistory = n
       </> : null}
     </section> : null}
     <GameTapeStepArtifacts artifacts={artifacts} ownerIdentity={step.step_execution_id} />
+    <section className="game-tape-provenance" aria-label={t("gameTape.settlement.title")}>
+      <strong>{t("gameTape.settlement.title")}</strong>
+      {step.settlement ? <dl className="game-tape-inspector__facts">
+        <div><dt>{t("gameTape.settlement.outcome")}</dt><dd>{step.settlement.outcome}</dd></div>
+        <div><dt>{t("gameTape.settlement.cleanup")}</dt><dd>{step.settlement.cleanup}</dd></div>
+        <div><dt>{t("gameTape.settlement.reason")}</dt><dd>{step.settlement.reason}</dd></div>
+        <div><dt>{t("gameTape.settlement.owner")}</dt><dd><code>{step.settlement.owner}</code></dd></div>
+        <div><dt>{t("gameTape.settlement.observedExit")}</dt><dd>{step.settlement.observed_returncode ?? "—"}</dd></div>
+      </dl> : <p>{t("gameTape.settlement.unavailable")}</p>}
+    </section>
     <GameTapeNativeAgentObservations observations={step.native_agent_observations ?? []} />
     <details className="advanced-disclosure game-tape-inspector__technical" open={technicalOpen} onToggle={(event) => { const next = event.currentTarget.open; if (next === technicalOpen) return; onTechnicalOpenChange?.(next); }}>
       <summary>{t("gameTape.inspector.technicalDetails")}</summary>

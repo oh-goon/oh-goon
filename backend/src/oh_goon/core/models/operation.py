@@ -399,6 +399,24 @@ class OperationReport(StrictModel):
     evidence: OperationEvidence
 
     @property
+    def resource_settlement(self) -> Literal["SETTLED", "UNRESOLVED"]:
+        """Consume canonical Step cleanup without reconstructing process success."""
+        if not isinstance(self.evidence, FleetPlanOperationEvidence):
+            return "SETTLED"
+        for step in self.evidence.plan.steps:
+            if (
+                step.settlement.cleanup == "UNVERIFIED"
+                or (step.teardown is not None and step.teardown.status == "FAILED")
+                or (
+                    step.status != "SKIPPED"
+                    and step.attempts
+                    and step.settlement.cleanup != "VERIFIED"
+                )
+            ):
+                return "UNRESOLVED"
+        return "SETTLED"
+
+    @property
     def action(self) -> OperationAction:
         return self.capability.action
 

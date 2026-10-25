@@ -17,9 +17,10 @@ from oh_goon.core.models.fleet_plan import (
     GitPlanStep,
     PlanStep,
     PreCommitPlanStep,
+    ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedExtensionStep,
-    ResolvedLocalSearchAgentStep,
+    ResolvedNativeAgentWorkload,
     ResolvedPlanStep,
 )
 from oh_goon.core.models.fleet_plan_kubernetes_steps import (
@@ -117,7 +118,7 @@ def resolve_plan_step(
         connection = context.agent_connection if step.harness.startswith("provider-") else None
         if callable(connection):
             connection = connection()
-        resolved = resolve_delivered_local_search_agent_step(
+        resolved = resolve_delivered_agent_step(
             handoff, connection=connection, native_agent=context.native_agent, role=step.role
         )
         if step.feedback is not None:
@@ -126,7 +127,7 @@ def resolve_plan_step(
 
             reference = step_output_reference(step.feedback)
             if (
-                step.harness not in ("local-model-skill-loop", "local-model-proposal")
+                step.harness not in ("local-model-proposal",)
                 or reference is None
                 or not isinstance(step.when, StepStatusCondition)
                 or step.when.step_id != reference[0]
@@ -135,7 +136,7 @@ def resolve_plan_step(
                 raise FleetPlanInvalid(
                     "Agent feedback requires one exact failed prior Step output and a matching FAILED-only condition"
                 )
-        return ResolvedLocalSearchAgentStep.model_validate(
+        return ResolvedAgentStep.model_validate(
             {
                 **resolved.model_dump(),
                 "step_id": step_id,
@@ -293,13 +294,13 @@ def require_agent_step_handoff(
         raise FleetPlanInvalid("Agent Step meaning changed after source capture")
 
 
-def resolve_delivered_local_search_agent_step(
+def resolve_delivered_agent_step(
     handoff: "FrozenAgentStepHandoff",
     *,
     connection: AgentConnection | None = None,
     native_agent: ResolvedNativeAgent | None = None,
     role: AgentResultRole = "report",
-) -> ResolvedLocalSearchAgentStep:
+) -> ResolvedAgentStep:
     """Preserve the typed Agent Step across the original resolved-Step boundary.
 
     This validates and freezes a *non-authorizing* typed Step. Only the original
@@ -344,17 +345,14 @@ def resolve_delivered_local_search_agent_step(
             raise FleetPlanInvalid(
                 "native inference disclosure differs from the selected recipient"
             )
-        return ResolvedLocalSearchAgentStep(
+        return ResolvedAgentStep(
             step_id=handoff.step_id,
-            argv=("python",),
             success_codes=(0,),
             timeout_seconds=handoff.timeout_seconds,
             delivery_sha256=hashlib.sha256(handoff.encode_prework_delivery()).hexdigest(),
             handoff_identity=handoff.handoff_identity,
             source_step_id=handoff.step_id,
-            harness="native",
-            role=role,
-            native_agent=native_agent,
+            workload=ResolvedNativeAgentWorkload(role=role, native_agent=native_agent),
         )
     if (
         handoff.harness
@@ -365,7 +363,6 @@ def resolve_delivered_local_search_agent_step(
             "local-model-tools",
             "local-model-files",
             "local-model-skill-resources",
-            "local-model-skill-loop",
             "local-model-proposal",
             "provider-review",
             "provider-adjudicate",
@@ -403,17 +400,19 @@ def resolve_delivered_local_search_agent_step(
             or not handoff.task.strip()
         ):
             raise FleetPlanInvalid("model Agent requires selected local Ollama recipient and model")
-    return ResolvedLocalSearchAgentStep.model_validate(
+    workload: dict[str, object] = {"harness": handoff.harness}
+    if handoff.harness.startswith("provider-"):
+        workload.update(connection=connection, model=requested.model)
+    elif handoff.harness != "local-search":
+        workload["model"] = requested.model
+    return ResolvedAgentStep.model_validate(
         {
             "step_id": handoff.step_id,
-            "argv": ("python",),
             "success_codes": (0,),
             "timeout_seconds": handoff.timeout_seconds,
             "delivery_sha256": hashlib.sha256(handoff.encode_prework_delivery()).hexdigest(),
             "handoff_identity": handoff.handoff_identity,
             "source_step_id": handoff.step_id,
-            "harness": handoff.harness,
-            "model": requested.model,
-            "connection": connection if handoff.harness.startswith("provider-") else None,
+            "workload": workload,
         }
     )

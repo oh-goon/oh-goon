@@ -14,10 +14,10 @@ from oh_goon.core.models.agent_providers import (
 )
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
+    ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedFleetPlan,
     ResolvedImport,
-    ResolvedLocalSearchAgentStep,
     ResolvedPreCommitStep,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import (
@@ -142,15 +142,13 @@ def test_strict_native_rejects_before_source_capture_and_run_admission(
         profile=NativeAgentProfile(),
         executable_sha256="a" * 64,
     )
-    native = ResolvedLocalSearchAgentStep(
+    native = ResolvedAgentStep(
+        workload={"harness": "native", "native_agent": selected},
         step_id="native-agent",
-        argv=("python",),
         timeout_seconds=30,
         delivery_sha256="b" * 64,
         handoff_identity="handoff",
         source_step_id="native-agent",
-        harness="native",
-        native_agent=selected,
     )
     plan = ResolvedFleetPlan.create(
         name="unsupported-strict-native",

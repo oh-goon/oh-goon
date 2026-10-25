@@ -4,9 +4,22 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.errors import InvalidRunTransition, JournalConflict
+from oh_goon.core.models.agent_repair import (
+    MAX_AGENT_CAMPAIGN_MESSAGE_CHARS,
+    TRUNCATED_AGENT_CAMPAIGN_MESSAGE,
+    AgentCampaignDecision,
+    AgentCampaignIntent,
+    AgentCampaignPhase,
+    AgentCampaignReadback,
+    AgentCampaignRunEvidence,
+    AgentRepairResult,
+    AgentRepairStopReason,
+)
 from oh_goon.core.models.fleet import OperationState
-from oh_goon.core.models.operation import OperationReport
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep
+from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
 from oh_goon.core.models.reconciliation import (
     RepositoryEffectAcknowledgementEvidence,
     RepositoryEffectReconciliationEvidence,
@@ -39,6 +52,7 @@ from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
+    FleetRunOutcome,
     FleetRunSource,
     FleetRunStatus,
     FleetRunTerminalIntent,
@@ -133,6 +147,360 @@ class Journal:
 
     def read_view_from_connection(self, connection: sqlite3.Connection) -> JournalReadView:
         return self._facts.read_view(connection)
+
+    def begin_agent_campaign(self, intent: AgentCampaignIntent) -> AgentCampaignReadback:
+        """Retain original intent; this does not admit any child or resume work."""
+        with self._database.transaction(write=True) as connection:
+            current = self._facts.read_view(connection).campaign(intent.campaign_id)
+            if current.records:
+                if current.intent == intent:
+                    return current
+                raise JournalConflict("Campaign identity is already bound to another intent")
+            self._facts.append_campaign(connection, intent)
+            return self._facts.read_view(connection).campaign(intent.campaign_id)
+
+    def agent_campaign(self, campaign_id: str) -> AgentCampaignReadback:
+        return self.read_view().campaign(campaign_id)
+
+    def agent_campaign_decision_inputs(
+        self, campaign_id: str
+    ) -> tuple[AgentCampaignReadback, tuple[AgentCampaignRunEvidence, ...], tuple[str, ...]]:
+        """Supply bounded references from one verified cut; never run campaign policy."""
+        view = self.read_view()
+        current = view.campaign(campaign_id)
+        settled = []
+        unresolved = []
+        for phase in current.phases:
+            detail = view.required_run_detail(phase.fleet_run_id)
+            if not detail.run.status.terminal:
+                unresolved.append(phase.fleet_run_id)
+                continue
+            settled.append(
+                AgentCampaignRunEvidence(
+                    fleet_run_id=phase.fleet_run_id,
+                    terminal_sequence=view.run_events(phase.fleet_run_id).events[-1].sequence,
+                    operation_ids=tuple(item.provenance.operation_id for item in detail.operations),
+                )
+            )
+        return current, tuple(settled), tuple(unresolved)
+
+    def agent_campaign_result(self, campaign_id: str) -> AgentRepairResult:
+        """Return the committed decision at one verified cut without running policy."""
+        view = self.read_view()
+        current = view.campaign(campaign_id)
+        decision = current.terminal_decision
+        intent = current.intent
+        if decision is None or intent is None:
+            raise JournalConflict("Campaign controller decision is missing or incomplete")
+        assert decision.stop_reason is not None
+        details = tuple(
+            view.required_run_detail(item.fleet_run_id) for item in decision.consumed_runs
+        )
+        return AgentRepairResult(
+            campaign_id,
+            intent.budget,
+            decision.stop_reason,
+            details,
+            decision.message,
+            tuple(phase.fleet_run_id for phase in current.phases),
+            decision.unresolved_run_ids,
+            decision.decision_id,
+            current.journal_revision,
+            current,
+        )
+
+    def commit_agent_campaign_decision(
+        self, decision: AgentCampaignDecision
+    ) -> AgentCampaignReadback:
+        with self._database.transaction(write=True) as connection:
+            return self.commit_agent_campaign_decision_in(connection, decision)
+
+    def commit_agent_campaign_decision_in(
+        self, connection: sqlite3.Connection, decision: AgentCampaignDecision
+    ) -> AgentCampaignReadback:
+        """CAS one policy output against original settled child evidence."""
+        if not isinstance(connection, sqlite3.Connection) or not connection.in_transaction:
+            raise JournalConflict("Campaign publication requires an existing SQLite transaction")
+        message = redact_diagnostic_text(decision.message)
+        if len(message) > MAX_AGENT_CAMPAIGN_MESSAGE_CHARS:
+            message = TRUNCATED_AGENT_CAMPAIGN_MESSAGE
+        decision = AgentCampaignDecision.model_validate(
+            {**decision.model_dump(), "message": message}
+        )
+        view = self._facts.read_view(connection)
+        current = view.campaign(decision.campaign_id)
+        for record in current.records:
+            fact = record.fact
+            if isinstance(fact, AgentCampaignDecision) and fact.decision_id == decision.decision_id:
+                if fact == decision:
+                    return current
+                raise JournalConflict("Campaign decision identity has conflicting content")
+        self._require_campaign_writer(current, decision.expected_revision)
+        intent = current.intent
+        assert intent is not None
+        phases = current.phases
+        if decision.phase_ordinal != len(
+            phases
+        ) or decision.remaining_runs != intent.maximum_runs - len(phases):
+            raise JournalConflict("Campaign decision changed exact phase membership or budget")
+        expected_evidence = []
+        unresolved = []
+        stopped = False
+        for phase in phases:
+            detail = view.required_run_detail(phase.fleet_run_id)
+            events = view.run_events(phase.fleet_run_id).events
+            stopped = stopped or any(
+                event.event_type is FleetRunEventType.RUN_CANCEL_REQUESTED for event in events
+            )
+            if not detail.run.status.terminal:
+                unresolved.append(phase.fleet_run_id)
+                continue
+            expected_evidence.append(
+                (
+                    phase.fleet_run_id,
+                    events[-1].sequence,
+                    tuple(operation.provenance.operation_id for operation in detail.operations),
+                )
+            )
+        if decision.unstarted_selection is not None:
+            selected = decision.unstarted_selection
+            previous = current.records[-1].fact
+            expected_selection = (
+                (intent.initial_phase, intent.initial_step_ids)
+                if isinstance(previous, AgentCampaignIntent)
+                else (previous.next_phase, previous.next_step_ids)
+                if isinstance(previous, AgentCampaignDecision) and previous.stop_reason is None
+                else None
+            )
+            if expected_selection != (selected.phase, selected.selected_step_ids):
+                raise JournalConflict(
+                    "Unstarted selection differs from the original selected phase/Step membership"
+                )
+            if (
+                view.run_detail(selected.selected_run_id) is not None
+                or selected.phase_ordinal != len(phases) + 1
+                or selected.phase_ordinal > intent.maximum_runs
+            ):
+                raise JournalConflict(
+                    "Unstarted selection conflicts with an admitted identity or phase budget"
+                )
+        supplied_evidence = [
+            (item.fleet_run_id, item.terminal_sequence, item.operation_ids)
+            for item in decision.consumed_runs
+        ]
+        if supplied_evidence != expected_evidence or decision.unresolved_run_ids != tuple(
+            unresolved
+        ):
+            raise JournalConflict(
+                "Campaign decision does not reference its exact settled child results"
+            )
+        success = decision.stop_reason in {
+            AgentRepairStopReason.CONVERGED,
+            AgentRepairStopReason.TEST_PASSED,
+        }
+        if success and decision.unstarted_selection is not None:
+            raise JournalConflict(
+                "Campaign convergence cannot contain selected work that never started"
+            )
+        if decision.stop_reason is None or success:
+            if unresolved or stopped:
+                raise JournalConflict(
+                    "Campaign advancement/convergence conflicts with accepted stop or unresolved work"
+                )
+            if not phases:
+                raise JournalConflict(
+                    "Campaign advancement/convergence requires settled child evidence"
+                )
+        if success:
+            latest = phases[-1].context
+            if (
+                decision.candidate_identity != latest.candidate_identity
+                or decision.scope_identity != latest.scope_identity
+            ):
+                raise JournalConflict(
+                    "Campaign terminal candidate/scope differs from the exact final settled phase"
+                )
+            if (
+                decision.stop_reason is AgentRepairStopReason.CONVERGED
+                and latest.phase != "verification"
+            ):
+                raise JournalConflict(
+                    "Campaign convergence requires its final settled verification phase"
+                )
+        if decision.stop_reason is AgentRepairStopReason.TEST_PASSED:
+            detail = view.required_run_detail(phases[-1].fleet_run_id)
+            target = detail.run.target
+            evidence = detail.operations[0].evidence if len(detail.operations) == 1 else None
+            result = evidence.plan if isinstance(evidence, FleetPlanOperationEvidence) else None
+            selected_command = (
+                next(
+                    (
+                        step
+                        for step in target.plan.steps
+                        if step.step_id == decision.passed_test_step_id
+                    ),
+                    None,
+                )
+                if isinstance(target, FleetPlanTarget)
+                else None
+            )
+            passed = (
+                next(
+                    (step for step in result.steps if step.step_id == decision.passed_test_step_id),
+                    None,
+                )
+                if result is not None
+                else None
+            )
+            if (
+                not isinstance(selected_command, ResolvedCommandStep)
+                or not isinstance(target, FleetPlanTarget)
+                or target.agent_repair is None
+                or target.agent_repair.phase is not None
+                or result is None
+                or result.plan_id != target.plan.plan_id
+                or tuple((step.step_id, step.kind) for step in result.steps)
+                != tuple((step.step_id, step.kind) for step in target.plan.steps)
+                or passed is None
+                or passed.status != "COMPLETED"
+                or passed.settlement.outcome != "SUCCESS"
+                or passed.settlement.cleanup != "VERIFIED"
+                or passed.settlement.reason != "ACCEPTED_EXIT"
+                or not passed.attempts
+                or any(
+                    step.status != "SKIPPED" and step.settlement.cleanup != "VERIFIED"
+                    for step in result.steps
+                )
+                or any(
+                    operation.resource_settlement == "UNRESOLVED"
+                    for phase in phases
+                    for operation in view.required_run_detail(phase.fleet_run_id).operations
+                )
+            ):
+                raise JournalConflict(
+                    "Test-passed decision lacks its exact accepted native test or settled cleanup"
+                )
+        if decision.stop_reason is None:
+            if (
+                not isinstance(current.records[-1].fact, AgentCampaignPhase)
+                or not decision.remaining_runs
+            ):
+                raise JournalConflict(
+                    "Campaign cannot publish a second successor or exceed its budget"
+                )
+        if decision.stop_reason is AgentRepairStopReason.CONVERGED and any(
+            view.required_run_detail(phase.fleet_run_id).outcome is not FleetRunOutcome.SUCCESS
+            for phase in phases
+        ):
+            raise JournalConflict("Campaign convergence conflicts with unsuccessful child results")
+        if decision.stop_reason is AgentRepairStopReason.CONVERGED:
+            for phase in phases:
+                detail = view.required_run_detail(phase.fleet_run_id)
+                target = detail.run.target
+                evidence = detail.operations[0].evidence if len(detail.operations) == 1 else None
+                result = evidence.plan if isinstance(evidence, FleetPlanOperationEvidence) else None
+                if (
+                    not isinstance(target, FleetPlanTarget)
+                    or result is None
+                    or result.plan_id != target.plan.plan_id
+                    or tuple((step.step_id, step.kind) for step in result.steps)
+                    != tuple((step.step_id, step.kind) for step in target.plan.steps)
+                    or any(
+                        step.status != "COMPLETED"
+                        or step.settlement.outcome != "SUCCESS"
+                        or step.settlement.cleanup != "VERIFIED"
+                        for step in result.steps
+                    )
+                    or any(
+                        operation.resource_settlement == "UNRESOLVED"
+                        for operation in detail.operations
+                    )
+                ):
+                    raise JournalConflict(
+                        "Campaign convergence lacks exact accepted settled Step evidence"
+                    )
+        self._facts.append_campaign(connection, decision)
+        return self._facts.read_view(connection).campaign(decision.campaign_id)
+
+    def _require_campaign_writer(
+        self, current: AgentCampaignReadback, expected_revision: int
+    ) -> None:
+        if current.intent is None or current.latest_revision != expected_revision:
+            raise JournalConflict("Campaign predecessor revision changed or intent is missing")
+        if current.terminal_decision is not None:
+            raise JournalConflict("Campaign already has a committed terminal decision")
+        if current.records[0].session_id != self._database.session_id:
+            raise JournalConflict("Campaign observation cannot resume a prior controller session")
+
+    def _bind_agent_campaign_phase_in(
+        self,
+        connection: sqlite3.Connection,
+        fleet_run_id: str,
+        target: FleetPlanTarget,
+        targets: list[RepositoryIdentity],
+    ) -> None:
+        context = target.agent_repair
+        assert context is not None
+        if context.campaign_revision is None:
+            raise JournalConflict(
+                "Campaign phase admission requires its committed predecessor revision"
+            )
+        current = self._facts.read_view(connection).campaign(context.repair_id)
+        self._require_campaign_writer(current, context.campaign_revision)
+        intent = current.intent
+        assert intent is not None
+        phases = current.phases
+        if (
+            context.attempt != len(phases) + 1
+            or context.max_attempts != intent.maximum_runs
+            or len(targets) != 1
+            or targets[0].repository_id != intent.repository_id
+            or context.limits.deadline_at != intent.deadline_at
+            or context.limits.step_timeout_seconds != intent.budget.step_timeout_seconds
+            or context.previous_run_id != (phases[-1].fleet_run_id if phases else None)
+            or (not phases and fleet_run_id != context.repair_id)
+            or context.write_roots != intent.write_roots
+            or (
+                context.phase is not None
+                and context.original_execution_digest != intent.original_execution_digest
+            )
+        ):
+            raise JournalConflict(
+                "Campaign admission changed its original authority, budget or lineage"
+            )
+        previous = current.records[-1].fact
+        if phases:
+            if (
+                not isinstance(previous, AgentCampaignDecision)
+                or previous.stop_reason is not None
+                or previous.next_phase != (context.phase or "repair")
+                or previous.next_step_ids != tuple(step.step_id for step in target.plan.steps)
+                or previous.candidate_identity != context.candidate_identity
+                or previous.scope_identity != context.scope_identity
+            ):
+                raise JournalConflict(
+                    "Campaign phase lacks its exact committed advancement decision"
+                )
+        elif not isinstance(previous, AgentCampaignIntent) or (
+            intent.initial_phase != (context.phase or "repair")
+            or intent.initial_step_ids != tuple(step.step_id for step in target.plan.steps)
+            or context.candidate_identity != intent.candidate_identity
+            or context.scope_identity != intent.scope_identity
+        ):
+            raise JournalConflict(
+                "Initial campaign admission differs from original selected candidate/scope"
+            )
+        self._facts.append_campaign(
+            connection,
+            AgentCampaignPhase(
+                campaign_id=context.repair_id,
+                expected_revision=current.latest_revision,
+                fleet_run_id=fleet_run_id,
+                context=context,
+                execution_digest=target.execution_digest,
+                selected_step_ids=tuple(step.step_id for step in target.plan.steps),
+            ),
+        )
 
     def commit_operation_in(
         self,
@@ -489,6 +857,8 @@ class Journal:
                 capability=intent.capability,
                 target=intent.target,
             )
+        if isinstance(intent.target, FleetPlanTarget) and intent.target.agent_repair is not None:
+            self._bind_agent_campaign_phase_in(connection, fleet_run_id, intent.target, targets)
         self._facts.append_run_event(connection, admitted)
         return state
 

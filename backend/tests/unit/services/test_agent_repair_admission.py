@@ -58,9 +58,7 @@ def test_unsafe_loop_shape_is_refused_before_execution(tmp_path, monkeypatch, at
     from oh_goon.runtime.goon_templates import GoonTemplateStore
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
-    plan, _, _ = FleetPlanResolver(
-        goon_templates=GoonTemplateStore()
-    ).resolve_frozen_local_search_agent(
+    plan, _, _ = FleetPlanResolver(goon_templates=GoonTemplateStore()).resolve_frozen_agent(
         plan_path,
         inputs=options["inputs"],
         repository_root=options["agent_repository_root"],
@@ -100,12 +98,11 @@ def test_unsafe_loop_shape_is_refused_before_execution(tmp_path, monkeypatch, at
     assert not (tmp_path / "calls").exists()
 
 
-def test_saved_version43_plan_keeps_its_original_identity_on_readback():
+def test_saved_incompatible_plan_requires_explicit_re_resolution():
     payload = (
         Path(__file__).resolve().parents[2] / "fixtures/agent_repair_legacy_plan43.json"
     ).read_text()
-    old = ResolvedFleetPlan.model_validate_json(payload)
-    assert old.contract_version == 43
-    reopened = ResolvedFleetPlan.model_validate_json(old.model_dump_json())
-    assert reopened == old
-    assert reopened.plan_id == old.plan_id
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="re-resolve and re-lock"):
+        ResolvedFleetPlan.model_validate_json(payload)

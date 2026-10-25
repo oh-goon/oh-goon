@@ -20,7 +20,7 @@ from oh_goon.core.models.execution_identity import (
     ResolvedExecutionReference,
 )
 from oh_goon.core.models.execution_lock_models import LockedExternalArtifact
-from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedLocalSearchAgentStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedFleetPlan
 from oh_goon.core.models.goon_plan_source import FleetPlanSource
 from oh_goon.core.vocabulary import MigrationMode, UvRecipeId
 
@@ -139,7 +139,7 @@ class FleetPlanTarget(ImmutableModel):
         expected_agent = {
             step.step_id: (step.handoff_identity, step.delivery_sha256)
             for step in self.plan.steps
-            if isinstance(step, ResolvedLocalSearchAgentStep)
+            if isinstance(step, ResolvedAgentStep)
         }
         found = {
             item.step_id: (item.handoff_identity, item.delivery_sha256)
@@ -153,8 +153,6 @@ class FleetPlanTarget(ImmutableModel):
             and len(expected_agent) != 1
         ):
             raise ValueError("repair admission requires one original Agent Step")
-        if self.agent_repair is not None and self.plan.contract_version < 44:
-            raise ValueError("repair admission requires Plan contract version 44")
         if self.caller_input_file is not None and self.scheduled_caller_file is not None:
             raise ValueError(
                 "live caller source and scheduled snapshot custody are mutually exclusive"

@@ -266,7 +266,7 @@ for line in sys.stdin:
                 step = detail.game_tape.repositories[0].steps[0]
                 assert any(
                     event.kind == "tool"
-                    for claim in step.native_agent_observations
+                    for claim in step.workload.native_agent_observations
                     for event in claim.events
                 )
                 assert step.attempts[0].standard_isolation is not None

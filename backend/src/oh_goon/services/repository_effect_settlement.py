@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from oh_goon.core.effect_attempts import OPERATOR_REQUIRED_EFFECT_STATUSES
-from oh_goon.core.errors import OperationNotFound
+from oh_goon.core.errors import OperationNotFound, StateConflict
 from oh_goon.core.models.effect_attempt import (
     EffectStartedRepositoryEffectAttempt,
     RepositoryEffectAttempt,
@@ -65,7 +65,10 @@ class RepositoryEffectSettlement:
         operation_id: str,
     ) -> None:
         self._journal.commit_operation_in(connection, report)
-        self._attempts.retire_committed_in(connection, operation_id)
+        if report.resource_settlement == "UNRESOLVED":
+            self._retain_unresolved_resource_fence_in(connection, operation_id)
+        else:
+            self._attempts.retire_committed_in(connection, operation_id)
 
     def settle_interruption_in(
         self,
@@ -108,6 +111,9 @@ class RepositoryEffectSettlement:
         view = self._journal.read_view_from_connection(connection)
         committed = view.operation(operation_id)
         if committed is not None:
+            if committed.resource_settlement == "UNRESOLVED":
+                self._retain_unresolved_resource_fence_in(connection, operation_id)
+                return RepositoryEffectInterruptionDisposition.OPERATOR_REQUIRED
             return self._retire_committed_coordination(connection, operation_id)
 
         current = self._attempts.get_in(connection, operation_id)
@@ -151,6 +157,7 @@ class RepositoryEffectSettlement:
         current: RepositoryEffectAttempt,
         evidence: RepositoryEffectReconciliationEvidence,
     ) -> None:
+        self._require_resource_quiescence_in(connection, current.operation_id)
         self._attempts.apply_reconciliation_in(
             connection,
             current.operation_id,
@@ -165,12 +172,39 @@ class RepositoryEffectSettlement:
         current: RepositoryEffectAttempt,
         evidence: RepositoryEffectAcknowledgementEvidence,
     ) -> None:
+        self._require_resource_quiescence_in(connection, current.operation_id)
         self._attempts.retire_acknowledged_in(
             connection,
             current.operation_id,
             expected_revision=current.record_version,
         )
         self._journal.commit_effect_acknowledgement_in(connection, evidence)
+
+    def _require_resource_quiescence_in(
+        self, connection: sqlite3.Connection, operation_id: str
+    ) -> None:
+        report = self._journal.read_view_from_connection(connection).operation(operation_id)
+        if report is not None and report.resource_settlement == "UNRESOLVED":
+            raise StateConflict(
+                "Original process/resource cleanup is unresolved; reconciliation or acknowledgement cannot prove quiescence"
+            )
+
+    def _retain_unresolved_resource_fence_in(
+        self, connection: sqlite3.Connection, operation_id: str
+    ) -> None:
+        current = self._attempts.get_in(connection, operation_id)
+        if current.status is EffectAttemptStatus.EFFECT_STARTED:
+            self._attempts.mark_unknown_in(
+                connection,
+                operation_id,
+                note="Canonical operation retains unresolved original process/resource cleanup; filesystem comparison or operator acknowledgement is not quiescence proof",
+            )
+        elif current.status not in (
+            OPERATOR_REQUIRED_EFFECT_STATUSES | {EffectAttemptStatus.OUTCOME_UNKNOWN}
+        ):
+            raise StateConflict(
+                "Committed resource uncertainty has invalid original effect authority"
+            )
 
     def _retire_committed_coordination(
         self,

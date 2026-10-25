@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from functools import cache
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -19,11 +20,12 @@ from oh_goon.core.models.fleet_plan import (
 )
 from oh_goon.core.path_authority import StrictHostPathAuthority
 from oh_goon.core.path_layouts import AttemptPathLayout
-from oh_goon.engine.command import CommandResult
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
 from oh_goon.integrations._fleet_plan_host_resources import (
     capture_host_tools,
     preflight_run_capabilities,
 )
+from oh_goon.integrations._fleet_plan_step_outcome import settle_step_execution
 from oh_goon.integrations.fleet_plan_admission import (
     AcceptedCicdRepositoryAdmission,
     inspect_cicd_repository,
@@ -64,7 +66,7 @@ def _repository(tmp_path: Path, dockerfile: str) -> Path:
 def test_oci_template_resolves_to_explicit_v25_authority() -> None:
     step, plan = _plan()
 
-    assert plan.contract_version == 44
+    assert plan.contract_version == 45
     assert step_execution_tool(step) == "buildah"
     assert step.capabilities.egress.mode == "hostname_allowlist"
     assert step.capabilities.egress.rules[0].hostname == "registry.example.com"
@@ -213,8 +215,23 @@ def test_multistage_copy_from_local_stage_is_admitted(tmp_path: Path) -> None:
     assert isinstance(result, AcceptedCicdRepositoryAdmission)
 
 
+@pytest.mark.parametrize(
+    "quiescent,reason,expected",
+    [
+        (True, "none", "SUCCESS"),
+        (False, "none", "INCOMPLETE"),
+        (None, "none", "INCOMPLETE"),
+        (True, "cancel", "CANCELLED"),
+        (True, "timeout", "TIMED_OUT"),
+        (True, "authority", "AUTHORITY_LOST"),
+        (True, "output_limit", "OUTPUT_LIMITED"),
+    ],
+)
 def test_oci_build_execution_uses_fixed_buildah_contract_and_writes_metadata(
     tmp_path: Path,
+    quiescent: bool | None,
+    reason: Any,
+    expected: str,
 ) -> None:
     step, _ = _plan()
     repository = _repository(
@@ -236,7 +253,21 @@ def test_oci_build_execution_uses_fixed_buildah_contract_and_writes_metadata(
         archive = Path(tag.removeprefix("oci-archive:"))
         archive.write_bytes(b"oci-archive")
         return CommandResult(
-            returncode=0, stdout="built", stderr="", argv=tuple(argv), duration_ms=5
+            returncode=0,
+            stdout="built",
+            stderr="",
+            argv=tuple(argv),
+            duration_ms=5,
+            supervisor=cast(
+                CommandSupervisorReceipt,
+                CommandSupervisorReceipt(
+                    final_process_group_quiescent=quiescent,
+                    cleanup_reason=reason,
+                    process_group_cleanup_requested=reason != "none",
+                )
+                if quiescent is not None
+                else None,
+            ),
         )
 
     outcome = execute_oci_build(
@@ -247,6 +278,15 @@ def test_oci_build_execution_uses_fixed_buildah_contract_and_writes_metadata(
         command_runner=runner,
         cancel_requested=None,
     )
+
+    if expected != "SUCCESS":
+        settlement = settle_step_execution(step, outcome)
+        assert settlement.outcome == expected
+        assert outcome.observed_returncode == 0
+        if quiescent is not True:
+            assert (repository / step.output.archive).exists()
+        assert not (repository / step.output.metadata).exists()
+        return
 
     argv = seen["argv"]
     assert isinstance(argv, tuple)

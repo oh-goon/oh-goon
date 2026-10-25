@@ -260,6 +260,7 @@ def _handoff_step(step: GameTapeStepExecution, repository_execution_id: str) -> 
         "kind": step.kind,
         "status": step.status.value,
         "exit_code": step.exit_code,
+        "settlement": step.settlement.model_dump(mode="json"),
         "reason": step.reason,
         "native_claims": [
             {
@@ -311,6 +312,9 @@ def run_handoff_projection(detail: FleetRunDetail) -> dict[str, Any]:
         "schema": "oh-goon.plan-run-handoff/v1",
         "fleet_run_id": detail.run.fleet_run_id,
         "journal_revision": detail.journal_revision,
+        "campaign_journal": detail.campaign_journal.model_dump(mode="json")
+        if detail.campaign_journal is not None
+        else None,
         "plan_id": tape.plan_id,
         "status": detail.run.status.value,
         "outcome": detail.outcome.value,

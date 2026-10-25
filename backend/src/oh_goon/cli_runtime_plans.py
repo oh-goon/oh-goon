@@ -299,13 +299,15 @@ def _print_agent_repair_result(
     result: AgentRepairResult, *, as_json: bool, campaign: bool = False
 ) -> int:
     campaign_projection = (
-        project_agent_campaign(result.repair_id, result.attempts, invocation=result)
+        project_agent_campaign(result.repair_id, result.attempts, campaign=result.campaign_journal)
         if campaign
         else None
     )
     receipt: dict[str, object] = {
         "schema": "oh-goon.agent-repair-result/v1",
         "repair_id": result.repair_id,
+        "committed_decision_id": result.committed_decision_id,
+        "journal_revision": result.journal_revision,
         "stop_reason": result.stop_reason.value,
         "test_passed": result.test_passed,
         "converged": result.converged,
@@ -337,7 +339,12 @@ def _print_agent_repair_result(
         print(f"Stop reason: {result.stop_reason.value}")
         if campaign_projection is not None:
             print(f"Campaign result: {campaign_projection['result']}")
-            print(f"Inspect retained evidence: oh-goon plan campaign {result.repair_id} --json")
+            if result.campaign_journal is not None and result.campaign_journal.intent is not None:
+                print(f"Inspect retained evidence: oh-goon plan campaign {result.repair_id} --json")
+            else:
+                print(
+                    "Preparation stopped before campaign intent was committed; no retained campaign is available."
+                )
         for attempt in result.attempts:
             print(
                 f"Run {attempt.run.fleet_run_id}: {attempt.run.status.value} / {attempt.outcome.value}"

@@ -464,18 +464,19 @@ def test_admission_failure_accounts_for_unknown_runs_and_owned_source(
             result = _repair(runtime, plan, repo, options)
         assert result.stop_reason.value == "execution_unresolved"
         assert result.admitted_run_ids == ()
-        assert result.unresolved_run_ids == ((observed["run_id"],) if readback == "unknown" else ())
+        # The canonical atomic linkage proves non-admission even if a
+        # separate Run observation path is unavailable.
+        assert result.unresolved_run_ids == ()
+        selected = result.campaign_journal.terminal_decision.unstarted_selection
+        assert selected.selected_run_id == observed["run_id"]
+        assert selected.admission_status == "not_admitted"
         assert not (tmp_path / "calls").exists()
         store = FleetContentStore(
             ApplicationStatePathLayout.from_database(tmp_path / "database.sqlite").content_store
         )
         reference = observed["target"].agent_deliveries[0].reference_id
-        if readback == "unknown":
-            # Lack of admission evidence is not permission to delete possibly owned input.
-            assert store.get(reference, owner_repository_id=repository_id(repo)).path.is_file()
-        else:
-            with pytest.raises(FleetPlanInvalid):
-                store.get(reference, owner_repository_id=repository_id(repo))
+        with pytest.raises(FleetPlanInvalid):
+            store.get(reference, owner_repository_id=repository_id(repo))
     finally:
         runtime.shutdown(wait_for_runs=True)
 
@@ -523,5 +524,47 @@ def test_native_nonstandard_failure_code_keeps_its_meaning_and_can_be_repaired(
         assert len(result.attempts) == 2
         assert result.attempts[0].operations[0].evidence.plan.steps[3].returncode == 200
         assert result.attempts[1].operations[0].evidence.plan.steps[3].returncode == 0
+    finally:
+        runtime.shutdown(wait_for_runs=True)
+
+
+def test_lost_admission_response_and_missing_run_observation_never_replays_work(
+    tmp_path,
+    monkeypatch,
+):
+    from oh_goon.core.errors import RunNotFound
+
+    plan, repo, options, _, _ = _repair_case(tmp_path, monkeypatch, block=True)
+    runtime = ApplicationRuntime.build(standard_local=True)
+    selected = []
+    start = runtime.runs.start_prepared_plan
+
+    def lose_committed_response(target, **kwargs):
+        selected.append(kwargs["fleet_run_id"])
+        start(target, **kwargs)
+        raise StateConflict("admission response lost; password=campaign-private-canary")
+
+    def unavailable(*_):
+        raise RunNotFound("selected Run observation unavailable")
+
+    try:
+        runtime.locations.add(repo.parent.parent)
+        with monkeypatch.context() as fault:
+            fault.setattr(runtime.runs, "start_prepared_plan", lose_committed_response)
+            fault.setattr(runtime.runs, "get", unavailable)
+            result = _repair(runtime, plan, repo, options)
+        assert len(selected) == 1
+        assert result.stop_reason.value == "execution_unresolved"
+        assert result.admitted_run_ids == tuple(selected)
+        assert result.campaign_journal.phases[0].fleet_run_id == selected[0]
+        assert result.campaign_journal.terminal_decision.unstarted_selection is None
+        assert result.unresolved_run_ids == ()
+        assert runtime.runs.get(selected[0]).run.status.terminal
+        assert "campaign-private-canary" not in result.message
+        assert not (tmp_path / "calls").exists()
+        retained = runtime.runs.agent_campaign_result(result.repair_id)
+        assert retained.committed_decision_id == result.committed_decision_id
+        assert retained.stop_reason == result.stop_reason
+        assert len(retained.admitted_run_ids) == 1
     finally:
         runtime.shutdown(wait_for_runs=True)

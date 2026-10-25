@@ -21,9 +21,9 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedDependencyInventoryStep,
-    ResolvedLocalSearchAgentStep,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
@@ -175,22 +175,23 @@ def test_in_process_dependency_inventory_requires_no_environment_tool() -> None:
     assert required_runtime_tool_names(plan) == ()  # type: ignore[arg-type]
 
 
-def _native_step(agent: NativeAgentName) -> ResolvedLocalSearchAgentStep:
-    return ResolvedLocalSearchAgentStep(
+def _native_step(agent: NativeAgentName) -> ResolvedAgentStep:
+    return ResolvedAgentStep(
+        workload={
+            "harness": "native",
+            "native_agent": ResolvedNativeAgent(
+                agent=agent,
+                profile_name="selected",
+                definition=NativeAgentDefinition(executable=f"/selected/{agent}-custom"),
+                profile=NativeAgentProfile(),
+                executable_sha256="a" * 64,
+            ),
+        },
         step_id="native-agent",
-        argv=("python",),
         timeout_seconds=30,
         delivery_sha256="b" * 64,
         handoff_identity="handoff",
         source_step_id="native-agent",
-        harness="native",
-        native_agent=ResolvedNativeAgent(
-            agent=agent,
-            profile_name="selected",
-            definition=NativeAgentDefinition(executable=f"/selected/{agent}-custom"),
-            profile=NativeAgentProfile(),
-            executable_sha256="a" * 64,
-        ),
     )
 
 
@@ -286,8 +287,8 @@ def test_native_evidence_retains_actual_invocation_and_launcher_bytes(
     assert tool is not None
     assert tool.name == Path(launcher).name
     assert tool.sha256 == "c" * 64 and tool.byte_count == 123
-    assert step.native_agent is not None
-    assert tool.sha256 != step.native_agent.executable_sha256
+    assert step.workload.harness == "native"
+    assert tool.sha256 != step.workload.native_agent.executable_sha256
 
 
 @pytest.mark.parametrize(

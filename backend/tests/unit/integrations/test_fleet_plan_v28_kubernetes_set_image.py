@@ -16,7 +16,7 @@ from oh_goon.core.fleet_plan_tool_requirements import (
 )
 from oh_goon.core.models.fleet_plan import ResolvedKubernetesSetImageStep
 from oh_goon.core.path_layouts import AttemptPathLayout
-from oh_goon.engine.command import CommandResult
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
 from oh_goon.integrations._fleet_plan_host_resources import (
     capture_host_environment,
     preflight_host_environment_feasibility,
@@ -92,7 +92,7 @@ def test_kubernetes_credentials_fail_malformed_cheap_preflight(
 
 def test_kubernetes_template_resolves_to_v28_exact_api_authority() -> None:
     plan = _plan()
-    assert plan.contract_version == 44
+    assert plan.contract_version == 45
     assert len(plan.steps) == 1
     step = plan.steps[0]
     assert isinstance(step, ResolvedKubernetesSetImageStep)
@@ -429,6 +429,9 @@ def test_committed_kubernetes_effect_reports_private_cleanup_failure(
     assert outcome.release_effect.outcome == "COMMITTED"
     assert outcome.release_effect.after_resource_version == "41"
     assert "credential cleanup failed" in outcome.stderr
+    from oh_goon.integrations._fleet_plan_step_outcome import settle_step_execution
+
+    assert settle_step_execution(step, outcome).cleanup == "UNVERIFIED"
     assert not (repository / "kubernetes/deployment-image.json").exists()
     assert not (repository / "kubernetes/resource-version.txt").exists()
     assert not (repository / "kubernetes/generation.txt").exists()
@@ -583,6 +586,108 @@ def test_set_image_read_failures_are_known_without_mutation(tmp_path: Path) -> N
         )
         assert outcome.returncode != 0
         assert not (repository / "kubernetes/image-reference.txt").exists()
+
+
+@pytest.mark.parametrize(
+    "quiescent,reason,expected",
+    [
+        (True, "none", "SUCCESS"),
+        (False, "none", "INCOMPLETE"),
+        (None, "none", "INCOMPLETE"),
+        (True, "cancel", "CANCELLED"),
+        (True, "timeout", "TIMED_OUT"),
+        (True, "authority", "AUTHORITY_LOST"),
+        (True, "output_limit", "OUTPUT_LIMITED"),
+    ],
+)
+def test_native_read_cleanup_is_retained_before_mutation(tmp_path, quiescent, reason, expected):
+    from dataclasses import replace
+
+    from oh_goon.integrations._fleet_plan_step_outcome import settle_step_execution
+
+    step = _plan().steps[0]
+    assert isinstance(step, ResolvedKubernetesSetImageStep)
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    calls = []
+
+    def runner(*argv, **kwargs):
+        method = argv[argv.index("--request") + 1]
+        calls.append(method)
+        Path(argv[argv.index("--output") + 1]).write_text(
+            json.dumps(
+                _deployment(image=OLD_IMAGE, resource_version="10", generation=4)
+                if method == "GET"
+                else _deployment(image=IMAGE, resource_version="11", generation=5)
+            )
+        )
+        return replace(
+            CommandResult(argv=argv, returncode=0, stdout="200", stderr=""),
+            supervisor=CommandSupervisorReceipt(
+                final_process_group_quiescent=quiescent,
+                cleanup_reason=reason,
+                process_group_cleanup_requested=reason != "none",
+            )
+            if quiescent is not None
+            else None,
+        )
+
+    outcome = execute_kubernetes_set_image(
+        repository,
+        step,
+        _layout(tmp_path / "attempt"),
+        environment={},
+        host_environment={"KUBERNETES_TOKEN": TOKEN, "KUBERNETES_CA_CERTIFICATE": CA},
+        command_runner=runner,
+        cancel_requested=None,
+    )
+    assert calls == (["GET", "PATCH"] if expected == "SUCCESS" else ["GET"])
+    settled = settle_step_execution(step, outcome)
+    assert settled.outcome == expected
+    assert settled.observed_returncode == 0
+
+
+@pytest.mark.parametrize("reason", ["cancel", "timeout", "authority", "output_limit"])
+def test_interrupted_patch_cannot_publish_success_from_a_zero_exit(tmp_path, reason):
+    step = _plan().steps[0]
+    assert isinstance(step, ResolvedKubernetesSetImageStep)
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    calls = []
+
+    def runner(*argv, **kwargs):
+        method = argv[argv.index("--request") + 1]
+        calls.append(method)
+        Path(argv[argv.index("--output") + 1]).write_text(
+            json.dumps(
+                _deployment(image=OLD_IMAGE, resource_version="10", generation=4)
+                if method == "GET"
+                else _deployment(image=IMAGE, resource_version="11", generation=5)
+            )
+        )
+        return CommandResult(
+            argv=argv,
+            returncode=0,
+            stdout="200",
+            stderr="",
+            supervisor=CommandSupervisorReceipt(
+                cleanup_reason=reason if method == "PATCH" else "none",
+                process_group_cleanup_requested=method == "PATCH",
+            ),
+        )
+
+    with pytest.raises(ExternalEffectOutcomeUnknown):
+        execute_kubernetes_set_image(
+            repository,
+            step,
+            _layout(tmp_path / "attempt"),
+            environment={},
+            host_environment={"KUBERNETES_TOKEN": TOKEN, "KUBERNETES_CA_CERTIFICATE": CA},
+            command_runner=runner,
+            cancel_requested=None,
+        )
+    assert calls == ["GET", "PATCH"]
+    assert not (repository / "kubernetes/image-reference.txt").exists()
 
 
 def test_committed_transition_validation_rejects_inconsistent_success() -> None:

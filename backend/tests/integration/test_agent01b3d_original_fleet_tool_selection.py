@@ -55,7 +55,7 @@ def test_listing_files_then_model_finish_uses_original_fleet_and_tape(tmp_path, 
         ],
     )
     frozen, handoff = _lock(plan, opts)
-    assert frozen.steps[0].harness == handoff.harness == "local-model-tools"
+    assert frozen.steps[0].workload.harness == handoff.harness == "local-model-tools"
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3d-list")
     assert detail.game_tape.status.value == "PASSED"
     assert (tmp_path / "calls").read_text().strip() == "2"
@@ -319,9 +319,7 @@ def test_tool_harness_is_bound_into_original_handoff_and_lock(tmp_path, monkeypa
     before, first = _lock(plan, opts)
     goon = tmp_path / "goons" / "agent" / "search" / "goon.yml"
     goon.write_text(goon.read_text().replace("local-model-tools", "local-model-review"))
-    after, second, _ = FleetPlanResolver(
-        goon_templates=GoonTemplateStore()
-    ).resolve_frozen_local_search_agent(
+    after, second, _ = FleetPlanResolver(goon_templates=GoonTemplateStore()).resolve_frozen_agent(
         plan,
         inputs=opts["inputs"],
         repository_root=opts["agent_repository_root"],

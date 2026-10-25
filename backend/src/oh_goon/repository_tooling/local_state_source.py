@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 
+from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.runtime.database import (
     DATABASE_SCHEMA_VERSION,
@@ -57,7 +58,12 @@ def main() -> int:
             )
         print(inspection.detail)
         if not inspection.compatible:
-            print("Source checkout recovery: make local-state-reset")
+            print(
+                "Preserve the original database and SQLite sidecars; use the matching original runtime to settle Runs, effects and workspace writers before archival or replacement."
+            )
+            print(
+                "Source checkout reset applies only to compatible, settled state: make local-state-reset"
+            )
             return 2
         if args.action == "check":
             return 0
@@ -76,7 +82,11 @@ def main() -> int:
         print("Confirmed source checkout recovery: make local-state-reset")
         return 2
 
-    deleted = reset_local_state(inspection.path)
+    try:
+        deleted = reset_local_state(inspection.path)
+    except (FleetDomainError, OSError) as exc:
+        print(f"Local state reset failed: {exc}")
+        return 2
     print(f"Local state reset: {inspection.path}")
     if deleted:
         print(f"Deleted {len(deleted)} SQLite file(s).")

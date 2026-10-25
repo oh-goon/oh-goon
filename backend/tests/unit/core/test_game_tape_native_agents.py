@@ -19,9 +19,9 @@ from oh_goon.core.models.fleet_observation import (
     NativeServiceExecutionEvidence,
 )
 from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedFleetPlan,
-    ResolvedLocalSearchAgentStep,
 )
 from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution, PlanOutputEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
@@ -29,24 +29,25 @@ from oh_goon.core.models.game_tape import GameTapeStepExecution
 from oh_goon.core.vocabulary import GameTapeStatus
 
 
-def _native_step(agent: NativeAgentName) -> ResolvedLocalSearchAgentStep:
-    return ResolvedLocalSearchAgentStep(
+def _native_step(agent: NativeAgentName) -> ResolvedAgentStep:
+    return ResolvedAgentStep(
+        workload={
+            "harness": "native",
+            "native_agent": ResolvedNativeAgent(
+                agent=agent,
+                profile_name="isolated-managed",
+                definition=NativeAgentDefinition(
+                    executable=f"/native/{agent}-custom", arguments=("--configured",)
+                ),
+                profile=NativeAgentProfile(),
+                executable_sha256="1" * 64,
+            ),
+        },
         step_id="agent",
-        argv=("python",),
         timeout_seconds=10,
         delivery_sha256="b" * 64,
         handoff_identity="handoff",
         source_step_id="agent",
-        harness="native",
-        native_agent=ResolvedNativeAgent(
-            agent=agent,
-            profile_name="isolated-managed",
-            definition=NativeAgentDefinition(
-                executable=f"/native/{agent}-custom", arguments=("--configured",)
-            ),
-            profile=NativeAgentProfile(),
-            executable_sha256="1" * 64,
-        ),
     )
 
 
@@ -155,7 +156,7 @@ def test_native_planned_projection_preserves_frozen_step_and_execution_lock(
         description="",
         execution=VerificationExecutionPolicy(),
         steps=(step,),
-        native_agent=step.native_agent,
+        native_agent=step.workload.native_agent,
     )
     original_json = plan.model_dump_json(exclude_computed_fields=True)
     original_lock = build_execution_lock(plan)
@@ -172,8 +173,8 @@ def test_native_planned_projection_preserves_frozen_step_and_execution_lock(
     )
 
     assert projected[0].command == (f"/native/{agent}-custom", "--configured")
-    assert isinstance(restored.steps[0], ResolvedLocalSearchAgentStep)
-    assert restored.steps[0].argv == ("python",)
+    assert isinstance(restored.steps[0], ResolvedAgentStep)
+    assert "argv" not in restored.steps[0].model_dump()
     assert restored.model_dump_json(exclude_computed_fields=True) == original_json
     assert build_execution_lock(restored) == original_lock
     summary = "\n".join(resolved_plan_summary(restored))

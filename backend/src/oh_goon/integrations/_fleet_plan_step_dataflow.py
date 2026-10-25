@@ -12,10 +12,10 @@ from oh_goon.core.models.fleet_plan import (
     PathExistsCondition,
     PathMissingCondition,
     PlanStreamOutput,
+    ResolvedAgentStep,
     ResolvedExtensionStep,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
-    ResolvedLocalSearchAgentStep,
     ResolvedOciTagAssertStep,
     ResolvedPlanStep,
     StepStatusCondition,
@@ -226,7 +226,7 @@ def bind_step_outputs(
         )
 
     updates: dict[str, object] = {}
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.feedback_reference is not None:
+    if isinstance(step, ResolvedAgentStep) and step.feedback_reference is not None:
         value = bind(step.feedback_reference)
         if not value.strip() or len(value.encode("utf-8")) > 2048:
             raise FleetPlanInvalid(

@@ -23,6 +23,13 @@ from oh_goon.core.errors import (
 from oh_goon.core.game_tape_comparison import compare_game_tapes
 from oh_goon.core.game_tape_failure_history import project_game_tape_failure_history
 from oh_goon.core.game_tape_performance import project_game_tape_performance
+from oh_goon.core.models.agent_repair import (
+    AgentCampaignDecision,
+    AgentCampaignIntent,
+    AgentCampaignReadback,
+    AgentCampaignRunEvidence,
+    AgentRepairResult,
+)
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
 from oh_goon.core.models.fleet_failures import (
@@ -380,21 +387,40 @@ class FleetRunControlPlane:
             return detail
         return detail.model_copy(update={"producer_implementation_provenance": provenance})
 
-    def agent_campaign(self, fleet_run_id: str) -> dict[str, Any]:
-        """Inspect linked campaign Runs from one verified immutable journal cut."""
+    def begin_agent_campaign(self, intent: AgentCampaignIntent) -> AgentCampaignReadback:
+        return self._journal.begin_agent_campaign(intent)
+
+    def campaign_journal(self, campaign_id: str) -> AgentCampaignReadback:
+        return self._journal.agent_campaign(campaign_id)
+
+    def campaign_decision_inputs(
+        self, campaign_id: str
+    ) -> tuple[AgentCampaignReadback, tuple[AgentCampaignRunEvidence, ...], tuple[str, ...]]:
+        return self._journal.agent_campaign_decision_inputs(campaign_id)
+
+    def commit_agent_campaign_decision(
+        self, decision: AgentCampaignDecision
+    ) -> AgentCampaignReadback:
+        return self._journal.commit_agent_campaign_decision(decision)
+
+    def agent_campaign_result(self, campaign_id: str) -> AgentRepairResult:
+        return self._journal.agent_campaign_result(campaign_id)
+
+    def agent_campaign(self, campaign_or_run_id: str) -> dict[str, Any]:
+        """Inspect campaign intent and linked Runs from one verified Journal cut."""
         view = self._journal.read_view()
-        selected = view.required_run_detail(fleet_run_id)
-        target = selected.run.target
-        if (
-            not isinstance(target, FleetPlanTarget)
-            or target.agent_repair is None
-            or target.agent_repair.phase is None
-        ):
-            raise FleetPlanInvalid("Selected Run is not part of a review-repair campaign")
+        campaign = view.campaign(campaign_or_run_id)
+        if campaign.intent is None:
+            selected = view.required_run_detail(campaign_or_run_id)
+            target = selected.run.target
+            if not isinstance(target, FleetPlanTarget) or target.agent_repair is None:
+                raise FleetPlanInvalid("Selected Run is not part of a repair campaign")
+            campaign = view.campaign(target.agent_repair.repair_id)
         return project_agent_campaign(
-            target.agent_repair.repair_id,
-            view.run_details(),
+            campaign.campaign_id,
+            tuple(view.required_run_detail(phase.fleet_run_id) for phase in campaign.phases),
             journal_revision=view.revision,
+            campaign=campaign,
         )
 
     def history(

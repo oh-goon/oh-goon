@@ -142,6 +142,29 @@ describe("GameTapeStepInspector failure actions", () => {
     expect(screen.queryByText("pi: auto_compaction_end")).toBeNull();
   });
 
+  it("renders canonical settlement and cleanup without deriving success from native claims", () => {
+    const step = failedStep();
+    step.settlement = { owner: "fleet_step_settlement", outcome: "INCOMPLETE", cleanup: "UNVERIFIED", reason: "CLEANUP_UNVERIFIED", observed_returncode: 0 };
+    render(<GameTapeStepInspector step={step} />);
+    expect(screen.getByText("INCOMPLETE")).toBeVisible();
+    expect(screen.getByText("UNVERIFIED")).toBeVisible();
+    expect(screen.getByText("CLEANUP_UNVERIFIED")).toBeVisible();
+    expect(screen.getByText("fleet_step_settlement")).toBeVisible();
+    expect(screen.getByText("pytest command failed", { exact: false })).toBeVisible();
+  });
+
+  it("keeps successful service completion distinct from caller cancellation", () => {
+    const step = failedStep();
+    step.settlement = { owner: "fleet_step_settlement", outcome: "SUCCESS", cleanup: "VERIFIED", reason: "ACCEPTED_SERVICE_COMPLETION", observed_returncode: -15 };
+    const { rerender } = render(<GameTapeStepInspector step={step} />);
+    expect(screen.getByText("SUCCESS")).toBeVisible();
+    expect(screen.getByText("ACCEPTED_SERVICE_COMPLETION")).toBeVisible();
+    rerender(<GameTapeStepInspector step={{ ...step, settlement: { ...step.settlement, outcome: "CANCELLED", reason: "CALLER_CANCELLED" } }} />);
+    expect(screen.getByText("CANCELLED")).toBeVisible();
+    expect(screen.getByText("CALLER_CANCELLED")).toBeVisible();
+    expect(screen.queryByText("ACCEPTED_SERVICE_COMPLETION")).toBeNull();
+  });
+
   it("shows derived materialization, runtime, atomic handoff and economics evidence", async () => {
     const step = failedStep() as unknown as Record<string, unknown>;
     step.execution_authority = {

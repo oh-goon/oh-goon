@@ -7,11 +7,11 @@ import os
 import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep
 from oh_goon.integrations._fleet_plan_step_dataflow import bind_step_outputs
 from tests.integration.test_agent01b2b_original_fleet import _lock
 from tests.integration.test_agent01b3b_original_fleet_model_observation import _run
-from tests.integration.test_agent01b3g_bounded_skill_loop import _loop_case
+from tests.integration.test_agent01b3g_bounded_skill_loop import _bounded_agent_case
 
 
 def _feedback_case(
@@ -21,15 +21,18 @@ def _feedback_case(
     note="FAILURE_SENTINEL: expected 8 got 9",
     bound_bytes=2048,
     have_diagnostic=True,
-    harness="local-model-skill-loop",
+    harness="local-model-proposal",
     selected_feedback="${{ steps.test.outputs.diagnostic }}",
 ):
-    plan, repo, opts, _ = _loop_case(
+    from tests.integration.test_agent01b3i_source_bound_patch_proposal import _payload
+
+    plan, repo, opts, _ = _bounded_agent_case(
         tmp_path,
         monkeypatch,
+        proposal=True,
         model_replies=[
             '{"tool":"read_file","path":"repo/code.txt"}',
-            '{"decision":"finish","summary":"Investigate the failing physical test"}',
+            _payload(),
         ],
     )
     bin_dir = tmp_path / "bin"
@@ -49,7 +52,7 @@ def _feedback_case(
 """,
         1,
     )
-    content = content.replace("harness: local-model-skill-loop", "harness: " + harness)
+    content = content.replace("harness: local-model-proposal", "harness: " + harness)
     content = content.replace(
         "    requested_effects:",
         '    feedback: "' + selected_feedback + '"\n'
@@ -140,7 +143,7 @@ def test_unbound_feedback_cannot_become_an_agent_model_turn(tmp_path, monkeypatc
     plan, repo, opts, _ = _feedback_case(tmp_path, monkeypatch)
     frozen, _ = _lock(plan, opts)
     agent = frozen.steps[1]
-    assert isinstance(agent, ResolvedLocalSearchAgentStep)
+    assert isinstance(agent, ResolvedAgentStep)
     with pytest.raises(FleetPlanInvalid, match="unavailable output"):
         bind_step_outputs(agent, {})
     assert (

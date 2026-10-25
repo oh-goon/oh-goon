@@ -23,12 +23,11 @@ from oh_goon.core.models.agent_review import (
 )
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.models.execution_lock_models import LockedExternalArtifact
-from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
+from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.fleet_plan import (
-    PLAN_TIMEOUT_RETURN_CODE,
+    ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedFleetPlan,
-    ResolvedLocalSearchAgentStep,
     ResolvedPlanStep,
     StepStatusCondition,
 )
@@ -60,11 +59,18 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class AgentRepairSteps:
     test: ResolvedCommandStep
-    agent: ResolvedLocalSearchAgentStep
+    agent: ResolvedAgentStep
     apply: ResolvedCommandStep
     retest: ResolvedCommandStep
     feedback_name: str
     allowed_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class PassedRepairTest:
+    """The failure-driven policy's exact accepted native test occurrence."""
+
+    step_id: str
 
 
 def _requires_status(step: ResolvedPlanStep, source: str, status: str) -> bool:
@@ -125,8 +131,8 @@ def validate_agent_repair_plan(
         type(test) is not ResolvedCommandStep
         or type(apply) is not ResolvedCommandStep
         or type(retest) is not ResolvedCommandStep
-        or not isinstance(agent, ResolvedLocalSearchAgentStep)
-        or agent.harness != "local-model-proposal"
+        or not isinstance(agent, ResolvedAgentStep)
+        or agent.workload.harness != "local-model-proposal"
     ):
         raise FleetPlanInvalid(
             "repair requires native command, proposal Agent, apply and native retest"
@@ -135,7 +141,7 @@ def validate_agent_repair_plan(
         step.retry.max_attempts != 1
         or step.lifecycle is not StepLifecycle.NORMAL
         or step.working_directory != "."
-        or step.uv is not None
+        or getattr(step, "uv", None) is not None
         or not isinstance(step.workspace.source, RepositoryWorkspaceSource)
         or not isinstance(step.cache.source, EmptyPlanCacheSource)
         or step.workspace.publish
@@ -187,7 +193,9 @@ def validate_agent_repair_plan(
     return AgentRepairSteps(test, agent, apply, retest, reference[1], path)
 
 
-def repair_attempt_decision(detail: FleetRunDetail, steps: AgentRepairSteps) -> Stop | None:
+def repair_attempt_decision(
+    detail: FleetRunDetail, steps: AgentRepairSteps
+) -> Stop | PassedRepairTest | None:
     """None means the exact failed retest permits another caller-budgeted attempt."""
     if getattr(getattr(detail.run, "failure", None), "code", None) == "OPERATION_DEADLINE_EXPIRED":
         return Stop.TIMED_OUT
@@ -215,21 +223,21 @@ def repair_attempt_decision(detail: FleetRunDetail, steps: AgentRepairSteps) -> 
         )
         if needs_native_proof and len(step.attempts) != 1:
             return Stop.EXECUTION_UNRESOLVED
-        for attempt in step.attempts:
-            if attempt.supervisor is None:
-                if needs_native_proof:
-                    return Stop.EXECUTION_UNRESOLVED
-                continue
-            if attempt.supervisor.cleanup_reason == "timeout":
-                return Stop.TIMED_OUT
-            if attempt.supervisor.cleanup_reason == "cancel":
-                return Stop.CANCELLED
-            if attempt.supervisor.cleanup_reason == "output_limit":
-                return Stop.FEEDBACK_UNAVAILABLE
+        if step.settlement.outcome == "TIMED_OUT":
+            return Stop.TIMED_OUT
+        if step.settlement.outcome == "CANCELLED":
+            return Stop.CANCELLED
+        if step.settlement.outcome == "OUTPUT_LIMITED":
+            return Stop.FEEDBACK_UNAVAILABLE
+        if needs_native_proof and (
+            step.settlement.cleanup != "VERIFIED"
+            or step.settlement.outcome not in {"SUCCESS", "FAILED"}
+        ):
+            return Stop.EXECUTION_UNRESOLVED
     test, agent, apply, retest = result.steps
     if test.status == "COMPLETED" and test.returncode == 0:
         return (
-            Stop.TEST_PASSED
+            PassedRepairTest(test.step_id)
             if all(step.status == "SKIPPED" for step in (agent, apply, retest))
             else Stop.EXECUTION_UNRESOLVED
         )
@@ -240,7 +248,7 @@ def repair_attempt_decision(detail: FleetRunDetail, steps: AgentRepairSteps) -> 
     if apply.status != "COMPLETED" or apply.returncode != 0:
         return Stop.APPLY_FAILED
     if retest.status == "COMPLETED" and retest.returncode == 0:
-        return Stop.TEST_PASSED
+        return PassedRepairTest(retest.step_id)
     if retest.status != "FAILED" or not retest.attempts:
         return Stop.EXECUTION_UNRESOLVED
     if not _has_feedback(retest, steps.feedback_name):
@@ -250,37 +258,6 @@ def repair_attempt_decision(detail: FleetRunDetail, steps: AgentRepairSteps) -> 
 
 def _has_feedback(step: PlanStepExecution, name: str) -> bool:
     return any(output.name == name and 0 < output.byte_count <= 2048 for output in step.outputs)
-
-
-def _completed_service_shutdown(step: PlanStepExecution, expected: ResolvedPlanStep) -> bool:
-    """A completed owned service shuts its daemon down through native cancellation.
-
-    The Run and typed Step still must succeed independently. This only identifies
-    the original adapter's shutdown receipt, never a cancelled model turn.
-    """
-    if (
-        not isinstance(expected, ResolvedLocalSearchAgentStep)
-        or expected.harness != "native"
-        or expected.native_agent is None
-        or expected.native_agent.profile.codex_service is None
-        or step.kind != "agent"
-        or step.status != "COMPLETED"
-        or step.returncode != 0
-    ):
-        return False
-    observations = [o for o in step.observations if isinstance(o, NativeAgentObservation)]
-    return (
-        len(observations) == 1
-        and observations[0].execution is not None
-        and observations[0].execution.repository_access == "read_only"
-        and observations[0].occurrence == expected.step_id
-        and observations[0].profile == expected.native_agent.profile_name
-        and observations[0].implementation_identity
-        == f"codex:sha256:{expected.native_agent.executable_sha256}"
-        and observations[0].role == expected.role
-        and observations[0].settled
-        and not observations[0].failed
-    )
 
 
 def completed_phase_steps(
@@ -300,10 +277,11 @@ def completed_phase_steps(
     if (
         evidence is None
         or evidence.plan_id != plan.plan_id
-        or tuple(s.step_id for s in evidence.steps) != tuple(s.step_id for s in plan.steps)
+        or tuple((s.step_id, s.kind) for s in evidence.steps)
+        != tuple((s.step_id, s.kind) for s in plan.steps)
     ):
         raise FleetPlanInvalid("phase result has incomplete or different Step membership")
-    for step, expected in zip(evidence.steps, plan.steps, strict=True):
+    for step in evidence.steps:
         if (
             step.status != "COMPLETED"
             or step.returncode != 0
@@ -315,13 +293,8 @@ def completed_phase_steps(
                 and step.attempts[0].standard_isolation.filesystem_cleanup != "verified"
             )
             or isinstance(step.teardown, FailedPlanStepTeardownEvidence)
-            or (
-                step.attempts[0].supervisor.cleanup_reason not in ("none", "output_cleanup")
-                and not (
-                    step.attempts[0].supervisor.cleanup_reason == "cancel"
-                    and _completed_service_shutdown(step, expected)
-                )
-            )
+            or step.settlement.outcome != "SUCCESS"
+            or step.settlement.cleanup != "VERIFIED"
         ):
             raise FleetPlanInvalid("phase lacks complete successful native attempt evidence")
     return evidence.steps
@@ -331,7 +304,7 @@ class AgentReviewRepairCampaign:
     """Phase selection policy for the existing bounded Fleet repair driver.
 
     This owner never launches processes or Runs. Every selected phase is returned
-    to the same original admission/wait/cancellation path as legacy repair.
+    to the same original admission/wait/cancellation path as failure-driven repair.
     """
 
     def __init__(
@@ -394,8 +367,8 @@ class AgentReviewRepairCampaign:
 
     def _validate_apply(self) -> None:
         for step in self.original.steps:
-            if isinstance(step, ResolvedLocalSearchAgentStep) and step.harness == "native":
-                native_selection = step.native_agent
+            if isinstance(step, ResolvedAgentStep) and step.workload.harness == "native":
+                native_selection = step.workload.native_agent
                 if (
                     native_selection is None
                     or (
@@ -464,7 +437,7 @@ class AgentReviewRepairCampaign:
         for step in self.original.steps:
             if step.step_id not in members:
                 continue
-            if isinstance(step, ResolvedLocalSearchAgentStep):
+            if isinstance(step, ResolvedAgentStep):
                 step = step.model_copy(update={"review_context": context})
             elif self.phase == "repair":
                 if not isinstance(step, ResolvedCommandStep):
@@ -534,29 +507,14 @@ class AgentReviewRepairCampaign:
             return Stop.TIMED_OUT
         if detail.outcome.value == "CANCELLED":
             return Stop.CANCELLED
-        expected_steps = {step.step_id: step for step in self.plan.steps}
         for operation in detail.operations:
             evidence = getattr(operation.evidence, "plan", None)
             for step in evidence.steps if evidence is not None else ():
-                expected = expected_steps.get(step.step_id)
-                service_step = (
-                    isinstance(expected, ResolvedLocalSearchAgentStep)
-                    and expected.harness == "native"
-                    and expected.native_agent is not None
-                    and expected.native_agent.profile.codex_service is not None
-                )
-                if service_step and getattr(step, "returncode", None) == PLAN_TIMEOUT_RETURN_CODE:
+                if step.settlement.outcome == "TIMED_OUT":
                     return Stop.TIMED_OUT
-                for attempt in step.attempts:
-                    if attempt.supervisor is not None:
-                        if attempt.supervisor.cleanup_reason == "timeout":
-                            return Stop.TIMED_OUT
-                        # The service adapter cancels its daemon after both a
-                        # completed turn and a failed preflight/turn. Canonical
-                        # Run cancellation above owns caller cancellation; a
-                        # failed service Step still fails typed completion below.
-                        if attempt.supervisor.cleanup_reason == "cancel" and not service_step:
-                            return Stop.CANCELLED
+                if step.settlement.outcome == "CANCELLED":
+                    return Stop.CANCELLED
+
         try:
             steps = completed_phase_steps(detail, self.plan)
         except FleetPlanInvalid:

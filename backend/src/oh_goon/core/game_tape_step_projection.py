@@ -8,7 +8,7 @@ from oh_goon.core.game_tape_identity import step_execution_id
 from oh_goon.core.game_tape_lifecycle import step_status
 from oh_goon.core.models.fleet_observation import NativeAgentObservation
 from oh_goon.core.models.fleet_plan import (
-    ResolvedLocalSearchAgentStep,
+    ResolvedAgentStep,
     ResolvedPlanStep,
     ResolvedStepSource,
 )
@@ -129,6 +129,7 @@ def _step_execution(
         working_directory=getattr(step, "working_directory", "."),
         environment=_environment_sources(step),
         exit_code=returncode,
+        **({"settlement": execution.settlement} if execution is not None else {}),
         attempts=execution.attempts if execution is not None else (),
         attempt_transitions=transitions,
         stdout_evidence=execution.stdout_evidence if execution is not None else None,
@@ -186,7 +187,7 @@ def _failure_reason(
         PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
         PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
     }:
-        native = isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None
+        native = isinstance(step, ResolvedAgentStep) and step.workload.harness == "native"
         argv = execution.argv if native and execution is not None else _planned_argv(step)
         if native and not argv:
             return (
@@ -253,8 +254,8 @@ def _failure_fingerprint(
 
 
 def _planned_argv(step: ResolvedPlanStep) -> tuple[str, ...]:
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
-        selected = step.native_agent.definition
+    if isinstance(step, ResolvedAgentStep) and step.workload.harness == "native":
+        selected = step.workload.native_agent.definition
         return (selected.executable, *selected.arguments) if selected.executable is not None else ()
     argv = getattr(step, "argv", ())
     if argv:

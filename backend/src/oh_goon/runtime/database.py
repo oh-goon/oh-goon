@@ -210,6 +210,29 @@ class LocalDatabase:
             self._initialize()
             self._path_identity = _capture_database_path_identity(self.path)
 
+    @staticmethod
+    @contextmanager
+    def observe_existing_for_reset(path: Path) -> Iterator[sqlite3.Connection]:
+        """Provide native read-only maintenance observation without runtime admission.
+
+        The canonical gate and read transaction remain held until the reset owner
+        has finished its explicit file deletion. This never initializes schema,
+        changes journal mode, repairs evidence, or admits an execution.
+        """
+        with sqlite_authority_gate(path, write=True):
+            if path.is_symlink() or not path.is_file():
+                raise sqlite3.DatabaseError(
+                    "Reset observation requires an existing regular database"
+                )
+            connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5.0)
+            try:
+                configure_common_connection(path, connection)
+                connection.execute("PRAGMA query_only = ON")
+                connection.execute("BEGIN")
+                yield connection
+            finally:
+                connection.close()
+
     @property
     def private_paths(self) -> tuple[Path, ...]:
         """Exact active SQLite state, including native transient sidecars and its gate."""
@@ -1260,15 +1283,6 @@ class LocalDatabase:
         ensure_private_directory(self.path.parent)
         connection = self._connect()
         try:
-            observed_mode = str(
-                connection.execute(f"PRAGMA journal_mode = {self.journal_mode}").fetchone()[0]
-            ).upper()
-            if observed_mode != self.journal_mode:
-                raise sqlite3.DatabaseError(
-                    "SQLite journal mode authority mismatch: "
-                    f"requested {self.journal_mode}, observed {observed_mode}"
-                )
-            connection.execute("PRAGMA synchronous = FULL")
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             existing_tables = connection.execute(
                 "SELECT name FROM sqlite_master "
@@ -1299,18 +1313,27 @@ class LocalDatabase:
                         expected=DATABASE_SCHEMA_VERSION,
                     )
                 )
+            identity_cookie = int(connection.execute("PRAGMA application_id").fetchone()[0])
+            if not fresh_database and identity_cookie == 0:
+                raise DatabaseSchemaMismatch(
+                    "Current SQLite database is missing its required application_id identity"
+                )
+            observed_mode = str(
+                connection.execute(f"PRAGMA journal_mode = {self.journal_mode}").fetchone()[0]
+            ).upper()
+            if observed_mode != self.journal_mode:
+                raise sqlite3.DatabaseError(
+                    "SQLite journal mode authority mismatch: "
+                    f"requested {self.journal_mode}, observed {observed_mode}"
+                )
+            connection.execute("PRAGMA synchronous = FULL")
             connection.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA_SQL)
             try:
                 ensure_durable_revision_schema(connection)
                 ensure_exclusion_schema(connection)
                 connection.execute(f"PRAGMA user_version = {DATABASE_SCHEMA_VERSION}")
                 connection.commit()
-                identity_cookie = int(connection.execute("PRAGMA application_id").fetchone()[0])
                 if identity_cookie == 0:
-                    if not fresh_database:
-                        raise DatabaseSchemaMismatch(
-                            "Current SQLite database is missing its required application_id identity"
-                        )
                     identity_cookie = _new_database_identity_cookie()
                     connection.execute(f"PRAGMA application_id = {identity_cookie}")
                     observed_identity = int(

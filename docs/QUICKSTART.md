@@ -18,7 +18,7 @@ dependency lock. No separate Hashmarks installation or agentsCookbook checkout
 is needed. A native dependency failure must be resolved before running the
 affected workload; diagnostics do not replace the real Hashmarks integration.
 
-A new operational database is created automatically. If a pre-live schema change made the old local database incompatible, follow the exact recovery command printed by startup and then restart with `make dev`.
+A new operational database is created automatically. If an existing database is incompatible, preserve it and follow [schema-mismatch recovery](TROUBLESHOOTING.md#local-database-schema-mismatch). Active or unresolved execution ownership must be settled before a fresh state generation; reset cannot bypass that boundary.
 
 ### Verify a source checkout
 

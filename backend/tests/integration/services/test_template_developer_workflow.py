@@ -383,7 +383,7 @@ def test_actual_local_search_example_projects_inputs_and_executes_its_frozen_too
     assert graph.goon(source, edge).path == workflow / "goons/agent/search/goon.yml"
     assert graph.containment_root == workflow
 
-    frozen, handoff, _ = resolver.resolve_frozen_local_search_agent(
+    frozen, handoff, _ = resolver.resolve_frozen_agent(
         source,
         source_graph=graph,
         inputs={"repo": "local:team/app", "skill": "local:team/search", "acceptance": "review"},

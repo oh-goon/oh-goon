@@ -9,7 +9,7 @@ import pytest
 
 from tests.integration.test_agent01b2b_original_fleet import _lock
 from tests.integration.test_agent01b3b_original_fleet_model_observation import _run
-from tests.integration.test_agent01b3g_bounded_skill_loop import _loop_case
+from tests.integration.test_agent01b3g_bounded_skill_loop import _bounded_agent_case
 
 _ORIGINAL = b"needle from real original Fleet\n"
 _DIGEST = hashlib.sha256(_ORIGINAL).hexdigest()
@@ -28,9 +28,9 @@ def _payload(**overrides):
 
 
 def _case(tmp_path, monkeypatch, *, model_replies):
-    plan, repo, opts, _ = _loop_case(tmp_path, monkeypatch, model_replies=model_replies)
-    path = tmp_path / "goons" / "agent" / "search" / "goon.yml"
-    path.write_text(path.read_text().replace("local-model-skill-loop", "local-model-proposal"))
+    plan, repo, opts, _ = _bounded_agent_case(
+        tmp_path, monkeypatch, model_replies=model_replies, proposal=True
+    )
     return plan, repo, opts
 
 
@@ -55,7 +55,7 @@ def test_proposal_is_durable_evidence_but_repository_stays_unchanged(tmp_path, m
         ],
     )
     frozen, handoff = _lock(plan, opts)
-    assert frozen.steps[0].harness == handoff.harness == "local-model-proposal"
+    assert frozen.steps[0].workload.harness == handoff.harness == "local-model-proposal"
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3i-proposal")
     assert detail.game_tape.status.value == "PASSED"
     assert (repo / "code.txt").read_bytes() == _ORIGINAL
@@ -125,7 +125,7 @@ def test_cannot_propose_unread_file_after_listing(tmp_path, monkeypatch):
 
 
 def test_other_harness_retains_previous_model_protocol(tmp_path, monkeypatch):
-    plan, repo, opts, _ = _loop_case(
+    plan, repo, opts, _ = _bounded_agent_case(
         tmp_path,
         monkeypatch,
         model_replies=[

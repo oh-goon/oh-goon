@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
@@ -118,7 +119,7 @@ def execute_git(
     *,
     environment: dict[str, str],
     command_runner: _StepCommandRunner = run_command,
-) -> CommandResult:
+) -> StepOutcome:
     result = git.run(
         *step.argv,
         cwd=step_working_directory(repository, step),
@@ -127,19 +128,18 @@ def execute_git(
         env=git_execution_environment(environment),
         command_runner=command_runner,
     )
+    outcome = from_command(result)
     if (
         step.result_contract is GitResultContract.CLEAN_WORKTREE
         and result.returncode == 0
         and result.stdout
     ):
-        return CommandResult(
-            argv=result.argv,
+        return replace(
+            outcome,
             returncode=1,
-            stdout=result.stdout,
             stderr="Repository worktree is not clean",
-            duration_ms=result.duration_ms,
         )
-    return result
+    return outcome
 
 
 def validate_extension(

@@ -305,7 +305,7 @@ class FleetPlanStepSequence:
         if (
             record.evidence_repository is None
             or record.outcome.skipped
-            or process_boundary_settled(record.outcome) is False
+            or process_boundary_settled(record.outcome) is not True
         ):
             return ()
         return collect_direct_artifacts(record.evidence_repository, step.artifacts)
@@ -319,7 +319,7 @@ class FleetPlanStepSequence:
         if (
             record.evidence_repository is None
             or record.outcome.skipped
-            or process_boundary_settled(record.outcome) is False
+            or process_boundary_settled(record.outcome) is not True
         ):
             return ()
         return collect_strict_artifacts(record.evidence_repository, step.artifacts, prepared_run)
@@ -352,7 +352,7 @@ class FleetPlanStepSequence:
             finished_at=record.finished_at,
         )
         self._results.append(evidence)
-        if process_boundary_settled(outcome) is False:
+        if not outcome.skipped and process_boundary_settled(outcome) is not True:
             self._halt_all = True
             self._halt_all_reason = "Prior execution cleanup is unverified; execution stopped"
         if isinstance(evidence, CompletedPlanStepExecution):

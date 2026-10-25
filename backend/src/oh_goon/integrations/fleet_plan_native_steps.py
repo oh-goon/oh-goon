@@ -34,7 +34,7 @@ from oh_goon.core.models.fleet_observation import (
     NativeAgentObservation,
     NativeServiceExecutionEvidence,
 )
-from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedLocalSearchAgentStep
+from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedAgentStep
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.engine.command import (
     MAX_COMMAND_INPUT_BYTES,
@@ -47,6 +47,7 @@ from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
     from_command,
     output_contract_failure,
+    process_boundary_settled,
 )
 from oh_goon.integrations.agent_inference_broker import approved_model_broker
 from oh_goon.integrations.agent_inference_relay import model_inference_relay
@@ -183,10 +184,11 @@ def require_native_agent_compatibility(
 
 
 def prepare_native_step_input(
-    packet: bytes, step: ResolvedLocalSearchAgentStep, runtime: StepRuntime
+    packet: bytes, step: ResolvedAgentStep, runtime: StepRuntime
 ) -> AgentHarnessInput:
     """Verify the original delivery once and check receiving execution intent."""
-    selected = step.native_agent
+    assert step.workload.harness == "native"
+    selected = step.workload.native_agent
     if (
         selected is None
         or runtime.native_profile != selected
@@ -196,7 +198,7 @@ def prepare_native_step_input(
     ):
         raise FleetPlanInvalid("Native Agent requires its original ordinary resolved Run intent")
     require_native_agent_compatibility(
-        selected, role=step.role, terminal_available=runtime.terminal is not None
+        selected, role=step.workload.role, terminal_available=runtime.terminal is not None
     )
     if runtime.runtime_supervision is not None:
         raise FleetPlanInvalid("Native whole-Step deadline cannot use a fresh per-process watchdog")
@@ -211,7 +213,9 @@ def prepare_native_step_input(
             raise FleetPlanInvalid("Native backend configuration differs from resolved Run intent")
     verify_native_agent_executable(selected)
     capabilities = tuple(
-        sorted({"frozen_source", "hashmarks_evidence", "observations", step.role, "terminal"})
+        sorted(
+            {"frozen_source", "hashmarks_evidence", "observations", step.workload.role, "terminal"}
+        )
     )
     prepared = prepare_agent_harness_input(
         packet,
@@ -229,7 +233,7 @@ def prepare_native_step_input(
             disclosure_recipients=selected.disclosure_recipients,
         ),
         occurrence=step.step_id,
-        role=step.role,
+        role=step.workload.role,
         optional_capabilities=("observations",),
         required_capabilities=("terminal",) if selected.interactive else (),
     )
@@ -241,7 +245,10 @@ def prepare_native_step_input(
             "Backend-owned native reasoning requires read-only source; repair uses its separately admitted native apply Step"
         )
     if (
-        (step.role != "report" or prepared.requested_effects.repository_access == "read_only")
+        (
+            step.workload.role != "report"
+            or prepared.requested_effects.repository_access == "read_only"
+        )
         and not sandboxed
         and selected.profile.codex_service is None
     ):
@@ -345,13 +352,14 @@ def _bootstrap(
 
 def _prompt(
     prepared: AgentHarnessInput,
-    step: ResolvedLocalSearchAgentStep,
+    step: ResolvedAgentStep,
     repository: Path,
     materialized: PreparedAgentEvidence,
     manifest: Path,
     evidence: str,
     state: Path,
 ) -> bytes:
+    assert step.workload.harness == "native"
     producer = (
         sys.executable,
         "-I",
@@ -398,7 +406,7 @@ def _prompt(
             + " --query-file <private-query-file>",
         },
         "output_contract": agent_phase_output_contract(step)
-        if step.role != "report"
+        if step.workload.role != "report"
         else "Report actual work and incomplete verification accurately. Model text is not execution or verification authority.",
     }
     prompt = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
@@ -408,7 +416,7 @@ def _prompt(
 
 
 def _retained_native_summary(
-    step: ResolvedLocalSearchAgentStep,
+    step: ResolvedAgentStep,
     text: str,
     *,
     diagnostic: str,
@@ -436,13 +444,14 @@ def _retained_native_summary(
 
 
 def _native_observation_from_protocol(
-    step: ResolvedLocalSearchAgentStep,
+    step: ResolvedAgentStep,
     prepared: AgentHarnessInput,
     protocol: NativeAgentEvents,
     execution: NativeServiceExecutionEvidence | None = None,
 ) -> NativeAgentObservation:
     """Bind retained claims to the exact receiving Step without result authority."""
-    selected = step.native_agent
+    assert step.workload.harness == "native"
+    selected = step.workload.native_agent
     assert selected is not None
     return NativeAgentObservation(
         agent=selected.agent,
@@ -451,7 +460,7 @@ def _native_observation_from_protocol(
         input_identity=prepared.input_identity,
         occurrence=prepared.occurrence,
         source_identity=prepared.source_identity,
-        role=step.role,
+        role=step.workload.role,
         events=protocol.observations,
         native_event_count=protocol.event_count,
         omitted_observations=protocol.omitted_observations,
@@ -463,7 +472,7 @@ def _native_observation_from_protocol(
 
 def execute_native_agent_step(
     repository: Path,
-    step: ResolvedLocalSearchAgentStep,
+    step: ResolvedAgentStep,
     prepared: AgentHarnessInput,
     materialized: PreparedAgentEvidence,
     process: _StepProcess,
@@ -472,7 +481,8 @@ def execute_native_agent_step(
     deadline: float,
 ) -> StepOutcome:
     """Run initial producer evidence and one native workload through the supplied runner."""
-    selected = step.native_agent
+    assert step.workload.harness == "native"
+    selected = step.workload.native_agent
     assert selected is not None
     sandboxed = selected.profile.backend == "bubblewrap"
     private_output = selected.profile.codex_service is not None or (
@@ -514,8 +524,9 @@ def execute_native_agent_step(
         read_only_mounts=frozen_mounts,
         read_only_workspace=sandboxed,
     )
-    if evidence.returncode != 0:
-        return from_command(evidence)
+    evidence_outcome = from_command(evidence)
+    if evidence_outcome.returncode != 0 or process_boundary_settled(evidence_outcome) is not True:
+        return evidence_outcome
     # The native workload's complete serialized input has its own receiving
     # bound below. Local-model disclosure budgets do not constrain this path.
     disclosure = task_evidence_prompt(
@@ -580,9 +591,9 @@ def execute_native_agent_step(
             )
 
             output_schema = None
-            if step.role == "review":
+            if step.workload.role == "review":
                 output_schema = review_output_schema(prepared.handoff, step.step_id)
-            elif step.role == "adjudication":
+            elif step.workload.role == "adjudication":
                 output_schema = AgentAdjudicationRecord.model_json_schema(by_alias=True)
                 properties = output_schema["properties"]
                 output_schema["required"] = list(properties)
@@ -774,7 +785,7 @@ def execute_native_agent_step(
                     preserve_native_executable_path=not sandboxed,
                     read_only_workspace=sandboxed
                     and (
-                        step.role != "report"
+                        step.workload.role != "report"
                         or prepared.requested_effects.repository_access == "read_only"
                     ),
                 )
@@ -850,12 +861,12 @@ def execute_native_agent_step(
                 "handoff_identity": prepared.handoff_identity,
                 "status": status,
                 "verdict": "INCONCLUSIVE"
-                if status == "COMPLETED" and step.role == "report"
+                if status == "COMPLETED" and step.workload.role == "report"
                 else None,
                 "findings": [],
                 "summary": "Native protocol claim; process and verification authority remain independent",
                 "record": outcome.stdout
-                if status == "COMPLETED" and step.role != "report"
+                if status == "COMPLETED" and step.workload.role != "report"
                 else None,
                 "observations": [event.model_dump(mode="json") for event in events],
                 "artifacts": [],
@@ -863,7 +874,7 @@ def execute_native_agent_step(
             submission = decode_agent_harness_submission(
                 canonical_bytes(envelope), expected_input=prepared
             )
-            if step.role != "report" and submission.record is not None:
+            if step.workload.role != "report" and submission.record is not None:
                 outcome = replace(outcome, stdout=submission.record)
         if execution_returncode == 0 and not selected.interactive and (not settled or failed):
             outcome = replace(
@@ -872,7 +883,7 @@ def execute_native_agent_step(
                 stderr="Native agent did not report a settled successful conversation",
             )
         if execution_returncode == 0 and outcome.returncode == 0:
-            accepting_role_output = step.role != "report"
+            accepting_role_output = step.workload.role != "report"
             outcome = accept_agent_phase_output(step, prepared.handoff, outcome)
     except (AgentProviderError, FleetPlanInvalid) as exc:
         if any(isinstance(item, NativeAgentObservation) for item in outcome.observations):

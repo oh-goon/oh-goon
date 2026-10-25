@@ -1,5 +1,10 @@
 # ADR AGENT-01B3L — Failed-test feedback belongs to original Fleet dataflow
 
+**Historical recipient selection.** `local-model-skill-loop` is removed;
+source-bound `local-model-proposal` retains the bounded failed-test feedback
+capability. The [current contract](../AGENT_SKILLS.md#failed-test-feedback)
+governs supported authoring and result semantics.
+
 **Decision:** The original authored Goon selects a single earlier command Step's `outputs` diagnostic as optional `feedback` to a subsequent `local-model-skill-loop` Agent. Resolve the static Step reference with the same original Plan/Goon owner that resolves command argv; bind the scalar only in the original Step sequencer from published outputs, and disclose it to the originally selected local model as JSON-escaped **UNTRUSTED DATA**. No other Agent harness may receive it.
 
 **Rationale:** AGENT-01B3K transports real failing test diagnostics but had no model recipient. A parallel model-runner, journal, mutable source capture, policy owner or hidden orchestration callback would fragment the original execution authority. The existing typed Agent Step and supervised model/tool calls already own the needed process lifecycle. Canonical ownership is preserved: original Resolver/handoff freeze source/task; original Step publisher owns actual failed test outputs; original sequence binds prior Step references and conditions; original supervisor owns all Ollama and `rg` processes; original Game Tape projects both Step outcomes.

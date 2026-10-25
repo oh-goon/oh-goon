@@ -1872,6 +1872,26 @@ class RepositoryWorkspaceAuthority:
             shutil.rmtree(quarantine)
 
     @staticmethod
+    def require_reset_safe_in(connection: sqlite3.Connection) -> None:
+        """Retain physical allocation authority until its original release completes."""
+        missing = connection.execute(
+            "SELECT workspaces.workspace_id FROM workspaces LEFT JOIN workspace_state USING (workspace_id) "
+            "WHERE workspace_state.workspace_id IS NULL LIMIT 1"
+        ).fetchone()
+        if missing is not None:
+            raise WorkspaceStateStale(
+                "Local-state reset cannot prove a workspace's original lifecycle"
+            )
+        rows = connection.execute("SELECT * FROM workspace_state").fetchall()
+        for row in rows:
+            state = _workspace_state(row)
+            RepositoryWorkspaceAuthority._require_no_unsettled_writer(connection, state)
+            if state.lifecycle_state is not WorkspaceLifecycleState.RELEASED:
+                raise WorkspaceStateStale(
+                    f"Local-state reset requires original workspace release: {state.workspace_id}"
+                )
+
+    @staticmethod
     def _require_no_unsettled_writer(connection: sqlite3.Connection, state: WorkspaceState) -> None:
         if state.current_lease_id is not None:
             raise WorkspaceStateStale(

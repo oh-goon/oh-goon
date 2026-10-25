@@ -4,15 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits
 
 if TYPE_CHECKING:
     from oh_goon.core.models.run import FleetRunDetail
+
+
+MAX_AGENT_CAMPAIGN_MESSAGE_CHARS = 4096
+TRUNCATED_AGENT_CAMPAIGN_MESSAGE = (
+    "Campaign diagnostic exceeded its redacted retention budget [truncated]"
+)
 
 
 class AgentRepairBudget(ImmutableModel):
@@ -41,6 +47,9 @@ class AgentRepairContext(ImmutableModel):
     candidate_identity: str | None = Field(default=None, exclude_if=lambda value: value is None)
     scope_identity: str | None = Field(default=None, exclude_if=lambda value: value is None)
     write_roots: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
+    campaign_revision: int | None = Field(
+        default=None, ge=1, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_attempt(self) -> AgentRepairContext:
@@ -87,7 +96,7 @@ class AgentRepairStopReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class AgentRepairResult:
-    """Invocation receipt; each underlying Run remains the durable result authority."""
+    """Committed campaign receipt; child Runs retain execution-result authority."""
 
     repair_id: str
     budget: AgentRepairBudget
@@ -96,6 +105,9 @@ class AgentRepairResult:
     message: str = ""
     admitted_run_ids: tuple[str, ...] = ()
     unresolved_run_ids: tuple[str, ...] = ()
+    committed_decision_id: str | None = None
+    journal_revision: int | None = None
+    campaign_journal: AgentCampaignReadback | None = None
 
     @property
     def test_passed(self) -> bool:
@@ -107,3 +119,130 @@ class AgentRepairResult:
     @property
     def converged(self) -> bool:
         return self.stop_reason is AgentRepairStopReason.CONVERGED
+
+
+class AgentCampaignIntent(ImmutableModel):
+    """Bounded original intent retained once before phase admission."""
+
+    kind: Literal["intent"] = "intent"
+    campaign_id: str = Field(min_length=1, max_length=160)
+    expected_revision: Literal[0] = 0
+    repository_id: str = Field(min_length=1)
+    original_execution_digest: str = Field(min_length=1)
+    budget: AgentRepairBudget
+    maximum_runs: int = Field(ge=1, le=160)
+    deadline_at: AwareDatetime
+    initial_phase: str = Field(min_length=1)
+    initial_step_ids: tuple[str, ...] = Field(min_length=1)
+    candidate_identity: str | None = None
+    scope_identity: str | None = None
+    write_roots: tuple[str, ...] = ()
+
+
+class AgentCampaignPhase(ImmutableModel):
+    """Exact selected membership, appended in the Run admission transaction."""
+
+    kind: Literal["phase"] = "phase"
+    campaign_id: str = Field(min_length=1, max_length=160)
+    expected_revision: int = Field(ge=1)
+    fleet_run_id: str = Field(min_length=1)
+    context: AgentRepairContext
+    execution_digest: str = Field(min_length=1)
+    selected_step_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class AgentCampaignRunEvidence(ImmutableModel):
+    fleet_run_id: str = Field(min_length=1)
+    terminal_sequence: int = Field(ge=1)
+    operation_ids: tuple[str, ...] = ()
+
+
+class AgentCampaignUnstartedSelection(ImmutableModel):
+    """A requested identity with no admitted Run at the decision read cut."""
+
+    selected_run_id: str = Field(min_length=1)
+    phase_ordinal: int = Field(ge=1, le=160)
+    phase: str = Field(min_length=1)
+    selected_step_ids: tuple[str, ...] = Field(min_length=1)
+    admission_status: Literal["not_admitted"] = "not_admitted"
+
+
+class AgentCampaignDecision(ImmutableModel):
+    """Policy output with bounded references to the settled inputs it consumed."""
+
+    kind: Literal["decision"] = "decision"
+    campaign_id: str = Field(min_length=1, max_length=160)
+    expected_revision: int = Field(ge=1)
+    decision_id: str = Field(min_length=1, max_length=160)
+    phase_ordinal: int = Field(ge=0, le=160)
+    remaining_runs: int = Field(ge=0, le=160)
+    consumed_runs: tuple[AgentCampaignRunEvidence, ...] = ()
+    candidate_identity: str | None = None
+    scope_identity: str | None = None
+    next_phase: str | None = None
+    next_step_ids: tuple[str, ...] = ()
+    unstarted_selection: AgentCampaignUnstartedSelection | None = None
+    stop_reason: AgentRepairStopReason | None = None
+    passed_test_step_id: str | None = Field(default=None, min_length=1)
+    unresolved_run_ids: tuple[str, ...] = ()
+    message: str = Field(default="", max_length=MAX_AGENT_CAMPAIGN_MESSAGE_CHARS)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> AgentCampaignDecision:
+        if (self.stop_reason is AgentRepairStopReason.TEST_PASSED) != (
+            self.passed_test_step_id is not None
+        ):
+            raise ValueError(
+                "Test-passed decision requires exactly its accepted native test reference"
+            )
+        if self.stop_reason is None and (self.next_phase is None or not self.next_step_ids):
+            raise ValueError("advancement requires the selected next phase")
+        if self.stop_reason is not None and (self.next_phase is not None or self.next_step_ids):
+            raise ValueError("terminal decision cannot select another phase")
+        if self.unstarted_selection is not None and self.stop_reason is None:
+            raise ValueError("Unstarted selection requires a blocking terminal decision")
+        return self
+
+
+AgentCampaignFact = Annotated[
+    AgentCampaignIntent | AgentCampaignPhase | AgentCampaignDecision,
+    Field(discriminator="kind"),
+]
+
+
+class AgentCampaignRecord(ImmutableModel):
+    session_id: str = Field(min_length=1)
+    revision: int = Field(ge=1)
+    fact: AgentCampaignFact
+
+
+class AgentCampaignReadback(ImmutableModel):
+    """Complete verified Journal cut; observing it never resumes work."""
+
+    campaign_id: str
+    journal_revision: int = Field(ge=0)
+    records: tuple[AgentCampaignRecord, ...]
+    complete: bool = True
+
+    @property
+    def latest_revision(self) -> int:
+        return self.records[-1].revision if self.records else 0
+
+    @property
+    def intent(self) -> AgentCampaignIntent | None:
+        if self.records and isinstance(self.records[0].fact, AgentCampaignIntent):
+            return self.records[0].fact
+        return None
+
+    @property
+    def phases(self) -> tuple[AgentCampaignPhase, ...]:
+        return tuple(
+            record.fact for record in self.records if isinstance(record.fact, AgentCampaignPhase)
+        )
+
+    @property
+    def terminal_decision(self) -> AgentCampaignDecision | None:
+        if self.records and isinstance(self.records[-1].fact, AgentCampaignDecision):
+            decision = self.records[-1].fact
+            return decision if decision.stop_reason is not None else None
+        return None

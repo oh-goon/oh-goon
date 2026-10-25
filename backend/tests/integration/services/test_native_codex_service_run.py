@@ -867,7 +867,7 @@ def test_installed_codex_service_campaign_preserves_phase_authority(
                 assert len(endpoint.probed) == 10
                 assert len(refused_mcp_threads) == len(set(refused_mcp_threads)) == 10
             invocation = project_agent_campaign(
-                result.repair_id, result.attempts, invocation=result
+                result.repair_id, result.attempts, campaign=result.campaign_journal
             )
             assert invocation["result"] == ("incomplete" if scenario == "cancel" else "converged")
             assert invocation["controller_result"]["stop_reason"] == result.stop_reason.value
@@ -889,8 +889,8 @@ def test_installed_codex_service_campaign_preserves_phase_authority(
                 assert invocation["verification"][-1]["unverified_step_ids"] == []
             retained = runtime.runs.agent_campaign(result.admitted_run_ids[-1])
             assert retained["campaign_id"] == result.repair_id
-            assert retained["result"] == "incomplete"
-            assert retained["controller_result"]["availability"] == "unavailable"
+            assert retained["result"] == invocation["result"]
+            assert retained["controller_result"]["availability"] == "journal"
             assert retained["runs"] == invocation["runs"]
             assert retained["findings"] == invocation["findings"]
             assert retained["verification"] == invocation["verification"]
@@ -903,7 +903,7 @@ def test_installed_codex_service_campaign_preserves_phase_authority(
             try:
                 recovered = reopened.runs.agent_campaign(result.admitted_run_ids[-1])
                 assert recovered["result"] == "incomplete"
-                assert recovered["controller_result"]["availability"] == "unavailable"
+                assert recovered["controller_result"]["availability"] == "journal"
                 for field in ("runs", "reviews", "findings", "repair_attempts", "verification"):
                     assert recovered[field] == retained[field]
                 assert _TOKEN not in json.dumps(recovered)

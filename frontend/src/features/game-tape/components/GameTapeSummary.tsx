@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { GameTapeObservabilityReceipt } from "@/features/game-tape/components/GameTapeObservabilityReceipt";
 import { GameTapeConfiguration } from "@/features/game-tape/components/GameTapeConfiguration";
 import { GameTapeTeamOverview } from "@/features/game-tape/components/GameTapeTeamOverview";
+import { GameTapeCampaignJournal } from "@/features/game-tape/components/GameTapeCampaignJournal";
 import { GameTapeStatus } from "@generated/enums";
 import type { GameTape } from "@generated/models";
 import { runLineage } from "@/domain/presentation/runProvenance";
@@ -37,6 +38,7 @@ export function GameTapeSummary({ tape, compact = false }: { tape: GameTape; com
       <div><span className="eyebrow">{t("gameTape.summary.duration")}</span><strong>{duration(tape.receipt.duration_ms)}</strong></div>
       <div className={summary.failed_steps > 0 ? "game-tape-summary__failure-answer" : ""}><span className="eyebrow">{t("gameTape.summary.whatFailed")}</span><strong>{failureAnswer}</strong>{summary.failed_steps > 1 ? <small>{t("gameTape.summary.moreFailures", { count: summary.failed_steps - 1 })}</small> : null}</div>
     </section>
+    <GameTapeCampaignJournal campaign={tape.campaign_journal} />
     <details className="advanced-disclosure game-tape-summary__run-facts"><summary>{t("gameTape.summary.moreRunFacts")}</summary>
       <dl className="game-tape-summary__facts">
         <div><dt>{t("gameTape.summary.plan")}</dt><dd>{executionReference?.plan_name ?? "—"}</dd></div>

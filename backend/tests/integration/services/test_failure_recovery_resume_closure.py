@@ -1,24 +1,81 @@
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from oh_goon.application import ApplicationRuntime
+from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.game_tape_projection import project_game_tape
 from oh_goon.core.models.run_events import (
     ReconciliationCompletedEvent,
     ReconciliationRequiredEvent,
     ReconciliationStartedEvent,
 )
+from oh_goon.core.product_identity import repository_id
 from oh_goon.core.vocabulary import FleetRunStatus, GameTapeEventType, GameTapeStatus, Verdict
 from oh_goon.engine.git import GitService
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.journal import Journal
+from oh_goon.services.execution_lock_persistence import write_execution_lock
+from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.local_lifecycle_execution import prepare_local_lifecycle_execution
 from tests.factories.repository_effect_runtime import effect_recovery
+
+
+@pytest.mark.process
+@pytest.mark.skipif(os.name != "posix", reason="Native POSIX launch-refusal qualification")
+def test_known_launch_refusal_releases_no_effect_fence_for_fresh_valid_admission(
+    tmp_path, monkeypatch
+):
+    repository = tmp_path / "repos/app"
+    repository.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state/db.sqlite"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    runtime = ApplicationRuntime.build(standard_local=True)
+    try:
+        runtime.locations.add(repository.parent)
+        for ordinal, command in enumerate(("./missing-selected-command", "true"), 1):
+            source = repository / "goon.yml"
+            source.write_text(
+                "execution: {purpose: verification}\nsteps:\n- id: work\n  run: "
+                + json.dumps(command)
+                + "\n"
+            )
+            plan = FleetPlanResolver().resolve(source)
+            write_execution_lock(repository / "goon.lock", build_execution_lock(plan))
+            target = runtime.plans.prepare_execution_target(source)
+            admitted = runtime.runs.start_prepared_plan(
+                target,
+                repository_ids={repository_id(repository)},
+                fleet_run_id=f"known-launch-refusal-{ordinal}",
+            )
+            detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=20)
+            operation = detail.operations[0]
+            step = operation.evidence.plan.steps[0]
+            assert operation.resource_settlement == "SETTLED"
+            if ordinal == 1:
+                assert detail.outcome.value == "ATTENTION_REQUIRED"
+                assert step.status == "FAILED" and step.returncode == 127
+                assert step.settlement.reason == "FAILED_TO_START"
+                assert step.settlement.cleanup == "VERIFIED"
+                assert step.attempts[0].supervisor is None
+                assert step.settlement.observed_returncode is None
+            else:
+                assert detail.outcome.value == "SUCCESS" and step.status == "COMPLETED"
+        original = runtime.runs.get("known-launch-refusal-1")
+        assert original.outcome.value == "ATTENTION_REQUIRED"
+        assert original.operations[0].evidence.plan.steps[0].returncode == 127
+    finally:
+        runtime.shutdown(wait_for_runs=True)
 
 
 def _script_plan() -> str:

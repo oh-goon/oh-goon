@@ -17,9 +17,9 @@ from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan import (
     AgentPlanStep,
     CompiledExecutionTemplate,
+    ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedFleetPlan,
-    ResolvedLocalSearchAgentStep,
     ResolvedPlanStep,
 )
 from oh_goon.core.models.fleet_plan_composition import PlanInputDefinition, PlanInputValue
@@ -281,7 +281,7 @@ class FleetPlanResolver:
                 raise FleetPlanInvalid("Agent delivery membership is incomplete")
             return plan, deliveries, source_sha
 
-    def resolve_frozen_local_search_agent(
+    def resolve_frozen_agent(
         self,
         plan_path: Path,
         *,
@@ -384,9 +384,7 @@ class FleetPlanResolver:
                 if isinstance(aliases, FrozenSkillRegistry)
                 else (locked_skills or ()),
             )
-            resolved = [
-                item for item in plan.steps if isinstance(item, ResolvedLocalSearchAgentStep)
-            ]
+            resolved = [item for item in plan.steps if isinstance(item, ResolvedAgentStep)]
             if len(resolved) != 1:
                 raise FleetPlanInvalid("Agent Step did not resolve through the original pipeline")
             return plan, handoff, graph.root.source_sha256

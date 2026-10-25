@@ -15,7 +15,11 @@ from oh_goon.core.models.fleet_plan_release_evidence import OciPublishReleaseEvi
 from oh_goon.core.path_authority import RepositoryPathSpace
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.engine.command import CommandResult
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, from_command
+from oh_goon.integrations._fleet_plan_step_outcome import (
+    StepOutcome,
+    from_command,
+    process_boundary_settled,
+)
 from oh_goon.integrations.exact_file_write import publish_text_file, remove_file_durably
 from oh_goon.integrations.fleet_plan_oci_registry_execution import (
     OciRegistryAttemptConfig,
@@ -89,6 +93,15 @@ def execute_oci_publish(
         if cleanup_error is not None:
             message += f" Private registry credential cleanup also failed: {cleanup_error}"
         raise ExternalEffectOutcomeUnknown(message)
+    if outcome.returncode != 0 or process_boundary_settled(outcome) is not True:
+        if cleanup_error is not None:
+            return replace(
+                _contract_failure(
+                    f"Private registry credential cleanup failed: {cleanup_error}", outcome
+                ),
+                resource_cleanup="unverified",
+            )
+        return outcome
     try:
         written_digest = outputs.digest.read_text(encoding="utf-8").strip()
     except OSError as exc:
@@ -113,9 +126,12 @@ def execute_oci_publish(
     )
     if cleanup_error is not None:
         _clear_old_outputs(outputs)
-        return _contract_failure(
-            f"OCI publication committed but private registry credential cleanup failed: {cleanup_error}",
-            released,
+        return replace(
+            _contract_failure(
+                f"OCI publication committed but private registry credential cleanup failed: {cleanup_error}",
+                released,
+            ),
+            resource_cleanup="unverified",
         )
     return _finalize_publish_outputs(step, outputs, destination, manifest_digest, released)
 
@@ -194,8 +210,9 @@ def _cleanup_with_note(config: OciRegistryAttemptConfig, error: BaseException) -
 def _cleanup_contract_failure(outcome: StepOutcome, cleanup_error: OSError | None) -> StepOutcome:
     if cleanup_error is None:
         return outcome
-    return _contract_failure(
-        f"Private registry credential cleanup failed: {cleanup_error}", outcome
+    return replace(
+        _contract_failure(f"Private registry credential cleanup failed: {cleanup_error}", outcome),
+        resource_cleanup="unverified",
     )
 
 

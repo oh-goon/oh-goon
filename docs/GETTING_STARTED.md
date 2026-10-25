@@ -46,17 +46,16 @@ Once the proof is healthy, manual operations can proceed. Restart oh-goon to res
 
 ## If startup says the local database is from an older epoch
 
-You do not need to find or edit SQLite files. oh-goon is pre-live and intentionally recreates incompatible local state instead of carrying migration code. Normal `oh-goon start` checks this before launching the local app and prints the exact database path.
+Normal startup refuses an incompatible SQLite generation and prints its exact path. Preserve that state and use its matching original runtime to settle active or unresolved execution ownership. After ownership is resolved, archive the old state and schema metadata read-only, then explicitly select a fresh generation. See [schema-mismatch recovery](TROUBLESHOOTING.md#local-database-schema-mismatch); choosing a new directory or confirming reset cannot clear an unresolved writer.
 
-For a source checkout:
+Inspect from the source checkout:
 
 ```bash
 make local-state-check
-make local-state-reset
-make dev
+make local-state-path
 ```
 
-For a built release, use that same release binary: `oh-goon local-state check`, `oh-goon local-state reset --yes`, then `oh-goon start`. Do not mix a source checkout with a different/global CLI. Reset removes only oh-goon's local SQLite database and its sidecars; repositories and project files are untouched, and saved League folders remain in `league.yml` and are restored on the next start.
+For compatible state with fully settled ownership, `make local-state-reset` can explicitly clear source-checkout history. The built-release equivalent is `oh-goon local-state reset --yes` from that exact release. Reset refuses incompatible, corrupt, active or unresolved state. A permitted reset removes only the selected SQLite database and sidecars; repositories and project files remain, and saved League folders stay in `league.yml`. Restart through `make dev` or that same release's `oh-goon start` after the selected recovery completes.
 
 
 ## Reusable Shared Plans

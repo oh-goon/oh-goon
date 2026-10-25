@@ -28,7 +28,7 @@ from oh_goon.core.models.enforcer_receipt import (
     EnforcerStepResultFact,
     EnforcerToolFact,
 )
-from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep
 from oh_goon.core.models.fleet_plan_evidence import (
     MissingPlanArtifact,
     RequirementsRepositoryAdmissionEvidence,
@@ -108,10 +108,12 @@ def render_enforcer_yaml(receipt: EnforcerRunReceipt) -> str:
 
 def _resolved_step(step: Any) -> EnforcerResolvedStepFact:
     required_tool = step_execution_tool(step)
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
+    if isinstance(step, ResolvedAgentStep) and step.workload.harness == "native":
         # Receipts retain a display label, never a native host path or a second
         # lookup authority. Attempt tool evidence independently names its launcher.
-        required_tool = Path(required_tool).name if required_tool else step.native_agent.agent
+        required_tool = (
+            Path(required_tool).name if required_tool else step.workload.native_agent.agent
+        )
     return EnforcerResolvedStepFact(
         step_id=step.step_id,
         kind=step.kind,

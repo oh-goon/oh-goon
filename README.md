@@ -237,7 +237,7 @@ The security boundary is runtime behavior, not repository prose:
 
 Operators own backup scheduling, retention, and restore procedures. The backend
 provides an explicit [SQLite snapshot API](docs/architecture/ADR_DB3_SCOUT_BACKUP_SINGLE_OWNER.md);
-there is no automatic restore workflow. Pre-live incompatible local state is reset explicitly with `make local-state-reset` from a source checkout, or with `oh-goon local-state reset --yes` from that exact built release; saved League-folder preferences remain separate. Do not use a different/global binary for source recovery.
+there is no automatic restore workflow. Incompatible state is preserved and requires its matching original runtime to settle execution ownership before an explicit archived-state/fresh-generation cutover. `make local-state-reset`, or `oh-goon local-state reset --yes` from the exact built release, applies only to compatible, fully settled state; confirmation cannot erase unresolved writer evidence. Saved League-folder preferences remain separate. See [schema-mismatch recovery](docs/TROUBLESHOOTING.md#local-database-schema-mismatch); do not use a different/global binary to bypass a refusal.
 
 See [Architecture](docs/ARCHITECTURE.md) and [path isolation](docs/development/PATH_ISOLATION_HARDENING.md).
 

@@ -12,11 +12,12 @@ from oh_goon.core.models.execution_authority_economics import (
 )
 from oh_goon.core.models.fleet_observation import FleetObservationEvidence
 from oh_goon.core.models.fleet_plan import (
+    PLAN_CONTRACT_RETURN_CODE,
+    ResolvedAgentStep,
     ResolvedExtensionStep,
     ResolvedGitStep,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
-    ResolvedLocalSearchAgentStep,
     ResolvedPlanStep,
     ResolvedPreCommitStep,
 )
@@ -35,6 +36,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanSnapshotEvidence,
     PlanStepAttemptEvidence,
     PlanStepExecution,
+    PlanStepSettlementEvidence,
     PlanToolEvidence,
     PublishedPlanOutputEvidence,
     SkippedPlanStepExecution,
@@ -46,7 +48,10 @@ from oh_goon.core.models.fleet_plan_release_evidence import (
 )
 from oh_goon.core.models.fleet_plan_retry import PlanRetryDecisionEvidence
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepEgress
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, step_succeeded
+from oh_goon.integrations._fleet_plan_step_outcome import (
+    StepOutcome,
+    settle_step_execution,
+)
 
 
 class _StepEvidenceFields(TypedDict):
@@ -65,6 +70,7 @@ class _StepEvidenceFields(TypedDict):
     artifacts: tuple[PlanArtifactEvidence, ...]
     outputs: tuple[PublishedPlanOutputEvidence, ...]
     observations: tuple[FleetObservationEvidence, ...]
+    settlement: PlanStepSettlementEvidence
 
 
 def step_evidence(
@@ -80,6 +86,7 @@ def step_evidence(
     started_at: datetime | None = None,
     finished_at: datetime | None = None,
 ) -> PlanStepExecution:
+    settlement = settle_step_execution(step, outcome)
     common: _StepEvidenceFields = {
         "step_id": step.step_id,
         "kind": step.kind,
@@ -96,19 +103,22 @@ def step_evidence(
         "artifacts": artifacts,
         "outputs": outputs,
         "observations": outcome.observations,
+        "settlement": settlement,
     }
-    if outcome.skipped:
+    if settlement.outcome == "SKIPPED":
         reason = outcome.stdout or outcome.stderr or "Step skipped"
         return SkippedPlanStepExecution(**common, reason=reason[:500])
-    if not step_succeeded(step, outcome):
-        return FailedPlanStepExecution(**common, returncode=outcome.returncode)
+    if settlement.outcome != "SUCCESS":
+        return FailedPlanStepExecution(
+            **common, returncode=outcome.returncode or PLAN_CONTRACT_RETURN_CODE
+        )
     return CompletedPlanStepExecution(**common, returncode=outcome.returncode)
 
 
 def canonical_argv(step: ResolvedPlanStep, outcome: StepOutcome) -> tuple[str, ...]:
     if outcome.skipped:
         return ()
-    if isinstance(step, ResolvedLocalSearchAgentStep) and step.native_agent is not None:
+    if isinstance(step, ResolvedAgentStep) and step.workload.harness == "native":
         return outcome.argv
     if isinstance(step, ResolvedGitStep):
         return ("git", *step.argv)
@@ -167,6 +177,7 @@ def attempt_evidence(
         attempt=attempt,
         argv=canonical_argv(step, outcome),
         returncode=outcome.returncode,
+        observed_returncode=outcome.observed_returncode,
         stdout_evidence=outcome.stdout_evidence or output_evidence(outcome.stdout),
         stderr_evidence=output_evidence(outcome.stderr),
         duration_ms=outcome.duration_ms,

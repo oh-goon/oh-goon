@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from oh_goon.core.models.agent_repair import AgentCampaignFact
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.reconciliation import (
     RepositoryEffectAcknowledgementEvidence,
@@ -49,7 +50,8 @@ class JournalFactStore:
                 return current, ()
             return current, tuple(self.load_entries_after(connection, revision))
 
-    def load_entries(self, connection: sqlite3.Connection) -> list[JournalEntry]:
+    @staticmethod
+    def load_entries(connection: sqlite3.Connection) -> list[JournalEntry]:
         rows = connection.execute(
             """
             SELECT revision, session_id, kind, report_json, event_json, effect_json,
@@ -120,6 +122,9 @@ class JournalFactStore:
             )
             expected_previous_hash = fact_hash
         return result
+
+    def append_campaign(self, connection: sqlite3.Connection, fact: AgentCampaignFact) -> None:
+        self._append_encoded(connection, JournalFactCodec.encode_campaign(fact))
 
     def append_operation(self, connection: sqlite3.Connection, report: OperationReport) -> None:
         self._append_encoded(connection, JournalFactCodec.encode_operation(report))

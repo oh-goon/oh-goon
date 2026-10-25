@@ -5,8 +5,9 @@ from __future__ import annotations
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, StepFailurePolicy
 from oh_goon.core.models.fleet_plan_step_primitives import PlanPublishedOutput, StepRetryPolicy
+from oh_goon.engine.command import CommandResult
 from oh_goon.integrations._fleet_plan_step_dataflow import bind_step_outputs
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, from_command
 from oh_goon.integrations._fleet_plan_step_retry import _successful_direct_publication
 from tests.integration.test_agent01b2b_original_fleet import _case, _lock
 
@@ -20,12 +21,14 @@ def _failed_step():
     )
 
 
+def _failed_outcome():
+    return from_command(CommandResult(argv=("probe-fail",), returncode=13, stdout="", stderr=""))
+
+
 def test_failed_command_can_publish_explicit_bounded_diagnostics_without_success(tmp_path):
     (tmp_path / "diagnostic.txt").write_text("failure: needle\n")
     step = _failed_step()
-    publication = _successful_direct_publication(
-        step, StepOutcome(argv=("probe-fail",), returncode=13), tmp_path
-    )
+    publication = _successful_direct_publication(step, _failed_outcome(), tmp_path)
     assert publication.outcome.returncode == 13
     assert publication.outputs == {"diagnostic": "failure: needle"}
     assert publication.output_evidence[0].byte_count == len("failure: needle")
@@ -55,25 +58,24 @@ def test_failed_tool_without_explicit_continue_does_not_publish(tmp_path):
             }
         ),
     ):
-        assert (
-            _successful_direct_publication(
-                denied, StepOutcome(argv=("probe-fail",), returncode=13), tmp_path
-            ).outputs
-            == {}
-        )
+        assert _successful_direct_publication(denied, _failed_outcome(), tmp_path).outputs == {}
 
 
 def test_missing_or_oversized_failure_diagnostics_never_publish(tmp_path):
     step = _failed_step()
-    missing = _successful_direct_publication(
-        step, StepOutcome(argv=("probe-fail",), returncode=13), tmp_path
-    )
+    missing = _successful_direct_publication(step, _failed_outcome(), tmp_path)
     assert missing.outputs == {} and missing.outcome.returncode != 0
     (tmp_path / "diagnostic.txt").write_text("x" * 129)
-    over = _successful_direct_publication(
-        step, StepOutcome(argv=("probe-fail",), returncode=13), tmp_path
-    )
+    over = _successful_direct_publication(step, _failed_outcome(), tmp_path)
     assert over.outputs == {} and over.outcome.returncode != 0
+
+
+def test_failed_diagnostic_cannot_publish_while_process_closure_is_unknown(tmp_path):
+    (tmp_path / "diagnostic.txt").write_text("failure: needle\n")
+    outcome = StepOutcome(argv=("probe-fail",), returncode=13)
+    publication = _successful_direct_publication(_failed_step(), outcome, tmp_path)
+    assert publication.outputs == {}
+    assert publication.outcome.returncode == 13
 
 
 def test_original_fleet_failed_test_feedback_into_conditional_followup(tmp_path, monkeypatch):

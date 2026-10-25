@@ -7,8 +7,8 @@ from pathlib import Path
 from oh_goon.core import local_access_protocol
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
     ResolvedGitStep,
-    ResolvedLocalSearchAgentStep,
     ResolvedPlanStep,
 )
 from oh_goon.core.models.fleet_plan_values import (
@@ -122,10 +122,16 @@ def step_host_environment_names(step: ResolvedPlanStep) -> tuple[str, ...]:
     credentials = getattr(step, "credentials", None)
     credential_names = getattr(credentials, "host_environment_names", ())
     names.extend(credential_names)
-    if isinstance(step, ResolvedLocalSearchAgentStep):
-        connection = step.connection
-        if step.native_agent is not None:
-            connection = step.native_agent.connection
+    if isinstance(step, ResolvedAgentStep):
+        connection = None
+        if step.workload.harness == "native":
+            connection = step.workload.native_agent.connection
+        elif step.workload.harness in (
+            "provider-review",
+            "provider-adjudicate",
+            "provider-proposal",
+        ):
+            connection = step.workload.connection
         if connection is not None:
             provider = connection.provider
             if provider.api_key_env is not None:

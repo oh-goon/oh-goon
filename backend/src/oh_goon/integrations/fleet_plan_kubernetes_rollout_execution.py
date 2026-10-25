@@ -19,7 +19,11 @@ from oh_goon.core.models.fleet_plan_release_evidence import (
 )
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.engine.errors import OperationCancelledError
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+from oh_goon.integrations._fleet_plan_step_outcome import (
+    StepOutcome,
+    from_command,
+    process_boundary_settled,
+)
 from oh_goon.integrations.fleet_plan_kubernetes_transport import (
     KubernetesCommandRunner,
     KubernetesPrivateConfig,
@@ -91,6 +95,7 @@ def execute_kubernetes_rollout_verify(
         return outcome
     return replace(
         outcome,
+        resource_cleanup="unverified",
         returncode=PLAN_CONTRACT_RETURN_CODE,
         stderr=(
             outcome.stderr + f"\nPrivate Kubernetes credential cleanup failed: {cleanup_error}"
@@ -130,11 +135,14 @@ def _run_rollout_observation_window(
     observations = 0
     last: _RolloutObservation | None = None
     last_argv: tuple[str, ...] = ()
+    last_process: StepOutcome | None = None
     while True:
         _raise_if_cancelled(cancel_requested)
         remaining = deadline - clock()
         if remaining <= 0:
-            return _timeout_outcome(step, last, observations, started, clock, last_argv)
+            return _timeout_outcome(
+                step, last, observations, started, clock, last_argv, last_process
+            )
         result = run_kubernetes_request(
             step.target,
             config,
@@ -148,10 +156,16 @@ def _run_rollout_observation_window(
             output=response,
         )
         last_argv = result.argv
+        last_process = from_command(result)
+        if (
+            process_boundary_settled(last_process) is not True
+            or last_process.returncode != result.returncode
+        ):
+            return last_process
         status = kubernetes_http_status(result)
         if result.returncode != 0 or status != 200:
-            return StepOutcome(
-                argv=result.argv,
+            return replace(
+                last_process,
                 returncode=result.returncode or PLAN_CONTRACT_RETURN_CODE,
                 stderr=(
                     result.stderr
@@ -162,18 +176,22 @@ def _run_rollout_observation_window(
         try:
             current = _parse_rollout(response, step)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            return _contract_failure(
-                str(exc), argv=result.argv, duration_ms=_elapsed_ms(started, clock)
+            return replace(
+                last_process,
+                returncode=PLAN_CONTRACT_RETURN_CODE,
+                stderr=str(exc)[:2000],
+                duration_ms=_elapsed_ms(started, clock),
             )
         observations += 1
         last = current
         terminal = _terminal_outcome(step, current, expected_generation)
         if terminal is not None:
             outcome, returncode, message = terminal
-            return StepOutcome(
-                argv=result.argv,
+            return replace(
+                last_process,
                 returncode=returncode,
                 stdout=message if returncode == 0 else "",
+                stdout_evidence=None,
                 stderr=message if returncode != 0 else "",
                 duration_ms=_elapsed_ms(started, clock),
                 release_verification=_evidence(
@@ -182,7 +200,9 @@ def _run_rollout_observation_window(
             )
         remaining = deadline - clock()
         if remaining <= 0:
-            return _timeout_outcome(step, last, observations, started, clock, last_argv)
+            return _timeout_outcome(
+                step, last, observations, started, clock, last_argv, last_process
+            )
         sleeper(min(step.policy.poll_interval_seconds, remaining))
 
 
@@ -233,6 +253,7 @@ def _timeout_outcome(
     started: float,
     clock: Callable[[], float],
     argv: tuple[str, ...],
+    last_process: StepOutcome | None,
 ) -> StepOutcome:
     if last is None:
         return StepOutcome(
@@ -248,7 +269,9 @@ def _timeout_outcome(
         observations,
         KubernetesRolloutVerificationOutcome.TIMEOUT,
     )
-    return StepOutcome(
+    assert last_process is not None
+    return replace(
+        last_process,
         argv=argv,
         returncode=PLAN_TIMEOUT_RETURN_CODE,
         stderr="Kubernetes rollout verification reached its declared timeout before readiness",

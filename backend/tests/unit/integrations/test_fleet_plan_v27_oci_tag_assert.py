@@ -4,6 +4,7 @@ import json
 from functools import cache
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -16,13 +17,13 @@ from oh_goon.core.fleet_plan_tool_requirements import (
 from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedOciTagAssertStep
 from oh_goon.core.models.fleet_plan_evidence import PlanResourceEvidence
 from oh_goon.core.path_layouts import AttemptPathLayout
-from oh_goon.engine.command import CommandResult
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_host_resources import (
     HostToolBinding,
     capture_host_environment,
 )
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, settle_step_execution
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.executable_materialization_authority import (
     StepExecutableMaterializationReceipt,
@@ -64,7 +65,7 @@ def _layout(root: Path) -> AttemptPathLayout:
 def test_tag_gate_resolves_to_v27_read_only_registry_authority() -> None:
     plan = _plan()
 
-    assert plan.contract_version == 44
+    assert plan.contract_version == 45
     assert len(plan.steps) == 1
     step = plan.steps[0]
     assert isinstance(step, ResolvedOciTagAssertStep)
@@ -167,8 +168,23 @@ def test_tag_assert_attempt_evidence_uses_frozen_skopeo_binding(
     assert evidence.tool.byte_count == 4321
 
 
+@pytest.mark.parametrize(
+    "quiescent,reason,expected",
+    [
+        (True, "none", "SUCCESS"),
+        (False, "none", "INCOMPLETE"),
+        (None, "none", "INCOMPLETE"),
+        (True, "cancel", "CANCELLED"),
+        (True, "timeout", "TIMED_OUT"),
+        (True, "authority", "AUTHORITY_LOST"),
+        (True, "output_limit", "OUTPUT_LIMITED"),
+    ],
+)
 def test_tag_assert_execution_uses_private_auth_and_writes_read_only_evidence(
     tmp_path: Path,
+    quiescent: bool | None,
+    reason: Any,
+    expected: str,
 ) -> None:
     step = _plan().steps[0]
     assert isinstance(step, ResolvedOciTagAssertStep)
@@ -193,6 +209,16 @@ def test_tag_assert_execution_uses_private_auth_and_writes_read_only_evidence(
             stderr="",
             argv=tuple(argv),
             duration_ms=4,
+            supervisor=cast(
+                CommandSupervisorReceipt,
+                CommandSupervisorReceipt(
+                    final_process_group_quiescent=quiescent,
+                    cleanup_reason=reason,
+                    process_group_cleanup_requested=reason != "none",
+                )
+                if quiescent is not None
+                else None,
+            ),
         )
 
     outcome = execute_oci_tag_assert(
@@ -207,6 +233,16 @@ def test_tag_assert_execution_uses_private_auth_and_writes_read_only_evidence(
         command_runner=runner,
         cancel_requested=None,
     )
+
+    if expected != "SUCCESS":
+        settlement = settle_step_execution(step, outcome)
+        assert settlement.outcome == expected
+        assert outcome.observed_returncode == 0
+        assert not (repository / step.output.metadata).exists()
+        assert not (repository / step.output.digest).exists()
+        assert not (repository / step.output.resolved_reference).exists()
+        assert isinstance(seen["authfile"], Path) and not seen["authfile"].exists()
+        return
 
     argv = seen["argv"]
     assert outcome.returncode == 0

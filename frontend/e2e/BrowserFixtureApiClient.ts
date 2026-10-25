@@ -5,7 +5,7 @@ import { FixtureRunRegistry } from "./fixtures/FixtureRunRegistry";
 import { dependencyMatches, emptyDependencyOverview } from "./fixtures/dependencies";
 import { fixtureLockDriftDiagnostic } from "./fixtures/diagnostics";
 import { defaultFailureGroup, requireFailureGroup, scaleFailureGroups, scaleFailureRunId } from "./fixtures/failures";
-import { fixtureFailureHistory, fixtureLiveOutput, fixtureRunDiff } from "./fixtures/gameTape";
+import { fixtureCampaignReadback, fixtureFailureHistory, fixtureLiveOutput, fixtureRunDiff } from "./fixtures/gameTape";
 import { fixtureObservationWindows } from "./fixtures/executionTimeline";
 import {
   FIXTURE_REPOSITORIES,
@@ -682,11 +682,22 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
   override async fleetRunDetail(runId: string): Promise<FleetRunDetail> {
     const run = this.projectRunState(runId);
     const failed = run.status === FleetRunStatus.FAILED;
-    return runDetail(
+    const detail = runDetail(
       run,
       run.status === FleetRunStatus.RUNNING ? GameTapeStatus.RUNNING : failed ? GameTapeStatus.FAILED : GameTapeStatus.PASSED,
       failed,
     );
+    if (this.scenarioConfig.campaignDecision) {
+      const campaign = fixtureCampaignReadback(runId, this.scenarioConfig.campaignDecision === "converged", this.scenarioConfig.campaignDecision === "not_admitted");
+      detail.campaign_journal = campaign;
+      detail.game_tape.campaign_journal = campaign;
+      for (const repository of detail.game_tape.repositories) {
+        for (const step of repository.steps ?? []) {
+          step.settlement = { owner: "fleet_step_settlement", outcome: "SUCCESS", cleanup: "VERIFIED", reason: "ACCEPTED_EXIT", observed_returncode: 0 };
+        }
+      }
+    }
+    return detail;
   }
 
   override async compareFleetRuns(runId: string, baselineRunId: string) {

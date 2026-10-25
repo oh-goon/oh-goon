@@ -55,11 +55,11 @@ folders:
 
 Teams are **not** persisted into this file. At startup/read time oh-goon scans the saved folders and derives current Git Teams and root `goon.yml` status from the filesystem. This prevents a stale second Team registry.
 
-## SQLite is a runtime projection, not League preference authority
+## SQLite owns execution facts; League preferences remain separate
 
 The existing `locations` SQLite table remains the transactionally consistent runtime projection used by Fleet admission/read views. On startup, oh-goon reconciles that projection from `league.yml` before recovery/admission begins.
 
-Ordinary startup never promotes the disposable SQLite projection into `league.yml`. A missing `league.yml` means the user currently has no configured League folders, so startup clears any stale SQLite location projection before admission. The explicit local-state reset deletes the incompatible operational database only. It never reads obsolete SQLite rows to reconstruct current preferences; `league.yml` is the sole durable League-folder authority.
+Ordinary startup never promotes the SQLite location projection into `league.yml`. A missing `league.yml` means the user currently has no configured League folders, so startup clears any stale location projection before admission. Canonical Journal facts and unresolved ownership are durable execution authority, separate from that disposable location projection. Reset refuses incompatible or unresolved operational state and never reconstructs current preferences from obsolete SQLite rows; `league.yml` remains the sole League-folder authority.
 
 Before `make dev`, `oh-goon start`, or `oh-goon serve` launches application processes, Oh-Goon runs `local-state prelaunch-check`. This is intentionally stronger than the manual read-only `local-state check`. For an existing database, the prelaunch proof opens that exact file non-creating (`mode=rw`), acquires `BEGIN IMMEDIATE`, and rolls back without semantic mutation; this proves SQLite can create/acquire the write/journal locking it will need. If the database does not yet exist, the real path remains absent while Oh-Goon creates a disposable sibling SQLite database, commits/reopens/checks it, and removes it and its sidecars. Failure to write, lock, commit, reopen, integrity-check, or clean up stops startup before uvicorn/Vite. SQLite remains format authority; this is storage admission evidence, not repair or migration.
 
@@ -67,9 +67,11 @@ Normal add/remove writes must not publish `league.yml` and the SQLite admission 
 
 ## Reset behavior
 
-For a source checkout, `make local-state-reset` deletes only the disposable SQLite database and its sidecars. `league.yml` remains. The next `make dev` recreates SQLite and restores the League-folder runtime projection automatically.
+For compatible, fully settled state, `make local-state-reset` explicitly deletes only the selected SQLite database and its sidecars. `league.yml` remains; the next `make dev` recreates the operational store and restores the League-folder projection.
 
-For a built release, use `oh-goon local-state reset --yes` from that exact release and then `oh-goon start`. This is explicit rather than an automatic destructive migration, and the source and built-release binaries must not be mixed.
+For the same compatible, settled case in a built release, use `oh-goon local-state reset --yes` from that exact release, then `oh-goon start`. The existing reset owner validates schema/integrity, canonical Journal and ownership before deletion; active Runs, incomplete campaigns, unsettled leases/effects or owned workspace allocations block reset. Confirmation does not override the refusal.
+
+An incompatible/unknown store is preserved unchanged. Stop admission, settle ownership through its matching original runtime, archive that state and schema metadata read-only, then explicitly select a fresh generation. A new state root cannot prove an older writer is gone; operators must preserve this drain/fence precondition across generations. See the [cutover and rollback contract](development/AGENT_RUNTIME_OWNERS.md#execution-state-cutover-and-recovery).
 
 ## Offline boundary
 

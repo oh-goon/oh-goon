@@ -20,10 +20,10 @@ from oh_goon.core.models.enforcer_receipt import EnforcerRunReceipt
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet_executor import FleetExecutorPlacement, PlanExecutorCapacityEvidence
 from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedFleetPlan,
     ResolvedImport,
-    ResolvedLocalSearchAgentStep,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
@@ -104,15 +104,13 @@ def _detail(tmp_path: Path, *, native: bool = False) -> FleetRunDetail:
             profile=NativeAgentProfile(),
             executable_sha256="c" * 64,
         )
-        planned = ResolvedLocalSearchAgentStep(
+        planned = ResolvedAgentStep(
+            workload={"harness": "native", "native_agent": native_agent},
             step_id="tests",
-            argv=("python",),
             timeout_seconds=60,
             delivery_sha256="b" * 64,
             handoff_identity="handoff",
             source_step_id="tests",
-            harness="native",
-            native_agent=native_agent,
         )
     plan = ResolvedFleetPlan.create(
         name="quality",
@@ -135,7 +133,7 @@ def _detail(tmp_path: Path, *, native: bool = False) -> FleetRunDetail:
         steps=(planned,),
         native_agent=native_agent,
     )
-    if isinstance(planned, ResolvedLocalSearchAgentStep):
+    if isinstance(planned, ResolvedAgentStep):
         target = FleetPlanTarget(
             kind="fleet_plan",
             plan=plan,

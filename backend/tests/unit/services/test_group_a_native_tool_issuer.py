@@ -57,7 +57,7 @@ def fixture(tmp_path: Path, monkeypatch, *, native_policy: str | None = None):
         "version: 1\nexecution:\n  purpose: verification\nsteps:\n  - id: check\n    run: 'true'\n"
     )
     raw = FleetPlanResolver().resolve(plan_file)
-    from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedLocalSearchAgentStep
+    from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedFleetPlan
 
     native = None
     steps = raw.steps
@@ -76,15 +76,13 @@ def fixture(tmp_path: Path, monkeypatch, *, native_policy: str | None = None):
             executable_sha256="a" * 64,
         )
         steps = (
-            ResolvedLocalSearchAgentStep(
+            ResolvedAgentStep(
+                workload={"harness": "native", "native_agent": native},
                 step_id="check",
-                argv=("python",),
                 timeout_seconds=30,
                 delivery_sha256="b" * 64,
                 handoff_identity="handoff",
                 source_step_id="check",
-                harness="native",
-                native_agent=native,
             ),
         )
 

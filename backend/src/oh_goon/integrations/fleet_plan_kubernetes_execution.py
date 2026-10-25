@@ -14,7 +14,11 @@ from oh_goon.core.models.fleet_plan_kubernetes import (
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.engine.command import CommandResult
 from oh_goon.integrations import fleet_plan_kubernetes_observation as kubernetes_observation
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
+from oh_goon.integrations._fleet_plan_step_outcome import (
+    StepOutcome,
+    from_command,
+    process_boundary_settled,
+)
 from oh_goon.integrations.fleet_plan_kubernetes_release import (
     KubernetesDeploymentObservation,
     kubernetes_release_evidence,
@@ -77,8 +81,11 @@ def execute_kubernetes_set_image(
     if cleanup_error is None:
         return outcome
     kubernetes_observation.clear_kubernetes_set_image_outputs(outputs)
-    return _contract_failure(
-        f"Private Kubernetes credential cleanup failed: {cleanup_error}", outcome
+    return replace(
+        _contract_failure(
+            f"Private Kubernetes credential cleanup failed: {cleanup_error}", outcome
+        ),
+        resource_cleanup="unverified",
     )
 
 
@@ -150,6 +157,9 @@ def _read_current_deployment(
         output=config.before_response,
     )
     status = kubernetes_http_status(result)
+    outcome = _outcome(result)
+    if process_boundary_settled(outcome) is not True or outcome.returncode != result.returncode:
+        return outcome
     if result.returncode != 0:
         return _read_failure(result, status, operation="read Deployment")
     if status != 200:
@@ -209,10 +219,12 @@ def _already_desired_outcome(
     status: int,
     before: KubernetesDeploymentObservation,
 ) -> StepOutcome:
-    released = StepOutcome(
+    released = replace(
+        from_command(result),
         argv=("curl",),
         returncode=0,
         stdout="Kubernetes Deployment already uses the desired immutable image",
+        stdout_evidence=None,
         duration_ms=result.duration_ms,
         release_effect=kubernetes_release_evidence(
             step, before=before, after=before, outcome="ALREADY_DESIRED"
@@ -279,10 +291,12 @@ def _commit_patch(
             f"validated: {exc}"
         ) from exc
     _validate_committed_transition(before, after, step)
-    released = StepOutcome(
+    released = replace(
+        from_command(result),
         argv=("curl",),
         returncode=0,
         stdout="Kubernetes Deployment image spec update committed; rollout readiness not observed",
+        stdout_evidence=None,
         stderr=result.stderr,
         duration_ms=before_result.duration_ms + result.duration_ms,
         release_effect=kubernetes_release_evidence(
@@ -359,7 +373,13 @@ def _local_evidence_failure(
 
 
 def _require_authoritative_patch_success(result: CommandResult, status: int) -> None:
-    if result.returncode != 0 or status < 200 or status >= 300:
+    outcome = from_command(result)
+    if (
+        outcome.returncode != 0
+        or status < 200
+        or status >= 300
+        or process_boundary_settled(outcome) is not True
+    ):
         raise ExternalEffectOutcomeUnknown(
             "Kubernetes image PATCH returned a non-success response whose commit status is not "
             f"classified as an authoritative rejection: HTTP {status or 'unavailable'}"
@@ -461,10 +481,10 @@ def _validate_committed_transition(
 
 
 def _outcome(result: CommandResult, extra_duration_ms: int = 0) -> StepOutcome:
-    return StepOutcome(
-        argv=result.argv,
-        returncode=result.returncode,
+    return replace(
+        from_command(result),
         stdout="",
+        stdout_evidence=None,
         stderr=result.stderr,
         duration_ms=result.duration_ms + extra_duration_ms,
     )

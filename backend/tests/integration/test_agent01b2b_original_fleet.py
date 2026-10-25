@@ -95,7 +95,7 @@ def _lock(plan: Path, opts):
     from oh_goon.runtime.goon_templates import GoonTemplateStore
 
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
-    frozen, handoff, _ = resolver.resolve_frozen_local_search_agent(
+    frozen, handoff, _ = resolver.resolve_frozen_agent(
         plan,
         inputs=opts["inputs"],
         repository_root=opts["agent_repository_root"],

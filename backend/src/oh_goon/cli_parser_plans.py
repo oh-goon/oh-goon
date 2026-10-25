@@ -110,8 +110,10 @@ def _add_run_readback_commands(
         ("steps", "Navigate original Game Tape repository and Step identities"),
         ("outputs", "Inspect original Game Tape Step output and artifact evidence"),
         ("handoff", "Read bounded original Run and Game Tape completion/failure facts"),
-        ("campaign", "Inspect linked review-repair campaign Runs and retained result evidence"),
+        ("campaign", "Inspect retained intent and results by campaign ID or linked Run ID"),
     ):
         viewer = plan_subparsers.add_parser(command, help=help_text)
-        viewer.add_argument("fleet_run_id")
+        viewer.add_argument(
+            "fleet_run_id", metavar="CAMPAIGN_OR_RUN_ID" if command == "campaign" else None
+        )
         viewer.add_argument("--json", action="store_true", dest="as_json")

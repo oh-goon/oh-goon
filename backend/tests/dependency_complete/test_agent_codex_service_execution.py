@@ -9,9 +9,10 @@ import sys
 import time
 import tomllib
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -24,12 +25,17 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord
-from oh_goon.core.models.fleet_plan import ResolvedLocalSearchAgentStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep
 from oh_goon.core.models.fleet_plan_values import HostEnvironmentPart, ResolvedEnvironmentBinding
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.step_output import StepOutputObserver
-from oh_goon.engine.command import CommandCancelledError, CommandResult, run_command
+from oh_goon.engine.command import (
+    CommandCancelledError,
+    CommandResult,
+    CommandSupervisorReceipt,
+    run_command,
+)
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
 from oh_goon.integrations import agent_codex_service_execution as execution
@@ -127,6 +133,15 @@ def execute_fixture(
                 require_process_group_quiescence=True,
                 input_data=kwargs.get("input_data"),
             )
+            if fault is not None and fault.startswith("version-stop-"):
+                reason = fault.removeprefix("version-stop-")
+                result = replace(
+                    result,
+                    supervisor=CommandSupervisorReceipt(
+                        cleanup_reason=cast(Any, reason),
+                        process_group_cleanup_requested=True,
+                    ),
+                )
             events.append(("version_receipt", result))
             return result
         events.append("process_birth")
@@ -299,14 +314,13 @@ def execute_fixture(
     )
     process = _with_output_observer(
         process,
-        ResolvedLocalSearchAgentStep(
+        ResolvedAgentStep(
+            timeout_seconds=3600,
+            workload={"harness": "native", "native_agent": selected},
             step_id="native-service",
-            argv=("python",),
             delivery_sha256="0" * 64,
             handoff_identity="original-frozen-handoff",
             source_step_id="native-service",
-            harness="native",
-            native_agent=selected,
             environment=(
                 ResolvedEnvironmentBinding(
                     name="ADMITTED_SECRET",
@@ -360,6 +374,8 @@ def test_service_turn_success_retains_actual_owned_daemon_cancellation_receipt(
     assert shutdown.supervisor.termination_receipt is not None
     assert result.outcome.stdout == "Native final report"
     assert result.outcome.returncode == 0 and result.protocol.settled is True
+    assert result.outcome.completion == "service_shutdown"
+    assert result.outcome.observed_returncode is None
     assert events.index("mcp_gate") < events.index("model_turn")
     assert events.index("store_separation") < events.index("mcp_discovery")
     assert events.index("mcp_discovery") < events.index("thread_start") < events.index("mcp_gate")
@@ -493,6 +509,36 @@ def test_unqualified_native_cli_version_blocks_before_daemon_and_model_submissio
     assert len(receipts) == 1 and isinstance(receipts[0], CommandResult)
     assert receipts[0].stdout.strip() == f"codex-cli {version}"
     assert receipts[0].supervisor.final_process_group_quiescent is True
+
+
+@pytest.mark.parametrize(
+    "reason,expected",
+    [
+        ("cancel", "CANCELLED"),
+        ("timeout", "TIMED_OUT"),
+        ("authority", "AUTHORITY_LOST"),
+        ("output_limit", "OUTPUT_LIMITED"),
+    ],
+)
+def test_interrupted_version_probe_never_starts_the_daemon_or_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str, expected: str
+) -> None:
+    from oh_goon.core.models.fleet_plan import ResolvedCommandStep
+    from oh_goon.integrations._fleet_plan_step_outcome import settle_step_execution
+
+    invoke, events, physical = execute_fixture(
+        tmp_path, monkeypatch, fault="version-stop-" + reason
+    )
+    with pytest.raises(execution.CodexServiceExecutionFailure) as error:
+        invoke()
+    assert "version_probe" in events and "process_birth" not in events
+    assert "connect" not in events and "model_turn" not in events and not physical
+    settlement = settle_step_execution(
+        ResolvedCommandStep(step_id="probe", argv=("codex", "--version")),
+        error.value.outcome,
+    )
+    assert settlement.outcome == expected
+    assert settlement.cleanup == "VERIFIED" and settlement.observed_returncode == 0
 
 
 @pytest.mark.parametrize("fault", ["store_overlap", "mcp", "features", "qualification"])

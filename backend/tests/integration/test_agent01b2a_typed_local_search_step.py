@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedLocalSearchAgentStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedFleetPlan
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations.fleet_plan_step_execution import (
     StepRuntime,
@@ -20,7 +20,7 @@ from oh_goon.integrations.fleet_plan_step_execution import (
 )
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
-from oh_goon.services.fleet_plan_step_resolution import resolve_delivered_local_search_agent_step
+from oh_goon.services.fleet_plan_step_resolution import resolve_delivered_agent_step
 
 
 def _case(tmp_path: Path, *, task="search:needle", harness="local-search", effects=""):
@@ -78,10 +78,10 @@ def _runtime(cancel=None, handoff=None):
 
 def test_frozen_typed_agent_uses_original_real_step_supervisor(tmp_path):
     handoff, repo, skill = _case(tmp_path)
-    step = resolve_delivered_local_search_agent_step(handoff)
+    step = resolve_delivered_agent_step(handoff)
     assert step.kind == "agent"
     assert step.step_id == handoff.step_id
-    assert ResolvedLocalSearchAgentStep.model_validate_json(step.model_dump_json()).kind == "agent"
+    assert ResolvedAgentStep.model_validate_json(step.model_dump_json()).kind == "agent"
     (repo / "code.txt").write_text("not present any more\n")
     (skill / "SKILL.md").write_text("changed live\n")
     result = execute_direct_step(tmp_path, step, _runtime(handoff=handoff), step_order=1)
@@ -93,7 +93,7 @@ def test_frozen_typed_agent_uses_original_real_step_supervisor(tmp_path):
 
 def test_no_match_is_structured_native_evidence_in_typed_step(tmp_path):
     handoff, _, _ = _case(tmp_path, task="search:absent-literal")
-    step = resolve_delivered_local_search_agent_step(handoff)
+    step = resolve_delivered_agent_step(handoff)
     result = execute_direct_step(tmp_path, step, _runtime(handoff=handoff), step_order=1)
     assert result.returncode == 0
     assert step.success_codes == (0,)
@@ -104,7 +104,7 @@ def test_cancellation_uses_existing_step_supervisor(tmp_path):
     with pytest.raises(OperationCancelledError):
         execute_direct_step(
             tmp_path,
-            resolve_delivered_local_search_agent_step(handoff),
+            resolve_delivered_agent_step(handoff),
             _runtime(lambda: True, handoff),
             step_order=1,
         )
@@ -115,7 +115,7 @@ def test_cancellation_uses_existing_step_supervisor(tmp_path):
 )
 def test_invalid_delivery_fails_before_real_process(tmp_path, monkeypatch, broken):
     handoff, _, _ = _case(tmp_path)
-    step = resolve_delivered_local_search_agent_step(handoff)
+    step = resolve_delivered_agent_step(handoff)
     data = step.model_dump(mode="python")
     delivery = handoff.encode_prework_delivery()
     if broken == "digest":
@@ -131,7 +131,7 @@ def test_invalid_delivery_fails_before_real_process(tmp_path, monkeypatch, broke
         data["delivery_sha256"] = hashlib.sha256(delivery).hexdigest()
     elif broken == "timeout":
         data["timeout_seconds"] = step.timeout_seconds + 1
-    corrupted = ResolvedLocalSearchAgentStep.model_validate(data)
+    corrupted = ResolvedAgentStep.model_validate(data)
     import oh_goon.integrations.fleet_plan_step_execution as executor
 
     monkeypatch.setattr(
@@ -152,19 +152,19 @@ def test_invalid_delivery_fails_before_real_process(tmp_path, monkeypatch, broke
 
 def test_agent_shape_cannot_be_relabelled_into_arbitrary_command(tmp_path):
     handoff, _, _ = _case(tmp_path)
-    step = resolve_delivered_local_search_agent_step(handoff)
+    step = resolve_delivered_agent_step(handoff)
     for mutation in (
         {"argv": ("bash", "-c", "touch escaped")},
         {"success_codes": (0, 1)},
         {"working_directory": ".."},
     ):
         with pytest.raises(ValidationError):
-            ResolvedLocalSearchAgentStep.model_validate({**step.model_dump(), **mutation})
+            ResolvedAgentStep.model_validate({**step.model_dump(), **mutation})
 
 
 def test_original_strict_backend_refuses_unqualified_agent_launch(tmp_path):
     handoff, _, _ = _case(tmp_path)
-    step = resolve_delivered_local_search_agent_step(handoff)
+    step = resolve_delivered_agent_step(handoff)
     with pytest.raises(FleetPlanInvalid, match="not admitted"):
         execute_strict_step(tmp_path, step, None, None, _runtime(handoff=handoff), step_order=1)
 
@@ -180,14 +180,14 @@ def test_original_strict_backend_refuses_unqualified_agent_launch(tmp_path):
 def test_unsupported_agent_request_rejected_before_resolved_step(tmp_path, task, effects):
     handoff, _, _ = _case(tmp_path, task=task, effects=effects)
     with pytest.raises(FleetPlanInvalid):
-        resolve_delivered_local_search_agent_step(handoff)
+        resolve_delivered_agent_step(handoff)
 
 
 def test_agent_kind_survives_original_resolved_plan_identity_and_wire_roundtrip(tmp_path):
     from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
 
     handoff, _, _ = _case(tmp_path)
-    step = resolve_delivered_local_search_agent_step(handoff)
+    step = resolve_delivered_agent_step(handoff)
     plan = ResolvedFleetPlan.create(
         name="read-only-agent-tool",
         description="test original Step union",
@@ -195,7 +195,7 @@ def test_agent_kind_survives_original_resolved_plan_identity_and_wire_roundtrip(
         steps=(step,),
     )
     restored = ResolvedFleetPlan.model_validate_json(plan.model_dump_json())
-    assert type(restored.steps[0]) is ResolvedLocalSearchAgentStep
+    assert type(restored.steps[0]) is ResolvedAgentStep
     assert restored.steps[0].kind == "agent"
     assert restored.steps[0].handoff_identity == handoff.handoff_identity
     assert restored.plan_id == plan.plan_id

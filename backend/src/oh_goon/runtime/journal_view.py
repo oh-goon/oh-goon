@@ -8,6 +8,7 @@ from pathlib import Path
 
 from oh_goon.core.errors import InvalidRequest, InvalidRunTransition, OperationNotFound, RunNotFound
 from oh_goon.core.fleet_plan_projection import atomic_goon_by_step
+from oh_goon.core.models.agent_repair import AgentCampaignReadback
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
 from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.fleet_failures import (
@@ -111,6 +112,16 @@ class JournalReadView:
             _index=JournalIndex.build(entries),
         )
 
+    def campaigns(self) -> tuple[AgentCampaignReadback, ...]:
+        return tuple(self.campaign(campaign_id) for campaign_id in self._index.campaigns)
+
+    def campaign(self, campaign_id: str) -> AgentCampaignReadback:
+        return AgentCampaignReadback(
+            campaign_id=campaign_id,
+            journal_revision=self.revision,
+            records=self._index.campaigns.get(campaign_id, ()),
+        )
+
     def operation(self, operation_id: str) -> OperationReport | None:
         report = self._index.operations_by_id.get(operation_id)
         return report.model_copy(deep=True) if report is not None else None
@@ -167,10 +178,17 @@ class JournalReadView:
 
     def run_detail(self, fleet_run_id: str) -> FleetRunDetail | None:
         detail = self._index.run_detail(fleet_run_id)
-        return (
-            detail.model_copy(deep=True, update={"journal_revision": self.revision})
-            if detail is not None
+        if detail is None:
+            return None
+        target = detail.run.target
+        campaign = (
+            self.campaign(target.agent_repair.repair_id)
+            if isinstance(target, FleetPlanTarget) and target.agent_repair is not None
             else None
+        )
+        return detail.model_copy(
+            deep=True,
+            update={"journal_revision": self.revision, "campaign_journal": campaign},
         )
 
     def required_run_detail(self, fleet_run_id: str) -> FleetRunDetail:

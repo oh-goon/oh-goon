@@ -32,24 +32,11 @@ def validate_resolved_plan(plan: Any) -> None:
     for step in plan.steps:
         if step.kind != "agent":
             continue
-        if step.harness == "native":
-            if native is None or step.native_agent != native:
+        if step.workload.harness == "native":
+            if native is None or step.workload.native_agent != native:
                 raise ValueError("Native Agent Step differs from the original Plan profile")
         elif native is not None:
             raise ValueError("A native execution profile cannot silently host built-in Agent steps")
-    if plan.contract_version < 44:
-        if any(
-            isinstance(output, PlanStreamOutput)
-            for step in plan.steps
-            for output in getattr(step, "outputs", ())
-        ):
-            raise ValueError("native stream publication requires Plan contract version 44")
-        if any(
-            getattr(step, "harness", None) == "local-model-proposal"
-            and getattr(step, "feedback_reference", None) is not None
-            for step in plan.steps
-        ):
-            raise ValueError("proposal feedback requires Plan contract version 44")
     prior: set[str] = set()
     published: dict[str, set[str]] = {}
     published_workspaces: set[str] = set()
@@ -67,7 +54,7 @@ def validate_resolved_plan(plan: Any) -> None:
         # A validated Agent proposal is a scalar Step output, not a hidden
         # model-controlled command or grant. Only this explicit harness exports it.
         if step.kind == "agent" and (
-            step.harness == "local-model-proposal" or agent_phase_role(step) == "proposal"
+            step.workload.harness == "local-model-proposal" or agent_phase_role(step) == "proposal"
         ):
             published[step.step_id].add("proposal")
         if step.workspace.publish:

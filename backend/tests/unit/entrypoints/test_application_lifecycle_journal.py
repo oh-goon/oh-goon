@@ -55,12 +55,12 @@ def test_step_lifecycle_reuses_publicly_warmed_journal_cut_and_refreshes_after_a
     loads = 0
     original_load = JournalFactStore.load_entries
 
-    def counted_load(store: JournalFactStore, connection: sqlite3.Connection) -> list[JournalEntry]:
+    def counted_load(connection: sqlite3.Connection) -> list[JournalEntry]:
         nonlocal loads
         loads += 1
-        return original_load(store, connection)
+        return original_load(connection)
 
-    monkeypatch.setattr(JournalFactStore, "load_entries", counted_load)
+    monkeypatch.setattr(JournalFactStore, "load_entries", staticmethod(counted_load))
     runtime = ApplicationRuntime.build(standard_local=True)
     run_id = "application-journal-reuse"
     readbacks: list[tuple[FleetRunDetail, FleetRunDetail]] = []

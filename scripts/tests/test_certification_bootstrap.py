@@ -533,8 +533,8 @@ def test_certification_state_reset_preserves_retained_dependency_supply(
     )
     state.mkdir(parents=True, exist_ok=True)
     database = state / "oh-goon.db"
-    database.write_bytes(b"broken sqlite bytes")
-    Path(f"{database}-journal").write_bytes(b"journal")
+    LocalDatabase(database, journal_mode="DELETE")
+    Path(f"{database}-journal").touch()
 
     cache = tmp_path / "cache"
     supply = cache / "oh-goon" / "certification-dependencies" / "schema-8" / "current"
@@ -710,3 +710,25 @@ def test_certification_database_preflight_rejects_nonlocal_storage_before_sqlite
             source_root=source,
             state_home=state_home,
         )
+
+
+def test_certification_reset_preserves_unreadable_original_writer_evidence(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.core.errors import StateConflict
+
+    source = _source_with_lock(tmp_path / "repo")
+    state_home = tmp_path / "state-home"
+    state = certification_state_root(source_root=source, state_home=state_home)
+    state.mkdir(parents=True, exist_ok=True)
+    database = state / "oh-goon.db"
+    database.write_bytes(b"unreadable original control-state authority")
+    journal = Path(f"{database}-journal")
+    journal.write_bytes(b"retained original journal evidence")
+    before = (database.read_bytes(), journal.read_bytes())
+    with pytest.raises(StateConflict, match="could not verify its original store"):
+        certification_bootstrap.reset_certification_control_state(
+            source_root=source,
+            state_home=state_home,
+        )
+    assert (database.read_bytes(), journal.read_bytes()) == before
