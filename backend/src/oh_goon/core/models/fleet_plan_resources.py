@@ -8,6 +8,15 @@ from pydantic import Field, field_validator, model_validator
 from oh_goon.core.models.base import ImmutableModel
 
 
+class PythonGoonProject(ImmutableModel):
+    """Captured package identity; executable source bytes travel privately."""
+
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    archive_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    byte_count: int = Field(ge=0, le=64 * 1024 * 1024)
+    entry_count: int = Field(ge=1, le=4096)
+
+
 class ExtensionDeclaration(ImmutableModel):
     name: str = Field(min_length=1, max_length=80)
     source: str = Field(min_length=1, max_length=500)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
@@ -13,6 +14,7 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedPreCommitStep,
 )
 from oh_goon.core.models.fleet_plan_evidence import PlanToolEvidence
+from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.path_authority import (
     ContainedPathSpace,
     RepositoryPathSpace,
@@ -21,7 +23,7 @@ from oh_goon.core.path_authority import (
 )
 from oh_goon.core.path_layouts import ManagedPreparationPathLayout
 from oh_goon.core.product_identity import stable_id
-from oh_goon.engine.command import CommandResult, run_command
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt, run_command
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
@@ -43,6 +45,32 @@ _UV_PREPARATION_OWNED_ENVIRONMENT = frozenset(
         "UV_OFFLINE",
     }
 )
+_UV_PREPARATION_COMMAND_RUNNER = partial(
+    run_command,
+    require_process_group_quiescence=True,
+    max_capture_bytes_per_stream=1024 * 1024,
+    retain_output_tail=True,
+)
+
+
+class UvPreparationIncomplete(FleetPlanInvalid):
+    """Original native receipt leaves preparation scratch under uncertain process use."""
+
+    def __init__(self, supervisor: CommandSupervisorReceipt | None) -> None:
+        super().__init__("Native uv preparation process cleanup is incomplete")
+        self.supervisor = supervisor
+
+
+def uv_preparation_requires_retained_scratch(error: BaseException) -> bool:
+    """Transport the original process owner's cleanup fact to its Run resource owner."""
+    if isinstance(error, UvPreparationIncomplete):
+        return True
+    supervisor = getattr(error, "supervisor", None)
+    if supervisor is None:
+        supervisor = getattr(error.__cause__, "supervisor", None)
+    if supervisor is None:
+        return hasattr(error, "supervisor") or hasattr(error.__cause__, "supervisor")
+    return supervisor.final_process_group_quiescent is not True
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,13 +108,16 @@ class UvProjectManagedRuntime:
     """
 
     project: str
-    group: str
+    group: str | None
     cache: Path
     python: Path
+    package_source: Path | None = None
 
     @property
     def readonly_paths(self) -> tuple[Path, ...]:
-        return (self.cache,)
+        return (
+            (self.cache, self.package_source) if self.package_source is not None else (self.cache,)
+        )
 
 
 ManagedRuntimeSpec = PreCommitManagedRuntime | ExtensionManagedRuntime | UvProjectManagedRuntime
@@ -130,7 +161,7 @@ def prepare_uv_project_runtimes(
     run_root: Path,
     path_authority: StrictHostPathAuthority,
     cancel_requested: Callable[[], bool] | None,
-    command_runner: Callable[..., CommandResult] = run_command,
+    command_runner: Callable[..., CommandResult] = _UV_PREPARATION_COMMAND_RUNNER,
     python_resolver: Callable[[Path], Path | None] = find_uv_system_python,
     host_environment: Mapping[str, str] | None = None,
 ) -> dict[str, UvProjectManagedRuntime]:
@@ -148,6 +179,14 @@ def prepare_uv_project_runtimes(
     )
     if not steps:
         return {}
+    if (
+        isinstance(plan.execution, CicdExecutionPolicy)
+        and not plan.execution.trust_repository_code
+        and any(step.project_source is not None for step in steps)
+    ):
+        raise FleetPlanInvalid(
+            "Untrusted Python Goon package preparation requires isolated builds, which are unavailable"
+        )
 
     preparation = ManagedPreparationPathLayout.from_root(run_root)
     preparation.ensure()
@@ -160,64 +199,113 @@ def prepare_uv_project_runtimes(
         raise FleetPlanInvalid(
             "Strict native uv preparation could not select one system Python authority"
         )
-    prepared: dict[tuple[str, str], Path] = {}
+    prepared: dict[tuple[str, str | None, str | None], Path] = {}
     runtimes: dict[str, UvProjectManagedRuntime] = {}
     native_uv = capture_native_uv_authority(
         host_environment, owned_uv_names=_UV_PREPARATION_OWNED_ENVIRONMENT
     )
 
-    for step in steps:
-        assert step.uv is not None
-        key = (step.uv.project, step.uv.group)
-        if key not in prepared:
-            project = RepositoryPathSpace.from_root(source_root).resolve(
+    owned_environments: set[Path] = set()
+    primary_error: BaseException | None = None
+    try:
+        for step in steps:
+            assert step.uv is not None
+            package_source = None
+            if step.project_source is not None:
+                from oh_goon.core.path_layouts import RunPathLayout
+
+                package_source = RunPathLayout.from_root(run_root).package_source(
+                    step.project_source.content_sha256
+                )
+            key = (
                 step.uv.project,
-                label=f"Fleet uv project for step {step.step_id}",
-                kind="directory",
-                require_exists=True,
+                step.uv.group,
+                step.project_source.content_sha256 if step.project_source else None,
             )
-            environment = env_root / stable_id(
-                "fleet-uv-preparation", {"project": step.uv.project, "group": step.uv.group}
-            ).removeprefix("sha256:")
-            env = _uv_preparation_environment(
-                preparation,
-                environment=environment,
+            if key not in prepared:
+                project = package_source or RepositoryPathSpace.from_root(source_root).resolve(
+                    step.uv.project,
+                    label=f"Fleet uv project for step {step.step_id}",
+                    kind="directory",
+                    require_exists=True,
+                )
+                environment = env_root / stable_id(
+                    "fleet-uv-preparation",
+                    {"project": step.uv.project, "group": step.uv.group, "package": key[2]},
+                ).removeprefix("sha256:")
+                env = _uv_preparation_environment(
+                    preparation,
+                    environment=environment,
+                    cache=cache,
+                    python=python,
+                    native_uv=native_uv,
+                )
+                owned_environments.add(environment)
+                result = command_runner(
+                    str(uv),
+                    "sync",
+                    "--project",
+                    str(project),
+                    "--locked",
+                    "--no-default-groups",
+                    *(["--group", step.uv.group] if step.uv.group is not None else []),
+                    *(["--no-editable"] if package_source is not None else []),
+                    cwd=project,
+                    timeout=900.0,
+                    cancel_requested=cancel_requested,
+                    env=env,
+                )
+                if (
+                    result.supervisor is None
+                    or result.supervisor.final_process_group_quiescent is not True
+                ):
+                    raise UvPreparationIncomplete(result.supervisor)
+                if result.returncode != 0:
+                    detail = (result.stderr or result.stdout or "native uv sync failed").strip()
+                    raise FleetPlanInvalid(
+                        f"Native uv preparation rejected project {step.uv.project!r} "
+                        f"group {step.uv.group!r}: {detail}"
+                    )
+                prepared[key] = environment
+
+            runtimes[step.step_id] = UvProjectManagedRuntime(
+                project=step.uv.project,
+                group=step.uv.group,
                 cache=cache,
                 python=python,
-                native_uv=native_uv,
+                package_source=package_source,
             )
-            result = command_runner(
-                str(uv),
-                "sync",
-                "--project",
-                str(project),
-                "--locked",
-                "--no-default-groups",
-                "--group",
-                step.uv.group,
-                cwd=project,
-                timeout=900.0,
-                cancel_requested=cancel_requested,
-                env=env,
-            )
-            if result.returncode != 0:
-                detail = (result.stderr or result.stdout or "native uv sync failed").strip()
-                raise FleetPlanInvalid(
-                    f"Native uv preparation rejected project {step.uv.project!r} "
-                    f"group {step.uv.group!r}: {detail}"
-                )
-            prepared[key] = environment
 
-        runtimes[step.step_id] = UvProjectManagedRuntime(
-            project=step.uv.project,
-            group=step.uv.group,
-            cache=cache,
-            python=python,
+        return runtimes
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        failures: list[OSError] = []
+        unsettled = primary_error is not None and uv_preparation_requires_retained_scratch(
+            primary_error
         )
-
-    for environment in prepared.values():
-        shutil.rmtree(environment, ignore_errors=True)
-    return runtimes
+        if unsettled:
+            assert primary_error is not None
+            primary_error.add_note(
+                f"Native uv preparation scratch retained while process cleanup is incomplete: {preparation.root}"
+            )
+        for environment in () if unsettled else sorted(owned_environments):
+            try:
+                if environment.exists() or environment.is_symlink():
+                    shutil.rmtree(environment)
+            except OSError as error:
+                failures.append(error)
+        if failures:
+            if primary_error is not None:
+                for cleanup_error in failures:
+                    primary_error.add_note(
+                        f"native uv preparation environment cleanup failed: {cleanup_error}"
+                    )
+            else:
+                raise FleetPlanInvalid(
+                    "Native uv preparation environment cleanup is incomplete"
+                ) from failures[0]
 
 
 def _uv_preparation_environment(

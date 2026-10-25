@@ -174,6 +174,9 @@ class RunPathLayout:
     def managed_input(self, index: int) -> Path:
         return self.managed_inputs / f"{index:03d}"
 
+    def package_source(self, digest: str) -> Path:
+        return self.root / "sources" / "goon-projects" / storage_component(digest)
+
 
 @dataclass(frozen=True, slots=True)
 class AttemptPathLayout:

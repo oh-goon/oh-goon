@@ -1,103 +1,77 @@
 # ADR — Complete Python Goon projects
 
-**Status:** Proposed implementation contract, 2026-10-25.
-**Scope:** Atomic Goons that carry their own Python implementation; local projects first, Git sources later.
-**Implementation status:** This document specifies intended behavior. It does not add runtime support. In particular, `runtime: python` and Git Goon selection below are proposals, not currently supported authoring syntax.
+**Status:** Implemented, 2026-10-25.
+**Scope:** Atomic Goons carrying their own Python implementation, from local
+packages or explicit pinned Git selections.
 
 ## Decision
 
-Make the Goon directory a complete Python project. A developer can enter that
-directory, use native uv, run its tests, and run its installed command. OH-Goon
-executes the same implementation and entry point through its existing lifecycle.
+A Python Goon directory is a complete standalone Python project. A developer
+can enter it, use native uv, run its tests and invoke its installed command.
+Oh-Goon installs the same captured implementation and runs the same entry point
+through its existing Fleet/Step lifecycle.
 
-The Plan stays small:
+The Plan remains small:
 
 ```yaml
 execution:
   purpose: cicd
 
 goons:
-  - ml/iris-train
+- ml/iris-train
 ```
 
-The Goon owns its input contract and Steps. Its `pyproject.toml` owns runtime
-dependencies, development tools, build configuration and the installed entry
-point. `run.yml` supplies caller values and invocation selection. The Plan does
-not acquire Python dependency or build-system declarations.
+The Goon owns typed public inputs, ordered Steps and artifacts.
+`pyproject.toml` owns runtime dependencies, development tools, build
+configuration and installed entry points. `uv.lock` remains native Python
+dependency authority. `run.yml` supplies caller values and invocation selection.
+`goon.lock` freezes execution identity and explicit Git source pins.
 
-The same package must later be usable from an explicitly selected Git
-repository and revision. Acquisition changes how source arrives; it does not
-change the package format, input semantics or execution lifecycle.
-
-This requirement applies to Python Atomic Goons carrying implementation.
-Composite Goons and Goons invoking tools in a selected target project do not
-need dummy Python projects. Plans still order Goons; Atomic Goons own Steps;
+This project contract applies to Atomic Goons carrying implementation.
+Composite Goons and Goons invoking tools in a selected target project need no
+dummy Python projects. Plans still order Goons; Atomic Goons own Steps;
 Composite Goons own Goons. There is no additional runner or execution graph.
 
-## Why this changes the current Iris example
+## Complete project ownership
 
-At the [reviewed baseline](https://github.com/oh-goon/oh-goon/tree/4e05311913bd1f465968c4ba644989309ef5f964),
-the [Iris Goon](../../templates/goons/ml/iris-train/goon.yml) already declares
-all four typed inputs, defaults and constraints. Input ownership is correct.
+The canonical Iris project is [templates/goons/ml/iris-train/](../../templates/goons/ml/iris-train/README.md):
 
-The usability problem is the split package: the Goon and README live in the
-catalog, while the Python project lives under
-[the certification fixture](../../template-certification/fixtures/ml/iris/pyproject.toml).
-The [catalog contract](../development/TEMPLATE_CATALOG_DETERMINISM.md)
-currently permits exactly YAML and README. The managed uv contract also
-selects a named dependency group. Moving files or changing dependency tables
-alone cannot implement this proposal.
-
-Current supported behavior remains documented in
-[Goon authoring](../development/GOON_AUTHORING.md) until the implementation
-and its owning documentation change together.
-
-## 1. One complete project directory
-
-For the proposed Iris package, the canonical home is
-`templates/goons/ml/iris-train/`:
-
-| File or directory | Responsibility |
+| Member | Responsibility |
 | --- | --- |
 | `goon.yml` | Typed public inputs, ordered Steps and declared artifacts. |
 | `README.md` | Purpose, local development, command usage, inputs and outputs. |
-| `pyproject.toml` | Python project metadata, runtime dependencies, development groups, entry point and build backend. |
-| `uv.lock` | Native uv dependency resolution, committed with the project. |
-| `src/iris_train/__init__.py` | Python package. |
-| `src/iris_train/cli.py` | Installed `iris-train` command and argument handling. |
-| `src/iris_train/training.py` | Training/evaluation logic, if separating it from the CLI improves the implementation. |
-| `tests/` | Meaningful tests of training behavior, validation and output contracts. |
+| `pyproject.toml` | Runtime dependencies, development groups, installed command and build backend. |
+| `uv.lock` | Committed native uv dependency resolution. |
+| `src/iris_train/` | Installed command and training implementation. |
+| `tests/` | Training, validation and output regressions. |
 
-The Python package layout is illustrative; native build configuration owns
-valid Python layouts. Mandatory package content is `goon.yml`, `README.md`,
-`pyproject.toml`, `uv.lock` and the implementation/resources needed to install
-and execute the declared command. The shipped Iris project also supplies tests.
-The README retains the catalog heading `# ml/iris-train`.
+`goon.yml`, `README.md`, `pyproject.toml`, `uv.lock` and the implementation and
+resources needed to install the command are required. Native build
+configuration owns valid Python layouts. The README retains the exact catalog
+heading, such as `# ml/iris-train`. Plan, Composite Goon and tool-invoking Atomic
+Goon packages retain their two-file YAML/README layout.
 
-The package must work after relocation without importing a certification
-fixture, the OH-Goon backend, a cookbook checkout, parent source, or an
-unrelated developer environment. Its internal code and resource dependencies
-are contained in the project. External Python dependencies use native project
-declarations and uv resolution. Undeclared sibling paths, ancestor uv
-workspaces and escaping local dependencies are outside this standalone model.
+The package installs after relocation without a certification fixture,
+Oh-Goon backend, cookbook checkout or parent source. Local dependencies must
+remain inside the project; escaping paths and reliance on an ancestor uv
+workspace are outside this standalone model. Native uv owns dependency
+resolution, build/install semantics and stale-lock refusal.
+Contained native uv workspace members remain supported. Local dependency,
+workspace member/exclusion and virtual lock-source paths must all stay inside
+the captured package so relocation preserves their native project authority.
 
-Local `uv sync`, testing and training produce environments, caches and output
-files. Those operations must not invalidate package discovery or add generated
-state to source identity. Extend the existing authored-source membership and
-Hashmarks boundaries to distinguish authored members from disposable state;
-do not create another package hash/filter engine or a manual file manifest.
+The existing source-snapshot and Hashmarks owners capture authored package
+contents. Generated environments/caches, declared output locations and
+`goon.lock` are excluded. Local sync, tests and training therefore do not add
+those generated files to package identity. There is no separately authored
+file manifest or second package-content hash engine.
 
-Move the Iris implementation to this one canonical home when implementing the
-proposal. Certification and integration tests consume it there rather than
-maintaining a second copy.
+## Explicit inputs and installed commands
 
-## 2. Inputs remain explicit in the Goon
-
-Proposed `goon.yml`:
+The Iris Atomic Goon selects its own project:
 
 ```yaml
 runtime: python
-
 inputs:
   random_seed:
     type: integer
@@ -119,30 +93,29 @@ inputs:
     default: 300
     min: 100
     max: 2000
-
 steps:
-  - run: >-
-      iris-train
-      --random-seed ${{ inputs.random_seed }}
-      --test-size-percent ${{ inputs.test_size_percent }}
-      --minimum-accuracy-percent ${{ inputs.minimum_accuracy_percent }}
-      --max-iterations ${{ inputs.max_iterations }}
-    artifacts:
-      - path: ml-output/iris-training-metrics.json
-        retention: evidence
-      - path: ml-output/iris-model-parameters.json
-        retention: content_store
+- run: >-
+    iris-train
+    --random-seed ${{ inputs.random_seed }}
+    --test-size-percent ${{ inputs.test_size_percent }}
+    --minimum-accuracy-percent ${{ inputs.minimum_accuracy_percent }}
+    --max-iterations ${{ inputs.max_iterations }}
+  artifacts:
+  - path: ml-output/iris-training-metrics.json
+    retention: evidence
+  - path: ml-output/iris-model-parameters.json
+    retention: content_store
 ```
 
-Here `runtime: python` explicitly selects the project in the directory
-containing `goon.yml`. It does not select the target repository's project.
-The command resolves in the prepared project environment. It is not an
-ambient PATH lookup or an implicit shell.
+`runtime: python` selects the project beside `goon.yml`, independently of the
+target repository. Commands resolve in its prepared environment and execute as
+argv; there is no implicit shell or ambient executable fallback. `uv.project`
+cannot redirect a package-owned runtime. Use `uv: {group: dev}` only when the
+workload needs that dependency group.
 
 The existing binder applies types, defaults and constraints before workload
-execution. Plans expose unique unbound inputs and retain explicit
-`with:`/`pass:` routing where needed. The caller may provide this fragment
-under the existing `run.yml` input mapping:
+execution. Plans expose unique unbound inputs and keep explicit `with:`/`pass:`
+routing. A caller changes values in `run.yml` without repeating the schema:
 
 ```yaml
 inputs:
@@ -150,236 +123,190 @@ inputs:
   minimum_accuracy_percent: 95
 ```
 
-That fragment supplies values, not a second schema. Unknown names, missing
-required values and invalid values fail through the existing input owner.
-Secrets retain their existing explicit environment/secret boundary.
+The Iris CLI requires explicit arguments, so workflow defaults stay in the
+Goon. Python owns application validation and training logic. Secrets retain
+their existing explicit environment/secret authority boundary.
 
-The Python CLI can require all four arguments, so it does not duplicate the
-Goon's workflow defaults. Python still owns application validation and training
-logic. Local use and OH-Goon call the same installed CLI with explicit values.
-No OH-Goon SDK is needed by the Iris implementation.
+## One dependency definition, distinct selections
 
-## 3. One pyproject.toml, different dependency selections
+The Iris project declares scikit-learn under `[project].dependencies`,
+`iris-train` under `[project.scripts]`, pytest/Ruff under the `dev` dependency
+group and its build backend under `[build-system]`. It needs no empty `ml` or
+`runtime` group. Its native lock can include development tools without installing
+them for training.
 
-Proposed Iris project configuration:
-
-```toml
-[project]
-name = "iris-train"
-version = "0.1.0"
-readme = "README.md"
-requires-python = ">=3.12"
-dependencies = ["scikit-learn>=1.6,<2"]
-
-[project.scripts]
-iris-train = "iris_train.cli:main"
-
-[dependency-groups]
-dev = ["pytest", "ruff"]
-
-[tool.uv]
-default-groups = ["dev"]
-
-[build-system]
-requires = ["uv_build>=0.10.0,<0.11.0"]
-build-backend = "uv_build"
-```
-
-Scikit-learn is a runtime dependency of this dedicated application. It does
-not need an `ml` group solely to distinguish it from developer tools.
-The version constraints illustrate the project shape; native uv authors the
-actual lock during implementation.
-
-| Use | Dependency selection |
+| Use | Selection |
 | --- | --- |
-| Local development | Install the project, runtime dependencies and the default `dev` group. |
-| OH-Goon Iris training | Install the project and runtime dependencies; select no dependency groups by default. |
-| A workload explicitly running tests or lint | Include the tools that workload requests through native dependency-group selection. |
+| Local development | Project, runtime dependencies and default `dev` group. |
+| Package runtime with no `uv.group` | Project and base runtime dependencies; no default groups. |
+| Explicit `uv: {group: dev}` | Project, base dependencies and the requested development group. |
 
-The intended local experience, from this directory, is:
-
-```sh
-uv sync
-uv run pytest
-uv run ruff check .
-uv run iris-train --random-seed 42 --test-size-percent 20 --minimum-accuracy-percent 90 --max-iterations 300
-```
-
-OH-Goon's runtime preparation has the native semantics of:
+Local development uses the same installed command:
 
 ```sh
-uv sync --locked --no-default-groups --no-editable
+uv sync --locked
+uv run --no-sync pytest
+uv run --no-sync ruff check .
+uv run --no-sync iris-train --random-seed 42 --test-size-percent 20 --minimum-accuracy-percent 90 --max-iterations 300
 ```
 
-That command describes preparation inside an owned execution environment;
-authors do not add it as a warm-up Step. The existing Python environment model
-must support a base-only selection. Do not require an empty group to satisfy
-the current named-group model.
+Package preparation has native semantics of
+`uv sync --locked --no-default-groups --no-editable`, adding `--group` only
+when selected. The original execution owners prepare and consume that
+selection; authors add no dependency-install Step. Base-only selection is
+also supported for existing target-project `uv` workloads. Execution does not
+run an unqualified `uv run` that could restore default groups, and does not use
+`--only-group`, which would omit the application project.
 
-Native uv owns resolution and stale-lock refusal. The same `uv.lock` can
-contain developer dependencies without installing them for training.
-Execution consumes the prepared selection: a later unqualified `uv run`
-must not automatically reinstall default groups. Do not use `--only-group`
-for base application execution, because it omits the project itself.
-These distinctions follow [native uv locking and syncing](https://docs.astral.sh/uv/concepts/projects/sync/).
+The runtime environment is separately owned; execution neither reuses nor
+prunes the developer's `.venv`. Build requirements remain in the native project
+configuration. `uv.lock` alone is not a claim that every isolated build
+requirement is pinned. See native uv [syncing](https://docs.astral.sh/uv/concepts/projects/sync/)
+and [project configuration](https://docs.astral.sh/uv/concepts/projects/config/).
 
-Use a separately owned runtime environment. Do not reuse or prune the
-developer's `.venv` to obtain the minimum runtime. A test workload may
-legitimately need pytest in CI; the minimum depends on the selected work,
-not on a global rule that CI can never use development tools.
-
-Keep `[build-system]` in the same project file. Building/installing the
-project supplies its console entry point in both environments. Build
-requirements are distinct from runtime dependencies and developer tools;
-they are not removed merely because execution happens in CI. Follow
-[native uv project and build configuration](https://docs.astral.sh/uv/concepts/projects/config/).
-Do not claim that `uv.lock` alone pins every isolated build requirement.
-
-## 4. One source capture and execution lifecycle
-
-Keep these roots explicit in the resolved contract:
+## Captured source and separate execution roots
 
 | Root | Meaning |
 | --- | --- |
-| Goon package source root | Captured implementation, Python metadata, lock and authored resources. |
-| Target repository root | Selected workload subject; never inferred from a package cache directory. |
-| Attempt working/output root | Owned writable execution state and produced artifacts. |
+| Package source | Captured code, project metadata, native lock and authored resources. |
+| Target repository | Explicit registered workload subject; never inferred from a package cache. |
+| Runtime environment | Owned native installation; separate from package source and developer environment. |
+| Attempt working/output root | Writable execution state and declared produced artifacts. |
 
-For Iris, relative output paths resolve under the attempt's writable project
-working directory. They do not write into the source cache or original
-developer checkout. Target-project Goons retain their explicit target source
-semantics; package-owned Python Goons do not silently substitute that project.
+Relative package outputs resolve under attempt working state, not the source
+cache or author checkout. Target-project Goons retain their explicit target
+semantics. Strict managed execution exposes captured package source read-only.
 
-The existing owners must perform the following sequence:
+The original owners perform one lifecycle:
 
-1. Resolve the exact Goon selection and capture its authored package contents.
-   Bind code, configuration, lock and resources to the same source identity.
-2. Compile the existing Plan/Goon graph and bind caller inputs once. Reject
-   known invalid source, package and input facts at their responsible boundary.
-3. Transport the resolved package and dependency selection through existing
-   admission and native environment preparation. Native build/install is
-   effectful work and retains the selected workload's policy.
-4. Execute the installed command through the original Step/process owner.
-   Preserve cancellation, cleanup, exit status and failure reporting.
-5. Retain declared artifacts and report through the existing Game Tape.
+1. Capture the exact selected source, compile the graph and bind caller inputs.
+2. Bind complete package identity and dependency selection into resolved Steps
+   and existing execution-lock freshness authority.
+3. Deliver the bounded captured package through existing run/content storage.
+   The receiver verifies that identity instead of reopening live author source.
+4. Prepare the native environment and execute the installed command through
+   the original Step/process owner, preserving failure, cancellation and cleanup.
+5. Retain declared artifacts and report the real result through Game Tape.
 
-Reuse Hashmarks for repository/source evidence and the existing execution-lock
-owner for execution identity. The catalog's current YAML byte digest is not a
-whole-package digest; do not silently change its meaning. Transport complete
-package source identity explicitly. Changes to code, project configuration,
-resources or the native lock must invalidate stale bound execution through the
-existing freshness checks.
+Hashmarks retains source-content authority. Catalog `sha256` still hashes YAML
+bytes only; it is not redefined as a package digest. Complete-project identity
+travels separately in the resolved command contract. Edits to implementation,
+resources, metadata or native lock invalidate stale execution even when
+`goon.yml` is unchanged. Local uncommitted source is identified by the captured
+working files rather than represented as clean Git HEAD.
 
-Local uncommitted work is identified by the captured working files, not
-represented as clean Git HEAD. Generated environments and outputs are not
-source identity. Receivers consume the captured source rather than reopening
-the live directory or independently rediscovering configuration.
+The Iris Plan keeps `purpose: cicd`, existing artifact retention and strict
+execution requirements. Ordinary package execution gains no global strict-host
+qualification requirement. See [execution first](ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md).
 
-The small Plan's `purpose: cicd`, artifact retention and selected execution
-profile keep their existing meanings. This proposal adds no global strict-host
-qualification requirement and does not bypass any explicitly selected
-guarantee. See [execution first](ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md).
+Package-owned Python runtime currently supports trusted package code. Native
+build/install preparation runs on the host before isolated application Steps.
+An explicit strict `trust_repository_code: false` therefore refuses during Plan
+resolution, with a defensive preparation check, before a package build starts.
+Isolated preparation for untrusted Python packages is not implemented. The
+default trusted policy and ordinary local execution keep their existing behavior;
+successful preparation does not establish APP or strict/native qualification.
 
-## 5. Later: select the same project from GitHub
+## Explicit pinned Git acquisition
 
-The later user experience is: select a GitHub example, inspect its declared
-work and inputs, choose values, lock the source and run it through OH-Goon.
-The user should not have to manually clone the repository, find a separate
-fixture and assemble the example.
-
-Support two explicit intents:
-
-- Import one reusable Goon package into an existing Plan.
-- Select a complete example containing a Plan and its local Goon packages.
-
-For the first intent, these are illustrative source coordinates:
+One reusable package can be imported into a local Plan:
 
 ```yaml
-git: https://github.com/your-org/oh-goon-examples.git
-ref: v1.0.0
-path: goons/ml/iris-train
+goons:
+- import: general/project-check
+  from:
+    git: https://github.com/your-org/workflows.git
+    ref: main
+    path: goons/general/project-check
 ```
 
-Here `path` means the exact package directory containing `goon.yml`, not a
-catalog root. This is not a supported `run.yml` or `from:` syntax. The later
-implementation must define one canonical public selection shape. A complete
-example additionally selects its Plan and authoring root explicitly; selecting
-one Goon never searches for a nearby Plan.
+`path` is the exact package directory containing `goon.yml` and ends with its
+`category/name`. It is not a catalog search root. Omitted `from:` still means
+the shipped catalog; local and remote packages do not shadow it.
 
-Reuse the native Git preparation, pinning, cache and temporary-worktree
-lifetime established for [Agent Skill sources](../AGENT_SKILLS.md#select-a-skill).
-Share acquisition behavior without making a Goon an Agent Skill or routing
-its execution through an Agent Step. `.goonskills.yml` remains the Skill
-source contract.
+A complete example selects both its authoring root and exact Plan in `run.yml`:
 
-Required source behavior:
+```yaml
+version: 1
+source:
+  kind: git-plan
+  git: https://github.com/your-org/workflows.git
+  ref: main
+  path: examples/orders
+  plan: plan.yml
+target: {repository_id: REPOSITORY_ID}
+```
 
-- Record origin, requested ref, resolved commit and selected location through
-  the existing execution-lock owner. `uv.lock` retains Python resolution;
-  `goon.lock` retains selected source pins and resolved execution identity.
-- Resolve a branch or tag at explicit acquisition/locking. Subsequent locked
-  use and cache recovery consume that exact commit. Missing content fails
-  clearly; it never selects another revision.
-- Refresh source pins only through an explicit user action. Do not silently
-  expand the Skill-specific `--update-skills` command to update Goon sources.
-- Capture a complete example's Plan and relative Goon imports from the same
-  selected revision. Keep exact names and explicit import origins. An omitted
-  `from:` continues to mean the shipped catalog; remote/local packages do not
-  shadow it.
-- Preserve local/read-only inspection. Unavailable source can be reported as
-  requiring acquisition; inspection must not hide a network fetch.
-- Acquisition does not run project code, install dependencies, initialize
-  submodules or execute Steps. Build/install and training occur at their
-  existing authorized execution boundaries.
-- Close temporary worktrees after capture, including failure/cancellation,
-  while respecting active cache leases. Cache locations are disposable
-  implementation details, not execution identity.
-- Transport captured bytes once. The execution receiver does not refetch a
-  branch, reread a mutable cache directory or select a different environment.
-- Retain provenance sufficient to identify the package, origin, requested
-  ref, resolved commit, selected path, dependency selection and actual outcome.
+The Plan and its contained local imports come from the same selected revision.
+Selecting one Goon never searches for a nearby Plan. The target remains an
+explicit registered repository.
 
-## Implementation order and acceptance
+Native Git preparation, cache leases and temporary-worktree lifetime are
+shared with [Skill sources](../AGENT_SKILLS.md#select-a-skill). Goons remain
+Goons; `.goonskills.yml` remains the separate Skill source contract.
 
-Implement the local project contract first. Design its source boundary so
-Git acquisition can later supply the same captured package representation.
-Do not add speculative source registries, duplicate resolvers or alternate
-execution front doors.
+- The first `lock` explicitly acquires source and records origin, requested ref,
+  selected path and resolved commit in `goon_sources`. Complete examples also
+  record their Plan selection.
+- Ordinary relocking and runs retain exact commits. A moving branch/tag or
+  cache miss never advances a locked selection. Cache recovery may acquire the
+  exact pinned commit; unavailable content fails clearly.
+- All selected paths sharing one origin/ref use one captured commit, regardless
+  of import order. Adding a package or selecting a Plan from that same source
+  retains its existing pin until explicit source refresh.
+- `lock run.yml --update-goons` explicitly refreshes Goon/Plan source pins.
+  `--update-skills` refreshes Skill pins independently.
+- Inspection and validation use cached source only; unavailable source reports
+  acquisition is required without hiding a network fetch.
+- Acquisition does not execute project code, install Python dependencies,
+  initialize submodules or launch Steps. Build/install stays at the original
+  execution boundary.
+- Native Git checks indexed attributes before source materialization. Selected
+  configured smudge/process filters and required filters refuse acquisition;
+  source is never silently replaced with unfiltered bytes. Native credentials
+  and unrelated configuration retain their original Git authority.
+  Acquisition disables hooks and filesystem-monitor callbacks for its Git commands.
+  Native Git identifies repository-context environment variables; acquisition
+  clears those inherited contexts so an enclosing Git process cannot redirect
+  its index/worktree operations. Native configuration and credentials remain selected.
+- Capture closes temporary worktrees on success/failure while respecting cache
+  leases. Cache paths remain disposable locations rather than source identity.
+  Execution consumes captured bytes instead of refetching a selector or reading
+  a mutable cache directory.
 
-| Increment | Required observable proof |
+See [run configuration](../development/TEMPLATE_INPUT_INSPECTION.md),
+[Goon authoring](../development/GOON_AUTHORING.md) and [goon.lock](../goon-lock.md)
+for the current public contract.
+
+## Verification boundaries
+
+Focused regressions cover standalone package installation, real installed
+command execution/readback, base-only versus explicit development groups,
+developer-environment preservation, complete-project freshness, repeated
+imports, distinct outputs, missing/escaping source and native lock failures.
+Git regressions run both a single imported package and a complete example,
+including a moved branch, explicit pin refresh and exact-commit cache recovery.
+Iris certification/integration consumes the canonical project rather than a
+second fixture implementation. The Airflow showcase uses package runtime for
+its three installed-command Steps.
+
+These tested boundaries do not establish APP PASS, privileged strict/native
+qualification, or an Airflow scheduler/worker deployment. Completing the Iris
+`purpose: cicd` Plan requires actual selected strict execution and retained
+content-store artifacts; standalone training or an ordinary verification
+wrapper cannot substitute for that evidence.
+
+## Existing owners
+
+| Concern | Owner |
 | --- | --- |
-| Local package | A relocated Iris project supports native uv development, tests and the installed command without the certification fixture or OH-Goon backend source. |
-| Local package | The small catalog Plan reaches the real Iris training Step through the same entry point, with validated inputs and genuine exit status. Admission alone is insufficient. |
-| Local package | Training retains the declared metrics and parameter artifacts under existing retention rules, including the command's threshold-failure behavior. |
-| Local package | Base-only execution installs necessary runtime dependencies, excludes pytest/Ruff unless selected, and leaves the developer environment untouched. |
-| Local package | Running local sync/tests/training does not invalidate package discovery or include generated state in captured source. |
-| Local package | Missing package files, invalid inputs, escaping source paths and stale locks fail at the responsible owner; OH-Goon does not silently repair or rewrite dependency authority. |
-| Local package | Source capture, relocation and repeated imports preserve exact package identity, written order, input bindings, distinct attempt outputs and existing cancellation/cleanup. Changed source cannot reuse stale execution authority. |
-| Git acquisition | The unchanged package works from a pinned Git directory through the same compiler, preparation and execution owners as local source. |
-| Git acquisition | A complete example selects its Plan and contained packages at one revision without manual copying or implicit package lookup. |
-| Git acquisition | Moving a branch/tag or clearing the cache does not advance a locked run; explicit refresh changes a reviewable source pin. |
-| Git acquisition | Acquisition/inspection executes no project code, and failure/cancellation releases owned temporary worktrees without disrupting active captures. |
+| Package discovery and authored membership | Template discovery, source snapshots and Hashmarks; [catalog determinism](../development/TEMPLATE_CATALOG_DETERMINISM.md). |
+| Compilation and inputs | Existing resolver/compiler; [input resolution](../development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md). |
+| Python selection and preparation | Existing managed uv model/runtime; [native tool authority](../development/NATIVE_TOOL_AUTHORITY.md). |
+| Git acquisition and source pins | Shared native Git preparation and [execution lock](../goon-lock.md). |
+| Execution and results | Existing Fleet/Step/process lifecycle, [artifact retention](../development/TEMPLATE_ARTIFACT_RETENTION.md) and Game Tape. |
+| Iris implementation | Canonical `ml/iris-train` project and its native tests. |
 
-These are acceptance criteria for future implementation, not test results of
-this documentation PR. Functional proof must include real command execution
-and output verification; mocked preparation and admission-only tests do not
-establish the intended experience.
-
-## Owners to change during implementation
-
-Extend existing ownership rather than adding a parallel stack:
-
-| Concern | Existing owner to extend |
-| --- | --- |
-| Package discovery and authored membership | Template discovery/source membership, [catalog determinism](../development/TEMPLATE_CATALOG_DETERMINISM.md), and Hashmarks source evidence. |
-| Authoring, compilation and inputs | [Goon authoring](../development/GOON_AUTHORING.md) and [input resolution/transport](../development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md). |
-| Python environment selection and preparation | Existing managed uv model/runtime and [native tool authority](../development/NATIVE_TOOL_AUTHORITY.md). |
-| Source acquisition and pins | Existing native Git source preparation, [Skill source contract](../AGENT_SKILLS.md#select-a-skill) and [execution lock](../goon-lock.md). |
-| Execution, artifacts and results | Original Fleet/Step/process owners, [artifact retention](../development/TEMPLATE_ARTIFACT_RETENTION.md) and Game Tape. |
-| Iris implementation and tests | The canonical Goon project; certification consumes that project without duplicating it. |
-
-When runtime support lands, update the current package rules in `AGENTS.md`,
-catalog/authoring guides and template READMEs in the same change. Update
-release/source inclusion and generated API contracts if their actual boundaries
-change. Use the repository's existing focused checks and escalation rules;
-this design does not create another qualification gate.
+Repository instructions, current guides and template READMEs carry this same
+contract. Existing focused checks and escalation rules apply; this decision
+adds no parallel selector, runner or qualification gate.

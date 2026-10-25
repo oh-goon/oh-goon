@@ -1,0 +1,5 @@
+execution:
+  purpose: cicd
+goons:
+  - import: ml/iris-train
+    from: ../../templates/goons

@@ -269,6 +269,37 @@ def test_schema_diagnostics_publish_only_safe_field_locations(tmp_path):
     assert "private-value" not in str(report)
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("git", "https://user:PRIVATE_TOKEN@example.test/private.git"),
+        ("ref", "--PRIVATE_REF"),
+        ("plan", "../PRIVATE_PLAN.yml"),
+    ],
+)
+def test_git_selection_diagnostics_name_safe_fields_without_echoing_values(tmp_path, field, value):
+    import yaml
+
+    from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
+
+    path, _ = _configuration(tmp_path)
+    declaration = yaml.safe_load(path.read_text())
+    declaration["source"] = {
+        "kind": "git-plan",
+        "git": "https://example.test/workflows.git",
+        "ref": "main",
+        "path": ".",
+        "plan": "plan.yml",
+    }
+    declaration["source"][field] = value
+    path.write_text(yaml.safe_dump(declaration))
+    with pytest.raises(FleetPlanInvalid) as error:
+        load_run_configuration(path)
+    report = safe_plan_diagnostic(error.value)
+    assert report["fields"] == ["source." + field]
+    assert "PRIVATE_" not in str(report)
+
+
 def test_configuration_change_during_lock_resolution_cannot_replace_lock(tmp_path, monkeypatch):
     path, _ = _configuration(tmp_path)
     plan_path, resolver = _plan(tmp_path)

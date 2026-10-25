@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
-from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedPlanStep
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan, ResolvedPlanStep
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepTeardownEvidence,
     FailedPlanStepTeardownEvidence,
@@ -64,6 +64,7 @@ from oh_goon.integrations.fleet_content_store import FleetContentObject, FleetCo
 from oh_goon.integrations.fleet_plan_managed_runtime import (
     ManagedRuntimeSpec,
     UvProjectManagedRuntime,
+    uv_preparation_requires_retained_scratch,
 )
 
 if TYPE_CHECKING:
@@ -576,7 +577,9 @@ class PreparedPlanRun:
         self._maintenance_receipt: FleetContentMaintenanceReceipt | None = None
         if run_parent is not None:
             run_parent = ensure_private_directory(run_parent)
-        self._temporary = tempfile.TemporaryDirectory(prefix="oh-goon-plan-", dir=run_parent)
+        self._temporary = tempfile.TemporaryDirectory(
+            prefix="oh-goon-plan-", dir=run_parent, delete=False
+        )
         self.root = canonical_path(self._temporary.name)
         self._layout = RunPathLayout.from_root(self.root)
         try:
@@ -605,8 +608,13 @@ class PreparedPlanRun:
                 content_inputs=self._lineage.content_input_evidence(),
             )
             self._lineage.clear_preparation_cancellation_observation()
-        except BaseException:
-            self._temporary.cleanup()
+        except BaseException as error:
+            if uv_preparation_requires_retained_scratch(error):
+                error.add_note(
+                    f"Fleet Run scratch retained while native process cleanup is incomplete: {self.root}"
+                )
+            else:
+                self._temporary.cleanup()
             raise
 
     def bind_execution_cancel_requested(self, cancel_requested: Callable[[], bool] | None) -> None:
@@ -716,6 +724,12 @@ class PreparedPlanRun:
             raise FleetPlanInvalid(
                 f"Fleet plan step {step.step_id} source changed while creating attempt {attempt_number}"
             )
+        if isinstance(step, ResolvedCommandStep) and step.project_source is not None:
+            RepositoryPathSpace.from_root(workspace).resolve(
+                step.working_directory,
+                label=f"Python Goon {step.step_id} output working_directory",
+                kind="directory",
+            ).mkdir(parents=True, exist_ok=True)
         home, tmp, cache, config, etc = (
             attempt_layout.home,
             attempt_layout.tmp,

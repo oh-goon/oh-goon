@@ -204,6 +204,30 @@ snapshot, or admission authority. See
 
 An import may select `from: ./goons` beside its static `category/name` identity. The existing source graph resolves that exact package inside the root authoring workspace, keys edges by import occurrence and reads each unique source once. Omitted `from:` retains shipped catalog selection; there is no local shadowing or fallback. Source positions retain local paths, while locks continue covering resolved execution semantics. File-backed Plans and repository Goons support local catalogs; Shared Plan storage refuses them because it saves only the Plan file.
 
+An explicit Git `from: {git: URL, ref: REF, path: exact/category/name}` selects
+one package. A `git-plan` run selection captures an exact Plan and its contained
+local packages at one revision. Both feed this same source graph and binder;
+`goon.lock` retains their exact commits, and `lock --update-goons` is the explicit
+source refresh. Read-only inspection uses cached source only. See
+[Goon authoring](GOON_AUTHORING.md#project-owned-goons-and-caller-overrides)
+and [run configuration](TEMPLATE_INPUT_INSPECTION.md#source-and-value-owners).
+
 ## Native uv selection
 
-The Goon’s uv project/group may reference declared inputs. They are bound before requirements, native preparation or execution. Derived uv requirements remain with the declaring Atomic Goon and are supported for ordinary verification as environment requirements. CI/CD-only repository requirements remain CI/CD-only. The working directory defaults to the selected project; an explicit working directory is supported and the compiled uv project argument is relative to it. Authored uv output/artifact paths are relative to that command working directory, then become concrete repository-relative execution paths.
+The Goon's uv project/group may reference declared inputs. They are bound before
+requirements, native preparation or execution. Omit `group` for base project
+dependencies with no default groups; an explicit group adds its dependencies.
+Derived uv requirements remain with the declaring Atomic Goon and are supported
+for ordinary verification as environment requirements. CI/CD-only repository
+requirements remain CI/CD-only.
+
+For target-project uv, the working directory defaults to the selected project;
+an explicit working directory is supported and the compiled uv project argument
+is relative to it. Authored output/artifact paths become concrete
+repository-relative execution paths. An Atomic Goon with `runtime: python`
+instead owns the complete project beside `goon.yml`; `uv.project` cannot redirect
+it. The captured project and selected group travel with the resolved command.
+Native uv installs that package in an owned environment; relative produced
+files resolve under writable attempt state, separately from package source and
+the target repository. Code, resources, metadata and the native lock participate
+in execution freshness without changing the catalog YAML digest contract.

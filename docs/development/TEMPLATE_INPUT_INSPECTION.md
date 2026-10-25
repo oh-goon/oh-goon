@@ -62,7 +62,7 @@ oh-goon run ./workflow/run.yml
 
 Generation refuses an existing destination. It does not overwrite a project or
 copy an unchanged shipped Plan. Inspection and validation do not start a Run,
-write a lock, fetch remote Skills, contact a model, read native private config,
+write a lock, fetch remote Goon/Plan or Skill sources, contact a model, read native private config,
 or grant permission. Locking and execution use the original resolver and
 Fleet lifecycle. A completed validation is not an executed check or APP PASS.
 
@@ -75,11 +75,39 @@ Choose exactly one source:
 | `catalog-plan` | `name: category/name` | Exact shipped Plan; no copied Plan required. |
 | `file-plan` | `path: ./plan.yml` | Exact project Plan contained below the selected workflow root. |
 | `repository-goon` | No `name` or `path` | Exact registered target's root `goon.yml`. |
+| `git-plan` | `git`, `ref`, `path`, `plan` | Exact Plan below an explicitly selected Git authoring root. |
 
 Mixed kinds, unknown keys or versions, duplicate YAML keys, unsafe paths,
 missing sources and unknown targets refuse before effects. Selection never
 searches another source or merges repository YAML with a Plan. Local Plan
 imports use the normal explicit `from: ./goons` source grammar.
+
+A complete Git example selects its authoring root and Plan separately:
+
+```yaml
+version: 1
+source:
+  kind: git-plan
+  git: https://github.com/your-org/workflows.git
+  ref: main
+  path: examples/orders
+  plan: plan.yml
+target: {repository_id: REPOSITORY_ID}
+```
+
+`path` is the authoring root inside that Git revision; `plan` is an exact
+contained path relative to it. The Plan's local `from:` imports remain inside
+that selected root and revision. Selecting a single remote Goon instead uses
+an explicit Git `from:` mapping in the local Plan; see
+[Goon authoring](GOON_AUTHORING.md#project-owned-goons-and-caller-overrides).
+Neither selection searches for a nearby Plan or shadows shipped imports.
+
+`lock` explicitly acquires source and records its exact commit in `goon.lock`.
+Ordinary lock regeneration and runs keep the pin; a missing cache may recover
+that same commit. `lock run.yml --update-goons` explicitly refreshes Goon/Plan
+selectors independently of `--update-skills`. Inspection and validation use
+cached source only; unavailable source reports acquisition is required without
+network effects. Acquisition does not run project code or install dependencies.
 
 `inputs` supplies scalar values only. The imported Goon and canonical binder
 own names, types, defaults and constraints. An omitted value may use its

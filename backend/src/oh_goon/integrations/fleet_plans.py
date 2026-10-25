@@ -178,6 +178,7 @@ class FleetPlanRunner:
             admitted_source_authority=request.repository_admission.source_authority,
             admitted_isolation_backend=request.isolation_backend,
             admitted_run=request.admitted_run,
+            execution_target=target,
         )
         return PreparedStrictFleetPlanExecution(
             runner=self,

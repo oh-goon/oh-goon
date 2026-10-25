@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
@@ -19,7 +19,7 @@ from oh_goon.core.errors import (
 )
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_executor import FleetExecutorPlacement
-from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_step_contract import RetainedPlanCacheSource
 from oh_goon.core.models.repository import RepositoryIdentity
@@ -38,7 +38,11 @@ from oh_goon.core.models.run_admission import (
 )
 from oh_goon.core.models.run_launch import ApplicationLaunchReceipt
 from oh_goon.core.models.scheduling import SchedulingPriority
-from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
+from oh_goon.core.models.target import (
+    FleetPlanTarget,
+    GoonProjectDeliveryReference,
+    OperationTarget,
+)
 from oh_goon.core.run_identity import require_fleet_run_detail_binding
 from oh_goon.core.vocabulary import FleetRunSource, FleetRunTerminalIntent
 from oh_goon.integrations.fleet_content_store import FleetContentStore
@@ -266,6 +270,91 @@ class FleetRunLifecycle:
                 raise TrustProtocolError(
                     "compiled Fleet contract deployment policy not provisioned"
                 )
+
+    @contextmanager
+    def project_source_transport(
+        self, intent: ResolvedCapabilityIntent, repositories: tuple[RepositoryIdentity, ...]
+    ) -> Iterator[ResolvedCapabilityIntent]:
+        """Promote exact captured package inputs at the original Run reservation boundary."""
+        import hashlib
+
+        from oh_goon.core.file_digest import sha256_file
+        from oh_goon.integrations.python_goon_projects import MAX_PROJECT_ARCHIVE_BYTES
+
+        target = intent.target
+        if not isinstance(target, FleetPlanTarget):
+            yield intent
+            return
+        projects = {
+            step.project_source.content_sha256: step.project_source
+            for step in target.plan.steps
+            if isinstance(step, ResolvedCommandStep) and step.project_source is not None
+        }
+        if not projects:
+            yield intent
+            return
+        if self._content_store is None:
+            raise FleetPlanInvalid("Python Goon source delivery requires the Fleet content store")
+        references = list(target.project_deliveries)
+        existing = {(item.owner_repository_id, item.project_sha256) for item in references}
+        required = {
+            (repository.repository_id, digest) for repository in repositories for digest in projects
+        }
+        archives = target.plan._project_archives
+        for _owner, digest in required - existing:
+            packet = archives.get(digest)
+            if (
+                packet is None
+                or hashlib.sha256(packet).hexdigest() != projects[digest].archive_sha256
+            ):
+                raise FleetPlanInvalid(
+                    "Python Goon original captured source is unavailable or changed"
+                )
+        created: list[GoonProjectDeliveryReference] = []
+        try:
+            for owner, digest in sorted(required - existing):
+                stored = self._content_store.put_frozen_bytes(
+                    archives[digest], owner_repository_id=owner
+                )
+                reference = GoonProjectDeliveryReference(
+                    project_sha256=digest,
+                    owner_repository_id=owner,
+                    reference_id=stored.reference_id,
+                )
+                references.append(reference)
+                created.append(reference)
+            for reference in references:
+                if (reference.owner_repository_id, reference.project_sha256) in required:
+                    self._content_store.preflight_reference_metadata(
+                        reference.reference_id,
+                        owner_repository_id=reference.owner_repository_id,
+                        expected_kind="file",
+                    )
+                    if (reference.owner_repository_id, reference.project_sha256) in existing:
+                        stored = self._content_store.get(
+                            reference.reference_id,
+                            owner_repository_id=reference.owner_repository_id,
+                            expected_kind="file",
+                        )
+                        if (
+                            stored.identity.byte_count > MAX_PROJECT_ARCHIVE_BYTES
+                            or sha256_file(stored.path)
+                            != projects[reference.project_sha256].archive_sha256
+                        ):
+                            raise FleetPlanInvalid(
+                                "Retained Python Goon archive differs from the expected captured source identity"
+                            )
+            bound = target.model_copy(update={"project_deliveries": tuple(references)})
+            yield replace(intent, target=bound)
+        except BaseException as error:
+            for reference in created:
+                try:
+                    self._content_store.release_reference(
+                        reference.reference_id, owner_repository_id=reference.owner_repository_id
+                    )
+                except Exception as cleanup_error:
+                    error.add_note(f"unadmitted Python Goon source cleanup failed: {cleanup_error}")
+            raise
 
     def admit(
         self,

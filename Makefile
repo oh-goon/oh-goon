@@ -197,8 +197,8 @@ release-locks-check: backend-lock-check frontend-lock-check
 diagnostic-system-check: backend-lock-check frontend-lock-check
 	@backend/.venv/bin/oh-goon-startup-environment doctor
 
-cli-install:
-	cd backend && uv tool install .
+cli-install: assemble-release
+	uv tool install generated/release/dist/oh_goon-*-py3-none-any.whl
 
 venv-clean:
 	rm -rf backend/.venv

@@ -80,6 +80,25 @@ def test_release_artifact_rejects_noncanonical_version_identity(tmp_path: Path) 
     )
 
 
+def test_release_artifact_reports_source_refusal_without_traceback(
+    tmp_path: Path,
+) -> None:
+    root = _minimal_root(tmp_path)
+    (root / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+    dist = root / "generated/release/dist"
+    dist.mkdir()
+    with zipfile.ZipFile(dist / "oh_goon-1.0.0-py3-none-any.whl", "w"):
+        pass
+    sidecar = root / "templates/goons/README.md:Zone.Identifier"
+    sidecar.write_text("transport\n", encoding="utf-8")
+
+    assert release_artifact_issues(root) == (
+        "release source cannot be verified: release source contains disposable transport artifacts; "
+        "run oh-goon-source-layout transport-clean explicitly",
+    )
+    assert sidecar.is_file()
+
+
 def test_expected_payload_rejects_symlinked_managed_root(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -94,3 +113,42 @@ def test_expected_payload_rejects_symlinked_managed_root(tmp_path: Path) -> None
         path.mkdir(parents=True, exist_ok=True)
     _payload, issues = _expected_payload(tmp_path)
     assert any("contained regular non-symlink directory" in issue for issue in issues)
+
+
+def test_python_goon_release_payload_keeps_complete_source_without_runtime_caches(
+    tmp_path: Path,
+) -> None:
+    root = _minimal_root(tmp_path)
+    package = root / "templates/goons/ml/train"
+    authored = (
+        "goon.yml",
+        "README.md",
+        "pyproject.toml",
+        "uv.lock",
+        "src/train.py",
+        "tests/test_train.py",
+    )
+    generated = (
+        ".venv/bin/python",
+        "__pycache__/train.pyc",
+        ".pytest_cache/nodeids",
+        ".mypy_cache/state.json",
+        ".ruff_cache/cache",
+        ".coverage",
+    )
+    for name in (*authored, *generated):
+        path = package / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("content\n", encoding="utf-8")
+    (package / "goon.yml").write_text(
+        "runtime: python\nsteps:\n- run: train\n", encoding="utf-8"
+    )
+    (root / "generated/release/static/index.html").write_text("UI\n", encoding="utf-8")
+
+    payload, issues = _expected_payload(root)
+
+    assert issues == ()
+    assert set(payload) == {
+        "oh_goon/static/index.html",
+        *(f"oh_goon/templates/goons/ml/train/{name}" for name in authored),
+    }

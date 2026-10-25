@@ -28,12 +28,9 @@ Use topic guides for current behavior. Specialized deployment and high-security 
 - [Tool authority](development/FROZEN_TOOL_AUTHORITY.md) and [Enforcer receipts](development/ENFORCER_RECEIPTS.md) — selected tool permissions and comparison of recorded execution facts.
 - [Hashmarks execution handoff](development/HASHMARKS_EXECUTION_LAYER.md) — admitted repository evidence, exact verification membership and Oh-Goon execution results.
 - [Agent runtime ownership](development/AGENT_RUNTIME_OWNERS.md) — live model/Agent call paths, outer workflow ownership, current evidence limits and the contract questions for replaceable coding agents.
+- [Complete Python Goon projects](architecture/ADR_PYTHON_GOON_PROJECTS.md) — standalone package-owned Python projects, native dependency selections, captured source and pinned Git acquisition.
 
 Retained ADRs explain architectural choices and their original evidence limits. Checkpoint status and historical test results in an ADR describe that source; they do not establish current qualification or select the next development task.
-
-## Proposed designs
-
-- [Complete Python Goon projects](architecture/ADR_PYTHON_GOON_PROJECTS.md) — proposed standalone Python projects, one native dependency definition for development and execution, and later pinned Git acquisition. This is an implementation contract, not currently supported runtime syntax.
 
 ## Template and maintainer references
 

@@ -98,14 +98,14 @@ class FleetPlanStepSequence:
         return "\n".join(self._stderr)
 
     def run_direct(self, step: ResolvedPlanStep) -> None:
-        source = self._repository
+        source = self._runtime.project_workspaces.get(step.step_id, self._repository)
         try:
             record = self._run(
                 step,
                 source=source,
                 imported_reason=None,
                 execute_retries=lambda bound, before, step_order: execute_direct_with_retries(
-                    self._repository,
+                    source,
                     bound,
                     step,
                     self._runtime,

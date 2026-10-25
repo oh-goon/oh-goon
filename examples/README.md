@@ -12,5 +12,6 @@ Use [the template first-run guide](../templates/README.md) to register a target 
 | [Review–repair](agentic-review-repair-loop/README.md) | Runnable with prerequisites | Provider or native workflow, explicit phase composition and bounded repair. |
 | [Standard Atomic](standard-atomic/README.md) | Runnable with prerequisites | Shell execution through the CLI, Fleet and Game Tape; separate native failure/cancellation checks. |
 | [Airflow TaskFlow comparison](airflow-taskflow-showcase/README.md) | Runnable with prerequisites | One standalone Python application, three ordered OH-Goon Steps, and a separate Airflow adapter. |
+| [Python Goon project from Git](python-goon-project/README.md) | Runnable with prerequisites | A complete example's explicit Plan and local Python project captured at one pinned Git revision. |
 
 The per-domain Plan READMEs contain small configurations for Python, OCI, Kubernetes, security, ML and advanced teaching workflows. Native tools and services retain their configuration and execution authority. Example infrastructure addresses and target IDs must be replaced deliberately; configuration inspection is not an external qualification receipt.

@@ -7223,6 +7223,14 @@
           "plan": {
             "$ref": "#/components/schemas/ResolvedFleetPlan"
           },
+          "project_deliveries": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/GoonProjectDeliveryReference"
+            },
+            "title": "Project Deliveries",
+            "type": "array"
+          },
           "scheduled_caller_file": {
             "anyOf": [
               {
@@ -12041,7 +12049,7 @@
             "type": "integer"
           },
           "source": {
-            "maxLength": 240,
+            "maxLength": 4096,
             "minLength": 1,
             "title": "Source",
             "type": "string"
@@ -13048,7 +13056,7 @@
             "title": "Condition"
           },
           "declaration": {
-            "maxLength": 240,
+            "maxLength": 4128,
             "minLength": 1,
             "title": "Declaration",
             "type": "string"
@@ -13468,6 +13476,35 @@
         ],
         "title": "GitResultContract",
         "type": "string"
+      },
+      "GoonProjectDeliveryReference": {
+        "additionalProperties": false,
+        "properties": {
+          "owner_repository_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Owner Repository Id",
+            "type": "string"
+          },
+          "project_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Project Sha256",
+            "type": "string"
+          },
+          "reference_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Reference Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_sha256",
+          "owner_repository_id",
+          "reference_id"
+        ],
+        "title": "GoonProjectDeliveryReference",
+        "type": "object"
       },
       "HostEnvironmentPart": {
         "additionalProperties": false,
@@ -15074,6 +15111,64 @@
           "digest"
         ],
         "title": "LockedExternalArtifact",
+        "type": "object"
+      },
+      "LockedGoonSource": {
+        "additionalProperties": false,
+        "properties": {
+          "commit": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "title": "Commit",
+            "type": "string"
+          },
+          "git": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Git",
+            "type": "string"
+          },
+          "kind": {
+            "default": "goon",
+            "enum": [
+              "goon",
+              "plan"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan"
+          },
+          "ref": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "git",
+          "ref",
+          "path",
+          "commit"
+        ],
+        "title": "LockedGoonSource",
         "type": "object"
       },
       "LockedSkillSource": {
@@ -20841,6 +20936,42 @@
         "title": "PyprojectValueRequirement",
         "type": "object"
       },
+      "PythonGoonProject": {
+        "additionalProperties": false,
+        "description": "Captured package identity; executable source bytes travel privately.",
+        "properties": {
+          "archive_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Archive Sha256",
+            "type": "string"
+          },
+          "byte_count": {
+            "maximum": 67108864.0,
+            "minimum": 0.0,
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "entry_count": {
+            "maximum": 4096.0,
+            "minimum": 1.0,
+            "title": "Entry Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_sha256",
+          "archive_sha256",
+          "byte_count",
+          "entry_count"
+        ],
+        "title": "PythonGoonProject",
+        "type": "object"
+      },
       "PythonRuntimeResult": {
         "additionalProperties": false,
         "properties": {
@@ -22828,6 +22959,16 @@
             "title": "Outputs",
             "type": "array"
           },
+          "project_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PythonGoonProject"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "retry": {
             "$ref": "#/components/schemas/StepRetryPolicy"
           },
@@ -23364,6 +23505,15 @@
               }
             ],
             "title": "Execution"
+          },
+          "goon_sources": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LockedGoonSource"
+            },
+            "maxItems": 128,
+            "title": "Goon Sources",
+            "type": "array"
           },
           "imports": {
             "items": {
@@ -24858,7 +25008,7 @@
             "type": "integer"
           },
           "source": {
-            "maxLength": 240,
+            "maxLength": 4096,
             "minLength": 1,
             "title": "Source",
             "type": "string"
@@ -31136,9 +31286,16 @@
         "description": "Backend-owned locked UV environment selected by a Goon.\n\nAuthoring selects the repository-relative uv project plus dependency group.\nLock enforcement, native materialization, cache lineage, and the concrete\n``uv run`` argv remain resolved execution concerns.",
         "properties": {
           "group": {
-            "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|\\$\\{\\{\\s*inputs\\.[A-Za-z_][A-Za-z0-9_-]*\\s*\\}\\})$",
-            "title": "Group",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|\\$\\{\\{\\s*inputs\\.[A-Za-z_][A-Za-z0-9_-]*\\s*\\}\\})$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           },
           "project": {
             "default": ".",
@@ -31146,11 +31303,17 @@
             "minLength": 1,
             "title": "Project",
             "type": "string"
+          },
+          "source": {
+            "default": "repository",
+            "enum": [
+              "repository",
+              "package"
+            ],
+            "title": "Source",
+            "type": "string"
           }
         },
-        "required": [
-          "group"
-        ],
         "title": "UvExecutionEnvironment",
         "type": "object"
       },
@@ -31159,9 +31322,16 @@
         "description": "Derived requirement for one backend-owned locked UV project environment.\n\nThe Goon author selects a repository-relative project and dependency group with ``uv:``. Oh Goon derives this\nrequirement so YAML never mirrors package membership from pyproject.toml/uv.lock.",
         "properties": {
           "group": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
-            "title": "Group",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           },
           "kind": {
             "const": "uv_project",
@@ -31177,9 +31347,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "group"
-        ],
         "title": "UvProjectRequirement",
         "type": "object"
       },

@@ -33,6 +33,17 @@ def _fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     )
     (root / "backend/.venv/bin/python").write_text("#!/bin/sh\nexit 0\n")
     (root / "backend/.venv/bin/python").chmod(0o755)
+    build = root / "build-wheel"
+    build.write_text(
+        "#!/bin/bash\nset -eu\n"
+        'source_root="${@: -1}"\n'
+        '[[ -f "$source_root/generated/release/static/index.html" ]] || exit 72\n'
+        '[[ -f "$source_root/backend/src/oh_goon/native_issuer/__init__.py" ]] || exit 73\n'
+        '[[ ! -e "$OH_GOON_WHEEL_FIXTURE_ROOT/generated/release/static/index.html" ]] || exit 74\n'
+        'mkdir -p "$source_root/generated/release/dist"\n'
+        'touch "$source_root/generated/release/dist/oh_goon-1267.0.1052-py3-none-any.whl"\n'
+    )
+    build.chmod(0o755)
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -51,20 +62,14 @@ def _fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         "#!/bin/bash\nset -euo pipefail\n"
         'printf "%s\\n" "$1" >> "$OH_GOON_WHEEL_FIXTURE_ROOT/uv-calls.log"\n'
         'case "$1" in\n'
-        "  build)\n"
-        '    [[ "$*" == *"--offline --wheel"* ]] || exit 71\n'
-        '    src="$4"; out="$6"\n'
-        '    [[ -f "$(dirname "$src")/generated/release/static/index.html" ]] || exit 72\n'
-        '    [[ -f "$src/src/oh_goon/native_issuer/__init__.py" ]] || exit 73\n'
-        '    [[ ! -e "$OH_GOON_WHEEL_FIXTURE_ROOT/generated/release/static/index.html" ]] || exit 74\n'
-        '    mkdir -p "$out"\n'
-        '    touch "$out/oh_goon-1267.0.1052-py3-none-any.whl"\n'
-        "    ;;\n"
         "  pip)\n"
         '    [[ "$*" == *"--offline --no-deps --target"* ]] || exit 76\n'
         '    [[ "${OH_GOON_WHEEL_FIXTURE_INSTALL_BLOCK:-0}" == "0" ]] || exit 78\n'
         "    ;;\n"
         "  run)\n"
+        '    if [[ "$*" == *"oh-goon-release-wheel-build"* ]]; then\n'
+        '      exec "$OH_GOON_WHEEL_FIXTURE_ROOT/build-wheel" "$@"\n'
+        "    fi\n"
         '    [[ "$*" == *"python -I -c"* ]] || exit 77\n'
         "    ;;\n"
         "  *) exit 75 ;;\n"
@@ -101,7 +106,7 @@ def test_qualification_never_weakens_release_hook_or_creates_app_pass(
     source = SCRIPT.read_text(encoding="utf-8")
     hook = (ROOT / "backend/hatch_build.py").read_text(encoding="utf-8")
     assert 'make --no-print-directory -C "$ROOT" frontend-build' in source
-    assert 'uv build --offline --wheel "$WORK/source/backend"' in source
+    assert 'oh-goon-release-wheel-build --offline --root "$WORK/source"' in source
     assert (
         'cp -a "$ROOT/frontend/dist/." "$WORK/source/generated/release/static/"'
         in source
@@ -127,5 +132,5 @@ def test_failed_candidate_install_cannot_reach_installed_issuer_probe(
     )
     assert result.returncode != 0
     invoked = (root / "uv-calls.log").read_text(encoding="utf-8").splitlines()
-    assert invoked == ["build", "pip"]
+    assert invoked == ["run", "pip"]
     assert not (root / "generated/release/static/index.html").exists()

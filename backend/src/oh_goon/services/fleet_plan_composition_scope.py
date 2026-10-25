@@ -151,7 +151,9 @@ def finalize_composition_scope(
         own_requirements.extend(
             UvProjectRequirement(project=step.uv.project, group=step.uv.group)
             for step in steps
-            if isinstance(step, ResolvedCommandStep) and step.uv is not None
+            if isinstance(step, ResolvedCommandStep)
+            and step.uv is not None
+            and step.uv.source == "repository"
         )
     declared = _unique_requirements(own_requirements)
     return ResolvedCompositionScope(

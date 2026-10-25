@@ -8,12 +8,7 @@ Repository → Plan → Goon → Step → Execution / Verification / Evidence
 
 An Atomic Goon owns ordered `steps:`. A Composite Goon owns ordered `goons:`. It never owns both. There is no DAG, inheritance, YAML macro system, patch/override model or second dependency model.
 
-The [complete Python Goon project proposal](../architecture/ADR_PYTHON_GOON_PROJECTS.md)
-describes a future package that contains its own Python project and later Git
-source acquisition. Its `runtime: python` spelling is proposed; the supported
-authoring contract below is unchanged.
-
-## Normal Python Goon
+## Target-project Python Goon
 
 ```yaml
 uv:
@@ -28,6 +23,60 @@ That is the baseline when the locked project lives under `backend`; omit `projec
 materialization and console-entrypoint execution to native uv. `uv.lock` remains native
 dependency authority. Do not copy package lists, lock hashes, cache keys, warm-up Steps,
 `.venv` paths or `uv lock --check` into a Goon.
+
+Omit `uv.group` to install the base project and its runtime dependencies without
+default dependency groups. An explicit group adds that group's dependencies.
+
+## Package-owned Python Goon
+
+A reusable Atomic Goon can carry its own complete Python project:
+
+```yaml
+runtime: python
+inputs:
+  label: example
+steps:
+- run: project-check --label ${{ inputs.label }}
+```
+
+Put `pyproject.toml`, committed native `uv.lock`, implementation and resources
+beside `goon.yml` and `README.md`. Declare `project-check` in
+`[project.scripts]`; run the same installed command locally with native uv.
+The project must install after relocation without parent projects, escaping
+local dependencies, an ancestor workspace or the Oh-Goon backend.
+Contained native uv workspace members are allowed; local dependency, workspace
+and virtual lock-source paths stay within the captured package.
+
+`runtime: python` selects this package, independently of the target repository.
+Native uv installs it with `--locked --no-default-groups --no-editable` into an
+owned environment. Omit `uv` for base-only execution; `uv: {group: dev}` selects
+an additional group. `uv.project` is invalid for package-owned runtime. Commands
+name the installed entry point directly and receive no ambient executable fallback.
+The developer's `.venv` is neither reused nor pruned.
+
+Package-owned runtime supports trusted package code. Explicit strict
+`trust_repository_code: false` refuses before build/install preparation because
+isolated package builds are unavailable. Ordinary local execution and the
+default trusted policy retain their existing behavior. Build preparation is
+effectful native work; an installed environment does not establish strict or
+APP qualification.
+
+A literal `working_directory`, such as `scratch/results`, selects a contained
+subdirectory created in each Step's owned output workspace. Artifact and file
+output paths are relative to that directory. Python package working directories
+and artifact/output file paths must be literal so source capture can exclude
+generated state before inputs are bound. Use typed inputs in command arguments;
+target-project Goons retain their existing path behavior.
+
+The compiler captures the complete authored project once through the existing
+source snapshot and Hashmarks owners. Code, lock, metadata and resources bind
+execution identity; changed source requires relocking. Environments, caches,
+`goon.lock` and declared generated output locations are excluded from package
+source. Execution consumes the captured package, with source, environment and
+writable output roots kept separate. Relative outputs and artifacts resolve
+under the attempt working directory. Keep program logic in installed code and
+declare its produced files normally. See the [Python Goon decision](../architecture/ADR_PYTHON_GOON_PROJECTS.md)
+and the complete [Iris package](../../templates/goons/ml/iris-train/README.md).
 
 `run:` is parsed into argv and executed directly without a shell. It rejects shell operators, redirects, command substitution, multiline shell and inline programs such as `python -c` or `sh -c`. If a command needs real logic, expose it through the repository's real CLI/script, for example `uv run verify-release`. Generic reusable logic belongs in a real tool or a backend-owned typed capability, not a hidden template scripts library.
 
@@ -149,13 +198,17 @@ Repository-specific requirements remain valid when they are real capability prer
 
 ## Shipped template identity
 
-A shipped package is exactly:
+A shipped Plan, Composite Goon or tool-invoking Atomic Goon is exactly:
 
 ```text
 templates/goons/<category>/<name>/
 ├── goon.yml
 └── README.md
 ```
+
+An Atomic Goon with `runtime: python` additionally contains its standalone
+Python project, including `pyproject.toml`, `uv.lock`, implementation/resources
+and optional tests. Native build configuration owns the Python layout.
 
 Plan and Goon YAML reject top-level `name:` and `description:`. The package
 path owns the exact logical identity, such as `python/test`, and `README.md`
@@ -415,9 +468,38 @@ checks must not be merged merely because native commands share prerequisites.
 
 Follow [the template developer journey](../../templates/README.md). Import a project package with its exact `category/name` plus `from: ./goons`; that source stays inside the root authoring workspace and never shadows shipped imports. Plans expose unique unbound direct inputs automatically; Composite Goons declare their public interface. Both support explicit recipient `pass:`/`with:` bindings.
 
+An explicit Git import selects the exact package directory:
+
+```yaml
+goons:
+- import: general/project-check
+  from:
+    git: https://github.com/your-org/workflows.git
+    ref: main
+    path: goons/general/project-check
+```
+
+The path ends in the imported `category/name` and contains `goon.yml`.
+`lock` acquires source and freezes the exact commit in `goon.lock`; ordinary
+locking and runs retain that pin, including after cache loss.
+Paths sharing one origin/ref keep the same captured commit even when new imports
+are added or reordered. A complete Plan selected from that same source retains
+its existing pin as well.
+`lock run.yml --update-goons` explicitly refreshes Goon/Plan source selectors.
+`--update-skills` remains separate. Inspection uses cached source only and
+reports unavailable source without fetching. Git acquisition does not execute
+project code or install dependencies. For a complete Git-hosted Plan and its
+local packages, use the explicit `git-plan` selection in the
+[run configuration guide](TEMPLATE_INPUT_INSPECTION.md).
+
 Put caller scalar values in the selected `run.yml` under `inputs`. `config validate`,
 `lock` and `run` transport that one selection to the canonical Goon binder; there
 is no values-file overlay or input-flag precedence. Inputs do not alter package
 selection. A changed execution choice requires an explicitly refreshed lock.
 
-For reusable Python Goons, reference declared inputs from `uv.project` and `uv.group`. Commands default to that project working directory. Native tools own their project configuration, including discovery and coverage policy. Output/artifact paths in uv Goons are authored relative to the command working directory and resolved before execution.
+For target-project Python Goons, reference declared inputs from `uv.project` and
+`uv.group` as needed. Commands default to that project working directory.
+Package-owned Python Goons keep their package source and attempt working roots
+distinct from the target repository. Native tools own their project configuration,
+including discovery and coverage policy. Output/artifact paths are authored
+relative to the command working directory and resolved before execution.

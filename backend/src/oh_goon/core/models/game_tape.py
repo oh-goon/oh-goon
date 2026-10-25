@@ -21,6 +21,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
 )
 from oh_goon.core.models.game_tape_observability import GameTapeObservabilityReceipt
 from oh_goon.core.models.game_tape_team import GameTapeTeamComposition
+from oh_goon.core.models.provenance import MAX_SOURCE_LOCATION_LENGTH
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import FleetExecutionAdmission
 from oh_goon.core.models.run_launch import (
@@ -40,7 +41,7 @@ class GameTapeEnvironmentSource(ImmutableModel):
 
 
 class GameTapeSourceLocation(ImmutableModel):
-    source: str = Field(min_length=1, max_length=240)
+    source: str = Field(min_length=1, max_length=MAX_SOURCE_LOCATION_LENGTH)
     line: int = Field(ge=1)
     column: int = Field(ge=1)
 
@@ -48,7 +49,7 @@ class GameTapeSourceLocation(ImmutableModel):
 class GameTapeWhy(ImmutableModel):
     """Execution reachability facts already established by the admitted plan/executor."""
 
-    declaration: str = Field(min_length=1, max_length=240)
+    declaration: str = Field(min_length=1, max_length=MAX_SOURCE_LOCATION_LENGTH + 32)
     source_location: GameTapeSourceLocation | None = None
     previous_step_id: str | None = Field(default=None, min_length=1, max_length=80)
     previous_step_status: GameTapeStatus | None = None

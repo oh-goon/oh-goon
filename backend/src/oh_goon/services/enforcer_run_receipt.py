@@ -255,7 +255,7 @@ def _requirement(item: Any) -> EnforcerRequirementFact:
     if kind in {"file_exists", "folder_exists", "path_exists"}:
         detail = item.path
     elif kind == "uv_project":
-        detail = item.group
+        detail = item.group if item.group is not None else "base dependencies"
     elif kind == "pyproject_value":
         detail = item.field
     else:  # pragma: no cover - closed requirement union

@@ -1,16 +1,19 @@
 # ml/iris-training
 
-Train and evaluate through a repository-provided `iris-train` command.
+Train and evaluate using the complete Python project in
+[ml/iris-train](../../../goons/ml/iris-train/README.md).
 
-**Status:** teaching example. **Effects:** Executes training and writes metrics and model parameters.
-
-**Prerequisites:** The project must implement `iris-train` in its locked `ml` group and produce the declared metrics and model-parameter files. The [Iris fixture](../../../../template-certification/fixtures/ml/iris/) trains scikit-learn's logistic-regression pipeline on its bundled Iris dataset and writes both files. Prepare the selected project with native `uv sync --locked --no-default-groups --group ml`. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+**Status:** teaching example. **Effects:** Executes training and writes metrics
+and model parameters. **Prerequisites:** Python 3.12+, native uv, an admitted
+strict executor and content-store publication. See the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
+The target repository needs no Iris implementation or `ml` dependency group.
 
 ```sh
 oh-goon templates init ml/iris-training --kind plan --output ./workflow
 ```
 
-Edit `workflow/run.yml` with your registered target and caller choices. Omitted options keep their Goon-owned defaults:
+Edit `workflow/run.yml` with your registered target and caller choices. Omitted
+values retain their Goon-owned defaults:
 
 ```yaml
 version: 1
@@ -30,6 +33,18 @@ oh-goon lock ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 
-**Expected outputs:** `ml-output/iris-training-metrics.json` is evidence; `ml-output/iris-model-parameters.json` has retained content-store bytes. Native command success determines acceptance.
+The Plan stays small: `purpose: cicd` and the ordered Goon import. The Goon's
+project owns Python dependencies, build configuration, installed command and
+tests. Native uv installs its base runtime dependencies in an owned execution
+environment, leaving developer environments alone.
+The Plan retains its default trusted-code policy. Explicit
+`trust_repository_code: false` refuses package preparation before build;
+isolated builds for untrusted Python packages are unavailable.
 
-The fixture separates 120 training examples from 30 evaluation examples with the default split and seed. Its metrics record actual held-out accuracy; a result below the selected minimum exits nonzero. The parameter file contains the fitted scaler and classifier arrays, without a pickle payload. Direct native training establishes the project command's result; completing this strict Plan additionally requires original Fleet enrollment, execution and retained-artifact evidence. A local verification wrapper cannot publish the model to the strict content store.
+**Expected outputs:** `ml-output/iris-training-metrics.json` is evidence;
+`ml-output/iris-model-parameters.json` has retained content-store bytes. Native
+command success determines acceptance. Actual held-out accuracy below the
+selected minimum exits nonzero. Direct local training proves the command's
+result; completing this Plan additionally requires the original Fleet execution
+and retained-artifact evidence. A local verification wrapper cannot publish
+the model to the strict content store.

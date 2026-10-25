@@ -20,7 +20,7 @@ from oh_goon.core.models.execution_identity import (
     ResolvedExecutionReference,
 )
 from oh_goon.core.models.execution_lock_models import LockedExternalArtifact
-from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.goon_plan_source import FleetPlanSource
 from oh_goon.core.vocabulary import MigrationMode, UvRecipeId
 
@@ -64,6 +64,12 @@ class AgentStepDeliveryReference(ImmutableModel):
     reference_id: str = Field(min_length=1, max_length=160)
 
 
+class GoonProjectDeliveryReference(ImmutableModel):
+    project_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    owner_repository_id: str = Field(min_length=1, max_length=160)
+    reference_id: str = Field(min_length=1, max_length=160)
+
+
 class FleetPlanTarget(ImmutableModel):
     """Verified immutable execution target; constructed once before admission and transported unchanged."""
 
@@ -75,6 +81,9 @@ class FleetPlanTarget(ImmutableModel):
         default=(), exclude_if=lambda value: not value
     )
     agent_deliveries: tuple[AgentStepDeliveryReference, ...] = ()
+    project_deliveries: tuple[GoonProjectDeliveryReference, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
     agent_repair: AgentRepairContext | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -147,6 +156,18 @@ class FleetPlanTarget(ImmutableModel):
         }
         if len(found) != len(self.agent_deliveries) or found != expected_agent:
             raise ValueError("Fleet Agent source reference does not match original Plan Step")
+        projects = {
+            step.project_source.content_sha256
+            for step in self.plan.steps
+            if isinstance(step, ResolvedCommandStep) and step.project_source is not None
+        }
+        project_references = {
+            (item.owner_repository_id, item.project_sha256) for item in self.project_deliveries
+        }
+        if len(project_references) != len(self.project_deliveries) or any(
+            item.project_sha256 not in projects for item in self.project_deliveries
+        ):
+            raise ValueError("Python Goon source references differ from resolved packages")
         if (
             self.agent_repair is not None
             and self.agent_repair.phase is None

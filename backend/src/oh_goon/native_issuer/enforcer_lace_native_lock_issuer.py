@@ -48,11 +48,15 @@ def _selected_projects(
     requirements = tuple(r for r in target.plan.requirements if isinstance(r, UvProjectRequirement))
     if not requirements:
         raise TrustProtocolError("admitted Plan has no selected native uv lock authority")
-    pairs = tuple(sorted((r.project, r.group) for r in requirements))
+    pairs = tuple(
+        sorted(
+            ((r.project, r.group) for r in requirements), key=lambda pair: (pair[0], pair[1] or "")
+        )
+    )
     if len(pairs) != len(set(pairs)):
         raise TrustProtocolError("duplicate uv project requirement")
     groups = {
-        project: tuple(sorted(g for p, g in pairs if p == project))
+        project: tuple(sorted(g for p, g in pairs if p == project and g is not None))
         for project in sorted({p for p, _ in pairs})
     }
     roots = {target.repository_id: target.path for target in admitted.targets}

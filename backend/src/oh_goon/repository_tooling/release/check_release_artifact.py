@@ -10,7 +10,9 @@ import zipfile
 from email.parser import BytesParser
 from pathlib import Path
 
+from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.file_digest import sha256_file_with_size
+from oh_goon.core.source_tree_policy import is_transient_source_path
 
 ROOT = Path(__file__).resolve().parents[5]
 
@@ -23,48 +25,56 @@ def _contained_in_root(path: Path, root: Path) -> bool:
     return True
 
 
-def _expected_payload(root: Path) -> tuple[dict[str, tuple[str, int]], tuple[str, ...]]:
+def _expected_payload(
+    root: Path, *, template_source: Path | None = None
+) -> tuple[dict[str, tuple[str, int]], tuple[str, ...]]:
+    if template_source is None:
+        from oh_goon.repository_tooling.release.build_wheel import staged_template_catalogs
+
+        with staged_template_catalogs(root) as stage:
+            return _expected_payload(root, template_source=stage)
     expected: dict[str, tuple[str, int]] = {}
     issues: list[str] = []
     sources = (
         (root / "backend" / "src" / "oh_goon", "oh_goon"),
         (root / "generated" / "release" / "static", "oh_goon/static"),
-        (root / "templates" / "goons", "oh_goon/templates/goons"),
-        (root / "templates" / "plans", "oh_goon/templates/plans"),
+        (template_source / "goons", "oh_goon/templates/goons"),
+        (template_source / "plans", "oh_goon/templates/plans"),
     )
     for source, prefix in sources:
-        if source.is_symlink() or not source.is_dir() or not _contained_in_root(source, root):
+        owner_root = template_source if source.parent == template_source else root
+        if source.is_symlink() or not source.is_dir() or not _contained_in_root(source, owner_root):
             issues.append(
                 "managed release source must be a contained regular non-symlink directory: "
-                f"{source.relative_to(root)}"
+                f"{source.relative_to(owner_root)}"
             )
             continue
         for current, dirnames, filenames in os.walk(source, topdown=True, followlinks=False):
             current_path = Path(current)
             kept_dirs: list[str] = []
             for dirname in dirnames:
-                if dirname == "__pycache__":
+                if is_transient_source_path((current_path / dirname).relative_to(source)):
                     continue
                 directory = current_path / dirname
                 if directory.is_symlink():
                     issues.append(
-                        f"managed release source contains symlink: {directory.relative_to(root)}"
+                        f"managed release source contains symlink: {directory.relative_to(owner_root)}"
                     )
                     continue
                 kept_dirs.append(dirname)
             dirnames[:] = kept_dirs
             for filename in filenames:
-                if filename.endswith((".pyc", ".pyo")):
+                if is_transient_source_path((current_path / filename).relative_to(source)):
                     continue
                 path = current_path / filename
                 if path.is_symlink():
                     issues.append(
-                        f"managed release source contains symlink: {path.relative_to(root)}"
+                        f"managed release source contains symlink: {path.relative_to(owner_root)}"
                     )
                     continue
                 if not stat.S_ISREG(path.lstat().st_mode):
                     issues.append(
-                        f"managed release source contains non-regular file: {path.relative_to(root)}"
+                        f"managed release source contains non-regular file: {path.relative_to(owner_root)}"
                     )
                     continue
                 expected[f"{prefix}/{path.relative_to(source).as_posix()}"] = sha256_file_with_size(
@@ -124,13 +134,15 @@ def _archive_member_identity(archive: zipfile.ZipFile, name: str) -> tuple[str, 
     return digest.hexdigest(), byte_count
 
 
-def _archive_issues(archive: zipfile.ZipFile, root: Path, version: str) -> list[str]:
+def _archive_issues(
+    archive: zipfile.ZipFile, root: Path, version: str, *, template_source: Path | None = None
+) -> list[str]:
     issues: list[str] = []
     names = archive.namelist()
     if len(names) != len(set(names)):
         issues.append("release wheel contains duplicate entries")
 
-    expected, source_issues = _expected_payload(root)
+    expected, source_issues = _expected_payload(root, template_source=template_source)
     issues.extend(source_issues)
     for name, identity in expected.items():
         if name not in names:
@@ -159,7 +171,9 @@ def _archive_issues(archive: zipfile.ZipFile, root: Path, version: str) -> list[
     return issues
 
 
-def release_artifact_issues(root: Path = ROOT) -> tuple[str, ...]:
+def release_artifact_issues(
+    root: Path = ROOT, *, template_source: Path | None = None
+) -> tuple[str, ...]:
     version_file = root / "VERSION"
     if (
         version_file.is_symlink()
@@ -193,7 +207,9 @@ def release_artifact_issues(root: Path = ROOT) -> tuple[str, ...]:
         issues.append(f"release wheel filename is {wheel.name!r}, expected {expected_name!r}")
     try:
         with zipfile.ZipFile(wheel) as archive:
-            issues.extend(_archive_issues(archive, root, version))
+            issues.extend(_archive_issues(archive, root, version, template_source=template_source))
+    except FleetDomainError as exc:
+        issues.append(f"release source cannot be verified: {exc}")
     except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
         issues.append(f"release wheel cannot be inspected: {exc}")
     return tuple(issues)

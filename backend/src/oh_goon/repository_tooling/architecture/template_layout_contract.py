@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from oh_goon.core.errors import FleetPlanSourceNotFound
 from oh_goon.core.source_transport_metadata import authored_source_entries
 from oh_goon.repository_tooling.architecture.common import Violation
 from oh_goon.repository_tooling.architecture.repository_layout import (
@@ -14,6 +15,7 @@ from oh_goon.repository_tooling.architecture.repository_layout import (
     PLAN_TEMPLATES_ROOT,
     TEMPLATES_ROOT,
 )
+from oh_goon.runtime.template_discovery import validate_template_package
 
 _NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -54,15 +56,29 @@ def _check_wheel_force_include(pyproject_path: Path, violations: list[Violation]
         .get("wheel", {})
         .get("force-include", {})
     )
-    expected = {
-        "../templates/goons": "oh_goon/templates/goons",
-        "../templates/plans": "oh_goon/templates/plans",
-    }
     if not isinstance(force_include, dict):
         force_include = {}
-    for source, target in expected.items():
-        if force_include.get(source) != target:
-            violations.append(Violation(pyproject_path, f'wheel packaging must include "{source}"'))
+    for source in ("../templates/goons", "../templates/plans"):
+        if source in force_include:
+            violations.append(
+                Violation(
+                    pyproject_path,
+                    f'wheel packaging must stage "{source}" through the release owner',
+                )
+            )
+    custom_hook = (
+        pyproject.get("tool", {})
+        .get("hatch", {})
+        .get("build", {})
+        .get("targets", {})
+        .get("wheel", {})
+        .get("hooks", {})
+        .get("custom", {})
+    )
+    if not isinstance(custom_hook, dict) or custom_hook.get("path") != "hatch_build.py":
+        violations.append(
+            Violation(pyproject_path, "wheel packaging requires its admitted-source custom hook")
+        )
 
 
 def _check_root(root: Path, source_name: str, kind: str, violations: list[Violation]) -> None:
@@ -93,25 +109,11 @@ def _check_root(root: Path, source_name: str, kind: str, violations: list[Violat
                     )
                 )
                 continue
-            expected = {source_name, "README.md"}
-            observed = {p.name for p in authored_source_entries(package)}
-            if observed != expected:
-                missing = sorted(expected - observed)
-                extra = sorted(observed - expected)
-                detail = []
-                if missing:
-                    detail.append("missing " + ", ".join(missing))
-                if extra:
-                    detail.append("unexpected " + ", ".join(extra))
-                suffix = f" ({'; '.join(detail)})" if detail else ""
-                violations.append(
-                    Violation(
-                        package,
-                        f"{kind} package must contain exactly {source_name} and README.md{suffix}",
-                    )
-                )
+            try:
+                source = validate_template_package(package, source_name=source_name, kind=kind)
+            except FleetPlanSourceNotFound as exc:
+                violations.append(Violation(package, str(exc)))
                 continue
-            source = package / source_name
             payload = yaml.safe_load(source.read_text(encoding="utf-8"))
             if not isinstance(payload, dict):
                 violations.append(Violation(source, f"{kind} YAML root must be a mapping"))

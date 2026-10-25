@@ -4,7 +4,6 @@ import hashlib
 import importlib.util
 import shutil
 import subprocess
-import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -75,7 +74,7 @@ from tests.factories.path_authority import (
 
 ROOT = Path(__file__).resolve().parents[4]
 TEMPLATES = ROOT / "templates"
-IRIS_CERTIFICATION_FIXTURE = ROOT / "template-certification" / "fixtures" / "ml" / "iris"
+IRIS_PROJECT_SOURCE = ROOT / "templates/goons/ml/iris-train"
 
 
 def _repository_bytes(repository: Path) -> tuple[tuple[str, bytes], ...]:
@@ -317,8 +316,12 @@ def test_invalid_shipped_template_inputs_fail_before_state_or_work_mutation(
     assert _repository_bytes(repository) == source_before
 
 
-def _copy_iris_certification_fixture(repository: Path) -> None:
-    shutil.copytree(IRIS_CERTIFICATION_FIXTURE, repository)
+def _copy_iris_project(repository: Path) -> None:
+    shutil.copytree(
+        IRIS_PROJECT_SOURCE,
+        repository,
+        ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache", "ml-output"),
+    )
     (repository / ".git").mkdir()
 
 
@@ -336,8 +339,7 @@ def _iris_uv_requirement(plan: ResolvedFleetPlan) -> tuple[ResolvedCommandStep, 
         "--no-default-groups",
         "--project",
         step.uv.project,
-        "--group",
-        step.uv.group,
+        *(["--group", step.uv.group] if step.uv.group is not None else []),
     )
     assert step.argv[: len(prefix)] == prefix
     assert len(step.argv) > len(prefix)
@@ -390,8 +392,7 @@ def _prove_iris_project_executable(
         str(repository),
         "--locked",
         "--no-default-groups",
-        "--group",
-        step.uv.group,
+        *(["--group", step.uv.group] if step.uv.group is not None else []),
     )
     lock = repository / "uv.lock"
     lock_before = lock.read_bytes()
@@ -423,24 +424,24 @@ def _prove_iris_project_executable(
             f"required project executable `{required_executable}` is not resolvable"
         )
 
-    metadata = tomllib.loads((repository / "pyproject.toml").read_text(encoding="utf-8"))
-    script_target = metadata.get("project", {}).get("scripts", {}).get(required_executable)
-    if script_target != "oh_goon_examples.iris:main":
-        raise FleetPlanInvalid(
-            f"required project executable `{required_executable}` is not resolvable"
-        )
-    if not (repository / "src" / "oh_goon_examples" / "iris.py").is_file():
-        raise FleetPlanInvalid(
-            f"required project executable `{required_executable}` target is missing"
-        )
+    help_result = subprocess.run(
+        [str(executable), "--help"],
+        cwd=repository,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if help_result.returncode != 0:
+        raise FleetPlanInvalid("Iris installed application could not import its implementation")
     return executable
 
 
-def test_iris_certification_fixture_resolves_entrypoint_and_reaches_admission_without_work(
+def test_iris_package_resolves_entrypoint_and_reaches_admission_without_work(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository = tmp_path / "repositories" / "iris"
-    _copy_iris_certification_fixture(repository)
+    _copy_iris_project(repository)
     target = _reviewed_shipped_target("ml/iris-training")
     database, state, attempts, planner, lifecycle, backend = _admission_stack(tmp_path, repository)
     repository_identity = RepositoryIdentity.model_validate({"path": repository})
@@ -476,45 +477,3 @@ def test_iris_certification_fixture_resolves_entrypoint_and_reaches_admission_wi
     assert attempts.all() == []
     assert _repository_bytes(repository) == source_before
     assert database.durable_revision() > admission.durable_revision
-
-
-@pytest.mark.parametrize("entrypoint_mutation", ["missing", "renamed"])
-def test_iris_certification_fixture_rejects_unresolvable_required_entrypoint_before_admission(
-    tmp_path: Path,
-    entrypoint_mutation: str,
-) -> None:
-    repository = tmp_path / "repositories" / "iris"
-    _copy_iris_certification_fixture(repository)
-    pyproject = repository / "pyproject.toml"
-    source = pyproject.read_text(encoding="utf-8")
-    entrypoint = 'iris-train = "oh_goon_examples.iris:main"'
-    assert entrypoint in source
-    if entrypoint_mutation == "missing":
-        source = source.replace(f"{entrypoint}\n", "")
-    else:
-        source = source.replace(entrypoint, 'iris-fit = "oh_goon_examples.iris:main"')
-    pyproject.write_text(source, encoding="utf-8")
-
-    target = _reviewed_shipped_target("ml/iris-training")
-    database, state, attempts, _planner, _lifecycle, backend = _admission_stack(
-        tmp_path, repository
-    )
-    revision_before = database.durable_revision()
-    source_before = _repository_bytes(repository)
-
-    with pytest.raises(
-        FleetPlanInvalid,
-        match=r"required project executable `iris-train` is not resolvable",
-    ):
-        _prove_iris_project_executable(
-            target.plan,
-            repository=repository,
-            preparation_root=tmp_path / "iris-certification-negative",
-        )
-
-    assert state.journal.read_view().run_detail("template-iris-startability-negative") is None
-    assert attempts.all() == []
-    assert backend.availability_checks == 0
-    assert backend.execute_calls == 0
-    assert database.durable_revision() == revision_before
-    assert _repository_bytes(repository) == source_before

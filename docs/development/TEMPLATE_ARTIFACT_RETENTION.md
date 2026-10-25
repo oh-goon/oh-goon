@@ -3,12 +3,15 @@
 This is the canonical authoring explanation for `steps[].artifacts[]` in shipped
 Goons. It documents the existing backend contract, not a new template-level
 storage manager or an alternate artifact schema. An Atomic Goon declares the
-repository-relative **file** produced by its command; the production executor
-owns collection, evidence and any content-store publication. In uv-managed Goons,
-authored output and artifact paths are relative to the command working directory,
-which defaults to the selected uv project. Compilation and input binding produce
-the existing concrete repository-relative paths before execution; the collector
-does not reinterpret the project selection.
+**file** produced by its command; the production executor owns collection,
+evidence and any content-store publication. Authored output and artifact paths
+are relative to the command working directory. Target-project uv Goons default
+to the selected project and compile paths into repository-relative execution
+paths. Package-owned `runtime: python` Goons write into owned attempt working
+state, separately from captured package source and the target repository. The
+existing collector consumes those resolved roots; it does not reinterpret the
+project selection. Retention and repository-scoped publication ownership are
+the same for both runtime selections.
 
 ## Choose the retention boundary
 

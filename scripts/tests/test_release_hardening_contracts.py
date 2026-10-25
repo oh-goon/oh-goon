@@ -34,7 +34,7 @@ def test_no_build_isolation_backend_is_in_locked_build_group() -> None:
     assert "editables>=0.5" in build
     assert "hatchling>=1.32.0" in build
     script = (root / "scripts/release/build_release.sh").read_text(encoding="utf-8")
-    assert "uv build --wheel --no-build-isolation --no-sources" in script
+    assert "oh-goon-release-wheel-build" in script
 
 
 def test_source_sync_uses_declared_build_requirements_and_release_stays_locked() -> (
@@ -64,7 +64,7 @@ def test_source_sync_uses_declared_build_requirements_and_release_stays_locked()
     assert "make release-locks-check" in release
     assert "uv lock --project backend --check" not in release
     assert "npm ci --package-lock-only" not in release
-    assert "uv build --wheel --no-build-isolation --no-sources" in release
+    assert "oh-goon-release-wheel-build" in release
     assert "oh-goon-python-install" not in release
     assert "uv sync --group dev" not in release
     assert "--no-install-project" not in release
@@ -167,7 +167,7 @@ def test_vendor_containers_install_built_wheel_instead_of_source_pythonpath() ->
     root = Path(__file__).resolve().parents[2]
     for vendor in ("ubuntu", "opensuse"):
         text = (root / "docker" / vendor / "Dockerfile").read_text(encoding="utf-8")
-        assert "uv build --wheel --no-build-isolation --no-sources" in text
+        assert "oh-goon-release-wheel-build" in text
         assert "uv sync --locked --project backend" in text
         assert "COPY vendor vendor" not in text
         assert "uv pip install --python backend/.venv/bin/python --no-deps" in text
@@ -211,16 +211,15 @@ def test_container_acceptance_proves_installed_wheel_origin(
     )
 
 
-def test_vendor_containers_verify_wheel_before_runtime_install() -> None:
+def test_vendor_containers_use_verified_wheel_builder_before_runtime_install() -> None:
     root = Path(__file__).resolve().parents[2]
     for vendor in ("ubuntu", "opensuse"):
         text = (root / "docker" / vendor / "Dockerfile").read_text(encoding="utf-8")
-        build_index = text.index("uv build --wheel --no-build-isolation")
-        verify_index = text.index("oh-goon-release-artifact-check")
+        build_index = text.index("oh-goon-release-wheel-build")
         install_index = text.index(
             "uv pip install --python backend/.venv/bin/python --no-deps"
         )
-        assert build_index < verify_index < install_index
+        assert build_index < install_index
         assert "generated/release/dist/oh_goon-*-py3-none-any.whl" in text
 
 
@@ -229,7 +228,7 @@ def test_vendor_wheel_builder_copies_release_identity_for_verification() -> None
     for vendor in ("ubuntu", "opensuse"):
         text = (root / "docker" / vendor / "Dockerfile").read_text(encoding="utf-8")
         assert text.index("COPY VERSION VERSION") < text.index(
-            "oh-goon-release-artifact-check"
+            "oh-goon-release-wheel-build"
         )
 
 
@@ -453,4 +452,4 @@ def test_container_runtime_consumes_current_public_lock_then_installs_hash_pinne
         )
         assert "COPY backend/pyproject.toml backend/uv.lock backend/" in text
         assert "COPY vendor vendor" not in text
-        assert "uv build --wheel --no-build-isolation --no-sources" in text
+        assert "oh-goon-release-wheel-build" in text

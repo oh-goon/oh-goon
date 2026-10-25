@@ -164,7 +164,7 @@ def test_native_wheel_qualification_script_never_reuses_checkout_imports() -> No
     ).read_text(encoding="utf-8")
 
     assert '[[ ! -x "$ROOT/backend/.venv/bin/python" ]]' in source
-    assert "uv build --offline --wheel" in source
+    assert "oh-goon-release-wheel-build --offline" in source
     assert (
         'uv pip install --offline --no-deps --target "$WORK/wheel-site" "${wheels[0]}"'
         in source

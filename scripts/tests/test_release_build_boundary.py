@@ -11,6 +11,14 @@ import types
 
 import pytest
 
+from oh_goon.repository_tooling.release.build_wheel import (
+    _archive_catalogs,
+    build_wheel,
+    staged_template_catalogs,
+)
+from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.integrations.content_snapshot import SnapshotIdentity
+from oh_goon.integrations.source_snapshot import snapshot_source_directory
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -43,7 +51,9 @@ def test_editable_backend_materialization_has_no_release_static_source_dependenc
     pyproject = tomllib.loads(
         (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     )
-    forced = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+    forced = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"].get(
+        "force-include", {}
+    )
     assert "../generated/release/static" not in forced
 
     backend = tmp_path / "backend"
@@ -52,6 +62,7 @@ def test_editable_backend_materialization_has_no_release_static_source_dependenc
     assert (
         module.release_static_inclusion(project_root=backend, version="editable") == {}
     )
+    assert module.release_catalog_inclusion(version="editable") == {}
     assert not (tmp_path / "generated/release/static").exists()
 
 
@@ -71,6 +82,184 @@ def test_standard_release_wheel_requires_built_ui_at_release_boundary(
     assert module.release_static_inclusion(
         project_root=backend, version="standard"
     ) == {str(static): "oh_goon/static"}
+
+
+def _python_goon_release_source(root: Path) -> Path:
+    package = root / "templates/goons/ml/train"
+    package.mkdir(parents=True)
+    (root / "templates/plans").mkdir()
+    (package / "goon.yml").write_text(
+        "runtime: python\nsteps:\n- run: train\n  artifacts:\n"
+        "  - path: assets/result.json\n    retention: evidence\n",
+        encoding="utf-8",
+    )
+    for relative in (
+        "README.md",
+        "pyproject.toml",
+        "uv.lock",
+        "src/train.py",
+        "tests/test_train.py",
+        "assets/input.json",
+        "assets/result.json",
+        "goon.lock",
+        ".venv/bin/python",
+        ".pytest_cache/nodeids",
+        "__pycache__/train.pyc",
+    ):
+        path = package / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("source\n", encoding="utf-8")
+    return package
+
+
+def test_release_catalog_capture_preserves_authored_output_siblings_and_scopes_scratch(
+    tmp_path: Path,
+) -> None:
+    package = _python_goon_release_source(tmp_path)
+    with staged_template_catalogs(tmp_path) as stage:
+        staged = stage / "goons/ml/train"
+        assert (staged / "assets/input.json").read_text() == "source\n"
+        assert (staged / "src/train.py").is_file()
+        assert (staged / "tests/test_train.py").is_file()
+        for relative in (
+            "assets/result.json",
+            "goon.lock",
+            ".venv",
+            ".pytest_cache",
+            "__pycache__",
+        ):
+            assert not (staged / relative).exists()
+        assert (package / "assets/result.json").exists()
+    assert not stage.exists()
+
+
+def test_release_catalog_capture_preserves_crlf_yaml_source_identity(
+    tmp_path: Path,
+) -> None:
+    package = _python_goon_release_source(tmp_path)
+    source = package / "goon.yml"
+    expected = source.read_bytes().replace(b"\n", b"\r\n")
+    source.write_bytes(expected)
+
+    with staged_template_catalogs(tmp_path) as stage:
+        assert (stage / "goons/ml/train/goon.yml").read_bytes() == expected
+
+
+def test_standard_wheel_rejects_missing_or_changed_catalog_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _hatch_build_module(monkeypatch)
+    monkeypatch.delenv("OH_GOON_RELEASE_CATALOG_ARCHIVE", raising=False)
+    monkeypatch.delenv("OH_GOON_RELEASE_CATALOG_ARCHIVE_SHA256", raising=False)
+    with pytest.raises(RuntimeError, match="requires admitted template catalog source"):
+        module.release_catalog_inclusion(version="standard")
+    _python_goon_release_source(tmp_path)
+    with staged_template_catalogs(tmp_path) as stage:
+        archive, digest = _archive_catalogs(stage)
+        monkeypatch.setenv("OH_GOON_RELEASE_CATALOG_ARCHIVE", str(archive))
+        monkeypatch.setenv("OH_GOON_RELEASE_CATALOG_ARCHIVE_SHA256", digest)
+        with archive.open("ab") as stream:
+            stream.write(b"changed delivery")
+        with pytest.raises(RuntimeError, match="differs from admitted source"):
+            module.release_catalog_inclusion(version="standard")
+        assert not (archive.parent / "hatch-catalogs").exists()
+
+
+def test_release_catalog_refuses_yaml_that_changed_after_compilation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.release import build_wheel as module
+
+    package = _python_goon_release_source(tmp_path)
+
+    def snapshot(
+        source: Path, destination: Path, *, label: str, exclude_paths: tuple[str, ...]
+    ) -> SnapshotIdentity:
+        if source.name == "goons":
+            path = package / "goon.yml"
+            path.write_text(path.read_text().replace("run: train", "run: changed"))
+        return snapshot_source_directory(
+            source, destination, label=label, exclude_paths=exclude_paths
+        )
+
+    monkeypatch.setattr(module, "snapshot_source_directory", snapshot)
+    with pytest.raises(
+        FleetPlanInvalid, match="changed while release catalog source was captured"
+    ):
+        with staged_template_catalogs(tmp_path):
+            pytest.fail("changed source must not reach the native wheel builder")
+
+
+def test_standard_wheel_refuses_catalog_source_symlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _python_goon_release_source(tmp_path)
+    (package / "assets/link.json").symlink_to("input.json")
+    module = _hatch_build_module(monkeypatch)
+    with staged_template_catalogs(tmp_path) as stage:
+        archive, digest = _archive_catalogs(stage)
+        monkeypatch.setenv("OH_GOON_RELEASE_CATALOG_ARCHIVE", str(archive))
+        monkeypatch.setenv("OH_GOON_RELEASE_CATALOG_ARCHIVE_SHA256", digest)
+        with pytest.raises(RuntimeError, match="non-regular source"):
+            module.release_catalog_inclusion(version="standard")
+
+
+@pytest.mark.parametrize("relative", ("README.md:Zone.Identifier", "copied.patch"))
+def test_release_catalog_refuses_transport_contamination_without_deleting_source(
+    tmp_path: Path, relative: str
+) -> None:
+    package = _python_goon_release_source(tmp_path)
+    with staged_template_catalogs(tmp_path) as stage:
+        assert (stage / "goons/ml/train/goon.yml").is_file()
+    contamination = package / relative
+    contamination.write_text("transport\n", encoding="utf-8")
+
+    with pytest.raises(FleetPlanInvalid, match="transport-clean explicitly"):
+        with staged_template_catalogs(tmp_path):
+            pytest.fail("contaminated source must not reach native packaging")
+
+    assert contamination.read_text(encoding="utf-8") == "transport\n"
+
+
+@pytest.mark.process
+def test_native_wheel_includes_captured_python_project_without_generated_outputs(
+    tmp_path: Path,
+) -> None:
+    package = _python_goon_release_source(tmp_path)
+    backend = tmp_path / "backend"
+    source = backend / "src/oh_goon"
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_text("def main(): return 0\n", encoding="utf-8")
+    (backend / "pyproject.toml").write_text(
+        '[project]\nname="oh-goon"\nversion="1.0.0"\nrequires-python=">=3.12"\n'
+        '[project.scripts]\noh-goon="oh_goon:main"\n'
+        '[build-system]\nrequires=["hatchling>=1.32.0"]\nbuild-backend="hatchling.build"\n'
+        '[tool.hatch.build.targets.wheel]\npackages=["src/oh_goon"]\n'
+        '[tool.hatch.build.targets.wheel.hooks.custom]\npath="hatch_build.py"\n',
+        encoding="utf-8",
+    )
+    shutil.copyfile(ROOT / "backend/hatch_build.py", backend / "hatch_build.py")
+    static = tmp_path / "generated/release/static"
+    static.mkdir(parents=True)
+    (static / "index.html").write_text("UI\n", encoding="utf-8")
+    (tmp_path / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+
+    assert build_wheel(tmp_path, offline=True) == 0
+
+    import zipfile
+
+    wheel = next((tmp_path / "generated/release/dist").glob("*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        names = set(archive.namelist())
+        prefix = "oh_goon/templates/goons/ml/train/"
+        assert archive.read(prefix + "assets/input.json") == b"source\n"
+        assert prefix + "src/train.py" in names
+        assert prefix + "tests/test_train.py" in names
+        assert prefix + "uv.lock" in names
+        assert prefix + "assets/result.json" not in names
+        assert prefix + "goon.lock" not in names
+        assert not any("/.venv/" in name or "/__pycache__/" in name for name in names)
+    assert (package / "assets/result.json").exists()
 
 
 def test_release_staging_is_owned_by_release_script_not_make_bootstrap_target() -> None:
@@ -145,13 +334,13 @@ def test_release_build_owns_fresh_ui_and_cleans_failed_outputs(
         ),
         tools / "uv": (
             '#!/bin/sh\nprintf "uv:%s\\n" "$1" >> "$RELEASE_COMMANDS"\n'
-            'if [ "$1" = build ]; then\n'
-            "  cp ../generated/release/static/index.html "
-            "../generated/release/dist/wheel-ui-proof\n"
+            'if [ "$1" = run ]; then\n'
+            '  printf "uv:build\\n" >> "$RELEASE_COMMANDS"\n'
+            "  cp generated/release/static/index.html "
+            "generated/release/dist/wheel-ui-proof\n"
             "fi\n"
         ),
         backend_bin / "oh-goon-release-version": "#!/bin/sh\nexit 0\n",
-        backend_bin / "oh-goon-release-artifact-check": "#!/bin/sh\nexit 0\n",
     }.items():
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)

@@ -78,7 +78,9 @@ def stat_caller_file(path: Path) -> os.stat_result:
         ) from exc
 
 
-def read_caller_file_bytes(path: Path, *, expected: os.stat_result) -> bytes:
+def read_caller_file_bytes(
+    path: Path, *, expected: os.stat_result, max_bytes: int = _MAX_BYTES
+) -> bytes:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(path, flags)
@@ -88,13 +90,13 @@ def read_caller_file_bytes(path: Path, *, expected: os.stat_result) -> bytes:
                 raise RunConfigurationInvalid(
                     "caller configuration file was replaced before its bytes could be captured"
                 )
-            if not stat.S_ISREG(before.st_mode) or before.st_size > _MAX_BYTES:
+            if not stat.S_ISREG(before.st_mode) or before.st_size > max_bytes:
                 raise RunConfigurationInvalid(
-                    "caller configuration file must be a regular file of at most 65536 bytes"
+                    f"caller configuration file must be a regular file of at most {max_bytes} bytes"
                 )
-            contents = stream.read(_MAX_BYTES + 1)
+            contents = stream.read(max_bytes + 1)
             after = os.fstat(stream.fileno())
-            if len(contents) > _MAX_BYTES or (
+            if len(contents) > max_bytes or (
                 before.st_dev,
                 before.st_ino,
                 before.st_size,

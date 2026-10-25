@@ -4,6 +4,7 @@ import json
 import shlex
 import time
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -14,7 +15,12 @@ import yaml
 
 from oh_goon.core.agent_review_plan import agent_phase_role
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
-from oh_goon.core.errors import FleetPlanInvalid, InvalidRunTransition, StateConflict
+from oh_goon.core.errors import (
+    FleetPlanInvalid,
+    InvalidRunTransition,
+    ScheduleNotFound,
+    StateConflict,
+)
 from oh_goon.core.execution_lock_identity import build_execution_lock, verify_execution_lock
 from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import (
@@ -71,6 +77,7 @@ from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
 from oh_goon.core.path_authority import navigation_path
 from oh_goon.core.product_identity import new_fleet_run_id
+from oh_goon.core.run_identity import with_retained_project_deliveries
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import FleetRunSource
 from oh_goon.engine.command import CommandTerminal
@@ -1573,6 +1580,20 @@ class FleetPlanService:
             target, repository_ids=repository_ids
         )
 
+    def project_source_transport_for_target(
+        self,
+        target: FleetPlanTarget,
+        *,
+        repository_ids: set[str],
+        expected_repository_instance_ids: dict[str, str] | None = None,
+    ) -> AbstractContextManager[tuple[FleetPlanTarget, dict[str, str]]]:
+        """Retain already-resolved Schedule source through the original Fleet owner."""
+        return self._runs.project_source_transport_for_prepared_plan(
+            target,
+            repository_ids=repository_ids,
+            expected_repository_instance_ids=expected_repository_instance_ids,
+        )
+
     def _prepare_scheduled_target(
         self,
         plan_path: Path,
@@ -1617,7 +1638,8 @@ class FleetPlanService:
         )
         sealed = FleetPlanTarget.model_validate(
             {
-                **target.model_dump(exclude={"caller_input_file", "scheduled_caller_file"}),
+                **target.model_dump(exclude={"plan", "caller_input_file", "scheduled_caller_file"}),
+                "plan": target.plan,
                 "scheduled_caller_file": frozen.model_dump(),
             }
         )
@@ -1660,19 +1682,35 @@ class FleetPlanService:
             source_graph=source_graph,
             repository=repository,
         )
-        repository_instance_ids = self.repository_instance_ids_for_target(
-            target, repository_ids=repository_ids
+        package_sources = any(getattr(step, "project_source", None) for step in target.plan.steps)
+        if package_sources:
+            try:
+                current = self._schedules.definition(schedule_id)
+            except ScheduleNotFound:
+                current = None
+            if current is not None and current.repository_ids == tuple(sorted(repository_ids)):
+                target = with_retained_project_deliveries(target, current.target)
+        transport = (
+            self.project_source_transport_for_target(target, repository_ids=repository_ids)
+            if package_sources
+            else nullcontext(
+                (
+                    target,
+                    self.repository_instance_ids_for_target(target, repository_ids=repository_ids),
+                )
+            )
         )
-        return self._schedules.create_prepared(
-            schedule_id,
-            _schedule_request(
-                target,
-                repository_ids=repository_ids,
-                repository_instance_ids=repository_instance_ids,
-                name=name,
-                interval_minutes=interval_minutes,
-            ),
-        )
+        with transport as (target, repository_instance_ids):
+            return self._schedules.create_prepared(
+                schedule_id,
+                _schedule_request(
+                    target,
+                    repository_ids=repository_ids,
+                    repository_instance_ids=repository_instance_ids,
+                    name=name,
+                    interval_minutes=interval_minutes,
+                ),
+            )
 
     def reschedule(
         self,
@@ -1711,26 +1749,37 @@ class FleetPlanService:
             source_graph=source_graph,
             repository=repository,
         )
-        repository_instance_ids = self.repository_instance_ids_for_target(
-            target, repository_ids=repository_ids
+        package_sources = any(getattr(step, "project_source", None) for step in target.plan.steps)
+        if package_sources and current.repository_ids == tuple(sorted(repository_ids)):
+            target = with_retained_project_deliveries(target, current.target)
+        transport = (
+            self.project_source_transport_for_target(target, repository_ids=repository_ids)
+            if package_sources
+            else nullcontext(
+                (
+                    target,
+                    self.repository_instance_ids_for_target(target, repository_ids=repository_ids),
+                )
+            )
         )
-        desired = _schedule_request(
-            target,
-            repository_ids=repository_ids,
-            repository_instance_ids=repository_instance_ids,
-            name=name,
-            interval_minutes=interval_minutes,
-        )
-        if _definition_matches(current, desired):
-            return current
-        return self._schedules.replace_prepared(
-            schedule_id,
-            ScheduleReplace(
-                generation_id=current.generation_id,
-                record_version=current.record_version,
-                **desired.model_dump(),
-            ),
-        )
+        with transport as (target, repository_instance_ids):
+            desired = _schedule_request(
+                target,
+                repository_ids=repository_ids,
+                repository_instance_ids=repository_instance_ids,
+                name=name,
+                interval_minutes=interval_minutes,
+            )
+            if _definition_matches(current, desired):
+                return current
+            return self._schedules.replace_prepared(
+                schedule_id,
+                ScheduleReplace(
+                    generation_id=current.generation_id,
+                    record_version=current.record_version,
+                    **desired.model_dump(),
+                ),
+            )
 
 
 def _selected_source_graph(

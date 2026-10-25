@@ -94,6 +94,111 @@ def test_uv_admission_has_no_disposable_native_resolution_owner() -> None:
     assert not hasattr(managed_runtime, "preflight_uv_project_feasibility")
 
 
+@pytest.mark.parametrize("failure", ["exit", "cancel", "unsettled", "unsettled_cancel"])
+def test_uv_preparation_cleans_only_settled_native_environments(
+    tmp_path: Path, failure: str
+) -> None:
+    from oh_goon.engine.command import CommandCancelledError
+
+    repository = _repository(tmp_path)
+    path_authority = _path_authority(tmp_path)
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    calls: list[Path] = []
+
+    def fail(*argv: str, **kwargs: object) -> CommandResult:
+        env = cast(dict[str, str], kwargs["env"])
+        environment = Path(env["UV_PROJECT_ENVIRONMENT"])
+        environment.mkdir()
+        (environment / "partial-install").write_bytes(b"partial")
+        calls.append(environment)
+        if failure in {"cancel", "unsettled_cancel"}:
+            raise CommandCancelledError(
+                "cancelled native preparation",
+                supervisor=CommandSupervisorReceipt(
+                    final_process_group_quiescent=failure == "cancel"
+                ),
+            )
+        return CommandResult(
+            returncode=2 if failure == "exit" else 0,
+            stdout="",
+            stderr="failed native materialization",
+            argv=tuple(argv),
+            supervisor=CommandSupervisorReceipt(
+                final_process_group_quiescent=failure != "unsettled"
+            ),
+        )
+
+    expected = (
+        CommandCancelledError if failure in {"cancel", "unsettled_cancel"} else FleetPlanInvalid
+    )
+    with pytest.raises(expected) as captured:
+        prepare_uv_project_runtimes(
+            _plan(_step()),
+            source_root=repository.path,
+            run_root=run_root,
+            path_authority=path_authority,
+            cancel_requested=None,
+            command_runner=fail,
+            python_resolver=lambda _uv: Path("/usr/bin/python3"),
+        )
+    assert len(calls) == 1
+    if failure.startswith("unsettled"):
+        assert (calls[0] / "partial-install").read_bytes() == b"partial"
+        assert str(run_root / ".preparation") in "\n".join(captured.value.__notes__)
+    else:
+        assert not calls[0].exists()
+        assert not tuple((run_root / ".preparation/uv-environments").iterdir())
+
+
+def test_untrusted_package_preparation_refuses_before_creating_runtime_state(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+
+    project = PythonGoonProject(
+        content_sha256="a" * 64, archive_sha256="b" * 64, byte_count=1, entry_count=1
+    )
+    step = _step().model_copy(
+        update={
+            "uv": UvExecutionEnvironment(source="package"),
+            "project_source": project,
+            "argv": (
+                "uv",
+                "run",
+                "--frozen",
+                "--no-default-groups",
+                "--project",
+                ".",
+                "application",
+            ),
+        }
+    )
+    trusted = _plan(step)
+    untrusted = trusted.model_copy(
+        update={"execution": trusted.execution.model_copy(update={"trust_repository_code": False})}
+    )
+    run_root = tmp_path / "uncreated-run"
+
+    def no_python(_uv: Path) -> Path:
+        raise AssertionError("untrusted package must refuse before native Python discovery")
+
+    def no_launch(*argv: str, **kwargs: object) -> CommandResult:
+        raise AssertionError("untrusted package must refuse before native process work")
+
+    with pytest.raises(FleetPlanInvalid, match="requires isolated builds"):
+        prepare_uv_project_runtimes(
+            untrusted,
+            source_root=tmp_path / "target",
+            run_root=run_root,
+            path_authority=_path_authority(tmp_path),
+            cancel_requested=None,
+            python_resolver=no_python,
+            command_runner=no_launch,
+        )
+    assert not run_root.exists()
+
+
 def test_uv_managed_step_requires_repository_workspace_source() -> None:
     producer = ResolvedCommandStep(
         step_id="producer",

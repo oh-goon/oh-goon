@@ -10,7 +10,7 @@ import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol, TypedDict, Unpack
 
@@ -106,6 +106,7 @@ from oh_goon.integrations.fleet_plan_managed_runtime import (
     ManagedRuntimeSpec,
     PreCommitManagedRuntime,
     UvProjectManagedRuntime,
+    uv_preparation_requires_retained_scratch,
 )
 from oh_goon.integrations.fleet_plan_oci_execution import execute_oci_build
 from oh_goon.integrations.fleet_plan_oci_publish_execution import execute_oci_publish
@@ -243,6 +244,9 @@ class StepRuntime:
     execution_identity: ExecutionIdentity | None = None
     workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None = None
     native_profile: ResolvedNativeAgent | None = None
+    project_sources: Mapping[str, Path] = field(default_factory=dict)
+    project_workspaces: Mapping[str, Path] = field(default_factory=dict)
+    on_unsettled_run_process: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,7 +309,11 @@ def execute_direct_step(
             return physical_runner(*args, timeout=selected_timeout, **kwargs)
 
         runner = bounded_runner
-    with tempfile.TemporaryDirectory(prefix="oh-goon-step-") as private_root:
+    package = isinstance(step, ResolvedCommandStep) and step.project_source is not None
+    temporary = tempfile.TemporaryDirectory(
+        prefix="oh-goon-step-", dir=repository.parent if package else None, delete=not package
+    )
+    with temporary as private_root:
         paths = AttemptPathLayout.from_root(Path(private_root))
         for path in (paths.home, paths.tmp, paths.cache, paths.config):
             path.mkdir()
@@ -325,27 +333,55 @@ def execute_direct_step(
             git_command_runner=runner,
             managed_runtime=None,
         )
-        process = _with_lifecycle_observer(
-            process,
-            step,
-            step_order,
-            attempt_number,
-            runtime.lifecycle_observer,
-        )
-        return _execute_typed_step(
-            repository,
-            step,
-            _with_output_observer(
-                process,
-                step,
-                attempt_number,
-                output_observer,
-                runtime.diagnostics,
-                runtime.fleet_run_id,
-                runtime.repository_id,
-            ),
-            runtime,
-        )
+        retain_package_scratch = False
+        try:
+            outcome = None
+            if isinstance(step, ResolvedCommandStep) and step.project_source is not None:
+                process, outcome = _prepare_python_project_attempt(
+                    repository, step, process, runtime
+                )
+            if outcome is None:
+                process = _with_lifecycle_observer(
+                    process, step, step_order, attempt_number, runtime.lifecycle_observer
+                )
+                outcome = _execute_typed_step(
+                    repository,
+                    step,
+                    _with_output_observer(
+                        process,
+                        step,
+                        attempt_number,
+                        output_observer,
+                        runtime.diagnostics,
+                        runtime.fleet_run_id,
+                        runtime.repository_id,
+                    ),
+                    runtime,
+                )
+            if process_boundary_settled(outcome) is not True:
+                if runtime.on_unsettled_run_process is not None:
+                    runtime.on_unsettled_run_process()
+                if package:
+                    retain_package_scratch = True
+                    outcome = replace(
+                        outcome,
+                        stderr=outcome.stderr.rstrip()
+                        + f"\nPython Goon Step scratch retained while native process cleanup is incomplete: {private_root}",
+                    )
+            return outcome
+        except BaseException as error:
+            if uv_preparation_requires_retained_scratch(error):
+                if runtime.on_unsettled_run_process is not None:
+                    runtime.on_unsettled_run_process()
+                if package:
+                    retain_package_scratch = True
+                    error.add_note(
+                        f"Python Goon Step scratch retained while native process cleanup is incomplete: {private_root}"
+                    )
+            raise
+        finally:
+            if package and not retain_package_scratch:
+                temporary.cleanup()
 
 
 def execute_strict_step(
@@ -1031,17 +1067,28 @@ def _execute_command_step(
 ) -> StepOutcome:
     argv = step.argv
     managed = process.managed_runtime
-    if isinstance(managed, UvProjectManagedRuntime):
+    package = (
+        managed.package_source
+        if isinstance(managed, UvProjectManagedRuntime)
+        else runtime.project_sources.get(step.project_source.content_sha256)
+        if step.project_source is not None
+        else None
+    )
+    if isinstance(managed, UvProjectManagedRuntime) or package is not None:
         if argv[:2] != ("uv", "run"):
             raise FleetPlanInvalid(
                 f"Managed uv step {step.step_id} no longer executes through native uv run"
             )
-        project = RepositoryPathSpace.from_root(repository).resolve(
-            managed.project,
-            label=f"Fleet uv project for step {step.step_id}",
-            kind="directory",
-            require_exists=True,
-        )
+        if package is not None:
+            project = package
+        else:
+            assert isinstance(managed, UvProjectManagedRuntime)
+            project = RepositoryPathSpace.from_root(repository).resolve(
+                managed.project,
+                label=f"Fleet uv project for step {step.step_id}",
+                kind="directory",
+                require_exists=True,
+            )
         try:
             project_index = argv.index("--project")
         except ValueError as exc:
@@ -1054,6 +1101,15 @@ def _execute_command_step(
             )
         rebound = list(argv)
         rebound[project_index + 1] = str(project)
+        if package is not None:
+            assert step.uv is not None
+            command_index = project_index + 2 + (2 if step.uv.group is not None else 0)
+            command = rebound[command_index]
+            if Path(command).name != command or command in {".", ".."}:
+                raise FleetPlanInvalid("Python Goon must invoke an installed application command")
+            rebound[command_index] = str(
+                Path(process.environment["UV_PROJECT_ENVIRONMENT"]) / "bin" / command
+            )
         argv = ("uv", "run", "--no-sync", *rebound[2:])
     return from_command(
         process.command_runner(
@@ -1065,6 +1121,47 @@ def _execute_command_step(
             runtime_supervision=runtime.runtime_supervision,
         )
     )
+
+
+def _prepare_python_project_attempt(
+    repository: Path, step: ResolvedCommandStep, process: _StepProcess, runtime: StepRuntime
+) -> tuple[_StepProcess, StepOutcome | None]:
+    from oh_goon.core.path_layouts import ManagedPreparationPathLayout
+    from oh_goon.engine.native_uv_environment import capture_native_uv_authority
+
+    assert step.project_source is not None and step.uv is not None
+    source = runtime.project_sources.get(step.project_source.content_sha256)
+    if source is None:
+        raise FleetPlanInvalid("Python Goon execution requires its captured package source")
+    native = capture_native_uv_authority(
+        process.host_environment,
+        owned_uv_names=frozenset({"UV_PROJECT_ENVIRONMENT", "UV_CACHE_DIR", "UV_OFFLINE"}),
+    )
+    environment = native.environment(
+        ManagedPreparationPathLayout.from_root(process.paths.root),
+        environment=process.paths.cache / "uv-project-environment",
+        cache=process.paths.cache / "uv",
+    )
+    environment.update(process.environment)
+    prepared = replace(process, environment=environment)
+    result = prepared.command_runner(
+        "uv",
+        "sync",
+        "--project",
+        str(source),
+        "--locked",
+        "--no-default-groups",
+        "--no-editable",
+        *(["--group", step.uv.group] if step.uv.group is not None else []),
+        cwd=repository,
+        timeout=_command_timeout(step, runtime),
+        cancel_requested=runtime.cancel_requested,
+        env=environment,
+    )
+    outcome = from_command(result)
+    return prepared, outcome if outcome.returncode != 0 or process_boundary_settled(
+        outcome
+    ) is not True else None
 
 
 def _prepare_strict_uv_attempt(
@@ -1079,7 +1176,7 @@ def _prepare_strict_uv_attempt(
     if step.uv is None:
         raise FleetPlanInvalid(f"Managed uv runtime is bound to non-uv step {step.step_id}")
 
-    project = RepositoryPathSpace.from_root(repository).resolve(
+    project = managed.package_source or RepositoryPathSpace.from_root(repository).resolve(
         managed.project,
         label=f"Fleet uv project for step {step.step_id}",
         kind="directory",
@@ -1100,8 +1197,8 @@ def _prepare_strict_uv_attempt(
         "--link-mode",
         "copy",
         "--no-default-groups",
-        "--group",
-        managed.group,
+        *(["--group", managed.group] if managed.group is not None else []),
+        *(["--no-editable"] if managed.package_source is not None else []),
         cwd=repository,
         timeout=min(step.timeout_seconds or 900.0, 900.0),
         cancel_requested=runtime.cancel_requested,

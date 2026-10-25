@@ -146,6 +146,12 @@ def resolve_plan_step(
             }
         )
     if isinstance(step, CommandPlanStep):
+        project_source = None
+        if step.uv is not None and step.uv.source == "package":
+            project = context.source_graph.node(plan_base / "goon.yml").python_project
+            if project is None:
+                raise FleetPlanInvalid("Python Goon command requires captured package source")
+            project_source = project.identity
         capabilities = compile_step_capabilities(step, value_compiler)
         if step.uv is not None:
             argv = list(step.argv)
@@ -171,6 +177,7 @@ def resolve_plan_step(
             step_id=step_id,
             capabilities=capabilities,
             environment=compiled_environment(step, value_compiler),
+            project_source=project_source,
         )
     if isinstance(step, DependencyInventoryPlanStep):
         capabilities = compile_step_capabilities(step, value_compiler)

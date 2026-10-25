@@ -34,6 +34,11 @@ def add_plan_commands(
     lock.add_argument(
         "--update-skills", action="store_true", help="Explicitly refresh declared Skill pins"
     )
+    lock.add_argument(
+        "--update-goons",
+        action="store_true",
+        help="Explicitly refresh declared Git Goon and Plan pins",
+    )
     plan = subparsers.add_parser("plan", help="Inspect recorded Runs or compare authored sources")
     plan_commands = plan.add_subparsers(dest="plan_command", required=True)
     check = plan_commands.add_parser(

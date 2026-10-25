@@ -84,9 +84,9 @@ def test_repository_showcase_executes_output_handoffs_and_reads_back_failures(
         steps = tape["repositories"][0]["steps"]
         assert [step["status"] for step in steps] == ["PASSED"] * 3
         assert [step["exit_code"] for step in steps] == [0] * 3
-        result_path = repository / ".showcase/result.json"
-        result_bytes = result_path.read_bytes()
-        assert json.loads(result_bytes) == {"total_order_value": expected_total}
+        result_bytes = (json.dumps({"total_order_value": expected_total}) + "\n").encode()
+        assert not (repository / ".showcase").exists()
+        assert not (repository / ".venv").exists()
         artifact = outputs["repositories"][0]["steps"][2]["artifacts"][0]
         assert artifact["path"] == ".showcase/result.json"
         assert artifact["status"] == "PRESENT"
@@ -96,7 +96,6 @@ def test_repository_showcase_executes_output_handoffs_and_reads_back_failures(
         assert total["name"] == "TOTAL"
         assert total["sha256"] == hashlib.sha256(expected_total.encode()).hexdigest()
 
-    shutil.rmtree(repository / ".showcase")
     select("invalid")
     cli("lock", str(selection))
     failed = json.loads(cli("run", str(selection), "--json", expected_returncode=1))
@@ -109,7 +108,6 @@ def test_repository_showcase_executes_output_handoffs_and_reads_back_failures(
     assert not (repository / ".showcase/result.json").exists()
 
     # Invalid caller values refuse before extraction can create output state.
-    shutil.rmtree(repository / ".showcase")
     select("unknown-fixture")
     rejected = cli("lock", str(selection), expected_returncode=2)
     assert "INVALID_INPUT_VALUE" in rejected and "fixture" in rejected

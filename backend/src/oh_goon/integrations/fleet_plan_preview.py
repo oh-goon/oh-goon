@@ -8,6 +8,7 @@ from oh_goon.core.fleet_plan_output_refs import step_output_reference
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
     ResolvedAgentStep,
+    ResolvedCommandStep,
     ResolvedFleetPlan,
     ResolvedPlanStep,
     ResolvedPreCommitStep,
@@ -149,6 +150,14 @@ def _preview_step(
             **policy,
         )
     require_environment(step)
+    if isinstance(step, ResolvedCommandStep) and step.project_source is not None:
+        return PlanStepPreview(
+            step_id=step.step_id,
+            kind=step.kind,
+            disposition=PlanPreviewDisposition.RUNTIME_DEPENDENT,
+            reason="Uses a package-owned attempt output workspace",
+            **policy,
+        )
     step_working_directory(repository, step)
     validate_step_declared_paths(repository, step)
     if (

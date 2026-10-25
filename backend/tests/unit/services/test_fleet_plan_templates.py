@@ -5,13 +5,31 @@ from pathlib import Path
 import pytest
 import yaml
 
+from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import CompiledGoonImportStep
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
+from oh_goon.core.source_transport_metadata import authored_source_entries
 from oh_goon.core.template_identity import TemplateClassification
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_source_graph import analyze_fleet_plan_sources
 from tests.factories.shipped_templates import GOON_TEMPLATES as GOONS
 from tests.factories.shipped_templates import PLAN_TEMPLATES as PLANS
+
+
+@pytest.mark.parametrize("catalog_name", ("goons", "workflow-catalog"))
+def test_python_project_import_requires_explicit_runtime_independent_of_catalog_name(
+    tmp_path: Path, catalog_name: str
+) -> None:
+    package = tmp_path / catalog_name / "general/check"
+    package.mkdir(parents=True)
+    (package / "goon.yml").write_text("steps:\n- run: project-check\n")
+    (package / "README.md").write_text("# general/check\n")
+    (package / "pyproject.toml").write_text('[project]\nname = "project-check"\nversion = "1"\n')
+    (package / "uv.lock").write_text("version = 1\n")
+    plan = tmp_path / "plan.yml"
+    plan.write_text(f"goons:\n- import: general/check\n  from: {catalog_name}\n")
+    with pytest.raises(FleetPlanInvalid, match="select runtime: python"):
+        FleetPlanResolver().resolve(plan)
 
 
 def test_shipped_template_classification_is_category_owned() -> None:
@@ -138,14 +156,17 @@ def test_python_secure_preserves_composite_goon_ancestry_and_order() -> None:
     )
 
 
-def test_template_package_shape_is_exact_two_files() -> None:
+def test_shipped_packages_keep_complete_python_projects_and_small_plain_packages() -> None:
     for root in (PLANS.root, GOONS.root):
         for category in sorted(path for path in root.iterdir() if path.is_dir()):
             for package in sorted(path for path in category.iterdir() if path.is_dir()):
-                assert {path.name for path in package.iterdir()} in (
-                    {"plan.yml", "README.md"},
-                    {"goon.yml", "README.md"},
-                )
+                entries = {path.name for path in authored_source_entries(package)}
+                source_name = "goon.yml" if root == GOONS.root else "plan.yml"
+                payload = yaml.safe_load((package / source_name).read_text(encoding="utf-8"))
+                if payload.get("runtime") == "python":
+                    assert {source_name, "README.md", "pyproject.toml", "uv.lock"} <= entries
+                else:
+                    assert entries == {source_name, "README.md"}
 
 
 def test_production_plans_do_not_repeat_default_resource_envelopes() -> None:
@@ -175,7 +196,7 @@ def test_core_python_goons_do_not_author_runtime_plumbing() -> None:
         assert "python -c" not in content, key
 
 
-def test_ml_iris_training_uses_project_command_and_locked_group() -> None:
+def test_ml_iris_training_uses_captured_package_and_base_dependencies() -> None:
     source = GOONS.source("ml/iris-train")
     goon = yaml.safe_load(source.content)
     plan_source = PLANS.source("ml/iris-training")
@@ -185,26 +206,27 @@ def test_ml_iris_training_uses_project_command_and_locked_group() -> None:
     assert source.compiled.name == "iris-train"
     assert source.compiled.description == ""
     assert PLANS.read("ml/iris-training").classification.value == "teaching-example"
-    assert goon["uv"] == {"group": "ml"}
+    assert goon["runtime"] == "python"
+    assert "uv" not in goon
     assert "requirements" not in goon
     assert len(goon["steps"]) == 1
-    assert goon["steps"][0]["run"].startswith("uv run iris-train ")
+    assert goon["steps"][0]["run"].startswith("iris-train ")
     assert "python -c" not in source.content
 
     resolved = FleetPlanResolver(goon_templates=GOONS).resolve(plan_source.path)
-    assert [item.kind for item in resolved.imports[0].requirements] == ["uv_project"]
+    assert resolved.imports[0].requirements == ()
     assert [item.name for item in resolved.imports] == ["ml/iris-train"]
     assert [step.step_id for step in resolved.steps] == ["ml-iris-train.iris-train"]
     command = resolved.steps[0]
-    assert command.argv[:9] == (
+    assert command.project_source is not None
+    assert command.uv.group is None
+    assert command.argv[:7] == (
         "uv",
         "run",
         "--frozen",
         "--no-default-groups",
         "--project",
         ".",
-        "--group",
-        "ml",
         "iris-train",
     )
 
