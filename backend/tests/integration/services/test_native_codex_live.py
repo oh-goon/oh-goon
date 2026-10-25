@@ -647,8 +647,157 @@ unittest.main(argv=["live-codex-stocktake-verification"])
 """
 
 
+_DEPLOY_ORDER_SOURCES = {
+    "deploy_order/__init__.py": "",
+    "deploy_order/graph.py": """def order_services(dependencies):
+    return sorted(dependencies)
+""",
+    "deploy_order/__main__.py": """import json
+import sys
+
+from .graph import order_services
+
+
+def main():
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        print(json.dumps(order_services(json.load(stream))))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+""",
+    "README.md": """# Deployment ordering
+
+Repair this standard-library deployment manifest tool.
+
+`deploy_order.graph.order_services(dependencies)` accepts a dictionary mapping
+nonempty service names to lists of dependency names. Validate the entire manifest:
+keys and dependency names must be nonempty strings, values must be lists, every
+dependency must be declared, and cycles (including self cycles) are invalid.
+Invalid manifests raise ValueError. Duplicate dependency edges are allowed and
+mean one prerequisite. Empty manifests produce []. Do not mutate any input.
+
+Return every service exactly once, after its dependencies. At each selection,
+choose the alphabetically smallest currently ready service, including services
+that just became ready. Results must be independent of dictionary insertion and
+dependency-list order. Use an iterative algorithm so long chains do not exhaust
+the Python recursion limit.
+
+`python -m deploy_order MANIFEST` reads a UTF-8 JSON manifest file and prints
+one JSON list plus newline. Success exits 0 with no stderr. Invalid JSON,
+invalid manifests and file/encoding errors exit 2 with a useful diagnostic on
+stderr and nothing on stdout. Preserve the public function and CLI interface.
+""",
+}
+
+_DEPLOY_ORDER_TASK = (
+    "Repair the deployment manifest tool according to README.md. Implement "
+    "deterministic dependency ordering, complete manifest validation and atomic CLI "
+    "error handling. Use only the Python standard library. Before editing, execute "
+    "the exact repository_tools.list Hashmarks command from the supplied instructions. "
+    "Also run the supplied repository_tools.search command with a private query file "
+    "containing order_services; create it under the native $TMPDIR scratch directory, "
+    "outside the working repository. Inspect the frozen source evidence before editing. "
+    "Change only deploy_order/graph.py and deploy_order/__main__.py. "
+    "Independent verification runs after your coding Step."
+)
+
+_DEPLOY_ORDER_VERIFICATION = r"""import copy
+import json
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+
+repository = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repository))
+from deploy_order.graph import order_services
+
+
+def cli(path):
+    return subprocess.run(
+        [sys.executable, "-I", "-B", "-c",
+         "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));runpy.run_module('deploy_order',run_name='__main__')",
+         str(repository), str(path)],
+        text=True, capture_output=True, timeout=10,
+    )
+
+
+class DeploymentOrderContract(unittest.TestCase):
+    def test_empty_and_independent_services(self):
+        self.assertEqual(order_services({}), [])
+        self.assertEqual(order_services({"z": [], "a": [], "m": []}), ["a", "m", "z"])
+
+    def test_newly_ready_services_compete_with_existing_ready_services(self):
+        manifest = {"z": [], "b": ["a"], "a": [], "c": ["b"]}
+        self.assertEqual(order_services(manifest), ["a", "b", "c", "z"])
+
+    def test_shared_dependencies_duplicates_permutations_and_nonmutation(self):
+        manifest = {"web": ["cache", "db", "db"], "worker": ["db"],
+                    "db": [], "cache": ["db"]}
+        before = copy.deepcopy(manifest)
+        expected = ["db", "cache", "web", "worker"]
+        self.assertEqual(order_services(manifest), expected)
+        self.assertEqual(manifest, before)
+        reordered = {key: list(reversed(manifest[key])) for key in reversed(manifest)}
+        self.assertEqual(order_services(reordered), expected)
+        self.assertEqual(order_services({"café": [], "api": ["café"]}), ["café", "api"])
+
+    def test_invalid_shapes_and_undeclared_dependencies(self):
+        for manifest in (None, [], "api", {"": []}, {1: []}, {"api": "db"},
+                         {"api": ()}, {"api": None}, {"api": [1]}, {"api": [""]},
+                         {"api": [[]]}, {"api": [{}]}, {"api": [True]},
+                         {"api": ["missing"]}, {"ok": [], "z": ["absent"]}):
+            before = copy.deepcopy(manifest)
+            with self.subTest(manifest=manifest), self.assertRaises(ValueError):
+                order_services(manifest)
+            self.assertEqual(manifest, before)
+
+    def test_cycles_including_disconnected_components(self):
+        for manifest in ({"a": ["a"]}, {"a": ["b"], "b": ["a"]},
+                         {"ready": [], "a": ["b"], "b": ["c"], "c": ["a"]}):
+            before = copy.deepcopy(manifest)
+            with self.subTest(manifest=manifest), self.assertRaises(ValueError):
+                order_services(manifest)
+            self.assertEqual(manifest, before)
+
+    def test_chain_beyond_recursion_limit(self):
+        names = [f"service-{index:05}" for index in range(2500)]
+        manifest = {name: [names[index - 1]] if index else []
+                    for index, name in reversed(list(enumerate(names)))}
+        self.assertEqual(order_services(manifest), names)
+
+    def test_cli_utf8_success_and_atomic_failures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "deployment manifest.json"
+            path.write_text(json.dumps({"api": ["café"], "café": []},
+                                       ensure_ascii=False), encoding="utf-8")
+            result = cli(path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, "")
+            self.assertTrue(result.stdout.endswith("\n"))
+            self.assertEqual(json.loads(result.stdout), ["café", "api"])
+            for payload in (b"{broken", b"[]", b'{"ok": [], "bad": ["absent"]}',
+                            b'{"ok": [], "a": ["a"]}', b"\xff"):
+                path.write_bytes(payload)
+                result = cli(path)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertTrue(result.stderr.strip())
+            result = cli(path.with_name("missing.json"))
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, "")
+            self.assertTrue(result.stderr.strip())
+
+
+unittest.main(argv=["live-codex-deployment-order-verification"])
+"""
+
+
 @pytest.mark.certification
-@pytest.mark.parametrize("scenario", ["ranges", "eventlog", "stocktake"])
+@pytest.mark.parametrize("scenario", ["ranges", "eventlog", "stocktake", "deploy-order"])
 def test_legacy_live_chatgpt_coding_uses_original_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -669,6 +818,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         "ranges": {"ranges.py": _BROKEN_SOURCE},
         "eventlog": _EVENTLOG_SOURCES,
         "stocktake": _STOCKTAKE_SOURCES,
+        "deploy-order": _DEPLOY_ORDER_SOURCES,
     }[scenario]
     for relative, text in source_files.items():
         path = repo / relative
@@ -682,6 +832,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             "ranges": _VERIFICATION,
             "eventlog": _EVENTLOG_VERIFICATION,
             "stocktake": _STOCKTAKE_VERIFICATION,
+            "deploy-order": _DEPLOY_ORDER_VERIFICATION,
         }[scenario],
         encoding="utf-8",
     )
@@ -753,6 +904,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         task = _EVENTLOG_TASK
     elif scenario == "stocktake":
         task = _STOCKTAKE_TASK
+    elif scenario == "deploy-order":
+        task = _DEPLOY_ORDER_TASK
     task_file = tmp_path / "task.txt"
     task_file.write_text(task, encoding="utf-8")
     catalog = tmp_path / "providers.json"
@@ -787,11 +940,13 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     handoff_keys = ("fleet_run_id", "status", "outcome", "source_admissions", "recorded_steps")
     verification_launches: list[tuple[str, ...]] = []
     hashmarks_followup_succeeded = False
+    hashmarks_search_succeeded = False
     skill_resource_reported = False
 
     def command_runner(*argv: str, **kwargs: Any) -> CommandResult:
-        nonlocal hashmarks_followup_succeeded, skill_resource_reported
+        nonlocal hashmarks_followup_succeeded, hashmarks_search_succeeded, skill_resource_reported
         if argv[0] == str(program):
+            native_diagnostics["native_invocation_observed"] = True
             assert len(native_occurrences) == expected_native_launches, (
                 "Each Run launches Codex once"
             )
@@ -840,9 +995,16 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             actual_home = kwargs["env"]["CODEX_HOME"]
             assert actual_home == str(home)
             result = run_command(*argv, **kwargs)
+            native_diagnostics["native_returncode"] = result.returncode
+            for relative, data in expected_source.items():
+                assert (Path(payload["captured_repository"]) / relative).read_bytes() == data
+            for relative, text in skill_files.items():
+                assert (Path(payload["captured_skill"]) / relative).read_bytes() == text.encode()
             events = parse_native_agent_events("codex", result.stdout, returncode=result.returncode)
             skill_resource_reported = "native-cli-skill-resource-canary" in events.final_text
             item_facts: list[dict[str, str | int]] = []
+            # Native typed edits expose ordering; shell writes are not classified here.
+            native_edit_observed = False
             for line in result.stdout.splitlines():
                 if not line.strip():
                     continue
@@ -850,6 +1012,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                 if not isinstance(item, dict):
                     continue
                 item_type = item.get("type")
+                if item_type == "file_change":
+                    native_edit_observed = True
                 if (
                     item_type == "command_execution"
                     and item.get("exit_code") == 0
@@ -867,7 +1031,41 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                             and followup.get("producer_implementation_identity")
                             == require_loaded_hashmarks_runtime()
                         ):
-                            hashmarks_followup_succeeded = True
+                            if payload["repository_tools"]["list"] in item["command"]:
+                                assert set(followup["paths"]) == {
+                                    "repo/" + relative for relative in expected_source
+                                }
+                                coverage = followup["discovery_coverage"]
+                                assert coverage["admitted_member_count"] == len(expected_source)
+                                assert coverage["repository_wide_completeness"] == "not-claimed"
+                                assert (
+                                    coverage["absence_outside_admitted_scope"] == "not-admissible"
+                                )
+                                if not native_edit_observed:
+                                    hashmarks_followup_succeeded = True
+                            elif scenario == "deploy-order" and "retrieval" in followup:
+                                retrieval = followup["retrieval"]
+                                assert retrieval["query"] == "order_services"
+                                assert any(
+                                    match["path"] == "deploy_order/graph.py"
+                                    and match["name"] == "order_services"
+                                    for match in retrieval["results"]
+                                )
+                                source = followup["source"]
+                                assert source["authority"] == "repository-evidence-only"
+                                assert source["execution_effect"] == "none"
+                                assert any(
+                                    match["path"] == "deploy_order/graph.py"
+                                    and match["literal"] == "order_services"
+                                    and match["member_revision"]
+                                    and any(
+                                        line["text"].strip() == "return sorted(dependencies)"
+                                        for line in match["context_excerpt"]
+                                    )
+                                    for match in source["occurrences"]
+                                )
+                                if not native_edit_observed:
+                                    hashmarks_search_succeeded = True
                 if len(item_facts) >= 32:
                     continue
                 fact: dict[str, str | int] = {
@@ -897,6 +1095,10 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                     )
                     fact["expected_interpreter"] = int(sys.executable in command)
                     fact["command_not_found"] = int("command not found" in output)
+                    if fact["hashmarks_command"]:
+                        fact["missing_query_file"] = int("No such file or directory" in output)
+                        fact["denied_query_file"] = int("Permission denied" in output)
+                        fact["database_unavailable"] = int("database is locked" in output)
                 item_facts.append(fact)
             native_diagnostics.update(
                 returncode=result.returncode,
@@ -957,6 +1159,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             pytest.fail("The CLI must emit one valid Run detail", pytrace=False)
         assert native_facts == [(0, True, False)]
         assert hashmarks_followup_succeeded
+        if scenario == "deploy-order":
+            assert hashmarks_search_succeeded
         assert skill_resource_reported
         assert verification_launches == list(verifications)
         steps = detail["game_tape"]["repositories"][0]["steps"]
@@ -986,6 +1190,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             expected_source,
             {
                 "ranges": {"ranges.py"},
+                "deploy-order": {"deploy_order/graph.py", "deploy_order/__main__.py"},
                 "eventlog": {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"},
                 "stocktake": {
                     "stocktake/rows.py",

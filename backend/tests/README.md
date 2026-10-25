@@ -244,6 +244,17 @@ It omits `--agent` to exercise the Codex CLI default while retaining an explicit
 signed-in profile and the same Hashmarks, Skill and verification boundaries.
 Select `-k stocktake` when iterating on that case.
 
+The deployment-order case repairs a JSON deployment manifest tool. Its immutable
+checks cover deterministic dependency ordering as services become ready, shared
+and duplicate edges, full manifest validation, disconnected cycles, nonmutation,
+a chain beyond the recursion limit, and atomic UTF-8 CLI success/error behavior.
+Select `-k deploy-order` when iterating on that case; it uses the same original
+Run, qualified Hashmarks follow-up, frozen Skill and source-edit boundaries. It
+also requires a successful producer search for the public function and checks
+revision-bound source evidence against the frozen broken implementation.
+The live cases require the exact supplied list command and its admitted paths and
+discovery qualifications; an envelope alone cannot satisfy the follow-up check.
+
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \
 OH_GOON_LIVE_CODEX_HOME=/path/to/existing/.codex \
