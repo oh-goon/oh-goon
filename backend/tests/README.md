@@ -220,11 +220,19 @@ The baseline enters through `oh-goon ai` with an explicit native catalog,
 caller-selected Skill and frozen reference resource. It exercises a range-merging
 repair and a multi-module NDJSON reporting CLI, including lazy record validation,
 aggregation, exact filtering, UTF-8 input and error exits. Each case starts with a
-failing immutable verifier, then checks two ordered verification Steps with quoted
+failing immutable verifier, then checks ordered verification Steps with quoted
 paths and literal arguments. Hashmarks follow-up, Skill delivery and native model
 settings remain observable separately from independent verification results.
 On Linux, file-backed stdin and file inputs also exercise the reporting CLI under
 a native 64 MiB memory limit; other platforms explicitly skip that one case.
+
+The reporting scenario also selects a third verifier for a minimum-count feature
+that remains outside the first repair task. The first native Step succeeds while
+that independent check fails, retaining `COMPLETED` / `ATTENTION_REQUIRED` and CLI
+exit 1. A second `oh-goon ai --handoff-from` Run adds the feature and reruns all
+three checks. The probe checks fresh captured bytes and Hashmarks identity,
+untrusted prior context with no permission authority, and unchanged first-Run
+outcome, source admissions and recorded Steps after the follow-up succeeds.
 
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \

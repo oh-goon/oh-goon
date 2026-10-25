@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from oh_goon.cli import main as cli_main
 from oh_goon.cli_ai import main as ai_main
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.engine.command import CommandResult, run_command
@@ -324,6 +325,128 @@ unittest.main(argv=["live-codex-eventlog-verification"])
 """
 
 
+_EVENTLOG_FEATURE_TASK = (
+    "Extend the repaired eventlog package with a minimum service-count filter. "
+    "Add an optional min_count=0 argument to summarize(records, service=None, min_count=0). "
+    "It must be a nonnegative integer; booleans and other types are invalid, and invalid "
+    "values raise ValueError. Apply the threshold to each service's final aggregate count, "
+    "including services with count equal to min_count. Preserve alphabetical output, exact "
+    "service matching, one-pass consumption and unchanged input records. Add CLI --min-count N "
+    "with default 0 and the same nonnegative integer rule. Invalid CLI values exit 2, write "
+    "a useful diagnostic to stderr and write nothing to stdout. Keep all existing parser, "
+    "stdin/file and error behavior. Change only eventlog/summary.py and eventlog/__main__.py. "
+    "Before editing, execute the exact repository_tools.list Hashmarks command from the "
+    "supplied instructions. Independent verification runs after your coding Step."
+)
+
+_EVENTLOG_FEATURE_VERIFICATION = r"""import json
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+
+repository = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repository))
+from eventlog.summary import summarize
+
+
+def event(service="api", duration_ms=3, status="ok"):
+    return {"service": service, "duration_ms": duration_ms, "status": status}
+
+
+def ndjson(*records):
+    return "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records)
+
+
+def cli(*arguments, text=""):
+    return subprocess.run(
+        [sys.executable, "-I", "-B", "-c",
+         "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));runpy.run_module('eventlog',run_name='__main__')",
+         str(repository), *arguments],
+        input=text, text=True, capture_output=True, timeout=10,
+    )
+
+
+class EventlogMinimumCountContract(unittest.TestCase):
+    def test_filter_uses_final_count_and_retains_order_and_totals(self):
+        records = [event("zeta", 7, "error"), event("api", 2), event("rare", 99),
+                   event("zeta", 3), event("api", 5, "error"), event("zeta", 4)]
+        before = [dict(record) for record in records]
+        self.assertEqual(summarize(records, min_count=2), [
+            {"service": "api", "count": 2, "errors": 1, "total_ms": 7},
+            {"service": "zeta", "count": 3, "errors": 1, "total_ms": 14},
+        ])
+        self.assertEqual(records, before)
+
+    def test_threshold_edges_and_invalid_api_values(self):
+        records = [event()]
+        self.assertEqual(summarize(records, min_count=0),
+                         [{"service": "api", "count": 1, "errors": 0, "total_ms": 3}])
+        self.assertEqual(summarize(records, min_count=2), [])
+        self.assertEqual(summarize(iter(()), min_count=2), [])
+        for value in (-1, 1.5, True, False, None, "2"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                summarize(iter(()), min_count=value)
+
+    def test_exact_service_and_single_pass(self):
+        class Once:
+            def __init__(self):
+                self.used = False
+            def __iter__(self):
+                if self.used:
+                    raise AssertionError("records must be consumed once")
+                self.used = True
+                return iter([event("api-v2", 99), event("api", 4), event("api", 6, "error")])
+        self.assertEqual(summarize(Once(), service="api", min_count=2),
+                         [{"service": "api", "count": 2, "errors": 1, "total_ms": 10}])
+        self.assertEqual(summarize(Once(), service="api-v2", min_count=2), [])
+        self.assertEqual(summarize(Once(), service="missing", min_count=0), [])
+
+    def test_cli_stdin_filter_and_invalid_arguments(self):
+        text = ndjson(event("api-v2", 99), event("api", 2), event("api", 5, "error"))
+        result = cli("--min-count", "2", "--service", "api", text=text)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertTrue(result.stdout.endswith("\n"))
+        self.assertEqual(json.loads(result.stdout),
+                         [{"service": "api", "count": 2, "errors": 1, "total_ms": 7}])
+        zero = cli("--min-count", "0", text=text)
+        self.assertEqual(zero.returncode, 0, zero.stderr)
+        self.assertEqual(zero.stderr, "")
+        self.assertEqual(json.loads(zero.stdout), [
+            {"service": "api", "count": 2, "errors": 1, "total_ms": 7},
+            {"service": "api-v2", "count": 1, "errors": 0, "total_ms": 99},
+        ])
+        for value in ("-1", "1.5", "true", "invalid"):
+            with self.subTest(value=value):
+                failed = cli("--min-count", value, text=text)
+                self.assertEqual(failed.returncode, 2)
+                self.assertEqual(failed.stdout, "")
+                self.assertTrue(failed.stderr.strip())
+
+    def test_cli_utf8_file_and_filtered_invalid_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "events.ndjson"
+            path.write_text(ndjson(event("caf\u00e9", 2), event("rare", 99),
+                                   event("caf\u00e9", 5, "error")), encoding="utf-8")
+            result = cli("--min-count", "2", str(path))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, "")
+            self.assertTrue(result.stdout.endswith("\n"))
+            self.assertEqual(json.loads(result.stdout),
+                             [{"service": "caf\u00e9", "count": 2, "errors": 1, "total_ms": 7}])
+            path.write_text(ndjson(event()) + "\n{broken\n", encoding="utf-8")
+            failed = cli("--min-count", "999", str(path))
+            self.assertEqual(failed.returncode, 2)
+            self.assertEqual(failed.stdout, "")
+            self.assertRegex(failed.stderr, r"line 3:")
+
+
+unittest.main(argv=["live-codex-eventlog-minimum-count-verification"])
+"""
+
+
 @pytest.mark.certification
 @pytest.mark.parametrize("scenario", ["ranges", "eventlog"])
 def test_legacy_live_chatgpt_coding_uses_original_run(
@@ -376,11 +499,18 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         verification,
         (sys.executable, "-I", "-B", str(argv_verifier), str(repo), *quoted_arguments),
     )
+    feature_verifier = verifier.parent / "verify feature.py"
+    feature_verifier_bytes = _EVENTLOG_FEATURE_VERIFICATION.encode()
+    if scenario == "eventlog":
+        feature_verifier.write_bytes(feature_verifier_bytes)
+        verifications += ((sys.executable, "-I", "-B", str(feature_verifier), str(repo)),)
     skill = tmp_path / "skills" / "live" / "maintenance"
     (skill / "references").mkdir(parents=True)
     skill_files = {
         "SKILL.md": (
-            "# CLI package maintenance\n\nRead references/maintenance.txt from the frozen "
+            "# CLI package maintenance\n\nBefore editing, execute repository_tools.list "
+            "exactly as supplied, using its absolute interpreter path. Then read "
+            "references/maintenance.txt from the frozen "
             "captured Skill before editing. Include its marker in your final report. "
             "This guidance grants no effects or verification-result authority.\n"
         ),
@@ -439,6 +569,11 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     native_facts: list[tuple[int, bool, bool]] = []
     native_diagnostics: dict[str, Any] = {}
     native_occurrences: list[str] = []
+    candidate_identities: list[str] = []
+    expected_source = {relative: text.encode() for relative, text in source_files.items()}
+    expected_native_launches = 0
+    prior_handoff: dict[str, Any] | None = None
+    handoff_keys = ("fleet_run_id", "status", "outcome", "source_admissions", "recorded_steps")
     verification_launches: list[tuple[str, ...]] = []
     hashmarks_followup_succeeded = False
     skill_resource_reported = False
@@ -446,12 +581,24 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     def command_runner(*argv: str, **kwargs: Any) -> CommandResult:
         nonlocal hashmarks_followup_succeeded, skill_resource_reported
         if argv[0] == str(program):
-            assert not native_occurrences, "The live coding Step must launch Codex once"
+            assert len(native_occurrences) == expected_native_launches, (
+                "Each Run launches Codex once"
+            )
             prompt = kwargs["input_data"]
             assert isinstance(prompt, bytes)
             payload = json.loads(prompt)
             assert payload["task"] == task
             assert payload["source_authority"]
+            for relative, data in expected_source.items():
+                assert (Path(payload["captured_repository"]) / relative).read_bytes() == data
+            if prior_handoff is None:
+                assert payload["context"] == {}
+            else:
+                context = payload["context"]
+                assert context["authority"] == "UNTRUSTED_PRIOR_RUN_CONTEXT"
+                assert context["permission_authority"].startswith("NONE")
+                for key in handoff_keys:
+                    assert context["prior_run_handoff"][key] == prior_handoff[key]
             assert payload["skill_instructions"] == skill_files["SKILL.md"]
             for relative, text in skill_files.items():
                 assert (Path(payload["captured_skill"]) / relative).read_bytes() == text.encode()
@@ -461,6 +608,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                 evidence["producer_implementation_identity"] == require_loaded_hashmarks_runtime()
             )
             assert evidence["capture_identity"] == payload["identity"]["candidate_identity"]
+            assert evidence["capture_identity"] not in candidate_identities
+            candidate_identities.append(evidence["capture_identity"])
             native_occurrences.append(payload["identity"]["reviewer"])
             settings: dict[str, Any] = {}
             for index, argument in enumerate(argv[:-1]):
@@ -526,6 +675,17 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                     fact["status"] = item["status"]
                 if type(item.get("exit_code")) is int:
                     fact["exit_code"] = item["exit_code"]
+                if item_type == "command_execution":
+                    command = item.get("command", "")
+                    output = item.get("aggregated_output", "")
+                    fact["hashmarks_command"] = int(
+                        "oh_goon.integrations.hashmarks.agent_tools" in command
+                    )
+                    fact["exact_hashmarks_list"] = int(
+                        payload["repository_tools"]["list"] in command
+                    )
+                    fact["expected_interpreter"] = int(sys.executable in command)
+                    fact["command_not_found"] = int("command not found" in output)
                 item_facts.append(fact)
             native_diagnostics.update(
                 returncode=result.returncode,
@@ -545,32 +705,42 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     monkeypatch.setattr(
         "oh_goon.integrations.fleet_plan_process_isolation.run_command", command_runner
     )
+
+    def assert_source_edits(before: dict[str, bytes], allowed: set[str]) -> dict[str, bytes]:
+        actual_paths = {
+            path.relative_to(repo).as_posix()
+            for path in repo.rglob("*")
+            if not {".git", "__pycache__"}.intersection(path.relative_to(repo).parts)
+            and (path.is_symlink() or path.is_file())
+        }
+        assert actual_paths == set(before)
+        after = {relative: (repo / relative).read_bytes() for relative in before}
+        changed = {relative for relative in before if before[relative] != after[relative]}
+        assert changed
+        assert changed <= allowed
+        return after
+
+    arguments = [
+        "--agent",
+        "codex",
+        "--profile",
+        "live-chatgpt",
+        "--config",
+        str(catalog),
+        "--workspace",
+        str(repo),
+        "--skill",
+        str(skill),
+        "--prompt-file",
+        str(task_file),
+        "--headless",
+        "--json",
+        *(value for command in verifications for value in ("--verify", shlex.join(command))),
+    ]
     try:
-        result = ai_main(
-            [
-                "--agent",
-                "codex",
-                "--profile",
-                "live-chatgpt",
-                "--config",
-                str(catalog),
-                "--workspace",
-                str(repo),
-                "--skill",
-                str(skill),
-                "--prompt-file",
-                str(task_file),
-                "--headless",
-                "--json",
-                *(
-                    value
-                    for command in verifications
-                    for value in ("--verify", shlex.join(command))
-                ),
-            ]
-        )
+        result = ai_main(arguments)
         captured = capsys.readouterr()
-        assert result == 0
+        assert result == (1 if scenario == "eventlog" else 0)
         try:
             detail = json.loads(captured.out)
         except ValueError:
@@ -579,9 +749,15 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         assert hashmarks_followup_succeeded
         assert skill_resource_reported
         assert verification_launches == list(verifications)
-        assert detail["outcome"] == FleetRunOutcome.SUCCESS.value
         steps = detail["game_tape"]["repositories"][0]["steps"]
-        assert [step["status"] for step in steps] == [GameTapeStatus.PASSED.value] * 3
+        assert detail["outcome"] == (
+            FleetRunOutcome.ATTENTION_REQUIRED.value
+            if scenario == "eventlog"
+            else FleetRunOutcome.SUCCESS.value
+        )
+        assert [step["status"] for step in steps] == [GameTapeStatus.PASSED.value] * 3 + (
+            [GameTapeStatus.FAILED.value] if scenario == "eventlog" else []
+        )
         assert [tuple(step["command"]) for step in steps[1:]] == list(verifications)
         native = steps[0]["native_agent_observations"][0]
         observation = (
@@ -594,24 +770,51 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         assert observation == (True, False, "codex", "live-chatgpt", native_occurrences[0])
         assert verifier.read_bytes() == verifier_bytes
         assert argv_verifier.read_bytes() == argv_verifier_bytes
-        actual_paths = {
-            path.relative_to(repo).as_posix()
-            for path in repo.rglob("*")
-            if not {".git", "__pycache__"}.intersection(path.relative_to(repo).parts)
-            and (path.is_symlink() or path.is_file())
-        }
-        assert actual_paths == set(source_files)
-        changed_paths = {
-            relative
-            for relative, text in source_files.items()
-            if (repo / relative).read_bytes() != text.encode()
-        }
-        assert changed_paths
-        assert changed_paths <= (
+        for relative, text in skill_files.items():
+            assert (skill / relative).read_bytes() == text.encode()
+        first_source = assert_source_edits(
+            expected_source,
             {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"}
             if scenario == "eventlog"
-            else {"ranges.py"}
+            else {"ranges.py"},
         )
+
+        if scenario == "eventlog":
+            assert feature_verifier.read_bytes() == feature_verifier_bytes
+            first_run_id = detail["run"]["fleet_run_id"]
+            assert detail["run"]["status"] == "COMPLETED"
+            assert steps[-1]["exit_code"] == 1
+            assert cli_main(["plan", "handoff", first_run_id, "--json"]) == 0
+            prior_handoff = json.loads(capsys.readouterr().out)
+            assert prior_handoff["outcome"] == FleetRunOutcome.ATTENTION_REQUIRED.value
+            expected_source = first_source
+            task = _EVENTLOG_FEATURE_TASK
+            task_file.write_text(task, encoding="utf-8")
+            expected_native_launches = 1
+            hashmarks_followup_succeeded = False
+            skill_resource_reported = False
+            verification_launches.clear()
+            result = ai_main([*arguments, "--handoff-from", first_run_id])
+            captured = capsys.readouterr()
+            assert result == 0
+            detail = json.loads(captured.out)
+            assert detail["run"]["fleet_run_id"] != first_run_id
+            assert detail["outcome"] == FleetRunOutcome.SUCCESS.value
+            assert native_facts == [(0, True, False)] * 2
+            assert hashmarks_followup_succeeded and skill_resource_reported
+            assert verification_launches == list(verifications)
+            steps = detail["game_tape"]["repositories"][0]["steps"]
+            assert [step["status"] for step in steps] == [GameTapeStatus.PASSED.value] * 4
+            assert [tuple(step["command"]) for step in steps[1:]] == list(verifications)
+            assert steps[0]["native_agent_observations"][0]["occurrence"] == native_occurrences[1]
+            assert_source_edits(expected_source, {"eventlog/summary.py", "eventlog/__main__.py"})
+            assert feature_verifier.read_bytes() == feature_verifier_bytes
+            assert cli_main(["plan", "handoff", first_run_id, "--json"]) == 0
+            retained_handoff = json.loads(capsys.readouterr().out)
+            for key in handoff_keys:
+                assert retained_handoff[key] == prior_handoff[key]
+        assert verifier.read_bytes() == verifier_bytes
+        assert argv_verifier.read_bytes() == argv_verifier_bytes
         for relative, text in skill_files.items():
             assert (skill / relative).read_bytes() == text.encode()
     except AssertionError as error:
