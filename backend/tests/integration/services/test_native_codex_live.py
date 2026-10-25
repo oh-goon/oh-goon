@@ -1621,10 +1621,244 @@ console.log('Binary HTTP range contract verified through native Node');
 """
 
 
+_FRAMES_NODE_SOURCES: dict[str, str] = {
+    "telemetry/codec.mjs": """export function encodeFrame(value) {
+    const text = JSON.stringify(value);
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(text.length);
+    return Buffer.concat([header, Buffer.from(text)]);
+}
+
+export async function* decodeFrames(source, maxBytes = 1048576) {
+    for await (const chunk of source) {
+        yield JSON.parse(chunk.subarray(4).toString('utf8'));
+    }
+}
+""",
+    "telemetry/cli.mjs": """import fs from 'node:fs';
+import { decodeFrames } from './codec.mjs';
+
+try {
+    const source = process.argv[2] ? fs.createReadStream(process.argv[2]) : process.stdin;
+    for await (const value of decodeFrames(source)) console.log(value);
+} catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+}
+""",
+    "README.md": (
+        "# Framed telemetry\n\nA dependency-free ESM codec and streaming CLI for "
+        "four-byte big-endian length-prefixed UTF-8 JSON messages.\n"
+    ),
+}
+
+_FRAMES_NODE_TASK = """Repair telemetry/codec.mjs and telemetry/cli.mjs using only native Node.js
+standard libraries. Keep their exports and change only those two files. Before editing,
+execute the exact repository_tools.list Hashmarks command supplied in the instructions
+and read the frozen Skill resource. Implement this application protocol:
+
+encodeFrame(value) uses native JSON.stringify semantics. Reject values whose serialization
+is undefined (such as undefined/functions/symbols), and propagate native serialization
+errors. Return one Buffer: four-byte unsigned big-endian payload BYTE length followed by
+the UTF-8 JSON bytes. Unicode length must be byte length, not JavaScript string length.
+
+decodeFrames(source, maxBytes=1048576) is an async generator over an async or sync iterable
+of Buffer/Uint8Array chunks. Respect typed-array byteOffset/byteLength; reject other chunk
+types with TypeError. Never modify supplied chunks. Yield one native JSON.parse value per
+frame, in order, including null, booleans, strings, arrays and objects. This generator API
+can yield null normally; do not substitute Node stream EOF semantics for JSON values.
+maxBytes must be an integer from 1 through 4294967295; reject invalid limits with TypeError
+or RangeError on the first pull, before consuming source input. A header length of zero or
+greater than maxBytes throws RangeError immediately after the four header bytes arrive,
+without pulling another source chunk for that frame. Support empty chunks, every possible
+header/payload split, and multiple frames in one chunk. Decode strict UTF-8 without
+replacement, reject BOM-prefixed JSON, and let native JSON.parse own JSON syntax/values.
+Clean EOF between frames is valid; incomplete headers or payloads at EOF are errors.
+Complete earlier messages may be yielded before a later error; never yield the invalid
+frame or subsequent frames. Yield each complete frame before examining a later frame in
+the same chunk, and before pulling another source chunk. Retain only an unfinished tail
+between source pulls, rather than accumulating decoded history. Use native async-iteration
+lifetime semantics: consumer early return and parser errors must close upstream iteration
+and await its cleanup; upstream errors must propagate without being replaced by EOF errors.
+
+CLI: node telemetry/cli.mjs [INPUT] reads the optional binary file or stdin, accepts at
+most one file argument, and writes native JSON.stringify(value) plus newline for each
+decoded message. Success exits 0 with no stderr. Usage, file, decoding or stream errors
+exit 2 with a diagnostic on stderr. Preserve complete earlier output lines on late error;
+write no invalid/later record, and handle native stdout backpressure/flush correctly.
+Repeated stdout drains must not retain obsolete listeners or produce listener warnings.
+No npm dependencies, network access, package manifests or extra source files are needed.
+Independent verification runs after your coding Step using the selected public Node.
+"""
+
+_FRAMES_NODE_VERIFICATION = r"""import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const root = process.argv[2];
+const { encodeFrame, decodeFrames } = await import(
+    pathToFileURL(path.join(root, 'telemetry/codec.mjs')));
+function wire(payload) {
+    const bytes = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(bytes.length);
+    return Buffer.concat([header, bytes]);
+}
+async function collect(source, maxBytes) {
+    const values = [];
+    try {
+        for await (const value of decodeFrames(source, maxBytes)) values.push(value);
+        return {values};
+    } catch (error) { return {values, error}; }
+}
+const values = [null, false, 0, 'café 雪 🌍', [1, null, 'x'],
+    {device: 'α', reading: 2.5}, JSON.parse('{"__proto__":{"ok":true}}'), '\ud800'];
+for (const value of values) {
+    const text = JSON.stringify(value);
+    const encoded = encodeFrame(value);
+    assert(Buffer.isBuffer(encoded));
+    assert.equal(encoded.readUInt32BE(0), Buffer.byteLength(text));
+    assert.deepEqual(encoded, wire(text));
+}
+for (const value of [undefined, () => 1, Symbol('x'), 1n]) {
+    assert.throws(() => encodeFrame(value), TypeError);
+}
+const cyclic = {}; cyclic.self = cyclic;
+assert.throws(() => encodeFrame(cyclic), TypeError);
+const packet = Buffer.concat(values.map(value => wire(JSON.stringify(value))));
+const before = Buffer.from(packet);
+for (let split = 0; split <= packet.length; split++) {
+    const chunks = [Buffer.alloc(0), packet.subarray(0, split),
+        new Uint8Array(0), packet.subarray(split)];
+    assert.deepEqual(await collect(chunks), {values});
+}
+assert.deepEqual(await collect([...packet].map(byte => Buffer.from([byte]))), {values});
+const wrapped = Buffer.concat([Buffer.from([255]), packet, Buffer.from([255])]);
+const view = new Uint8Array(wrapped.buffer, wrapped.byteOffset + 1, packet.length);
+assert.deepEqual(await collect([view]), {values});
+assert.deepEqual(packet, before);
+assert.deepEqual(wrapped.subarray(1, -1), packet);
+assert.deepEqual(await collect([]), {values: []});
+assert.deepEqual(await collect([wire(' \n-0\t')]), {values: [-0]});
+assert.deepEqual(await collect([wire('null')], 4), {values: [null]});
+assert.deepEqual(await collect([wire('0')], 1), {values: [0]});
+assert.deepEqual(await collect([wire('null')], 4294967295), {values: [null]});
+for (const maxBytes of [0, -1, 1.5, NaN, Infinity, 4294967296, '64', null]) {
+    let pulled = false;
+    async function* unused() { pulled = true; yield packet; }
+    const result = await collect(unused(), maxBytes);
+    assert(result.error instanceof TypeError || result.error instanceof RangeError);
+    assert.equal(pulled, false);
+    assert.deepEqual(result.values, []);
+}
+for (const [length, maxBytes] of [[0, 32], [33, 32], [1048577, undefined]]) {
+    let pulledPayload = false, closed = 0;
+    const header = Buffer.alloc(4); header.writeUInt32BE(length);
+    async function* bounded() {
+        try { yield header; pulledPayload = true; yield Buffer.alloc(length); }
+        finally { await Promise.resolve(); closed++; }
+    }
+    const result = await collect(bounded(), maxBytes);
+    assert(result.error instanceof RangeError);
+    assert.deepEqual(result.values, []);
+    assert.equal(pulledPayload, false);
+    assert.equal(closed, 1);
+}
+const prefix = wire('{"ok":true}');
+const invalid = [wire(Buffer.from([34, 195, 40, 34])), wire('falsex'),
+    wire(Buffer.concat([Buffer.from([239, 187, 191]), Buffer.from('null')])),
+    ...[1, 2, 3].map(n => Buffer.alloc(n)), wire('"unfinished"').subarray(0, -1)];
+for (const bad of invalid) {
+    const result = await collect([Buffer.concat([prefix, bad])]);
+    assert.deepEqual(result.values, [{ok: true}]);
+    assert(result.error instanceof Error);
+}
+for (const bad of ['text', [1, 2], new Uint16Array([1]), null]) {
+    let closed = 0;
+    async function* wrongType() {
+        try { yield prefix; yield bad; yield prefix; }
+        finally { await Promise.resolve(); closed++; }
+    }
+    const result = await collect(wrongType());
+    assert.deepEqual(result.values, [{ok: true}]);
+    assert(result.error instanceof TypeError);
+    assert.equal(closed, 1);
+}
+for (const cancel of [false, true]) {
+    let pulledNext = false, closed = 0;
+    async function* lazy() {
+        try {
+            yield Buffer.concat([prefix, Buffer.alloc(4)]);
+            pulledNext = true; yield prefix;
+        } finally { await new Promise(resolve => setTimeout(resolve, 2)); closed++; }
+    }
+    const decoder = decodeFrames(lazy());
+    assert.deepEqual(await decoder.next(), {value: {ok: true}, done: false});
+    assert.equal(pulledNext, false);
+    if (cancel) await decoder.return();
+    else await assert.rejects(() => decoder.next(), RangeError);
+    assert.equal(closed, 1);
+    assert.equal(pulledNext, false);
+}
+const upstreamError = new Error('upstream canary');
+async function* failingSource() { yield Buffer.alloc(2); throw upstreamError; }
+assert.equal((await collect(failingSource())).error, upstreamError);
+
+const scratch = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'frames-'));
+try {
+    const cli = path.join(root, 'telemetry/cli.mjs');
+    const run = (input, args = []) => spawnSync(process.execPath, [cli, ...args],
+        {cwd: root, input, encoding: 'utf8', timeout: 10000, maxBuffer: 8 * 1024 * 1024});
+    const output = values.map(value => JSON.stringify(value) + '\n').join('');
+    const stdin = run(packet);
+    assert.equal(stdin.status, 0, stdin.stderr);
+    assert.equal(stdin.stdout, output);
+    assert.equal(stdin.stderr, '');
+    const file = path.join(scratch, 'café telemetry.bin');
+    fs.writeFileSync(file, packet);
+    const fromFile = run(undefined, [file]);
+    assert.equal(fromFile.status, 0, fromFile.stderr);
+    assert.equal(fromFile.stdout, output);
+    assert.equal(fromFile.stderr, '');
+    const empty = run(Buffer.alloc(0));
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.equal(empty.stdout, '');
+    assert.equal(empty.stderr, '');
+    for (const args of [[path.join(scratch, 'missing')], [file, file]]) {
+        const result = run(Buffer.alloc(0), args);
+        assert.equal(result.status, 2);
+        assert.equal(result.stdout, '');
+        assert(result.stderr.trim());
+    }
+    const big = '雪'.repeat(100000);
+    const late = run(Buffer.concat([wire(JSON.stringify(big)), Buffer.alloc(4), prefix]));
+    assert.equal(late.status, 2);
+    assert.equal(late.stdout, JSON.stringify(big) + '\n');
+    assert(late.stderr.trim());
+    const repeated = run(Buffer.concat(Array(16).fill(wire(JSON.stringify(big)))));
+    assert.equal(repeated.status, 0, repeated.stderr);
+    assert.equal(repeated.stdout, (JSON.stringify(big) + '\n').repeat(16));
+    assert.equal(repeated.stderr, '');
+} finally { fs.rmSync(scratch, {recursive: true, force: true}); }
+console.log('Framed JSON stream, cancellation and binary CLI contract verified');
+"""
+
+
 @pytest.mark.certification
 @pytest.mark.parametrize(
     "scenario",
-    ["ranges", "eventlog", "stocktake", "deploy-order", "ledger", "safe-zip", "http-node"],
+    [
+        "ranges",
+        "eventlog",
+        "stocktake",
+        "deploy-order",
+        "ledger",
+        "safe-zip",
+        "http-node",
+        "frames-node",
+    ],
 )
 def test_legacy_live_chatgpt_coding_uses_original_run(
     tmp_path: Path,
@@ -1640,10 +1874,10 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     home = Path(account_home).resolve(strict=True)
     assert home.is_dir()
     node_program: Path | None = None
-    if scenario == "http-node":
+    if scenario in {"http-node", "frames-node"}:
         node_executable = os.environ.get("OH_GOON_NATIVE_NODE")
         if not node_executable:
-            pytest.skip("Select an installed public Node.js executable for the HTTP case")
+            pytest.skip("Select an installed public Node.js executable for the Node cases")
         node_program = Path(node_executable).resolve(strict=True)
         assert not node_program.is_relative_to(home)
     model = os.environ.get("OH_GOON_LIVE_CODEX_MODEL", "gpt-6-luna")
@@ -1657,6 +1891,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         "ledger": _LEDGER_SOURCES,
         "safe-zip": _SAFE_ZIP_SOURCES,
         "http-node": _HTTP_NODE_SOURCES,
+        "frames-node": _FRAMES_NODE_SOURCES,
     }[scenario]
     for relative, text in source_files.items():
         path = repo / relative
@@ -1678,6 +1913,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             "ledger": _LEDGER_VERIFICATION,
             "safe-zip": _SAFE_ZIP_VERIFICATION,
             "http-node": _HTTP_NODE_VERIFICATION,
+            "frames-node": _FRAMES_NODE_VERIFICATION,
         }[scenario],
         encoding="utf-8",
     )
@@ -1770,6 +2006,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         task = _SAFE_ZIP_TASK
     elif scenario == "http-node":
         task = _HTTP_NODE_TASK + f"\nSelected public Node executable: {node_program}\n"
+    elif scenario == "frames-node":
+        task = _FRAMES_NODE_TASK + f"\nSelected public Node executable: {node_program}\n"
     task_file = tmp_path / "task.txt"
     task_file.write_text(task, encoding="utf-8")
     catalog = tmp_path / "providers.json"
@@ -2083,6 +2321,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                 "ledger": {"ledger/records.py", "ledger/database.py", "ledger/__main__.py"},
                 "safe-zip": {"bundle_unpack/extract.py", "bundle_unpack/__main__.py"},
                 "http-node": {"byte_asset/range.mjs", "byte_asset/handler.mjs"},
+                "frames-node": {"telemetry/codec.mjs", "telemetry/cli.mjs"},
                 "deploy-order": {"deploy_order/graph.py", "deploy_order/__main__.py"},
                 "eventlog": {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"},
                 "stocktake": {
