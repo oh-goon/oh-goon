@@ -371,7 +371,7 @@ def codex_login_command(
         f"model_instructions_file={json.dumps(str(instructions), ensure_ascii=False)}",
         'approval_policy="never"',
         *permission_settings,
-        f'projects.{json.dumps(str(workspace), ensure_ascii=False)}.trust_level="untrusted"',
+        f'projects={{{json.dumps(str(workspace), ensure_ascii=False)}={{trust_level="untrusted"}}}}',
         'web_search="disabled"',
         'shell_environment_policy.inherit="none"',
         f'shell_environment_policy.set={{PATH="/usr/local/bin:/usr/bin:/bin",TMPDIR={json.dumps(temporary_directory, ensure_ascii=False)}}}',

@@ -61,7 +61,7 @@ def test_installed_codex_retains_instructions_across_followup_and_compaction(
     if authentication == "chatgpt" and transport == "http" and sys.version_info < (3, 14):
         pytest.skip("Native compressed ChatGPT fixture requires Python 3.14 compression.zstd")
     program = Path(executable).resolve(strict=True)
-    repo = tmp_path / "repos" / "app"
+    repo = tmp_path / "repos" / "app.with-dots"
     repo.mkdir(parents=True)
     (repo / "code.py").write_text("VALUE = 41\n")
     (repo / "verify.py").write_text("from code import VALUE\nassert VALUE == 42\n")

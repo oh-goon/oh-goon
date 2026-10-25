@@ -1094,8 +1094,332 @@ unittest.main(argv=['live-codex-sqlite-ledger-verification'])
 """
 
 
+_SAFE_ZIP_SOURCES = {
+    "bundle_unpack/__init__.py": "",
+    "bundle_unpack/extract.py": """import zipfile
+
+
+def extract_archive(archive, destination, max_bytes=1048576):
+    with zipfile.ZipFile(archive) as source:
+        source.extractall(destination)
+        return sorted(source.namelist())
+""",
+    "bundle_unpack/__main__.py": """import argparse
+import json
+
+from .extract import extract_archive
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('archive')
+    parser.add_argument('destination')
+    parser.add_argument('--max-bytes', type=int, default=1048576)
+    args = parser.parse_args()
+    print(json.dumps(extract_archive(args.archive, args.destination, args.max_bytes)))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
+""",
+    "README.md": """# Validated bundle extraction
+
+Repair this standard-library ZIP extraction package for a trusted local destination.
+Native zipfile owns archive decoding, decompression and CRC validation; use it.
+
+`bundle_unpack.extract.extract_archive(archive, destination, max_bytes=1048576)`
+reads a ZIP and returns a sorted list of extracted relative file paths. Directory
+entries are created but omitted from the returned list. Keep binary contents exact
+and support Unicode names, nested files, empty files and explicit empty directories.
+The archive itself must remain unchanged. Close owned files/archive handles.
+
+The destination must already be a real empty directory. Reject a symlink, file,
+missing directory or nonempty destination. This task assumes no concurrent writer;
+it does not require adversarial race/custody guarantees or rollback of OS write
+failures after validation.
+
+Before the first destination effect, validate the entire archive, including native
+decompression/CRC checks. Policy or archive-validation failures must leave the
+destination contents unchanged. Use bounded staging if necessary. `max_bytes` must
+be a nonnegative integer (not bool). The total uncompressed file bytes may not
+exceed it; a zero limit permits empty files/directories. Do not accumulate bytes
+past the bound. Validation/policy failures raise ValueError; native archive or I/O
+errors may propagate.
+
+Member names are nonempty portable relative POSIX paths. Reject leading slashes,
+backslashes, colons, empty/dot/dot-dot components, and repeated separators. One
+trailing slash denotes a directory; directory payloads must be empty. Reject
+symlink/special-file Unix modes and inconsistent file/directory modes. Ordinary
+ZIP entries with unspecified Unix type bits are allowed. Reject duplicate canonical
+member paths, including repeated directories, and file/directory prefix conflicts
+regardless of archive order. An explicit directory plus its child file is valid.
+
+`python -m bundle_unpack ARCHIVE DEST [--max-bytes N]` prints one JSON list plus
+newline on success, exits 0 and emits no stderr. All policy, archive, input and OS
+errors exit 2 with a useful diagnostic on stderr and no stdout. Preserve the public
+function and CLI. Use only the Python standard library.
+""",
+}
+
+_SAFE_ZIP_TASK = (
+    "Repair the validated ZIP extraction package according to README.md. Use native "
+    "zipfile to validate/decode members, validate every member and byte bound before "
+    "writing the destination, and fix CLI success/error handling. In particular, reject "
+    "both orders of a file/directory prefix conflict: node followed by node/child, or "
+    "node/child followed by the regular file node; neither may create output. Keep the public API "
+    "and use only the standard library. Before editing, execute the exact "
+    "repository_tools.list Hashmarks command from the supplied instructions. Change "
+    "only bundle_unpack/extract.py and bundle_unpack/__main__.py. Independent "
+    "verification creates its own temporary archives and destinations after your Step."
+)
+
+_SAFE_ZIP_VERIFICATION = r"""import json
+import pathlib
+import stat
+import struct
+import subprocess
+import sys
+import tempfile
+import unittest
+import zipfile
+
+repository = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repository))
+from bundle_unpack.extract import extract_archive
+
+
+def archive(path, members, compression=zipfile.ZIP_DEFLATED):
+    with zipfile.ZipFile(path, 'w', compression=compression) as source:
+        for name, data in members:
+            source.writestr(name, data)
+    return path
+
+
+def cli(source, destination, *arguments):
+    return subprocess.run(
+        [sys.executable, '-I', '-B', '-c',
+         "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));runpy.run_module('bundle_unpack',run_name='__main__')",
+         str(repository), str(source), str(destination), *arguments],
+        text=True, capture_output=True, timeout=10,
+    )
+
+
+class BundleExtractionContract(unittest.TestCase):
+    def test_valid_binary_unicode_directories_and_exact_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            destination = root / 'output'
+            destination.mkdir()
+            data = b'\x00\xff\r\n'
+            regular = zipfile.ZipInfo('regular.txt')
+            regular.create_system = 3
+            regular.external_attr = (stat.S_IFREG | 0o644) << 16
+            source = archive(root / 'bundle.zip', [
+                ('folder/', b''), ('empty/', b''), ('folder/raw.bin', data),
+                ('café 雪.txt', 'hèj'.encode('utf-8')), ('empty-file', b''), (regular, b'ok')])
+            before = source.read_bytes()
+            expected = ['café 雪.txt', 'empty-file', 'folder/raw.bin', 'regular.txt']
+            self.assertEqual(extract_archive(source, destination, max_bytes=10), expected)
+            self.assertEqual((destination / 'folder/raw.bin').read_bytes(), data)
+            self.assertEqual((destination / 'café 雪.txt').read_bytes(), 'hèj'.encode('utf-8'))
+            self.assertEqual((destination / 'empty-file').read_bytes(), b'')
+            self.assertEqual((destination / 'regular.txt').read_bytes(), b'ok')
+            self.assertTrue((destination / 'empty').is_dir())
+            self.assertEqual(sorted(path.relative_to(destination).as_posix()
+                                    for path in destination.rglob('*') if path.is_file()), expected)
+            self.assertEqual(source.read_bytes(), before)
+
+    def test_child_before_explicit_parent_directory_is_valid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            destination = root / 'output'
+            destination.mkdir()
+            source = archive(root / 'bundle.zip', [('folder/file', b'ok'), ('folder/', b'')])
+            self.assertEqual(extract_archive(source, destination), ['folder/file'])
+            self.assertEqual((destination / 'folder/file').read_bytes(), b'ok')
+
+    def test_default_byte_limit_rejects_oversize_before_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            destination = root / 'output'
+            destination.mkdir()
+            source = archive(root / 'bundle.zip', [('first', b'ok'), ('oversize', b'x' * (1048576 + 1))])
+            with self.assertRaises(ValueError):
+                extract_archive(source, destination)
+            self.assertEqual(list(destination.iterdir()), [])
+
+    def test_empty_archive_and_zero_byte_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for index, members in enumerate(([], [('zero', b''), ('empty/', b'')])):
+                destination = root / str(index)
+                destination.mkdir()
+                source = archive(root / f'{index}.zip', members)
+                self.assertEqual(extract_archive(source, destination, max_bytes=0),
+                                 [] if index == 0 else ['zero'])
+
+    def test_late_invalid_names_leave_destination_and_outside_unchanged(self):
+        invalid = ['../outside.txt', '/absolute.txt', 'a/../x', './x', 'a/./x',
+                   'a//x', 'a\\x', 'C:drive.txt', 'a:stream', '.', '..', 'a//']
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            outside = root / 'outside.txt'
+            outside.write_bytes(b'keep')
+            for index, name in enumerate(invalid):
+                with self.subTest(name=name):
+                    destination = root / f'out{index}'
+                    destination.mkdir()
+                    source = archive(root / f'{index}.zip', [('first.txt', b'good'), (name, b'bad')])
+                    before = source.read_bytes()
+                    with self.assertRaises(ValueError):
+                        extract_archive(source, destination)
+                    self.assertEqual(list(destination.iterdir()), [])
+                    self.assertEqual(outside.read_bytes(), b'keep')
+                    self.assertEqual(source.read_bytes(), before)
+
+    def test_duplicate_and_prefix_conflicts_are_order_independent(self):
+        cases = [
+            [('same', b'a'), ('same', b'b')],
+            [('same/', b''), ('same/', b'')],
+            [('node', b'a'), ('node/child', b'b')],
+            [('node/child', b'b'), ('node', b'a')],
+            [('node/', b''), ('node', b'a')],
+            [('node', b'a'), ('node/', b'')],
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for index, members in enumerate(cases):
+                with self.subTest(members=members):
+                    destination = root / f'out{index}'
+                    destination.mkdir()
+                    source = root / f'{index}.zip'
+                    if index < 2:
+                        with self.assertWarnsRegex(UserWarning, 'Duplicate name'):
+                            archive(source, members)
+                    else:
+                        archive(source, members)
+                    with self.assertRaises(ValueError):
+                        extract_archive(source, destination)
+                    self.assertEqual(list(destination.iterdir()), [])
+
+    def test_unix_special_modes_and_directory_payload_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            cases = [(stat.S_IFLNK | 0o777, 'link', b'../outside'),
+                     (stat.S_IFIFO | 0o600, 'fifo', b''),
+                     (stat.S_IFDIR | 0o755, 'wrong', b''),
+                     (stat.S_IFREG | 0o644, 'wrong/', b''),
+                     (stat.S_IFDIR | 0o755, 'directory/', b'payload')]
+            for index, (mode, name, data) in enumerate(cases):
+                with self.subTest(mode=mode, name=name):
+                    member = zipfile.ZipInfo(name)
+                    member.create_system = 3
+                    member.external_attr = mode << 16
+                    destination = root / f'out{index}'
+                    destination.mkdir()
+                    source = archive(root / f'{index}.zip', [('first', b'good'), (member, data)])
+                    with self.assertRaises(ValueError):
+                        extract_archive(source, destination)
+                    self.assertEqual(list(destination.iterdir()), [])
+
+    def test_invalid_limits_and_total_uncompressed_byte_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = archive(root / 'bundle.zip', [('first', b'123456'), ('last', b'abcdef')])
+            empty = archive(root / 'empty.zip', [])
+            for index, limit in enumerate([-1, True, False, 1.5, '12', None, 0, 6, 11]):
+                with self.subTest(limit=limit):
+                    destination = root / f'out{index}'
+                    destination.mkdir()
+                    with self.assertRaises(ValueError):
+                        extract_archive(empty if index < 6 else source, destination, max_bytes=limit)
+                    self.assertEqual(list(destination.iterdir()), [])
+
+    def test_native_crc_failure_is_detected_before_destination_effects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = archive(root / 'bad.zip', [('first', b'good'), ('last', b'corrupt-me')],
+                             compression=zipfile.ZIP_STORED)
+            with zipfile.ZipFile(source) as native:
+                self.assertIsNone(native.testzip())
+                offset = native.getinfo('last').header_offset
+            data = bytearray(source.read_bytes())
+            name_size, extra_size = struct.unpack_from('<HH', data, offset + 26)
+            data[offset + 30 + name_size + extra_size] ^= 1
+            source.write_bytes(data)
+            destination = root / 'output'
+            destination.mkdir()
+            with self.assertRaises((ValueError, zipfile.BadZipFile)):
+                extract_archive(source, destination)
+            self.assertEqual(list(destination.iterdir()), [])
+
+    def test_destination_must_be_real_existing_and_empty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = archive(root / 'bundle.zip', [('keep.txt', b'replace')])
+            nonempty = root / 'nonempty'
+            nonempty.mkdir()
+            keep = nonempty / 'keep.txt'
+            keep.write_bytes(b'original')
+            target_file = root / 'file'
+            target_file.write_bytes(b'original')
+            missing = root / 'missing'
+            for destination in (nonempty, target_file, missing):
+                with self.subTest(destination=destination), self.assertRaises((ValueError, OSError)):
+                    extract_archive(source, destination)
+            self.assertEqual(keep.read_bytes(), b'original')
+            self.assertEqual(target_file.read_bytes(), b'original')
+            self.assertFalse(missing.exists())
+
+    def test_symlink_destination_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = archive(root / 'bundle.zip', [('file', b'content')])
+            real = root / 'real'
+            real.mkdir()
+            link = root / 'link'
+            link.symlink_to(real, target_is_directory=True)
+            with self.assertRaises((ValueError, OSError)):
+                extract_archive(source, link)
+            self.assertEqual(list(real.iterdir()), [])
+            self.assertTrue(link.is_symlink())
+
+    def test_cli_unicode_success_and_atomic_error_exits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = archive(root / 'café bundle.zip', [('雪.bin', b'\x00\xff')])
+            destination = root / 'output with spaces'
+            destination.mkdir()
+            result = cli(source, destination, '--max-bytes', '2')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, '')
+            self.assertTrue(result.stdout.endswith('\n'))
+            self.assertEqual(json.loads(result.stdout), ['雪.bin'])
+            self.assertEqual((destination / '雪.bin').read_bytes(), b'\x00\xff')
+            bad = archive(root / 'bad.zip', [('first', b'ok'), ('../late', b'no')])
+            malformed = root / 'malformed.zip'
+            malformed.write_bytes(b'not a zip')
+            cases = [(bad, []), (malformed, []), (source, ['--max-bytes', '1']),
+                     (source.with_name('missing.zip'), []), (source, ['--max-bytes', '-1'])]
+            for index, (path, arguments) in enumerate(cases):
+                target = root / f'bad-output{index}'
+                target.mkdir()
+                result = cli(path, target, *arguments)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, '')
+                self.assertTrue(result.stderr.strip())
+                self.assertEqual(list(target.iterdir()), [])
+
+
+unittest.main(argv=['live-codex-zip-extraction-verification'])
+"""
+
+
 @pytest.mark.certification
-@pytest.mark.parametrize("scenario", ["ranges", "eventlog", "stocktake", "deploy-order", "ledger"])
+@pytest.mark.parametrize(
+    "scenario", ["ranges", "eventlog", "stocktake", "deploy-order", "ledger", "safe-zip"]
+)
 def test_legacy_live_chatgpt_coding_uses_original_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1110,7 +1434,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     home = Path(account_home).resolve(strict=True)
     assert home.is_dir()
     model = os.environ.get("OH_GOON_LIVE_CODEX_MODEL", "gpt-6-luna")
-    repo = tmp_path / "repos" / "app"
+    repo = tmp_path / "repos" / ("bundle.workspace" if scenario == "safe-zip" else "app")
     repo.mkdir(parents=True)
     source_files = {
         "ranges": {"ranges.py": _BROKEN_SOURCE},
@@ -1118,6 +1442,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         "stocktake": _STOCKTAKE_SOURCES,
         "deploy-order": _DEPLOY_ORDER_SOURCES,
         "ledger": _LEDGER_SOURCES,
+        "safe-zip": _SAFE_ZIP_SOURCES,
     }[scenario]
     for relative, text in source_files.items():
         path = repo / relative
@@ -1133,6 +1458,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             "stocktake": _STOCKTAKE_VERIFICATION,
             "deploy-order": _DEPLOY_ORDER_VERIFICATION,
             "ledger": _LEDGER_VERIFICATION,
+            "safe-zip": _SAFE_ZIP_VERIFICATION,
         }[scenario],
         encoding="utf-8",
     )
@@ -1208,6 +1534,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         task = _DEPLOY_ORDER_TASK
     elif scenario == "ledger":
         task = _LEDGER_TASK
+    elif scenario == "safe-zip":
+        task = _SAFE_ZIP_TASK
     task_file = tmp_path / "task.txt"
     task_file.write_text(task, encoding="utf-8")
     catalog = tmp_path / "providers.json"
@@ -1298,6 +1626,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             assert actual_home == str(home)
             result = run_command(*argv, **kwargs)
             native_diagnostics["native_returncode"] = result.returncode
+            native_diagnostics["native_stderr_present"] = bool(result.stderr)
+            native_diagnostics["native_stdout_present"] = bool(result.stdout)
             for relative, data in expected_source.items():
                 assert (Path(payload["captured_repository"]) / relative).read_bytes() == data
             for relative, text in skill_files.items():
@@ -1432,7 +1762,9 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         assert actual_paths == set(before)
         for relative in before:
             path = repo / relative
-            assert stat.S_ISREG(path.lstat().st_mode)
+            state = path.lstat()
+            assert stat.S_ISREG(state.st_mode)
+            assert state.st_nlink == 1
             assert all(not parent.is_symlink() for parent in path.parents if repo in parent.parents)
         after = {relative: (repo / relative).read_bytes() for relative in before}
         changed = {relative for relative in before if before[relative] != after[relative]}
@@ -1503,6 +1835,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             {
                 "ranges": {"ranges.py"},
                 "ledger": {"ledger/records.py", "ledger/database.py", "ledger/__main__.py"},
+                "safe-zip": {"bundle_unpack/extract.py", "bundle_unpack/__main__.py"},
                 "deploy-order": {"deploy_order/graph.py", "deploy_order/__main__.py"},
                 "eventlog": {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"},
                 "stocktake": {
