@@ -281,6 +281,15 @@ over the edited modules. Select `-k http-node` and supply `OH_GOON_NATIVE_NODE`
 outside the authentication home; no npm dependencies or runtime installation are
 needed.
 
+The framed-JSON Node case repairs an incremental binary telemetry codec and CLI.
+Its immutable checks cover every chunk split, coalesced messages, Unicode byte
+lengths, typed-array views, strict UTF-8/JSON errors, truncated EOF and frame caps
+before further input is pulled. Native async iteration supplies lazy consumption
+and awaited upstream cleanup on cancellation/error. Real stdin/file CLI probes
+check repeated drains without listener warnings and complete output on late failure. Select
+`-k frames-node` with the same explicit public Node executable. This case claims
+a per-frame limit and incremental consumption, not a global process-memory bound.
+
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \
 OH_GOON_LIVE_CODEX_HOME=/path/to/existing/.codex \
