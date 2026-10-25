@@ -146,8 +146,10 @@ make architecture
 
 ### Select one workflow configuration
 
-Register your repository in the UI, then use its repository ID in the generated
-selection:
+Follow the [template first-run guide](../templates/README.md) for headless
+registration with `league add-folder` and `league scan --json`. Copy the selected
+repository's canonical `repository_id` into the generated selection's
+`target.repository_id`; the current initializer requires this explicit ID transfer:
 
 ```bash
 oh-goon templates list --kind plan

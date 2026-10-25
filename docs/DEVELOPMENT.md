@@ -29,6 +29,13 @@ Repository-wide native-tool policy is owned by [Native tool authority](developme
 
 Oh Goon does not probe or select host `python*` command names. `backend/pyproject.toml` owns Python `>=3.12,<3.15` and dependency intent; committed `backend/uv.lock` is native uv's exact resolution authority; native uv `>=0.10.0` owns interpreter discovery and `backend/.venv` materialization. The lock is part of source/package/certification identity and public-source publication checks reject private, host-local, and repository-local dependency identity from it. Full-project materialization uses `--locked` so stale lock authority is rejected; repeated no-sync execution may use `--frozen` because it consumes an already-qualified lock without authoring or materializing. `make sync` is the intentional authoring boundary allowed to update the lock.
 
+Standalone Python examples own their native project and lock at
+`examples/<project>/{pyproject.toml,uv.lock}`. Each lock and its sibling project
+file must be regular, non-symlink source files. These locks and the existing
+certification-fixture locks describe their isolated workloads; they do not
+replace backend dependency authority. Other root or nested `uv.lock` paths
+remain invalid. Native uv owns project validity and lock freshness.
+
 `make init` is the sole idempotent developer materialization frontdoor. It invokes native uv and npm directly; those tools own resolution consumption, caches, retries, environment creation, and installation semantics. There is no separate developer acquisition/setup command. The dependency-resolution adapter remains only for repository-specific public-source policy; native uv itself owns lock freshness through `uv lock --check`/`uv sync --locked` and intentional `make sync` authoring. `make init` is a separate supply-chain proof over materialized native-tool outputs. Use `make sync` only after intentional dependency-intent changes; native uv/npm author the committed lock bytes.
 
 Hashmarks is a mandatory backend dependency supplied through that same

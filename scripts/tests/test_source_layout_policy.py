@@ -68,14 +68,86 @@ def test_committed_backend_lock_must_be_a_regular_non_symlink_file(
     )
 
 
-def test_second_source_uv_lock_is_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "relative",
+    ["uv.lock", "tools/uv.lock", "examples/uv.lock", "examples/project/nested/uv.lock"],
+)
+def test_second_source_uv_lock_is_rejected(tmp_path: Path, relative: str) -> None:
     _minimal_source(tmp_path)
-    extra = tmp_path / "tools/uv.lock"
-    extra.parent.mkdir()
+    assert canonical_source_layout_issues(tmp_path, check_tracked_generated=False) == ()
+    extra = tmp_path / relative
+    extra.parent.mkdir(parents=True, exist_ok=True)
+    (extra.parent / "pyproject.toml").write_text(
+        '[project]\nname = "unexpected"\nversion = "0.0.0"\n', encoding="utf-8"
+    )
     extra.write_text("version = 1\npackage = []\n", encoding="utf-8")
     issues = canonical_source_layout_issues(tmp_path, check_tracked_generated=False)
     assert any(
         issue.path == extra and "dependency authority belongs at" in issue.reason
+        for issue in issues
+    )
+
+
+def _standalone_python_example(root: Path) -> Path:
+    project = root / "examples/standalone-python-project"
+    project.mkdir(parents=True)
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "example"\nversion = "0.0.0"\n', encoding="utf-8"
+    )
+    (project / "uv.lock").write_text("version = 1\npackage = []\n", encoding="utf-8")
+    return project
+
+
+def test_standalone_python_example_owns_its_native_lock(tmp_path: Path) -> None:
+    _minimal_source(tmp_path)
+    _standalone_python_example(tmp_path)
+
+    assert canonical_source_layout_issues(tmp_path, check_tracked_generated=False) == ()
+
+
+@pytest.mark.parametrize("replacement", ["missing", "symlink", "directory"])
+def test_standalone_python_example_lock_requires_regular_project_metadata(
+    tmp_path: Path, replacement: str
+) -> None:
+    _minimal_source(tmp_path)
+    project = _standalone_python_example(tmp_path)
+    assert canonical_source_layout_issues(tmp_path, check_tracked_generated=False) == ()
+    metadata = project / "pyproject.toml"
+    metadata.unlink()
+    if replacement == "symlink":
+        outside = tmp_path / "unrelated-project.toml"
+        outside.write_text('[project]\nname = "unrelated"\n', encoding="utf-8")
+        metadata.symlink_to(outside)
+    elif replacement == "directory":
+        metadata.mkdir()
+
+    issues = canonical_source_layout_issues(tmp_path, check_tracked_generated=False)
+
+    assert any(
+        issue.path == project / "uv.lock"
+        and "requires a sibling regular non-symlink pyproject.toml" in issue.reason
+        for issue in issues
+    )
+
+
+@pytest.mark.parametrize("replacement", ["symlink", "directory"])
+def test_standalone_python_example_lock_must_be_a_regular_file(
+    tmp_path: Path, replacement: str
+) -> None:
+    _minimal_source(tmp_path)
+    project = _standalone_python_example(tmp_path)
+    assert canonical_source_layout_issues(tmp_path, check_tracked_generated=False) == ()
+    lock = project / "uv.lock"
+    lock.unlink()
+    if replacement == "symlink":
+        lock.symlink_to(tmp_path / "backend/uv.lock")
+    else:
+        lock.mkdir()
+
+    issues = canonical_source_layout_issues(tmp_path, check_tracked_generated=False)
+
+    assert any(
+        issue.path == lock and "regular non-symlink file" in issue.reason
         for issue in issues
     )
 

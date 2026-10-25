@@ -7,6 +7,7 @@ from oh_goon.core.source_transport_metadata import is_disposable_source_transpor
 
 CANONICAL_BACKEND_LOCK = PurePosixPath("backend/uv.lock")
 CANONICAL_CERTIFICATION_FIXTURE_ROOT = PurePosixPath("template-certification/fixtures")
+CANONICAL_EXAMPLES_ROOT = PurePosixPath("examples")
 CANONICAL_FRONTEND_LOCK = PurePosixPath("frontend/package-lock.json")
 CANONICAL_BACKEND_VENV = PurePosixPath("backend/.venv")
 PACKAGE_MANAGER_MATERIALIZATION_DIRECTORY_NAMES: frozenset[str] = frozenset(
@@ -133,6 +134,14 @@ def _is_certification_fixture_lock(relative: PurePosixPath) -> bool:
     )
 
 
+def _isolated_python_project_lock_owner(relative: PurePosixPath) -> str | None:
+    if _is_certification_fixture_lock(relative):
+        return "certification fixture"
+    if relative.name == "uv.lock" and relative.parent.parent == CANONICAL_EXAMPLES_ROOT:
+        return "standalone Python example"
+    return None
+
+
 def _is_regular_non_symlink(path: Path) -> bool:
     try:
         mode = path.lstat().st_mode
@@ -144,7 +153,7 @@ def _is_regular_non_symlink(path: Path) -> bool:
 
 
 def canonical_lock_layout_issues(root: Path) -> tuple[tuple[Path, str], ...]:
-    """Validate source lock placement without conflating isolated fixture authority."""
+    """Validate source lock placement without conflating isolated project authority."""
 
     root = root.resolve()
     issues: list[tuple[Path, str]] = []
@@ -176,7 +185,7 @@ def canonical_lock_layout_issues(root: Path) -> tuple[tuple[Path, str], ...]:
                 continue
             retained.append(name)
         dirnames[:] = retained
-        for name in filenames:
+        for name in filenames + [name for name in dirnames if name == "uv.lock"]:
             relative = PurePosixPath(*relative_dir.parts, name)
             if relative.parts and relative.parts[0] == ".git":
                 continue
@@ -186,12 +195,13 @@ def canonical_lock_layout_issues(root: Path) -> tuple[tuple[Path, str], ...]:
                 continue
             if name == "uv.lock":
                 candidate = root / Path(relative)
-                if _is_certification_fixture_lock(relative):
+                project_owner = _isolated_python_project_lock_owner(relative)
+                if project_owner is not None:
                     if not _is_regular_non_symlink(candidate):
                         issues.append(
                             (
                                 candidate,
-                                "committed certification fixture lock must be a regular "
+                                f"committed {project_owner} lock must be a regular "
                                 "non-symlink file",
                             )
                         )
@@ -201,7 +211,7 @@ def canonical_lock_layout_issues(root: Path) -> tuple[tuple[Path, str], ...]:
                         issues.append(
                             (
                                 candidate,
-                                "certification fixture uv.lock requires a sibling regular "
+                                f"{project_owner} uv.lock requires a sibling regular "
                                 "non-symlink pyproject.toml",
                             )
                         )
@@ -211,7 +221,8 @@ def canonical_lock_layout_issues(root: Path) -> tuple[tuple[Path, str], ...]:
                         candidate,
                         "unexpected uv.lock source path; Oh-Goon dependency authority "
                         f"belongs at {CANONICAL_BACKEND_LOCK} or under "
-                        f"{CANONICAL_CERTIFICATION_FIXTURE_ROOT}",
+                        f"{CANONICAL_CERTIFICATION_FIXTURE_ROOT}; standalone Python "
+                        f"example authority belongs at {CANONICAL_EXAMPLES_ROOT}/<project>/uv.lock",
                     )
                 )
     return tuple(issues)
