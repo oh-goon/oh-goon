@@ -5,7 +5,7 @@ inputs:
   repo: local:my-project
   skill: cookbook/codebase-finding-derivation
 agent:
-  implementation: pi
+  implementation: codex
   profile: isolated-managed
   acceptance: agentic-review
   repository_root: /approved/repositories

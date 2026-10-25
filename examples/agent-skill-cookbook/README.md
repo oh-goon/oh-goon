@@ -4,7 +4,7 @@ Classification: runnable-with-prerequisites
 
 Run a typed read-only review using the existing `agents/native-review` Plan and the upstream `codebase-finding-derivation` Skill. Admitted repository evidence is disclosed to the selected native model recipient. A review result does not grant write authority or establish passing verification.
 
-**Prerequisites:** an initialized Oh-Goon installation, registered workload repository, installed Pi/OpenCode/Codex and a compatible isolated managed profile in the provider catalog. Native sign-in, model settings, context window and compaction stay native-owned. Remote Git source capture may need network/cache access; ordinary inspection does not fetch it.
+**Prerequisites:** an initialized Oh-Goon installation, registered workload repository, installed Codex CLI and a compatible isolated managed profile with a Responses connection in the provider catalog. Native sign-in, model settings, context window and compaction stay native-owned. Remote Git source capture may need network/cache access; ordinary inspection does not fetch it.
 
 Initialize a separate workflow, then copy the included `.goonskills.yml` into it:
 
@@ -12,7 +12,7 @@ Initialize a separate workflow, then copy the included `.goonskills.yml` into it
 oh-goon templates init agents/native-review --kind plan --output ./workflow
 ```
 
-Edit `workflow/run.yml` using [the complete selection](run.yml). Set the real `target.repository_id`, `inputs.repo`, approved `agent.repository_root` and selected implementation/profile. Keep `agent.skill_root: .` and the registry beside `run.yml`. The registry owns the Git source/ref/directories once; do not copy these facts into the run selection:
+Edit `workflow/run.yml` using [the complete selection](run.yml). Set the real `target.repository_id`, `inputs.repo`, approved `agent.repository_root` and selected profile. The example follows the initializer’s Codex default; select Pi or OpenCode explicitly with a compatible profile. Keep `agent.skill_root: .` and the registry beside `run.yml`. The registry owns the Git source/ref/directories once; do not copy these facts into the run selection:
 
 ```yaml
 sources:

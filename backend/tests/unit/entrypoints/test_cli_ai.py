@@ -169,6 +169,60 @@ def test_ai_uses_one_resolved_selection_and_original_run_wait(
     assert "Fleet Run ID: native-run" in output.err
 
 
+def test_ai_defaults_to_codex_with_the_explicit_signed_in_profile(
+    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    public = native_cli.executable.parent / "public"
+    public.mkdir()
+    executable = public / "codex"
+    executable.write_bytes(native_cli.executable.read_bytes())
+    executable.chmod(0o755)
+    native_home = native_cli.executable.parent / "private-native-home"
+    native_home.mkdir()
+    payload = {
+        "native_agents": {"codex": {"executable": str(executable)}},
+        "native_profiles": {
+            "signed-in": {
+                "allowed_agents": ["codex"],
+                "codex_login": {
+                    "home": str(native_home),
+                    "model": "gpt-6-luna",
+                    "reasoning_effort": "low",
+                },
+            }
+        },
+    }
+    native_cli.config.write_text(json.dumps(payload))
+    monkeypatch.setattr(cli_ai, "_isolation", native_cli.isolation_factory)
+    argv = list(native_cli.argv)
+    del argv[1:3]
+    assert main([*argv, "--profile", "signed-in"]) == 0
+    selected = native_cli.runtime.plans.run_native_agent.call_args.kwargs["selected"]
+    assert selected.agent == "codex"
+    assert selected.definition.executable == str(executable)
+    assert selected.profile_name == "signed-in"
+    assert selected.connection is None
+    assert selected.profile.codex_login.model == "gpt-6-luna"
+    assert selected.profile.codex_login.reasoning_effort == "low"
+    assert list(native_home.iterdir()) == []
+    native_cli.runtime.runs.wait_for_terminal.assert_called_once_with("native-run")
+
+
+@pytest.mark.parametrize("agent", ["pi", "opencode"])
+def test_ai_preserves_explicit_native_agent_selection(
+    native_cli: SimpleNamespace, agent: str
+) -> None:
+    payload = json.loads(native_cli.config.read_text())
+    payload["native_agents"][agent] = {"executable": str(native_cli.executable)}
+    native_cli.config.write_text(json.dumps(payload))
+    argv = list(native_cli.argv)
+    argv[2] = agent
+    assert main(argv) == 0
+    selected = native_cli.runtime.plans.run_native_agent.call_args.kwargs["selected"]
+    assert selected.agent == agent
+    assert selected.connection.provider_name == "host"
+
+
 def test_ai_does_not_change_configured_parent_or_excluded_repository(
     native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -394,15 +448,23 @@ def test_ai_explicit_missing_catalog_does_not_use_empty_default(
     native_cli.build.assert_not_called()
 
 
+@pytest.mark.parametrize("agent", [None, "pi"])
 def test_ai_absent_default_catalog_does_not_infer_native_model_connection(
-    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    native_cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    agent: str | None,
 ) -> None:
-    monkeypatch.setenv("PATH", f"{native_cli.executable.parent}{os.pathsep}{os.environ['PATH']}")
+    lookup = Mock(return_value=str(native_cli.executable))
+    monkeypatch.setattr("oh_goon.runtime.agent_providers.shutil.which", lookup)
     argv = list(native_cli.argv)
+    if agent is None:
+        del argv[1:3]
     index = argv.index("--config")
     del argv[index : index + 2]
     assert main(argv) == 2
     assert "managed inference" in capsys.readouterr().err
+    lookup.assert_called_once_with(agent or "codex", path=os.environ.get("PATH", ""))
     native_cli.build.assert_not_called()
 
 

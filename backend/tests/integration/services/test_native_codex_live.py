@@ -447,8 +447,208 @@ unittest.main(argv=["live-codex-eventlog-minimum-count-verification"])
 """
 
 
+_STOCKTAKE_SOURCES = {
+    "stocktake/__init__.py": "",
+    "stocktake/rows.py": """import csv
+
+
+def read_rows(stream):
+    return [(row["sku"], int(row["quantity"])) for row in csv.DictReader(stream)]
+""",
+    "stocktake/reconcile.py": """def reconcile(expected, counted, only_changed=False):
+    counts = dict(counted)
+    return [{"sku": sku, "expected": quantity, "counted": counts.get(sku, 0),
+             "delta": quantity - counts.get(sku, 0)} for sku, quantity in expected]
+""",
+    "stocktake/__main__.py": """import argparse
+import json
+
+from .reconcile import reconcile
+from .rows import read_rows
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("expected")
+    parser.add_argument("counted")
+    args = parser.parse_args()
+    with open(args.expected) as expected, open(args.counted) as counted:
+        print(json.dumps(reconcile(read_rows(expected), read_rows(counted))))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+""",
+    "README.md": """# Stocktake CSV reconciliation
+
+Repair this standard-library package while retaining its public functions.
+
+`stocktake.rows.read_rows(stream)` reads a text stream of CSV and returns a list
+of `(sku, quantity)` tuples. Require exactly the header `sku,quantity` in that
+order; an empty stream, missing/repeated/extra columns, malformed CSV or rows
+with the wrong number of fields raise ValueError. Ignore empty data rows. Use
+standard CSV quoting, including commas and newlines inside quoted SKUs. A SKU
+must contain a non-whitespace character; preserve its original spelling. A
+quantity consists only of one or more ASCII decimal digits and is converted to
+int. Zero and leading zeros are valid; signs, whitespace, fractions and other
+numeric spellings are invalid. Reject every malformed row rather than silently
+dropping it. File encoding is the caller's responsibility.
+
+`stocktake.reconcile.reconcile(expected, counted, only_changed=False)` consumes
+two iterables of already validated `(sku, quantity)` pairs once each. Sum
+duplicate SKUs independently on each side and retain every SKU from either
+side. Missing sides have quantity zero. Return dictionaries containing exactly
+`sku`, `expected`, `counted` and `delta`, sorted by exact SKU. Delta is counted
+minus expected, so shortages are negative. With only_changed=True omit exactly
+the rows whose final delta is zero. Never modify either input.
+
+`python -m stocktake [--only-changed] EXPECTED COUNTED` reads two UTF-8 CSV files
+with proper CSV newline handling. Print the reconciliation as one JSON list
+followed by a newline, with no stderr and exit 0. Input errors, including
+malformed CSV, missing files and invalid UTF-8, exit 2 with a useful stderr
+diagnostic and no stdout. Validate both complete inputs before printing.
+""",
+}
+
+_STOCKTAKE_TASK = (
+    "Repair the stocktake CSV reconciliation package according to README.md. "
+    "Fix CSV validation, exact joining and aggregation across both inventories, "
+    "shortage/surplus signs and the --only-changed CLI behavior. Preserve its public "
+    "functions and use only the Python standard library. Before editing, execute the "
+    "exact repository_tools.list Hashmarks command from the supplied instructions. "
+    "Change only stocktake/rows.py, stocktake/reconcile.py and stocktake/__main__.py. "
+    "Independent verification runs after your coding Step."
+)
+
+_STOCKTAKE_VERIFICATION = r"""import io
+import json
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+
+repository = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repository))
+from stocktake.rows import read_rows
+from stocktake.reconcile import reconcile
+
+
+def rows(text):
+    return read_rows(io.StringIO(text, newline=""))
+
+
+def cli(*arguments):
+    return subprocess.run(
+        [sys.executable, "-I", "-B", "-c",
+         "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));runpy.run_module('stocktake',run_name='__main__')",
+         str(repository), *arguments],
+        text=True, capture_output=True, timeout=10,
+    )
+
+
+class StocktakeContract(unittest.TestCase):
+    def test_header_only_zero_and_blank_data_rows(self):
+        self.assertEqual(rows("sku,quantity\n"), [])
+        self.assertEqual(rows("sku,quantity\n\nbolt,000\n\n"), [("bolt", 0)])
+        self.assertEqual(reconcile(iter(()), iter(())), [])
+
+    def test_csv_quoting_and_exact_unicode_sku(self):
+        self.assertEqual(rows('sku,quantity\r\n"bolt,steel",2\r\n"shelf\nlabel",3\r\ncafé,4\r\n'),
+                         [("bolt,steel", 2), ("shelf\nlabel", 3), ("café", 4)])
+        self.assertEqual(rows("sku,quantity\n bolt ,2\n"), [(" bolt ", 2)])
+
+    def test_rejects_invalid_headers_and_row_shapes(self):
+        for text in ("", "quantity,sku\n2,bolt\n", "sku,sku\nbolt,2\n",
+                     "sku,quantity,extra\nbolt,2,x\n", "sku\nbolt\n",
+                     "sku,quantity\nbolt\n", "sku,quantity\nbolt,2,x\n",
+                     'sku,quantity\n"unclosed,2\n', "sku,quantity\n,2\n",
+                     "sku,quantity\n   ,2\n"):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                rows(text)
+
+    def test_rejects_invalid_quantities_after_a_valid_row(self):
+        for value in ("-1", "+2", "1.5", "true", " 2", "2 ", "", "٢"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                rows("sku,quantity\nvalid,1\ninvalid," + value + "\n")
+
+    def test_full_join_duplicate_aggregation_signs_and_filter(self):
+        expected = [("widget", 3), ("bolt", 2), ("widget", 4), ("even", 5)]
+        counted = [("extra", 2), ("widget", 1), ("even", 2), ("widget", 4), ("even", 3)]
+        all_rows = [{"sku": "bolt", "expected": 2, "counted": 0, "delta": -2},
+                    {"sku": "even", "expected": 5, "counted": 5, "delta": 0},
+                    {"sku": "extra", "expected": 0, "counted": 2, "delta": 2},
+                    {"sku": "widget", "expected": 7, "counted": 5, "delta": -2}]
+        self.assertEqual(reconcile(expected, counted), all_rows)
+        self.assertEqual(reconcile(expected, counted, only_changed=True),
+                         [all_rows[0], all_rows[2], all_rows[3]])
+        self.assertEqual(reconcile([], [("a", 1), ("a-2", 2)]),
+                         [{"sku": "a", "expected": 0, "counted": 1, "delta": 1},
+                          {"sku": "a-2", "expected": 0, "counted": 2, "delta": 2}])
+        self.assertEqual(reconcile([("Bolt", 2), (" bolt ", 1)], [("bolt", 3)]),
+                         [{"sku": " bolt ", "expected": 1, "counted": 0, "delta": -1},
+                          {"sku": "Bolt", "expected": 2, "counted": 0, "delta": -2},
+                          {"sku": "bolt", "expected": 0, "counted": 3, "delta": 3}])
+
+    def test_single_pass_without_input_mutation(self):
+        class Once:
+            def __init__(self, values):
+                self.values, self.used = values, False
+            def __iter__(self):
+                if self.used:
+                    raise AssertionError("inventory must be consumed once")
+                self.used = True
+                return iter(self.values)
+        expected, counted = [["bolt", 2]], [["bolt", 3]]
+        self.assertEqual(reconcile(Once(expected), Once(counted)),
+                         [{"sku": "bolt", "expected": 2, "counted": 3, "delta": 1}])
+        self.assertEqual(expected, [["bolt", 2]])
+        self.assertEqual(counted, [["bolt", 3]])
+
+    def test_cli_utf8_quoted_paths_filter_and_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            expected = pathlib.Path(directory) / "expected inventory.csv"
+            counted = pathlib.Path(directory) / "counted inventory.csv"
+            expected.write_text('sku,quantity\n"bolt,steel",2\ncafé,3\n', encoding="utf-8")
+            counted.write_text('sku,quantity\ncafé,1\n"bolt,steel",2\n', encoding="utf-8")
+            for arguments, values in (([], [
+                {"sku": "bolt,steel", "expected": 2, "counted": 2, "delta": 0},
+                {"sku": "café", "expected": 3, "counted": 1, "delta": -2}]),
+                (["--only-changed"], [
+                {"sku": "café", "expected": 3, "counted": 1, "delta": -2}])):
+                result = cli(*arguments, str(expected), str(counted))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                self.assertTrue(result.stdout.endswith("\n"))
+                self.assertEqual(json.loads(result.stdout), values)
+
+    def test_cli_input_failures_are_atomic_for_either_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            valid = pathlib.Path(directory) / "valid.csv"
+            invalid = pathlib.Path(directory) / "invalid.csv"
+            valid.write_text("sku,quantity\nbolt,1\n", encoding="utf-8")
+            for payload in (b"sku,quantity\nbolt,1\nbad,-1\n", b"\xff",
+                            b'sku,quantity\n"unclosed,2\n'):
+                invalid.write_bytes(payload)
+                for inputs in ((valid, invalid), (invalid, valid)):
+                    with self.subTest(payload=payload, inputs=inputs):
+                        result = cli("--only-changed", *(str(path) for path in inputs))
+                        self.assertEqual(result.returncode, 2)
+                        self.assertEqual(result.stdout, "")
+                        self.assertTrue(result.stderr.strip())
+            missing = cli(str(valid), str(invalid.with_name("missing.csv")))
+            self.assertEqual(missing.returncode, 2)
+            self.assertEqual(missing.stdout, "")
+            self.assertTrue(missing.stderr.strip())
+
+
+unittest.main(argv=["live-codex-stocktake-verification"])
+"""
+
+
 @pytest.mark.certification
-@pytest.mark.parametrize("scenario", ["ranges", "eventlog"])
+@pytest.mark.parametrize("scenario", ["ranges", "eventlog", "stocktake"])
 def test_legacy_live_chatgpt_coding_uses_original_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -465,7 +665,11 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     model = os.environ.get("OH_GOON_LIVE_CODEX_MODEL", "gpt-6-luna")
     repo = tmp_path / "repos" / "app"
     repo.mkdir(parents=True)
-    source_files = _EVENTLOG_SOURCES if scenario == "eventlog" else {"ranges.py": _BROKEN_SOURCE}
+    source_files = {
+        "ranges": {"ranges.py": _BROKEN_SOURCE},
+        "eventlog": _EVENTLOG_SOURCES,
+        "stocktake": _STOCKTAKE_SOURCES,
+    }[scenario]
     for relative, text in source_files.items():
         path = repo / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -474,7 +678,12 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     verifier = tmp_path / "independent verification" / "verify contract.py"
     verifier.parent.mkdir()
     verifier.write_text(
-        _EVENTLOG_VERIFICATION if scenario == "eventlog" else _VERIFICATION, encoding="utf-8"
+        {
+            "ranges": _VERIFICATION,
+            "eventlog": _EVENTLOG_VERIFICATION,
+            "stocktake": _STOCKTAKE_VERIFICATION,
+        }[scenario],
+        encoding="utf-8",
     )
     verifier_bytes = verifier.read_bytes()
     verification = (sys.executable, "-I", "-B", str(verifier), str(repo))
@@ -542,6 +751,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     )
     if scenario == "eventlog":
         task = _EVENTLOG_TASK
+    elif scenario == "stocktake":
+        task = _STOCKTAKE_TASK
     task_file = tmp_path / "task.txt"
     task_file.write_text(task, encoding="utf-8")
     catalog = tmp_path / "providers.json"
@@ -721,8 +932,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         return after
 
     arguments = [
-        "--agent",
-        "codex",
+        *([] if scenario == "stocktake" else ["--agent", "codex"]),
         "--profile",
         "live-chatgpt",
         "--config",
@@ -774,9 +984,15 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             assert (skill / relative).read_bytes() == text.encode()
         first_source = assert_source_edits(
             expected_source,
-            {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"}
-            if scenario == "eventlog"
-            else {"ranges.py"},
+            {
+                "ranges": {"ranges.py"},
+                "eventlog": {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"},
+                "stocktake": {
+                    "stocktake/rows.py",
+                    "stocktake/reconcile.py",
+                    "stocktake/__main__.py",
+                },
+            }[scenario],
         )
 
         if scenario == "eventlog":
