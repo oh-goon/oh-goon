@@ -5,6 +5,7 @@ import importlib.util
 import shutil
 import subprocess
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.models.fleet_executor import FleetExecutorIdentity
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.models.fleet_plan_isolation import (
     IsolationBackendCapabilities,
     IsolationKernelBoundary,
@@ -24,6 +26,8 @@ from oh_goon.core.models.run_admission import (
     DirectFleetExecutionAdmission,
     fleet_repository_scope,
 )
+from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.path_authority import StrictHostPathAuthority
 from oh_goon.core.path_layouts import ManagedPreparationPathLayout
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
@@ -31,8 +35,11 @@ from oh_goon.core.vocabulary import (
     FleetRunStatus,
     OperationAction,
 )
+from oh_goon.engine.command import CommandOutputObserver, CommandProcessObserver, CommandResult
+from oh_goon.engine.command_supervision import CommandRuntimeSupervision
 from oh_goon.engine.native_uv_environment import capture_native_uv_authority
 from oh_goon.integrations import fleet_plan_preview
+from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
 from oh_goon.integrations.uv_python_runtime import find_uv_system_python
 from oh_goon.runtime._executor_configuration import (
     ConfiguredFleetExecutor,
@@ -47,6 +54,7 @@ from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.runtime.safety import RuntimeSafetyGate
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
+from oh_goon.runtime.state import LocalState
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plans import prepare_reviewed_execution_target
@@ -80,13 +88,13 @@ def _repository_bytes(repository: Path) -> tuple[tuple[str, bytes], ...]:
     )
 
 
-def _install_source_identity_observer(monkeypatch, repository: Path) -> None:
+def _install_source_identity_observer(monkeypatch: pytest.MonkeyPatch, repository: Path) -> None:
     """Use real Hashmarks when installed; otherwise replace only that native observation."""
 
     if importlib.util.find_spec("hashmarks") is not None:
         return
 
-    def observe(root: Path):
+    def observe(root: Path) -> SimpleNamespace:
         assert root == repository
         members = _repository_bytes(root)
         digest = hashlib.sha256()
@@ -137,13 +145,34 @@ class _StartabilityBackend:
         del plan
         self.availability_checks += 1
 
-    def execute(self, request, *, timeout, cancel_requested, process_observer=None):
-        del request, timeout, cancel_requested, process_observer
+    def execute(
+        self,
+        request: IsolatedProcessRequest,
+        *,
+        timeout: float | None,
+        cancel_requested: Callable[[], bool] | None,
+        stream_output: CommandOutputObserver | None = None,
+        process_observer: CommandProcessObserver | None = None,
+        runtime_supervision: CommandRuntimeSupervision | None = None,
+    ) -> CommandResult:
+        del request, timeout, cancel_requested, stream_output, process_observer, runtime_supervision
         self.execute_calls += 1
         raise AssertionError("template startability must stop before Step work")
 
 
-def _admission_stack(tmp_path: Path, repository: Path, *, path_authority=TEST_PATH_AUTHORITY):
+def _admission_stack(
+    tmp_path: Path,
+    repository: Path,
+    *,
+    path_authority: StrictHostPathAuthority = TEST_PATH_AUTHORITY,
+) -> tuple[
+    LocalDatabase,
+    LocalState,
+    RepositoryEffectAttemptStore,
+    FleetAdmissionPlanner,
+    FleetRunLifecycle,
+    _StartabilityBackend,
+]:
     database = LocalDatabase(tmp_path / "runtime.db")
     state = local_state(database)
     state.add_location(repository.parent)
@@ -193,7 +222,9 @@ def _admission_stack(tmp_path: Path, repository: Path, *, path_authority=TEST_PA
     return database, state, attempts, planner, lifecycle, backend
 
 
-def _reviewed_shipped_target(template_key: str, *, inputs: dict[str, str] | None = None):
+def _reviewed_shipped_target(
+    template_key: str, *, inputs: dict[str, PlanInputValue] | None = None
+) -> FleetPlanTarget:
     plans = PlanTemplateStore(TEMPLATES / "plans")
     goons = GoonTemplateStore(TEMPLATES / "goons")
 
@@ -225,13 +256,13 @@ def _reviewed_shipped_target(template_key: str, *, inputs: dict[str, str] | None
 
 
 def test_representative_shipped_plan_reaches_run_admitted_without_step_work(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository = tmp_path / "repositories" / "fixture"
     seed_cicd_repository(repository)
     target = _reviewed_shipped_target("python/dependency-inventory")
     database, state, attempts, planner, lifecycle, backend = _admission_stack(tmp_path, repository)
-    repository_identity = RepositoryIdentity(path=repository)
+    repository_identity = RepositoryIdentity.model_validate({"path": repository})
     repository_scope = fleet_repository_scope({repository_identity.repository_id})
     intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)
     source_before = _repository_bytes(repository)
@@ -406,13 +437,13 @@ def _prove_iris_project_executable(
 
 
 def test_iris_certification_fixture_resolves_entrypoint_and_reaches_admission_without_work(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository = tmp_path / "repositories" / "iris"
     _copy_iris_certification_fixture(repository)
     target = _reviewed_shipped_target("ml/iris-training")
     database, state, attempts, planner, lifecycle, backend = _admission_stack(tmp_path, repository)
-    repository_identity = RepositoryIdentity(path=repository)
+    repository_identity = RepositoryIdentity.model_validate({"path": repository})
     repository_scope = fleet_repository_scope({repository_identity.repository_id})
     intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)
     source_before = _repository_bytes(repository)
