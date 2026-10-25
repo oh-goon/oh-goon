@@ -541,3 +541,115 @@ def test_shared_schedule_repository_replacement_refuses_before_package_store_eff
     assert calls == []
     with pytest.raises(ScheduleNotFound):
         runtime.schedules.definition("shared-stale")
+
+
+@pytest.mark.parametrize(
+    "quiescent", (True, False, None), ids=("settled", "unsettled", "unavailable")
+)
+def test_target_step_consuming_package_output_preserves_unsettled_run_resources(
+    execution: tuple[ApplicationRuntime, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    quiescent: bool | None,
+) -> None:
+    runtime, repository, plan = execution
+    package = plan.parent / "goons/general/orders"
+    implementation = package / "src/orders_pipeline/cli.py"
+    implementation.write_text(
+        implementation.read_text()
+        + """
+
+def scratch_file():
+    from pathlib import Path
+    output = Path.cwd() / "held.txt"
+    output.write_text("held package output")
+    print(output)
+"""
+    )
+    pyproject = package / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text().replace(
+            "orders-pipeline = ",
+            'orders-location = "orders_pipeline.cli:scratch_file"\norders-pipeline = ',
+        )
+    )
+    (package / "goon.yml").write_text(
+        yaml.safe_dump(
+            {
+                "runtime": "python",
+                "steps": [
+                    {
+                        "id": "where",
+                        "run": "orders-location",
+                        "outputs": {
+                            "FILE": {"stream": "stdout", "max_bytes": 4096},
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    consumer = plan.parent / "goons/general/consume"
+    consumer.mkdir()
+    (consumer / "README.md").write_text("# general/consume\n\nConsume prior package output.\n")
+    (consumer / "goon.yml").write_text(
+        yaml.safe_dump(
+            {
+                "inputs": {"file": {"type": "string"}},
+                "steps": [{"run": "git hash-object ${{ inputs.file }}"}],
+            }
+        )
+    )
+    plan.write_text(
+        yaml.safe_dump(
+            {
+                "goons": [
+                    {"import": "general/orders", "from": "goons"},
+                    {
+                        "import": "general/consume",
+                        "from": "goons",
+                        "with": {
+                            "file": "${{ steps.general-orders.where.outputs.FILE }}",
+                        },
+                    },
+                ]
+            }
+        )
+    )
+    runtime.plans.lock(plan)
+    native = fleet_plan_step_execution._direct_step_command_runner
+    consumed: list[Path] = []
+
+    def observe_consumer(*argv: str, **kwargs: Any) -> CommandResult:
+        result = native(*argv, **kwargs)
+        if argv[:2] == ("git", "hash-object"):
+            assert result.returncode == 0
+            assert result.supervisor.final_process_group_quiescent is True
+            consumed.append(Path(argv[2]))
+            if quiescent is not True:
+                runtime.runs.cancel("mixed-package-consumer")
+                return replace(
+                    result,
+                    supervisor=(
+                        replace(result.supervisor, final_process_group_quiescent=False)
+                        if quiescent is False
+                        else cast(CommandSupervisorReceipt, None)
+                    ),
+                )
+        return result
+
+    monkeypatch.setattr(fleet_plan_step_execution, "_direct_step_command_runner", observe_consumer)
+    started = runtime.plans.run(
+        plan, repository_ids={repository_id(repository)}, fleet_run_id="mixed-package-consumer"
+    )
+    completed = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
+    assert consumed
+    for output in consumed:
+        if quiescent is True:
+            assert completed.game_tape.status.value == "PASSED"
+            assert not output.exists()
+        else:
+            assert completed.run.status.value == "CANCELLED"
+            assert completed.game_tape.repositories[0].steps[-1].settlement.outcome == "INCOMPLETE"
+            assert output.read_text() == "held package output"
+    assert not (repository / "held.txt").exists()
+    assert not (package / "held.txt").exists()

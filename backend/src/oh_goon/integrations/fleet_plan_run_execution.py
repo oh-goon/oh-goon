@@ -285,7 +285,7 @@ class FleetPlanRunExecutor:
                 runtime,
                 project_sources=sources,
                 project_workspaces=workspaces,
-                on_unsettled_package_process=retain_unsettled_package_scratch,
+                on_unsettled_run_process=retain_unsettled_package_scratch,
             )
             sequence = FleetPlanStepSequence(repository, runtime, output_observer)
             for step in plan.steps:

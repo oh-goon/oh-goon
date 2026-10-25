@@ -246,7 +246,7 @@ class StepRuntime:
     native_profile: ResolvedNativeAgent | None = None
     project_sources: Mapping[str, Path] = field(default_factory=dict)
     project_workspaces: Mapping[str, Path] = field(default_factory=dict)
-    on_unsettled_package_process: Callable[[], None] | None = None
+    on_unsettled_run_process: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,24 +358,26 @@ def execute_direct_step(
                     ),
                     runtime,
                 )
-            if package and process_boundary_settled(outcome) is not True:
-                retain_package_scratch = True
-                if runtime.on_unsettled_package_process is not None:
-                    runtime.on_unsettled_package_process()
-                outcome = replace(
-                    outcome,
-                    stderr=outcome.stderr.rstrip()
-                    + f"\nPython Goon Step scratch retained while native process cleanup is incomplete: {private_root}",
-                )
+            if process_boundary_settled(outcome) is not True:
+                if runtime.on_unsettled_run_process is not None:
+                    runtime.on_unsettled_run_process()
+                if package:
+                    retain_package_scratch = True
+                    outcome = replace(
+                        outcome,
+                        stderr=outcome.stderr.rstrip()
+                        + f"\nPython Goon Step scratch retained while native process cleanup is incomplete: {private_root}",
+                    )
             return outcome
         except BaseException as error:
-            if package and uv_preparation_requires_retained_scratch(error):
-                retain_package_scratch = True
-                if runtime.on_unsettled_package_process is not None:
-                    runtime.on_unsettled_package_process()
-                error.add_note(
-                    f"Python Goon Step scratch retained while native process cleanup is incomplete: {private_root}"
-                )
+            if uv_preparation_requires_retained_scratch(error):
+                if runtime.on_unsettled_run_process is not None:
+                    runtime.on_unsettled_run_process()
+                if package:
+                    retain_package_scratch = True
+                    error.add_note(
+                        f"Python Goon Step scratch retained while native process cleanup is incomplete: {private_root}"
+                    )
             raise
         finally:
             if package and not retain_package_scratch:
