@@ -76,7 +76,10 @@ The installed Codex permission probe uses a synthetic authentication home and no
 model connection. It checks the exact native tool policy used by explicit
 `codex_login` profiles: workspace writes, read-only evidence, private-path and
 symlink denial, and host-loopback denial. It does not establish a live account
-or the planned native-service/private-store boundary:
+or the planned native-service/private-store boundary. It also executes the
+absolute loaded-Python Hashmarks command inside that policy, checking the frozen
+source listing, capture and loaded producer identities, and unchanged source
+bytes. Runtime paths and interpreter aliases come from the existing mount owner:
 
 ```sh
 OH_GOON_NATIVE_CODEX=/path/to/codex \

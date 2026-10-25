@@ -38,7 +38,11 @@ from oh_goon.integrations.agent_native_execution import (
     native_executable_sha256,
 )
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
-from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
+from oh_goon.integrations.fleet_plan_process_isolation import (
+    native_profile_command_runner,
+    native_runtime_read_only_mounts,
+)
+from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
 
@@ -141,10 +145,31 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
     private = home / "canary"
     private.write_text("synthetic private data; never a real credential")
     (capture / "evidence").write_text("frozen producer evidence")
+    captured_repository = capture / "repo"
+    captured_repository.mkdir()
+    captured_source = captured_repository / "code.py"
+    captured_bytes = b"def handle_widget():\n    return 42\n"
+    captured_source.write_bytes(captured_bytes)
+    capture_identity = "native-boundary-captured-source"
+    producer_identity = require_loaded_hashmarks_runtime()
+    producer_command = (
+        sys.executable,
+        "-I",
+        "-m",
+        "oh_goon.integrations.hashmarks.agent_tools",
+        "--root",
+        str(capture),
+        "--state-directory",
+        str(state),
+        "--capture-identity",
+        capture_identity,
+        "--tool",
+        "list_paths",
+    )
     (repo / "escape").symlink_to(private)
     script = repo / "probe.py"
     script.write_text(
-        "import pathlib,socket,sys\n"
+        "import json,pathlib,socket,subprocess,sys\n"
         f"home=pathlib.Path({str(home)!r})\n"
         "for path in (home/'canary',pathlib.Path('escape')):\n"
         "    try: path.read_bytes()\n"
@@ -158,6 +183,16 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
         "try: socket.create_connection(('127.0.0.1',int(sys.argv[1])),timeout=1)\n"
         "except OSError: pass\n"
         "else: raise AssertionError('host loopback was reachable')\n"
+        "with pathlib.Path('hashmarks-output.json').open('w+b') as output:\n"
+        f"    subprocess.run({producer_command!r},stdout=output,check=True)\n"
+        "    output.seek(0)\n"
+        "    encoded=output.read(65537)\n"
+        "assert len(encoded)<=65536\n"
+        "packet=json.loads(encoded)\n"
+        "assert packet['producer']=='Hashmarks'\n"
+        f"assert packet['capture_identity']=={capture_identity!r}\n"
+        f"assert packet['producer_implementation_identity']=={producer_identity!r}\n"
+        "assert packet['paths']==['repo/code.py']\n"
         "pathlib.Path('native-boundary-proof').write_text('PASS')\n"
         f"pathlib.Path({str(state / 'index-proof')!r}).write_text('PASS')\n"
     )
@@ -174,13 +209,19 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
         ),
         executable_sha256=native_executable_sha256(program),
     )
+    runtime_mounts = native_runtime_read_only_mounts(repo, selected)
     command = codex_login_command(
         selected,
         instructions=capture / "evidence",
         workspace=repo,
         scratch=scratch,
         evidence_state=state,
-        read_roots=(capture, program.parent),
+        read_roots=(
+            capture,
+            program.parent,
+            *(mount.source for mount in runtime_mounts),
+            *(Path(mount.target) for mount in runtime_mounts),
+        ),
     )
     settings = tuple(
         value
@@ -209,6 +250,7 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
     assert result.returncode == 0, result.stderr
     assert (repo / "native-boundary-proof").read_text() == "PASS"
     assert (state / "index-proof").read_text() == "PASS"
+    assert captured_source.read_bytes() == captured_bytes
 
 
 @pytest.mark.parametrize("verification_value", [42, 43])
