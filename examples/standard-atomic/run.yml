@@ -1,0 +1,3 @@
+version: 1
+source: {kind: repository-goon}
+target: {repository_id: REPOSITORY_ID}

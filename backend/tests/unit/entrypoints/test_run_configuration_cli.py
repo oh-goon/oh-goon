@@ -543,3 +543,66 @@ def test_human_and_json_inspection_preserve_zero_numeric_constraint(workflow, ca
     assert seed["contract"]["minimum"] == 0
     assert main(["config", "inspect", str(workflow)]) == 0
     assert "'minimum': 0" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "command", [("config", "inspect"), ("config", "validate"), ("lock",), ("run",)]
+)
+@pytest.mark.parametrize(
+    ("harness", "effects"),
+    [
+        ("provider-review", {}),
+        ("local-model-search", {"model": "local-model", "recipients": ["ollama_local"]}),
+        ("native", {}),
+        ("local-search", {"repository_access": "write"}),
+        ("local-search", {"recipients": ["external_model"]}),
+        ("local-search", {"capabilities": {"tools": ["sh"]}}),
+    ],
+)
+def test_source_only_agent_selection_refuses_inference_or_effects_before_work(
+    workflow, monkeypatch, command, harness, effects
+):
+    import oh_goon.cli as cli
+    import oh_goon.cli_agent_providers as providers
+    import oh_goon.services.agent_skill_registry as skills
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid source-only selection reached runtime, provider or Skill acquisition")
+
+    monkeypatch.setattr(cli, "_build_application_runtime", forbidden)
+    monkeypatch.setattr(providers, "agent_connection_from_args", forbidden)
+    monkeypatch.setattr(skills, "original_skill_aliases", forbidden)
+    package = workflow.parent / "goons/agents/check"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# agents/check\n\nSource selection refusal fixture.\n")
+    (package / "goon.yml").write_text(
+        yaml.safe_dump(
+            {
+                "inputs": {
+                    "repo": {"type": "repository_reference"},
+                    "skill": {"type": "skill_reference"},
+                    "acceptance": {"type": "acceptance_profile"},
+                },
+                "steps": [
+                    {
+                        "uses": "agent",
+                        "harness": harness,
+                        "task": "search:needle",
+                        "requested_effects": effects,
+                    }
+                ],
+            }
+        )
+    )
+    (workflow.parent / "plan.yml").write_text("goons:\n- import: agents/check\n  from: goons\n")
+    selected = yaml.safe_load(workflow.read_text())
+    selected["source"] = {"kind": "file-plan", "path": "plan.yml"}
+    selected["inputs"] = {"repo": "local:repository", "skill": "local:skill"}
+    selected["agent"] = {
+        "acceptance": "review",
+        "repository_root": str(workflow.parent.parent),
+        "skill_root": ".",
+    }
+    workflow.write_text(yaml.safe_dump(selected))
+    assert main([*command, str(workflow)]) == 2
+    assert not (workflow.parent / "goon.lock").exists()

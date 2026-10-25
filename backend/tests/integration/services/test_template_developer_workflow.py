@@ -1,11 +1,13 @@
 """Documented authoring journeys resolve actual sources and execute native tools."""
 
+import hashlib
 import json
 import os
 import select
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -35,6 +37,147 @@ def _prepare_fixture_project(project: Path) -> None:
         text=True,
     )
     assert result.returncode == 0, (result.stderr or result.stdout)[-8192:]
+
+
+@pytest.mark.parametrize(
+    "kind,key,step_count",
+    [("plan", "python/quality", 4), ("goon", "python/test", 2), ("goon", "python/quality", 4)],
+    ids=["initialized-plan", "initialized-atomic-goon", "initialized-composite-goon"],
+)
+def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    native_fixture_uv_cache: Path,
+    kind: str,
+    key: str,
+    step_count: int,
+) -> None:
+    monkeypatch.setenv("UV_CACHE_DIR", str(native_fixture_uv_cache))
+    repository = tmp_path / "repositories/team/app"
+    shutil.copytree(
+        FIXTURE,
+        repository,
+        ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache"),
+    )
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    _prepare_fixture_project(repository)
+    environment = {
+        name: value for name, value in os.environ.items() if not name.startswith("OH_GOON_")
+    }
+    environment.update(
+        OH_GOON_DB=str(tmp_path / "runtime.sqlite"),
+        OH_GOON_LEAGUE_FILE=str(tmp_path / "league.yml"),
+        XDG_CONFIG_HOME=str(tmp_path / "config"),
+        XDG_DATA_HOME=str(tmp_path / "data"),
+        XDG_STATE_HOME=str(tmp_path / "state"),
+    )
+    executable = Path(sys.executable).with_name("oh-goon")
+
+    def cli(*arguments: str, expected_returncode: int = 0) -> str:
+        completed = subprocess.run(
+            [str(executable), *arguments],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        assert completed.returncode == expected_returncode, (
+            arguments,
+            completed.stdout[-8192:],
+            completed.stderr[-8192:],
+        )
+        return completed.stdout
+
+    cli("league", "add-folder", str(tmp_path / "repositories"))
+    league = json.loads(cli("league", "scan", "--json"))
+    assert len(league["teams"]) == 1
+    target = league["teams"][0]["repository"]
+    assert Path(target["path"]) == repository
+    workflow = tmp_path / "workflow"
+    cli("templates", "init", key, "--kind", kind, "--output", str(workflow))
+    if key == "python/test":
+        # Extend the initialized Atomic selection through ordinary authoring,
+        # using a real project command as the bounded published-data producer.
+        (repository / "report.py").write_text("print('native-cli-report')\n")
+        package = workflow / "goons/general/native-report"
+        package.mkdir(parents=True)
+        (package / "README.md").write_text(
+            "# general/native-report\n\nPublish one native result.\n"
+        )
+        (package / "goon.yml").write_text(
+            "uv: {group: dev}\nsteps:\n- run: uv run python report.py\n"
+            "  outputs: {RESULT: {stream: stdout, max_bytes: 128}}\n"
+        )
+        with (workflow / "plan.yml").open("a") as stream:
+            stream.write("- import: general/native-report\n  from: ./goons\n")
+    selection = workflow / "run.yml"
+    config = yaml.safe_load(selection.read_text())
+    config["target"]["repository_id"] = target["repository_id"]
+    if key == "python/quality":
+        config["inputs"] = {"typechecker": "ty"}
+    selection.write_text(yaml.safe_dump(config, sort_keys=False))
+    inspected = json.loads(cli("config", "inspect", str(selection), "--json"))
+    validated = json.loads(cli("config", "validate", str(selection), "--json"))
+    assert inspected == validated
+    assert validated["status"] == "inputs-valid"
+    assert validated["proof"]["admission"] == "not-started"
+    assert not (workflow / "goon.lock").exists()
+    cli("lock", str(selection))
+    assert (workflow / "goon.lock").is_file()
+    receipt = json.loads(cli("run", str(selection), "--json"))
+    run_id = receipt["fleet_run_id"]
+    assert receipt["status"] == "COMPLETED" and receipt["outcome"] == "SUCCESS"
+    # Every readback crosses a fresh process and reopens the durable original
+    # Journal; none can reuse the execution process's transient Run objects.
+    views = {
+        view: json.loads(cli("plan", view, run_id, "--json"))
+        for view in ("status", "steps", "outputs", "tape")
+    }
+    assert all(report["fleet_run_id"] == run_id for report in views.values())
+    assert views["status"]["status"] == "COMPLETED"
+    assert views["status"]["outcome"] == "SUCCESS"
+    tape = views["tape"]
+    assert tape["status"] == "PASSED"
+    steps = views["steps"]["repositories"][0]["steps"]
+    assert steps == tape["repositories"][0]["steps"]
+    assert len(steps) == step_count
+    assert all(step["status"] == "PASSED" and step["exit_code"] == 0 for step in steps)
+    report = next(
+        artifact
+        for step in views["outputs"]["repositories"][0]["steps"]
+        for artifact in step["artifacts"]
+        if artifact["path"] == "junit.xml"
+    )
+    junit = (repository / "junit.xml").read_bytes()
+    assert b'tests="1"' in junit
+    assert report["status"] == "PRESENT"
+    assert report["sha256"] == hashlib.sha256(junit).hexdigest()
+    assert report["byte_count"] == len(junit)
+
+    if key == "python/test":
+        published = next(
+            output
+            for step in views["outputs"]["repositories"][0]["steps"]
+            for output in step["outputs"]
+            if output["name"] == "RESULT"
+        )
+        assert published["sha256"] == hashlib.sha256(b"native-cli-report").hexdigest()
+        assert published["byte_count"] == len(b"native-cli-report")
+        (repository / "tests/test_workload.py").write_text(
+            "def test_native_failure():\n    assert False\n"
+        )
+        cli("lock", str(selection))
+        failed = json.loads(cli("run", str(selection), "--json", expected_returncode=1))
+        failed_status = json.loads(cli("plan", "status", failed["fleet_run_id"], "--json"))
+        failed_tape = json.loads(cli("plan", "tape", failed["fleet_run_id"], "--json"))
+        assert failed_status["outcome"] == "ATTENTION_REQUIRED"
+        assert failed_tape["status"] == "ATTENTION_REQUIRED"
+        failed_step = failed_tape["repositories"][0]["steps"][0]
+        assert failed_step["status"] == "FAILED" and failed_step["exit_code"] == 1
+        skipped = failed_tape["repositories"][0]["steps"][1]
+        assert skipped["status"] == "SKIPPED" and skipped["outputs"] == []
+        assert json.loads(cli("plan", "outputs", run_id, "--json")) == views["outputs"]
 
 
 @pytest.mark.parametrize("project", [".", "my backend"])

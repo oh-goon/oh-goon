@@ -38,6 +38,7 @@ def prepare_configuration(args: argparse.Namespace) -> None:
         graph.validate_agent_selection(
             native_selected=agent is not None and agent.implementation is not None,
             require_review_phases=repair is not None,
+            model_selected=agent is not None and agent.model_profile is not None,
         )
     if agent is not None and not graph.has_agent_source_contract():
         raise FleetPlanInvalid("Agent selection requires an authored Agent source contract")

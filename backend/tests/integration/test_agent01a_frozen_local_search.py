@@ -6,9 +6,11 @@ This is NOT Fleet Agent admission, model use, or a completed Game Tape.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.engine.errors import OperationCancelledError
@@ -21,37 +23,29 @@ from oh_goon.integrations.fleet_plan_step_execution import (
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
+EXAMPLE = Path(__file__).resolve().parents[3] / "examples" / "agent-skill-local-search"
 
-def case(
-    tmp_path: Path, *, task: str = "search:needle", harness: str = "local-search", effects: str = ""
-):
-    goon = tmp_path / "goons" / "agent" / "search"
-    goon.mkdir(parents=True)
-    (goon / "README.md").write_text("Local read-only search\n")
-    (goon / "goon.yml").write_text(
-        """inputs:
-  repo: {type: repository_reference}
-  skill: {type: skill_reference}
-  acceptance: {type: acceptance_profile}
-steps:
-  - uses: agent
-    harness: """
-        + harness
-        + '\n    task: "'
-        + task
-        + '"\n'
-        + effects
-    )
+
+def case(tmp_path: Path, *, task: str | None = None, harness: str | None = None, effects: str = ""):
+    shutil.copytree(EXAMPLE, tmp_path, dirs_exist_ok=True)
+    goon = tmp_path / "goons" / "agent" / "search" / "goon.yml"
+    if task is not None or harness is not None or effects:
+        authored = yaml.safe_load(goon.read_text())
+        step = authored["steps"][0]
+        if task is not None:
+            step["task"] = task
+        if harness is not None:
+            step["harness"] = harness
+        if effects:
+            step.update(yaml.safe_load(effects))
+        goon.write_text(yaml.safe_dump(authored, sort_keys=False))
     plan = tmp_path / "plan.yml"
-    plan.write_text("inputs: [repo, skill, acceptance]\ngoons: [agent/search]\n")
     repo = tmp_path / "repos" / "team" / "app"
-    repo.mkdir(parents=True)
-    (repo / "code.txt").write_text("needle in the original file\n")
     skill = tmp_path / "skills" / "team" / "search"
-    skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text("# Read-only search skill\nNever edit source files.\n")
+    # Add one supporting resource to retain the closure regression alongside
+    # the actual checked-in Plan, Goon, repository and Skill bytes.
     (skill / "guide.txt").write_text("search is fixed-string\n")
-    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(tmp_path / "goons"))
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     _, sha = resolver.input_definitions_with_source(plan)
     handoff = resolver.prepare_agent_step_handoff(
         plan,
@@ -79,18 +73,18 @@ def test_real_frozen_tool_uses_original_step_supervisor_and_old_captured_bytes(
 
     monkeypatch.setattr(hashmarks, "CodeMap", index_before_supervision)
     original_id = handoff.handoff_identity
+    original_repository = (repo / "code.txt").read_bytes()
+    original_skill = (skill / "SKILL.md").read_bytes()
     (repo / "code.txt").write_text("NO MATCH HERE\n")
     (skill / "SKILL.md").write_text("CHANGED AFTER CAPTURE\n")
     with prepare_frozen_readonly_skill_search(handoff) as (root, step):
         assert handoff.handoff_identity == original_id
-        assert (root / "repo" / "code.txt").read_text() == "needle in the original file\n"
-        assert (
-            root / "skill" / "SKILL.md"
-        ).read_text() == "# Read-only search skill\nNever edit source files.\n"
+        assert (root / "repo" / "code.txt").read_bytes() == original_repository
+        assert (root / "skill" / "SKILL.md").read_bytes() == original_skill
         assert (root / "skill" / "guide.txt").read_text() == "search is fixed-string\n"
         result = execute_direct_step(root, step, runtime(), step_order=1)
     assert result.returncode == 0
-    assert "needle in the original file" in result.stdout
+    assert original_repository.decode().strip() in result.stdout
     assert (
         json.loads(result.stdout)["capture_identity"] == handoff.source.repository.content_identity
     )
@@ -152,7 +146,10 @@ def test_unrequested_effects_and_unsupported_harness_fail_before_work(
     with pytest.raises(FleetPlanInvalid, match=expected):
         with prepare_frozen_readonly_skill_search(handoff):
             pytest.fail("Tool prework accepted an unsupported request")
-    assert (repo / "code.txt").read_text() == "needle in the original file\n"
+    captured = next(
+        member.data for member in handoff.source.repository.members if member.path == "code.txt"
+    )
+    assert (repo / "code.txt").read_bytes() == captured
 
 
 def test_original_agent_resolver_remains_preview_only(tmp_path):
@@ -166,6 +163,8 @@ def test_original_agent_resolver_remains_preview_only(tmp_path):
 def test_original_delivery_packet_executes_same_frozen_tool_without_reopening_source(tmp_path):
     handoff, repo, skill = case(tmp_path)
     packet = handoff.encode_prework_delivery()
+    original_repository = (repo / "code.txt").read_bytes()
+    original_skill = (skill / "SKILL.md").read_bytes()
     (repo / "code.txt").write_text("changed after capture\n")
     (skill / "SKILL.md").write_text("changed after capture\n")
     with prepare_delivered_readonly_skill_search(
@@ -173,11 +172,11 @@ def test_original_delivery_packet_executes_same_frozen_tool_without_reopening_so
         expected_handoff_identity=handoff.handoff_identity,
         expected_step_id=handoff.step_id,
     ) as (root, step):
-        assert (root / "repo" / "code.txt").read_text() == "needle in the original file\n"
-        assert (root / "skill" / "SKILL.md").read_text().startswith("# Read-only")
+        assert (root / "repo" / "code.txt").read_bytes() == original_repository
+        assert (root / "skill" / "SKILL.md").read_bytes() == original_skill
         result = execute_direct_step(root, step, runtime(), step_order=1)
     assert result.returncode == 0
-    assert "needle in the original file" in result.stdout
+    assert original_repository.decode().strip() in result.stdout
     assert not root.exists()
 
 

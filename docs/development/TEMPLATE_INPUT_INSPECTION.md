@@ -94,9 +94,12 @@ Pi, OpenCode and Codex own their native authentication, context windows,
 compaction, reasoning, tools and private settings.
 
 An `agent` selection requires `acceptance`, an absolute approved
-`repository_root`, and a contained relative `skill_root`. Select either native
-`implementation` plus `profile`, or managed inference `model_profile`; a native
-selection cannot also set a managed model profile. `repair` requires all four
+`repository_root`, and a contained relative `skill_root`. Model-backed Steps require
+either native `implementation` plus `profile`, or managed inference `model_profile`;
+a native selection cannot also set a managed model profile. Recipient-free,
+read-only `local-search` Steps use only the source roots and acceptance, without a
+model selection or provider request. The authored source graph rejects a missing
+model selection for other harnesses before capture or execution. `repair` requires all four
 explicit limits: `review_passes`, `write_roots`, `timeout_seconds`, and
 `step_timeout_seconds`. Its Run also requires fresh `--authorize-repair` consent.
 

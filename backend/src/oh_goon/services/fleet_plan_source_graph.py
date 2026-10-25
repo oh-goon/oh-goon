@@ -108,11 +108,15 @@ class FleetPlanSourceGraph:
         return tuple(found)
 
     def validate_agent_selection(
-        self, *, native_selected: bool, require_review_phases: bool | None = None
+        self,
+        *,
+        native_selected: bool,
+        require_review_phases: bool | None = None,
+        model_selected: bool | None = None,
     ) -> None:
         """Refuse source/selection conflicts before registry acquisition or model capture."""
         from oh_goon.core.agent_review_plan import validate_agent_phase_steps
-        from oh_goon.core.models.fleet_plan import AgentPlanStep
+        from oh_goon.core.models.fleet_plan import AgentPlanStep, AgentStepRequestedEffects
 
         steps: dict[str, PlanStep] = {}
         owners: dict[str, str] = {}
@@ -140,6 +144,19 @@ class FleetPlanSourceGraph:
         if any((step.harness == "native") != native_selected for step in agent_steps):
             raise FleetPlanInvalid(
                 "Selected native/provider agent differs from the authored harness"
+            )
+        if (
+            model_selected is False
+            and not native_selected
+            and any(
+                step.harness != "local-search"
+                or step.requested_effects != AgentStepRequestedEffects()
+                for step in agent_steps
+            )
+        ):
+            raise FleetPlanInvalid(
+                "Source-only agent selection requires recipient-free read-only local-search; "
+                "model harnesses require an explicit model_profile or native selection"
             )
         if require_review_phases is False and owners:
             raise FleetPlanInvalid(
