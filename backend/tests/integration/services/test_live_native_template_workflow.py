@@ -21,11 +21,13 @@ from oh_goon.cli import main
 @pytest.mark.certification
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX project verification script")
 @pytest.mark.parametrize("kind", ["plan", "goon"])
+@pytest.mark.parametrize("connection", ["codex_login", "codex_service"])
 def test_live_codex_executes_initialized_native_workflow_and_independent_verification(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     kind: str,
+    connection: str,
 ) -> None:
     executable = os.environ.get("OH_GOON_NATIVE_CODEX")
     account_root = os.environ.get("OH_GOON_LIVE_CODEX_HOME")
@@ -34,6 +36,16 @@ def test_live_codex_executes_initialized_native_workflow_and_independent_verific
     program = Path(executable).resolve(strict=True)
     selected_account = Path(account_root).resolve(strict=True)
     assert selected_account.is_dir()
+    definition: dict[str, object] = {"executable": str(program)}
+    if connection == "codex_service":
+        runtime_root = os.environ.get("OH_GOON_NATIVE_CODEX_RUNTIME_ROOT")
+        if not runtime_root:
+            pytest.skip("Select the complete public runtime for native service execution")
+        public_runtime = Path(runtime_root).resolve(strict=True)
+        assert program.is_relative_to(public_runtime)
+        assert not public_runtime.is_relative_to(selected_account)
+        assert not selected_account.is_relative_to(public_runtime)
+        definition["runtime_roots"] = [str(public_runtime)]
     repository = tmp_path / "repos" / "sample"
     repository.mkdir(parents=True)
     source = repository / "arithmetic.py"
@@ -70,14 +82,14 @@ def test_live_codex_executes_initialized_native_workflow_and_independent_verific
     providers.write_text(
         json.dumps(
             {
-                "native_agents": {"codex": {"executable": str(program)}},
+                "native_agents": {"codex": definition},
                 "native_profiles": {
                     "live-cli": {
                         "backend": "local",
                         "allowed_agents": ["codex"],
                         "workspace_roots": [str(repository.parent)],
                         "timeout_seconds": 180,
-                        "codex_login": {
+                        connection: {
                             "home": str(selected_account),
                             "model": os.environ.get("OH_GOON_LIVE_CODEX_MODEL", "gpt-6-luna"),
                             "reasoning_effort": "low",
@@ -147,6 +159,15 @@ def test_live_codex_executes_initialized_native_workflow_and_independent_verific
     assert len(steps) == 2
     assert all(step["status"] == "PASSED" and step["exit_code"] == 0 for step in steps)
     assert steps[0]["native_agent_observations"][0]["agent"] == "codex"
+    if connection == "codex_service":
+        execution = steps[0]["native_agent_observations"][0]["execution"]
+        assert execution["authority"] == "ORIGINAL_STEP_EXECUTION"
+        assert execution["native_version"] == "0.164.0"
+        assert execution["repository_access"] == "write"
+        assert execution["native_state_separation"] == "verified"
+        assert execution["preflight"] == "verified"
+        assert execution["mcp_catalog"] == "empty"
+        assert execution["process_cleanup"] == "verified"
     assert tuple(steps[1]["command"]) == ("./scripts/verify",)
     completed = subprocess.run(verification, capture_output=True, text=True, timeout=10)
     assert completed.returncode == 0

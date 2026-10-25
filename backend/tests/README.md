@@ -250,6 +250,17 @@ Goon selections through the public CLI, lock, native coding and a project
 verification Step. An independent verifier first fails the original sample and
 then passes its real edited source; verifier and project-check bytes must remain
 unchanged. Codex alone handles sign-in. The harness never opens auth or env files.
+The module covers both `codex_login` and `codex_service` profiles. Service cases
+also require the complete public runtime and check original native Step policy,
+state separation, empty MCP catalog and process-cleanup evidence:
+
+```sh
+OH_GOON_NATIVE_CODEX=/opt/native-codex/bin/codex \
+OH_GOON_NATIVE_CODEX_RUNTIME_ROOT=/opt/native-codex \
+OH_GOON_LIVE_CODEX_HOME=/path/to/existing/.codex \
+OH_GOON_LIVE_CODEX_MODEL=gpt-6-luna \
+uv run --offline --frozen --no-sync --project backend pytest -m certification backend/tests/integration/services/test_live_native_template_workflow.py -k codex_service
+```
 
 The selected native installation and the loaded Oh-Goon/Python runtime must be
 outside the authentication-home tree, as required by the existing native tool
@@ -259,7 +270,9 @@ they do not require a local model server.
 The [implemented native-service adapter](../../docs/AGENT_PROVIDERS.md#native-service-adapter-design)
 uses a dedicated owned process/session and has the separate synthetic installed
 qualification above. Native services retain authentication, configuration and
-token refresh. Real-account lifecycle qualification must use supported non-secret
+token refresh. Its initialized Plan and Goon cases also complete real signed-in
+service inference and independent verification. Refresh and credential-persistence
+qualification must use supported non-secret
 native protocol facts, without file reads, token export, forced-refresh/account-server
 helpers or broad configuration APIs. A cached authenticated response alone does
 not establish refresh or persistence; if native lifecycle events cannot establish

@@ -110,7 +110,10 @@ def execute_fixture(
         assert not inherited_control.keys() & environment.keys()
         if argv[-1] == "--version":
             events.append("version_probe")
-            version = "codex-cli 0.999.0" if fault == "version" else "codex-cli 0.163.0"
+            version = {
+                "version": "codex-cli 0.999.0",
+                "previous_version": "codex-cli 0.163.0",
+            }.get(fault or "", "codex-cli 0.164.0")
             result = run_command(
                 sys.executable,
                 "-I",
@@ -474,10 +477,11 @@ def test_native_mcp_discovery_or_disable_rejection_closes_original_process_befor
     assert "PRIVATE_NATIVE_REGISTRATION" not in str(error.value)
 
 
+@pytest.mark.parametrize("fault,version", [("version", "0.999.0"), ("previous_version", "0.163.0")])
 def test_unqualified_native_cli_version_blocks_before_daemon_and_model_submission(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, version: str
 ) -> None:
-    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault="version")
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault=fault)
     with pytest.raises(AgentProviderError, match="version"):
         invoke()
     assert "version_probe" in events
@@ -487,7 +491,7 @@ def test_unqualified_native_cli_version_blocks_before_daemon_and_model_submissio
         item[1] for item in events if isinstance(item, tuple) and item[0] == "version_receipt"
     ]
     assert len(receipts) == 1 and isinstance(receipts[0], CommandResult)
-    assert receipts[0].stdout.strip() == "codex-cli 0.999.0"
+    assert receipts[0].stdout.strip() == f"codex-cli {version}"
     assert receipts[0].supervisor.final_process_group_quiescent is True
 
 
