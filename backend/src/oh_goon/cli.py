@@ -15,7 +15,6 @@ from oh_goon.cli_local_state import check_local_state_for_startup, run_local_sta
 from oh_goon.cli_logs import run_logs_command
 from oh_goon.cli_open import run_open_command
 from oh_goon.cli_parser import build_parser
-from oh_goon.cli_runtime import run_stateful_command
 from oh_goon.cli_start import run_start_command
 from oh_goon.cli_status import run_status_command
 from oh_goon.cli_stop import run_stop_command
@@ -172,6 +171,8 @@ def _build_application_runtime(
 
 def _execute_stateful_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     try:
+        from oh_goon.cli_runtime import run_stateful_command
+
         result = run_stateful_command(runtime, args)
     except BaseException as exc:
         _shutdown_after_primary_failure(runtime)
