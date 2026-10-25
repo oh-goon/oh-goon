@@ -21,6 +21,8 @@ from oh_goon.core.product_identity import stable_id
 if TYPE_CHECKING:
     from oh_goon.core.models.fleet_plan import ResolvedPlanStep
 
+_NATIVE_AGENT_ADAPTER = TypeAdapter(ResolvedNativeAgent)
+
 
 def validate_resolved_plan(plan: Any) -> None:
     """Validate cross-step invariants that require the fully resolved plan graph."""
@@ -414,11 +416,7 @@ def _validate_plan_identity(plan: Any) -> None:
             step.model_dump(mode="json", exclude_computed_fields=True) for step in plan.steps
         ],
         **(
-            {
-                "native_agent": TypeAdapter(ResolvedNativeAgent).dump_python(
-                    plan.native_agent, mode="json"
-                )
-            }
+            {"native_agent": _NATIVE_AGENT_ADAPTER.dump_python(plan.native_agent, mode="json")}
             if getattr(plan, "native_agent", None) is not None
             else {}
         ),

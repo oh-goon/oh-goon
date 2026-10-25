@@ -549,18 +549,19 @@ def test_human_and_json_inspection_preserve_zero_numeric_constraint(workflow, ca
     "command", [("config", "inspect"), ("config", "validate"), ("lock",), ("run",)]
 )
 @pytest.mark.parametrize(
-    ("harness", "effects"),
+    ("harness", "effects", "include_selection"),
     [
-        ("provider-review", {}),
-        ("local-model-search", {"model": "local-model", "recipients": ["ollama_local"]}),
-        ("native", {}),
-        ("local-search", {"repository_access": "write"}),
-        ("local-search", {"recipients": ["external_model"]}),
-        ("local-search", {"capabilities": {"tools": ["sh"]}}),
+        ("provider-review", {}, True),
+        ("local-model-search", {"model": "local-model", "recipients": ["ollama_local"]}, True),
+        ("native", {}, True),
+        ("local-search", {"repository_access": "write"}, True),
+        ("local-search", {"recipients": ["external_model"]}, True),
+        ("local-search", {"capabilities": {"tools": ["sh"]}}, True),
+        ("local-search", {}, False),
     ],
 )
 def test_source_only_agent_selection_refuses_inference_or_effects_before_work(
-    workflow, monkeypatch, command, harness, effects
+    workflow, monkeypatch, command, harness, effects, include_selection
 ):
     import oh_goon.cli as cli
     import oh_goon.cli_agent_providers as providers
@@ -603,6 +604,8 @@ def test_source_only_agent_selection_refuses_inference_or_effects_before_work(
         "repository_root": str(workflow.parent.parent),
         "skill_root": ".",
     }
+    if not include_selection:
+        del selected["agent"]
     workflow.write_text(yaml.safe_dump(selected))
     assert main([*command, str(workflow)]) == 2
     assert not (workflow.parent / "goon.lock").exists()
