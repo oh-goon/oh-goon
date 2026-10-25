@@ -252,6 +252,8 @@ Select `-k deploy-order` when iterating on that case; it uses the same original
 Run, qualified Hashmarks follow-up, frozen Skill and source-edit boundaries. It
 also requires a successful producer search for the public function and checks
 revision-bound source evidence against the frozen broken implementation.
+Its list and search execute in one native shell command, proving that each
+producer payload retains its own evidence interpretation when commands are batched.
 The live cases require the exact supplied list command and its admitted paths and
 discovery qualifications; an envelope alone cannot satisfy the follow-up check.
 
@@ -269,10 +271,21 @@ Archives and destinations are verifier-owned temporary data. Select `-k safe-zip
 concurrent destination custody remains outside this ordinary coding task. Its
 workspace name contains a literal dot to exercise native project-key transport.
 
+The Node.js HTTP case repairs an ESM binary download handler and single-range
+parser. Native Node serves real loopback requests for byte-exact full/partial
+responses, HEAD, malformed/unsatisfiable ranges, method/path errors and factory
+input isolation. The coding Step keeps its existing network restriction; the
+immutable verifier owns the HTTP server and closes its connections. The second
+verification Step runs the explicitly selected public Node's native syntax check
+over the edited modules. Select `-k http-node` and supply `OH_GOON_NATIVE_NODE`
+outside the authentication home; no npm dependencies or runtime installation are
+needed.
+
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \
 OH_GOON_LIVE_CODEX_HOME=/path/to/existing/.codex \
 OH_GOON_LIVE_CODEX_MODEL=gpt-6-luna \
+OH_GOON_NATIVE_NODE=/usr/bin/node \
 uv run --offline --frozen --no-sync --project backend pytest -m certification backend/tests/integration/services/test_native_codex_live.py
 ```
 

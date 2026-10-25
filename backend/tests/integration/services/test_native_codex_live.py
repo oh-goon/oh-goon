@@ -696,9 +696,13 @@ _DEPLOY_ORDER_TASK = (
     "deterministic dependency ordering, complete manifest validation and atomic CLI "
     "error handling. Use only the Python standard library. Before editing, execute "
     "the exact repository_tools.list Hashmarks command from the supplied instructions. "
-    "Also run the supplied repository_tools.search command with a private query file "
-    "containing order_services; create it under the native $TMPDIR scratch directory, "
-    "outside the working repository. Inspect the frozen source evidence before editing. "
+    "Run that list command and the supplied repository_tools.search command in the same "
+    "shell invocation, in that order, joining the two complete commands with &&. "
+    "Create a private query file under the native $TMPDIR scratch directory, outside "
+    "the working repository, containing exactly order_services with no newline. "
+    "Replace the search template's entire <private-query-file> placeholder with its "
+    "quoted actual path; do not concatenate the two commands' arguments. Both commands "
+    "must succeed before editing. Inspect the frozen source evidence before editing. "
     "Change only deploy_order/graph.py and deploy_order/__main__.py. "
     "Independent verification runs after your coding Step."
 )
@@ -1416,9 +1420,211 @@ unittest.main(argv=['live-codex-zip-extraction-verification'])
 """
 
 
+_HTTP_NODE_SOURCES: dict[str, str] = {
+    "byte_asset/range.mjs": """export function parseRange(header, size) {
+    return null;
+}
+""",
+    "byte_asset/handler.mjs": """import { parseRange } from './range.mjs';
+
+export function createHandler(body, pathname = '/download') {
+    return (request, response) => {
+        if (request.url !== pathname) {
+            response.writeHead(404);
+            response.end();
+            return;
+        }
+        parseRange(request.headers.range, body.length);
+        const text = body.toString('utf8');
+        response.writeHead(200, { 'Content-Length': text.length });
+        response.end(text);
+    };
+}
+""",
+    "README.md": (
+        "# Byte asset\n\nA dependency-free Node.js ESM handler serving an in-memory binary "
+        "download with a deliberately limited single-range contract.\n"
+    ),
+}
+
+_HTTP_NODE_TASK = """Repair byte_asset/range.mjs and byte_asset/handler.mjs using only native
+Node.js standard libraries. Keep their named public exports and change only those two files.
+Before editing, execute the exact repository_tools.list Hashmarks command supplied in the
+instructions and read the captured Skill resource. Implement this limited application contract:
+
+parseRange(header, size) validates size first: it must be a nonnegative safe integer; reject
+invalid sizes with TypeError or RangeError even when the header is absent. Missing, nonstring,
+malformed or unsupported headers return null (ignore the range). Recognize only exact lowercase
+ASCII bytes=START-END, bytes=START-, bytes=-SUFFIX with at least one decimal number. Leading
+zeros are allowed; spaces, commas, trailing characters/linebreaks and unsafe integer fields
+are malformed. Return exactly {start, end}, inclusive. Clamp an oversized end to size-1.
+Open ranges end at size-1. Suffix ranges select the last SUFFIX bytes, bounded by the full body.
+For syntactically valid safe-integer fields, start>=size, end<start, zero suffix and any valid
+range on an empty body throw RangeError. This is an application contract, not full HTTP RFC support.
+
+createHandler(body, pathname='/download') accepts a Buffer only and captures a copy when
+created, so later caller mutation cannot alter responses. pathname must be a string starting
+with / and containing no query or fragment; reject invalid factory inputs. Use Node's URL
+parser for request paths, ignore query strings, and match the configured pathname exactly.
+Unknown paths return 404, Content-Length: 0, empty body. Known paths support GET and HEAD only;
+other methods return 405, Allow: GET, HEAD, Content-Length: 0, empty body.
+GET without a range, or with an ignored range, returns 200 with all original binary bytes.
+Satisfiable ranges return 206 with exactly the selected bytes and Content-Range: bytes S-E/N.
+Unsatisfiable ranges return 416, Content-Range: bytes */N, Content-Length: 0, empty body.
+Every known-path GET/HEAD response has Accept-Ranges: bytes; successful 200/206 responses
+have Content-Type: application/octet-stream and exact byte Content-Length. Full responses
+have no Content-Range. HEAD ignores Range entirely, returning 200 and full headers but no body.
+Empty buffers and custom paths must work. Do not use string lengths or decode binary bodies.
+
+The coding Step has no network capability. Use pure function and native syntax self-checks;
+independent verification runs real loopback HTTP requests after the coding Step completes.
+"""
+
+_HTTP_NODE_VERIFICATION = r"""import assert from 'node:assert/strict';
+import http from 'node:http';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const root = process.argv[2];
+const { parseRange } = await import(pathToFileURL(path.join(root, 'byte_asset/range.mjs')));
+const { createHandler } = await import(pathToFileURL(path.join(root, 'byte_asset/handler.mjs')));
+for (const [header, size, expected] of [
+    ['bytes=1-3', 8, {start: 1, end: 3}],
+    ['bytes=6-', 8, {start: 6, end: 7}],
+    ['bytes=-3', 8, {start: 5, end: 7}],
+    ['bytes=-99', 8, {start: 0, end: 7}],
+    ['bytes=0001-0002', 8, {start: 1, end: 2}],
+    ['bytes=0-9007199254740991', 8, {start: 0, end: 7}],
+    ['bytes=0-0', 1, {start: 0, end: 0}],
+]) assert.deepEqual(parseRange(header, size), expected);
+const ignored = [undefined, null, 3, {}, '', 'Bytes=0-1', 'bytes=', 'bytes=-',
+    'bytes= 0-1', 'bytes=0 -1', 'bytes=0-1 ', 'bytes=0-1\n', 'bytes=0-1\r\n',
+    'bytes=0-1,3-4', 'bytes=+0-1', 'bytes=0-1x', 'bytes=\u0660-1',
+    'bytes=0-9007199254740992', 'bytes=9007199254740992-', 'bytes=-9007199254740992'];
+for (const header of ignored) assert.equal(parseRange(header, 8), null);
+for (const header of ['bytes=8-', 'bytes=9-10', 'bytes=4-3', 'bytes=-0']) {
+    assert.throws(() => parseRange(header, 8), RangeError);
+}
+for (const header of ['bytes=0-0', 'bytes=0-', 'bytes=-1']) {
+    assert.throws(() => parseRange(header, 0), RangeError);
+}
+for (const size of [-1, 1.5, NaN, Infinity, 9007199254740992, '8', null, undefined]) {
+    assert.throws(() => parseRange(undefined, size), error =>
+        error instanceof TypeError || error instanceof RangeError);
+}
+assert.equal(parseRange(undefined, 0), null);
+for (const body of ['text', new Uint8Array([1]), null]) {
+    assert.throws(() => createHandler(body));
+}
+for (const pathname of ['', 'download', '/download?x=1', '/download#x', null, 3]) {
+    assert.throws(() => createHandler(Buffer.alloc(0), pathname));
+}
+
+async function withServer(handler, inspect) {
+    const server = http.createServer(handler);
+    const sockets = new Set();
+    server.on('connection', socket => {
+        sockets.add(socket);
+        socket.on('close', () => sockets.delete(socket));
+    });
+    try {
+        await new Promise((resolve, reject) => {
+            server.once('error', reject);
+            server.listen(0, '127.0.0.1', resolve);
+        });
+        const address = server.address();
+        await inspect((method = 'GET', target = '/download', range) =>
+            new Promise((resolve, reject) => {
+                const request = http.request({host: '127.0.0.1', port: address.port,
+                    method, path: target, agent: false,
+                    headers: range === undefined ? {} : {Range: range}}, response => {
+                    const chunks = [];
+                    let length = 0;
+                    response.on('data', chunk => {
+                        length += chunk.length;
+                        if (length > 1024) response.destroy(new Error('Unbounded response'));
+                        else chunks.push(chunk);
+                    });
+                    response.on('error', reject);
+                    response.on('aborted', () => reject(new Error('Aborted response')));
+                    response.on('end', () => resolve({status: response.statusCode,
+                        headers: response.headers, body: Buffer.concat(chunks)}));
+                });
+                request.setTimeout(2000, () => request.destroy(new Error('Request timeout')));
+                request.on('error', reject);
+                request.end();
+            }));
+    } finally {
+        for (const socket of sockets) socket.destroy();
+        await new Promise(resolve => server.close(resolve));
+    }
+}
+function success(response, status, bytes, total, contentRange) {
+    assert.equal(response.status, status);
+    assert.equal(response.headers['accept-ranges'], 'bytes');
+    assert.equal(response.headers['content-type'], 'application/octet-stream');
+    assert.equal(response.headers['content-length'], String(total));
+    assert.equal(response.headers['content-range'], contentRange);
+    assert.deepEqual(response.body, bytes);
+}
+const original = Buffer.from([0, 255, 195, 169, 10, 128, 42, 13]);
+const supplied = Buffer.from(original);
+const handler = createHandler(supplied);
+supplied.fill(7);
+await withServer(handler, async request => {
+    success(await request(), 200, original, original.length);
+    success(await request('GET', '/download?name=caf%C3%A9'), 200, original, original.length);
+    for (const range of ['units=0-1', 'bytes=0-1,3-4', 'bytes= 0-1',
+        'bytes=0-9007199254740992']) {
+        success(await request('GET', '/download', range), 200, original, original.length);
+    }
+    for (const [range, start, end] of [['bytes=1-3', 1, 3], ['bytes=6-', 6, 7],
+        ['bytes=-3', 5, 7], ['bytes=-99', 0, 7], ['bytes=0-99', 0, 7]]) {
+        success(await request('GET', '/download', range), 206,
+            original.subarray(start, end + 1), end - start + 1, `bytes ${start}-${end}/8`);
+    }
+    for (const range of ['bytes=8-', 'bytes=4-3', 'bytes=-0']) {
+        const response = await request('GET', '/download', range);
+        assert.equal(response.status, 416);
+        assert.equal(response.headers['accept-ranges'], 'bytes');
+        assert.equal(response.headers['content-range'], 'bytes */8');
+        assert.equal(response.headers['content-length'], '0');
+        assert.equal(response.body.length, 0);
+    }
+    for (const range of [undefined, 'bytes=8-', 'bytes=1-2']) {
+        success(await request('HEAD', '/download', range), 200, Buffer.alloc(0), 8);
+    }
+    for (const [method, target, status] of [['GET', '/missing', 404],
+        ['GET', '/download/extra', 404], ['POST', '/download', 405],
+        ['DELETE', '/download?x=1', 405], ['POST', '/missing', 404]]) {
+        const response = await request(method, target);
+        assert.equal(response.status, status);
+        assert.equal(response.headers['content-length'], '0');
+        assert.equal(response.body.length, 0);
+        if (status === 405) assert.equal(response.headers.allow, 'GET, HEAD');
+    }
+});
+await withServer(createHandler(Buffer.alloc(0)), async request => {
+    success(await request(), 200, Buffer.alloc(0), 0);
+    const response = await request('GET', '/download', 'bytes=0-');
+    assert.equal(response.status, 416);
+    assert.equal(response.headers['content-range'], 'bytes */0');
+    assert.equal(response.headers['content-length'], '0');
+    assert.equal(response.headers['accept-ranges'], 'bytes');
+    assert.equal(response.body.length, 0);
+});
+await withServer(createHandler(original, '/asset'), async request => {
+    success(await request('GET', '/asset?cache=1'), 200, original, 8);
+    assert.equal((await request()).status, 404);
+});
+console.log('Binary HTTP range contract verified through native Node');
+"""
+
+
 @pytest.mark.certification
 @pytest.mark.parametrize(
-    "scenario", ["ranges", "eventlog", "stocktake", "deploy-order", "ledger", "safe-zip"]
+    "scenario",
+    ["ranges", "eventlog", "stocktake", "deploy-order", "ledger", "safe-zip", "http-node"],
 )
 def test_legacy_live_chatgpt_coding_uses_original_run(
     tmp_path: Path,
@@ -1433,6 +1639,13 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     program = Path(executable).resolve(strict=True)
     home = Path(account_home).resolve(strict=True)
     assert home.is_dir()
+    node_program: Path | None = None
+    if scenario == "http-node":
+        node_executable = os.environ.get("OH_GOON_NATIVE_NODE")
+        if not node_executable:
+            pytest.skip("Select an installed public Node.js executable for the HTTP case")
+        node_program = Path(node_executable).resolve(strict=True)
+        assert not node_program.is_relative_to(home)
     model = os.environ.get("OH_GOON_LIVE_CODEX_MODEL", "gpt-6-luna")
     repo = tmp_path / "repos" / ("bundle.workspace" if scenario == "safe-zip" else "app")
     repo.mkdir(parents=True)
@@ -1443,13 +1656,18 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         "deploy-order": _DEPLOY_ORDER_SOURCES,
         "ledger": _LEDGER_SOURCES,
         "safe-zip": _SAFE_ZIP_SOURCES,
+        "http-node": _HTTP_NODE_SOURCES,
     }[scenario]
     for relative, text in source_files.items():
         path = repo / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    verifier = tmp_path / "independent verification" / "verify contract.py"
+    verifier = (
+        tmp_path
+        / "independent verification"
+        / ("verify contract.mjs" if node_program else "verify contract.py")
+    )
     verifier.parent.mkdir()
     verifier.write_text(
         {
@@ -1459,25 +1677,39 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             "deploy-order": _DEPLOY_ORDER_VERIFICATION,
             "ledger": _LEDGER_VERIFICATION,
             "safe-zip": _SAFE_ZIP_VERIFICATION,
+            "http-node": _HTTP_NODE_VERIFICATION,
         }[scenario],
         encoding="utf-8",
     )
     verifier_bytes = verifier.read_bytes()
-    verification = (sys.executable, "-I", "-B", str(verifier), str(repo))
+    verification = (
+        (str(node_program), str(verifier), str(repo))
+        if node_program
+        else (sys.executable, "-I", "-B", str(verifier), str(repo))
+    )
     baseline = run_command(*verification, cwd=repo)
     assert baseline.returncode == 1
 
     argv_verifier = verifier.parent / "verify arguments.py"
     quoted_arguments = (
+        *((str(node_program),) if node_program else ()),
         "literal value with spaces",
         "https://example.invalid/tasks?cursor=alpha%20beta&tag=one",
     )
-    argv_verifier.write_text(
-        "import pathlib,sys\n"
-        f"assert tuple(sys.argv[2:]) == {quoted_arguments!r}\n"
-        "for source in pathlib.Path(sys.argv[1]).rglob('*.py'):\n"
+    syntax_check = (
+        "sources = list(pathlib.Path(sys.argv[1]).rglob('*.mjs'))\n"
+        "assert sources\n"
+        "for source in sources:\n"
+        "    subprocess.run([sys.argv[2], '--check', str(source)], check=True, timeout=10)\n"
+        if node_program
+        else "for source in pathlib.Path(sys.argv[1]).rglob('*.py'):\n"
         "    compile(source.read_bytes(), str(source), 'exec')\n"
-        "print('Quoted arguments preserved; Python sources compile')\n",
+    )
+    argv_verifier.write_text(
+        "import pathlib,subprocess,sys\n"
+        f"assert tuple(sys.argv[2:]) == {quoted_arguments!r}\n"
+        + syntax_check
+        + "print('Quoted arguments preserved; native source syntax verified')\n",
         encoding="utf-8",
     )
     argv_verifier_bytes = argv_verifier.read_bytes()
@@ -1536,6 +1768,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         task = _LEDGER_TASK
     elif scenario == "safe-zip":
         task = _SAFE_ZIP_TASK
+    elif scenario == "http-node":
+        task = _HTTP_NODE_TASK + f"\nSelected public Node executable: {node_program}\n"
     task_file = tmp_path / "task.txt"
     task_file.write_text(task, encoding="utf-8")
     catalog = tmp_path / "providers.json"
@@ -1571,10 +1805,12 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
     verification_launches: list[tuple[str, ...]] = []
     hashmarks_followup_succeeded = False
     hashmarks_search_succeeded = False
+    hashmarks_combined_followup_succeeded = False
     skill_resource_reported = False
 
     def command_runner(*argv: str, **kwargs: Any) -> CommandResult:
-        nonlocal hashmarks_followup_succeeded, hashmarks_search_succeeded, skill_resource_reported
+        nonlocal hashmarks_followup_succeeded, hashmarks_search_succeeded
+        nonlocal hashmarks_combined_followup_succeeded, skill_resource_reported
         if argv[0] == str(program):
             native_diagnostics["native_invocation_observed"] = True
             assert len(native_occurrences) == expected_native_launches, (
@@ -1651,6 +1887,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                     and item.get("exit_code") == 0
                     and "oh_goon.integrations.hashmarks.agent_tools" in item.get("command", "")
                 ):
+                    list_followup_in_command = False
+                    search_followup_in_command = False
                     for output_line in item.get("aggregated_output", "").splitlines():
                         try:
                             followup = json.loads(output_line)
@@ -1663,7 +1901,10 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                             and followup.get("producer_implementation_identity")
                             == require_loaded_hashmarks_runtime()
                         ):
-                            if payload["repository_tools"]["list"] in item["command"]:
+                            if (
+                                payload["repository_tools"]["list"] in item["command"]
+                                and "paths" in followup
+                            ):
                                 assert set(followup["paths"]) == {
                                     "repo/" + relative for relative in expected_source
                                 }
@@ -1675,6 +1916,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                                 )
                                 if not native_edit_observed:
                                     hashmarks_followup_succeeded = True
+                                    list_followup_in_command = True
                             elif scenario == "deploy-order" and "retrieval" in followup:
                                 retrieval = followup["retrieval"]
                                 assert retrieval["query"] == "order_services"
@@ -1698,6 +1940,9 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                                 )
                                 if not native_edit_observed:
                                     hashmarks_search_succeeded = True
+                                    search_followup_in_command = True
+                    if list_followup_in_command and search_followup_in_command:
+                        hashmarks_combined_followup_succeeded = True
                 if len(item_facts) >= 32:
                     continue
                 fact: dict[str, str | int] = {
@@ -1800,6 +2045,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         assert hashmarks_followup_succeeded
         if scenario == "deploy-order":
             assert hashmarks_search_succeeded
+            assert hashmarks_combined_followup_succeeded
         assert skill_resource_reported
         assert verification_launches == list(verifications)
         steps = detail["game_tape"]["repositories"][0]["steps"]
@@ -1836,6 +2082,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                 "ranges": {"ranges.py"},
                 "ledger": {"ledger/records.py", "ledger/database.py", "ledger/__main__.py"},
                 "safe-zip": {"bundle_unpack/extract.py", "bundle_unpack/__main__.py"},
+                "http-node": {"byte_asset/range.mjs", "byte_asset/handler.mjs"},
                 "deploy-order": {"deploy_order/graph.py", "deploy_order/__main__.py"},
                 "eventlog": {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"},
                 "stocktake": {
