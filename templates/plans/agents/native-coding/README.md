@@ -4,13 +4,13 @@ Run one writable native Agent, then the project’s explicit verification script
 
 **Status:** runnable with prerequisites. **Effects:** Sends admitted evidence to the native agent and permits scoped writes before native verification.
 
-**Prerequisites:** An authorized repository root, captured Skill resources and configured model connection. Install the selected native agent and configure a compatible isolated managed profile; native model/auth settings remain native-owned.
+**Prerequisites:** An authorized repository root, captured Skill resources and configured model connection. Install Codex CLI and configure a compatible isolated managed profile with a Responses connection; see [native configuration](../../../../docs/AGENT_PROVIDERS.md#run-a-native-coding-agent). Native model/auth settings remain native-owned.
 
 ```sh
 oh-goon templates init agents/native-coding --kind plan --output ./workflow
 ```
 
-Edit `workflow/run.yml` with your registered target and caller choices. Omitted options keep their Goon-owned defaults:
+The initializer selects Codex. Edit `workflow/run.yml` with your registered target and caller choices; select Pi or OpenCode explicitly with a compatible profile. Omitted options keep their Goon-owned defaults:
 
 ```yaml
 version: 1
@@ -21,7 +21,7 @@ inputs:
   skill: local:skills/repair
   verification_command: scripts/verify
 agent:
-  implementation: pi
+  implementation: codex
   profile: isolated-managed
   acceptance: native-coding
   repository_root: /approved/repositories

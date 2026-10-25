@@ -237,6 +237,13 @@ three checks. The probe checks fresh captured bytes and Hashmarks identity,
 untrusted prior context with no permission authority, and unchanged first-Run
 outcome, source admissions and recorded Steps after the follow-up succeeds.
 
+The stocktake case repairs a multi-module CSV reconciliation CLI. Its independent
+checks cover single-pass input, duplicate SKU totals, missing inventory sides,
+exact filtering, quoted and UTF-8 fields, and malformed-input error behavior.
+It omits `--agent` to exercise the Codex CLI default while retaining an explicit
+signed-in profile and the same Hashmarks, Skill and verification boundaries.
+Select `-k stocktake` when iterating on that case.
+
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \
 OH_GOON_LIVE_CODEX_HOME=/path/to/existing/.codex \

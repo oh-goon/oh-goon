@@ -156,6 +156,8 @@ def test_shipped_example_loads_without_provider_packages_or_credentials():
     config = load_agent_providers(root / "examples/agent-providers/providers.toml")
     assert set(config.providers) == {"ollama", "litellm", "openrouter", "openai", "anthropic"}
     assert config.resolve("local", environment={}).provider.api == "ollama"
+    with pytest.raises(AgentProviderError, match="configured model profile"):
+        config.resolve(None, environment={})
 
 
 def test_json_and_toml_share_one_provider_contract(tmp_path):

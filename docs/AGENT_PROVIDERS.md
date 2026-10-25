@@ -1,18 +1,27 @@
 # Agent provider configuration
 
-Oh-Goon can connect to configured model endpoints without installing their servers or provider SDKs. Ollama, LiteLLM, OpenRouter and OpenAI are connection choices, not repository dependencies. Direct OpenAI connections use API keys. Prefer an explicitly configured API-key connection for unattended automation. Native Codex can also use its existing sign-in through the optional trusted local profile below; Codex retains authentication and refresh authority.
+Oh-Goon defaults to the installed Codex CLI for managed coding tasks. Use its existing sign-in with the explicitly configured trusted local profile below; Codex retains authentication and refresh authority. No local model server is needed. OpenCode and Pi remain explicit native-agent choices. Oh-Goon also supports configured model endpoints without installing their servers or provider SDKs. Direct OpenAI connections use API keys.
 
 ## Run a native coding agent
 
-`oh-goon ai` runs an installed OpenCode, Pi or Codex through the existing Fleet
+`oh-goon ai` runs the installed Codex CLI through the existing Fleet
 Run and Step lifecycle. `oh-goon-ai` is the same command with `ai` supplied.
-Start from a Git repository root, or select it explicitly:
+Select a configured execution profile and start from a Git repository root, or
+select the repository explicitly. The `signed-in` profile is defined in
+[Use an existing Codex sign-in](#use-an-existing-codex-sign-in):
 
 ```sh
+oh-goon ai --config providers.json --profile signed-in --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
 oh-goon ai --agent pi --config providers.json --profile company --prompt-file task.txt --headless
 oh-goon-ai --agent opencode --config providers.json --profile company --workspace /path/to/project --prompt "Review the failing test"
 oh-goon ai --agent codex --config providers.json --profile company-responses --prompt-file task.txt --headless --verify "uv run pytest tests/test_example.py" --json
 ```
+
+Omitting `--agent` selects `codex`; an explicit `--agent` is preserved. Agent
+selection does not discover native authentication, change the selected profile or
+start a model server. New native `templates init` selections also name Codex
+with the `isolated-managed` profile; existing `run.yml` selections stay explicit.
+Missing configuration fails before work.
 
 Broker-backed native reasoning requires an explicit managed inference connection so qualified
 Hashmarks context reaches every model request, including follow-up and compaction.
@@ -23,7 +32,7 @@ direct-model Steps and cannot be selected for these native adapters. The endpoin
 must also support the selected agent's native tool calling and replay behavior;
 a compatible API path alone does not establish coding-task compatibility.
 
-The native default is `isolated-managed`, using the catalog's explicit
+The default execution profile remains `isolated-managed`, using the catalog's explicit
 `default_model` and the existing Bubblewrap backend. A missing model selection
 fails before work. Broker-backed reasoning cannot use the general `local` profile:
 host networking would let native project settings bypass required context
@@ -133,7 +142,7 @@ copying or exporting credentials. This requires a Codex version supporting
 ```
 
 ```sh
-oh-goon ai --agent codex --profile signed-in --config providers.json --workspace /path/to/projects/app --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
+oh-goon ai --profile signed-in --config providers.json --workspace /path/to/projects/app --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
 ```
 
 This is an original managed Run with headless report Steps. Oh-Goon configures
@@ -691,13 +700,18 @@ oh-goon agent providers path
 
 On Linux it is `$XDG_CONFIG_HOME/oh-goon/providers.json`, falling back to `~/.config/oh-goon/providers.json`. macOS uses `~/Library/Application Support/oh-goon/providers.json`; Windows uses `%APPDATA%/oh-goon/providers.json`. `OH_GOON_PROVIDERS_FILE` selects another file; explicit `--config` takes precedence. The chosen file is the entire catalog. There is no directory discovery, layering or dependency on the database path.
 
-Create a configuration for a model already installed in Ollama:
+For managed coding with the Codex CLI, configure the explicit
+[signed-in profile](#use-an-existing-codex-sign-in). The HTTP provider commands
+below configure direct model requests or broker-backed native profiles; they do
+not configure native Codex sign-in.
+
+Create a configuration for an explicitly selected OpenRouter model:
 
 ```sh
-oh-goon agent providers setup --provider ollama --model YOUR_INSTALLED_MODEL
+oh-goon agent providers setup --provider openrouter --model PROVIDER/MODEL_ID
 ```
 
-For a running LiteLLM proxy, use `--provider litellm --model YOUR_MODEL_ALIAS`. `--base-url` selects another endpoint and `--api-key-env` names its credential variable. Setup writes the selected JSON file and a sibling `providers.schema.json` derived from Oh-Goon's configuration model. It creates the directory and refuses to overwrite an existing catalog. Setup does not connect, pull a model or install a server.
+For a running LiteLLM proxy, use `--provider litellm --model YOUR_MODEL_ALIAS`. An explicitly selected existing Ollama server uses `--provider ollama --model YOUR_INSTALLED_MODEL`. No provider is selected implicitly. `--base-url` selects another endpoint and `--api-key-env` names its credential variable. Setup writes the selected JSON file and a sibling `providers.schema.json` derived from Oh-Goon's configuration model. It creates the directory and refuses to overwrite an existing catalog. Setup does not connect, pull a model or install a server.
 
 The resulting catalog is editable JSON with `$schema` support:
 
@@ -707,10 +721,14 @@ The resulting catalog is editable JSON with `$schema` support:
   "version": 1,
   "default_model": "default",
   "providers": {
-    "ollama": {"api": "ollama", "base_url": "http://127.0.0.1:11434"}
+    "openrouter": {
+      "api": "openai-chat-completions",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY"
+    }
   },
   "models": {
-    "default": {"provider": "ollama", "model": "YOUR_INSTALLED_MODEL"}
+    "default": {"provider": "openrouter", "model": "PROVIDER/MODEL_ID"}
   }
 }
 ```

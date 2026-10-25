@@ -20,6 +20,7 @@ from threading import Event, Thread
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.agent_providers import (
+    DEFAULT_NATIVE_AGENT,
     DEFAULT_NATIVE_AGENT_PROFILE,
     AgentProviderError,
     AgentProvidersConfig,
@@ -51,7 +52,12 @@ def add_ai_command(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
     parser = subparsers.add_parser("ai", help="Run a native coding agent through a managed Run")
-    parser.add_argument("--agent", required=True, choices=("opencode", "pi", "codex"))
+    parser.add_argument(
+        "--agent",
+        default=DEFAULT_NATIVE_AGENT,
+        choices=("opencode", "pi", "codex"),
+        help="Native coding agent (default: codex)",
+    )
     parser.add_argument(
         "--profile", default=DEFAULT_NATIVE_AGENT_PROFILE, help="Native execution profile"
     )
