@@ -119,8 +119,11 @@ individual finding's resolution. Bounded native context diagnostics and original
 execution facts explain preflight failures without including model/tool transcripts;
 their existing claim and execution authority labels remain distinct.
 
-Use `oh-goon plan campaign FLEET_RUN_ID --json` with any linked Run to inspect the
-same retained evidence after interruption. It reads one original journal cut;
+Use `oh-goon plan campaign CAMPAIGN_OR_RUN_ID --json` with the campaign ID or any
+linked Run to inspect the same retained evidence after interruption. The campaign
+ID also works when initial admission was refused and no Run exists. Cancellation
+before source/intent preparation reports that no retained campaign is available.
+The command reads one original journal cut;
 it neither loads raw model transcripts nor resumes work. Missing Runs, absent
 Step results and nonterminal or cancelled Runs remain incomplete. Committed
 controller intent, exact phase linkage and decisions reopen from the canonical
@@ -194,7 +197,7 @@ facts in the existing export receipt, lock, invocation result and Run evidence:
 
 Campaign policy decides workflow convergence and retains its decision in the
 canonical Journal; original Runs and settled Step evidence decide execution
-outcomes. Inspect `plan campaign RUN_ID --json` after reopening the runtime;
+outcomes. Inspect `plan campaign CAMPAIGN_OR_RUN_ID --json` after reopening the runtime;
 the verified Journal read cut retains campaign intent, exact linked phases and
 committed controller decisions independently of invocation stdout. Successful
 child verification without a committed controller decision remains incomplete,

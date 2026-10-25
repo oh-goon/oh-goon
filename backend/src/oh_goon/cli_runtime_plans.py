@@ -339,7 +339,12 @@ def _print_agent_repair_result(
         print(f"Stop reason: {result.stop_reason.value}")
         if campaign_projection is not None:
             print(f"Campaign result: {campaign_projection['result']}")
-            print(f"Inspect retained evidence: oh-goon plan campaign {result.repair_id} --json")
+            if result.campaign_journal is not None and result.campaign_journal.intent is not None:
+                print(f"Inspect retained evidence: oh-goon plan campaign {result.repair_id} --json")
+            else:
+                print(
+                    "Preparation stopped before campaign intent was committed; no retained campaign is available."
+                )
         for attempt in result.attempts:
             print(
                 f"Run {attempt.run.fleet_run_id}: {attempt.run.status.value} / {attempt.outcome.value}"

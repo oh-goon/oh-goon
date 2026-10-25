@@ -406,16 +406,18 @@ class FleetRunControlPlane:
     def agent_campaign_result(self, campaign_id: str) -> AgentRepairResult:
         return self._journal.agent_campaign_result(campaign_id)
 
-    def agent_campaign(self, fleet_run_id: str) -> dict[str, Any]:
-        """Inspect linked campaign Runs from one verified immutable journal cut."""
+    def agent_campaign(self, campaign_or_run_id: str) -> dict[str, Any]:
+        """Inspect campaign intent and linked Runs from one verified Journal cut."""
         view = self._journal.read_view()
-        selected = view.required_run_detail(fleet_run_id)
-        target = selected.run.target
-        if not isinstance(target, FleetPlanTarget) or target.agent_repair is None:
-            raise FleetPlanInvalid("Selected Run is not part of a repair campaign")
-        campaign = view.campaign(target.agent_repair.repair_id)
+        campaign = view.campaign(campaign_or_run_id)
+        if campaign.intent is None:
+            selected = view.required_run_detail(campaign_or_run_id)
+            target = selected.run.target
+            if not isinstance(target, FleetPlanTarget) or target.agent_repair is None:
+                raise FleetPlanInvalid("Selected Run is not part of a repair campaign")
+            campaign = view.campaign(target.agent_repair.repair_id)
         return project_agent_campaign(
-            target.agent_repair.repair_id,
+            campaign.campaign_id,
             tuple(view.required_run_detail(phase.fleet_run_id) for phase in campaign.phases),
             journal_revision=view.revision,
             campaign=campaign,

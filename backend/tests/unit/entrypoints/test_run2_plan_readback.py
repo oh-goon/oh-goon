@@ -182,6 +182,11 @@ def test_campaign_invocation_output_preserves_cancelled_before_admission(capsys)
     assert result["campaign"]["controller_result"]["availability"] == "unavailable"
     assert result["campaign"]["runs"] == []
 
+    assert _print_agent_repair_result(receipt, as_json=False, campaign=True) == 130
+    text = capsys.readouterr().out
+    assert "Preparation stopped before campaign intent was committed" in text
+    assert "Inspect retained evidence:" not in text
+
 
 def test_events_preserves_original_sequence_and_revision_without_recomputation(capsys):
     runs = _OriginalRuns()
