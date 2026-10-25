@@ -31,6 +31,10 @@ Use topic guides for current behavior. Specialized deployment and high-security 
 
 Retained ADRs explain architectural choices and their original evidence limits. Checkpoint status and historical test results in an ADR describe that source; they do not establish current qualification or select the next development task.
 
+## Proposed designs
+
+- [Complete Python Goon projects](architecture/ADR_PYTHON_GOON_PROJECTS.md) — proposed standalone Python projects, one native dependency definition for development and execution, and later pinned Git acquisition. This is an implementation contract, not currently supported runtime syntax.
+
 ## Template and maintainer references
 
 - [Artifact retention](development/TEMPLATE_ARTIFACT_RETENTION.md) and [network authority](development/TEMPLATE_NETWORK_AUTHORITY.md) — explicit output retention and egress contracts.

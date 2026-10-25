@@ -8,6 +8,11 @@ Repository → Plan → Goon → Step → Execution / Verification / Evidence
 
 An Atomic Goon owns ordered `steps:`. A Composite Goon owns ordered `goons:`. It never owns both. There is no DAG, inheritance, YAML macro system, patch/override model or second dependency model.
 
+The [complete Python Goon project proposal](../architecture/ADR_PYTHON_GOON_PROJECTS.md)
+describes a future package that contains its own Python project and later Git
+source acquisition. Its `runtime: python` spelling is proposed; the supported
+authoring contract below is unchanged.
+
 ## Normal Python Goon
 
 ```yaml
