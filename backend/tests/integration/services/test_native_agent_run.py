@@ -508,7 +508,7 @@ def test_native_run_keeps_every_model_turn_bound_and_retains_step_local_claims(
         "    request = urllib.request.Request('http://127.0.0.1:18743/v1/' + route, data=body, headers={'Content-Type': 'application/json'})\n"
         "    with urllib.request.urlopen(request, timeout=10) as response:\n"
         "        assert json.load(response)['choices']\n"
-        "    print(json.dumps({'type': 'auto_compaction_end'}), flush=True)\n"
+        "    print(json.dumps({'type': 'compaction_end'}), flush=True)\n"
         "pathlib.Path('code.py').write_text('VALUE = 42\\n')\n"
         "if agent == 'pi':\n"
         "    print(json.dumps({'type': 'message_end', 'message': {'role': 'assistant', 'content': 'Fixture completed', 'stopReason': 'stop'}}), flush=True)\n"

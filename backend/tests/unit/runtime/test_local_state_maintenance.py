@@ -181,11 +181,68 @@ def test_contract45_journal_refuses_at_schema_boundary_without_decoding_or_mutat
     monkeypatch.setattr(JournalFactCodec, "decode", unexpected_decode)
     assert main(["doctor"]) == 2
     output = capsys.readouterr().out
-    assert "found 89; expected 90" in output
+    assert f"found 89; expected {DATABASE_SCHEMA_VERSION}" in output
     assert "matching original runtime" in output
     assert "A fresh state path does not settle an original unresolved writer" in output
     assert "JournalCorruption" not in output
     assert path.read_bytes() == before
+
+
+def test_schema90_cancellation_refuses_before_codec_or_ddl_without_mutation(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    from oh_goon.core.errors import DatabaseSchemaMismatch
+    from oh_goon.runtime.journal_codec import JournalFactCodec
+
+    path = tmp_path / "schema90.db"
+    _set_database(monkeypatch, path)
+    LocalDatabase(path, journal_mode="DELETE")
+    assert inspect_local_database().compatible
+    fixture = Path(__file__).parents[2] / "fixtures/schema90_cancelled_run.json"
+    legacy = json.loads(fixture.read_text(encoding="utf-8"))
+    events = [json.loads(row["event_json"]) for row in legacy["entries"] if row["event_json"]]
+    cancellation = next(
+        event["cancellation"] for event in events if event["event_type"] == "STEP_CANCELLED"
+    )
+    assert cancellation["native_agent_observations"] == []
+    assert cancellation["physical_execution_id"] is None and cancellation["duration_ms"] == 0
+    assert events[-1]["event_type"] == "RUN_CANCELLED"
+    with closing(sqlite3.connect(path)) as connection, connection:
+        for row in legacy["entries"]:
+            columns = tuple(row)
+            connection.execute(
+                f"INSERT INTO journal_entries ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+                tuple(row[column] for column in columns),
+            )
+        connection.execute(f"PRAGMA user_version = {legacy['schema_version']}")
+    before = path.read_bytes()
+
+    def unexpected_decode(**_kwargs):
+        pytest.fail("schema90 must refuse before decoding its cancellation payload")
+
+    statements = []
+    native_connect = sqlite3.connect
+
+    def traced_connect(*args, **kwargs):
+        connection = native_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(JournalFactCodec, "decode", unexpected_decode)
+    monkeypatch.setattr(sqlite3, "connect", traced_connect)
+    with pytest.raises(DatabaseSchemaMismatch):
+        LocalDatabase(path, journal_mode="WAL")
+    assert main(["doctor"]) == 2
+    output = capsys.readouterr().out
+    assert f"found 90; expected {DATABASE_SCHEMA_VERSION}" in output
+    assert "matching original runtime" in output and "JournalCorruption" not in output
+    assert path.read_bytes() == before
+    assert not any(
+        sql.lstrip().upper().startswith(("CREATE ", "ALTER ", "DROP ", "BEGIN IMMEDIATE"))
+        or "PRAGMA JOURNAL_MODE =" in sql.upper()
+        or "PRAGMA USER_VERSION =" in sql.upper()
+        for sql in statements
+    )
 
 
 def test_serve_stops_before_uvicorn_on_stale_local_state(tmp_path, monkeypatch, capsys) -> None:

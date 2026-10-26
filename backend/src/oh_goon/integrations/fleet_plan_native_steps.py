@@ -585,7 +585,6 @@ def execute_native_agent_step(
         _write_private(prompt_file, prompt_data)
         if selected.profile.codex_service is not None:
             from oh_goon.integrations.agent_codex_service_execution import (
-                CodexServiceExecutionCancelled,
                 CodexServiceExecutionFailure,
                 execute_codex_service_run,
             )
@@ -614,26 +613,6 @@ def execute_native_agent_step(
                     evidence_state=state,
                     output_schema=output_schema,
                 )
-            except CodexServiceExecutionCancelled as error:
-                summary = _retained_native_summary(
-                    step,
-                    "",
-                    diagnostic="Original cancellation requested; native final summary unavailable.",
-                    host_environment=process.host_environment,
-                )
-                protocol = NativeAgentEvents(
-                    (*error.safe_diagnostics[-127:], summary),
-                    "",
-                    False,
-                    True,
-                    error.native_event_count,
-                    error.omitted_observations + max(0, len(error.safe_diagnostics) - 127),
-                )
-                error.native_observations = (
-                    *error.native_observations,
-                    _native_observation_from_protocol(step, prepared, protocol),
-                )
-                raise
             except CodexServiceExecutionFailure as error:
                 service_outcome = error.outcome
                 service_protocol = NativeAgentEvents(

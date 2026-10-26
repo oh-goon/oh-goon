@@ -138,6 +138,7 @@ def test_cancellation_without_bound_valid_supervision_retains_uncertainty(missin
     assert receipt.settlement.outcome == "INCOMPLETE"
     assert receipt.settlement.cleanup == "UNAVAILABLE"
     assert receipt.settlement.reason == "SUPERVISION_UNAVAILABLE"
+    assert (receipt.duration_ms is None) is (missing in {"supervisor", "identity"})
     assert "PRIVATE_NATIVE_OUTPUT" not in receipt.model_dump_json()
 
 
@@ -151,6 +152,91 @@ def test_cancellation_receipt_rejects_upgrading_missing_cleanup_to_verified():
             ),
             physical_execution_id="claimed-original-physical",
         )
+
+
+@pytest.mark.parametrize(
+    "fact", ["duration_ms", "observed_returncode", "supervisor", "standard_isolation"]
+)
+def test_unobserved_cancellation_cannot_acquire_physical_facts(fact):
+    from oh_goon.core.models.fleet_plan_evidence import (
+        PlanExecutionSupervisorEvidence,
+        PlanIsolationBackendEvidence,
+        PlanStandardIsolationEvidence,
+        PlanStepCancellationEvidence,
+    )
+
+    receipt = cancellation_evidence(
+        ResolvedCommandStep(step_id="before-launch", argv=("work",)),
+        OperationCancelledError("cancelled before launch"),
+    )
+    assert receipt.duration_ms is None and receipt.settlement.observed_returncode is None
+    payload = receipt.model_dump(mode="json")
+    if fact == "duration_ms":
+        payload[fact] = 0
+    elif fact == "observed_returncode":
+        payload["settlement"][fact] = 0
+    elif fact == "supervisor":
+        payload[fact] = PlanExecutionSupervisorEvidence(
+            process_group_cleanup_requested=True,
+            cleanup_reason="cancel",
+            final_process_group_quiescent=True,
+        ).model_dump(mode="json")
+    else:
+        payload[fact] = PlanStandardIsolationEvidence(
+            backend=PlanIsolationBackendEvidence(
+                backend_id="bubblewrap",
+                configuration_id="resolved-backend",
+                kernel_boundary="shared_host_kernel",
+                remote_execution=False,
+                experimental=False,
+            ),
+            workspace_read_only=True,
+            broker_socket_mounted=False,
+            resource_owner="none",
+            preflight="verified",
+            filesystem_cleanup="verified",
+        ).model_dump(mode="json")
+    with pytest.raises(ValidationError, match="original physical execution"):
+        PlanStepCancellationEvidence.model_validate(payload)
+
+
+def test_unbound_cancelled_process_does_not_attribute_supervision_or_isolation():
+    from oh_goon.core.models.fleet_plan_evidence import (
+        PlanIsolationBackendEvidence,
+        PlanStandardIsolationEvidence,
+    )
+
+    physical = CommandCancelledError(
+        "unbound cancellation",
+        supervisor=CommandSupervisorReceipt(
+            process_group_cleanup_requested=True,
+            cleanup_reason="cancel",
+            final_process_group_quiescent=True,
+        ),
+        standard_isolation=PlanStandardIsolationEvidence(
+            backend=PlanIsolationBackendEvidence(
+                backend_id="bubblewrap",
+                configuration_id="resolved-backend",
+                kernel_boundary="shared_host_kernel",
+                remote_execution=False,
+                experimental=False,
+            ),
+            workspace_read_only=True,
+            broker_socket_mounted=False,
+            resource_owner="none",
+            preflight="verified",
+            filesystem_cleanup="verified",
+        ),
+        duration_ms=12,
+    )
+    error = OperationCancelledError("cancelled")
+    error.__cause__ = physical
+    receipt = cancellation_evidence(ResolvedCommandStep(step_id="work", argv=("work",)), error)
+    assert (
+        receipt.settlement.outcome == "INCOMPLETE" and receipt.settlement.cleanup == "UNAVAILABLE"
+    )
+    assert receipt.supervisor is None and receipt.standard_isolation is None
+    assert receipt.duration_ms is None and receipt.physical_execution_id is None
 
 
 def test_process_free_inventory_succeeds_without_a_fabricated_supervisor(tmp_path):

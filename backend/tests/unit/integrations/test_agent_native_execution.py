@@ -429,7 +429,7 @@ def test_native_payloads_are_bounded_and_observation_omission_is_explicit() -> N
 
 def test_long_native_session_keeps_compaction_and_final_claim_without_a_session_cap() -> None:
     parser = NativeAgentEventParser("pi")
-    parser.feed(events({"type": "agent_start"}, {"type": "auto_compaction_start"}))
+    parser.feed(events({"type": "agent_start"}, {"type": "compaction_start"}))
     transferred = 0
     for index in range(6000):
         record = events(
@@ -439,7 +439,7 @@ def test_long_native_session_keeps_compaction_and_final_claim_without_a_session_
         parser.feed(record)
     parser.feed(
         events(
-            {"type": "auto_compaction_end"},
+            {"type": "compaction_end"},
             {
                 "type": "message_end",
                 "message": {
@@ -459,6 +459,38 @@ def test_long_native_session_keeps_compaction_and_final_claim_without_a_session_
     assert len(result.observations) == 128
     assert result.omitted_observations == 5876
     assert result.observations[1].kind == "context"
+
+
+@pytest.mark.parametrize("reason", ["manual", "threshold", "overflow"])
+def test_pi_compaction_records_are_context_and_cannot_establish_settlement(reason: str) -> None:
+    output = events(
+        {"type": "agent_start"},
+        {"type": "compaction_start", "reason": reason},
+        {
+            "type": "compaction_end",
+            "reason": reason,
+            "result": {"summary": "PRIVATE_NATIVE_COMPACTION_SUMMARY"},
+            "aborted": False,
+            "willRetry": reason == "overflow",
+        },
+    )
+    incomplete = parse_native_agent_events("pi", output, returncode=0)
+    assert not incomplete.settled and not incomplete.failed and incomplete.final_text == ""
+    assert [item.summary for item in incomplete.observations if item.kind == "context"] == [
+        "pi: compaction_start",
+        "pi: compaction_end",
+    ]
+    assert all("PRIVATE" not in item.summary for item in incomplete.observations)
+    result = parse_native_agent_events(
+        "pi",
+        output
+        + events(
+            {"type": "message_end", "message": {"role": "assistant", "content": "final claim"}},
+            {"type": "agent_settled", "aborted": False},
+        ),
+        returncode=0,
+    )
+    assert result.settled and not result.failed and result.final_text == "final claim"
 
 
 @pytest.mark.parametrize("agent", ["opencode", "pi", "codex"])

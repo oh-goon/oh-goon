@@ -43,7 +43,11 @@ from oh_goon.core.models.runtime_supervision import RuntimeSupervisionPolicy
 from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt, CommandTimeoutExpired
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
 from oh_goon.engine.git import GitService
-from oh_goon.integrations._fleet_plan_step_evidence import attempt_evidence, step_evidence
+from oh_goon.integrations._fleet_plan_step_evidence import (
+    attempt_evidence,
+    cancellation_evidence,
+    step_evidence,
+)
 from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
     from_command,
@@ -960,11 +964,11 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
         with pytest.raises(service_owner.CodexServiceExecutionCancelled) as caught:
             execute_direct_step(repository, step, runtime, step_order=1)
         assert caught.value.outcome is failure
-        observation = caught.value.native_observations[0]
-        assert observation.source_identity == handoff.source.capture_identity
-        assert observation.input_identity and observation.failed and not observation.settled
-        assert observation.events[-1].kind == "context"
-        assert "cancellation" in observation.events[-1].summary
+        retained = cancellation_evidence(step, caught.value)
+        assert retained.settlement.outcome == "CANCELLED"
+        assert retained.supervisor.final_process_group_quiescent is True
+        assert retained.physical_execution_id == "owned-service-preflight"
+        assert "synthetic-private-service-protocol" not in retained.model_dump_json()
         return
     outcome = execute_direct_step(repository, step, runtime, step_order=1)
     assert outcome.returncode == PLAN_CONTRACT_RETURN_CODE
