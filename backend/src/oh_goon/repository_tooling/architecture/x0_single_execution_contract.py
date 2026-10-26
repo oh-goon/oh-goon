@@ -702,7 +702,7 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
             # acceptance, publication, campaign and domain owners consume the
             # normalized observations instead. Pure preparation and validation
             # functions remain usable by provider/resolution owners.
-            forbidden = native_event_contracts + (
+            forbidden: tuple[str, ...] = native_event_contracts + (
                 "oh_goon.integrations.agent_codex_service_execution",
             )
             if path != package / "cli_agent_services.py":

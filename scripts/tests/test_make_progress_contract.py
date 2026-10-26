@@ -140,6 +140,65 @@ def test_init_has_no_storage_admission_before_native_uv_and_doctor_is_separate()
     assert "$(DEPENDENCY_POLICY)" in (ROOT / "Makefile").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("mypy_exit", (0, 17))
+def test_backend_gate_checks_configured_package_types_before_running_tests(
+    tmp_path: Path, mypy_exit: int
+) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    backend = tmp_path / "backend"
+    executor = backend / ".venv/bin/oh-goon-qualification-exec"
+    executor.parent.mkdir(parents=True)
+    recorder = (
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "with Path(os.environ['OH_GOON_TEST_BACKEND_CALLS']).open('a') as stream:\n"
+        "    stream.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')\n"
+        "sys.exit(int(os.environ['OH_GOON_TEST_MYPY_EXIT']) if 'mypy' in sys.argv[1:] else 0)\n"
+    )
+    for executable in (tools / "uv", executor):
+        executable.write_text(recorder, encoding="utf-8")
+        executable.chmod(0o755)
+    calls = tmp_path / "calls.jsonl"
+    environment = dict(os.environ)
+    for name in (
+        "BACKEND_CHECK_TEST_ROOTS",
+        "CHECK_PYTEST_MARKER",
+        "MAKEFLAGS",
+        "MFLAGS",
+        "MAKEOVERRIDES",
+    ):
+        environment.pop(name, None)
+    environment.update(
+        PATH=f"{tools}{os.pathsep}{environment.get('PATH', os.defpath)}",
+        OH_GOON_TEST_BACKEND_CALLS=str(calls),
+        OH_GOON_TEST_MYPY_EXIT=str(mypy_exit),
+    )
+    result = subprocess.run(
+        ["make", "--no-print-directory", "-f", str(ROOT / "Makefile"), "backend-check"],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    observed = [json.loads(line) for line in calls.read_text().splitlines()]
+    typed = [event for event in observed if "mypy" in event["argv"]]
+    tests = [event for event in observed if event["argv"][0] == "pytest"]
+    assert len(typed) == 1
+    assert typed[0]["cwd"] == str(backend)
+    assert typed[0]["argv"][-1] == "mypy"  # Use native configured package selection.
+    assert result.returncode == (2 if mypy_exit else 0), result.stdout + result.stderr
+    if mypy_exit:
+        assert tests == []
+        assert "17" in result.stderr
+    else:
+        assert len(tests) == 1
+        assert observed.index(typed[0]) < observed.index(tests[0])
+
+
 @pytest.mark.parametrize("failure", ("", "backend", "cross-owner"))
 @pytest.mark.parametrize(
     ("marker_override", "expected_marker"),

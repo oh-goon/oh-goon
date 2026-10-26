@@ -72,7 +72,10 @@ A new draft commit does not report the seven full checks; repository settings mu
 exact names. Workflow scheduling does not install or prove those settings.
 
 Routine required jobs have no path filters or allowed failures. Full Git history supplies
-the PR-base quality-floor comparison. Hosted `backend-check` selects unit and
+the PR-base quality-floor comparison. Local and hosted `backend-check` run native
+mypy with `backend/pyproject.toml`'s configured `oh_goon` package selection before
+behavior tests. Test-file typing uses separately selected tooling or edited-test
+checks. Hosted `backend-check` selects unit and
 dependency-complete tests through Make's `BACKEND_CHECK_TEST_ROOTS`; the required
 `test-integration` job owns backend and cross-owner integration tests. Together
 they cover the bounded ordinary backend suite once, selecting `not certification
