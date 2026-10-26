@@ -22,15 +22,17 @@ def test_source_navigation_links_resolve_to_current_owners() -> None:
         ROOT / "docs/AGENT_SKILLS.md",
         ROOT / "docs/AGENT_PROVIDERS.md",
         ROOT / "docs/development/AGENT_RUNTIME_OWNERS.md",
+        ROOT / "docs/development/AGENT_HARNESS_COMPATIBILITY.md",
         ROOT / "docs/development/HASHMARKS_EXECUTION_LAYER.md",
         ROOT / "docs/architecture/ADR_AGENT_WORKLOAD_CANONICAL_EXECUTION.md",
         ROOT / "docs/architecture/ADR_SKILL_03A_HARNESS_DATA_BOUNDARY.md",
     )
     broken = []
     for document in documents:
-        for href in re.findall(
-            r"\[[^\]\n]+\]\(([^)\s]+)\)", document.read_text(encoding="utf-8")
-        ):
+        text = document.read_text(encoding="utf-8")
+        hrefs = re.findall(r"\[[^\]\n]+\]\(([^)\s]+)\)", text)
+        hrefs.extend(re.findall(r"(?m)^ {0,3}\[[^\]\n]+\]:[ \t]*<?([^\s>]+)>?", text))
+        for href in hrefs:
             if href.startswith(("https://", "http://", "mailto:", "#")):
                 continue
             target = href.split("#", 1)[0]

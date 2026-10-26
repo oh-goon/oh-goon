@@ -6,6 +6,7 @@ from pydantic import AwareDatetime, Field, model_validator
 
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.capability import CapabilitySnapshot
+from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import (
     FleetRunFailure,
@@ -191,6 +192,7 @@ class StepSkippedEvent(_StepTerminalEventBase):
 
 class StepCancelledEvent(_StepTerminalEventBase):
     event_type: Literal[FleetRunEventType.STEP_CANCELLED]
+    cancellation: PlanStepCancellationEvidence | None = None
 
 
 class RepositoryCompletedEvent(_FleetRunEventBase):

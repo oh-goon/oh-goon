@@ -22,6 +22,19 @@ alongside the retained bounded model protocols and direct provider requests.
 Selecting a protocol does not establish installed native capabilities, accepted
 role output, successful verification or host certification.
 
+The [harness compatibility inventory](AGENT_HARNESS_COMPATIBILITY.md) records
+temporary adaptations, their removal conditions and conformance evidence by
+harness and mode. Native integration upgrades reassess those entries against the
+selected installed implementation; deterministic protocol fixtures alone do not
+qualify that implementation.
+
+Harness replacement uses a separately resolved and admitted Run. The explicit
+prior-Run handoff supplies bounded, untrusted Journal/Game Tape context to a fresh
+native invocation; it neither resumes nor converts another harness's session.
+An admitted Step retains its frozen harness selection on failure. Unsupported
+capabilities fail explicitly, without substituting a different harness. Native
+same-session continuation remains a separate, mode-specific capability.
+
 ## Current execution path
 
 | Responsibility | Existing owner and handoff |
@@ -89,6 +102,13 @@ helper. Missing supervision or unverified cleanup retains the original physical
 receipt and stops the sequence. Step acceptance rejects unknown supervisor reasons
 before publication and exhaustively handles the command owner's current variants;
 verified `output_cleanup` remains an ordinary completed process boundary.
+
+Cancellation retains the original typed cleanup receipt through `STEP_CANCELLED`
+and Game Tape even when no OperationReport exists. The existing Step evidence
+owner accepts the supervisor's receipt; the Journal binds its physical execution
+to the same Step. Reads project that accepted settlement without creating attempts
+or claiming source state after cancellation. Missing or invalid evidence remains
+incomplete, and cancellation still stops retries, publication and later helpers.
 
 The inspected effect cuts are original Run admission (identity/lease/Journal),
 Step launch through the supplied command/backend owner, separately admitted patch
@@ -549,7 +569,7 @@ normal startup does not acquire a strict signer/custody qualification gate.
 | Producer qualifications and evidence bounds | [Hashmarks Agent tools](../../backend/tests/unit/integrations/test_hashmarks_agent_tools.py) |
 | Passive harness data contract | [Harness contract](../../backend/tests/unit/core/test_agent_harness_contract.py), [effect requests](../../backend/tests/unit/services/test_skill03b_effect_requests.py) |
 | Native receiver and complete Run lifecycle | [Native Step contract](../../backend/tests/dependency_complete/test_fleet_plan_native_steps.py), [native Run](../../backend/tests/integration/services/test_native_agent_run.py) |
-| Native service readiness | Both explicit clients bound the entire readiness exchange and their transport teardown; safe failures preserve cleanup uncertainty and cancellation. [Codex transport](../../backend/tests/dependency_complete/test_agent_codex_service.py) covers native protocol/continuation and profile pinning. Its opt-in [installed service case](../../backend/tests/integration/services/test_native_codex_service.py) verifies model-free review/scoped-repair/re-review denials, synthetic private stores and original owner cleanup. Native empty-thread resume is refused. A separate installed local-provider case proves persisted protocol resume and compaction with explicit frozen instructions; the original [service Run case](../../backend/tests/integration/services/test_native_codex_service_run.py) proves tool follow-up, native automatic compaction and independent verification. Cross-Run session adoption and generic effective-grant identity remain unverified. [OpenCode transport](../../backend/tests/dependency_complete/test_agent_opencode_service.py) covers authority, bounds, safe failures and client closure. The opt-in [installed OpenCode case](../../backend/tests/integration/services/test_native_opencode_service.py) verifies real 2.1.2 readiness, matching original process birth, no global shutdown on client close and original owner cancellation/quiescence using synthetic private state. It does not qualify stdin lease, native continuation, user authentication or private-store/tool isolation. |
+| Native service readiness | [Codex transport](../../backend/tests/dependency_complete/test_agent_codex_service.py) covers protocol continuation and profile pinning; [installed service cases](../../backend/tests/integration/services/test_native_codex_service.py) cover native policy, follow-up, persisted resume and compaction, while [service Runs](../../backend/tests/integration/services/test_native_codex_service_run.py) cover independent verification. [OpenCode transport](../../backend/tests/dependency_complete/test_agent_opencode_service.py) covers bounded authority and closure; [installed readiness/lease cases](../../backend/tests/integration/services/test_native_opencode_service.py) verify PID-bound readiness, client closure preserving the server, owner cancellation, stdio discovery and native shutdown after stdin closes. OpenCode service-session execution remains unavailable. The [compatibility inventory](AGENT_HARNESS_COMPATIBILITY.md) records precise installed scopes and remaining qualification limits. |
 | Installed Codex instruction transport | Opt-in [native Codex context](../../backend/tests/integration/services/test_native_codex_context.py): synthetic API-key/ChatGPT authentication × HTTP/WebSocket, privileged task/Skill/producer context through native response chains, automatic compaction and continuation. ChatGPT discovery uses a local HTTPS backend; WebSocket cases reject inference HTTP fallback. Live account access and model quality remain separate. |
 | Live Codex account and coding | The [legacy live coding baseline](../../backend/tests/integration/services/test_native_codex_live.py) retains the original local Run and independent verifier; its credential-reading/forced-refresh helper is removed. It does not qualify native-store exclusion. The [implemented native-service adapter](../AGENT_PROVIDERS.md#native-service-adapter-design) has separate synthetic installed qualification; real-account refresh/persistence qualification remains unverified and requires non-secret native lifecycle facts. |
 | Ordinary physical boundaries and native resources | [Standard Bubblewrap](../../backend/tests/unit/integrations/test_standard_bubblewrap_isolation.py), [verification and Git observers](../../backend/tests/unit/integrations/test_native_plan_isolation.py) |

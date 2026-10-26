@@ -291,6 +291,7 @@ def test_native_mcp_exclusion_uses_one_threadless_snapshot_and_one_exact_disable
                 method = message["method"]
                 if method == "initialized":
                     continue
+                result: dict[str, Any]
                 if method == "initialize":
                     result = _INITIAL
                 elif method == "mcpServerStatus/list":
@@ -409,6 +410,7 @@ def test_incomplete_or_unaddressable_native_mcp_inventory_fails_without_model_or
                 messages.append(method)
                 if method == "initialized":
                     continue
+                result: dict[str, Any]
                 if method == "initialize":
                     result = _INITIAL
                 elif method == "mcpServerStatus/list":
@@ -488,6 +490,7 @@ def test_workload_mcp_capabilities_must_be_disabled_with_exact_frozen_membership
                 methods.append(method)
                 if method == "initialized":
                     continue
+                result: dict[str, Any]
                 if method == "initialize":
                     result = _INITIAL
                 elif method == "thread/start":
@@ -643,6 +646,118 @@ def test_native_profile_fallback_or_wrong_resume_identity_is_refused(
 
     asyncio.run(check())
     assert methods == ["initialize", "initialized", "thread/resume"]
+
+
+def test_lost_turn_response_is_not_replayed_or_inherited_after_native_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages: list[tuple[int, dict[str, Any]]] = []
+    connections = 0
+
+    async def endpoint(websocket: WebSocket) -> None:
+        nonlocal connections
+        connections += 1
+        generation = connections
+        thread = f"owned-generation-{generation}"
+        await websocket.accept()
+        try:
+            while True:
+                message = await websocket.receive_json()
+                messages.append((generation, message))
+                method = message["method"]
+                if method == "initialized":
+                    continue
+                result: dict[str, Any]
+                if method == "initialize":
+                    result = {
+                        **_INITIAL,
+                        "userAgent": f"codex_cli_rs/0.16{generation + 2}.0 (native)",
+                    }
+                elif method == "thread/start":
+                    result = {
+                        "thread": {"id": thread},
+                        "activePermissionProfile": {"id": "admitted"},
+                    }
+                else:
+                    assert method == "turn/start"
+                    await websocket.send_json(
+                        {
+                            "method": "item/agentMessage/delta",
+                            "params": {
+                                "threadId": thread,
+                                "delta": f"generation {generation} progress",
+                            },
+                        }
+                    )
+                    if generation == 1:
+                        # The native service accepted the request but its turn
+                        # response was lost. Replaying could duplicate work.
+                        await websocket.close()
+                        return
+                    result = {"turn": {"id": "new-generation-turn"}}
+                await websocket.send_json({"id": message["id"], "result": result})
+        except WebSocketDisconnect:
+            pass
+
+    endpoint_transport(monkeypatch, endpoint)
+
+    async def check() -> None:
+        client = CodexServiceClient(tmp_path / "explicit.sock", experimental_api=True)
+        async with client:
+            initial_metadata = client.metadata
+            assert initial_metadata["service_version"] == "0.163.0"
+            await client.start_thread(
+                cwd=tmp_path,
+                permissions="admitted",
+                model="native-model",
+                developer_instructions="original frozen context",
+            )
+            with pytest.raises(NativeCodexRequestUncertain) as error:
+                await client.start_turn(
+                    "owned-generation-1", "original task", permissions="admitted"
+                )
+            assert error.value.retryable is False
+        assert client.metadata["transport_cleanup"] == "complete"
+
+        async with client:
+            restarted_metadata = client.metadata
+            assert restarted_metadata["service_version"] == "0.164.0"
+            before = len(messages)
+            with pytest.raises(AgentProviderError, match="selected thread"):
+                await client.start_turn(
+                    "owned-generation-1", "unsafe replay", permissions="admitted"
+                )
+            with pytest.raises(AgentProviderError, match="selected thread"):
+                await client.next_notification("owned-generation-1")
+            with pytest.raises(AgentProviderError, match="original frozen instructions"):
+                await client.resume_thread("owned-generation-1", permissions="admitted")
+            assert len(messages) == before
+            await client.start_thread(
+                cwd=tmp_path,
+                permissions="admitted",
+                model="native-model",
+                developer_instructions="separately selected frozen context",
+            )
+            result = await client.start_turn(
+                "owned-generation-2", "new task", permissions="admitted"
+            )
+            assert result["turn"]["id"] == "new-generation-turn"
+            notification = await client.next_notification("owned-generation-2")
+            assert notification["params"]["delta"] == "generation 2 progress"
+
+    asyncio.run(check())
+    assert connections == 2
+    turns = [
+        (generation, message)
+        for generation, message in messages
+        if message["method"] == "turn/start"
+    ]
+    assert [(generation, message["params"]["input"]) for generation, message in turns] == [
+        (1, [{"type": "text", "text": "original task"}]),
+        (2, [{"type": "text", "text": "new task"}]),
+    ]
+    assert all(message["method"] != "thread/resume" for _, message in messages)
 
 
 @pytest.mark.parametrize(

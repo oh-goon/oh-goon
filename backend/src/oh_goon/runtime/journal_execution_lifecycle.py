@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     FleetRunEvent,
@@ -66,7 +67,18 @@ def _execution_lifecycle_event(
     returncode: int | None,
     termination_reason: str | None = None,
     output_count: int | None = None,
+    cancellation: PlanStepCancellationEvidence | None = None,
 ) -> FleetRunEvent:
+    if cancellation is not None:
+        if event_type is not FleetRunEventType.STEP_CANCELLED:
+            raise ValueError("Cancellation evidence belongs only to STEP_CANCELLED")
+        return StepCancelledEvent(
+            event_type=event_type,
+            step_id=step_id or "",
+            step_order=step_order or 0,
+            cancellation=cancellation,
+            **common,
+        )
     if event_type is FleetRunEventType.REPOSITORY_STARTED:
         return RepositoryStartedEvent(event_type=event_type, **common)
     step_common: _StepFields = {**common, "step_id": step_id or "", "step_order": step_order or 0}

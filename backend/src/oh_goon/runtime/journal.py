@@ -19,6 +19,7 @@ from oh_goon.core.models.agent_repair import (
 )
 from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep
+from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
 from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
 from oh_goon.core.models.reconciliation import (
     RepositoryEffectAcknowledgementEvidence,
@@ -559,6 +560,7 @@ class Journal:
             returncode: int | None = None,
             termination_reason: str | None = None,
             output_count: int | None = None,
+            cancellation: PlanStepCancellationEvidence | None = None,
         ) -> None:
             self.record_execution_lifecycle(
                 fleet_run_id=fleet_run_id,
@@ -574,6 +576,7 @@ class Journal:
                 returncode=returncode,
                 termination_reason=termination_reason,
                 output_count=output_count,
+                cancellation=cancellation,
             )
 
         return observe
@@ -595,6 +598,7 @@ class Journal:
         returncode: int | None = None,
         termination_reason: str | None = None,
         output_count: int | None = None,
+        cancellation: PlanStepCancellationEvidence | None = None,
     ) -> None:
         """Append one live lifecycle fact inside a caller-owned write transaction."""
         view = self._facts.read_view(connection)
@@ -617,6 +621,7 @@ class Journal:
             returncode,
             termination_reason,
             output_count,
+            cancellation,
         )
         identity = _execution_lifecycle_identity(candidate)
         for existing in events:
@@ -646,6 +651,7 @@ class Journal:
         returncode: int | None = None,
         termination_reason: str | None = None,
         output_count: int | None = None,
+        cancellation: PlanStepCancellationEvidence | None = None,
     ) -> None:
         """Append one live execution transition to the canonical Fleet journal."""
         with self._database.transaction(write=True) as connection:
@@ -664,6 +670,7 @@ class Journal:
                 returncode=returncode,
                 termination_reason=termination_reason,
                 output_count=output_count,
+                cancellation=cancellation,
             )
 
     def record_storage_maintenance(

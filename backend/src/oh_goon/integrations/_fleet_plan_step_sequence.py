@@ -24,7 +24,7 @@ from oh_goon.integrations._fleet_plan_step_dataflow import (
     bind_step_outputs,
     condition_skip_reason,
 )
-from oh_goon.integrations._fleet_plan_step_evidence import step_evidence
+from oh_goon.integrations._fleet_plan_step_evidence import cancellation_evidence, step_evidence
 from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
     failure_policy,
@@ -114,8 +114,8 @@ class FleetPlanStepSequence:
                     step_order=step_order,
                 ),
             )
-        except OperationCancelledError:
-            self._record_cancelled_lifecycle(step)
+        except OperationCancelledError as error:
+            self._record_cancelled_lifecycle(step, error)
             raise
         artifacts = self._direct_artifacts(step, record)
         self._record(step, record, host_environment=None, artifacts=artifacts)
@@ -146,8 +146,8 @@ class FleetPlanStepSequence:
                         step_order=step_order,
                     ),
                 )
-            except OperationCancelledError:
-                self._record_cancelled_lifecycle(step)
+            except OperationCancelledError as error:
+                self._record_cancelled_lifecycle(step, error)
                 raise
             try:
                 artifacts = self._strict_artifacts(step, record, prepared_run)
@@ -201,10 +201,17 @@ class FleetPlanStepSequence:
                 physical_execution_id=physical_execution_id,
             )
 
-    def _record_cancelled_lifecycle(self, step: ResolvedPlanStep) -> None:
+    def _record_cancelled_lifecycle(
+        self, step: ResolvedPlanStep, error: OperationCancelledError
+    ) -> None:
         observer = self._runtime.lifecycle_observer
         if observer is not None:
-            observer(step.step_id, len(self._results) + 1, "STEP_CANCELLED")
+            observer(
+                step.step_id,
+                len(self._results) + 1,
+                "STEP_CANCELLED",
+                cancellation=cancellation_evidence(step, error),
+            )
 
     def _record_terminal_lifecycle(self, step: ResolvedPlanStep) -> None:
         observer = self._runtime.lifecycle_observer

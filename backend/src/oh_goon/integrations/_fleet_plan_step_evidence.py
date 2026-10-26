@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from datetime import datetime
 from typing import TypedDict
 
@@ -10,7 +11,7 @@ from oh_goon.core.models.execution_authority_diagnostics import (
 from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
-from oh_goon.core.models.fleet_observation import FleetObservationEvidence
+from oh_goon.core.models.fleet_observation import FleetObservationEvidence, NativeAgentObservation
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
     ResolvedAgentStep,
@@ -35,6 +36,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanRetainedContentEvidence,
     PlanSnapshotEvidence,
     PlanStepAttemptEvidence,
+    PlanStepCancellationEvidence,
     PlanStepExecution,
     PlanStepSettlementEvidence,
     PlanToolEvidence,
@@ -48,8 +50,11 @@ from oh_goon.core.models.fleet_plan_release_evidence import (
 )
 from oh_goon.core.models.fleet_plan_retry import PlanRetryDecisionEvidence
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepEgress
+from oh_goon.engine.command import CommandCancelledError, CommandSupervisorReceipt
+from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
+    process_boundary_settled,
     settle_step_execution,
 )
 
@@ -113,6 +118,65 @@ def step_evidence(
             **common, returncode=outcome.returncode or PLAN_CONTRACT_RETURN_CODE
         )
     return CompletedPlanStepExecution(**common, returncode=outcome.returncode)
+
+
+def cancellation_evidence(
+    step: ResolvedPlanStep, error: OperationCancelledError
+) -> PlanStepCancellationEvidence:
+    """Retain the physical owner's facts without launching post-cancellation work."""
+    outcome = getattr(error, "outcome", None)
+    if not isinstance(outcome, StepOutcome):
+        physical = error.__cause__
+        supervisor = physical.supervisor if isinstance(physical, CommandCancelledError) else None
+        if (
+            not isinstance(supervisor, CommandSupervisorReceipt)
+            or supervisor.cleanup_reason
+            not in {"none", "cancel", "timeout", "authority", "output_cleanup", "output_limit"}
+            or supervisor.process_group_cleanup_requested == (supervisor.cleanup_reason == "none")
+        ):
+            supervisor = None
+        outcome = StepOutcome(
+            argv=(),
+            returncode=PLAN_CONTRACT_RETURN_CODE,
+            supervisor=supervisor,
+            standard_isolation=physical.standard_isolation
+            if isinstance(physical, CommandCancelledError)
+            else None,
+            physical_execution_id=physical.physical_execution_id
+            if isinstance(physical, CommandCancelledError)
+            else None,
+            duration_ms=physical.duration_ms if isinstance(physical, CommandCancelledError) else 0,
+        )
+    elif outcome.supervisor is not None and (
+        outcome.supervisor.process_group_cleanup_requested
+        == (outcome.supervisor.cleanup_reason == "none")
+    ):
+        outcome = replace(outcome, supervisor=None)
+    settlement = settle_step_execution(step, outcome)
+    if not (
+        settlement.outcome == "CANCELLED"
+        and settlement.cleanup == "VERIFIED"
+        and outcome.physical_execution_id is not None
+    ):
+        unverified = process_boundary_settled(outcome) is False
+        settlement = PlanStepSettlementEvidence(
+            outcome="INCOMPLETE",
+            cleanup="UNVERIFIED" if unverified else "UNAVAILABLE",
+            reason="CLEANUP_UNVERIFIED" if unverified else "SUPERVISION_UNAVAILABLE",
+            observed_returncode=outcome.observed_returncode,
+        )
+    return PlanStepCancellationEvidence(
+        settlement=settlement,
+        supervisor=_supervisor_evidence(outcome.supervisor),
+        standard_isolation=outcome.standard_isolation,
+        physical_execution_id=outcome.physical_execution_id,
+        duration_ms=outcome.duration_ms,
+        native_agent_observations=tuple(
+            item
+            for item in getattr(error, "native_observations", ())
+            if isinstance(item, NativeAgentObservation)
+        ),
+    )
 
 
 def canonical_argv(step: ResolvedPlanStep, outcome: StepOutcome) -> tuple[str, ...]:
@@ -203,23 +267,27 @@ def attempt_evidence(
         retry=retry,
         release_effect=release_effect,
         release_verification=release_verification,
-        supervisor=(
-            PlanExecutionSupervisorEvidence(
-                leader_exited_before_group_quiescence=outcome.supervisor.leader_exited_before_group_quiescence,
-                process_group_cleanup_requested=outcome.supervisor.process_group_cleanup_requested,
-                cleanup_reason=outcome.supervisor.cleanup_reason,
-                final_process_group_quiescent=outcome.supervisor.final_process_group_quiescent,
-                forced_termination=outcome.supervisor.forced_termination,
-                recovery_events=tuple(
-                    PlanExecutionRecoveryEventEvidence.model_validate(event.as_dict())
-                    for event in outcome.supervisor.recovery_events
-                ),
-            )
-            if outcome.supervisor is not None
-            else None
-        ),
+        supervisor=_supervisor_evidence(outcome.supervisor),
         execution_authority_economics=tuple(_economics_evidence(item) for item in economics),
         execution_authority=execution_authority,
+    )
+
+
+def _supervisor_evidence(
+    supervisor: CommandSupervisorReceipt | None,
+) -> PlanExecutionSupervisorEvidence | None:
+    if supervisor is None:
+        return None
+    return PlanExecutionSupervisorEvidence(
+        leader_exited_before_group_quiescence=supervisor.leader_exited_before_group_quiescence,
+        process_group_cleanup_requested=supervisor.process_group_cleanup_requested,
+        cleanup_reason=supervisor.cleanup_reason,
+        final_process_group_quiescent=supervisor.final_process_group_quiescent,
+        forced_termination=supervisor.forced_termination,
+        recovery_events=tuple(
+            PlanExecutionRecoveryEventEvidence.model_validate(event.as_dict())
+            for event in supervisor.recovery_events
+        ),
     )
 
 

@@ -316,9 +316,13 @@ probe](../backend/tests/integration/services/test_native_opencode_service.py)
 used a real 2.1.2 server with synthetic HOME/XDG state and a fresh transport
 password. Its PID matched original command-owner birth evidence; closing the
 client left the server available, and original owner cancellation established
-process-group quiescence. No session, account or inference operation ran. This
-non-stdio probe does not qualify the prepared stdin lease, continuation,
-private-store/tool isolation or a real account.
+process-group quiescence. A separate `--stdio` case verifies bounded first-stdout
+endpoint discovery, a live parent-held stdin lease, and native exit zero with
+process quiescence after stdin closes. No session, account or inference operation
+runs in these readiness cases; continuation, private-store/tool isolation and
+real-account behavior remain unqualified. The
+[compatibility inventory](development/AGENT_HARNESS_COMPATIBILITY.md) records
+the separate installed CLI and service evidence.
 
 ### Native service adapter design
 

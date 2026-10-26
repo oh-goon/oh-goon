@@ -15,6 +15,7 @@ from oh_goon.core.models.fleet_plan import (
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepTeardownEvidence,
     PlanArtifactEvidence,
+    PlanStepCancellationEvidence,
     PlanStepExecution,
     PublishedPlanOutputEvidence,
     SkippedPlanStepExecution,
@@ -39,7 +40,7 @@ from oh_goon.core.models.game_tape import (
     GameTapeStepExecution,
     GameTapeWhy,
 )
-from oh_goon.core.models.run_events import StepStartedEvent
+from oh_goon.core.models.run_events import StepCancelledEvent, StepStartedEvent
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary import GameTapeStatus
 
@@ -71,6 +72,12 @@ def project_steps(
         execution = by_id.get(step.step_id)
         events = tuple(events_by_step.get(step.step_id, ()))
         starts = [event for event in events if isinstance(event, StepStartedEvent)]
+        cancellations = [event for event in events if isinstance(event, StepCancelledEvent)]
+        cancellation = (
+            max(cancellations, key=lambda event: event.sequence).cancellation
+            if cancellations
+            else None
+        )
         live_start = (
             min(starts, key=lambda event: event.sequence).generated_at
             if starts
@@ -93,6 +100,7 @@ def project_steps(
                 source_label=source_label,
                 operation_reason_code=operation_reason_code,
                 live_started_at=live_start,
+                cancellation=cancellation,
             )
         )
     return tuple(projected)
@@ -111,6 +119,7 @@ def _step_execution(
     source_label: str,
     operation_reason_code: str | None,
     live_started_at: datetime | None = None,
+    cancellation: PlanStepCancellationEvidence | None = None,
 ) -> GameTapeStepExecution:
     started_at = execution.started_at if execution is not None else live_started_at
     finished_at = execution.finished_at if execution is not None else None
@@ -124,12 +133,23 @@ def _step_execution(
         status=status,
         started_at=started_at,
         finished_at=finished_at,
-        duration_ms=execution.duration_ms if execution is not None else None,
+        duration_ms=execution.duration_ms
+        if execution is not None
+        else cancellation.duration_ms
+        if cancellation is not None
+        else None,
         command=execution.argv if execution is not None else _planned_argv(step),
         working_directory=getattr(step, "working_directory", "."),
         environment=_environment_sources(step),
         exit_code=returncode,
-        **({"settlement": execution.settlement} if execution is not None else {}),
+        **(
+            {"settlement": execution.settlement}
+            if execution is not None
+            else {"settlement": cancellation.settlement}
+            if cancellation is not None
+            else {}
+        ),
+        cancellation=cancellation,
         attempts=execution.attempts if execution is not None else (),
         attempt_transitions=transitions,
         stdout_evidence=execution.stdout_evidence if execution is not None else None,
@@ -144,6 +164,8 @@ def _step_execution(
                 if isinstance(observation, NativeAgentObservation)
             )
             if execution is not None
+            else cancellation.native_agent_observations
+            if cancellation is not None
             else ()
         ),
         reason=(

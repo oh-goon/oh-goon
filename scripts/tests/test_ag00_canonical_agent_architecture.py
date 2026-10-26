@@ -195,6 +195,94 @@ def test_native_step_adapter_has_the_same_no_admission_boundary(baseline: Path) 
     assert any("adapter bypass admission" in message for message in _check(baseline))
 
 
+@pytest.mark.parametrize(
+    ("relative", "source"),
+    [
+        (
+            "services/review_phase.py",
+            "from oh_goon.integrations.agent_codex_service import CodexServiceClient as Client\n"
+            "def interpret():\n    return Client\n",
+        ),
+        (
+            "core/review_result.py",
+            "from oh_goon.integrations import agent_opencode_service as native\n"
+            "def interpret():\n    return native.OpenCodeServiceClient\n",
+        ),
+        (
+            "runtime/result_publication.py",
+            "from oh_goon.integrations.agent_codex_service_execution import CodexServiceExecution\n",
+        ),
+        (
+            "api/routes/review.py",
+            "from oh_goon.integrations.agent_native_execution import NativeAgentEvents as Events\n",
+        ),
+        (
+            "integrations/fleet_plan_step_settlement.py",
+            "from oh_goon.integrations import agent_native_execution as native\n"
+            "def interpret(payload):\n    return native.NativeAgentEventParser(payload)\n",
+        ),
+        (
+            "cli_ai.py",
+            "import oh_goon.integrations.agent_native_execution as native\n"
+            "parse = getattr(native, 'parse_native_agent_events')\n",
+        ),
+        (
+            "cli_agent_services.py",
+            "from oh_goon.integrations.agent_codex_service_execution import execute_codex_service_run\n",
+        ),
+    ],
+)
+def test_native_protocol_cannot_escape_into_shared_result_or_control_owners(
+    baseline: Path, relative: str, source: str
+) -> None:
+    candidate = baseline / "backend/src/oh_goon" / relative
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text("def interpret(result):\n    return result.settlement\n")
+    assert _check(baseline) == []
+    candidate.write_text(source)
+    assert any(
+        "native agent protocol outside adapter owner" in message
+        for message in _check(baseline)
+    )
+
+
+@pytest.mark.parametrize(
+    ("relative", "source"),
+    [
+        (
+            "integrations/fleet_plan_native_steps.py",
+            "from oh_goon.integrations.agent_native_execution import NativeAgentEventParser\n",
+        ),
+        (
+            "integrations/agent_codex_service_execution.py",
+            "from oh_goon.integrations.agent_codex_service import CodexServiceClient\n",
+        ),
+        (
+            "cli_agent_services.py",
+            "from oh_goon.integrations.agent_codex_service import CodexServiceClient\n"
+            "from oh_goon.integrations.agent_opencode_service import OpenCodeServiceClient\n",
+        ),
+        (
+            "services/agent_resolution.py",
+            "from oh_goon.integrations.agent_native_execution import validate_native_agent_arguments\n"
+            "def validate(selected):\n    return validate_native_agent_arguments(selected)\n",
+        ),
+        (
+            "integrations/fleet_plan_step_settlement.py",
+            "from oh_goon.core.models.fleet_observation import NativeAgentObservation\n"
+            "def interpret(result):\n    return result.settlement\n",
+        ),
+    ],
+)
+def test_native_protocol_boundary_preserves_adapters_readiness_and_typed_results(
+    baseline: Path, relative: str, source: str
+) -> None:
+    candidate = baseline / "backend/src/oh_goon" / relative
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text(source)
+    assert _check(baseline) == []
+
+
 def test_agent_cli_side_entrance_rejected(baseline: Path) -> None:
     pyproject = baseline / "backend/pyproject.toml"
     pyproject.write_text(

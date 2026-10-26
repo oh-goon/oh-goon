@@ -20,9 +20,17 @@ from typing import Any
 
 import pytest
 
-from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
+    CodexServiceConnection,
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
 from oh_goon.engine.command import CommandCancelledError, CommandResult, run_command
 from oh_goon.integrations.agent_codex_service import CodexServiceClient
+from oh_goon.integrations.agent_codex_service_execution import service_arguments
+from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from tests.fakes.codex_responses import CodexResponsesFixture
 
 _PROBE = r"""import json, pathlib, subprocess, sys
@@ -61,7 +69,22 @@ facts['private_alias_read_denied'] = denied(lambda: (repo / 'private-alias').rea
 facts['private_alias_write_denied'] = denied(lambda: (repo / 'private-alias').write_text('unauthorized'))
 child = subprocess.run([sys.executable, '-I', '-c', 'import pathlib, sys\ntry: pathlib.Path(sys.argv[1]).read_bytes()\nexcept OSError: sys.exit(0)\nelse: sys.exit(1)', str(stores / 'codex-auth.json')], capture_output=True, timeout=3)
 facts['subprocess_private_read_denied'] = child.returncode == 0
-print(json.dumps(facts, sort_keys=True))
+"""
+
+_RESERVED_DIRECTORY_PROBE = r"""
+reserved = repo / '.codex'
+if not reserved.exists():
+    facts['reserved_root_creation_denied'] = denied(reserved.mkdir)
+facts['reserved_directory_creation_denied'] = denied(lambda: (reserved / 'new-directory').mkdir())
+facts['reserved_directory_rename_denied'] = denied(lambda: reserved.rename(repo / '.codex-moved'))
+facts['reserved_directory_delete_denied'] = denied(reserved.rmdir)
+facts['reserved_new_file_denied'] = denied(lambda: (reserved / 'new.toml').write_text('unauthorized'))
+for relative in ('config.toml', 'nested/private.txt'):
+    protected = reserved / relative
+    facts[relative + '_read_denied'] = denied(protected.read_bytes)
+    facts[relative + '_write_denied'] = denied(lambda: protected.write_text('unauthorized'))
+    facts[relative + '_rename_denied'] = denied(lambda: protected.rename(protected.with_suffix('.moved')))
+    facts[relative + '_delete_denied'] = denied(protected.unlink)
 """
 
 
@@ -205,7 +228,7 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
                             "/usr/bin/python3",
                             "-I",
                             "-c",
-                            _PROBE,
+                            _PROBE + "\nprint(json.dumps(facts, sort_keys=True))\n",
                             str(workspace),
                             str(scratch),
                             str(stores),
@@ -385,7 +408,10 @@ class _ServiceContinuationResponses(CodexResponsesFixture):
 
 
 @pytest.mark.certification
-def test_installed_codex_service_preserves_followup_resume_and_compaction(tmp_path: Path) -> None:
+@pytest.mark.parametrize("reserved_directory", ["absent", "populated"])
+def test_installed_codex_service_preserves_followup_resume_and_compaction(
+    tmp_path: Path, reserved_directory: str
+) -> None:
     executable = os.environ.get("OH_GOON_NATIVE_CODEX")
     runtime_root = os.environ.get("OH_GOON_NATIVE_CODEX_RUNTIME_ROOT")
     if not executable or not runtime_root:
@@ -413,14 +439,28 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(tmp_pa
     ):
         (stores / name).write_text("SYNTHETIC_PRIVATE_CANARY")
     (workspace / "private-alias").symlink_to(stores / "codex-auth.json")
+    reserved = workspace / ".codex"
+    if reserved_directory == "populated":
+        (reserved / "nested").mkdir(parents=True)
+        (reserved / "config.toml").write_text("# SYNTHETIC_WORKSPACE_CONFIGURATION\n")
+        (reserved / "nested" / "private.txt").write_text("SYNTHETIC_RESERVED_CONTENT")
+    else:
+        assert not reserved.exists()
+    reserved_contents = {
+        path.relative_to(reserved): path.read_bytes()
+        for path in reserved.rglob("*")
+        if path.is_file()
+    }
     command = shlex.join(
         (
             "/usr/bin/python3",
             "-I",
             "-c",
             _PROBE
+            + _RESERVED_DIRECTORY_PROBE
             + "\nimport os\nassert 'SERVICE_SYNTHETIC_KEY' not in os.environ\n"
-            + "assert all(facts.values()), facts\nprint('SERVICE_TOOL_BOUNDARY_PROOF')\n",
+            + "assert all(facts.values()), facts\n"
+            + "print(json.dumps(facts, sort_keys=True))\nprint('SERVICE_TOOL_BOUNDARY_PROOF')\n",
             str(workspace),
             str(scratch),
             str(stores),
@@ -440,44 +480,53 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(tmp_pa
     }
     for key in ("CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
         Path(environment[key]).mkdir(mode=0o700)
-    filesystem = {
-        ":root": "deny",
-        ":minimal": "read",
-        str(runtime): "read",
-        str(workspace): "read",
-        str(scratch): "write",
-        str(stores): "deny",
-        str(home): "deny",
-        str(control): "deny",
-    }
-    rules = ",".join(
-        json.dumps(path) + "=" + json.dumps(access) for path, access in filesystem.items()
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="installed-service",
+        definition=NativeAgentDefinition(executable=str(program)),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=environment["CODEX_HOME"], model="gpt-6.1-sol", reasoning_effort="low"
+            )
+        ),
+        executable_sha256=native_executable_sha256(program),
+    )
+    native_argv = service_arguments(
+        selected,
+        repository=workspace,
+        read_roots=(runtime,),
+        control=control,
+        scratch=scratch,
+        socket=advertised,
+        profile="phase-review",
+        read_only=True,
+    )
+    writable_argv = service_arguments(
+        selected,
+        repository=workspace,
+        read_roots=(runtime,),
+        control=control,
+        scratch=scratch,
+        socket=advertised,
+        profile="phase-write",
+        read_only=False,
+    )
+    writable_policy = next(
+        value
+        for previous, value in zip(writable_argv, writable_argv[1:], strict=False)
+        if previous == "-c" and value.startswith("permissions.phase-write=")
     )
     cancelled = Event()
     outcomes: list[CommandResult | BaseException] = []
     endpoint = _ServiceContinuationResponses(command)
     with endpoint:
         settings = [
-            'default_permissions="phase-review"',
-            'approval_policy="never"',
             'model="gpt-6.1-sol"',
             'model_provider="service-fixture"',
             'model_providers.service-fixture={name="service-fixture",base_url='
             + json.dumps(endpoint.base_url + "/v1")
             + ',env_key="SERVICE_SYNTHETIC_KEY",wire_api="responses",requires_openai_auth=false,supports_websockets=false,request_max_retries=0,stream_max_retries=0}',
-            'shell_environment_policy.inherit="none"',
-            'shell_environment_policy.set={PATH="/usr/local/bin:/usr/bin:/bin",TMPDIR='
-            + json.dumps(str(scratch))
-            + "}",
-            "features.use_legacy_landlock=false",
-            "features.hooks=false",
-            "features.plugin_hooks=false",
-            "features.plugins=false",
-            "features.apps=false",
-            "features.multi_agent_v2=false",
-            "features.skill_mcp_dependency_install=false",
-            'web_search="disabled"',
-            f"permissions.phase-review={{filesystem={{{rules}}},network={{enabled=false}}}}",
+            writable_policy,
         ]
         arguments = tuple(part for setting in settings for part in ("-c", setting))
 
@@ -485,11 +534,9 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(tmp_pa
             try:
                 outcomes.append(
                     run_command(
-                        executable,
+                        native_argv[0],
                         *arguments,
-                        "app-server",
-                        "--listen",
-                        "unix://" + str(advertised),
+                        *native_argv[1:],
                         cwd=workspace,
                         env=environment,
                         timeout=90,
@@ -517,7 +564,9 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(tmp_pa
                     if notification["method"] == "item/completed":
                         item = notification["params"]["item"]
                         if item["type"] == "commandExecution":
-                            assert item["status"] == "completed" and item["exitCode"] == 0, item
+                            assert item["status"] == "completed" and item["exitCode"] == 0, item[
+                                "aggregatedOutput"
+                            ]
                             facts_line, marker = item["aggregatedOutput"].splitlines()
                             assert marker == "SERVICE_TOOL_BOUNDARY_PROOF"
                             assert all(json.loads(facts_line).values())
@@ -530,6 +579,32 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(tmp_pa
                 async with CodexServiceClient(
                     advertised, timeout_seconds=15, experimental_api=True
                 ) as client:
+                    write_probe = await client.command_exec(
+                        (
+                            "/usr/bin/python3",
+                            "-I",
+                            "-c",
+                            "import json,pathlib,sys\n"
+                            "repo=pathlib.Path(sys.argv[1])\nfacts={}\n"
+                            "def denied(action):\n"
+                            " try: action()\n"
+                            " except OSError: return True\n"
+                            " return False\n"
+                            "canary=repo/'admitted-write.txt'\n"
+                            "canary.write_text('native write proof')\n"
+                            "facts['workspace_write_allowed']=canary.read_text()=='native write proof'\n"
+                            "canary.unlink()\n"
+                            + _RESERVED_DIRECTORY_PROBE
+                            + "assert all(facts.values()),facts\n"
+                            "print(json.dumps(facts,sort_keys=True))\n",
+                            str(workspace),
+                        ),
+                        cwd=workspace,
+                        permissions="phase-write",
+                        timeout_seconds=8,
+                    )
+                    assert write_probe["exitCode"] == 0, write_probe
+                    assert all(json.loads(write_probe["stdout"]).values())
                     created = await client.start_thread(
                         cwd=workspace,
                         permissions="phase-review",
@@ -609,6 +684,14 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(tmp_pa
             assert source.read_text() == "VALUE = 41\n"
             assert (workspace / ".git" / "config").read_text() == "SYNTHETIC_GIT_METADATA"
             assert all(path.read_text() == "SYNTHETIC_PRIVATE_CANARY" for path in stores.iterdir())
+            assert not reserved.is_symlink()
+            assert not reserved.exists() or reserved.is_dir()
+            assert not (workspace / ".codex-moved").exists()
+            assert {
+                path.relative_to(reserved): path.read_bytes()
+                for path in reserved.rglob("*")
+                if path.is_file()
+            } == reserved_contents
         finally:
             cancelled.set()
             server.join(timeout=12)
