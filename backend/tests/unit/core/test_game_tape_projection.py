@@ -28,6 +28,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanResourceEvidence,
     PlanStandardIsolationEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
     PlanToolEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
@@ -650,7 +651,13 @@ def test_game_tape_compares_adjacent_attempts_from_canonical_evidence() -> None:
     assert transition.resource_policy_changed is False
 
 
-def test_game_tape_preserves_existing_timeout_fact() -> None:
+@pytest.mark.parametrize(
+    ("authored_timeout_seconds", "selected_timeout_seconds", "elapsed_ms"),
+    ((1, 1, 1000), (3600, 300, 310_000)),
+)
+def test_game_tape_preserves_timeout_without_inventing_the_effective_budget(
+    authored_timeout_seconds: int, selected_timeout_seconds: int, elapsed_ms: int
+) -> None:
     from oh_goon.core.execution_ledger import _step_terminal_message
     from oh_goon.core.game_tape_step_projection import project_steps
     from oh_goon.core.models.fleet_plan_step_primitives import PLAN_TIMEOUT_RETURN_CODE
@@ -659,20 +666,25 @@ def test_game_tape_preserves_existing_timeout_fact() -> None:
     planned = ResolvedCommandStep(
         step_id="timeout-step",
         argv=("python", "-c", "sleep"),
-        timeout_seconds=1,
+        timeout_seconds=authored_timeout_seconds,
     )
     execution = FailedPlanStepExecution(
         step_id="timeout-step",
         kind="command",
         started_at=now,
-        finished_at=now + timedelta(seconds=1),
+        finished_at=now + timedelta(milliseconds=elapsed_ms),
         argv=("python", "-c", "sleep"),
         returncode=PLAN_TIMEOUT_RETURN_CODE,
         stdout_evidence=_output(""),
-        stderr_evidence=_output("Fleet plan step timed out after 1 seconds\n"),
-        duration_ms=1000,
+        stderr_evidence=_output(
+            f"Fleet plan step timed out after {selected_timeout_seconds} seconds\n"
+        ),
+        duration_ms=elapsed_ms,
         repository_state_before="before",
         repository_state_after="before",
+        settlement=PlanStepSettlementEvidence(
+            outcome="TIMED_OUT", cleanup="VERIFIED", reason="DEADLINE_EXPIRED"
+        ),
     )
     projected = project_steps(
         "run-timeout",
@@ -684,9 +696,17 @@ def test_game_tape_preserves_existing_timeout_fact() -> None:
         terminal=True,
         operation_reason_code="OPERATION_FAILED",
     )
-    assert projected[0].reason == "Step timed out after 1 seconds."
+    # The authored limit can exceed the selected cap; elapsed time also includes
+    # cleanup. Neither is a recorded effective timeout budget in this projection.
+    assert projected[0].reason == "Step timed out."
+    assert projected[0].status is GameTapeStatus.FAILED
+    assert projected[0].duration_ms == elapsed_ms
+    assert projected[0].settlement == execution.settlement
     assert projected[0].failure is not None
     assert projected[0].failure.exit_code == PLAN_TIMEOUT_RETURN_CODE
+    assert projected[0].failure.reason_code == "OPERATION_FAILED"
+    assert projected[0].failure.evidence_sha256 == execution.stderr_evidence.sha256
+    assert projected[0].stderr_evidence == execution.stderr_evidence
     assert _step_terminal_message(GameTapeStatus.FAILED, execution) == "Step timed out."
 
 

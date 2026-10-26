@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-SHOWCASE = Path(__file__).resolve().parents[4] / "examples/airflow-taskflow-showcase"
+SHOWCASE = Path(__file__).resolve().parents[4] / "templates/goons/general/orders-taskflow"
 pytestmark = pytest.mark.skipif(
     os.name != "posix" or shutil.which("uv") is None, reason="native Git and POSIX uv required"
 )

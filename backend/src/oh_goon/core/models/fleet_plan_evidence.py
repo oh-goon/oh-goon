@@ -23,7 +23,7 @@ from oh_goon.core.models.fleet_plan_release_evidence import (
     KubernetesRolloutVerificationOutcome,
     PlanReleaseEffectEvidence,
 )
-from oh_goon.core.models.fleet_plan_requirements import RequirementCount
+from oh_goon.core.models.fleet_plan_requirements import RequirementCount, UvLockMode
 from oh_goon.core.models.fleet_plan_retry import PlanRetryDecisionEvidence
 from oh_goon.core.models.fleet_plan_tool_authority import PlanHostToolAuthorityEvidence
 from oh_goon.core.models.shard_execution import CanonicalShardExecutionEvidence
@@ -351,6 +351,19 @@ class PlanExecutionAuthorityEconomicsEvidence(ImmutableModel):
         return self
 
 
+class PlanUvPreparationEvidence(ImmutableModel):
+    """Native preparation observation; a failed command is not a stale-lock diagnosis."""
+
+    lock_mode: UvLockMode
+    freshness: Literal["not_checked", "checked", "not_established"]
+
+    @model_validator(mode="after")
+    def validate_freshness(self) -> PlanUvPreparationEvidence:
+        if (self.lock_mode == "frozen") != (self.freshness == "not_checked"):
+            raise ValueError("Frozen UV preparation does not check metadata freshness")
+        return self
+
+
 class PlanStepAttemptEvidence(ImmutableModel):
     attempt: int = Field(ge=1, le=5)
     argv: tuple[str, ...] = Field(default_factory=tuple)
@@ -363,6 +376,9 @@ class PlanStepAttemptEvidence(ImmutableModel):
     repository_state_after: str = Field(min_length=1)
     worktree_files_after: tuple[str, ...] = Field(default_factory=tuple)
     tool: PlanToolEvidence | None = None
+    uv_preparation: PlanUvPreparationEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     cache_input: PlanSnapshotEvidence | None = None
     cache_output: PlanSnapshotEvidence | None = None
     retained_cache: PlanRetainedContentEvidence | None = None

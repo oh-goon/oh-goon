@@ -19,6 +19,10 @@ from oh_goon.repository_tooling.release.build_wheel import (
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.source_snapshot import snapshot_source_directory
+from oh_goon.services.template_plan_drafts import (
+    AGENT_REVIEW_EXAMPLE,
+    agent_review_companion_files,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -105,6 +109,11 @@ def _python_goon_release_source(root: Path) -> Path:
         ".venv/bin/python",
         ".pytest_cache/nodeids",
         "__pycache__/train.pyc",
+        "src/train.egg-info/PKG-INFO",
+        "train-0.1.dist-info/METADATA",
+        ".eggs/dependency.egg/EGG-INFO/PKG-INFO",
+        "build/recipe.txt",
+        "dist/fixture.json",
     ):
         path = package / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -121,15 +130,21 @@ def test_release_catalog_capture_preserves_authored_output_siblings_and_scopes_s
         assert (staged / "assets/input.json").read_text() == "source\n"
         assert (staged / "src/train.py").is_file()
         assert (staged / "tests/test_train.py").is_file()
+        assert (staged / "build/recipe.txt").read_text() == "source\n"
+        assert (staged / "dist/fixture.json").read_text() == "source\n"
         for relative in (
             "assets/result.json",
             "goon.lock",
             ".venv",
             ".pytest_cache",
             "__pycache__",
+            "src/train.egg-info",
+            "train-0.1.dist-info",
+            ".eggs",
         ):
             assert not (staged / relative).exists()
         assert (package / "assets/result.json").exists()
+        assert (package / "src/train.egg-info/PKG-INFO").exists()
     assert not stage.exists()
 
 
@@ -143,6 +158,35 @@ def test_release_catalog_capture_preserves_crlf_yaml_source_identity(
 
     with staged_template_catalogs(tmp_path) as stage:
         assert (stage / "goons/ml/train/goon.yml").read_bytes() == expected
+
+
+def test_release_captures_exact_agent_companions_and_refuses_symlink_resources(
+    tmp_path: Path,
+) -> None:
+    _python_goon_release_source(tmp_path)
+    package = tmp_path / "templates/goons/agents/agentic-review-repair-loop"
+    shutil.copytree(ROOT / "templates/goons/agents/agentic-review-repair-loop", package)
+    files = agent_review_companion_files(ROOT)
+    for relative, content in files.items():
+        path = tmp_path / "examples" / AGENT_REVIEW_EXAMPLE / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content.encode("utf-8"))
+    with staged_template_catalogs(tmp_path) as stage:
+        for relative, content in files.items():
+            assert (
+                stage / "examples" / AGENT_REVIEW_EXAMPLE / relative
+            ).read_bytes() == content.encode("utf-8")
+    skill = tmp_path / "examples" / AGENT_REVIEW_EXAMPLE / "skills/repair/SKILL.md"
+    skill.unlink()
+    private = tmp_path / "private.md"
+    private.write_text("private source\n")
+    skill.symlink_to(private)
+    with pytest.raises(FleetPlanInvalid, match="symlink"):
+        with staged_template_catalogs(tmp_path):
+            pytest.fail(
+                "linked authoring resources must refuse before native packaging"
+            )
+    assert private.read_text() == "private source\n"
 
 
 def test_standard_wheel_rejects_missing_or_changed_catalog_delivery(
@@ -256,10 +300,144 @@ def test_native_wheel_includes_captured_python_project_without_generated_outputs
         assert prefix + "src/train.py" in names
         assert prefix + "tests/test_train.py" in names
         assert prefix + "uv.lock" in names
+        assert archive.read(prefix + "build/recipe.txt") == b"source\n"
+        assert archive.read(prefix + "dist/fixture.json") == b"source\n"
         assert prefix + "assets/result.json" not in names
         assert prefix + "goon.lock" not in names
         assert not any("/.venv/" in name or "/__pycache__/" in name for name in names)
+        assert not any(
+            ".egg-info/" in name or ".dist-info/" in name or "/.eggs/" in name
+            for name in names
+            if name.startswith(prefix)
+        )
     assert (package / "assets/result.json").exists()
+
+
+@pytest.mark.process
+def test_installed_wheel_initializes_complete_agent_workflow_without_checkout_resources(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "source"
+    backend = root / "backend"
+    backend.mkdir(parents=True)
+    shutil.copytree(
+        ROOT / "backend/src",
+        backend / "src",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    for name in ("pyproject.toml", "hatch_build.py"):
+        shutil.copyfile(ROOT / "backend" / name, backend / name)
+    shutil.copyfile(ROOT / "VERSION", root / "VERSION")
+    snapshot_source_directory(
+        ROOT / "templates", root / "templates", label="release fixture"
+    )
+    for relative, content in agent_review_companion_files(ROOT).items():
+        destination = root / "examples" / AGENT_REVIEW_EXAMPLE / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content.encode("utf-8"))
+    static = root / "generated/release/static"
+    static.mkdir(parents=True)
+    (static / "index.html").write_text("UI\n")
+    assert build_wheel(root, offline=True) == 0
+    wheel = next((root / "generated/release/dist").glob("*.whl"))
+
+    environment = tmp_path / "installed"
+    native_environment = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(environment)}
+    prepared = subprocess.run(
+        [
+            "uv",
+            "sync",
+            "--locked",
+            "--offline",
+            "--no-default-groups",
+            "--no-install-project",
+            "--project",
+            str(ROOT / "backend"),
+            "--python",
+            sys.executable,
+        ],
+        env=native_environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert prepared.returncode == 0, prepared.stderr
+    installed = subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--offline",
+            "--no-deps",
+            "--python",
+            str(environment / "bin/python"),
+            str(wheel),
+        ],
+        env=native_environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert installed.returncode == 0, installed.stderr
+    repository = tmp_path / "target"
+    (repository / ".git").mkdir(parents=True)
+    league = tmp_path / "league.yml"
+    import yaml
+
+    league.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
+    native_environment["OH_GOON_LEAGUE_FILE"] = str(league)
+    native_environment.pop("PYTHONPATH", None)
+    shutil.rmtree(root / "templates")
+    shutil.rmtree(root / "examples")
+    shutil.rmtree(backend / "src")
+    output = tmp_path / "workflow"
+    result = subprocess.run(
+        [
+            str(environment / "bin/oh-goon"),
+            "templates",
+            "init",
+            "agents/agentic-review-repair-loop",
+            "--kind",
+            "plan",
+            "--output",
+            str(output),
+            "--repository",
+            str(repository),
+        ],
+        cwd=tmp_path,
+        env=native_environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    for relative in (
+        ".goonskills.yml",
+        "skills/adjudicate/SKILL.md",
+        "skills/repair/SKILL.md",
+    ):
+        assert (output / relative).read_bytes() == (
+            ROOT / "examples" / AGENT_REVIEW_EXAMPLE / relative
+        ).read_bytes()
+    selected = yaml.safe_load((output / "run.yml").read_text())
+    assert selected["inputs"]["repo"] == "local:target"
+    assert selected["agent"]["repository_root"] == str(repository.parent)
+    assert selected["agent"]["model_profile"] == "REQUIRED_MODEL_PROFILE"
+    inspected = subprocess.run(
+        [
+            str(environment / "bin/oh-goon"),
+            "config",
+            "inspect",
+            str(output / "run.yml"),
+            "--json",
+        ],
+        cwd=tmp_path,
+        env=native_environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert inspected.returncode == 0, inspected.stderr + inspected.stdout
 
 
 def test_release_staging_is_owned_by_release_script_not_make_bootstrap_target() -> None:

@@ -113,7 +113,11 @@ from oh_goon.core.models.fleet_plan_oci_tag_steps import (
 from oh_goon.core.models.fleet_plan_oci_tag_steps import (
     ResolvedOciTagAssertStep as ResolvedOciTagAssertStep,
 )
-from oh_goon.core.models.fleet_plan_requirements import RepositoryRequirement
+from oh_goon.core.models.fleet_plan_requirements import (
+    UV_PROJECT_SELECTION_SWITCHES,
+    RepositoryRequirement,
+    UvLockMode,
+)
 from oh_goon.core.models.fleet_plan_resources import (
     ExtensionCatalog as ExtensionCatalog,
 )
@@ -202,20 +206,21 @@ from oh_goon.core.models.provenance import MAX_SOURCE_LOCATION_LENGTH
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
-FLEET_PLAN_CONTRACT_VERSION: Literal[45] = 45
+FLEET_PLAN_CONTRACT_VERSION: Literal[46] = 46
 _NATIVE_AGENT_ADAPTER = TypeAdapter(ResolvedNativeAgent)
 DEFAULT_PRE_COMMIT_REQUIREMENT = "pre-commit==4.6.2"
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 3600.0
 
 
 class UvExecutionEnvironment(ImmutableModel):
-    """Backend-owned locked UV environment selected by a Goon.
+    """One explicit native UV selection, materialized by the authoring compiler.
 
     Authoring selects the repository-relative uv project plus dependency group.
     Lock enforcement, native materialization, cache lineage, and the concrete
     ``uv run`` argv remain resolved execution concerns.
     """
 
+    lock_mode: UvLockMode
     project: str = Field(default=".", min_length=1, max_length=240)
     source: Literal["repository", "package"] = Field(
         default="repository", exclude_if=lambda value: value == "repository"
@@ -520,11 +525,19 @@ class ResolvedCommandStep(CommandPlanStep):
 
     @model_validator(mode="after")
     def validate_uv_selection(self) -> ResolvedCommandStep:
+        if self.uv is not None and self.argv[:3] != ("uv", "run", f"--{self.uv.lock_mode}"):
+            raise ValueError("Resolved uv argv must retain its selected native lock mode")
         package = self.uv is not None and self.uv.source == "package"
         if package != (self.project_source is not None):
             raise ValueError("Package execution requires the exact captured Python Goon source")
         if package and self.uv is not None and self.uv.project != ".":
             raise ValueError("Python Goon runtime selects its package root")
+        if self.uv is not None and any(
+            binding.name in UV_PROJECT_SELECTION_SWITCHES for binding in self.environment
+        ):
+            raise ValueError(
+                "Goon uv selection owns native project and lock switches; remove those imports"
+            )
         if self.uv is not None and (
             "${{" in self.uv.project
             or (
@@ -815,7 +828,7 @@ class ResolvedImport(ImmutableModel):
 class ResolvedFleetPlan(ImmutableModel):
     """Fully bound immutable execution plan.  Runtime never re-reads YAML/TOML."""
 
-    contract_version: Literal[45] = FLEET_PLAN_CONTRACT_VERSION
+    contract_version: Literal[46] = FLEET_PLAN_CONTRACT_VERSION
     _project_archives: dict[str, bytes] = PrivateAttr(default_factory=dict)
 
     @field_validator("contract_version", mode="before")

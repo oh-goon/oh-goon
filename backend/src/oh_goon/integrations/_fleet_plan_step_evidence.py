@@ -185,6 +185,7 @@ def attempt_evidence(
         repository_state_after=repository_state_after,
         worktree_files_after=worktree_files_after,
         tool=tool,
+        uv_preparation=outcome.uv_preparation,
         cache_input=cache_input,
         cache_output=cache_output,
         retained_cache=retained_cache,

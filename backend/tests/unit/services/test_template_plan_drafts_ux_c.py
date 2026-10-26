@@ -266,8 +266,9 @@ def test_reviewer_authoring_generates_a_normal_ordered_composite(tmp_path, monke
     assert authored["goons"][2:] == [
         edge for edge in original["goons"] if edge["phase"] != "review"
     ]
+    for relative in ("skills/adjudicate/SKILL.md", "skills/repair/SKILL.md"):
+        assert (output / relative).is_file()
     assert not (output / ".goonskills.yml").exists()
-    assert not list(output.rglob("SKILL.md"))
     # Real source capture and resolver prove the generated authoring format runs
     # through the existing graph, binder and phased source owners.
     resolver, _, _, options = agent_review_case(tmp_path / "fixture")
@@ -375,9 +376,77 @@ def test_default_agent_selections_follow_the_compiled_harness_and_phases(
     assert (selected.agent.profile == "isolated-managed") is native
     assert (selected.agent.model_profile == "REQUIRED_MODEL_PROFILE") is not native
     assert (selected.repair is not None) is repair
-    assert sorted(item.name for item in path.parent.iterdir()) == (
-        ["run.yml"] if kind == "plan" else ["plan.yml", "run.yml"]
+    files = {
+        item.relative_to(path.parent).as_posix()
+        for item in path.parent.rglob("*")
+        if item.is_file()
+    }
+    expected = {"run.yml"} if kind == "plan" else {"plan.yml", "run.yml"}
+    if repair:
+        from oh_goon.services.template_plan_drafts import AGENT_REVIEW_COMPANION_PATHS
+
+        expected.update(AGENT_REVIEW_COMPANION_PATHS)
+    assert files == expected
+
+
+def test_agent_initialization_copies_exact_bundled_companions(tmp_path):
+    from oh_goon.services.agent_skill_registry import read_goonskills
+    from oh_goon.services.template_plan_drafts import (
+        AGENT_REVIEW_COMPANION_PATHS,
+        AGENT_REVIEW_EXAMPLE,
+        initialize_run_configuration,
     )
+
+    path = initialize_run_configuration(
+        "agents/agentic-review-repair-loop", tmp_path / "workflow", kind="plan"
+    )
+    example = Path(__file__).resolve().parents[4] / "examples" / AGENT_REVIEW_EXAMPLE
+    for relative in AGENT_REVIEW_COMPANION_PATHS:
+        assert (path.parent / relative).read_bytes() == (example / relative).read_bytes()
+    registry = read_goonskills(path.parent / ".goonskills.yml")
+    assert len(registry.aliases) == 4
+
+
+def test_interrupted_skill_publication_never_publishes_run_selection(tmp_path, monkeypatch):
+    import os
+
+    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+
+    output = tmp_path / "workflow"
+    linked = os.link
+
+    def interrupt(source, target, **kwargs):
+        if target == "SKILL.md":
+            raise KeyboardInterrupt
+        return linked(source, target, **kwargs)
+
+    monkeypatch.setattr(os, "link", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        initialize_run_configuration("agents/agentic-review-repair-loop", output, kind="plan")
+    assert not (output / "run.yml").exists()
+    assert (output / ".goonskills.yml").is_file()
+    assert not list(output.rglob(".oh-goon-authoring-*"))
+
+
+def test_missing_bundled_companion_refuses_before_workflow_publication(tmp_path, monkeypatch):
+    from oh_goon.services import template_plan_drafts
+
+    valid = template_plan_drafts.initialize_run_configuration(
+        "agents/agentic-review-repair-loop", tmp_path / "valid", kind="plan"
+    )
+    assert (valid.parent / "skills/adjudicate/SKILL.md").is_file()
+    read_companions = template_plan_drafts.agent_review_companion_files
+    monkeypatch.setattr(
+        template_plan_drafts,
+        "agent_review_companion_files",
+        lambda _: read_companions(tmp_path / "incomplete-installation"),
+    )
+    output = tmp_path / "refused"
+    with pytest.raises(FleetPlanInvalid):
+        template_plan_drafts.initialize_run_configuration(
+            "agents/agentic-review-repair-loop", output, kind="plan"
+        )
+    assert not output.exists()
 
 
 def test_infrastructure_goon_initialization_leaves_policy_with_the_authored_plan(tmp_path):

@@ -58,6 +58,7 @@ TRANSIENT_DIRECTORY_NAMES: frozenset[str] = (
             ".pytest_cache",
             ".mypy_cache",
             ".ruff_cache",
+            ".eggs",
         }
     )
     | PACKAGE_MANAGER_MATERIALIZATION_DIRECTORY_NAMES
@@ -65,6 +66,7 @@ TRANSIENT_DIRECTORY_NAMES: frozenset[str] = (
 TRANSIENT_FILE_NAMES: frozenset[str] = frozenset({".coverage", "coverage-python.json"})
 TRANSIENT_FILE_PREFIXES: tuple[str, ...] = (".coverage.",)
 TRANSIENT_SUFFIXES: frozenset[str] = frozenset({".pyc", ".pyo", ".tsbuildinfo"})
+PYTHON_DISTRIBUTION_METADATA_SUFFIXES: tuple[str, ...] = (".egg-info", ".dist-info")
 
 
 def repository_relative_path(path: Path | PurePosixPath | str) -> PurePosixPath:
@@ -125,6 +127,8 @@ def is_transient_source_path(
         if relative == root or root in relative.parents:
             return True
     if any(part in TRANSIENT_DIRECTORY_NAMES for part in relative.parts):
+        return True
+    if any(part.endswith(PYTHON_DISTRIBUTION_METADATA_SUFFIXES) for part in relative.parts):
         return True
     if relative.name in TRANSIENT_FILE_NAMES:
         return True

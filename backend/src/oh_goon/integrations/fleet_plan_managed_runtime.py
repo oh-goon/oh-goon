@@ -15,6 +15,7 @@ from oh_goon.core.models.fleet_plan import (
 )
 from oh_goon.core.models.fleet_plan_evidence import PlanToolEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
+from oh_goon.core.models.fleet_plan_requirements import UV_PROJECT_SELECTION_SWITCHES, UvLockMode
 from oh_goon.core.path_authority import (
     ContainedPathSpace,
     RepositoryPathSpace,
@@ -40,15 +41,18 @@ from oh_goon.integrations.content_snapshot import (
 )
 from oh_goon.integrations.uv_python_runtime import find_uv_system_python
 
-_UV_PREPARATION_OWNED_ENVIRONMENT = frozenset(
-    {
-        "UV_CACHE_DIR",
-        "UV_PROJECT_ENVIRONMENT",
-        "UV_NO_MANAGED_PYTHON",
-        "UV_PYTHON_DOWNLOADS",
-        "UV_PYTHON",
-        "UV_OFFLINE",
-    }
+_UV_PREPARATION_OWNED_ENVIRONMENT = (
+    frozenset(
+        {
+            "UV_CACHE_DIR",
+            "UV_PROJECT_ENVIRONMENT",
+            "UV_NO_MANAGED_PYTHON",
+            "UV_PYTHON_DOWNLOADS",
+            "UV_PYTHON",
+            "UV_OFFLINE",
+        }
+    )
+    | UV_PROJECT_SELECTION_SWITCHES
 )
 _UV_PREPARATION_COMMAND_RUNNER = partial(
     run_command,
@@ -115,6 +119,7 @@ class UvProjectManagedRuntime:
 
     project: str
     group: str | None
+    lock_mode: UvLockMode
     cache: Path
     python: Path
     package_source: Path | None = None
@@ -202,7 +207,7 @@ def prepare_uv_project_runtimes(
         raise FleetPlanInvalid(
             "Strict native uv preparation could not select one system Python authority"
         )
-    prepared: set[tuple[str, str | None, str | None]] = set()
+    prepared: set[tuple[str, str | None, str | None, UvLockMode]] = set()
     runtimes: dict[str, UvProjectManagedRuntime] = {}
     native_uv = (
         None
@@ -228,6 +233,7 @@ def prepare_uv_project_runtimes(
                 step.uv.project,
                 step.uv.group,
                 step.project_source.content_sha256 if step.project_source else None,
+                step.uv.lock_mode,
             )
             if key not in prepared:
                 project = package_source or RepositoryPathSpace.from_root(source_root).resolve(
@@ -238,7 +244,12 @@ def prepare_uv_project_runtimes(
                 )
                 selection_id = stable_id(
                     "fleet-uv-preparation",
-                    {"project": step.uv.project, "group": step.uv.group, "package": key[2]},
+                    {
+                        "project": step.uv.project,
+                        "group": step.uv.group,
+                        "package": key[2],
+                        "lock_mode": step.uv.lock_mode,
+                    },
                 ).removeprefix("sha256:")
                 environment = env_root / selection_id
                 if not isolated_preparation:
@@ -275,7 +286,7 @@ def prepare_uv_project_runtimes(
                         "sync",
                         "--project",
                         str(project),
-                        "--locked",
+                        f"--{step.uv.lock_mode}",
                         "--no-default-groups",
                         *(["--group", step.uv.group] if step.uv.group is not None else []),
                         *(["--no-editable"] if package_source is not None else []),
@@ -300,6 +311,7 @@ def prepare_uv_project_runtimes(
             runtimes[step.step_id] = UvProjectManagedRuntime(
                 project=step.uv.project,
                 group=step.uv.group,
+                lock_mode=step.uv.lock_mode,
                 cache=cache,
                 python=python,
                 package_source=package_source,

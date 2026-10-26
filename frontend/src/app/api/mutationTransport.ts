@@ -1,5 +1,5 @@
 import { appDiagnosticStore } from "@/domain/diagnostics/appDiagnosticStore";
-import { executeOperation } from "@/app/api/httpTransport";
+import { executeOperation, type OperationTransportOptions } from "@/app/api/httpTransport";
 import { ApiError, ApiUnavailableError } from "@/domain/api/ApiError";
 import {
   operations,
@@ -11,19 +11,25 @@ import {
 import {
   MutationBusyError,
   type MutationController,
+  type MutationDispatch,
   type MutationScope,
 } from "@/domain/concurrency/MutationController";
 import type { WriteCommandResult, WriteErrorRecovery } from "@/domain/mutations/WriteCommandResult";
+
+interface MutationTransportOptions extends OperationTransportOptions {
+  readonly dispatch?: MutationDispatch;
+}
 
 export function writeOperation<Name extends OperationName>(
   mutations: MutationController,
   scope: MutationScope,
   name: Name,
   call: OperationCall<Name>,
+  options?: MutationTransportOptions,
 ): Promise<WriteCommandResult<OperationResponse<Name>>> {
   const metadata = operations[name];
   const source = `${metadata.method} ${operationUrl(name, call)}`;
-  return writeCommand(mutations, scope, source, () => executeOperation(name, call));
+  return writeCommand(mutations, scope, source, () => executeOperation(name, call, undefined, options), options?.dispatch);
 }
 
 async function writeCommand<Result>(
@@ -31,9 +37,10 @@ async function writeCommand<Result>(
   scope: MutationScope,
   source: string,
   command: () => Promise<Result>,
+  dispatch?: MutationDispatch,
 ): Promise<WriteCommandResult<Result>> {
   try {
-    const execution = await mutations.execute(scope, command);
+    const execution = await mutations.execute(scope, command, dispatch);
     return {
       outcome: "saved",
       value: execution.value,

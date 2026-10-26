@@ -219,9 +219,17 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 runtime, admitted.fleet_run_id, admitted_run=admitted
             )
     except KeyboardInterrupt:
+        cancellation_requested = False
+        execution_status = None
+        execution_terminal = None
+        readback = None
         if admitted is not None:
+            readback = ["oh-goon", "plan", "handoff", admitted.fleet_run_id, "--json"]
             try:
-                runtime.runs.cancel(admitted.fleet_run_id)
+                observed = runtime.runs.cancel(admitted.fleet_run_id)
+                cancellation_requested = True
+                execution_status = observed.status.value
+                execution_terminal = observed.status.terminal
             except FleetDomainError:
                 pass
         if as_json:
@@ -231,12 +239,25 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                         "schema": _RUN_RESULT_SCHEMA,
                         "status": "interrupted",
                         "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
+                        "cancellation_requested": cancellation_requested,
+                        "execution_status": execution_status,
+                        "execution_terminal": execution_terminal,
+                        "cleanup": "not-established-by-interruption",
+                        "readback_argv": readback,
                     },
                     sort_keys=True,
                 )
             )
         else:
-            print("Plan run interrupted.")
+            print("Plan invocation interrupted.")
+            if admitted is not None:
+                print(
+                    "Cancellation request: "
+                    + ("confirmed" if cancellation_requested else "unconfirmed")
+                )
+                print("Execution status: " + (execution_status or "unobserved"))
+                print("Cleanup evidence: inspect durable Run handoff.")
+                print("Durable Run handoff argv: " + json.dumps(readback))
         return 130
     except (FleetDomainError, ValueError) as exc:
         if hasattr(args, "_run_configuration"):

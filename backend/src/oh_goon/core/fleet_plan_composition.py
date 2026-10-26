@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import cast, overload
 
+from pydantic import ValidationError
+
 from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid
 from oh_goon.core.fleet_plan_output_refs import (
     goon_output_reference,
@@ -192,7 +194,12 @@ def render_step(step: PlanStep, values: dict[str, PlanInputValue]) -> PlanStep:
     payload = _render_value(step.model_dump(mode="python"), values)
     if isinstance(step, CommandPlanStep):
         payload["argv"] = tuple(str(value) for value in cast(tuple[object, ...], payload["argv"]))
-    return type(step).model_validate(payload)
+    try:
+        return type(step).model_validate(payload)
+    except ValidationError as exc:
+        raise FleetPlanInvalid(
+            f"Fleet plan Step {step.step_id!r} cannot accept its resolved input values"
+        ) from exc
 
 
 @overload

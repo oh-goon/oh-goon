@@ -26,6 +26,7 @@ describe("read resource invalidation", () => {
     expect(new Set(readScopesForResources(["run-history"]))).toEqual(new Set([
       "history-list",
       "history-detail",
+      "agent-campaign",
       "game-tape-diff",
       "game-tape-performance",
       "game-tape-failure-history",

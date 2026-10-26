@@ -5,6 +5,7 @@ import type {
   OperationResponse,
 } from "@generated/operations";
 import type { WriteCommandResult } from "@/domain/mutations/WriteCommandResult";
+import type { RunAgentSelection } from "@generated/models";
 
 type OperationBody<Name extends OperationName> = NonNullable<OperationCall<Name>["body"]>;
 type ReadOperationResult<Name extends OperationName> = Promise<OperationResponse<Name>>;
@@ -17,6 +18,8 @@ type FleetRunExecutionObservationQuery = NonNullable<OperationCall<typeof op.fle
 type ScoutFindingCategory = NonNullable<NonNullable<OperationCall<typeof op.scout_findings.operationId>["query"]>["category"]>;
 type ScoutDetailSection = NonNullable<NonNullable<OperationCall<typeof op.scout_plan.operationId>["query"]>["section"]>;
 type ScheduleOccurrenceStatus = NonNullable<NonNullable<OperationCall<typeof op.schedule_occurrence_repositories.operationId>["query"]>["status"]>;
+
+export type SharedPlanInputs = NonNullable<OperationBody<typeof op.preview_shared_plan.operationId>["inputs"]>;
 
 export interface ReadRequestOptions {
   readonly signal?: AbortSignal;
@@ -49,6 +52,7 @@ export interface ApiClient {
   fleetFailureRepositories(groupId: string, query?: string, signatureId?: string, offset?: number, limit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.fleet_failure_repositories.operationId>;
   fleetRunHistory(beforeRevision?: number, limit?: number, outcome?: FleetRunHistoryOutcome, status?: FleetRunHistoryStatus, source?: FleetRunHistorySource, repositoryId?: string, fromAt?: string, toAt?: string, planQuery?: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.fleet_run_history.operationId>;
   fleetRunDetail(runId: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.get_fleet_run.operationId>;
+  agentCampaign(campaignId: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.get_agent_campaign.operationId>;
   compareFleetRuns(runId: string, baselineRunId: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.compare_fleet_runs.operationId>;
   gameTapePerformance(runId: string, sampleLimit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.game_tape_performance.operationId>;
   gameTapeFailureHistory(runId: string, repositoryId: string, stepId: string, sampleLimit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.game_tape_failure_history.operationId>;
@@ -95,11 +99,12 @@ export interface ApiClient {
   sharedPlans(options?: ReadRequestOptions): ReadOperationResult<typeof op.shared_plans.operationId>;
   planTemplates(options?: ReadRequestOptions): ReadOperationResult<typeof op.plan_templates.operationId>;
   sharedPlan(planKey: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.shared_plan.operationId>;
-  inspectSharedPlanInputs(planKey: string, expectedRevision: string, inputs?: Record<string, string>, options?: ReadRequestOptions): ReadOperationResult<typeof op.inspect_shared_plan_inputs.operationId>;
-  previewSharedPlanLock(planKey: string, expectedRevision: string, inputs?: Record<string, string>, options?: ReadRequestOptions): ReadOperationResult<typeof op.preview_shared_plan_lock.operationId>;
+  inspectSharedPlanInputs(planKey: string, expectedRevision: string, inputs?: SharedPlanInputs, options?: ReadRequestOptions, agent?: RunAgentSelection | null, repositoryIds?: string[]): ReadOperationResult<typeof op.inspect_shared_plan_inputs.operationId>;
+  previewSharedPlanLock(planKey: string, expectedRevision: string, inputs?: SharedPlanInputs, options?: ReadRequestOptions, agent?: RunAgentSelection | null, repositoryIds?: string[]): ReadOperationResult<typeof op.preview_shared_plan_lock.operationId>;
   createSharedPlanFromTemplate(templateKey: string, expectedTemplateSha256: string): WriteOperationResult<typeof op.create_shared_plan_from_template.operationId>;
   saveSharedPlan(planKey: string, content: string, expectedRevision: string | null): WriteOperationResult<typeof op.save_shared_plan.operationId>;
-  previewSharedPlan(planKey: string, expectedRevision: string, repositoryIds: string[], inputs?: Record<string, string>, options?: ReadRequestOptions): ReadOperationResult<typeof op.preview_shared_plan.operationId>;
+  previewSharedPlan(planKey: string, expectedRevision: string, repositoryIds: string[], inputs?: SharedPlanInputs, options?: ReadRequestOptions, agent?: RunAgentSelection | null): ReadOperationResult<typeof op.preview_shared_plan.operationId>;
+  repairSharedPlan(request: OperationBody<typeof op.repair_shared_plan.operationId>): WriteOperationResult<typeof op.repair_shared_plan.operationId>;
   leagueLineups(options?: ReadRequestOptions): ReadOperationResult<typeof op.league_lineups.operationId>;
   inspectLeagueLineup(lineupKey: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.inspect_league_lineup.operationId>;
   saveLeagueLineup(lineupKey: string, name: string, repositories: string[], expectedRevision: string | null): WriteOperationResult<typeof op.save_lineup.operationId>;
@@ -111,7 +116,8 @@ export interface ApiClient {
     expectedPlanRevision: string,
     expectedExecutionDigest: string,
     repositoryInstanceIds: Record<string, string>,
-    inputs?: Record<string, string>,
+    inputs?: SharedPlanInputs,
+    agent?: RunAgentSelection | null,
   ): WriteOperationResult<typeof op.run_shared_plan.operationId>;
   startTeamRun(fleetRunId: string, repository: string, expectedPipelineSha256: string, expectedRepositoryInstanceId: string, inputs?: Record<string, string>): WriteOperationResult<typeof op.run_team.operationId>;
   browse(path?: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.browse.operationId>;

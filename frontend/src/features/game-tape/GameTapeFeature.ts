@@ -10,3 +10,4 @@ export type { GameTapeRecoveryAction } from "@/features/game-tape/runRecovery";
 export { gameTapeFlowGroups } from "@/features/game-tape/gameTapeFlowModel";
 
 export { statusSymbol } from "@/features/game-tape/gameTapeFormat";
+export { GameTapeCampaignJournal } from "@/features/game-tape/components/GameTapeCampaignJournal";

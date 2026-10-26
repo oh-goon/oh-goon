@@ -113,13 +113,14 @@ Both modes resolve into the same immutable execution representation and then use
 
 Choose folders in the UI to discover Git repositories. Every discovered Git root remains visible as a repository; missing or invalid `goon.yml` files are reported rather than silently skipped.
 
-For normal CLI work, select one `run.yml`. Register the target repository in the
-UI first, then use its canonical repository ID in the generated file:
+For normal CLI work, register the target folder and select its repository path
+when creating one `run.yml`:
 
 ```bash
 oh-goon templates list --kind plan
-oh-goon templates init python/quality --kind plan --output ./workflow
-# Edit workflow/run.yml: target.repository_id and relevant inputs.
+oh-goon league add-folder /absolute/path/to/repository
+oh-goon templates init python/quality --kind plan --output ./workflow --repository /absolute/path/to/repository
+# Edit relevant workflow/run.yml inputs for the selected project.
 oh-goon config inspect ./workflow/run.yml
 oh-goon config validate ./workflow/run.yml
 oh-goon lock ./workflow/run.yml
@@ -130,7 +131,7 @@ Inspection is local and read-only. Validation proves the selected source and
 typed inputs; neither command grants permission or proves native prerequisites.
 Locking freezes execution identity, and Run admission checks freshness before
 effects. The [configuration guide](docs/development/TEMPLATE_INPUT_INSPECTION.md)
-explains the three source selections and their owners.
+explains catalog, file, repository Goon and pinned Git selections and their owners.
 
 This is a clean replacement of the former Plan-path plus input/agent flag
 assembly. Unsupported commands, old selection files and unknown schema versions
@@ -156,7 +157,9 @@ Plan
 - The source graph is read and resolved once before admission.
 - Execution remains a single ordered sequence; visualization never creates scheduler edges.
 
-Shipped packages use one exact grammar:
+Plan, Composite Goon and tool-invoking Atomic Goon packages contain YAML and
+README. An Atomic Goon with `runtime: python` instead owns a complete standalone
+Python project beside its YAML:
 
 ```text
 templates/goons/<category>/<name>/
@@ -166,12 +169,21 @@ templates/goons/<category>/<name>/
 templates/plans/<category>/<name>/
 ├── plan.yml
 └── README.md
+
+templates/goons/<category>/<python-name>/
+├── goon.yml
+├── README.md
+├── pyproject.toml
+├── uv.lock
+├── src/
+└── tests/
 ```
 
 `goon.lock` is a compact deterministic fingerprint of the resolved execution structure. It does not duplicate dependency resolution:
 
 - `goon.lock` freezes resolved Plan/Goon/Step structure and relevant external-artifact digests.
 - `backend/pyproject.toml` owns Python dependency intent; committed `backend/uv.lock` is native uv's exact resolution authority.
+- Each Python Goon owns its own `pyproject.toml` and native `uv.lock`; execution installs base dependencies unless its Goon explicitly selects a group.
 - `frontend/package-lock.json` owns Node dependencies.
 - Other ecosystem locks remain authoritative for their ecosystems.
 

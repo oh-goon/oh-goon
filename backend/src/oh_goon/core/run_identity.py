@@ -53,6 +53,26 @@ def with_retained_project_deliveries(
     return target.model_copy(update={"project_deliveries": retained.project_deliveries})
 
 
+def with_retained_agent_deliveries(
+    target: FleetPlanTarget, retained: FleetPlanTarget
+) -> FleetPlanTarget:
+    """Reuse Agent custody only for exactly the same frozen source and Run intent."""
+    if not target.agent_deliveries or not retained.agent_deliveries:
+        return target
+    requested = tuple(
+        (item.step_id, item.handoff_identity, item.delivery_sha256)
+        for item in target.agent_deliveries
+    )
+    original = tuple(
+        (item.step_id, item.handoff_identity, item.delivery_sha256)
+        for item in retained.agent_deliveries
+    )
+    if requested != original:
+        return target
+    candidate = target.model_copy(update={"agent_deliveries": retained.agent_deliveries})
+    return candidate if _target_facts(candidate) == _target_facts(retained) else target
+
+
 def _target_facts(target: OperationTarget | None) -> object:
     """Private source packets transport captured bytes; serialized facts bind authority."""
     return (

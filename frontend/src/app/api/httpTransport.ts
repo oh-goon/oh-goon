@@ -15,6 +15,10 @@ const API_ROOT = "/api";
 const REQUEST_TIMEOUT_MS = 10_000;
 const READ_RETRY_DELAYS_MS = [250, 750] as const;
 
+export interface OperationTransportOptions {
+  readonly timeoutMs?: number;
+}
+
 export function readOperation<Name extends OperationName>(
   name: Name,
   call: OperationCall<Name>,
@@ -39,6 +43,7 @@ export async function executeOperation<Name extends OperationName>(
   name: Name,
   call: OperationCall<Name>,
   signal?: AbortSignal,
+  options?: OperationTransportOptions,
 ): Promise<OperationResponse<Name>> {
   const metadata = operations[name];
   const url = operationUrl(name, call);
@@ -51,7 +56,7 @@ export async function executeOperation<Name extends OperationName>(
   const retryDelays = metadata.method === "GET" ? READ_RETRY_DELAYS_MS : [];
   for (let attempt = 0; ; attempt += 1) {
     try {
-      return await requestOnce(name, url, init);
+      return await requestOnce(name, url, init, options);
     } catch (error) {
       if (!(error instanceof ApiUnavailableError)) throw error;
       const retryDelay = retryDelays[attempt];
@@ -65,8 +70,9 @@ async function requestOnce<Name extends OperationName>(
   name: Name,
   url: string,
   init: RequestInit,
+  options?: OperationTransportOptions,
 ): Promise<OperationResponse<Name>> {
-  const response = await requestRaw(url, init);
+  const response = await requestRaw(url, init, options);
   const kind = operations[name].responseKind;
   if (kind === "void") return undefined as OperationResponse<Name>;
   const raw = await response.text();
@@ -77,13 +83,15 @@ async function requestOnce<Name extends OperationName>(
   return decodeResponse(name, parseJson(raw));
 }
 
-async function requestRaw(url: string, init: RequestInit): Promise<Response> {
-  const response = await fetchApiRaw(url, init);
+async function requestRaw(url: string, init: RequestInit, options?: OperationTransportOptions): Promise<Response> {
+  const response = await fetchApiRaw(url, init, options);
   if (!response.ok) throw await responseError(response);
   return response;
 }
 
-async function fetchApiRaw(url: string, init: RequestInit): Promise<Response> {
+async function fetchApiRaw(url: string, init: RequestInit, options?: OperationTransportOptions): Promise<Response> {
+  const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new RangeError("Request timeout must be positive and finite");
   const externalSignal = init.signal;
   if (externalSignal?.aborted) throw abortError();
   const controller = new AbortController();
@@ -93,7 +101,7 @@ async function fetchApiRaw(url: string, init: RequestInit): Promise<Response> {
   } else {
     externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
   }
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${API_ROOT}${url}`, {
       headers: { "Content-Type": "application/json" },

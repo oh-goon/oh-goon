@@ -234,5 +234,9 @@ def test_shared_plan_lock_preview_route_uses_backend_resolved_lock() -> None:
     assert response.json()["plan_id"] == "plan-1"
     assert "goon" not in response.json()
     service.lock_preview.assert_called_once_with(
-        "python-quality", inputs={"coverage_threshold": "85"}, expected_revision="a" * 64
+        "python-quality",
+        inputs={"coverage_threshold": "85"},
+        expected_revision="a" * 64,
+        agent=None,
+        repository_ids=set(),
     )

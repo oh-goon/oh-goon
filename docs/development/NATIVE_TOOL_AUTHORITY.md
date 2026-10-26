@@ -115,11 +115,14 @@ For a strict repository-backed `uv:` Step, the admitted source is a new isolated
 execution subject. The live checkout's `backend/.venv` is never authority and is never
 transported. Admission proves Oh-Goon-owned source, project, group, execution and isolation
 structure without running a disposable dependency resolution. Strict preparation is the
-first native dependency operation: `uv sync --locked --no-default-groups --group <selected>`
+first native dependency operation: `uv sync --frozen --no-default-groups --group <selected>`
 acquires that exact project into a disposable preparation environment and one retained
 run-owned cache. The physical attempt materializes an attempt-owned environment outside the source workspace
 offline from that admitted cache, then executes the application command with native
-`uv run --frozen --no-default-groups --no-sync`. Oh-Goon owns source identity, cache/workspace placement,
+`uv run --no-default-groups --no-sync`. An explicitly selected `lock_mode: locked`
+uses native `--locked` preparation instead; frozen adds no hidden freshness check.
+The resolved mode is retained across preparation and attempt installation, and
+already prepared execution does not resync. Oh-Goon owns source identity, cache/workspace placement,
 sandboxing and evidence; uv owns lock/group validity, distribution acquisition,
 environment construction, console-entrypoint resolution and execution.
 

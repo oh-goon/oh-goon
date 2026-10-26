@@ -972,7 +972,7 @@ def test_plan_repository_requirements_fail_together_before_run_admitted(tmp_path
                 value_type=RepositoryValueType.STRING,
                 non_empty=True,
             ),
-            UvProjectRequirement(group="dev"),
+            UvProjectRequirement(lock_mode="locked", group="dev"),
         )
     )
     planner = object.__new__(FleetAdmissionPlanner)
@@ -986,7 +986,7 @@ def test_plan_repository_requirements_fail_together_before_run_admitted(tmp_path
     message = str(exc.value)
     assert "repository requirement path is missing: uv.lock" in message
     assert "repository requirement pyproject field is missing: project.imagename" in message
-    assert "locked UV project requires uv.lock: ." in message
+    assert "selected UV project requires uv.lock: ." in message
 
 
 def test_repository_requirements_report_all_typed_failures_in_one_pass(tmp_path: Path) -> None:
@@ -1022,8 +1022,8 @@ def test_repository_requirements_report_all_typed_failures_in_one_pass(tmp_path:
                 field="project.count", value_type=RepositoryValueType.INTEGER
             ),
             PyprojectValueRequirement(field="project.flag", value_type=RepositoryValueType.BOOLEAN),
-            UvProjectRequirement(group="missing"),
-            UvProjectRequirement(group="dev"),
+            UvProjectRequirement(lock_mode="locked", group="missing"),
+            UvProjectRequirement(lock_mode="locked", group="dev"),
         ),
     )
 
@@ -1047,7 +1047,7 @@ def test_repository_requirements_skip_typed_checks_when_pyproject_is_missing(
             PyprojectValueRequirement(
                 field="project.version", value_type=RepositoryValueType.STRING
             ),
-            UvProjectRequirement(group="dev"),
+            UvProjectRequirement(lock_mode="locked", group="dev"),
         ),
     )
 
@@ -1068,7 +1068,9 @@ def test_uv_lock_structure_is_owned_by_native_uv_not_static_admission(
         pyproject.read_text(encoding="utf-8") + "\n[dependency-groups]\ndev = []\n",
         encoding="utf-8",
     )
-    inspection = inspect_cicd_repository(repository, (UvProjectRequirement(group="dev"),))
+    inspection = inspect_cicd_repository(
+        repository, (UvProjectRequirement(lock_mode="locked", group="dev"),)
+    )
 
     assert not isinstance(inspection, RejectedCicdRepositoryAdmission)
 
@@ -1085,10 +1087,14 @@ def test_uv_project_requirement_transports_group_without_shadow_validation(tmp_p
         "version = 1\nrevision = 1\npackage = []\n", encoding="utf-8"
     )
 
-    accepted = inspect_cicd_repository(repository, (UvProjectRequirement(group="dev"),))
+    accepted = inspect_cicd_repository(
+        repository, (UvProjectRequirement(lock_mode="locked", group="dev"),)
+    )
     assert not isinstance(accepted, RejectedCicdRepositoryAdmission)
 
-    deferred = inspect_cicd_repository(repository, (UvProjectRequirement(group="missing"),))
+    deferred = inspect_cicd_repository(
+        repository, (UvProjectRequirement(lock_mode="locked", group="missing"),)
+    )
     assert not isinstance(deferred, RejectedCicdRepositoryAdmission)
 
 
@@ -1118,7 +1124,7 @@ def test_plan_repository_requirements_are_rechecked_on_frozen_snapshot(tmp_path:
                 value_type=RepositoryValueType.STRING,
                 non_empty=True,
             ),
-            UvProjectRequirement(group="dev"),
+            UvProjectRequirement(lock_mode="locked", group="dev"),
         )
     )
     planner = object.__new__(FleetAdmissionPlanner)
@@ -1165,7 +1171,9 @@ def test_uv_project_requirement_is_derived_and_valid_without_package_shadow_mode
     (tmp_path / ".git").mkdir()
     (tmp_path / "pyproject.toml").write_text("[dependency-groups]\ndev = []\n", encoding="utf-8")
     (tmp_path / "uv.lock").write_text("version = 1\nrevision = 1\npackage = []\n", encoding="utf-8")
-    evidence = validate_cicd_repository(tmp_path, (UvProjectRequirement(group="dev"),))
+    evidence = validate_cicd_repository(
+        tmp_path, (UvProjectRequirement(lock_mode="locked", group="dev"),)
+    )
 
     assert evidence.kind == "requirements"
     assert evidence.requirement_count == 1

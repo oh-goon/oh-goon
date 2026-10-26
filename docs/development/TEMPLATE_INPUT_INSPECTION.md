@@ -8,9 +8,18 @@ provider connections, native model settings, or a second workflow language.
 This single-file entrypoint applies to local CLI catalog/file/repository
 invocations. The browser's persisted Team and Shared Plan APIs retain their
 distinct source-revision, repository-instance and reviewed-target authority.
-They converge on the same Fleet execution lifecycle, but the browser does not
-load `run.yml` or expose its new agent/repair groups. No equivalence for those
-new groups across CLI/API/GUI is claimed.
+They converge on the same Fleet execution lifecycle. Shared Plans expose the
+same typed Agent selection and bounded review-repair budget groups through
+their backend contract. The browser submits those selections with the saved
+Plan revision, reviewed execution digest and exact repository instances.
+Shared Agent execution selects one Team and explicit absolute repository/Skill
+roots on the server; CLI `run.yml` keeps its Skill root relative to its workflow
+directory. Provider/native profiles retain their existing configuration owner.
+Repair requires fresh explicit authorization for each submission. Recorded
+campaign results reopen through the original Journal. Initial capture can
+expire or be cancelled before intent is recorded; that invocation result has
+no Journal revision and grants no durable completion claim. A readback never
+resumes execution.
 
 After [development setup](../DEVELOPMENT.md), invoke the source CLI with
 `uv run --offline --frozen --no-sync --project backend oh-goon` in place of
@@ -18,7 +27,8 @@ After [development setup](../DEVELOPMENT.md), invoke the source CLI with
 
 ```sh
 oh-goon templates list --kind plan
-oh-goon templates init python/quality --kind plan --output ./workflow
+oh-goon league add-folder /absolute/path/to/repository
+oh-goon templates init python/quality --kind plan --output ./workflow --repository /absolute/path/to/repository
 ```
 
 `--kind` is required because a Plan and a Goon may share the same catalog key.
@@ -27,8 +37,8 @@ A Plan selection uses the catalog directly; a Goon selection creates a minimal
 `plan.yml` importing that exact Goon and selects the file from `run.yml`. Neither
 mode copies the selected Goon implementation or invents another source owner.
 
-Edit the generated `workflow/run.yml` to select the registered repository ID
-and the inputs you need. For example:
+The initializer resolves `--repository` through the existing League registry
+and writes its canonical identity. Edit the generated inputs you need. For example:
 
 ```yaml
 version: 1
@@ -43,11 +53,10 @@ inputs:
   typechecker: ty
 ```
 
-`REPOSITORY_ID` is a placeholder for the target's registered canonical identity.
-Follow the [template first-run guide](../../templates/README.md) for headless
-registration with `league add-folder` and `league scan --json`. Copy the selected
-repository's canonical `repository_id` into `target.repository_id`; the current
-initializer requires this explicit ID transfer.
+The illustrative `REPOSITORY_ID` above is filled by `--repository`; omitting that
+option deliberately leaves a target placeholder for later selection. An
+unregistered explicit path refuses before publishing the workflow. See the
+[template first-run guide](../../templates/README.md) for headless registration.
 The Python values above illustrate this repository's layout. Native uv, Ruff,
 Pytest and the selected type checker retain their project configuration and
 results. Inspect your actual selected contract before changing values.
@@ -62,9 +71,19 @@ oh-goon run ./workflow/run.yml
 
 Generation refuses an existing destination. It does not overwrite a project or
 copy an unchanged shipped Plan. Inspection and validation do not start a Run,
-write a lock, fetch remote Goon/Plan or Skill sources, contact a model, read native private config,
+write a lock, fetch remote Goon/Plan or Skill sources by default, contact a model, read native private config,
 or grant permission. Locking and execution use the original resolver and
 Fleet lifecycle. A completed validation is not an executed check or APP PASS.
+
+For a new Git selection, `oh-goon config inspect ./workflow/run.yml --acquire`
+explicitly permits the existing Git acquisition owner to capture its source
+before required input values are known. It does not write `goon.lock`, install
+the project or start execution. JSON and human inspection report requested
+origin/ref, resolved commit, stable logical Plan/Goon paths, YAML-only hashes,
+complete Python package identity, selected dependency groups and the limits of
+the evidence. A successful contract inspection does not establish installation
+or execution. Default inspection retains its no-network behavior and uses
+existing exact pins.
 
 ## Source and value owners
 
@@ -108,11 +127,18 @@ that same commit. `lock run.yml --update-goons` explicitly refreshes Goon/Plan
 selectors independently of `--update-skills`. Inspection and validation use
 cached source only; unavailable source reports acquisition is required without
 network effects. Acquisition does not run project code or install dependencies.
+Explicit `config inspect --acquire` also permits acquisition for contract
+discovery before a successful lock; installation and execution remain unproven.
 
 `inputs` supplies scalar values only. The imported Goon and canonical binder
 own names, types, defaults and constraints. An omitted value may use its
 owner's default; an explicit invalid value fails. Ambiguous shared inputs need
 explicit `pass:` recipients or renamed `with:` bindings in the Plan/Goon.
+Browser fields display declared defaults without submitting them as caller
+inputs. **Value source** distinguishes omission, an explicit value equal to the
+default, and explicit null. Clearing a text field supplies an explicit empty
+string; the existing binder decides whether that value or null is valid for
+the selected input. Preview `explicit_inputs` retains exactly the supplied map.
 The config cannot contain copied schemas, nested executor policy, credentials,
 secret interpolation, `steps`, `goons` or native `modelOverrides`.
 
@@ -121,6 +147,9 @@ Use them only for workflows that support those selections. See
 [Agent Skills](../AGENT_SKILLS.md) and [Agent providers](../AGENT_PROVIDERS.md).
 `.goonskills.yml` alone owns Skill source/ref/directories; `goon.lock` owns
 frozen Skill commits. Provider catalogs own connection/profile definitions.
+For the shipped review-repair workflow, initialization copies its existing
+pinned registry and local adjudication/proposal Skill companions. Custom review
+Skill resources remain caller-owned; inspection identifies remaining choices.
 Pi, OpenCode and Codex own their native authentication, context windows,
 compaction, reasoning, tools and private settings.
 

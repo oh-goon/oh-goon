@@ -1,6 +1,10 @@
 version: 1
 source:
-  kind: repository-goon
+  kind: git-plan
+  git: https://github.com/oh-goon/oh-goon.git
+  ref: main
+  path: .
+  plan: examples/airflow-taskflow-showcase/plan.yml
 target:
   repository_id: REPOSITORY_ID
 inputs:

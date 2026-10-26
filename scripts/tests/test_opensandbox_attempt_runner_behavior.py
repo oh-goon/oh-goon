@@ -738,7 +738,11 @@ def test_native_helper_builds_and_runs_captured_python_project(
     tool = HostToolBinding("uv", uv, uv, snapshot_identity(uv))
     runtime_binding = capture_runtime_root(
         (tool,),
-        {"build": UvProjectManagedRuntime(".", None, tmp_path / "cache", python)},
+        {
+            "build": UvProjectManagedRuntime(
+                ".", None, "frozen", tmp_path / "cache", python
+            )
+        },
         runtime,
         runtime_inspector=Path(ldd_name).resolve(strict=True),
         network_enabled=False,

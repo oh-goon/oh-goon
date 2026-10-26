@@ -62,9 +62,13 @@ def release_catalog_inclusion(*, version: str) -> dict[str, str]:
             if not member.isfile() and not member.isdir():
                 raise RuntimeError("release template catalog contains non-regular source")
         archive.extractall(destination, filter="data")
-    if {path.name for path in destination.iterdir()} != {"goons", "plans"}:
-        raise RuntimeError("release template catalog must contain goons and plans")
-    return {str(destination): "oh_goon/templates"}
+    if {path.name for path in destination.iterdir()} != {"goons", "plans", "examples"}:
+        raise RuntimeError("release template catalog must contain goons, plans and examples")
+    return {
+        str(destination / "goons"): "oh_goon/templates/goons",
+        str(destination / "plans"): "oh_goon/templates/plans",
+        str(destination / "examples"): "oh_goon/examples",
+    }
 
 
 class CustomBuildHook(BuildHookInterface):

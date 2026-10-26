@@ -859,8 +859,11 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
         return
     if raw_uv is None:
         raw_uv = {}
-    if not isinstance(raw_uv, dict) or not set(raw_uv) <= {"group", "project"}:
-        raise FleetPlanInvalid("Goon uv may contain group and project")
+    if not isinstance(raw_uv, dict) or not set(raw_uv) <= {"group", "project", "lock_mode"}:
+        raise FleetPlanInvalid("Goon uv may contain group, project and lock_mode")
+    lock_mode = raw_uv.get("lock_mode", "frozen")
+    if lock_mode not in ("frozen", "locked"):
+        raise FleetPlanInvalid("Goon uv.lock_mode must be frozen or locked")
     if runtime is not None and "project" in raw_uv:
         raise FleetPlanInvalid("Python runtime owns the Goon package project; remove uv.project")
     group = raw_uv.get("group")
@@ -921,7 +924,7 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
         step["argv"] = [
             "uv",
             "run",
-            "--frozen",
+            f"--{lock_mode}",
             "--no-default-groups",
             "--project",
             project,
@@ -929,6 +932,7 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
             *argv[2:],
         ]
         step["uv"] = {
+            "lock_mode": lock_mode,
             "project": project,
             "group": group,
             "source": "package" if runtime == "python" else "repository",

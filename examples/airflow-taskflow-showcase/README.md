@@ -1,71 +1,49 @@
-# Official Airflow TaskFlow → OH-Goon showcase
+# Run the orders TaskFlow example from Git
 
 Classification: runnable-with-prerequisites
 
-One standalone Python application adapts the official [Airflow 3.3.2 TaskFlow tutorial](https://airflow.apache.org/docs/apache-airflow/3.3.2/_modules/airflow/example_dags/tutorial_taskflow_api.html) into shared `extract → transform → load` operations. The original values 301.27 + 433.21 + 502.22 give **1236.70**. The `changed` fixture gives **60.00**; `invalid` fails transformation. These two fixtures, decimal arithmetic, validation, the CLI, and file outputs are showcase extensions. Airflow's original sample loads by printing the total.
+Select one revision of this repository and run its complete [general/orders-taskflow Python Goon](../../templates/goons/general/orders-taskflow/README.md) against an empty registered target. This ordinary trusted verification Plan needs an installed OH-Goon CLI, Python 3.12+ and native uv. The application has no runtime dependencies; the separate Airflow adapter is optional.
 
-## Local development
-
-Copy this entire directory to a location outside the OH-Goon checkout. It is a complete Python project with a committed native `uv.lock`; Python 3.12+ and uv are required. From the copied directory:
+Create and register a target without copying application code into it:
 
 ```bash
-uv sync --locked
-uv run --no-sync pytest tests/test_operations.py tests/test_cli.py
-uv run --no-sync orders-pipeline extract --fixture official
-uv run --no-sync orders-pipeline transform --data '{"1001":301.27,"1002":433.21,"1003":502.22}'
-uv run --no-sync orders-pipeline load --total 1236.70
+mkdir -p ./repositories/orders-target
+git init ./repositories/orders-target
+oh-goon league add-folder "$PWD/repositories/orders-target"
+oh-goon league scan
+oh-goon templates init general/orders-taskflow --kind goon --output ./workflow --repository "$PWD/repositories/orders-target"
 ```
 
-The application and its ordinary tests need neither Airflow nor OH-Goon. Each CLI operation writes its result under `.showcase/` in the working directory. `extract` requires an explicit fixture; the Goon owns the workflow default. `transform --data` accepts JSON data, and `load --total` accepts the scalar total. OH-Goon transports the preceding Step's output value into those arguments.
+Initialization binds the registered target and writes its canonical ID. Keep the generated `target` and `inputs` in `workflow/run.yml`; replace only its `source` mapping with this explicit Git selection:
 
-## OH-Goon
+```yaml
+source:
+  kind: git-plan
+  git: https://github.com/oh-goon/oh-goon.git
+  ref: main
+  path: .
+  plan: examples/airflow-taskflow-showcase/plan.yml
+```
 
-Use an installed OH-Goon CLI after its normal setup. For a source checkout, follow [development setup](https://github.com/oh-goon/oh-goon/blob/main/docs/DEVELOPMENT.md) and use its prepared CLI. In the copied project, initialize a standalone target repository and register it headlessly:
+The selector names the repository, requested ref, authoring root and contained Plan. That Plan imports this revision's package explicitly; the installed catalog cannot shadow it. The initializer's local `workflow/plan.yml` is now unselected and can be removed after this edit. This directory's `run.yml` is a reference selection with a placeholder target; initialization supplies the actual target authority.
 
 ```bash
-git init
-oh-goon league add-folder "$PWD"
-oh-goon league scan --json
+oh-goon config inspect ./workflow/run.yml --acquire
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml --json
 ```
 
-Set the included `run.yml`'s `target.repository_id` to this project's canonical `repository_id` from the scan. Registration does not require the browser. The current CLI still requires this manual ID transfer; automatic repository selection belongs to the broader initialization work. Change caller values only in `run.yml` (`fixture: official`, `changed`, or `invalid`), then:
+Explicit inspection acquires source and explains the input contract and selected commit. It does not install or execute application code. Locking records the commit in `workflow/goon.lock`; later Runs retain that exact pin. Change a caller input and lock again. Only `oh-goon lock ./workflow/run.yml --update-goons` refreshes Git source selection. Cached inspection without `--acquire` does not fetch missing source.
+
+The ordinary Run waits for completion. Use its returned `fleet_run_id` in a fresh CLI process:
 
 ```bash
-oh-goon lock ./run.yml
-oh-goon run ./run.yml
+oh-goon plan tape RUN_ID --json
+oh-goon plan outputs RUN_ID --json
 ```
 
-The Run waits for completion and prints its ID. Use that exact ID in `oh-goon plan tape RUN_ID`, `oh-goon plan steps RUN_ID`, `oh-goon plan logs RUN_ID`, and `oh-goon plan outputs RUN_ID`, or open its Game Tape in the browser. `config inspect ./run.yml` and `config validate ./run.yml` are optional authoring diagnostics. Lock/run perform the canonical validation. After changing a selection or Goon declaration, explicitly lock again; running does not refresh a stale lock.
+With `fixture: official`, all three Steps pass and the final artifact hash describes `{"total_order_value": "1236.70"}` followed by a newline. `fixture: changed` produces `60.00`. `fixture: invalid` passes extraction, fails transformation and skips loading; the Run requires attention. Each execution uses owned source, environment and output roots, leaving the empty target and developer environment unchanged.
 
-The expected result is three successful Steps and `total_order_value` of `1236.70` or `60.00`. With `fixture: invalid`, extraction succeeds, transformation fails with a nonzero exit, loading is skipped, and the Run requires attention. Use a fresh copy or remove previous `.showcase/` results when inspecting failure locally: an old file is not evidence of a new successful Step.
+The artifact uses `retention: evidence`: Game Tape preserves its hash, size and presence across process restart. It does not retain downloadable bytes. The Iris CI/CD [Git example](../python-goon-project/README.md) demonstrates a separate workflow requiring retained-content publication and the selected CI/CD executor.
 
-The final `.showcase/result.json` uses `retention: evidence`: Game Tape records its presence, hash and size. This declaration does not retain durable file bytes. See [artifact retention](https://github.com/oh-goon/oh-goon/blob/main/docs/development/TEMPLATE_ARTIFACT_RETENTION.md).
-
-This root Goon selects `runtime: python`. It captures this complete project and
-installs its base application dependencies with no default dependency groups.
-Native uv owns installation; there is no dependency-install Step. Execution
-uses separate package source, environment and writable output roots. It does
-not reuse or prune the developer's `.venv`, and the target repository supplies
-no implementation. Authored code, resources, project metadata and native lock
-bind freshness; caches and declared `.showcase/` outputs do not.
-
-## Airflow
-
-Install **Airflow 3.3.2** in a separate Python 3.12 environment using the [official installation instructions](https://airflow.apache.org/docs/apache-airflow/3.3.2/installation/installing-from-pypi.html) and its matching constraints. Install this project in that environment, then register `dags/orders_taskflow.py` in its DAG folder. The adapter reads installed package resources and can be copied independently of the source tree.
-
-Trigger `orders_taskflow_comparison`. Set `ORDERS_FIXTURE=official`, `changed`, or `invalid` in the task environment. Airflow owns that environment selection; it does not read OH-Goon's `run.yml`. TaskFlow passes the small Python results through native XCom. Inspect the three task instances, logs and final returned `total_order_value`. The invalid fixture must fail `transform_orders` and prevent `load_orders` from succeeding.
-
-With Airflow and pytest installed in that separate environment, run `python -m pytest tests/test_airflow_adapter.py`. It uses isolated temporary SQLite state to verify a copied DAG's native import, dependency graph, complete local `dag.test()` runs, XCom totals and invalid-input failure propagation. A scheduler/worker deployment remains a separate verification boundary.
-
-## Scope and the Python Goon contract
-
-Both adapters use the same installed `orders_pipeline.operations`. OH-Goon observes three linear Steps; Airflow observes three dependent tasks. Neither engine invokes the other. Equivalent results here do not establish general DAG equivalence, relative performance, or reliability.
-
-This example uses the [complete Python Goon contract](https://github.com/oh-goon/oh-goon/blob/main/docs/architecture/ADR_PYTHON_GOON_PROJECTS.md):
-one installable application, explicit workflow inputs, package-owned runtime,
-base-only dependency selection and captured authored source. The shipped
-[Iris Goon](https://github.com/oh-goon/oh-goon/tree/main/templates/goons/ml/iris-train)
-uses the same package contract. Reusable packages can also be selected from
-explicit pinned Git coordinates; see the [template guide](https://github.com/oh-goon/oh-goon/blob/main/templates/README.md#select-pinned-git-source).
-This root-Goon comparison does not establish scheduler/worker deployment,
-strict/native qualification, APP certification or the broader initialization/result roadmap.
+OH-Goon executes the package's three ordered Steps and explicit output bindings. It does not execute or translate Airflow DAGs. The [canonical package guide](../../templates/goons/general/orders-taskflow/README.md) identifies the official Airflow 3.3.2 tutorial and this application's adaptations, and documents direct frozen Python development, the full business command and individual operations. Required CI runs the ordinary application tests under the native lock without Airflow. The optional external Airflow adapter and any scheduler/worker deployment remain separate qualification.

@@ -11,12 +11,16 @@ from textwrap import dedent
 import pytest
 
 pytestmark = pytest.mark.skipif(
-    importlib.util.find_spec("airflow") is None,
+    importlib.util.find_spec("airflow") is None
+    and os.environ.get("OH_GOON_REQUIRE_AIRFLOW_TESTS") != "1",
     reason="Airflow adapter requires its separate environment",
 )
 
 
 def test_copied_dag_native_runs_and_failure_propagation(tmp_path):
+    assert importlib.util.find_spec("airflow") is not None, (
+        "Select the airflow dependency group to run this explicitly requested native adapter test"
+    )
     home = tmp_path / "airflow"
     dag_folder = home / "dags"
     dag_folder.mkdir(parents=True)

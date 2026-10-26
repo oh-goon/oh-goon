@@ -28,6 +28,12 @@ def add_goon_commands(
     init.add_argument("--kind", choices=("plan", "goon"), required=True)
     init.add_argument("--output", type=Path, required=True)
     init.add_argument(
+        "--repository",
+        type=Path,
+        metavar="PATH",
+        help="Select a registered League repository path and write its exact target identity",
+    )
+    init.add_argument(
         "--review",
         action="append",
         default=[],

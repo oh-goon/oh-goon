@@ -1,10 +1,12 @@
 import { CausalityClock, type CausalityRevision } from "@/domain/concurrency/CausalityClock";
 
 export type MutationScope = "fleet-run" | "locations" | "repositories" | "schedules" | "recovery" | "plans" | "league-lineups" | "dependency-selections";
+export type MutationDispatch = "exclusive" | "agent-repair" | "fleet-run-cancel";
 
 export interface MutationToken {
   readonly id: number;
   readonly scope: MutationScope;
+  readonly dispatch: MutationDispatch;
 }
 
 export interface MutationExecution<Value> {
@@ -26,6 +28,7 @@ export class MutationBusyError extends Error {
 export class MutationController {
   private nextId = 0;
   private active: MutationToken | null = null;
+  private cancellingRepair: MutationToken | null = null;
   private readonly listeners = new Set<Listener>();
   private readonly commitListeners = new Set<MutationCommitListener>();
   private readonly conflictListeners = new Set<MutationConflictListener>();
@@ -37,7 +40,7 @@ export class MutationController {
     return () => this.listeners.delete(listener);
   };
 
-  readonly getSnapshot = (): boolean => this.active !== null;
+  readonly getSnapshot = (): boolean => this.active !== null || this.cancellingRepair !== null;
 
   readonly subscribeCommits = (listener: MutationCommitListener): (() => void) => {
     this.commitListeners.add(listener);
@@ -62,8 +65,9 @@ export class MutationController {
   async execute<Result>(
     scope: MutationScope,
     mutation: () => Promise<Result>,
+    dispatch: MutationDispatch = "exclusive",
   ): Promise<MutationExecution<Result>> {
-    const token = this.acquire(scope);
+    const token = this.acquire(scope, dispatch);
     try {
       const value = await mutation();
       // Once the server confirms a write, UI context cannot make that side effect
@@ -77,17 +81,25 @@ export class MutationController {
     }
   }
 
-  private acquire(scope: MutationScope): MutationToken {
-    if (this.active !== null) throw new MutationBusyError();
-    const token = { id: ++this.nextId, scope } satisfies MutationToken;
-    this.active = token;
+  private acquire(scope: MutationScope, dispatch: MutationDispatch): MutationToken {
+    // Repair HTTP requests stay open while admitted child Runs execute. Their
+    // cancellation must reach the server without releasing the repair's write
+    // fence. Every other write, including another cancellation, remains exclusive.
+    const canCancelRepair = dispatch === "fleet-run-cancel" && scope === "fleet-run"
+      && this.active?.dispatch === "agent-repair" && this.active.scope === "fleet-run"
+      && this.cancellingRepair === null;
+    if (this.getSnapshot() && !canCancelRepair) throw new MutationBusyError();
+    const token = { id: ++this.nextId, scope, dispatch } satisfies MutationToken;
+    if (canCancelRepair) this.cancellingRepair = token;
+    else this.active = token;
     this.emit();
     return token;
   }
 
   private release(token: MutationToken): void {
-    if (this.active?.id !== token.id) return;
-    this.active = null;
+    if (this.active?.id === token.id) this.active = null;
+    else if (this.cancellingRepair?.id === token.id) this.cancellingRepair = null;
+    else return;
     this.emit();
   }
 

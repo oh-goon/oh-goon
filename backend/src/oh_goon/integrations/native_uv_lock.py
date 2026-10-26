@@ -1,14 +1,19 @@
-"""Native uv owner for one selected locked project (read-only, offline).
+"""Native uv owner for one selected locked project (offline).
 
 This observes uv's authority; it never decides dependency graph semantics or
 modifies the lock. It is shared by the installed issuer and tooling adapter.
+Native metadata checks can execute project build hooks, so callers must retain
+the selected code-trust boundary rather than treating this as pure inspection.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+
+from oh_goon.core.models.fleet_plan_requirements import UV_PROJECT_SELECTION_SWITCHES
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -23,6 +28,11 @@ def native_uv_locked_project_issue(project: Path, *, runner: Runner = subprocess
             check=False,
             capture_output=True,
             text=True,
+            env={
+                name: value
+                for name, value in os.environ.items()
+                if name not in UV_PROJECT_SELECTION_SWITCHES
+            },
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return f"native uv lock --check --offline could not run: {exc}"

@@ -79,14 +79,20 @@ def validate_template_package(directory: Path, *, source_name: str, kind: str) -
         expected |= {"pyproject.toml", "uv.lock"}
     if not expected <= entries or (not python_project and entries != expected):
         missing = sorted(expected - entries)
-        extra = sorted(entries - expected)
+        extra = sorted(entries - expected) if not python_project else []
         details: list[str] = []
         if missing:
             details.append("missing " + ", ".join(missing))
         if extra:
             details.append("unexpected " + ", ".join(extra))
+        requirement = (
+            "requires a standalone Python project with goon.yml, README.md, "
+            "pyproject.toml and uv.lock"
+            if python_project
+            else f"must contain exactly {source_name} and README.md"
+        )
         raise FleetPlanSourceNotFound(
-            f"{kind} template {directory.name} must contain exactly {source_name} and README.md"
+            f"{kind} template {directory.name} {requirement}"
             + (f" ({'; '.join(details)})" if details else "")
         )
     for filename in expected:

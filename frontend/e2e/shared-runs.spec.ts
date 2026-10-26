@@ -5,6 +5,25 @@ import { SHARED_RUN_SUBMIT_RELEASE_EVENT } from "./fixtures/scenarios";
 import { expectExplicitRunRoute, openFixture } from "./helpers/navigation";
 import { currentRunList, currentRunSummary, gameTapeRegion, savedPlanSelect } from "./helpers/locators";
 
+test("Untouched Plan defaults and explicitly supplied equal values retain different provenance", async ({ page }) => {
+  await openFixture(page, "shared-runs");
+  await savedPlanSelect(page).selectOption("python-quality");
+  await page.getByRole("checkbox", { name: new RegExp(LONG_REPOSITORY_NAME.slice(0, 40)) }).check();
+  await expect(page.locator(".backend-verification--ready")).toBeVisible();
+  const details = page.locator(".backend-verification").getByText("Technical verification details", { exact: true });
+  await details.click();
+  await expect(page.getByText("No explicit Plan inputs were supplied for this preview.")).toBeVisible();
+  await page.getByRole("combobox", { name: "Value source", exact: true }).selectOption("explicit");
+  await expect(page.getByLabel(/coverage_threshold/)).toHaveValue("70");
+  await expect(page.locator(".backend-verification dl").filter({ hasText: "coverage_threshold" })).toContainText('"70"');
+  if (await details.locator("..").getAttribute("open") === null) await details.click();
+  await expect(page.locator(".backend-verification dl").filter({ hasText: "coverage_threshold" }).getByText('"70"', { exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "Value source", exact: true }).selectOption("default");
+  await expect(page.getByText("No explicit Plan inputs were supplied for this preview.")).toBeAttached();
+  if (await details.locator("..").getAttribute("open") === null) await details.click();
+  await expect(page.getByText("No explicit Plan inputs were supplied for this preview.")).toBeVisible();
+});
+
 test("New shared run starts from an explicit saved Plan before repository selection", async ({ page }) => {
   await openFixture(page, "shared-runs");
   await expect(page.getByRole("group", { name: "Selected Plan", exact: true })).toBeHidden();

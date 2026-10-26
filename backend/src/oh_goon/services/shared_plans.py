@@ -10,13 +10,17 @@ from oh_goon.core.errors import (
     FleetPlanSourceStale,
 )
 from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.models.agent_repair import AgentRepairResult
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.models.goon_plan_source import SharedPlanSource
 from oh_goon.core.models.plan_template import PlanTemplateCatalog
+from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import (
     FleetRunHistoryPage,
     FleetRunState,
 )
+from oh_goon.core.models.run_configuration import RunAgentSelection, RunRepairSelection
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.shared_plan import (
     BlockedSharedPlanRepositoryPreview,
@@ -37,6 +41,7 @@ from oh_goon.integrations.fleet_plan_compilation import parse_plan_template
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.runtime.shared_plans import SharedPlanFileStore, normalize_shared_plan_key
 from oh_goon.services.execution_lock_persistence import render_execution_lock
+from oh_goon.services.fleet_plan_resolution_context import PreparedAgentPlan
 from oh_goon.services.fleet_plans import FleetPlanService
 from oh_goon.services.league import LeagueService
 from oh_goon.services.shared_plan_preview_diagnostics import (
@@ -194,15 +199,13 @@ class SharedPlanService:
         self,
         plan_key: str,
         *,
-        inputs: dict[str, str] | None = None,
+        inputs: dict[str, PlanInputValue] | None = None,
         expected_revision: str | None = None,
+        agent: RunAgentSelection | None = None,
+        repository_ids: set[str] | None = None,
     ) -> SharedPlanLockPreview:
         document = self._store.read(plan_key, expected_revision=expected_revision)
-        plan, source_sha256 = self._plans.resolve_with_source(
-            self._store.path(document.plan_key),
-            inputs=dict(inputs) if inputs is not None else None,
-            root_expected_name=document.plan_key,
-        )
+        plan, source_sha256 = self._resolve_selection(document, inputs, agent, repository_ids)
         self._require_source_revision(document, source_sha256)
         lock = build_execution_lock(plan)
         return SharedPlanLockPreview(
@@ -217,16 +220,14 @@ class SharedPlanService:
         self,
         plan_key: str,
         *,
-        inputs: dict[str, str] | None = None,
+        inputs: dict[str, PlanInputValue] | None = None,
         expected_revision: str,
+        agent: RunAgentSelection | None = None,
+        repository_ids: set[str] | None = None,
     ) -> tuple[str, str, str]:
         """Resolve one pinned source cut; never create a run, lock or admission receipt."""
         document = self._store.read(plan_key, expected_revision=expected_revision)
-        plan, source_sha256 = self._plans.resolve_with_source(
-            self._store.path(document.plan_key),
-            inputs=dict(inputs) if inputs is not None else None,
-            root_expected_name=document.plan_key,
-        )
+        plan, source_sha256 = self._resolve_selection(document, inputs, agent, repository_ids)
         self._require_source_revision(document, source_sha256)
         return document.plan_key, document.sha256, plan.plan_id
 
@@ -235,19 +236,16 @@ class SharedPlanService:
         plan_key: str,
         *,
         repository_ids: set[str],
-        inputs: dict[str, str] | None = None,
+        inputs: dict[str, PlanInputValue] | None = None,
         expected_revision: str | None = None,
+        agent: RunAgentSelection | None = None,
     ) -> SharedPlanPreview:
         if not repository_ids:
             raise FleetPlanInvalid(
                 "Shared Plan preview requires at least one explicitly selected Team"
             )
         document = self._store.read(plan_key, expected_revision=expected_revision)
-        plan, source_sha256 = self._plans.resolve_with_source(
-            self._store.path(document.plan_key),
-            inputs=dict(inputs) if inputs is not None else None,
-            root_expected_name=document.plan_key,
-        )
+        plan, source_sha256 = self._resolve_selection(document, inputs, agent, repository_ids)
         self._require_source_revision(document, source_sha256)
         teams = self._preview_teams(plan, repository_ids)
         ready = sum(item.state == "READY" for item in teams)
@@ -266,6 +264,64 @@ class SharedPlanService:
             teams=tuple(teams),
             ready_count=ready,
             blocked_count=len(teams) - ready,
+        )
+
+    def _prepare_agent(
+        self,
+        document: SharedPlanDocument,
+        inputs: dict[str, PlanInputValue] | None,
+        agent: RunAgentSelection,
+        repository_ids: set[str] | None,
+        *,
+        require_review_phases: bool | None = None,
+        repository_instance_ids: dict[str, str] | None = None,
+    ) -> PreparedAgentPlan:
+        repository = self._agent_repository(repository_ids, repository_instance_ids)
+        prepared = self._plans.prepare_agent_plan(
+            self._store.path(document.plan_key),
+            selection=agent,
+            repository=repository.path,
+            inputs=dict(inputs or {}),
+            root_expected_name=document.plan_key,
+            require_review_phases=require_review_phases,
+        )
+        self._require_source_revision(document, prepared.source_sha256)
+        return prepared
+
+    def _agent_repository(
+        self,
+        repository_ids: set[str] | None,
+        repository_instance_ids: dict[str, str] | None = None,
+    ) -> RepositoryIdentity:
+        if repository_ids is None or len(repository_ids) != 1:
+            raise FleetPlanInvalid("Shared Agent Plans require one explicitly selected Team")
+        matches = [
+            item for item in self._league.repositories() if item.repository_id in repository_ids
+        ]
+        if len(matches) != 1:
+            raise FleetPlanInvalid("Shared Agent Team is outside the current League")
+        if repository_instance_ids is not None and (
+            set(repository_instance_ids) != repository_ids
+            or repository_instance_ids[matches[0].repository_id]
+            != repository_subject_instance_id(matches[0].path)
+        ):
+            raise FleetPlanSourceStale("Shared Agent Team instance changed after preview")
+        return matches[0]
+
+    def _resolve_selection(
+        self,
+        document: SharedPlanDocument,
+        inputs: dict[str, PlanInputValue] | None,
+        agent: RunAgentSelection | None,
+        repository_ids: set[str] | None,
+    ) -> tuple[ResolvedFleetPlan, str]:
+        if agent is not None:
+            prepared = self._prepare_agent(document, inputs, agent, repository_ids)
+            return prepared.plan, prepared.source_sha256
+        return self._plans.resolve_with_source(
+            self._store.path(document.plan_key),
+            inputs=dict(inputs) if inputs is not None else None,
+            root_expected_name=document.plan_key,
         )
 
     def _preview_teams(
@@ -316,9 +372,10 @@ class SharedPlanService:
         expected_execution_digest: str,
         expected_plan_revision: str,
         repository_instance_ids: dict[str, str],
-        inputs: dict[str, str] | None = None,
+        inputs: dict[str, PlanInputValue] | None = None,
         fleet_run_id: str | None = None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
+        agent: RunAgentSelection | None = None,
     ) -> FleetRunState:
         # This is the HTTP Shared Plan execution owner. Check explicit Run
         # enrollment before reading saved Plan bytes, inspecting selected Teams,
@@ -331,6 +388,25 @@ class SharedPlanService:
         if set(repository_instance_ids) != repository_ids:
             raise FleetPlanInvalid(
                 "Shared Plan run repository instance authority must exactly match selected Teams"
+            )
+        if agent is not None:
+            prepared = self._prepare_agent(
+                document,
+                inputs,
+                agent,
+                repository_ids,
+                require_review_phases=False,
+                repository_instance_ids=repository_instance_ids,
+            )
+            return self._plans.run_prepared_agent(
+                prepared,
+                source=SharedPlanSource(plan_key=document.plan_key, sha256=document.sha256),
+                expected_plan_id=expected_plan_id,
+                expected_execution_digest=expected_execution_digest,
+                repository_ids=repository_ids,
+                expected_repository_instance_ids=repository_instance_ids,
+                fleet_run_id=fleet_run_id,
+                requested_priority=requested_priority,
             )
         # Deliberately do not inspect repository-owned goon.yml files here. Target selection
         # validates only that requested IDs are current managed Git Teams in the League.
@@ -345,6 +421,47 @@ class SharedPlanService:
             expected_plan_id=expected_plan_id,
             expected_repository_instance_ids=repository_instance_ids,
             root_expected_name=document.plan_key,
+        )
+
+    def repair(
+        self,
+        plan_key: str,
+        *,
+        agent: RunAgentSelection,
+        repair: RunRepairSelection,
+        authorize_repair: bool,
+        repository_ids: set[str],
+        expected_plan_id: str,
+        expected_execution_digest: str,
+        expected_plan_revision: str,
+        repository_instance_ids: dict[str, str],
+        fleet_run_id: str,
+        inputs: dict[str, PlanInputValue] | None = None,
+    ) -> AgentRepairResult:
+        self._plans.require_plan_ingress_preparation(fleet_run_id)
+        if authorize_repair is not True:
+            raise FleetPlanInvalid(
+                "Bounded repair requires explicit authorization for this submission"
+            )
+        document = self._store.read(plan_key, expected_revision=expected_plan_revision)
+        repository = self._agent_repository(repository_ids, repository_instance_ids)
+        return self._plans.repair(
+            self._store.path(document.plan_key),
+            budget=repair.budget(),
+            repository_id=next(iter(repository_ids)),
+            inputs=dict(inputs or {}),
+            agent_repository_root=Path(agent.repository_root),
+            agent_skill_root=Path(agent.skill_root),
+            allowed_agent_acceptance=(agent.acceptance,),
+            review_write_roots=repair.write_roots,
+            repository=repository.path,
+            fleet_run_id=fleet_run_id,
+            agent_selection=agent,
+            root_expected_name=document.plan_key,
+            reviewed_source=SharedPlanSource(plan_key=document.plan_key, sha256=document.sha256),
+            expected_plan_id=expected_plan_id,
+            expected_execution_digest=expected_execution_digest,
+            expected_repository_instance_ids=repository_instance_ids,
         )
 
     def repository_ids(self, repositories: tuple[Path, ...]) -> set[str]:

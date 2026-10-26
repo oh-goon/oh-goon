@@ -25,11 +25,17 @@ def run_template_command(args: argparse.Namespace) -> int:
                 alias, skill = value.split("=", 1)
                 reviewers.append((alias, skill))
             destination = initialize_run_configuration(
-                args.key, args.output, kind=args.kind, reviewers=reviewers
+                args.key,
+                args.output,
+                kind=args.kind,
+                reviewers=reviewers,
+                repository=args.repository,
             )
             print(f"Created: {destination}")
             print(
-                "Select the registered repository ID and required values, then inspect and validate run.yml."
+                "Set the required values in run.yml, then inspect and validate it."
+                if args.repository is not None
+                else "Select the registered repository ID and required values, then inspect and validate run.yml."
             )
             return 0
         if args.template_command == "show":

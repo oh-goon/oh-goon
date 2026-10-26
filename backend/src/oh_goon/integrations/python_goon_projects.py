@@ -9,13 +9,14 @@ import tarfile
 import tempfile
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from urllib.parse import unquote, urlsplit
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.file_digest import sha256_file
 from oh_goon.core.models.fleet_plan import CompiledExecutionTemplate, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
-from oh_goon.core.path_authority import repository_relative_parts
+from oh_goon.core.path_authority import ContainedPathSpace, repository_relative_parts
 from oh_goon.core.path_layouts import RunPathLayout
 from oh_goon.integrations.content_snapshot import replace_tree_from_tar_gz
 from oh_goon.integrations.source_snapshot import snapshot_source_directory
@@ -73,18 +74,7 @@ def capture_python_goon_project(
                 raise FleetPlanInvalid(f"Python Goon project requires a regular {name}")
         if sha256_file(snapshot / "goon.yml") != yaml_sha256:
             raise FleetPlanInvalid("Python Goon changed during source capture")
-        for name in ("pyproject.toml", "uv.lock"):
-            try:
-                metadata = tomllib.loads((snapshot / name).read_text(encoding="utf-8"))
-            except (ValueError, OSError) as exc:
-                raise FleetPlanInvalid(f"Invalid Python Goon {name}") from exc
-            _require_contained_dependency_paths(metadata)
-            workspace: object = metadata
-            for component in ("tool", "uv", "workspace"):
-                workspace = workspace.get(component) if isinstance(workspace, dict) else None
-            if isinstance(workspace, dict):
-                for field in ("members", "exclude"):
-                    _require_contained_dependency_paths({"path": workspace.get(field, [])})
+        _validate_project_metadata(snapshot)
         archive_path = Path(directory) / "project.tar.gz"
         with archive_path.open("wb") as output:
             with gzip.GzipFile(fileobj=output, mode="wb", mtime=0, filename="") as compressed:
@@ -113,27 +103,146 @@ def _archive_metadata(member: tarfile.TarInfo) -> tarfile.TarInfo:
     return member
 
 
-def _require_contained_dependency_paths(value: object) -> None:
+def _validate_project_metadata(root: Path) -> None:
+    space = ContainedPathSpace.from_root(root)
+    root_metadata = [root / "pyproject.toml", root / "uv.lock"]
+    if (root / "uv.toml").is_file():
+        root_metadata.append(root / "uv.toml")
+    pending = list(root_metadata)
+    seen: set[Path] = set(pending)
+    for path in pending:
+        try:
+            metadata = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
+            raise FleetPlanInvalid(f"Invalid Python Goon {path.relative_to(root)}") from exc
+        base = path.parent
+        _require_contained_dependency_paths(metadata, space=space, base=base)
+        groups = metadata.get("dependency-groups")
+        if isinstance(groups, dict):
+            for requirements in groups.values():
+                _require_contained_file_requirements(requirements, space=space, base=base)
+        project = metadata.get("project")
+        optional = project.get("optional-dependencies") if isinstance(project, dict) else None
+        if isinstance(optional, dict):
+            for requirements in optional.values():
+                _require_contained_file_requirements(requirements, space=space, base=base)
+        if path == root / "uv.lock":
+            # The native lock identifies installed local projects. Inspect exactly
+            # those projects' authored build metadata, without searching for other
+            # pyprojects (which may intentionally be invalid test resources).
+            packages = metadata.get("package", [])
+            if isinstance(packages, list):
+                for package in packages:
+                    source = package.get("source") if isinstance(package, dict) else None
+                    if not isinstance(source, dict):
+                        continue
+                    for field in ("directory", "editable"):
+                        location = source.get(field)
+                        if isinstance(location, str):
+                            directory = space.resolve_from(
+                                root, location, label="Python Goon local dependency"
+                            )
+                            for name in ("pyproject.toml", "uv.toml"):
+                                child = directory / name
+                                if child not in seen:
+                                    seen.add(child)
+                                    if child.is_file():
+                                        pending.append(child)
+
+
+def _require_contained_dependency_paths(
+    value: object, *, space: ContainedPathSpace, base: Path
+) -> None:
     """Constrain native path authority, without resolving Python dependencies."""
     if isinstance(value, dict):
         for key, item in value.items():
-            if key in {"path", "directory", "editable", "virtual", "backend-path"}:
+            if key == "workspace" and isinstance(item, dict):
+                for field in ("members", "exclude"):
+                    _require_contained_dependency_paths(
+                        {"path": item.get(field, [])}, space=space, base=base
+                    )
+            if key in {"path", "directory", "editable", "virtual", "backend-path", "workspace"}:
                 paths = item if isinstance(item, list) else [item]
                 for path in paths:
                     if isinstance(path, str):
-                        try:
-                            repository_relative_parts(
-                                str(PurePosixPath(path.replace("\\", "/"))),
-                                label="Python Goon dependency path",
-                            )
-                        except FleetPlanInvalid:
-                            raise FleetPlanInvalid(
-                                "Python Goon dependency path escapes its project"
-                            ) from None
-            _require_contained_dependency_paths(item)
+                        _require_contained_dependency_path(path, space=space, base=base)
+            elif key in {
+                "url",
+                "git",
+                "registry",
+                "find-links",
+                "index-url",
+                "extra-index-url",
+                "default-index",
+            }:
+                locations = item if isinstance(item, list) else [item]
+                for location in locations:
+                    if isinstance(location, str):
+                        _require_contained_dependency_location(location, space=space, base=base)
+            elif key in {
+                "requires",
+                "dependencies",
+                "constraint-dependencies",
+                "override-dependencies",
+                "build-constraint-dependencies",
+                "extra-build-dependencies",
+                "requires-dist",
+            }:
+                _require_contained_file_requirements(item, space=space, base=base)
+            _require_contained_dependency_paths(item, space=space, base=base)
     elif isinstance(value, list):
         for item in value:
-            _require_contained_dependency_paths(item)
+            _require_contained_dependency_paths(item, space=space, base=base)
+
+
+def _require_contained_dependency_path(path: str, *, space: ContainedPathSpace, base: Path) -> None:
+    try:
+        normalized = str(PurePosixPath(path.replace("\\", "/")))
+        if base == space.root:
+            repository_relative_parts(normalized, label="Python Goon dependency path")
+        else:
+            space.resolve_from(base, normalized, label="Python Goon dependency path")
+    except FleetPlanInvalid:
+        raise FleetPlanInvalid("Python Goon dependency path escapes its project") from None
+
+
+def _require_contained_dependency_location(
+    location: str, *, space: ContainedPathSpace, base: Path
+) -> None:
+    """Distinguish remote URLs from native local index/artifact references only."""
+    if PureWindowsPath(location).drive:
+        _require_contained_dependency_path(location, space=space, base=base)
+        return
+    try:
+        parsed = urlsplit(location)
+    except ValueError:
+        raise FleetPlanInvalid("Invalid Python Goon dependency location") from None
+    if parsed.scheme.lower() == "file":
+        # A file authority names a host/UNC share. Absolute file URLs also cannot
+        # move with the captured project; only relative file references can.
+        if parsed.netloc:
+            raise FleetPlanInvalid("Python Goon dependency path escapes its project")
+        _require_contained_dependency_path(unquote(parsed.path), space=space, base=base)
+    elif not parsed.scheme:
+        _require_contained_dependency_path(location, space=space, base=base)
+
+
+def _require_contained_file_requirements(
+    requirements: object, *, space: ContainedPathSpace, base: Path
+) -> None:
+    """Check direct file-URL custody; native uv still parses/resolves requirements."""
+    if isinstance(requirements, dict):
+        for requirement in requirements.values():
+            _require_contained_file_requirements(requirement, space=space, base=base)
+        return
+    if isinstance(requirements, list):
+        for requirement in requirements:
+            _require_contained_file_requirements(requirement, space=space, base=base)
+    elif isinstance(requirements, str):
+        _, separator, reference = requirements.partition("@")
+        location = (reference if separator else requirements).strip().split(maxsplit=1)
+        if location and location[0].lower().startswith("file:"):
+            _require_contained_dependency_location(location[0], space=space, base=base)
 
 
 def materialize_python_goon_project(

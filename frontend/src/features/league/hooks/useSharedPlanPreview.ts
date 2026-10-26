@@ -1,17 +1,19 @@
+import type { SharedPlanInputs } from "@/domain/api/ApiClient";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useApiClient } from "@/app/ApiClientProvider";
 import { useReadResource, type ReadResourceHandle } from "@/app/reads/useReadResource";
 import { canonicalIdentity } from "@/domain/identity/canonicalValue";
-import type { SharedPlanPreview } from "@generated/models";
+import type { RunAgentSelection, SharedPlanPreview } from "@generated/models";
 
 export interface SharedPlanPreviewOptions {
   readonly planKey: string;
   readonly planRevision: string;
   readonly repositoryIds: readonly string[];
   readonly expectedRepositoryInstanceIds?: Readonly<Record<string, string>>;
-  readonly inputs: Record<string, string>;
+  readonly inputs: SharedPlanInputs;
+  readonly agent?: RunAgentSelection | null;
   readonly enabled: boolean;
 }
 
@@ -19,8 +21,8 @@ export function useSharedPlanPreview(options: SharedPlanPreviewOptions): ReadRes
   const client = useApiClient();
   const { t } = useTranslation();
   const request = useCallback(
-    (signal: AbortSignal) => client.previewSharedPlan(options.planKey, options.planRevision, [...options.repositoryIds], options.inputs, { signal }),
-    [client, options.inputs, options.planKey, options.planRevision, options.repositoryIds],
+    (signal: AbortSignal) => client.previewSharedPlan(options.planKey, options.planRevision, [...options.repositoryIds], options.inputs, { signal }, options.agent),
+    [client, options.inputs, options.planKey, options.planRevision, options.repositoryIds, options.agent],
   );
   return useReadResource<SharedPlanPreview>({
     scope: "shared-plan-preview",
@@ -32,6 +34,7 @@ export function useSharedPlanPreview(options: SharedPlanPreviewOptions): ReadRes
           repositoryIds: [...options.repositoryIds].sort(),
           expectedRepositoryInstanceIds: options.expectedRepositoryInstanceIds ?? null,
           inputs: options.inputs,
+          agent: options.agent ?? null,
         })
       : null,
     enabled: options.enabled,

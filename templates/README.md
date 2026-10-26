@@ -19,7 +19,7 @@ Copy the workload’s `teams[].repository.repository_id` from the scan. Registra
 Your trusted workload needs a committed `pyproject.toml` and native `uv.lock`. Its selected group must provide Ruff, pytest and your chosen Pyright or ty checker. Prepare that group with native uv in the selected project, then initialize a new workflow directory:
 
 ```sh
-uv sync --locked --group dev
+uv sync --frozen --group dev
 oh-goon templates init python/quality --kind plan --output ./workflow
 ```
 

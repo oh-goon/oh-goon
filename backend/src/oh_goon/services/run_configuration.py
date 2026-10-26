@@ -13,7 +13,11 @@ import yaml
 from pydantic import ValidationError
 from yaml.tokens import AliasToken, AnchorToken, TagToken
 
-from oh_goon.core.errors import FleetPlanInvalid, RunConfigurationInvalid
+from oh_goon.core.errors import (
+    FleetPlanInvalid,
+    FleetPlanSourceAcquisitionRequired,
+    RunConfigurationInvalid,
+)
 from oh_goon.core.models.caller_input_file import CallerInputFileIdentity
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.models.git_sources import LockedGoonSource
@@ -145,7 +149,10 @@ class RunConfigurationSnapshot:
         source = self.selection.source
         if isinstance(source, GitPlanSelection):
             if acquired_plan is None:
-                raise FleetPlanInvalid("Git Plan source requires explicit acquisition with lock")
+                raise FleetPlanSourceAcquisitionRequired(
+                    "Git Plan source requires explicit acquisition with lock; "
+                    "inspect its contract first with 'oh-goon config inspect run.yml --acquire'"
+                )
             return acquired_plan
         if isinstance(source, CatalogPlanSelection):
             store = plan_templates or PlanTemplateStore()
@@ -394,7 +401,10 @@ def capture_run_configuration_source(
             None,
         )
         if frozen is None and not acquire:
-            raise FleetPlanInvalid("Git Plan requires explicit acquisition with lock")
+            raise FleetPlanSourceAcquisitionRequired(
+                "Git Plan requires explicit acquisition with lock; "
+                "inspect its contract first with 'oh-goon config inspect run.yml --acquire'"
+            )
         pinned = frozen or next(
             (item for item in locked if (item.git, item.ref) == (selection.git, selection.ref)),
             None,

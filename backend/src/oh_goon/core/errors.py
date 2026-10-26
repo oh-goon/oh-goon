@@ -320,6 +320,10 @@ class FleetPlanInvalid(InvalidRequest):
     code = "FLEET_PLAN_INVALID"
 
 
+class FleetPlanSourceAcquisitionRequired(FleetPlanInvalid):
+    """The selected Git source has no acquired/pinned source authority yet."""
+
+
 class RunConfigurationInvalid(FleetPlanInvalid):
     """A safe typed selection refusal, with field locations and no caller values."""
 

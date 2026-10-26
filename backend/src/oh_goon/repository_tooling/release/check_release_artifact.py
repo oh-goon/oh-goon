@@ -40,6 +40,7 @@ def _expected_payload(
         (root / "generated" / "release" / "static", "oh_goon/static"),
         (template_source / "goons", "oh_goon/templates/goons"),
         (template_source / "plans", "oh_goon/templates/plans"),
+        (template_source / "examples", "oh_goon/examples"),
     )
     for source, prefix in sources:
         owner_root = template_source if source.parent == template_source else root

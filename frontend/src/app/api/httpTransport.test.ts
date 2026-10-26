@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { readOperation } from "@/app/api/httpTransport";
+import { executeOperation, readOperation } from "@/app/api/httpTransport";
 import { operations } from "@generated/operations";
 
 const healthOperation = operations.health.operationId;
@@ -11,6 +11,26 @@ afterEach(() => {
 });
 
 describe("httpTransport retries", () => {
+  it("keeps an explicitly budgeted long request open beyond the ordinary timeout", async () => {
+    vi.useFakeTimers();
+    let respond: (response: Response) => void = () => { throw new Error("No request"); };
+    let signal: AbortSignal | null = null;
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      signal = init.signal ?? null;
+      return new Promise<Response>((resolve) => { respond = resolve; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = executeOperation(
+      operations.get_fleet_run_enforcer_receipt.operationId,
+      { path: { fleet_run_id: "long-request" } }, undefined, { timeoutMs: 60_000 },
+    );
+    await vi.advanceTimersByTimeAsync(10_001);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(signal!.aborted).toBe(false);
+    respond(new Response("receipt", { status: 200 }));
+    await expect(pending).resolves.toBe("receipt");
+  });
+
   it("does not issue a retry after the caller aborts during backoff", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn().mockRejectedValue(new TypeError("offline"));

@@ -52,8 +52,10 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedPreCommitStep,
     ResolvedProviderAgentWorkload,
 )
+from oh_goon.core.models.fleet_plan_evidence import PlanUvPreparationEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits, PlanExecutionPolicy
 from oh_goon.core.models.fleet_plan_observation_steps import ResolvedDependencyInventoryStep
+from oh_goon.core.models.fleet_plan_requirements import UV_PROJECT_SELECTION_SWITCHES
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.path_authority import (
@@ -259,6 +261,7 @@ class _StepProcess:
     git_command_runner: CommandRunner
     managed_runtime: ManagedRuntimeSpec | None
     package_project: Path | None = None
+    uv_preparation: PlanUvPreparationEvidence | None = None
     # Safe controller diagnostics only; native protocol/source bytes stay private.
     diagnostic_output: StepDiagnosticObserver | None = None
     redact_visible_output: Callable[[str], str] | None = None
@@ -1069,7 +1072,30 @@ def _execute_command_step(
     repository: Path, step: ResolvedCommandStep, process: _StepProcess, runtime: StepRuntime
 ) -> StepOutcome:
     argv = step.argv
+    if step.uv is not None and argv[:3] != ("uv", "run", f"--{step.uv.lock_mode}"):
+        raise FleetPlanInvalid(f"Native uv argv mode differs from resolved step {step.step_id}")
     managed = process.managed_runtime
+    environment = process.environment
+    if step.uv is not None and managed is None and process.package_project is None:
+        from oh_goon.core.path_layouts import ManagedPreparationPathLayout
+        from oh_goon.engine.native_uv_environment import capture_native_uv_authority
+
+        native = capture_native_uv_authority(
+            process.host_environment,
+            owned_uv_names=frozenset(
+                {
+                    "UV_PROJECT_ENVIRONMENT",
+                    "UV_CACHE_DIR",
+                }
+            )
+            | UV_PROJECT_SELECTION_SWITCHES,
+        )
+        environment = native.environment(
+            ManagedPreparationPathLayout.from_root(process.paths.root),
+            environment=process.paths.cache / "uv-project-environment",
+            cache=process.paths.cache / "uv",
+        )
+        environment.update(process.environment)
     package_runtime = (
         step.project_source is not None
         or isinstance(managed, UvProjectManagedRuntime)
@@ -1114,16 +1140,43 @@ def _execute_command_step(
             rebound[command_index] = str(
                 Path(process.environment["UV_PROJECT_ENVIRONMENT"]) / "bin" / command
             )
-        argv = ("uv", "run", "--no-sync", *rebound[2:])
-    return from_command(
+        assert step.uv is not None
+        if rebound[2] != f"--{step.uv.lock_mode}":
+            raise FleetPlanInvalid(
+                f"Managed uv argv mode differs from resolved step {step.step_id}"
+            )
+        argv = ("uv", "run", "--no-sync", *rebound[3:])
+    outcome = from_command(
         process.command_runner(
             *argv,
             cwd=step_working_directory(repository, step),
             timeout=_command_timeout(step, runtime),
             cancel_requested=runtime.cancel_requested,
-            env=process.environment,
+            env=environment,
             runtime_supervision=runtime.runtime_supervision,
         )
+    )
+    if step.uv is not None:
+        outcome = replace(
+            outcome,
+            uv_preparation=process.uv_preparation or _uv_preparation_evidence(step, outcome),
+        )
+    return outcome
+
+
+def _uv_preparation_evidence(
+    step: ResolvedCommandStep, outcome: StepOutcome
+) -> PlanUvPreparationEvidence:
+    assert step.uv is not None
+    return PlanUvPreparationEvidence(
+        lock_mode=step.uv.lock_mode,
+        freshness=(
+            "not_checked"
+            if step.uv.lock_mode == "frozen"
+            else "checked"
+            if outcome.returncode == 0 and process_boundary_settled(outcome) is True
+            else "not_established"
+        ),
     )
 
 
@@ -1153,7 +1206,14 @@ def _prepare_python_project_attempt(
         raise FleetPlanInvalid("Python Goon source changed while creating its build project")
     native = capture_native_uv_authority(
         process.host_environment,
-        owned_uv_names=frozenset({"UV_PROJECT_ENVIRONMENT", "UV_CACHE_DIR", "UV_OFFLINE"}),
+        owned_uv_names=frozenset(
+            {
+                "UV_PROJECT_ENVIRONMENT",
+                "UV_CACHE_DIR",
+                "UV_OFFLINE",
+            }
+        )
+        | UV_PROJECT_SELECTION_SWITCHES,
     )
     environment = native.environment(
         ManagedPreparationPathLayout.from_root(process.paths.root),
@@ -1167,7 +1227,7 @@ def _prepare_python_project_attempt(
         "sync",
         "--project",
         str(project),
-        "--locked",
+        f"--{step.uv.lock_mode}",
         "--no-default-groups",
         "--no-editable",
         *(["--group", step.uv.group] if step.uv.group is not None else []),
@@ -1178,6 +1238,9 @@ def _prepare_python_project_attempt(
         runtime_supervision=runtime.runtime_supervision,
     )
     outcome = from_command(result)
+    preparation = _uv_preparation_evidence(step, outcome)
+    prepared = replace(prepared, uv_preparation=preparation)
+    outcome = replace(outcome, uv_preparation=preparation)
     return prepared, outcome if outcome.returncode != 0 or process_boundary_settled(
         outcome
     ) is not True else None
@@ -1194,6 +1257,8 @@ def _prepare_strict_uv_attempt(
         return process, None
     if step.uv is None:
         raise FleetPlanInvalid(f"Managed uv runtime is bound to non-uv step {step.step_id}")
+    if managed.lock_mode != step.uv.lock_mode:
+        raise FleetPlanInvalid(f"Managed uv lock mode differs from resolved step {step.step_id}")
 
     if managed.package_source is not None:
         project = RepositoryPathSpace.from_root(process.paths.cache).resolve(
@@ -1223,7 +1288,8 @@ def _prepare_strict_uv_attempt(
         "sync",
         "--project",
         str(project),
-        *(["--locked"] if managed.isolated_preparation else ["--frozen", "--offline"]),
+        f"--{managed.lock_mode}",
+        *([] if managed.isolated_preparation else ["--offline"]),
         "--link-mode",
         "copy",
         "--no-default-groups",
@@ -1240,6 +1306,9 @@ def _prepare_strict_uv_attempt(
         runtime_supervision=runtime.runtime_supervision,
     )
     outcome = from_command(result)
+    preparation = _uv_preparation_evidence(step, outcome)
+    prepared = replace(prepared, uv_preparation=preparation)
+    outcome = replace(outcome, uv_preparation=preparation)
     if outcome.returncode != 0 or process_boundary_settled(outcome) is not True:
         return prepared, outcome
     return prepared, None

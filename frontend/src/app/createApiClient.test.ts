@@ -15,6 +15,18 @@ describe("createApiClient write fence transport", () => {
     write.mockResolvedValue({ outcome: "saved", value: undefined, causalityRevision: 1 } as never);
   });
 
+  it("transports reviewed Agent selection and nullable caller inputs unchanged", () => {
+    const mutations = new MutationController();
+    const client = createApiClient(mutations);
+    const agent = { implementation: "codex" as const, profile: "native-review", model_profile: null, acceptance: "agentic-review", repository_root: "/work/repos", skill_root: "/work/workflow" };
+    void client.startSharedPlanRun("agent-run", "selected", ["repo-a"], "reviewed-plan", "a".repeat(64), `sha256:${"b".repeat(64)}`, { "repo-a": "instance-a" }, { optional: null, explicit: "" }, agent);
+    expect(write).toHaveBeenCalledWith(mutations, "fleet-run", op.run_shared_plan.operationId, { body: {
+      fleet_run_id: "agent-run", plan_key: "selected", expected_plan_id: "reviewed-plan",
+      expected_plan_revision: "a".repeat(64), expected_execution_digest: `sha256:${"b".repeat(64)}`,
+      repository_ids: ["repo-a"], repository_instance_ids: { "repo-a": "instance-a" }, inputs: { optional: null, explicit: "" }, agent,
+    } });
+  });
+
   it("transports reviewed mutation fences without renaming or dropping them", () => {
     const mutations = new MutationController();
     const client = createApiClient(mutations);
@@ -48,6 +60,6 @@ describe("createApiClient write fence transport", () => {
     });
     expect(write).toHaveBeenNthCalledWith(7, mutations, "fleet-run", op.cancel_fleet_run.operationId, {
       path: { fleet_run_id: "run-b" },
-    });
+    }, { dispatch: "fleet-run-cancel" });
   });
 });

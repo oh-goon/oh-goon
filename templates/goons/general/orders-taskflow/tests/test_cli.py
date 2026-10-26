@@ -55,3 +55,26 @@ def test_extract_requires_explicit_fixture(tmp_path):
     assert result.returncode != 0
     assert "--fixture" in result.stderr
     assert not (tmp_path / ".showcase").exists()
+
+
+@pytest.mark.parametrize(
+    ("fixture", "expected"),
+    [("official", "1236.70"), ("invalid", None), ("changed", "60.00")],
+)
+def test_direct_workflow_uses_shared_operations_and_stops_on_failure(
+    tmp_path, fixture, expected
+):
+    result = run_command(tmp_path, "run", "--fixture", fixture)
+    output = tmp_path / ".showcase"
+    assert (output / "extracted.json").is_file()
+    if expected is None:
+        assert result.returncode != 0
+        assert "Invalid amount" in result.stderr
+        assert not (output / "total.txt").exists()
+        assert not (output / "result.json").exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert (output / "total.txt").read_text(encoding="utf8").strip() == expected
+        assert json.loads((output / "result.json").read_text(encoding="utf8")) == {
+            "total_order_value": expected
+        }

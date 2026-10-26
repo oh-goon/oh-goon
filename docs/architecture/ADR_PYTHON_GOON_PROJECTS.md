@@ -55,16 +55,20 @@ The package installs after relocation without a certification fixture,
 Oh-Goon backend, cookbook checkout or parent source. Local dependencies must
 remain inside the project; escaping paths and reliance on an ancestor uv
 workspace are outside this standalone model. Native uv owns dependency
-resolution, build/install semantics and stale-lock refusal.
+resolution and build/install semantics. Frozen lock consumption is valid;
+metadata freshness checks belong to an explicitly selected locked mode.
 Contained native uv workspace members remain supported. Local dependency,
 workspace member/exclusion and virtual lock-source paths must all stay inside
 the captured package so relocation preserves their native project authority.
 
 The existing source-snapshot and Hashmarks owners capture authored package
-contents. Generated environments/caches, declared output locations and
-`goon.lock` are excluded. Local sync, tests and training therefore do not add
-those generated files to package identity. There is no separately authored
-file manifest or second package-content hash engine.
+contents. Generated environments/caches, Python distribution metadata
+(`*.egg-info`, `*.dist-info` and `.eggs`), declared output locations and
+`goon.lock` are excluded by the canonical source-membership policy. Git ignore
+files do not select authored membership. Local sync, tests and training therefore
+do not add those generated files to package identity. Authored directories named
+`build` or `dist` remain source unless an output declaration excludes them.
+There is no separately authored file manifest or second package-content hash engine.
 
 ## Explicit inputs and installed commands
 
@@ -144,14 +148,14 @@ them for training.
 Local development uses the same installed command:
 
 ```sh
-uv sync --locked
+uv sync --frozen
 uv run --no-sync pytest
 uv run --no-sync ruff check .
 uv run --no-sync iris-train --random-seed 42 --test-size-percent 20 --minimum-accuracy-percent 90 --max-iterations 300
 ```
 
 Package preparation has native semantics of
-`uv sync --locked --no-default-groups --no-editable`, adding `--group` only
+`uv sync --frozen --no-default-groups --no-editable`, adding `--group` only
 when selected. The original execution owners prepare and consume that
 selection; authors add no dependency-install Step. Base-only selection is
 also supported for existing target-project `uv` workloads. Execution does not
@@ -163,6 +167,60 @@ prunes the developer's `.venv`. Build requirements remain in the native project
 configuration. `uv.lock` alone is not a claim that every isolated build
 requirement is pinned. See native uv [syncing](https://docs.astral.sh/uv/concepts/projects/sync/)
 and [project configuration](https://docs.astral.sh/uv/concepts/projects/config/).
+
+## Native lock mode and durable cutover
+
+A Goon may select `uv: {lock_mode: frozen}` or `uv: {lock_mode: locked}`.
+Omission selects frozen operation, and the compiler materializes that choice in
+every resolved UV Step and derived requirement. The Iris and orders reference
+Goons select frozen explicitly. Groups are independent of lock mode.
+
+Frozen consumes the existing `uv.lock` without a metadata-freshness check or
+rewrite. A pyproject/lock mismatch alone is not an Oh-Goon veto; unavailable
+packages, unusable locks and real native build/application failures remain failures.
+Locked asks native uv to reject when freshness would require changing the lock.
+Neither selection refreshes dependencies or falls back to the other mode.
+`goon.lock` still binds the chosen mode and exact captured source bytes, including
+`pyproject.toml` and `uv.lock`; changing source requires explicit re-locking.
+
+The selected mode reaches trusted preparation, isolated/remote preparation,
+campaign phases, schedules and retained Plan readback unchanged. Already prepared
+application execution uses `uv run --no-sync` without another mode flag or sync.
+Attempt receipts retain actual native preparation facts: frozen freshness is
+`not_checked`, successful settled locked preparation is `checked`, and a native
+failure leaves locked freshness `not_established`. A nonzero exit does not by
+itself prove a stale lock. Ordinary repository UV execution also owns its attempt
+environment rather than reusing the developer's `.venv`.
+
+The selected UV owner controls `UV_FROZEN`, `UV_LOCKED`, `UV_NO_SYNC` and
+`UV_NO_PROJECT`; ambient switches cannot change the resolved project/mode, and
+explicit imports of those switches are refused for managed UV Steps. Other native
+UV configuration, credentials, certificates and transport settings retain their
+native ownership.
+
+The fixed native pre-admission issuer refuses an untrusted repository-owned UV
+selection in locked mode. Native `uv lock --check --offline` can execute PEP 517
+metadata/build hooks on the controller host, and this issuer cannot establish
+that freshness inside the selected isolation boundary. It refuses before the
+native check rather than signing a weaker proof. Trusted locked selections keep
+their native freshness check; frozen untrusted selections retain exact byte/mode
+identity without one. Package-owned runtimes remain outside repository UV
+requirements and perform their selected preparation inside the original Step
+boundary. The native issuer restriction is separate from the existing isolated
+`uv sync --locked` execution capability.
+
+Resolved Plan contract 46 requires explicit lock mode. Database schema 90 rejects
+older schema-89 state before decoding incompatible contract-45 Journal payloads;
+they are not corruption and are never reinterpreted as frozen. Quiesce the old writer before
+switching runtimes, retain old evidence under its original runtime, and re-resolve
+and re-lock authoring with the new runtime before new admission. Creating a new
+state directory does not prove that an old process has stopped.
+
+The Python project convention belongs to Python-runtime Goons and maintained
+Python examples. Ordinary tool-invoking Goons still execute without fabricated
+Python metadata. This change adds no Goon-less application source or implicit
+target selection: external workflows remain in the existing Goon family and use
+explicit target authority.
 
 ## Captured source and separate execution roots
 
@@ -202,7 +260,7 @@ qualification requirement. See [execution first](ADR_EXECUTION_FIRST_PROPORTIONA
 An explicit strict `trust_repository_code: false` applies the selected isolation
 boundary to native dependency installation and package builds as well as the
 application command. Run preparation selects uv and its system Python without
-running the project's build backend on the host. Native `uv sync --locked` runs
+running the project's build backend on the host. Native `uv sync` with the resolved frozen/locked mode runs
 inside the original isolated Step process owner, with the Step's selected
 environment, network and resource authority.
 
@@ -301,7 +359,7 @@ developer-environment preservation, complete-project freshness, repeated
 imports, distinct outputs, missing/escaping source and native lock failures.
 Native namespace regressions execute a self-contained PEP 517 backend and its
 installed command, proving writable private builds, immutable captured source,
-unmounted host-file and loopback isolation, base-only installation and stale-lock
+unmounted host-file and loopback isolation, base-only installation and explicit locked freshness
 refusal before application launch. Trusted repeated imports also build and run
 separate private copies without changing their shared captured source.
 Git regressions run both a single imported package and a complete example,

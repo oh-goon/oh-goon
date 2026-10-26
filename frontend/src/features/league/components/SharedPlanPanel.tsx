@@ -1,3 +1,4 @@
+import type { SharedPlanInputs } from "@/domain/api/ApiClient";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -7,7 +8,8 @@ import { advanceIdentityIncarnation, sameIdentityIncarnation, type IdentityIncar
 import { useApiClient, useReportMutationFeedback } from "@/app/ApiClientProvider";
 import { appDiagnosticStore } from "@/domain/diagnostics/appDiagnosticStore";
 
-import type { FleetRunState, LeagueLineupDocument, LeagueMap, SharedPlanPreview } from "@generated/models";
+import type { AgentCampaignResult, FleetRunState, LeagueLineupDocument, LeagueMap, RunAgentSelection, SharedPlanPreview } from "@generated/models";
+import { newFleetRunId } from "@/domain/identity/commandIdentity";
 import { RepositorySelectionPanel } from "@/features/league/components/RepositorySelectionPanel";
 import type { WriteCommandResult } from "@/domain/mutations/WriteCommandResult";
 import { useLeagueLineups } from "@/features/league/hooks/useLeagueLineups";
@@ -19,17 +21,20 @@ import { useSharedPlanInputInspection } from "@/features/league/hooks/useSharedP
 import { useSharedPlanLockPreview } from "@/features/league/hooks/useSharedPlanLockPreview";
 import { useSharedPlanPreview } from "@/features/league/hooks/useSharedPlanPreview";
 import { editorWriteAuthority } from "@/features/league/writeAuthority";
+import { EMPTY_SHARED_PLAN_AGENT, SharedPlanAgentFields, sharedPlanAgentSelection, sharedPlanRepairSelection } from "@/features/league/components/SharedPlanAgentFields";
 import {
   ExecutionPlanInputFields,
   executionPlanInputs,
   initialExecutionPlanInputValues,
   requiredExecutionPlanInputsComplete,
+  type ExecutionPlanInputValues,
 } from "@/features/plans/PlansFeature";
 
 interface Props {
   league: LeagueMap | null;
   actionsDisabled?: boolean;
-  onRun: (planKey: string, repositoryIds: string[], expectedPlanId: string, expectedPlanRevision: string, expectedExecutionDigest: string, repositoryInstanceIds: Record<string, string>, inputs: Record<string, string>) => Promise<WriteCommandResult<FleetRunState>>;
+  onRun: (planKey: string, repositoryIds: string[], expectedPlanId: string, expectedPlanRevision: string, expectedExecutionDigest: string, repositoryInstanceIds: Record<string, string>, inputs: SharedPlanInputs, agent?: RunAgentSelection | null) => Promise<WriteCommandResult<FleetRunState>>;
+  onOpenCampaign?: (campaignId: string) => void;
   onAcceptedRun?: (fleetRunId: string) => void;
   initialRepositoryIds?: readonly string[];
   initialRepositoryInstanceIds?: Readonly<Record<string, string>>;
@@ -42,10 +47,11 @@ type SubmissionState =
   | { state: "accepted"; owner: IdentityIncarnation }
   | { state: "rejected"; owner: IdentityIncarnation; title: string; message: string };
 
-export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcceptedRun, initialRepositoryIds = [], initialRepositoryInstanceIds, onOpenPlans }: Props) {
+export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcceptedRun, initialRepositoryIds = [], initialRepositoryInstanceIds, onOpenPlans, onOpenCampaign }: Props) {
   const { t } = useTranslation();
   const client = useApiClient();
   const reportLineupMutation = useReportMutationFeedback("league-lineups");
+  const reportRepairMutation = useReportMutationFeedback("fleet-run");
   const plans = useSharedPlans();
   const [savedSelectionsOpen, setSavedSelectionsOpen] = useState(false);
   const lineups = useLeagueLineups(savedSelectionsOpen);
@@ -61,7 +67,16 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
   const [lineupKey, setLineupKey] = useState("");
   const lineupInspection = useLeagueLineupInspection(lineupKey);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => [...initialRepositoryIds]);
-  const [inputValues, setInputValues] = useState<Record<string, string | null>>({});
+  const [inputValues, setInputValues] = useState<ExecutionPlanInputValues>({});
+  const [agentDraft, setAgentDraft] = useState(EMPTY_SHARED_PLAN_AGENT);
+  const [repairAuthorization, setRepairAuthorization] = useState<IdentityIncarnation | null>(null);
+  const [repairHandoff, setRepairHandoff] = useState<{ id: string; result: AgentCampaignResult | null; uncertain: boolean } | null>(null);
+  const agentSelection = useMemo(() => sharedPlanAgentSelection(agentDraft), [agentDraft]);
+  const repairSelection = useMemo(() => sharedPlanRepairSelection(agentDraft), [agentDraft]);
+  const agentReady = agentSelection === null || Boolean(
+    agentSelection.acceptance && agentSelection.repository_root && agentSelection.skill_root
+    && (!agentSelection.implementation || agentSelection.profile) && selectedIds.length === 1,
+  );
   const [lineupDraftKey, setLineupDraftKey] = useState("");
   const [lineupName, setLineupName] = useState("");
   const [lineupRevision, setLineupRevision] = useState<string | null>(null);
@@ -121,18 +136,23 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
     setSelectedIds((current) => current.filter((id) => availableRepositoryIds.has(id)));
   }, [availableRepositoryIds, league]);
 
-  const inputDefinitions = selectedPlanDocument?.inputs ?? [];
+  const inputDefinitions = (selectedPlanDocument?.inputs ?? []).filter((definition) => !agentDraft.enabled || definition.name !== "acceptance");
   const requiredInputsComplete = requiredExecutionPlanInputsComplete(inputDefinitions, inputValues);
-  const submittedInputs = useMemo(() => executionPlanInputs(inputValues), [inputValues]);
+  const submittedInputs = useMemo(() => {
+    const values = executionPlanInputs(inputValues);
+    if (agentDraft.enabled) delete values.acceptance;
+    return values;
+  }, [inputValues, agentDraft.enabled]);
   const inputInspectionRead = useSharedPlanInputInspection(
-    planKey, selectedPlanDocument?.sha256 ?? "", submittedInputs, Boolean(planKey && selectedPlanDocument),
+    planKey, selectedPlanDocument?.sha256 ?? "", submittedInputs, Boolean(planKey && selectedPlanDocument && agentReady), agentSelection, selectedIds,
   );
   const inputInspection = inputInspectionRead.resource.status === "read-fresh" ? inputInspectionRead.resource.data : null;
   const lockPreviewRead = useSharedPlanLockPreview(
     planKey,
     selectedPlanDocument?.sha256 ?? "",
     submittedInputs,
-    Boolean(planKey && selectedPlanDocument && requiredInputsComplete),
+    Boolean(planKey && selectedPlanDocument && requiredInputsComplete && agentReady),
+    undefined, agentSelection, selectedIds,
   );
   const selectedLeagueRepositoryInstanceIds = useMemo(() => {
     const selected = new Set(selectedIds);
@@ -158,7 +178,8 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
     repositoryIds: selectedIds,
     expectedRepositoryInstanceIds: previewExpectedRepositoryInstanceIds,
     inputs: submittedInputs,
-    enabled: Boolean(planKey && selectedPlanDocument && selectedIds.length > 0 && requiredInputsComplete),
+    agent: agentSelection,
+    enabled: Boolean(planKey && selectedPlanDocument && selectedIds.length > 0 && requiredInputsComplete && agentReady),
   });
   const lockPreview = lockPreviewRead.resource.data;
   const lockPreviewing = lockPreviewRead.resource.status === "read-loading" || lockPreviewRead.resource.status === "read-refreshing";
@@ -181,6 +202,7 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
     executionDigest: preview?.execution_digest ?? null,
     reviewedExecutionDigest: lockPreview?.execution_digest ?? null,
     inputs: submittedInputs,
+    agent: agentSelection, repair: agentDraft.repair ? agentDraft : null,
   }));
   const currentRunOwner = runOwnerRef.current;
   const currentSubmission = submission.state === "idle" || sameIdentityIncarnation(submission.owner, currentRunOwner)
@@ -199,7 +221,10 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
   const previewFresh = previewRead.resource.status === "read-fresh";
   const lockPreviewFresh = lockPreviewRead.resource.status === "read-fresh";
   const lockMatchesPreview = preview !== null && lockPreview !== null && lockPreview.plan_id === preview.plan_id && lockPreview.sha256 === preview.sha256 && lockPreview.execution_digest === preview.execution_digest;
-  const canAttemptRun = requiredInputsComplete && previewFresh && lockPreviewFresh && lockMatchesPreview && preview !== null && preview.ready_count + preview.blocked_count === selectedIds.length;
+  const canAttemptRun = agentReady && requiredInputsComplete && previewFresh && lockPreviewFresh && lockMatchesPreview && preview !== null && preview.ready_count + preview.blocked_count === selectedIds.length;
+  const repairAuthorized = repairAuthorization !== null && sameIdentityIncarnation(repairAuthorization, currentRunOwner);
+  const repairReady = repairSelection !== null && repairSelection.write_roots.length > 0
+    && [repairSelection.review_passes, repairSelection.timeout_seconds, repairSelection.step_timeout_seconds].every(Number.isFinite);
 
   const chooseIds = (ids: string[]) => {
     setSelectedIds(ids);
@@ -209,6 +234,7 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
 
   const submitRun = async () => {
     if (!preview || !previewFresh || !canAttemptRun || submissionPending || actionsDisabled) return;
+    if (repairSelection !== null && (!agentSelection || !repairAuthorized || !repairReady)) return;
     if (preview.blocked_count > 0) {
       setRunAttemptError({
         owner: currentRunOwner,
@@ -221,9 +247,28 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
     setRunAttemptError(null);
     const commandOwner = runOwnerRef.current;
     setSubmission({ state: "submitting", owner: commandOwner });
+    let submittedCampaignId: string | null = null;
     try {
       const repositoryInstanceIds = previewRepositoryInstanceIds!;
-      const result = await onRun(planKey, selectedIds, preview.plan_id, preview.sha256, preview.execution_digest, repositoryInstanceIds, submittedInputs);
+      if (repairSelection !== null) {
+        if (!agentSelection || !repairAuthorized || !repairReady) return;
+        const campaignId = newFleetRunId();
+        submittedCampaignId = campaignId;
+        setRepairAuthorization(null);
+        setRepairHandoff({ id: campaignId, result: null, uncertain: false });
+        const result = await client.repairSharedPlan({
+          fleet_run_id: campaignId, plan_key: planKey, expected_plan_id: preview.plan_id,
+          expected_plan_revision: preview.sha256, expected_execution_digest: preview.execution_digest,
+          repository_ids: selectedIds, repository_instance_ids: repositoryInstanceIds,
+          inputs: submittedInputs, agent: agentSelection, repair: repairSelection, authorize_repair: true,
+        });
+        if (result.outcome !== "saved") reportRepairMutation(result);
+        const retained = result.outcome === "saved" && result.value.campaign_id === campaignId ? result.value : null;
+        setRepairHandoff({ id: campaignId, result: retained, uncertain: retained === null });
+        if (sameIdentityIncarnation(runOwnerRef.current, commandOwner)) setSubmission({ state: "idle" });
+        return;
+      }
+      const result = await onRun(planKey, selectedIds, preview.plan_id, preview.sha256, preview.execution_digest, repositoryInstanceIds, submittedInputs, agentSelection);
       if (!sameIdentityIncarnation(runOwnerRef.current, commandOwner)) return;
       if (result.outcome === "saved") {
         setSubmission({ state: "accepted", owner: commandOwner });
@@ -244,6 +289,9 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
         });
       }
     } catch (error) {
+      if (submittedCampaignId !== null) {
+        setRepairHandoff({ id: submittedCampaignId, result: null, uncertain: true });
+      }
       if (!sameIdentityIncarnation(runOwnerRef.current, commandOwner)) return;
       setSubmission({
         state: "rejected",
@@ -395,6 +443,8 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
         {planLoadError ? <div className="run-setup-edge-state run-setup-edge-state--error" role="alert"><strong>{planLoadError}</strong><button className="text-button" type="button" onClick={() => { void planDocumentRead.refresh(); }}>{t("sharedPlans.inputs.retryLoad")}</button></div> : null}
         {selectedPlan?.changed_since_last_run ? <div className="notice notice--warning" role="status"><strong>{t("sharedPlans.execution.planChangedTitle")}</strong><p>{t("sharedPlans.execution.planChangedMessage", { name: selectedPlan.plan_key })}</p></div> : null}
         {inputDefinitions.length > 0 ? <ExecutionPlanInputFields definitions={inputDefinitions} values={inputValues} onChange={(name, value) => { setInputValues((current) => ({ ...current, [name]: value })); setRunAttemptError(null); setSubmission({ state: "idle" }); }} /> : null}
+        <SharedPlanAgentFields draft={agentDraft} onChange={(draft) => { setAgentDraft(draft); setRunAttemptError(null); setSubmission({ state: "idle" }); }} />
+        {!agentReady ? <p role="status">{t("sharedPlans.agent.completeSelection")}</p> : null}
         <PlanInputDiagnostic inspection={inputInspection} />
       </section> : null}
       {selectedPlanDocument ? <RepositorySelectionPanel repositories={repositories} selectedIds={selectedIds} onChange={chooseIds} /> : null}
@@ -413,6 +463,15 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
     {currentRunAttemptError ? <div className="notice notice--danger shared-plan-run-failure" role="alert"><strong>{currentRunAttemptError.title}</strong><p>{currentRunAttemptError.message}</p></div> : null}
     {currentSubmission.state === "accepted" ? <div className="notice notice--success shared-plan-run-accepted" role="status" aria-live="polite"><strong>{t("sharedPlans.verification.acceptedTitle")}</strong><p>{t("sharedPlans.verification.acceptedMessage")}</p></div> : null}
     {currentSubmission.state === "rejected" ? <div className="notice notice--danger shared-plan-run-failure" role="alert"><strong>{currentSubmission.title}</strong><p>{currentSubmission.message}</p></div> : null}
+    {repairHandoff ? <div className="notice" role="status"><strong>{t("sharedPlans.agent.handoff")} <code>{repairHandoff.id}</code></strong>
+      {repairHandoff.result ? <p>{t("gameTape.campaign.result")}: {repairHandoff.result.result}</p> : null}
+      {repairHandoff.result?.journal_revision === null ? <p>{t("sharedPlans.agent.unrecorded")}</p> : null}
+      {repairHandoff.result?.invocation_result ? <p>{t("sharedPlans.agent.invocationStopped", { reason: repairHandoff.result.invocation_result.stop_reason })}</p> : null}
+      {repairHandoff.uncertain ? <p>{t("sharedPlans.agent.transportUncertain")}</p> : null}
+      {onOpenCampaign && repairHandoff.result?.journal_revision !== null ? <button className="button button--secondary" type="button" onClick={() => onOpenCampaign(repairHandoff.id)}>{t("gameTape.campaign.open")}</button> : null}
+    </div> : null}
+
+    {repairSelection ? <label className="checkbox-row"><input type="checkbox" checked={repairAuthorized} disabled={!canAttemptRun || submissionPending} onChange={(event) => setRepairAuthorization(event.target.checked ? currentRunOwner : null)} />{t("sharedPlans.agent.authorize")}</label> : null}
 
     {planKey ? <div className={preview?.blocked_count ? "shared-plan-run-bar shared-plan-run-bar--blocked" : preview ? "shared-plan-run-bar shared-plan-run-bar--ready" : "shared-plan-run-bar"}>
       <div className="shared-plan-run-bar__status" role="status" aria-live="polite"><span className="shared-plan-run-bar__state-dot" aria-hidden="true" />
@@ -429,9 +488,9 @@ export function SharedPlanPanel({ league, actionsDisabled = false, onRun, onAcce
       <button
         className="button button--primary"
         type="button"
-        disabled={actionsDisabled || submissionPending || !canAttemptRun}
+        disabled={actionsDisabled || submissionPending || !canAttemptRun || (repairSelection !== null && (!repairAuthorized || !repairReady))}
         onClick={() => { void submitRun(); }}
-      >{submitting ? t("sharedPlans.verification.submittingButton") : t("sharedPlans.run", { count: selectedIds.length })}</button>
+      >{submitting ? t("sharedPlans.verification.submittingButton") : repairSelection ? t("sharedPlans.agent.runRepair") : t("sharedPlans.run", { count: selectedIds.length })}</button>
     </div> : null}
 
     {lineupDetached ? <p className="notice notice--warning" role="status">{t("sharedPlans.lineupServerRemoved")}</p> : null}

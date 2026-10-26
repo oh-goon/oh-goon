@@ -387,9 +387,11 @@ def _run_selected(
         runtime.runs.cancel(admitted.fleet_run_id)
         detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
         print(
-            f"Cancellation requested: {admitted.fleet_run_id}; status: {detail.run.status.value}",
+            f"Invocation interrupted; cancellation requested: {admitted.fleet_run_id}; "
+            f"execution status: {detail.run.status.value}",
             file=sys.stderr,
         )
+        print("Cleanup evidence: inspect durable Run handoff.", file=sys.stderr)
         return 130, detail
     return (0 if detail.outcome is FleetRunOutcome.SUCCESS else 1), detail
 

@@ -113,7 +113,7 @@ def _detail(tmp_path: Path, *, native: bool = False, uv_base: bool = False) -> F
             handoff_identity="handoff",
             source_step_id="tests",
         )
-    requirements = (UvProjectRequirement(),) if uv_base else ()
+    requirements = (UvProjectRequirement(lock_mode="locked"),) if uv_base else ()
     plan = ResolvedFleetPlan.create(
         name="quality",
         description="",

@@ -36,8 +36,8 @@ def prepare_configuration(args: argparse.Namespace) -> None:
         snapshot,
         repositories,
         resolver,
-        acquire=args.command == "lock",
-        allow_network=args.command in {"lock", "run"},
+        acquire=args.command == "lock" or bool(getattr(args, "acquire", False)),
+        allow_network=args.command in {"lock", "run"} or bool(getattr(args, "acquire", False)),
         update=bool(getattr(args, "update_goons", False)),
     )
     args._run_configuration = selected
@@ -117,6 +117,13 @@ def run_config_command(args: argparse.Namespace) -> int:
             f"Configuration: {report['configuration']['path']} ({report['configuration']['sha256']})"
         )
         print(f"Source: {report['source']['selection']}\n  {report['source']['path']}")
+        for selection in report["source"]["dependency_selections"]:
+            print(
+                f"  Dependency group: {selection['group']!r} | {selection['group_state']} | declared={selection['declared_group']!r}"
+            )
+        for source in report["source"]["git_sources"]:
+            print(f"  Git: {source['git']} | ref={source['ref']} | commit={source['commit']}")
+            print(f"    path: {source['path']}")
         print(f"Target: {report['target']['name']} ({report['target']['repository_id']})")
         print(f"Status: {report['status']}")
         print("Inputs:")
@@ -143,6 +150,15 @@ def run_config_command(args: argparse.Namespace) -> int:
         for item in report["occurrences"]:
             phase = f" | phase={item['phase']}" if item["phase"] else ""
             print(f"  {' → '.join(item['occurrence'])}: {item['goon']}{phase}")
+            print(
+                f"    source: {item['source']['path']} | YAML sha256={item['source']['yaml_sha256']}"
+            )
+            if item["source"]["project"] is not None:
+                print(f"    Python project: {item['source']['project']}")
+            for selection in item["source"]["dependency_selections"]:
+                print(
+                    f"    Dependency group: {selection['group']!r} | {selection['group_state']} | declared={selection['declared_group']!r}"
+                )
             for binding in item["bindings"]:
                 print(f"    {binding['name']}: {binding['origin']}")
                 if binding.get("skill") is not None:
@@ -159,6 +175,7 @@ def run_config_command(args: argparse.Namespace) -> int:
             if report[group] is not None:
                 print(f"{group}: {report[group]}")
         print(f"Skill pin records: {report['skills']}")
+        print(f"Source acquisition: {report['proof']['acquisition']}")
         if report["diagnostic"] is not None:
             issue = report["diagnostic"]
             print(f"Unresolved: {issue['code']} | {issue['safe_next_action']}")

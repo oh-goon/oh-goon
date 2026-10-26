@@ -284,7 +284,6 @@ def completed_phase_steps(
     for step in evidence.steps:
         if (
             step.status != "COMPLETED"
-            or step.returncode != 0
             or len(step.attempts) != 1
             or step.attempts[0].supervisor is None
             or step.attempts[0].supervisor.final_process_group_quiescent is not True
@@ -326,8 +325,8 @@ class AgentReviewRepairCampaign:
         self.capture_options: AgentCaptureOptions = {
             **capture_options,
             "locked_skills": plan.skill_sources,
+            "locked_goons": plan.goon_sources,
         }
-        self.capture_options.pop("source_graph", None)
         self.passes = passes
         self.write_roots = validate_write_roots(write_roots)
         self.phases = agent_review_phases(plan)
@@ -466,7 +465,23 @@ class AgentReviewRepairCampaign:
             for edge in self.original.imports
             if members.intersection(edge.step_ids)
         )
-        return ResolvedFleetPlan.create(
+        configuration = self.original.configuration
+        if configuration is not None:
+            scopes = {edge.import_id for edge in imports}
+            entries = tuple(
+                entry
+                for entry in configuration.entries
+                if entry.scope is None or entry.scope in scopes
+            )
+            configuration = configuration.model_copy(
+                update={
+                    "entries": entries,
+                    "omitted_entries": configuration.omitted_entries
+                    + len(configuration.entries)
+                    - len(entries),
+                }
+            )
+        projected = ResolvedFleetPlan.create(
             name=self.original.name,
             description=self.original.description,
             execution=self.original.execution,
@@ -475,8 +490,22 @@ class AgentReviewRepairCampaign:
             requirements=self.original.requirements,
             step_sources=tuple(s for s in self.original.step_sources if s.step_id in members),
             skill_sources=self.original.skill_sources,
+            goon_sources=self.original.goon_sources,
             native_agent=self.original.native_agent,
+            configuration=configuration,
         )
+        projected._project_archives.update(
+            {
+                step.project_source.content_sha256: self.original._project_archives[
+                    step.project_source.content_sha256
+                ]
+                for step in projected.steps
+                if isinstance(step, ResolvedCommandStep)
+                and step.project_source is not None
+                and step.project_source.content_sha256 in self.original._project_archives
+            }
+        )
+        return projected
 
     def _recapture(self, *, require_unchanged: bool) -> str:
         plan, handoffs, _ = self.resolver.resolve_frozen_agents(

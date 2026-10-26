@@ -1,9 +1,43 @@
 import { GameTapeStatus } from "@generated/enums";
-import type { AgentCampaignReadback, GameTapeFailureHistory, GameTapeLiveOutputBatch, GameTapeLiveOutputChunk, GameTapeRunDiff } from "@generated/models";
+import type { AgentCampaignReadback, AgentCampaignResult, GameTapeFailureHistory, GameTapeLiveOutputBatch, GameTapeLiveOutputChunk, GameTapeRunDiff } from "@generated/models";
 
 import { PRIMARY_REPOSITORY } from "./identities";
 import { FIXTURE_PLAN_ID } from "./plans";
 import { FIXTURE_FINISHED, FIXTURE_NOW } from "./time";
+
+export function fixtureCampaignResultForId(campaignId: string): AgentCampaignResult {
+  if (campaignId !== "campaign-browser-refused") throw new Error("Unknown fixture campaign");
+  return fixtureUnadmittedCampaignResult(campaignId);
+}
+
+export function fixtureUnadmittedCampaignResult(campaignId = "campaign-browser-refused"): AgentCampaignResult {
+  const selection = { selected_run_id: campaignId, phase_ordinal: 1, phase: "review", selected_step_ids: ["refused-review-step"], admission_status: "not_admitted" as const };
+  const intent = {
+    kind: "intent" as const, campaign_id: campaignId, repository_id: PRIMARY_REPOSITORY.repository_id,
+    original_execution_digest: "original-execution-identity", maximum_runs: 6,
+    initial_phase: "review", initial_step_ids: ["refused-review-step"],
+    budget: { max_attempts: 2, timeout_seconds: 120, step_timeout_seconds: 30 }, deadline_at: FIXTURE_FINISHED,
+  };
+  return {
+    schema: "oh-goon.agent-campaign-result/v2", campaign_id: campaignId, journal_revision: 203,
+    result: "incomplete", complete: true, intent, runs: [], repositories: [],
+    incomplete_reasons: ["No admitted campaign Runs are available"],
+    controller_result: { availability: "journal", stop_reason: "execution_unresolved", decision_id: "initial-refusal" },
+    safe_next_action: "inspect_original_runs_and_resolve_ownership", unstarted_selection: selection,
+    decision_history: [
+      { session_id: "intent", revision: 1, fact: intent },
+      { session_id: "refusal", revision: 2, fact: {
+        kind: "decision", campaign_id: campaignId, expected_revision: 1, decision_id: "initial-refusal",
+        phase_ordinal: 0, remaining_runs: 6, stop_reason: "execution_unresolved", consumed_runs: [],
+        unstarted_selection: selection, message: "Initial admission was refused before any Run started.",
+      } },
+    ],
+    original_execution_digest: null, initial_candidate: null, last_admitted_candidate: null, final_candidate: null,
+    reviews: [], findings: [], adjudications: [], repair_attempts: [], verification: [],
+    claim_authority: "Review and adjudication records are source-bound Agent claims; Step results retain execution authority",
+    continuation_authority: "Read-only projection; a fresh authorized invocation is required",
+  };
+}
 
 export function fixtureCampaignReadback(runId: string, terminal: boolean, unstarted = false): AgentCampaignReadback {
   const campaignId = "campaign-browser-original";

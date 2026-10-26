@@ -10,6 +10,9 @@ from pydantic import Field, field_validator, model_validator
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.source_tree_policy import is_transient_source_path
 
+type UvLockMode = Literal["frozen", "locked"]
+UV_PROJECT_SELECTION_SWITCHES = frozenset({"UV_FROZEN", "UV_LOCKED", "UV_NO_SYNC", "UV_NO_PROJECT"})
+
 
 class RepositoryValueType(StrEnum):
     STRING = "string"
@@ -99,13 +102,14 @@ class PyprojectValueRequirement(ImmutableModel):
 
 
 class UvProjectRequirement(ImmutableModel):
-    """Derived requirement for one backend-owned locked UV project environment.
+    """Derived requirement for one backend-owned UV project selection.
 
     The Goon author selects a repository-relative project and dependency group with ``uv:``. Oh Goon derives this
     requirement so YAML never mirrors package membership from pyproject.toml/uv.lock.
     """
 
     kind: Literal["uv_project"] = "uv_project"
+    lock_mode: UvLockMode
     project: str = Field(default=".", min_length=1, max_length=240)
     group: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 

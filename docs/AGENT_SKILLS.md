@@ -123,6 +123,8 @@ Use `oh-goon plan campaign CAMPAIGN_OR_RUN_ID --json` with the campaign ID or an
 linked Run to inspect the same retained evidence after interruption. The campaign
 ID also works when initial admission was refused and no Run exists. Cancellation
 before source/intent preparation reports that no retained campaign is available.
+The authenticated `GET /api/fleet/runs/campaigns/{campaign_id}` API delegates to
+the same read owner, including campaigns with zero admitted Runs.
 The command reads one original journal cut;
 it neither loads raw model transcripts nor resumes work. Missing Runs, absent
 Step results and nonterminal or cancelled Runs remain incomplete. Committed
@@ -132,6 +134,12 @@ the subsequent committed controller decision reports
 `controller_result.availability: unavailable` and `result: incomplete`; those
 Runs alone cannot establish convergence. A fresh authorized invocation is
 required for continuation; readback starts no work.
+
+Regression and final verification consume the Step owner's successful settlement
+and verified cleanup. An exit declared in `success_codes`, including a nonzero
+exit, retains that accepted meaning in campaign progression and readback. An
+undeclared nonzero exit remains failed; membership, candidate, supervision and
+cleanup requirements still apply.
 
 ## Hashmarks dogfood acceptance
 
@@ -301,6 +309,15 @@ to refresh them or accept changed source declarations. Cache misses fetch the
 recorded commit; they never advance a branch implicitly. Commit the registry
 and generated lock with the workflow. There is no INI registry or Gitlink mode.
 
+Shared Agent inspection, preview, lock preview and execution consume remote Skill
+pins from `goon.lock` beside `.goonskills.yml` in the explicitly selected
+`agent.skill_root`. First lock that selected workflow through the CLI; then use
+that same absolute Skill root for the Shared Plan. The Shared Plan receives its
+own reviewed execution digest from the captured source. This consumes only the
+existing Skill pins, without refreshing them or treating the other workflow's
+Plan fingerprint as Shared Plan authority. A missing lock or changed registry
+continues to refuse remote Skill capture; use the explicit CLI lock/update flow.
+
 The managed Git object cache lives under
 `${XDG_CACHE_HOME:-~/.cache}/oh-goon/skill-sources`. Native Git retains selected
 objects, and temporary worktrees close after capture. Cache locations do not
@@ -357,6 +374,12 @@ Plan, inputs, authorized repository/Skill roots and acceptance selection. Only
 the repository bytes may change in this repair request. A changed Plan, Goon,
 source selector or Skill requires a new authorization. A cancellation callback
 can interrupt capture, including file reads, without returning a next handoff.
+
+For Git-owned Plans or Goons, transport the selected source graph and original
+resolved Plan's `goon_sources` as `source_graph` and `locked_goons`. Recapture
+uses the native Git owner to restore those exact revisions and holds its lease
+through capture. A retained graph supplies provenance; mutable local authoring
+is read again and must still match the authorized source.
 
 For remote Skills, pass the original resolved Plan's `skill_sources` as
 `locked_skills` during recapture and resolution of a supplied handoff. The

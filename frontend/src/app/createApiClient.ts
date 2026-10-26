@@ -85,6 +85,11 @@ export function createApiClient(mutations: MutationController): ApiClient {
       { path: { fleet_run_id: runId } },
       options,
     ),
+    agentCampaign: (campaignId, options) => readOperation(
+      op.get_agent_campaign.operationId,
+      { path: { campaign_id: campaignId } },
+      options,
+    ),
     compareFleetRuns: (runId, baselineRunId, options) => readOperation(
       op.compare_fleet_runs.operationId,
       { path: { fleet_run_id: runId, baseline_run_id: baselineRunId } },
@@ -246,10 +251,11 @@ export function createApiClient(mutations: MutationController): ApiClient {
       { path: { fleet_run_id: runId }, query: { after } },
       options,
     ),
-    cancelFleetRun: (runId) => write(
-      "fleet-run",
+    cancelFleetRun: (runId) => writeOperation(
+      mutations, "fleet-run",
       op.cancel_fleet_run.operationId,
       { path: { fleet_run_id: runId } },
+      { dispatch: "fleet-run-cancel" },
     ),
     readmitFleetRun: (runId, newFleetRunId) => write(
       "fleet-run",
@@ -282,14 +288,14 @@ export function createApiClient(mutations: MutationController): ApiClient {
       { path: { plan_key: planKey } },
       options,
     ),
-    inspectSharedPlanInputs: (planKey, expectedRevision, inputs = {}, options) => readOperation(
+    inspectSharedPlanInputs: (planKey, expectedRevision, inputs = {}, options, agent, repositoryIds) => readOperation(
       op.inspect_shared_plan_inputs.operationId,
-      { body: { plan_key: planKey, expected_revision: expectedRevision, inputs } },
+      { body: { plan_key: planKey, expected_revision: expectedRevision, inputs, ...(agent ? { agent, repository_ids: repositoryIds ?? [] } : {}) } },
       options,
     ),
-    previewSharedPlanLock: (planKey, expectedRevision, inputs = {}, options) => readOperation(
+    previewSharedPlanLock: (planKey, expectedRevision, inputs = {}, options, agent, repositoryIds) => readOperation(
       op.preview_shared_plan_lock.operationId,
-      { body: { plan_key: planKey, expected_revision: expectedRevision, inputs } },
+      { body: { plan_key: planKey, expected_revision: expectedRevision, inputs, ...(agent ? { agent, repository_ids: repositoryIds ?? [] } : {}) } },
       options,
     ),
     createSharedPlanFromTemplate: (templateKey, expectedTemplateSha256) => write(
@@ -302,9 +308,9 @@ export function createApiClient(mutations: MutationController): ApiClient {
       op.save_shared_plan.operationId,
       { path: { plan_key: planKey }, body: { content, expected_revision: expectedRevision } },
     ),
-    previewSharedPlan: (planKey, expectedRevision, repositoryIds, inputs = {}, options) => readOperation(
+    previewSharedPlan: (planKey, expectedRevision, repositoryIds, inputs = {}, options, agent) => readOperation(
       op.preview_shared_plan.operationId,
-      { body: { plan_key: planKey, expected_revision: expectedRevision, repository_ids: repositoryIds, inputs } },
+      { body: { plan_key: planKey, expected_revision: expectedRevision, repository_ids: repositoryIds, inputs, ...(agent ? { agent } : {}) } },
       options,
     ),
     leagueLineups: (options) => readOperation(op.league_lineups.operationId, {}, options),
@@ -318,7 +324,11 @@ export function createApiClient(mutations: MutationController): ApiClient {
       op.save_lineup.operationId,
       { path: { lineup_key: lineupKey }, body: { name, repositories, expected_revision: expectedRevision } },
     ),
-    startSharedPlanRun: (fleetRunId, planKey, repositoryIds, expectedPlanId, expectedPlanRevision, expectedExecutionDigest, repositoryInstanceIds, inputs = {}) => write(
+    repairSharedPlan: (request) => writeOperation(
+      mutations, "fleet-run", op.repair_shared_plan.operationId, { body: request },
+      { timeoutMs: (request.repair.timeout_seconds + 30) * 1000, dispatch: "agent-repair" },
+    ),
+    startSharedPlanRun: (fleetRunId, planKey, repositoryIds, expectedPlanId, expectedPlanRevision, expectedExecutionDigest, repositoryInstanceIds, inputs = {}, agent) => write(
       "fleet-run",
       op.run_shared_plan.operationId,
       {
@@ -331,6 +341,7 @@ export function createApiClient(mutations: MutationController): ApiClient {
           repository_ids: repositoryIds,
           repository_instance_ids: repositoryInstanceIds,
           inputs,
+          ...(agent ? { agent } : {}),
         },
       },
     ),

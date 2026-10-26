@@ -1,7 +1,10 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from oh_goon.core.models.fleet_plan_composition import PlanInputValue
+from oh_goon.core.models.run_configuration import RunAgentSelection, RunRepairSelection
 
 
 class TeamRunRequest(BaseModel):
@@ -23,6 +26,7 @@ class SharedPlanFromTemplateRequest(BaseModel):
 
 
 class SharedPlanRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     plan_key: str = Field(min_length=1, max_length=64)
     expected_plan_id: str = Field(min_length=1)
     expected_plan_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -30,7 +34,8 @@ class SharedPlanRunRequest(BaseModel):
     repository_ids: tuple[str, ...] = Field(min_length=1)
     repository_instance_ids: dict[str, str] = Field(min_length=1)
     fleet_run_id: str = Field(min_length=1)
-    inputs: dict[str, str] = Field(default_factory=dict)
+    inputs: dict[str, PlanInputValue] = Field(default_factory=dict)
+    agent: RunAgentSelection | None = None
 
     @model_validator(mode="after")
     def validate_repository_instances(self) -> "SharedPlanRunRequest":
@@ -44,22 +49,40 @@ class SharedPlanRunRequest(BaseModel):
 
 
 class SharedPlanLockPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     plan_key: str = Field(min_length=1, max_length=64)
     expected_revision: str = Field(min_length=64, max_length=64)
-    inputs: dict[str, str] = Field(default_factory=dict)
+    inputs: dict[str, PlanInputValue] = Field(default_factory=dict)
+    agent: RunAgentSelection | None = None
+    repository_ids: tuple[str, ...] = ()
 
 
 class SharedPlanPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     plan_key: str = Field(min_length=1, max_length=64)
     expected_revision: str = Field(min_length=64, max_length=64)
     repository_ids: tuple[str, ...] = Field(min_length=1)
-    inputs: dict[str, str] = Field(default_factory=dict)
+    inputs: dict[str, PlanInputValue] = Field(default_factory=dict)
+    agent: RunAgentSelection | None = None
 
     @model_validator(mode="after")
     def validate_repository_population(self) -> "SharedPlanPreviewRequest":
         if len(self.repository_ids) != len(set(self.repository_ids)):
             raise ValueError("repository_ids must be unique")
         return self
+
+
+class SharedPlanRepairRequest(SharedPlanRunRequest):
+    agent: RunAgentSelection
+    repair: RunRepairSelection
+    authorize_repair: Literal[True]
+
+    @field_validator("authorize_repair", mode="before")
+    @classmethod
+    def explicit_authorization(cls, value: object) -> object:
+        if value is not True:
+            raise ValueError("Repair requires explicit boolean authorization")
+        return value
 
 
 class LeagueLineupSaveRequest(BaseModel):
@@ -82,6 +105,7 @@ class SafePlanInputDiagnostic(BaseModel):
         "UNOWNED_PROJECTED_INPUT",
         "AMBIGUOUS_PROJECTED_INPUT",
         "PLAN_RESOLUTION_REJECTED",
+        "SOURCE_ACQUISITION_REQUIRED",
     ]
     inputs: list[str]
     safe_next_action: str

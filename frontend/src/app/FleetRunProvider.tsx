@@ -1,3 +1,4 @@
+import type { SharedPlanInputs } from "@/domain/api/ApiClient";
 import { createContext, type Context, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -6,7 +7,7 @@ import { useApiClient, useReadController, useReportMutationFeedback } from "@/ap
 import { useReadResource } from "@/app/reads/useReadResource";
 import { useAppBootstrap } from "@/app/bootstrap/AppBootstrapProvider";
 import type { FleetRunOptions } from "@/domain/api/ApiClient";
-import type { FleetRunDetail, FleetRunOverview, FleetRunState, FleetSnapshot, OperationAction } from "@generated/models";
+import type { FleetRunDetail, FleetRunOverview, FleetRunState, FleetSnapshot, OperationAction, RunAgentSelection } from "@generated/models";
 import type { WriteCommandResult } from "@/domain/mutations/WriteCommandResult";
 import { readScopesForResources, readScopesInvalidatedByFleetProgress } from "@/domain/reads/readResources";
 import { watchFleetRun } from "@/app/fleetRun/watchFleetRun";
@@ -52,7 +53,8 @@ interface FleetRunActionsValue {
     expectedPlanRevision: string,
     expectedExecutionDigest: string,
     repositoryInstanceIds: Record<string, string>,
-    inputs?: Record<string, string>,
+    inputs?: SharedPlanInputs,
+    agent?: RunAgentSelection | null,
   ): Promise<WriteCommandResult<FleetRunState>>;
   cancelFleet(runId: string): Promise<WriteCommandResult<FleetRunState>>;
   readmitFleet(runId: string): Promise<WriteCommandResult<FleetRunState>>;
@@ -264,7 +266,8 @@ export function FleetRunProvider({ children }: { children: ReactNode }) {
     expectedPlanRevision: string,
     expectedExecutionDigest: string,
     repositoryInstanceIds: Record<string, string>,
-    inputs: Record<string, string> = {},
+    inputs: SharedPlanInputs = {},
+    agent?: RunAgentSelection | null,
   ) => {
     const key = canonicalIdentity({
       internalPlan: planKey,
@@ -274,6 +277,7 @@ export function FleetRunProvider({ children }: { children: ReactNode }) {
       expectedExecutionDigest,
       repositoryInstanceIds,
       inputs,
+      agent: agent ?? null,
     });
     const fleetRunId = pendingFleetRunId(key);
     const result = await client.startSharedPlanRun(
@@ -285,6 +289,7 @@ export function FleetRunProvider({ children }: { children: ReactNode }) {
       expectedExecutionDigest,
       repositoryInstanceIds,
       inputs,
+      agent,
     );
     return acceptStartedRun(key, fleetRunId, result);
   }, [acceptStartedRun, client, pendingFleetRunId]);

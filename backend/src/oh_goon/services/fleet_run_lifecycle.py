@@ -39,6 +39,7 @@ from oh_goon.core.models.run_admission import (
 from oh_goon.core.models.run_launch import ApplicationLaunchReceipt
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import (
+    AgentStepDeliveryReference,
     FleetPlanTarget,
     GoonProjectDeliveryReference,
     OperationTarget,
@@ -148,6 +149,35 @@ class FleetRunLifecycle:
         """Delegate one worker-thread SQLite handle lifetime to the database owner."""
         with self._database.execution_connection_scope():
             yield
+
+    def release_unadmitted_agent_deliveries(
+        self,
+        fleet_run_id: str,
+        deliveries: tuple[AgentStepDeliveryReference, ...],
+        *,
+        owner_repository_id: str,
+    ) -> None:
+        """Release new source references only after original Journal admission readback."""
+        if self._content_store is None:
+            raise FleetPlanInvalid("Agent source cleanup requires its original content store")
+        detail = self._journal.read_view().run_detail(fleet_run_id)
+        target = detail.run.target if detail is not None else None
+        retained = (
+            {item.reference_id for item in target.agent_deliveries}
+            if isinstance(target, FleetPlanTarget)
+            else set()
+        )
+        failures: list[Exception] = []
+        for delivery in deliveries:
+            if delivery.reference_id not in retained:
+                try:
+                    self._content_store.release_reference(
+                        delivery.reference_id, owner_repository_id=owner_repository_id
+                    )
+                except Exception as exc:
+                    failures.append(exc)
+        if failures:
+            raise ExceptionGroup("Unadmitted Agent source cleanup failed", failures)
 
     @contextmanager
     def serialize_admission(self, identity: str) -> Iterator[None]:

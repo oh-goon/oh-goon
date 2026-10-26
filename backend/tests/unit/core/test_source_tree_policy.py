@@ -56,3 +56,23 @@ def test_frontend_reports_are_transient_only_at_owned_output_roots(name: str) ->
 
 def test_local_repository_catalog_is_not_a_global_execution_exclusion() -> None:
     assert not is_transient_source_path("repositories/local/README.md")
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "src/project.egg-info/PKG-INFO",
+        "project.egg-info",
+        "project-0.1.dist-info/METADATA",
+        "nested/.eggs/dependency.egg/EGG-INFO/PKG-INFO",
+    ),
+)
+def test_generated_python_distribution_metadata_is_transient(path: str) -> None:
+    assert is_transient_source_path(path)
+
+
+@pytest.mark.parametrize(
+    "path", ("build/recipe.txt", "dist/fixture.whl", "src/project/dist/schema.json")
+)
+def test_python_build_directory_names_do_not_exclude_authored_resources(path: str) -> None:
+    assert not is_transient_source_path(path)

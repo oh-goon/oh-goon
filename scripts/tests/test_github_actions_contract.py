@@ -120,6 +120,7 @@ case "${0##*/}" in
   make)
     printf 'make:%s\n' "$*" >> "$SDK_EVENTS"
     if [ "${SIM_TERM:-0}" = 1 ]; then kill -TERM "$SDK_WORKFLOW_PID"; fi
+    if [ "$1" = test-python-projects ]; then exit "${SIM_PROJECT_CHECK_STATUS:-0}"; fi
     exit "${SIM_CHECK_STATUS:-0}"
     ;;
   *) exit 99 ;;
@@ -203,9 +204,29 @@ def test_required_check_executes_exact_matrix_target_and_preserves_its_status(
     )
     assert result.returncode == check_status, result.stderr
     expected = [f"make:{target}"]
+    if target == "test-integration" and check_status == 0:
+        expected.append("make:test-python-projects")
     if target in {"backend-check", "test-integration"}:
         expected = ["mount", "view", *expected, "umount"]
     assert events == expected
+    assert not mounted
+
+
+@pytest.mark.process
+def test_required_integration_project_failure_preserves_status_and_releases_sdk_overlay(
+    tmp_path: Path,
+) -> None:
+    result, events, mounted = _run_required_check(
+        tmp_path, "test-integration", {"SIM_PROJECT_CHECK_STATUS": "23"}
+    )
+    assert result.returncode == 23, result.stderr
+    assert events == [
+        "mount",
+        "view",
+        "make:test-integration",
+        "make:test-python-projects",
+        "umount",
+    ]
     assert not mounted
 
 
