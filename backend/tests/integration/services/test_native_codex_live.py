@@ -2178,6 +2178,348 @@ unittest.main(argv=['live-document-patch-verification'])
 """
 
 
+_ASYNC_WINDOW_SOURCES: dict[str, str] = {
+    "async_window/__init__.py": "from .pipeline import ordered_map\n",
+    "async_window/pipeline.py": """async def ordered_map(function, iterable, *, limit=4):
+    for item in list(iterable):
+        yield await function(item)
+""",
+    "README.md": """# Bounded asynchronous ETL mapping
+
+Repair async_window.pipeline.ordered_map(function, iterable, *, limit=4).
+It returns an async iterator of awaited function(item) results in input order.
+Use only the Python standard library. The synchronous iterable may be single-pass
+and unbounded. Do not mutate/copy its items or close the caller-owned iterator.
+The function may return any native awaitable, including a Future, and may raise
+synchronously. Keep original result and exception objects, without wrapping them.
+
+The stream is lazy: construction and closing an unstarted stream do not touch
+the iterable or call the function. On the first pull, reject a limit that is not
+a positive non-bool integer with ValueError before touching either input.
+For valid input, acquire its iterator once. Submit up to limit items concurrently
+before waiting for the first ordered result. The window includes completed but
+unyielded items: never pull more than limit items ahead of yielded results.
+Do not advance input or refill a vacancy while the consumer is paused at yield.
+Refill when the next result is requested. Preserve input order even when work
+finishes out of order; a later worker failure is raised at its ordered position.
+
+If input iteration fails during a refill, propagate that original exception
+immediately. On worker failure, input failure, caller cancellation, or explicit
+aclose(), cancel and await all owned work before completing the transition.
+Await asynchronous worker finalizers too. Peer cleanup errors must not replace
+the original ordered worker/input error or caller cancellation. Explicit closure
+discards remaining results/errors. Never cancel unrelated caller tasks. Consumers
+that stop early use contextlib.aclosing or explicitly await stream.aclose().
+
+Only async_window/pipeline.py may change. Keep this README and __init__.py intact.
+Independent verification lives outside this source tree. This is a bounded
+submission-window contract, not a claim about global process memory.
+""",
+}
+
+_ASYNC_WINDOW_TASK = (
+    "Repair the bounded asynchronous ETL mapper described in README.md. Preserve the public "
+    "ordered_map API, ordered results/errors, lazy bounded submission window, native awaitables "
+    "and deterministic awaited cleanup on cancellation/closure. Use only the Python standard "
+    "library and edit async_window/pipeline.py only. Before editing, execute the exact supplied "
+    "repository_tools.list Hashmarks command and read the frozen Skill reference. Independent "
+    "verification runs after your coding Step."
+)
+
+_ASYNC_WINDOW_VERIFICATION = r"""import asyncio
+from contextlib import aclosing
+import pathlib
+import sys
+import unittest
+
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).resolve()))
+from async_window import ordered_map
+
+async def collect(function, source, *, limit=4):
+    async with aclosing(ordered_map(function, source, limit=limit)) as stream:
+        return [value async for value in stream]
+
+class MapperTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lazy_empty_and_invalid_limits(self):
+        class Untouched:
+            def __iter__(self):
+                raise AssertionError('input touched')
+        def forbidden(value):
+            raise AssertionError('function called')
+        stream = ordered_map(forbidden, Untouched())
+        await stream.aclose()
+        for limit in (True, False, 0, -1, 1.5, '2', None):
+            with self.subTest(limit=limit), self.assertRaises(ValueError):
+                async with aclosing(ordered_map(forbidden, Untouched(), limit=limit)) as stream:
+                    await anext(stream)
+        self.assertEqual(await collect(forbidden, []), [])
+
+    async def test_identity_and_single_pass_source(self):
+        values = [object(), {'mutable': []}, None]
+        original = tuple(values)
+        class Source:
+            iterations = 0
+            closed = False
+            def __iter__(self):
+                self.iterations += 1
+                if self.iterations != 1:
+                    raise AssertionError('source restarted')
+                return iter(values)
+            def close(self):
+                self.closed = True
+        source = Source()
+        async def identity(value):
+            return value
+        result = await collect(identity, source, limit=1)
+        self.assertEqual(source.iterations, 1)
+        self.assertFalse(source.closed)
+        self.assertEqual(tuple(values), original)
+        self.assertEqual(values[1], {'mutable': []})
+        self.assertTrue(all(a is b for a, b in zip(result, original, strict=True)))
+
+    async def test_concurrency_and_order(self):
+        gates = [asyncio.Event() for _ in range(3)]
+        ready = asyncio.Event()
+        entered = set()
+        active = 0
+        peak = 0
+        async def transform(value):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            try:
+                entered.add(value)
+                if {0, 1, 2} <= entered:
+                    ready.set()
+                if value < 3:
+                    await gates[value].wait()
+                return value * 10
+            finally:
+                active -= 1
+        result = asyncio.create_task(collect(transform, range(9), limit=3))
+        try:
+            await asyncio.wait_for(ready.wait(), 5)
+            gates[2].set()
+            gates[1].set()
+            await asyncio.sleep(0)
+            self.assertFalse(result.done())
+            gates[0].set()
+            self.assertEqual(await asyncio.wait_for(result, 5), list(range(0, 90, 10)))
+            self.assertEqual(peak, 3)
+            self.assertEqual(active, 0)
+        finally:
+            result.cancel()
+            await asyncio.gather(result, return_exceptions=True)
+
+    async def test_unbounded_source_window_and_explicit_close(self):
+        pulled, entered, finalized = [], [], []
+        blocked = asyncio.Event()
+        def source():
+            value = 0
+            while True:
+                pulled.append(value)
+                yield value
+                value += 1
+        async def transform(value):
+            entered.append(value)
+            try:
+                if value:
+                    await blocked.wait()
+                return value
+            finally:
+                await asyncio.sleep(0)
+                finalized.append(value)
+                if value:
+                    raise RuntimeError('discarded explicit-close peer failure')
+        # A finite tripwire avoids allowing an eager list() to exhaust host memory.
+        def bounded_tripwire():
+            for value in source():
+                if value == 30:
+                    raise AssertionError('unbounded prefetch')
+                yield value
+        stream = ordered_map(transform, bounded_tripwire(), limit=3)
+        try:
+            self.assertEqual(await asyncio.wait_for(anext(stream), 5), 0)
+            await asyncio.sleep(0)
+            self.assertEqual(pulled, [0, 1, 2])
+            self.assertCountEqual(entered, [0, 1, 2])
+            await stream.aclose()
+            self.assertCountEqual(finalized, [0, 1, 2])
+            self.assertEqual(pulled, [0, 1, 2])
+        finally:
+            await stream.aclose()
+
+    async def test_ordered_failure_and_peer_cleanup(self):
+        marker = LookupError('ordered failure')
+        first = asyncio.Event()
+        ready = asyncio.Event()
+        entered, finalized = [], []
+        async def transform(value):
+            entered.append(value)
+            if len(entered) == 3:
+                ready.set()
+            try:
+                if value == 0:
+                    await first.wait()
+                    return 'first'
+                if value == 1:
+                    raise marker
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0)
+                finalized.append(value)
+                if value == 2:
+                    raise RuntimeError('discarded peer cleanup failure')
+        stream = ordered_map(transform, range(3), limit=3)
+        request = asyncio.create_task(anext(stream))
+        try:
+            await asyncio.wait_for(ready.wait(), 5)
+            self.assertFalse(request.done())
+            first.set()
+            self.assertEqual(await asyncio.wait_for(request, 5), 'first')
+            with self.assertRaises(LookupError) as caught:
+                await anext(stream)
+            self.assertIs(caught.exception, marker)
+            self.assertCountEqual(finalized, [0, 1, 2])
+        finally:
+            request.cancel()
+            await asyncio.gather(request, return_exceptions=True)
+            await stream.aclose()
+
+    async def test_completed_results_still_occupy_submission_window(self):
+        pulled = []
+        def source():
+            for value in range(12):
+                pulled.append(value)
+                yield value
+        async def identity(value):
+            return value
+        async with aclosing(ordered_map(identity, source(), limit=3)) as stream:
+            for expected in range(4):
+                self.assertEqual(await anext(stream), expected)
+                await asyncio.sleep(0)
+                self.assertEqual(pulled, list(range(expected + 3)))
+
+    async def test_explicit_close_leaves_caller_iterator_open(self):
+        closed = []
+        def source():
+            try:
+                yield from range(100)
+            finally:
+                closed.append(True)
+        async def identity(value):
+            return value
+        caller_iterator = source()
+        stream = ordered_map(identity, caller_iterator, limit=2)
+        try:
+            self.assertEqual(await anext(stream), 0)
+            await stream.aclose()
+            self.assertEqual(closed, [])
+            self.assertEqual(next(caller_iterator), 2)
+        finally:
+            await stream.aclose()
+            caller_iterator.close()
+        self.assertEqual(closed, [True])
+
+    async def test_native_awaitables_and_synchronous_failure(self):
+        loop = asyncio.get_running_loop()
+        marker = ArithmeticError('call-time failure')
+        def native_future(value):
+            if value == 2:
+                raise marker
+            result = loop.create_future()
+            result.set_result(value)
+            return result
+        self.assertEqual(await collect(native_future, range(2)), [0, 1])
+        async with aclosing(ordered_map(native_future, range(3), limit=2)) as stream:
+            self.assertEqual(await anext(stream), 0)
+            self.assertEqual(await anext(stream), 1)
+            with self.assertRaises(ArithmeticError) as caught:
+                await anext(stream)
+            self.assertIs(caught.exception, marker)
+        class Awaitable:
+            def __init__(self, value):
+                self.value = value
+            def __await__(self):
+                async def resolve():
+                    return self.value
+                return resolve().__await__()
+        self.assertEqual(await collect(Awaitable, ['a', 'b']), ['a', 'b'])
+
+    async def test_source_failure_cancels_and_awaits_owned_work(self):
+        marker = OSError('source failed during refill')
+        finalized = []
+        class Source:
+            closed = False
+            position = 0
+            iterations = 0
+            def __iter__(self):
+                self.iterations += 1
+                if self.iterations != 1:
+                    raise AssertionError('source restarted')
+                return self
+            def __next__(self):
+                if self.position < 2:
+                    value = self.position
+                    self.position += 1
+                    return value
+                raise marker
+            def close(self):
+                self.closed = True
+        async def transform(value):
+            try:
+                if value:
+                    await asyncio.Event().wait()
+                return value
+            finally:
+                await asyncio.sleep(0)
+                finalized.append(value)
+                if value:
+                    raise RuntimeError('discarded input-failure peer error')
+        source = Source()
+        async with aclosing(ordered_map(transform, source, limit=2)) as stream:
+            self.assertEqual(await asyncio.wait_for(anext(stream), 5), 0)
+            await asyncio.sleep(0)
+            with self.assertRaises(OSError) as caught:
+                await anext(stream)
+            self.assertIs(caught.exception, marker)
+            self.assertCountEqual(finalized, [0, 1])
+        self.assertFalse(source.closed)
+
+    async def test_consumer_cancellation_awaits_workers_and_spares_other_tasks(self):
+        ready = asyncio.Event()
+        entered, finalized = [], []
+        async def transform(value):
+            entered.append(value)
+            if len(entered) == 3:
+                ready.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0)
+                finalized.append(value)
+                if value == 2:
+                    raise RuntimeError('discarded cancellation peer error')
+        unrelated = asyncio.create_task(asyncio.Event().wait())
+        stream = ordered_map(transform, range(10), limit=3)
+        request = asyncio.create_task(anext(stream))
+        try:
+            await asyncio.wait_for(ready.wait(), 5)
+            request.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await request
+            self.assertCountEqual(finalized, [0, 1, 2])
+            self.assertFalse(unrelated.done())
+        finally:
+            request.cancel()
+            unrelated.cancel()
+            await asyncio.gather(request, unrelated, return_exceptions=True)
+            await stream.aclose()
+
+unittest.main(argv=['live-codex-async-window-verification'])
+"""
+
+
 @pytest.mark.certification
 @pytest.mark.parametrize(
     "scenario",
@@ -2191,6 +2533,7 @@ unittest.main(argv=['live-document-patch-verification'])
         "http-node",
         "frames-node",
         "document-patch",
+        "async-window",
     ],
 )
 def test_legacy_live_chatgpt_coding_uses_original_run(
@@ -2226,6 +2569,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         "http-node": _HTTP_NODE_SOURCES,
         "frames-node": _FRAMES_NODE_SOURCES,
         "document-patch": _DOCUMENT_PATCH_SOURCES,
+        "async-window": _ASYNC_WINDOW_SOURCES,
     }[scenario]
     for relative, text in source_files.items():
         path = repo / relative
@@ -2249,6 +2593,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             "http-node": _HTTP_NODE_VERIFICATION,
             "frames-node": _FRAMES_NODE_VERIFICATION,
             "document-patch": _DOCUMENT_PATCH_VERIFICATION,
+            "async-window": _ASYNC_WINDOW_VERIFICATION,
         }[scenario],
         encoding="utf-8",
     )
@@ -2258,7 +2603,9 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         if node_program
         else (sys.executable, "-I", "-B", str(verifier), str(repo))
     )
-    baseline = run_command(*verification, cwd=repo)
+    # The serial async fixture hits three independent five-second event guards.
+    baseline_options = {"timeout": 30} if scenario == "async-window" else {}
+    baseline = run_command(*verification, cwd=repo, **baseline_options)
     assert baseline.returncode == 1
 
     argv_verifier = verifier.parent / "verify arguments.py"
@@ -2345,6 +2692,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         task = _FRAMES_NODE_TASK + f"\nSelected public Node executable: {node_program}\n"
     elif scenario == "document-patch":
         task = _DOCUMENT_PATCH_TASK
+    elif scenario == "async-window":
+        task = _ASYNC_WINDOW_TASK
     task_file = tmp_path / "task.txt"
     task_file.write_text(task, encoding="utf-8")
     catalog = tmp_path / "providers.json"
@@ -2664,6 +3013,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                     "docpatch/patch.py",
                     "docpatch/__main__.py",
                 },
+                "async-window": {"async_window/pipeline.py"},
                 "deploy-order": {"deploy_order/graph.py", "deploy_order/__main__.py"},
                 "eventlog": {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"},
                 "stocktake": {
