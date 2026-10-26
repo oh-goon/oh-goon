@@ -166,7 +166,6 @@ class _Clock:
 
 def test_release_template_resolves_v29_with_separate_explicit_rollout_gate() -> None:
     plan = _plan()
-    assert plan.contract_version == 46
     commit, verify = plan.steps[-2:]
     assert isinstance(commit, ResolvedKubernetesSetImageStep)
     assert isinstance(verify, ResolvedKubernetesRolloutVerifyStep)

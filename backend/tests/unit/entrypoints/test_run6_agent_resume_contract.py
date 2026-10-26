@@ -60,6 +60,8 @@ class _Tape:
             exit_code=7,
             reason="Original verifier failure",
             native_agent_observations=(),
+            project_source=None,
+            uv=None,
             settlement=_Facts(
                 {"outcome": "FAILED", "reason": "FAILED_EXIT", "cleanup": "VERIFIED"}
             ),

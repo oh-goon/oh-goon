@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from oh_goon.cli import main
+from oh_goon.core.execution_lock_identity import LOCK_VERSION
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.services.execution_lock_persistence import load_execution_lock
 
@@ -544,7 +545,7 @@ def test_inspection_projects_authored_skill_references_and_unverified_pin_record
     write_execution_lock(
         lock_path,
         ExecutionLock(
-            lock_version=1,
+            lock_version=LOCK_VERSION,
             plan="sha256:" + "0" * 64,
             digest="sha256:" + "1" * 64,
             skill_sources=(
