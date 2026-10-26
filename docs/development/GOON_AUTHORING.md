@@ -14,11 +14,12 @@ An Atomic Goon owns ordered `steps:`. A Composite Goon owns ordered `goons:`. It
 uv:
   project: backend
   group: dev
+  lock_mode: frozen
 steps:
 - run: uv run pytest
 ```
 
-That is the baseline when the locked project lives under `backend`; omit `project` when
+That is the baseline when the selected project lives under `backend`; omit `project` when
 `pyproject.toml` and `uv.lock` are at repository root. `uv:` delegates project validity,
 materialization and console-entrypoint execution to native uv. `uv.lock` remains native
 dependency authority. Do not copy package lists, lock hashes, cache keys, warm-up Steps,
@@ -26,6 +27,10 @@ dependency authority. Do not copy package lists, lock hashes, cache keys, warm-u
 
 Omit `uv.group` to install the base project and its runtime dependencies without
 default dependency groups. An explicit group adds that group's dependencies.
+`uv.lock_mode` defaults to `frozen`, consuming the existing native lock without a
+metadata-freshness check or rewrite. Select `locked` to require native freshness
+refusal. Neither mode updates dependency resolution or falls back to another mode.
+Both preserve the execution-lock binding to captured project and lock bytes.
 
 ## Package-owned Python Goon
 
@@ -48,7 +53,8 @@ Contained native uv workspace members are allowed; local dependency, workspace
 and virtual lock-source paths stay within the captured package.
 
 `runtime: python` selects this package, independently of the target repository.
-Native uv installs it with `--locked --no-default-groups --no-editable` into an
+Native uv installs it with the selected `--frozen` or `--locked` mode plus
+`--no-default-groups --no-editable` into an
 owned environment. Omit `uv` for base-only execution; `uv: {group: dev}` selects
 an additional group. `uv.project` is invalid for package-owned runtime. Commands
 name the installed entry point directly and receive no ambient executable fallback.

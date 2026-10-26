@@ -1,4 +1,5 @@
 runtime: python
+uv: {lock_mode: frozen}
 inputs:
   random_seed:
     type: integer

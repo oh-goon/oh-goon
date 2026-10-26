@@ -176,7 +176,7 @@ def _uv_plan() -> ResolvedFleetPlan:
                     "build",
                     "demo-tool",
                 ),
-                uv=UvExecutionEnvironment(project="backend", group="build"),
+                uv=UvExecutionEnvironment(lock_mode="frozen", project="backend", group="build"),
             ),
         ),
     )

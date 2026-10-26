@@ -142,7 +142,7 @@ def _requirement_summary(requirement: RepositoryRequirement) -> str:
         selection = (
             f"group={requirement.group}" if requirement.group is not None else "base dependencies"
         )
-        return f"  require uv_project: {selection}"
+        return f"  require uv_project: {selection} lock_mode={requirement.lock_mode}"
     qualifiers = []
     if requirement.non_empty:
         qualifiers.append("non_empty=true")

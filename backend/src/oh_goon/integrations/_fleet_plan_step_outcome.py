@@ -23,6 +23,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanOutputEvidence,
     PlanStandardIsolationEvidence,
     PlanStepSettlementEvidence,
+    PlanUvPreparationEvidence,
 )
 from oh_goon.core.models.fleet_plan_release_evidence import (
     KubernetesRolloutVerificationEvidence,
@@ -57,6 +58,7 @@ class StepOutcome:
     execution_authority_economics: tuple[ExecutionAuthorityEconomicsReceipt, ...] = ()
     physical_execution_id: str | None = None
     standard_isolation: PlanStandardIsolationEvidence | None = None
+    uv_preparation: PlanUvPreparationEvidence | None = None
     # Tail capture retains diagnostic text; evidence covers the whole original raw stream.
     stdout_evidence: PlanOutputEvidence | None = None
     # Adapters distinguish native completion from process-free work and proven launch refusal.

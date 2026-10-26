@@ -58,6 +58,8 @@ Feature directory names are the capability catalog. Do not create a separate han
 
 Application-level composition. `App.tsx` owns top-level page selection, `app/api/` owns transport boundaries, `createApiClient.ts` binds generated operation identities to the readable API surface, and app read/mutation owners coordinate request lifecycle behavior.
 
+The shared mutation controller serializes writes. A synchronous Agent repair request retains its write fence while child Runs execute, but permits one Fleet Run cancellation request to reach the server. Both responses use the same causality and read invalidation owner; ordinary write controls remain busy until both requests settle. Active Run cancellation stays available during repair and follows the backend Run's cancelling state.
+
 ### `domain/`
 
 Framework-light frontend facts and interfaces for API use, reads, mutations, identity, presentation and Fleet state. Domain code must not duplicate backend execution/admission/template semantics or generated operation metadata.

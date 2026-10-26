@@ -389,7 +389,7 @@ def test_service_daemon_shutdown_preserves_failed_preflight_timeout_and_caller_c
     target = FleetPlanTarget(
         kind="fleet_plan",
         plan=plan,
-        source=PlanFileSource(sha256="0" * 64),
+        source=PlanFileSource(sha256=plan.configuration.root_source_sha256),
         identity=structural_execution_identity(plan),
         agent_deliveries=tuple(
             AgentStepDeliveryReference(

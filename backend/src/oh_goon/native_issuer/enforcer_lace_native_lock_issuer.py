@@ -25,7 +25,7 @@ from oh_goon.core.enforcer_lace_trust import (
     canonical_bytes,
     digest,
 )
-from oh_goon.core.models.fleet_plan_requirements import UvProjectRequirement
+from oh_goon.core.models.fleet_plan_requirements import UvLockMode, UvProjectRequirement
 from oh_goon.core.models.run_events import RunAdmittedEvent
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.path_authority import RepositoryPathSpace
@@ -35,12 +35,12 @@ from oh_goon.native_issuer.enforcer_lace_prework_capture import PreworkRunCaptur
 from oh_goon.runtime.journal import Journal
 
 LOCK_FIELD = "lock_identity"
-LOCK_DOMAIN = "oh-goon/fleet-run-selected-native-uv-locks/v1"
+LOCK_DOMAIN = "oh-goon/fleet-run-selected-native-uv-locks/v2"
 
 
 def _selected_projects(
     journal: Journal, run_id: str, *, prework: PreworkRunCapture | None = None
-) -> tuple[RunAdmittedEvent, int, dict[str, tuple[str, ...]], dict[str, Path]]:
+) -> tuple[RunAdmittedEvent, int, dict[tuple[str, UvLockMode], tuple[str, ...]], dict[str, Path]]:
     admitted, revision = _read_original_admission(journal, run_id, prework=prework)
     target = admitted.target
     if not isinstance(target, FleetPlanTarget):
@@ -50,14 +50,17 @@ def _selected_projects(
         raise TrustProtocolError("admitted Plan has no selected native uv lock authority")
     pairs = tuple(
         sorted(
-            ((r.project, r.group) for r in requirements), key=lambda pair: (pair[0], pair[1] or "")
+            ((r.project, r.group, r.lock_mode) for r in requirements),
+            key=lambda pair: (pair[0], pair[1] or "", pair[2]),
         )
     )
     if len(pairs) != len(set(pairs)):
         raise TrustProtocolError("duplicate uv project requirement")
     groups = {
-        project: tuple(sorted(g for p, g in pairs if p == project and g is not None))
-        for project in sorted({p for p, _ in pairs})
+        (project, mode): tuple(
+            sorted(g for p, g, m in pairs if p == project and m == mode and g is not None)
+        )
+        for project, mode in sorted({(p, m) for p, _, m in pairs})
     }
     roots = {target.repository_id: target.path for target in admitted.targets}
     selected = tuple(item.repository_id for item in admitted.repository_admissions)
@@ -95,7 +98,10 @@ def _safe_file_identity(path: Path) -> str:
 
 
 def _measure(
-    groups: dict[str, tuple[str, ...]], roots: dict[str, Path], *, native_check: bool
+    groups: dict[tuple[str, UvLockMode], tuple[str, ...]],
+    roots: dict[str, Path],
+    *,
+    native_check: bool,
 ) -> tuple[dict[str, object], ...]:
     entries: list[dict[str, object]] = []
     for repository_id in sorted(roots):
@@ -108,7 +114,7 @@ def _measure(
         ):
             raise TrustProtocolError("unsafe durable repository root for native lock")
         space = RepositoryPathSpace.from_root(root)
-        for relative, selected_groups in groups.items():
+        for (relative, lock_mode), selected_groups in groups.items():
             try:
                 project = space.resolve(
                     relative,
@@ -122,7 +128,7 @@ def _measure(
                 raise TrustProtocolError("uv project traverses a filesystem alias")
             intent = _safe_file_identity(project / "pyproject.toml")
             lock = _safe_file_identity(project / "uv.lock")
-            if native_check:
+            if native_check and lock_mode == "locked":
                 issue = native_uv_locked_project_issue(project)
                 if issue is not None:
                     raise TrustProtocolError("native uv rejected admitted lock freshness: " + issue)
@@ -131,6 +137,7 @@ def _measure(
                     "repository_id": repository_id,
                     "project": relative,
                     "groups": list(selected_groups),
+                    "lock_mode": lock_mode,
                     "pyproject_sha256": intent,
                     "uv_lock_sha256": lock,
                 }
@@ -139,7 +146,7 @@ def _measure(
 
 
 def observed_admitted_run_lock_identity(*, journal: Journal, run_id: str) -> str:
-    """Compute exact selected lock identity, including one native freshness check.
+    """Bind selected bytes/mode; check native freshness only when locked is selected.
 
     This non-live observation cannot replace a pre-work capture/commit transaction.
     """
@@ -160,7 +167,7 @@ def issue_observed_captured_run_lock_identity(
     signing_key: Ed25519PrivateKey,
     prework: PreworkRunCapture | None = None,
 ) -> IssuerEvidence:
-    """Sign only a native-uv-checked lock identity from the admitted Run's Plan."""
+    """Sign selected native lock bytes and mode without adding frozen freshness checks."""
     contract.verify()
     if (
         not isinstance(signing_key, Ed25519PrivateKey)

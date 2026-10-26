@@ -217,7 +217,11 @@ and [run configuration](TEMPLATE_INPUT_INSPECTION.md#source-and-value-owners).
 The Goon's uv project/group may reference declared inputs. They are bound before
 requirements, native preparation or execution. Omit `group` for base project
 dependencies with no default groups; an explicit group adds its dependencies.
-Derived uv requirements remain with the declaring Atomic Goon and are supported
+`uv.lock_mode` is a literal `frozen` (the default) or `locked` selection, retained
+with the resolved Step and requirement. Frozen consumes the existing native lock
+without a freshness check; locked asks native uv to reject a required change.
+Neither selection refreshes native resolution. Derived uv requirements remain
+with the declaring Atomic Goon and are supported
 for ordinary verification as environment requirements. CI/CD-only repository
 requirements remain CI/CD-only.
 

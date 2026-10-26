@@ -22,7 +22,7 @@ from tests.unit.services.test_group_a_verified_ingress_authorities import (
 )
 
 
-def fixture(tmp_path: Path, monkeypatch):
+def fixture(tmp_path: Path, monkeypatch, *, lock_mode="locked", stale=False):
     from oh_goon.core.models.fleet_executor import (
         FleetExecutorPlacement,
         PlanExecutorCapacityEvidence,
@@ -60,7 +60,7 @@ def fixture(tmp_path: Path, monkeypatch):
         description=plain.description,
         steps=plain.steps,
         execution=CicdExecutionPolicy(),
-        requirements=(UvProjectRequirement(project=".", group="dev"),),
+        requirements=(UvProjectRequirement(lock_mode=lock_mode, project=".", group="dev"),),
         imports=plain.imports,
         step_sources=plain.step_sources,
     )
@@ -98,6 +98,13 @@ def fixture(tmp_path: Path, monkeypatch):
             capture_output=True,
             text=True,
         )
+        if stale:
+            metadata = root / "pyproject.toml"
+            metadata.write_text(
+                metadata.read_text().replace(
+                    "dependencies = []", 'dependencies = ["absent-mode-probe==0.0.1"]'
+                )
+            )
     identities.sort(key=lambda x: x.repository_id)
     admissions.sort(key=lambda x: x.repository_id)
     monkeypatch.setattr(source_native, "repository_subject_instance_id", lambda p: observed[p][0])
@@ -177,6 +184,21 @@ def test_native_uv_positive_and_independent_ed25519_verification(tmp_path, monke
     )
     assert sign(journal, contract) == signed
     assert len(observed) == 3
+
+
+def test_frozen_admitted_lock_identity_never_checks_freshness(tmp_path, monkeypatch):
+    def forbidden_check(_project):
+        pytest.fail("frozen admitted selection must not invoke native lock freshness")
+
+    monkeypatch.setattr(issuer, "native_uv_locked_project_issue", forbidden_check)
+    journal, contract, observed = fixture(tmp_path, monkeypatch, lock_mode="frozen", stale=True)
+    locks = {root: (root / "uv.lock").read_bytes() for root in observed}
+    assert sign(journal, contract).field == "lock_identity"
+    assert (
+        issuer.observed_admitted_run_lock_identity(journal=journal, run_id="durable-run")
+        == contract.fields["lock_identity"]
+    )
+    assert all((root / "uv.lock").read_bytes() == data for root, data in locks.items())
 
 
 def test_lock_mutation_and_stale_native_lock_rejected(tmp_path, monkeypatch):

@@ -129,6 +129,10 @@ def inspect_run_configuration(
             selections.append(
                 {
                     "step": step.step_id,
+                    "lock_mode": step.uv.lock_mode,
+                    "freshness": "not_checked"
+                    if step.uv.lock_mode == "frozen"
+                    else "not_established",
                     "declared_group": step.uv.group,
                     "group": group,
                     "group_state": state,

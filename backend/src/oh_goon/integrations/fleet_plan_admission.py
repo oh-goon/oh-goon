@@ -219,12 +219,12 @@ def _validate_uv_project_requirement(
     if project is None:
         return
     if not project.is_dir():
-        issues.append(f"locked UV project directory is missing: {requirement.project}")
+        issues.append(f"selected UV project directory is missing: {requirement.project}")
         return
     if not (project / "pyproject.toml").is_file():
-        issues.append(f"locked UV project requires pyproject.toml: {requirement.project}")
+        issues.append(f"selected UV project requires pyproject.toml: {requirement.project}")
     if not (project / "uv.lock").is_file():
-        issues.append(f"locked UV project requires uv.lock: {requirement.project}")
+        issues.append(f"selected UV project requires uv.lock: {requirement.project}")
 
 
 _MISSING = object()

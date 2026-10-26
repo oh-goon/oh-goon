@@ -149,7 +149,9 @@ def finalize_composition_scope(
     own_requirements = list(compiled.requirements)
     if any(isinstance(raw, CommandPlanStep) and raw.uv is not None for raw in compiled.steps):
         own_requirements.extend(
-            UvProjectRequirement(project=step.uv.project, group=step.uv.group)
+            UvProjectRequirement(
+                project=step.uv.project, group=step.uv.group, lock_mode=step.uv.lock_mode
+            )
             for step in steps
             if isinstance(step, ResolvedCommandStep)
             and step.uv is not None

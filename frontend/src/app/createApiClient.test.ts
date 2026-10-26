@@ -60,6 +60,6 @@ describe("createApiClient write fence transport", () => {
     });
     expect(write).toHaveBeenNthCalledWith(7, mutations, "fleet-run", op.cancel_fleet_run.operationId, {
       path: { fleet_run_id: "run-b" },
-    });
+    }, { dispatch: "fleet-run-cancel" });
   });
 });

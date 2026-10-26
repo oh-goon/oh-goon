@@ -54,7 +54,7 @@ def _step(step_id: str = "package") -> ResolvedCommandStep:
             "build",
             "oh-goon-package-source",
         ),
-        uv=UvExecutionEnvironment(project="backend", group="build"),
+        uv=UvExecutionEnvironment(lock_mode="frozen", project="backend", group="build"),
         timeout_seconds=60,
     )
 
@@ -165,7 +165,7 @@ def test_untrusted_uv_preparation_defers_every_build_to_isolated_step(
     )
     step = _step().model_copy(
         update={
-            "uv": UvExecutionEnvironment(source="package"),
+            "uv": UvExecutionEnvironment(lock_mode="frozen", source="package"),
             "project_source": project,
             "argv": (
                 "uv",
@@ -292,7 +292,7 @@ def test_uv_preparation_acquires_once_per_project_group_and_keeps_only_native_ca
         "sync",
         "--project",
         str(repository.path / "backend"),
-        "--locked",
+        "--frozen",
         "--no-default-groups",
         "--group",
         "build",
@@ -305,6 +305,39 @@ def test_uv_preparation_acquires_once_per_project_group_and_keeps_only_native_ca
     assert preparation_environments.is_dir()
     assert tuple(preparation_environments.iterdir()) == ()
     assert kwargs["env"]["UV_PROJECT_ENVIRONMENT"] != str(repository.path / "backend" / ".venv")
+
+
+def test_uv_preparation_keeps_same_project_modes_independent(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    first = _step("frozen")
+    assert first.uv is not None
+    second = first.model_copy(
+        update={
+            "step_id": "locked",
+            "uv": first.uv.model_copy(update={"lock_mode": "locked"}),
+            "argv": tuple("--locked" if token == "--frozen" else token for token in first.argv),
+        }
+    )
+    calls: list[tuple[tuple[str, ...], str]] = []
+
+    def runner(*argv: str, **options: object) -> CommandResult:
+        environment = cast(dict[str, str], options["env"])
+        calls.append((argv, environment["UV_PROJECT_ENVIRONMENT"]))
+        return _ok(*argv)
+
+    runtimes = prepare_uv_project_runtimes(
+        _plan(first, second),
+        source_root=repository.path,
+        run_root=tmp_path / "run",
+        path_authority=_path_authority(tmp_path),
+        cancel_requested=None,
+        command_runner=runner,
+        python_resolver=lambda _uv: Path("/usr/bin/python3"),
+    )
+    assert [argv[4] for argv, _ in calls] == ["--frozen", "--locked"]
+    assert calls[0][1] != calls[1][1]
+    assert runtimes["frozen"].lock_mode == "frozen"
+    assert runtimes["locked"].lock_mode == "locked"
 
 
 def test_uv_preparation_preserves_native_tls_and_proxy_transport(
@@ -526,7 +559,7 @@ def test_uv_preparation_failure_stops_before_application_work(
         "sync",
         "--project",
         str(repository.path / "backend"),
-        "--locked",
+        "--frozen",
         "--no-default-groups",
         "--group",
         "build",
@@ -558,7 +591,7 @@ def test_trusted_package_build_writes_only_owned_copy_and_retains_unsettled_work
     (captured / "pyproject.toml").write_bytes(b"authored project metadata")
     step = _step().model_copy(
         update={
-            "uv": UvExecutionEnvironment(source="package"),
+            "uv": UvExecutionEnvironment(lock_mode="frozen", source="package"),
             "project_source": project,
         }
     )
@@ -633,7 +666,7 @@ def test_package_preparation_refuses_changed_source_before_backend_execution(
     )
     step = _step().model_copy(
         update={
-            "uv": UvExecutionEnvironment(source="package"),
+            "uv": UvExecutionEnvironment(lock_mode="frozen", source="package"),
             "project_source": project,
         }
     )
@@ -682,7 +715,7 @@ def test_direct_package_builds_keep_repeated_import_source_immutable(
     step = _step().model_copy(
         update={
             "project_source": project,
-            "uv": UvExecutionEnvironment(source="package"),
+            "uv": UvExecutionEnvironment(lock_mode="frozen", source="package"),
             "argv": (
                 "uv",
                 "run",
@@ -792,6 +825,7 @@ def test_strict_uv_attempt_materializes_offline_then_runs_no_sync(
         command_runner=runner,
         git_command_runner=runner,
         managed_runtime=UvProjectManagedRuntime(
+            lock_mode="frozen",
             project="backend",
             group="build",
             cache=tmp_path / "prepared-cache",
@@ -839,7 +873,6 @@ def test_strict_uv_attempt_materializes_offline_then_runs_no_sync(
         "uv",
         "run",
         "--no-sync",
-        "--frozen",
         "--no-default-groups",
         "--project",
         str(repository / "backend"),
@@ -900,6 +933,7 @@ def test_strict_uv_materialization_failure_prevents_application_command(
         command_runner=reject,
         git_command_runner=reject,
         managed_runtime=UvProjectManagedRuntime(
+            lock_mode="frozen",
             project="backend",
             group="build",
             cache=tmp_path / "prepared-cache",
@@ -959,7 +993,7 @@ def test_untrusted_uv_attempt_uses_locked_isolated_build_before_installed_comman
     if package:
         step = step.model_copy(
             update={
-                "uv": UvExecutionEnvironment(source="package"),
+                "uv": UvExecutionEnvironment(lock_mode="frozen", source="package"),
                 "argv": (
                     "uv",
                     "run",
@@ -1003,6 +1037,7 @@ def test_untrusted_uv_attempt_uses_locked_isolated_build_before_installed_comman
         command_runner=runner,
         git_command_runner=runner,
         managed_runtime=UvProjectManagedRuntime(
+            lock_mode="frozen",
             project="." if package else "backend",
             group=None if package else "build",
             cache=tmp_path / "empty-prepared-cache",
@@ -1023,7 +1058,7 @@ def test_untrusted_uv_attempt_uses_locked_isolated_build_before_installed_comman
         "sync",
         "--project",
         str(project),
-        "--locked",
+        "--frozen",
         "--link-mode",
         "copy",
         "--no-default-groups",
@@ -1096,6 +1131,7 @@ def test_strict_uv_build_transports_original_runtime_supervision(tmp_path: Path)
         command_runner=runner,
         git_command_runner=runner,
         managed_runtime=UvProjectManagedRuntime(
+            lock_mode="frozen",
             project="backend",
             group="build",
             cache=tmp_path / "cache",
@@ -1134,6 +1170,7 @@ def test_uv_prepared_cache_seed_has_identity_owner(
         identity=binding_identity,
     )
     runtime = UvProjectManagedRuntime(
+        lock_mode="frozen",
         project="backend",
         group="build",
         cache=prepared_cache,
@@ -1192,6 +1229,7 @@ def test_physical_attempt_consumes_prepared_uv_cache_and_binds_result_identity(
         identity=binding_identity,
     )
     runtime = UvProjectManagedRuntime(
+        lock_mode="frozen",
         project="backend",
         group="build",
         cache=prepared_cache,
@@ -1328,6 +1366,7 @@ def test_strict_uv_attempt_copy_link_mode_prevents_hard_linked_cache_output(
         command_runner=runner,
         git_command_runner=runner,
         managed_runtime=UvProjectManagedRuntime(
+            lock_mode="frozen",
             project="backend",
             group="build",
             cache=prepared_cache,

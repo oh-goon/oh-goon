@@ -819,6 +819,7 @@ def test_uv_system_python_exact_prepared_path_is_preserved_as_runtime_alias(
         (tool,),
         {
             "package": UvProjectManagedRuntime(
+                lock_mode="frozen",
                 project="backend",
                 group="build",
                 cache=tmp_path / "cache",

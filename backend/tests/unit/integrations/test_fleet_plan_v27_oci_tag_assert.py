@@ -65,7 +65,7 @@ def _layout(root: Path) -> AttemptPathLayout:
 def test_tag_gate_resolves_to_v27_read_only_registry_authority() -> None:
     plan = _plan()
 
-    assert plan.contract_version == 45
+    assert plan.contract_version == 46
     assert len(plan.steps) == 1
     step = plan.steps[0]
     assert isinstance(step, ResolvedOciTagAssertStep)

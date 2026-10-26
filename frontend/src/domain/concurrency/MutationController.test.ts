@@ -86,4 +86,55 @@ describe("MutationController", () => {
     });
   });
 
+  it("keeps cancellation exclusive during an ordinary write", async () => {
+    const controller = new MutationController();
+    let finish!: () => void;
+    const pending = controller.execute("fleet-run", () => new Promise<void>((resolve) => { finish = resolve; }));
+    const cancel = async () => "cancelled";
+
+    await expect(controller.execute("fleet-run", cancel, "fleet-run-cancel")).rejects.toBeInstanceOf(MutationBusyError);
+    await expect(controller.execute("fleet-run", async () => undefined, "agent-repair")).rejects.toBeInstanceOf(MutationBusyError);
+    finish();
+    await pending;
+    await expect(controller.execute("fleet-run", cancel, "fleet-run-cancel")).resolves.toEqual({ value: "cancelled", causalityRevision: 2 });
+    expect(controller.getSnapshot()).toBe(false);
+  });
+
+  it("releases a failed cancellation for retry without releasing the repair write fence", async () => {
+    const controller = new MutationController();
+    let finishRepair!: () => void;
+    let failCancellation!: (error: Error) => void;
+    const repair = controller.execute("fleet-run", () => new Promise<void>((resolve) => { finishRepair = resolve; }), "agent-repair");
+    const cancellation = controller.execute("fleet-run", () => new Promise<void>((_resolve, reject) => { failCancellation = reject; }), "fleet-run-cancel");
+
+    await expect(controller.execute("fleet-run", async () => undefined, "fleet-run-cancel")).rejects.toBeInstanceOf(MutationBusyError);
+    failCancellation(new Error("cancellation transport failed"));
+    await expect(cancellation).rejects.toThrow("cancellation transport failed");
+    expect(controller.getSnapshot()).toBe(true);
+    expect(controller.causality.current()).toBe(0);
+    await expect(controller.execute("locations", async () => undefined)).rejects.toBeInstanceOf(MutationBusyError);
+    await expect(controller.execute("fleet-run", async () => "cancelled", "fleet-run-cancel")).resolves.toEqual({ value: "cancelled", causalityRevision: 1 });
+    expect(controller.getSnapshot()).toBe(true);
+    finishRepair();
+    await repair;
+    expect(controller.causality.current()).toBe(2);
+    expect(controller.getSnapshot()).toBe(false);
+  });
+
+  it("retains a dispatched cancellation's write fence when repair transport fails first", async () => {
+    const controller = new MutationController();
+    let failRepair!: (error: Error) => void;
+    let finishCancellation!: () => void;
+    const repair = controller.execute("fleet-run", () => new Promise<void>((_resolve, reject) => { failRepair = reject; }), "agent-repair");
+    const cancellation = controller.execute("fleet-run", () => new Promise<void>((resolve) => { finishCancellation = resolve; }), "fleet-run-cancel");
+
+    failRepair(new Error("repair connection lost"));
+    await expect(repair).rejects.toThrow("repair connection lost");
+    expect(controller.getSnapshot()).toBe(true);
+    await expect(controller.execute("fleet-run", async () => undefined, "agent-repair")).rejects.toBeInstanceOf(MutationBusyError);
+    await expect(controller.execute("fleet-run", async () => undefined, "fleet-run-cancel")).rejects.toBeInstanceOf(MutationBusyError);
+    finishCancellation();
+    await expect(cancellation).resolves.toEqual({ value: undefined, causalityRevision: 1 });
+    expect(controller.getSnapshot()).toBe(false);
+  });
 });

@@ -46,6 +46,7 @@ from oh_goon.integrations.git_source_preparation import prepare_git_source
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from tests.factories.agent_review import agent_review_case
+from tests.factories.python_goon_projects import write_isolated_build_project
 from tests.integration.api.client import authenticated_api_client
 
 
@@ -223,6 +224,13 @@ model = "synthetic/reviewer"
         ),
         (
             "accepted_nonzero",
+            2,
+            "converged",
+            ["review", "adjudicate", "repair", "regression", "review", "verification"],
+            10,
+        ),
+        (
+            "python_phases",
             2,
             "converged",
             ["review", "adjudicate", "repair", "regression", "review", "verification"],
@@ -455,7 +463,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                 endpoint=f"http://127.0.0.1:{server.server_port}",
                 plan_template=template_key,
             )
-            if scenario == "accepted_nonzero":
+            if scenario in ("accepted_nonzero", "python_phases"):
                 from oh_goon.runtime.goon_templates import GoonTemplateStore
 
                 templates = GoonTemplateStore()
@@ -467,23 +475,67 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                 for edge in composite["goons"]:
                     if edge["phase"] in ("regression", "verification"):
                         edge["from"] = "../.."
+                        if scenario == "python_phases":
+                            edge["pass"] = ["candidate_directory"]
+                if scenario == "python_phases":
+                    composite["inputs"] = [
+                        value
+                        for value in composite["inputs"]
+                        if value not in ("regression_command", "verification_command")
+                    ]
+                    options["inputs"].pop("regression_command")
+                    options["inputs"].pop("verification_command")
+                    composite["inputs"].append("candidate_directory")
+                    options["inputs"]["candidate_directory"] = str(repo)
                 (catalog / "custom/goon.yml").write_text(yaml.safe_dump(composite, sort_keys=False))
                 (catalog / "custom/README.md").write_text("# agents/custom\n")
                 for phase in ("regression", "verification"):
                     package = catalog / phase
-                    package.mkdir()
-                    content = yaml.safe_load(templates.source(f"agents/{phase}").content)
-                    content["steps"][0]["success_codes"] = [0, 1]
+                    if scenario == "python_phases":
+                        write_isolated_build_project(package)
+                        metadata = package / "pyproject.toml"
+                        metadata.write_text(
+                            metadata.read_text().replace(
+                                "[project.scripts]",
+                                'dependencies = ["absent-mode-probe==0.0.1"]\n[project.scripts]',
+                            )
+                        )
+                        (package / "isolated_app.py").write_text(
+                            "import argparse\n"
+                            "from pathlib import Path\n"
+                            "def main():\n"
+                            "    parser = argparse.ArgumentParser()\n"
+                            "    parser.add_argument('--candidate', required=True)\n"
+                            "    candidate = Path(parser.parse_args().candidate)\n"
+                            "    assert (candidate / 'code.txt').read_text() == 'repaired\\n'\n"
+                            "    assert (candidate / 'regression.txt').is_file()\n"
+                            "    print('native-python-phase-ran')\n"
+                        )
+                        content = {
+                            "runtime": "python",
+                            "uv": {"lock_mode": "frozen"},
+                            "inputs": {"candidate_directory": {"type": "string"}},
+                            "steps": [
+                                {
+                                    "run": "isolated-build --candidate ${{ inputs.candidate_directory }}"
+                                }
+                            ],
+                        }
+                    else:
+                        package.mkdir()
+                        content = yaml.safe_load(templates.source(f"agents/{phase}").content)
+                        content["steps"][0]["success_codes"] = [0, 1]
                     (package / "goon.yml").write_text(yaml.safe_dump(content, sort_keys=False))
                     (package / "README.md").write_text(f"# agents/{phase}\n")
                 path.write_text(
                     "execution: {purpose: verification}\ngoons:\n- import: agents/custom\n  from: local-goons\n"
                 )
-                check = repo / "check"
-                check.write_text(
-                    check.read_text()
-                    + 'result=$?\nif [ "$result" = 0 ]; then exit 1; fi\nexit "$result"\n'
-                )
+                if scenario == "accepted_nonzero":
+                    check = repo / "check"
+                    check.write_text(
+                        check.read_text()
+                        + 'result=$?\nif [ "$result" = 0 ]; then exit 1; fi\nexit "$result"\n'
+                    )
             if scenario == "large_scope":
                 cases = repo / "repository_evidence_and_verification_handoff_contracts"
                 cases.mkdir()
@@ -616,13 +668,15 @@ def test_native_loop_reserves_review_and_retains_each_phase(
             monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
             monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
             lock_path = tmp_path / "goon.lock"
-            if scenario == "git_plan":
+            if scenario in ("git_plan", "python_phases"):
                 monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
                 upstream = tmp_path / "git-plan"
                 upstream.mkdir()
                 authored = upstream / "workflows/review"
                 authored.mkdir(parents=True)
                 (authored / "plan.yml").write_bytes(path.read_bytes())
+                if scenario == "python_phases":
+                    shutil.copytree(tmp_path / "local-goons", authored / "local-goons")
                 subprocess.run(["git", "init", "-q", "-b", "main", str(upstream)], check=True)
                 subprocess.run(["git", "-C", str(upstream), "add", "."], check=True)
                 subprocess.run(
@@ -670,7 +724,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
             )
             write_execution_lock(lock_path, build_execution_lock(plan))
             lock = lock_path.read_bytes()
-            if scenario == "git_plan":
+            if scenario in ("git_plan", "python_phases"):
                 (authored / "plan.yml").write_text("goons:\n- python/quality\n")
                 subprocess.run(["git", "-C", str(upstream), "add", "."], check=True)
                 subprocess.run(
@@ -818,7 +872,9 @@ max_output_tokens = 8192
                     else None
                 )
                 assert result.stop_reason.value == expected, (
-                    "\n".join(chunk.text for chunk in output.chunks) if output else str(result)
+                    result.message
+                    + "\n"
+                    + ("\n".join(chunk.text for chunk in output.chunks) if output else str(result))
                 )
                 assert result.test_passed is (expected == "converged")
                 if scenario == "accepted_nonzero":
@@ -846,7 +902,7 @@ max_output_tokens = 8192
                 assert len({o["candidate_identity"] for o in observed[:4]}) == 1
                 assert lock_path.read_bytes() == lock
                 for index, detail in enumerate(result.attempts):
-                    if scenario == "git_plan":
+                    if scenario in ("git_plan", "python_phases"):
                         assert detail.run.target.plan.goon_sources == (pin,)
                     context = detail.run.target.agent_repair
                     assert context.max_attempts == 4 * (passes - 1) + 2
@@ -857,6 +913,17 @@ max_output_tokens = 8192
                     assert not detail.rerun_supported
                     assert runtime.runs.get(detail.run.fleet_run_id).operations == detail.operations
                     assert "fixture-secret-not-a-source" not in detail.model_dump_json()
+                    if scenario == "python_phases":
+                        assert detail.run.target.plan.configuration is not None
+                        phase = detail.run.target.agent_repair.phase
+                        if phase in ("regression", "verification"):
+                            selected = detail.run.target.plan.steps[0]
+                            assert selected.uv.lock_mode == "frozen"
+                            assert selected.project_source is not None
+                            recorded = detail.operations[0].evidence.plan.steps[0]
+                            assert recorded.settlement.outcome == "SUCCESS"
+                            assert recorded.attempts[0].uv_preparation.lock_mode == "frozen"
+                            assert recorded.attempts[0].uv_preparation.freshness == "not_checked"
                 if scenario == "large_scope":
                     records = [
                         observation.record
@@ -879,6 +946,7 @@ max_output_tokens = 8192
                     "repair",
                     "shared_http",
                     "git_plan",
+                    "python_phases",
                     "accepted_nonzero",
                     "remote",
                     "arbitrary",
@@ -908,7 +976,14 @@ max_output_tokens = 8192
                     assert not (repo / "regression.txt").exists()
             finally:
                 runtime.shutdown(wait_for_runs=True)
-            if scenario in ("repair", "accepted_nonzero", "large_scope", "shared_http", "git_plan"):
+            if scenario in (
+                "repair",
+                "accepted_nonzero",
+                "large_scope",
+                "shared_http",
+                "git_plan",
+                "python_phases",
+            ):
                 reopened = ApplicationRuntime.build(standard_local=True)
                 try:
                     assert [
@@ -916,6 +991,23 @@ max_output_tokens = 8192
                         for identifier in result.admitted_run_ids
                     ] == expected_phases
                     assert len(observed) == calls
+                    if scenario == "python_phases":
+                        for identifier in result.admitted_run_ids:
+                            restored = reopened.runs.get(identifier)
+                            assert restored.run.target.plan.goon_sources == (pin,)
+                            assert restored.run.target.plan.configuration is not None
+                            if restored.run.target.agent_repair.phase in (
+                                "regression",
+                                "verification",
+                            ):
+                                assert restored.run.target.plan.steps[0].uv.lock_mode == "frozen"
+                                assert (
+                                    restored.operations[0]
+                                    .evidence.plan.steps[0]
+                                    .attempts[0]
+                                    .uv_preparation.freshness
+                                    == "not_checked"
+                                )
                     if scenario == "accepted_nonzero":
                         campaign = reopened.runs.agent_campaign(result.repair_id)
                         assert campaign["result"] == "converged"

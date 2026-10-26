@@ -1641,7 +1641,12 @@ class FleetPlanService:
                         if reviewed_source is not None
                         else (FleetRunSource.CICD if repository_goon else FleetRunSource.MANUAL),
                     )
-                    if started.fleet_run_id != selected_run_id or started.target != target:
+                    if not isinstance(started.target, FleetPlanTarget):
+                        raise StateConflict("Admission response is not its selected Plan target")
+                    target = with_retained_project_deliveries(target, started.target)
+                    if started.fleet_run_id != selected_run_id or started.target.model_dump(
+                        mode="json", exclude_computed_fields=True
+                    ) != target.model_dump(mode="json", exclude_computed_fields=True):
                         raise StateConflict(
                             "Admission response differs from its exact selected Run/target"
                         )
@@ -1679,9 +1684,17 @@ class FleetPlanService:
                         except InvalidRunTransition:
                             pass
                         observed = self._runs.wait_for_terminal(selected_run_id)
+                        if not isinstance(observed.run.target, FleetPlanTarget):
+                            raise StateConflict(
+                                "Admitted Run readback is not its selected Plan target"
+                            )
+                        target = with_retained_project_deliveries(target, observed.run.target)
                         if (
                             observed.run.fleet_run_id != selected_run_id
-                            or observed.run.target != target
+                            or observed.run.target.model_dump(
+                                mode="json", exclude_computed_fields=True
+                            )
+                            != target.model_dump(mode="json", exclude_computed_fields=True)
                         ):
                             raise StateConflict(
                                 "Admitted Run readback conflicts with its selected target"
@@ -1713,7 +1726,11 @@ class FleetPlanService:
                             detail = self._runs.wait_for_terminal(started.fleet_run_id, timeout=0.1)
                             if (
                                 detail.run.fleet_run_id != started.fleet_run_id
-                                or detail.run.target != target
+                                or not isinstance(detail.run.target, FleetPlanTarget)
+                                or detail.run.target.model_dump(
+                                    mode="json", exclude_computed_fields=True
+                                )
+                                != target.model_dump(mode="json", exclude_computed_fields=True)
                             ):
                                 raise StateConflict(
                                     "repair result does not match its admitted Run/source"

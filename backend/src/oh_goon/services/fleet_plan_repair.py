@@ -465,7 +465,23 @@ class AgentReviewRepairCampaign:
             for edge in self.original.imports
             if members.intersection(edge.step_ids)
         )
-        return ResolvedFleetPlan.create(
+        configuration = self.original.configuration
+        if configuration is not None:
+            scopes = {edge.import_id for edge in imports}
+            entries = tuple(
+                entry
+                for entry in configuration.entries
+                if entry.scope is None or entry.scope in scopes
+            )
+            configuration = configuration.model_copy(
+                update={
+                    "entries": entries,
+                    "omitted_entries": configuration.omitted_entries
+                    + len(configuration.entries)
+                    - len(entries),
+                }
+            )
+        projected = ResolvedFleetPlan.create(
             name=self.original.name,
             description=self.original.description,
             execution=self.original.execution,
@@ -476,7 +492,20 @@ class AgentReviewRepairCampaign:
             skill_sources=self.original.skill_sources,
             goon_sources=self.original.goon_sources,
             native_agent=self.original.native_agent,
+            configuration=configuration,
         )
+        projected._project_archives.update(
+            {
+                step.project_source.content_sha256: self.original._project_archives[
+                    step.project_source.content_sha256
+                ]
+                for step in projected.steps
+                if isinstance(step, ResolvedCommandStep)
+                and step.project_source is not None
+                and step.project_source.content_sha256 in self.original._project_archives
+            }
+        )
+        return projected
 
     def _recapture(self, *, require_unchanged: bool) -> str:
         plan, handoffs, _ = self.resolver.resolve_frozen_agents(

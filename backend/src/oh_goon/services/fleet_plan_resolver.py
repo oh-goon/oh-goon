@@ -1148,7 +1148,7 @@ def _validate_backend_uv_cache_authority(
 ) -> tuple[ResolvedPlanStep, ...]:
     """Keep repository-backed uv cache authority single-owned by run preparation.
 
-    Strict preparation prepares each exact project/group once through native ``uv sync --locked``
+    Strict preparation prepares each exact project/group/mode through native ``uv sync``
     and freezes that retained run-owned uv cache before application Step work. Physical
     attempts receive a copy of that frozen cache and materialize their own environment
     offline. Resolver-authored Step cache publication/consumption would create a second

@@ -251,10 +251,11 @@ export function createApiClient(mutations: MutationController): ApiClient {
       { path: { fleet_run_id: runId }, query: { after } },
       options,
     ),
-    cancelFleetRun: (runId) => write(
-      "fleet-run",
+    cancelFleetRun: (runId) => writeOperation(
+      mutations, "fleet-run",
       op.cancel_fleet_run.operationId,
       { path: { fleet_run_id: runId } },
+      { dispatch: "fleet-run-cancel" },
     ),
     readmitFleetRun: (runId, newFleetRunId) => write(
       "fleet-run",
@@ -325,7 +326,7 @@ export function createApiClient(mutations: MutationController): ApiClient {
     ),
     repairSharedPlan: (request) => writeOperation(
       mutations, "fleet-run", op.repair_shared_plan.operationId, { body: request },
-      { timeoutMs: (request.repair.timeout_seconds + 30) * 1000 },
+      { timeoutMs: (request.repair.timeout_seconds + 30) * 1000, dispatch: "agent-repair" },
     ),
     startSharedPlanRun: (fleetRunId, planKey, repositoryIds, expectedPlanId, expectedPlanRevision, expectedExecutionDigest, repositoryInstanceIds, inputs = {}, agent) => write(
       "fleet-run",

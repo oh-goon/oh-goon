@@ -19930,6 +19930,16 @@
               }
             ]
           },
+          "uv_preparation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanUvPreparationEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "worktree_files_after": {
             "items": {
               "type": "string"
@@ -20392,6 +20402,30 @@
           "byte_count"
         ],
         "title": "PlanToolEvidence",
+        "type": "object"
+      },
+      "PlanUvPreparationEvidence": {
+        "additionalProperties": false,
+        "description": "Native preparation observation; a failed command is not a stale-lock diagnosis.",
+        "properties": {
+          "freshness": {
+            "enum": [
+              "not_checked",
+              "checked",
+              "not_established"
+            ],
+            "title": "Freshness",
+            "type": "string"
+          },
+          "lock_mode": {
+            "$ref": "#/components/schemas/UvLockMode"
+          }
+        },
+        "required": [
+          "lock_mode",
+          "freshness"
+        ],
+        "title": "PlanUvPreparationEvidence",
         "type": "object"
       },
       "PlanValueNamespace": {
@@ -23721,8 +23755,8 @@
             ]
           },
           "contract_version": {
-            "const": 45,
-            "default": 45,
+            "const": 46,
+            "default": 46,
             "title": "Contract Version",
             "type": "integer"
           },
@@ -31835,7 +31869,7 @@
       },
       "UvExecutionEnvironment": {
         "additionalProperties": false,
-        "description": "Backend-owned locked UV environment selected by a Goon.\n\nAuthoring selects the repository-relative uv project plus dependency group.\nLock enforcement, native materialization, cache lineage, and the concrete\n``uv run`` argv remain resolved execution concerns.",
+        "description": "One explicit native UV selection, materialized by the authoring compiler.\n\nAuthoring selects the repository-relative uv project plus dependency group.\nLock enforcement, native materialization, cache lineage, and the concrete\n``uv run`` argv remain resolved execution concerns.",
         "properties": {
           "group": {
             "anyOf": [
@@ -31848,6 +31882,9 @@
               }
             ],
             "title": "Group"
+          },
+          "lock_mode": {
+            "$ref": "#/components/schemas/UvLockMode"
           },
           "project": {
             "default": ".",
@@ -31866,12 +31903,22 @@
             "type": "string"
           }
         },
+        "required": [
+          "lock_mode"
+        ],
         "title": "UvExecutionEnvironment",
         "type": "object"
       },
+      "UvLockMode": {
+        "enum": [
+          "frozen",
+          "locked"
+        ],
+        "type": "string"
+      },
       "UvProjectRequirement": {
         "additionalProperties": false,
-        "description": "Derived requirement for one backend-owned locked UV project environment.\n\nThe Goon author selects a repository-relative project and dependency group with ``uv:``. Oh Goon derives this\nrequirement so YAML never mirrors package membership from pyproject.toml/uv.lock.",
+        "description": "Derived requirement for one backend-owned UV project selection.\n\nThe Goon author selects a repository-relative project and dependency group with ``uv:``. Oh Goon derives this\nrequirement so YAML never mirrors package membership from pyproject.toml/uv.lock.",
         "properties": {
           "group": {
             "anyOf": [
@@ -31891,6 +31938,9 @@
             "title": "Kind",
             "type": "string"
           },
+          "lock_mode": {
+            "$ref": "#/components/schemas/UvLockMode"
+          },
           "project": {
             "default": ".",
             "maxLength": 240,
@@ -31899,6 +31949,9 @@
             "type": "string"
           }
         },
+        "required": [
+          "lock_mode"
+        ],
         "title": "UvProjectRequirement",
         "type": "object"
       },

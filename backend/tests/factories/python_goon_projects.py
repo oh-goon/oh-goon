@@ -26,7 +26,7 @@ def write_isolated_build_project(path: Path, *, stale_lock: bool = False) -> Non
     path.mkdir(parents=True)
     (path / "README.md").write_text("# general/isolated-build\n")
     (path / "goon.yml").write_text(
-        "runtime: python\nexecution: {purpose: cicd, trust_repository_code: false}\n"
+        "runtime: python\nuv: {lock_mode: locked}\nexecution: {purpose: cicd, trust_repository_code: false}\n"
         "steps:\n- run: isolated-build\n"
     )
     metadata = dedent("""\
