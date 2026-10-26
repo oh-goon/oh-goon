@@ -61,7 +61,7 @@ help:
 	  '  See docs/development/MAKE_TARGET_SURFACE.yml.' \
 	  '' \
 	  'Owner checks (non-canonical workflow):' \
-	  '  make backend-check    Backend lint, format and behavior tests' \
+	  '  make backend-check    Backend lint, format, types and behavior tests' \
 	  '  make ruff-repair      Apply Ruff safe autofixes, then canonical Python formatting' \
 	  '  make frontend-functional-certification  Current functional gate: typecheck, architecture, i18n, unit tests, build' \
 	  '  make frontend-check   Strict later-release frontend gate: adds lint, coverage/quality checks' \
@@ -752,6 +752,7 @@ logs:
 check-backend:
 	cd backend && uv run --offline --frozen --no-sync --group quality ruff check src tests
 	cd backend && uv run --offline --frozen --no-sync --group quality ruff format --check src tests
+	cd backend && uv run --offline --frozen --no-sync --group quality mypy
 	uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet guard
 	cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "$(CHECK_PYTEST_MARKER)" $(BACKEND_CHECK_TEST_ROOTS)
 

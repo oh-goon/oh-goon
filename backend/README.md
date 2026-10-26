@@ -10,7 +10,7 @@ From `backend/`:
 make -C .. backend-install
 uv run --offline --frozen --no-sync pytest tests/unit/<owner>/<focused_test>.py
 uv run --offline --frozen --no-sync ruff check src tests
-uv run --offline --frozen --no-sync mypy src tests
+uv run --offline --frozen --no-sync mypy
 ```
 
 `backend-install` consumes the committed native uv lock, including the required
@@ -23,6 +23,10 @@ Before finishing a backend change, run the complete backend owner check from thi
 ```bash
 make -C .. backend-check
 ```
+
+The backend check includes mypy's strict `oh_goon` package selection from
+`pyproject.toml` before behavior tests. Edited test files receive separately
+selected typing checks.
 
 If you add, change, or remove a FastAPI route or public request/response model, return to the repository root and run `make generate`. Never edit generated frontend contract files by hand.
 

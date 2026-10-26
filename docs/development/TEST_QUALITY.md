@@ -39,7 +39,8 @@ and native subprocess coverage. Privileged/model certification probes remain
 explicitly selected. Repository tooling belongs in the measurement because it
 is part of the same Python package.
 
-`backend-check` runs lint, formatting and ordinary behavior tests. Coverage
+`backend-check` runs lint, formatting, configured package type checks and ordinary
+behavior tests. Coverage
 percentages remain diagnostics, as required by `AGENTS.md`; they do not decide
 repository correctness or APP certification. `make quality-check` explicitly
 compares a complete coverage measurement to the existing committed floors.
