@@ -2604,12 +2604,15 @@ _CIDR_POLICY_TASK = (
     "Preserve compile_policy and decide, use native ipaddress authority, enforce longest-prefix "
     "and address-family semantics, validate the full one-pass rule source, detach policy state, "
     "and keep CLI errors atomic. Use only the Python standard library. Edit netpolicy/policy.py "
-    "and netpolicy/__main__.py only. Before editing, execute the exact supplied "
+    "and netpolicy/__main__.py only. Honor the required string types for actions and defaults; "
+    "mutable non-str wrappers such as collections.UserString must be rejected even when they "
+    "compare equal to an allowed string. Before editing, execute the exact supplied "
     "repository_tools.list Hashmarks command and read the frozen Skill reference. "
     "Independent verification runs after your coding Step."
 )
 
-_CIDR_POLICY_VERIFICATION = r"""import copy
+_CIDR_POLICY_VERIFICATION = r"""from collections import UserString
+import copy
 import ipaddress
 import json
 import pathlib
@@ -2711,13 +2714,16 @@ class PolicyTests(unittest.TestCase):
         class Untouched:
             def __iter__(self):
                 raise AssertionError('source touched before default validation')
-        for default in [None, True, 1, [], {}, 'ALLOW', ' allow', '']:
+        for default in [None, True, 1, [], {}, 'ALLOW', ' allow', '',
+                        UserString('allow'), UserString('deny')]:
             with self.subTest(default=default), self.assertRaises(ValueError):
                 compile_policy(Untouched(), default=default)
 
     def test_all_rules_validated_and_stop_at_first_invalid(self):
         invalid = [None, [], {}, {'network': '192.0.2.0/24'},
                    {'network': '192.0.2.0/24', 'action': []},
+                   {'network': '192.0.2.0/24', 'action': UserString('allow')},
+                   {'network': '192.0.2.0/24', 'action': UserString('deny')},
                    {'network': '192.0.2.0/24', 'action': 'ALLOW'},
                    {'network': 1, 'action': 'allow'},
                    {'network': '192.0.2.1/24', 'action': 'allow'},
